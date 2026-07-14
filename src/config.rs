@@ -25,6 +25,11 @@ pub fn voice_control() -> CommandConfig {
             "https://hub.kitlangton.dev/training",
             ["training"],
         ))
+        .target(Target::website(
+            "website.open.meditation",
+            "https://hub.kitlangton.dev/meditation",
+            ["meditation"],
+        ))
         .contextual(ContextualCommand::dictation_start(
             "dictation.start",
             ["dictate", "start dictating"],
