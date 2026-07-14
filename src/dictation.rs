@@ -37,6 +37,7 @@ pub fn dictation_control_suffix(text: &str) -> Option<(DictationControl, usize)>
         ("dictates send", DictationControl::Send),
         ("dictate end", DictationControl::Send),
         ("dictates end", DictationControl::Send),
+        ("dictate and", DictationControl::Send),
         ("dictates and", DictationControl::Send),
     ] {
         if let Some(prefix) = lowercase.strip_suffix(suffix)
@@ -45,6 +46,27 @@ pub fn dictation_control_suffix(text: &str) -> Option<(DictationControl, usize)>
                 || prefix.ends_with(|character: char| character.is_ascii_punctuation()))
         {
             return Some((control, prefix.len()));
+        }
+    }
+    None
+}
+
+pub fn dictation_start_prefix(text: &str) -> Option<usize> {
+    let text = text.trim_start();
+    let lowercase = text.to_ascii_lowercase();
+    for prefix in [
+        "dictate start",
+        "dictates start",
+        "dictate starts",
+        "dictates starts",
+        "start dictating",
+    ] {
+        if let Some(remainder) = lowercase.strip_prefix(prefix)
+            && (remainder.is_empty()
+                || remainder.starts_with(char::is_whitespace)
+                || remainder.starts_with(|character: char| character.is_ascii_punctuation()))
+        {
+            return Some(text.len() - remainder.len());
         }
     }
     None
@@ -196,7 +218,15 @@ impl DictationCapture {
     }
 
     pub fn start(&mut self, now: Instant) {
-        let pre_roll = samples_for(PRE_ROLL_DURATION, self.sample_rate).min(self.ring.len());
+        self.start_with_pre_roll(now, PRE_ROLL_DURATION);
+    }
+
+    pub fn start_voice(&mut self, now: Instant) {
+        self.start_with_pre_roll(now, RING_BUFFER_DURATION);
+    }
+
+    fn start_with_pre_roll(&mut self, now: Instant, duration: Duration) {
+        let pre_roll = samples_for(duration, self.sample_rate).min(self.ring.len());
         let mut recording = Recording::new(now, self.sample_rate);
         let samples: Vec<_> = self
             .ring
@@ -206,10 +236,6 @@ impl DictationCapture {
             .collect();
         recording.push(&samples);
         self.recording = Some(recording);
-    }
-
-    pub fn start_without_pre_roll(&mut self, now: Instant) {
-        self.recording = Some(Recording::new(now, self.sample_rate));
     }
 
     pub fn push(&mut self, samples: &[f32]) {
@@ -313,5 +339,13 @@ mod tests {
             Some((DictationControl::Send, 0))
         ));
         assert!(dictation_control_suffix("Please dictate this sentence").is_none());
+    }
+
+    #[test]
+    fn finds_dictation_start_at_the_beginning_of_an_utterance() {
+        assert_eq!(dictation_start_prefix("Dictate start."), Some(13));
+        assert!(dictation_start_prefix("Dictate start as you can see").is_some());
+        assert!(dictation_start_prefix("Dictates start, testing").is_some());
+        assert!(dictation_start_prefix("Okay, dictate start").is_none());
     }
 }

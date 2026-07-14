@@ -8,7 +8,9 @@ use crate::audio::AudioInput;
 use crate::commands::{Action, CommandConfig, Decision, Mode};
 use crate::config;
 use crate::context::{ContextMonitor, ContextSnapshot};
-use crate::dictation::{DictationCapture, DictationControl, Finish, dictation_control_suffix};
+use crate::dictation::{
+    DictationCapture, DictationControl, Finish, dictation_control_suffix, dictation_start_prefix,
+};
 use crate::events::{
     CommandOutcome, DictationPhase, EventLog, TranscriptPhase, VoiceEvent, VoiceState, now_ms,
 };
@@ -122,9 +124,9 @@ pub fn listen(
         if !hotkey.is_recording() && last_update.elapsed() >= UPDATE_INTERVAL {
             for update in recognizer.update()? {
                 let is_completed = matches!(update.phase, TranscriptPhase::Completed);
-                if !voice_dictating && has_voice_dictation_start_suffix(&update.text) {
+                if !voice_dictating && dictation_start_prefix(&update.text).is_some() {
                     recognizer.reset_stream()?;
-                    dictation.start_without_pre_roll(Instant::now());
+                    dictation.start_voice(Instant::now());
                     voice_dictating = true;
                     feedback::play(Tone::DictationStart);
                     events.dictation(DictationPhase::Started, "")?;
@@ -186,27 +188,6 @@ pub fn listen(
         device: input.device_name,
     })?;
     Ok(())
-}
-
-fn has_voice_dictation_start_suffix(heard: &str) -> bool {
-    let heard = heard
-        .trim()
-        .trim_end_matches(|character: char| character.is_ascii_punctuation())
-        .trim_end()
-        .to_ascii_lowercase();
-    [
-        "dictate start",
-        "dictates start",
-        "dictate starts",
-        "dictates starts",
-        "start dictating",
-    ]
-    .into_iter()
-    .any(|suffix| {
-        heard
-            .strip_suffix(suffix)
-            .is_some_and(|prefix| prefix.is_empty() || prefix.ends_with(char::is_whitespace))
-    })
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -286,7 +267,7 @@ fn handle_command(
             action: Action::StartDictation,
         } => {
             recognizer.reset_stream()?;
-            dictation.start_without_pre_roll(Instant::now());
+            dictation.start_voice(Instant::now());
             *voice_dictating = true;
             feedback::play(Tone::DictationStart);
             events.dictation(DictationPhase::Started, "")?;
@@ -428,22 +409,4 @@ fn handle_dictation_event(event: WorkerEvent, events: &mut EventLog) -> Result<(
         }
     }
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::has_voice_dictation_start_suffix;
-
-    #[test]
-    fn dictation_start_is_a_resilient_suffix() {
-        assert!(has_voice_dictation_start_suffix("Dictate start."));
-        assert!(has_voice_dictation_start_suffix(
-            "Okay, whenever you're ready, dictates start."
-        ));
-        assert!(has_voice_dictation_start_suffix("Start dictating."));
-        assert!(!has_voice_dictation_start_suffix("Dictate."));
-        assert!(!has_voice_dictation_start_suffix(
-            "What does dictate start mean?"
-        ));
-    }
 }

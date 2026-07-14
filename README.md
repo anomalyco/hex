@@ -46,6 +46,8 @@ For hands-free dictation, say `dictate start`, speak, then say `dictate stop` to
 transcribe and paste or `dictate send` to paste and press Enter. Say
 `dictate cancel` to discard the capture. While voice dictation is active,
 ordinary voice commands are ignored.
+You may continue directly after the activation phrase, as in
+`dictate start this is my message`; the activation prefix is removed.
 
 Run the terminal dashboard in another terminal:
 

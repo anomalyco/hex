@@ -6,7 +6,7 @@ use color_eyre::eyre::{Result, WrapErr, eyre};
 use transcribe_rs::onnx::Quantization;
 use transcribe_rs::onnx::parakeet::{ParakeetModel, ParakeetParams, TimestampGranularity};
 
-use crate::dictation::{DictationClip, dictation_control_suffix};
+use crate::dictation::{DictationClip, dictation_control_suffix, dictation_start_prefix};
 use crate::paste::Paster;
 
 pub struct Parakeet {
@@ -132,6 +132,11 @@ fn strip_dictation_control(text: &str) -> String {
             character.is_whitespace() || character.is_ascii_punctuation()
         });
     }
+    if let Some(prefix_end) = dictation_start_prefix(text) {
+        text = text[prefix_end..].trim_start_matches(|character: char| {
+            character.is_whitespace() || character.is_ascii_punctuation()
+        });
+    }
     text.to_string()
 }
 
@@ -178,6 +183,14 @@ mod tests {
         assert_eq!(
             strip_dictation_control("Testing it. Dictate send. Dictate send."),
             "Testing it"
+        );
+        assert_eq!(
+            strip_dictation_control("I wonder if this will work, dictate and"),
+            "I wonder if this will work"
+        );
+        assert_eq!(
+            strip_dictation_control("Dictate start, this should keep the message. Dictates stop."),
+            "this should keep the message"
         );
         assert_eq!(
             strip_dictation_control("Keep dictate here."),
