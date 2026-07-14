@@ -42,7 +42,7 @@ pre-roll protects the first phoneme. Pressing or releasing Option resets
 Moonshine's stream so dictation audio cannot leak into a command.
 Press Option-Shift-V to paste the last successful transcript again.
 
-For hands-free dictation, say `dictate`, speak, then say `dictate stop` to
+For hands-free dictation, say `dictate start`, speak, then say `dictate stop` to
 transcribe and paste or `dictate send` to paste and press Enter. Say
 `dictate cancel` to discard the capture. While voice dictation is active,
 ordinary voice commands are ignored.

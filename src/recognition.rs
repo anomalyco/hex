@@ -122,7 +122,7 @@ pub fn listen(
         if !hotkey.is_recording() && last_update.elapsed() >= UPDATE_INTERVAL {
             for update in recognizer.update()? {
                 let is_completed = matches!(update.phase, TranscriptPhase::Completed);
-                if !voice_dictating && !is_completed && is_voice_dictation_start(&update.text) {
+                if !voice_dictating && has_voice_dictation_start_suffix(&update.text) {
                     recognizer.reset_stream()?;
                     dictation.start_without_pre_roll(Instant::now());
                     voice_dictating = true;
@@ -188,15 +188,25 @@ pub fn listen(
     Ok(())
 }
 
-fn is_voice_dictation_start(heard: &str) -> bool {
-    matches!(
+fn has_voice_dictation_start_suffix(heard: &str) -> bool {
+    let heard = heard
+        .trim()
+        .trim_end_matches(|character: char| character.is_ascii_punctuation())
+        .trim_end()
+        .to_ascii_lowercase();
+    [
+        "dictate start",
+        "dictates start",
+        "dictate starts",
+        "dictates starts",
+        "start dictating",
+    ]
+    .into_iter()
+    .any(|suffix| {
         heard
-            .trim()
-            .trim_matches(|character: char| character.is_ascii_punctuation())
-            .to_ascii_lowercase()
-            .as_str(),
-        "dictate" | "start dictating"
-    )
+            .strip_suffix(suffix)
+            .is_some_and(|prefix| prefix.is_empty() || prefix.ends_with(char::is_whitespace))
+    })
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -418,4 +428,22 @@ fn handle_dictation_event(event: WorkerEvent, events: &mut EventLog) -> Result<(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::has_voice_dictation_start_suffix;
+
+    #[test]
+    fn dictation_start_is_a_resilient_suffix() {
+        assert!(has_voice_dictation_start_suffix("Dictate start."));
+        assert!(has_voice_dictation_start_suffix(
+            "Okay, whenever you're ready, dictates start."
+        ));
+        assert!(has_voice_dictation_start_suffix("Start dictating."));
+        assert!(!has_voice_dictation_start_suffix("Dictate."));
+        assert!(!has_voice_dictation_start_suffix(
+            "What does dictate start mean?"
+        ));
+    }
 }

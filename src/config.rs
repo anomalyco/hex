@@ -32,7 +32,7 @@ pub fn voice_control() -> CommandConfig {
         ))
         .contextual(ContextualCommand::dictation_start(
             "dictation.start",
-            ["dictate", "start dictating"],
+            ["dictate start", "start dictating"],
         ))
         .contextual(ContextualCommand::global_shortcut(
             "shortcut.command-one",
