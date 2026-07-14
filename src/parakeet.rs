@@ -6,7 +6,7 @@ use color_eyre::eyre::{Result, WrapErr, eyre};
 use transcribe_rs::onnx::Quantization;
 use transcribe_rs::onnx::parakeet::{ParakeetModel, ParakeetParams, TimestampGranularity};
 
-use crate::dictation::DictationClip;
+use crate::dictation::{DictationClip, dictation_control_suffix};
 use crate::paste::Paster;
 
 pub struct Parakeet {
@@ -126,21 +126,11 @@ impl DictationWorker {
 }
 
 fn strip_dictation_control(text: &str) -> String {
-    let text = text.trim();
-    let comparable = text
-        .trim_end_matches(|character: char| character.is_ascii_punctuation())
-        .trim_end();
-    let lowercase = comparable.to_ascii_lowercase();
-    for suffix in ["dictate stop", "dictate send"] {
-        if let Some(prefix) = lowercase.strip_suffix(suffix)
-            && (prefix.is_empty() || prefix.ends_with(char::is_whitespace))
-        {
-            return comparable[..prefix.len()]
-                .trim_end_matches(|character: char| {
-                    character.is_whitespace() || character.is_ascii_punctuation()
-                })
-                .to_string();
-        }
+    let mut text = text.trim();
+    while let Some((_, prefix_end)) = dictation_control_suffix(text) {
+        text = text[..prefix_end].trim_end_matches(|character: char| {
+            character.is_whitespace() || character.is_ascii_punctuation()
+        });
     }
     text.to_string()
 }
@@ -181,6 +171,14 @@ mod tests {
             "Hello from voice control"
         );
         assert_eq!(strip_dictation_control("Dictate stop."), "");
+        assert_eq!(
+            strip_dictation_control("How are we doing here? Dictates stop."),
+            "How are we doing here"
+        );
+        assert_eq!(
+            strip_dictation_control("Testing it. Dictate send. Dictate send."),
+            "Testing it"
+        );
         assert_eq!(
             strip_dictation_control("Keep dictate here."),
             "Keep dictate here."

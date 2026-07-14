@@ -8,7 +8,7 @@ use crate::audio::AudioInput;
 use crate::commands::{Action, CommandConfig, Decision, Mode};
 use crate::config;
 use crate::context::{ContextMonitor, ContextSnapshot};
-use crate::dictation::{DictationCapture, Finish};
+use crate::dictation::{DictationCapture, DictationControl, Finish, dictation_control_suffix};
 use crate::events::{
     CommandOutcome, DictationPhase, EventLog, TranscriptPhase, VoiceEvent, VoiceState, now_ms,
 };
@@ -122,8 +122,24 @@ pub fn listen(
         if !hotkey.is_recording() && last_update.elapsed() >= UPDATE_INTERVAL {
             for update in recognizer.update()? {
                 let is_completed = matches!(update.phase, TranscriptPhase::Completed);
+                if !voice_dictating && !is_completed && is_voice_dictation_start(&update.text) {
+                    recognizer.reset_stream()?;
+                    dictation.start_without_pre_roll(Instant::now());
+                    voice_dictating = true;
+                    feedback::play(Tone::DictationStart);
+                    events.dictation(DictationPhase::Started, "")?;
+                    emit_state(&mut events, true, mode, &input.device_name)?;
+                    events.emit(&VoiceEvent::Command {
+                        timestamp_ms: now_ms(),
+                        heard: update.text,
+                        command: Some("dictation.start".into()),
+                        outcome: CommandOutcome::Executed,
+                        context: context.label(),
+                    })?;
+                    break;
+                }
                 if voice_dictating {
-                    if is_completed && let Some(control) = voice_dictation_control(&update.text) {
+                    if let Some((control, _)) = dictation_control_suffix(&update.text) {
                         voice_dictating = false;
                         recognizer.reset_stream()?;
                         handle_voice_dictation_control(
@@ -170,6 +186,17 @@ pub fn listen(
         device: input.device_name,
     })?;
     Ok(())
+}
+
+fn is_voice_dictation_start(heard: &str) -> bool {
+    matches!(
+        heard
+            .trim()
+            .trim_matches(|character: char| character.is_ascii_punctuation())
+            .to_ascii_lowercase()
+            .as_str(),
+        "dictate" | "start dictating"
+    )
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -316,30 +343,9 @@ fn finish_dictation(
     }
 }
 
-#[derive(Clone, Copy)]
-enum VoiceDictationControl {
-    Stop,
-    Send,
-    Cancel,
-}
-
-fn voice_dictation_control(heard: &str) -> Option<VoiceDictationControl> {
-    match heard
-        .trim()
-        .trim_matches(|character: char| character.is_ascii_punctuation())
-        .to_ascii_lowercase()
-        .as_str()
-    {
-        "dictate stop" => Some(VoiceDictationControl::Stop),
-        "dictate send" => Some(VoiceDictationControl::Send),
-        "dictate cancel" => Some(VoiceDictationControl::Cancel),
-        _ => None,
-    }
-}
-
 #[allow(clippy::too_many_arguments)]
 fn handle_voice_dictation_control(
-    control: VoiceDictationControl,
+    control: DictationControl,
     heard: &str,
     dictation: &mut DictationCapture,
     worker: &DictationWorker,
@@ -349,12 +355,12 @@ fn handle_voice_dictation_control(
     events: &mut EventLog,
 ) -> Result<()> {
     let id = match control {
-        VoiceDictationControl::Stop => "dictation.stop",
-        VoiceDictationControl::Send => "dictation.send",
-        VoiceDictationControl::Cancel => "dictation.cancel",
+        DictationControl::Stop => "dictation.stop",
+        DictationControl::Send => "dictation.send",
+        DictationControl::Cancel => "dictation.cancel",
     };
     match control {
-        VoiceDictationControl::Stop | VoiceDictationControl::Send => {
+        DictationControl::Stop | DictationControl::Send => {
             let Finish::Transcribe(clip) = dictation.finish(Instant::now()) else {
                 events.dictation(DictationPhase::Discarded, "")?;
                 emit_state(events, false, mode, device)?;
@@ -367,15 +373,13 @@ fn handle_voice_dictation_control(
                 device: device.into(),
             })?;
             events.dictation(DictationPhase::Transcribing, "")?;
-            if let Err(error) =
-                worker.transcribe(clip, matches!(control, VoiceDictationControl::Send))
-            {
+            if let Err(error) = worker.transcribe(clip, matches!(control, DictationControl::Send)) {
                 feedback::play(Tone::Error);
                 events.dictation(DictationPhase::Failed(error.into()), "")?;
                 emit_state(events, false, mode, device)?;
             }
         }
-        VoiceDictationControl::Cancel => {
+        DictationControl::Cancel => {
             dictation.cancel();
             feedback::play(Tone::Cancel);
             events.dictation(DictationPhase::Cancelled, "")?;
@@ -414,26 +418,4 @@ fn handle_dictation_event(event: WorkerEvent, events: &mut EventLog) -> Result<(
         }
     }
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{VoiceDictationControl, voice_dictation_control};
-
-    #[test]
-    fn voice_dictation_controls_are_standalone_phrases() {
-        assert!(matches!(
-            voice_dictation_control("Dictate send."),
-            Some(VoiceDictationControl::Send)
-        ));
-        assert!(matches!(
-            voice_dictation_control("dictate stop"),
-            Some(VoiceDictationControl::Stop)
-        ));
-        assert!(matches!(
-            voice_dictation_control("dictate cancel"),
-            Some(VoiceDictationControl::Cancel)
-        ));
-        assert!(voice_dictation_control("please dictate send").is_none());
-    }
 }

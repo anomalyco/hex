@@ -15,6 +15,41 @@ pub enum Finish {
     Transcribe(DictationClip),
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DictationControl {
+    Stop,
+    Send,
+    Cancel,
+}
+
+pub fn dictation_control_suffix(text: &str) -> Option<(DictationControl, usize)> {
+    let text = text
+        .trim_end()
+        .trim_end_matches(|character: char| character.is_ascii_punctuation())
+        .trim_end();
+    let lowercase = text.to_ascii_lowercase();
+    for (suffix, control) in [
+        ("dictate cancel", DictationControl::Cancel),
+        ("dictates cancel", DictationControl::Cancel),
+        ("dictate stop", DictationControl::Stop),
+        ("dictates stop", DictationControl::Stop),
+        ("dictate send", DictationControl::Send),
+        ("dictates send", DictationControl::Send),
+        ("dictate end", DictationControl::Send),
+        ("dictates end", DictationControl::Send),
+        ("dictates and", DictationControl::Send),
+    ] {
+        if let Some(prefix) = lowercase.strip_suffix(suffix)
+            && (prefix.is_empty()
+                || prefix.ends_with(char::is_whitespace)
+                || prefix.ends_with(|character: char| character.is_ascii_punctuation()))
+        {
+            return Some((control, prefix.len()));
+        }
+    }
+    None
+}
+
 pub struct DictationClip {
     samples: Vec<f32>,
 }
@@ -261,5 +296,22 @@ mod tests {
             assert_eq!(samples.len(), expected);
             assert!(samples.last().is_some_and(|sample| *sample > 0.25));
         }
+    }
+
+    #[test]
+    fn finds_resilient_controls_at_the_end_of_an_utterance() {
+        assert!(matches!(
+            dictation_control_suffix("How are we doing? Dictates stop."),
+            Some((DictationControl::Stop, _))
+        ));
+        assert!(matches!(
+            dictation_control_suffix("That's okay. Dictates send."),
+            Some((DictationControl::Send, _))
+        ));
+        assert!(matches!(
+            dictation_control_suffix("Dictates end."),
+            Some((DictationControl::Send, 0))
+        ));
+        assert!(dictation_control_suffix("Please dictate this sentence").is_none());
     }
 }
