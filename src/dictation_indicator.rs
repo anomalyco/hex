@@ -32,6 +32,7 @@ const EXIT_ANGULAR_FREQUENCY: f32 = 24.0;
 const GEOMETRY_ANGULAR_FREQUENCY: f32 = 24.0;
 const HIDDEN_SCALE: f32 = 0.82;
 const HIDDEN_SOFTNESS: f32 = 4.0;
+const PROCESSING_MORPH_DURATION: Duration = Duration::from_millis(250);
 
 #[derive(Clone, Copy, Debug)]
 pub enum DictationIndicatorEvent {
@@ -369,6 +370,7 @@ struct MetalRenderer {
     render_started: Instant,
     last_frame: Instant,
     exiting: bool,
+    completion_pending: bool,
     scale: f32,
     target_average: f32,
     target_peak: f32,
@@ -430,6 +432,7 @@ impl MetalRenderer {
             render_started: now,
             last_frame: now,
             exiting: true,
+            completion_pending: false,
             scale: 2.0,
             target_average: 0.0,
             target_peak: 0.0,
@@ -453,6 +456,7 @@ impl MetalRenderer {
                 self.render_started = now;
                 self.last_frame = now;
                 self.exiting = false;
+                self.completion_pending = false;
                 self.target_average = 0.0;
                 self.target_peak = 0.0;
                 self.average.reset(0.0);
@@ -471,28 +475,30 @@ impl MetalRenderer {
             DictationIndicatorEvent::Transcribing => {
                 self.phase = Phase::Transcribing;
                 self.phase_started = now;
+                self.completion_pending = false;
                 self.target_average = 0.0;
                 self.target_peak = 0.0;
             }
             DictationIndicatorEvent::Discarded => {
                 self.phase = Phase::Hidden;
+                self.completion_pending = false;
                 self.freeze_visual_state();
             }
             DictationIndicatorEvent::Cancelled => {
                 self.phase = Phase::Cancelled;
                 self.phase_started = now;
+                self.completion_pending = false;
                 self.freeze_visual_state();
             }
             DictationIndicatorEvent::Completed => {
                 if matches!(self.phase, Phase::Transcribing) {
-                    self.phase = Phase::Completed;
-                    self.phase_started = now;
-                    self.freeze_visual_state();
+                    self.completion_pending = true;
                 }
             }
             DictationIndicatorEvent::Failed => {
                 self.phase = Phase::Failed;
                 self.phase_started = now;
+                self.completion_pending = false;
                 self.freeze_visual_state();
             }
         }
@@ -522,6 +528,17 @@ impl MetalRenderer {
 
     fn draw(&mut self) -> bool {
         let now = Instant::now();
+        if self.completion_pending
+            && now.duration_since(self.phase_started) >= PROCESSING_MORPH_DURATION
+        {
+            self.width.reset(CAPSULE_HEIGHT);
+            self.height.reset(CAPSULE_HEIGHT);
+            self.processing.reset(1.0);
+            self.phase = Phase::Completed;
+            self.phase_started = now;
+            self.completion_pending = false;
+            self.freeze_visual_state();
+        }
         let dt = now
             .duration_since(self.last_frame)
             .as_secs_f32()
@@ -735,6 +752,16 @@ mod tests {
             Phase::Completed.visible_duration(),
             Some(Duration::from_millis(240))
         );
+    }
+
+    #[test]
+    fn processing_morph_duration_matches_geometry_spring() {
+        let mut width = Spring::new(CAPSULE_WIDTH);
+        for _ in 0..15 {
+            width.step_critical(CAPSULE_HEIGHT, 1.0 / 60.0, GEOMETRY_ANGULAR_FREQUENCY);
+        }
+        assert!(width.value < CAPSULE_HEIGHT + 0.7);
+        assert_eq!(PROCESSING_MORPH_DURATION, Duration::from_millis(250));
     }
 
     #[test]
