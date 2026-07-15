@@ -1,6 +1,6 @@
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::RecvTimeoutError;
+use std::sync::mpsc::{RecvTimeoutError, Sender};
 use std::time::{Duration, Instant};
 
 use color_eyre::Result;
@@ -18,6 +18,7 @@ use crate::events::{
     CommandOutcome, DictationPhase, EventLog, TranscriptPhase, VoiceEvent, VoiceState, now_ms,
 };
 use crate::feedback::{self, Tone};
+use crate::meeting::MeetingRequest;
 use crate::moonshine::Moonshine;
 use crate::parakeet::{DictationWorker, TranscriptionTarget, WorkerEvent};
 use crate::suppression::{self, HotkeyAction, InputMonitor, OptionHotkey};
@@ -43,6 +44,7 @@ pub fn listen(
     commands: CommandConfig,
     shutdown: &AtomicBool,
     indicator: Option<DictationIndicatorSender>,
+    meeting_requests: Option<Sender<MeetingRequest>>,
 ) -> Result<()> {
     shutdown.store(false, Ordering::Relaxed);
     let overridden;
@@ -291,6 +293,7 @@ pub fn listen(
                         &mut recognizer,
                         &mut dictation,
                         &action_executor,
+                        meeting_requests.as_ref(),
                         &update.text,
                         &context,
                         &input.device_name,
@@ -392,6 +395,7 @@ fn handle_command(
     recognizer: &mut Moonshine,
     dictation: &mut DictationCapture,
     action_executor: &ActionExecutor,
+    meeting_requests: Option<&Sender<MeetingRequest>>,
     heard: &str,
     context: &ContextSnapshot,
     device: &str,
@@ -426,6 +430,29 @@ fn handle_command(
             events.dictation(DictationPhase::Started, "")?;
             emit_state(events, true, *mode, device)?;
             (Some(id.into()), CommandOutcome::Executed)
+        }
+        Decision::Execute { id, action }
+            if matches!(action, Action::StartMeeting | Action::StopMeeting) =>
+        {
+            let request = match action {
+                Action::StartMeeting => MeetingRequest::Start,
+                Action::StopMeeting => MeetingRequest::Stop,
+                _ => unreachable!(),
+            };
+            let outcome = meeting_requests
+                .ok_or("meeting controls require the HEX app")
+                .and_then(|requests| {
+                    requests
+                        .send(request)
+                        .map_err(|_| "meeting controller is unavailable")
+                });
+            match outcome {
+                Ok(()) => (Some(id.into()), CommandOutcome::Executed),
+                Err(error) => {
+                    feedback::play(Tone::Error);
+                    (Some(id.into()), CommandOutcome::Failed(error.into()))
+                }
+            }
         }
         Decision::Execute { id, action } => {
             match action_executor.submit(id, action, heard, context.label()) {

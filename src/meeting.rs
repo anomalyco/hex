@@ -20,6 +20,12 @@ const SAMPLE_RATE: u32 = 16_000;
 const TRANSCRIPTION_CHUNK: usize = SAMPLE_RATE as usize * 30;
 static ACTIVE_MEETINGS: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum MeetingRequest {
+    Start,
+    Stop,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct MeetingManifest {
     pub schema_version: u8,

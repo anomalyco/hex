@@ -20,6 +20,7 @@ pub struct MeetingCandidate {
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MeetingSource {
+    Manual,
     GoogleMeet,
     Zoom,
     Teams,
@@ -31,6 +32,7 @@ pub enum MeetingSource {
 impl MeetingSource {
     pub fn label(self) -> &'static str {
         match self {
+            Self::Manual => "Meeting",
             Self::GoogleMeet => "Google Meet",
             Self::Zoom => "Zoom",
             Self::Teams => "Microsoft Teams",

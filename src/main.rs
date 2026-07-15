@@ -148,6 +148,7 @@ fn main() -> Result<()> {
                 config::voice_control(),
                 &SHUTDOWN,
                 None,
+                None,
             )
         }
         Command::Status => dashboard::run(event_path, config::voice_control()),

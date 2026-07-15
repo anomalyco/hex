@@ -39,6 +39,19 @@ pub fn voice_control() -> CommandConfig {
             "captains-log.start",
             CAPTAINS_LOG_START_PHRASES.iter().copied(),
         ))
+        .contextual(ContextualCommand::meeting_start(
+            "meeting.start",
+            [
+                "start meeting",
+                "start a meeting",
+                "record meeting",
+                "record this meeting",
+            ],
+        ))
+        .contextual(ContextualCommand::meeting_stop(
+            "meeting.stop",
+            ["stop meeting", "stop the meeting", "stop recording"],
+        ))
         .contextual(ContextualCommand::global_shortcut(
             "shortcut.command-one",
             Key::Character('1'),
@@ -154,4 +167,32 @@ pub fn voice_control() -> CommandConfig {
             "console",
             ["go to console", "open console", "go to console channel"],
         ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::commands::{Decision, Mode};
+    use crate::context::ContextSnapshot;
+
+    #[test]
+    fn meeting_recording_can_be_controlled_by_voice() {
+        let commands = voice_control();
+        let context = ContextSnapshot::default();
+
+        assert!(matches!(
+            commands.resolve(Mode::Listening, "Start a meeting.", &context),
+            Decision::Execute {
+                id: "meeting.start",
+                ..
+            }
+        ));
+        assert!(matches!(
+            commands.resolve(Mode::Listening, "Stop meeting.", &context),
+            Decision::Execute {
+                id: "meeting.stop",
+                ..
+            }
+        ));
+    }
 }

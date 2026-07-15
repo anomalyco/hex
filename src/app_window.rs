@@ -3,17 +3,18 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command as ProcessCommand;
 use std::rc::Rc;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::sync::mpsc::Sender;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use gpui::{
-    AnyElement, App, Bounds, Context, FontWeight, IntoElement, Render, TitlebarOptions, Window,
-    WindowBounds, WindowHandle, WindowOptions, div, prelude::*, px, rgb, size,
+    AnyElement, App, Bounds, Context, FontWeight, IntoElement, Render, Rgba, TitlebarOptions,
+    Window, WindowBounds, WindowHandle, WindowOptions, div, prelude::*, px, rgb, size,
 };
 
 use crate::app_settings::AppSettings;
 use crate::commands::{CommandConfig, CommandInfo, CommandScope};
 use crate::events::{CommandOutcome, DictationPhase, TranscriptPhase, VoiceEvent, VoiceState};
-use crate::meeting::{self, MeetingManifest, MeetingStatus};
+use crate::meeting::{self, MeetingManifest, MeetingRequest, MeetingStatus};
 
 const WINDOW_WIDTH: f32 = 1040.0;
 const WINDOW_HEIGHT: f32 = 700.0;
@@ -39,12 +40,14 @@ pub fn open_or_focus(
     app_window: &Rc<RefCell<Option<WindowHandle<AppWindow>>>>,
     event_path: PathBuf,
     commands: CommandConfig,
+    meeting_requests: Sender<MeetingRequest>,
     cx: &mut App,
 ) -> gpui::Result<WindowHandle<AppWindow>> {
     if let Some(handle) = app_window.borrow().as_ref().copied()
         && handle
             .update(cx, |this, window, cx| {
                 this.event_path = event_path.clone();
+                this.meeting_requests = meeting_requests.clone();
                 this.refresh(cx);
                 window.activate_window();
             })
@@ -67,7 +70,7 @@ pub fn open_or_focus(
             window_min_size: Some(size(px(MINIMUM_WIDTH), px(MINIMUM_HEIGHT))),
             ..Default::default()
         },
-        |_, cx| cx.new(|_| AppWindow::new(event_path, commands)),
+        |_, cx| cx.new(|_| AppWindow::new(event_path, commands, meeting_requests)),
     )?;
     *app_window.borrow_mut() = Some(handle);
     cx.activate(true);
@@ -142,11 +145,67 @@ enum MeetingTranscript {
     Unavailable(String),
 }
 
+struct ToggleSpring {
+    position: f32,
+    velocity: f32,
+    target: f32,
+    last_frame: Instant,
+}
+
+impl ToggleSpring {
+    fn new(enabled: bool) -> Self {
+        let position = if enabled { 1.0 } else { 0.0 };
+        Self {
+            position,
+            velocity: 0.0,
+            target: position,
+            last_frame: Instant::now(),
+        }
+    }
+
+    fn set_enabled(&mut self, enabled: bool) {
+        self.target = if enabled { 1.0 } else { 0.0 };
+        self.last_frame = Instant::now();
+    }
+
+    fn advance(&mut self, elapsed: Duration) {
+        let mut remaining = elapsed.as_secs_f32().min(0.1);
+        while remaining > 0.0 {
+            let dt = remaining.min(1.0 / 240.0);
+            let acceleration = -24.0_f32.powi(2) * (self.position - self.target)
+                - 2.0 * 0.72 * 24.0 * self.velocity;
+            self.velocity += acceleration * dt;
+            self.position += self.velocity * dt;
+            remaining -= dt;
+        }
+        if self.is_settled() {
+            self.position = self.target;
+            self.velocity = 0.0;
+        }
+    }
+
+    fn render_position(&mut self, window: &mut Window) -> f32 {
+        let now = Instant::now();
+        self.advance(now.duration_since(self.last_frame));
+        self.last_frame = now;
+        if !self.is_settled() {
+            window.request_animation_frame();
+        }
+        self.position
+    }
+
+    fn is_settled(&self) -> bool {
+        (self.position - self.target).abs() < 0.001 && self.velocity.abs() < 0.01
+    }
+}
+
 /// Root GPUI entity for the production app shell.
 pub struct AppWindow {
     pane: Pane,
     event_path: PathBuf,
+    meeting_requests: Sender<MeetingRequest>,
     settings: AppSettings,
+    sound_toggle: ToggleSpring,
     meetings: Vec<MeetingManifest>,
     meetings_error: Option<String>,
     selected_meeting: Option<String>,
@@ -161,7 +220,11 @@ pub struct AppWindow {
 }
 
 impl AppWindow {
-    fn new(event_path: PathBuf, commands: CommandConfig) -> Self {
+    fn new(
+        event_path: PathBuf,
+        commands: CommandConfig,
+        meeting_requests: Sender<MeetingRequest>,
+    ) -> Self {
         let settings = AppSettings::load().unwrap_or_else(|error| {
             tracing::error!(%error, "could not load app settings");
             AppSettings::default()
@@ -181,6 +244,8 @@ impl AppWindow {
         let mut window = Self {
             pane: Pane::Settings,
             event_path,
+            meeting_requests,
+            sound_toggle: ToggleSpring::new(settings.sound_effects),
             settings,
             meetings: Vec::new(),
             meetings_error: None,
@@ -304,8 +369,8 @@ impl AppWindow {
             .into_any_element()
     }
 
-    fn render_settings(&mut self, cx: &mut Context<Self>) -> AnyElement {
-        let enabled = self.settings.sound_effects;
+    fn render_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        let toggle_position = self.sound_toggle.render_position(window);
         div()
             .size_full()
             .flex()
@@ -347,9 +412,10 @@ impl AppWindow {
                                             ),
                                         ),
                                 )
-                                .child(toggle(enabled))
+                                .child(toggle(toggle_position))
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.settings.sound_effects = !this.settings.sound_effects;
+                                    this.sound_toggle.set_enabled(this.settings.sound_effects);
                                     crate::feedback::set_enabled(this.settings.sound_effects);
                                     if let Err(error) = this.settings.save() {
                                         tracing::error!(%error, "could not save app settings");
@@ -381,6 +447,32 @@ impl AppWindow {
                 cx.notify();
             }))
             .into_any_element();
+        let start = div()
+            .id("start-meeting")
+            .h(px(30.0))
+            .px_3()
+            .flex()
+            .items_center()
+            .rounded_sm()
+            .bg(rgb(0xe8e8e8))
+            .text_size(px(12.0))
+            .font_weight(FontWeight::SEMIBOLD)
+            .text_color(rgb(0x171717))
+            .cursor_pointer()
+            .hover(|button| button.bg(rgb(0xffffff)))
+            .child("Start Recording")
+            .on_click(cx.listener(|this, _, _, _| {
+                if this.meeting_requests.send(MeetingRequest::Start).is_err() {
+                    tracing::error!("meeting controller is unavailable");
+                }
+            }))
+            .into_any_element();
+        let actions = div()
+            .flex()
+            .items_center()
+            .gap_2()
+            .child(refresh)
+            .child(start);
 
         let rows: Vec<AnyElement> = self
             .meetings
@@ -452,7 +544,7 @@ impl AppWindow {
             .size_full()
             .flex()
             .flex_col()
-            .child(pane_header("Meetings", Some(refresh)))
+            .child(pane_header("Meetings", Some(actions.into_any_element())))
             .child(
                 div()
                     .id("meetings-workspace")
@@ -991,12 +1083,12 @@ impl AppWindow {
 }
 
 impl Render for AppWindow {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let content = match self.pane {
             Pane::Meetings => self.render_meetings(cx),
             Pane::Commands => self.render_commands(cx),
             Pane::Activity => self.render_activity(cx),
-            Pane::Settings => self.render_settings(cx),
+            Pane::Settings => self.render_settings(window, cx),
         };
         div()
             .size_full()
@@ -1038,7 +1130,8 @@ fn section_label(label: &'static str) -> AnyElement {
         .into_any_element()
 }
 
-fn toggle(enabled: bool) -> AnyElement {
+fn toggle(position: f32) -> AnyElement {
+    let color_position = position.clamp(0.0, 1.0);
     div()
         .w(px(38.0))
         .h(px(22.0))
@@ -1046,16 +1139,25 @@ fn toggle(enabled: bool) -> AnyElement {
         .flex_none()
         .flex()
         .items_center()
-        .justify_start()
         .rounded_full()
-        .when(enabled, |toggle| toggle.justify_end().bg(rgb(0xe4e4e4)))
-        .when(!enabled, |toggle| toggle.bg(rgb(0x353535)))
-        .child(div().size(px(16.0)).rounded_full().bg(if enabled {
-            rgb(SURFACE)
-        } else {
-            rgb(0x9a9a9a)
-        }))
+        .bg(mix_color(rgb(0x353535), rgb(0xe4e4e4), color_position))
+        .child(
+            div()
+                .ml(px(16.0 * position.clamp(-0.04, 1.04)))
+                .size(px(16.0))
+                .rounded_full()
+                .bg(mix_color(rgb(0x9a9a9a), rgb(SURFACE), color_position)),
+        )
         .into_any_element()
+}
+
+fn mix_color(from: Rgba, to: Rgba, position: f32) -> Rgba {
+    Rgba {
+        r: from.r + (to.r - from.r) * position,
+        g: from.g + (to.g - from.g) * position,
+        b: from.b + (to.b - from.b) * position,
+        a: from.a + (to.a - from.a) * position,
+    }
 }
 
 fn empty_message(message: &'static str) -> AnyElement {
@@ -1131,6 +1233,8 @@ fn command_task(command: &CommandInfo) -> &'static str {
         "Voice control"
     } else if command.id.starts_with("dictation.") || command.id.starts_with("captains-log.") {
         "Dictation"
+    } else if command.id.starts_with("meeting.") {
+        "Meetings"
     } else {
         match command.description {
             "Open application" => "Open applications",
@@ -1340,6 +1444,25 @@ fn text_or(prefix: &str, text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn toggle_spring_is_frame_rate_independent_and_settles() {
+        let simulate = |frame_rate: u32| {
+            let mut spring = ToggleSpring::new(false);
+            spring.set_enabled(true);
+            for _ in 0..frame_rate {
+                spring.advance(Duration::from_secs_f32(1.0 / frame_rate as f32));
+            }
+            spring
+        };
+
+        let at_60_hz = simulate(60);
+        let at_120_hz = simulate(120);
+        assert!(at_60_hz.is_settled());
+        assert!(at_120_hz.is_settled());
+        assert!((at_60_hz.position - at_120_hz.position).abs() < 0.001);
+        assert_eq!(at_60_hz.position, 1.0);
+    }
 
     #[test]
     fn recent_activity_keeps_context_older_than_the_visible_window() {

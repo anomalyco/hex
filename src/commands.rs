@@ -17,6 +17,8 @@ pub enum Mode {
 pub enum Action {
     StartDictation,
     StartCaptainsLog,
+    StartMeeting,
+    StopMeeting,
     OpenApplication(&'static str),
     OpenUrl(&'static str),
     NavigateBrowser(&'static str),
@@ -58,7 +60,10 @@ impl Target {
 
     fn verbs(&self) -> &'static [&'static str] {
         match self.action {
-            Action::StartDictation | Action::StartCaptainsLog => &[],
+            Action::StartDictation
+            | Action::StartCaptainsLog
+            | Action::StartMeeting
+            | Action::StopMeeting => &[],
             Action::OpenApplication(_) => &["open", "launch"],
             Action::OpenUrl(_) => &["go to", "open"],
             Action::NavigateBrowser(_) => &[],
@@ -71,6 +76,8 @@ impl Target {
         match self.action {
             Action::StartDictation => "Start voice dictation",
             Action::StartCaptainsLog => "Record a journal entry",
+            Action::StartMeeting => "Start meeting recording",
+            Action::StopMeeting => "Stop meeting recording",
             Action::OpenApplication(_) => "Open application",
             Action::OpenUrl(_) => "Open website",
             Action::NavigateBrowser(_) => "Navigate active tab",
@@ -137,6 +144,29 @@ impl ContextualCommand {
             description: "Record a journal entry",
             context: ContextPredicate::Always,
             action: Action::StartCaptainsLog,
+        }
+    }
+
+    pub fn meeting_start(
+        id: &'static str,
+        phrases: impl IntoIterator<Item = &'static str>,
+    ) -> Self {
+        Self {
+            id,
+            phrases: phrases.into_iter().collect(),
+            description: "Start meeting recording",
+            context: ContextPredicate::Always,
+            action: Action::StartMeeting,
+        }
+    }
+
+    pub fn meeting_stop(id: &'static str, phrases: impl IntoIterator<Item = &'static str>) -> Self {
+        Self {
+            id,
+            phrases: phrases.into_iter().collect(),
+            description: "Stop meeting recording",
+            context: ContextPredicate::Always,
+            action: Action::StopMeeting,
         }
     }
 
@@ -450,8 +480,11 @@ impl CommandConfig {
 pub fn execute(action: Action) -> Result<()> {
     let mut command = Command::new("/usr/bin/open");
     match action {
-        Action::StartDictation | Action::StartCaptainsLog => {
-            return Err(eyre!("dictation actions require the recognition loop"));
+        Action::StartDictation
+        | Action::StartCaptainsLog
+        | Action::StartMeeting
+        | Action::StopMeeting => {
+            return Err(eyre!("interactive actions require the HEX app"));
         }
         Action::OpenApplication(application) => {
             command.args(["-a", application]);

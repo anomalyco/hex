@@ -19,7 +19,7 @@ use crate::app_window::AppWindow;
 use crate::context::ContextSnapshot;
 use crate::dictation_indicator::DictationIndicatorEvent;
 use crate::dictation_indicator::{self, DictationIndicatorUi};
-use crate::meeting;
+use crate::meeting::{self, MeetingRequest};
 use crate::meeting_detection::{
     MeetingCandidate, MeetingDetector, MeetingSource, candidate_from_microphone,
 };
@@ -72,6 +72,7 @@ pub fn run(
     let show_app_on_launch = app_event_path.is_some() && !dictation_preview;
     let (event_sender, event_receiver) = mpsc::channel();
     let (command_sender, command_receiver) = mpsc::channel();
+    let (meeting_request_sender, meeting_request_receiver) = mpsc::channel();
     let (indicator_sender, indicator_receiver) = dictation_indicator::channel();
     if dictation_preview {
         let preview_sender = indicator_sender.clone();
@@ -101,7 +102,12 @@ pub fn run(
                 source: MeetingSource::Zoom,
             }));
         }
-        if let Err(error) = controller_loop(shutdown, controller_events.clone(), command_receiver) {
+        if let Err(error) = controller_loop(
+            shutdown,
+            controller_events.clone(),
+            command_receiver,
+            meeting_request_receiver,
+        ) {
             tracing::error!(%error, "meeting controller stopped");
             let _ = controller_events.send(ControllerEvent::Failed {
                 title: "Meeting detection stopped".into(),
@@ -110,8 +116,10 @@ pub fn run(
         }
     });
 
+    let recognition_meeting_requests = meeting_request_sender.clone();
     let recognition_worker = listener.map(|listener| {
         let failure_indicator = indicator_sender.clone();
+        let meeting_requests = recognition_meeting_requests.clone();
         thread::spawn(move || {
             if let Err(error) = recognition::listen(
                 &listener.project_root,
@@ -120,6 +128,7 @@ pub fn run(
                 config::voice_control(),
                 shutdown,
                 Some(indicator_sender),
+                Some(meeting_requests),
             ) {
                 tracing::error!(%error, "desktop recognition stopped");
                 failure_indicator.send(crate::dictation_indicator::DictationIndicatorEvent::Failed);
@@ -130,6 +139,7 @@ pub fn run(
     let app_window = Rc::new(RefCell::new(None::<WindowHandle<AppWindow>>));
     let reopen_window = app_window.clone();
     let reopen_event_path = app_event_path.clone();
+    let reopen_meeting_requests = meeting_request_sender.clone();
     let application = Application::new();
     application.on_reopen(move |cx| {
         if let Some(event_path) = reopen_event_path.clone()
@@ -137,6 +147,7 @@ pub fn run(
                 &reopen_window,
                 event_path,
                 config::voice_control(),
+                reopen_meeting_requests.clone(),
                 cx,
             )
         {
@@ -150,6 +161,7 @@ pub fn run(
                 &app_window,
                 event_path,
                 config::voice_control(),
+                meeting_request_sender.clone(),
                 cx,
             )
         {
@@ -253,13 +265,23 @@ fn controller_loop(
     shutdown: &AtomicBool,
     events: Sender<ControllerEvent>,
     commands: Receiver<ControllerCommand>,
+    meeting_requests: Receiver<MeetingRequest>,
 ) -> Result<()> {
     let mut detector = MeetingDetector::default();
     let mut recording: Option<ActiveRecording> = None;
+    let mut observed_microphone_apps = Vec::new();
     tracing::info!("GPUI meeting watcher started");
 
     while !shutdown.load(Ordering::Relaxed) {
-        while let Ok(command) = commands.try_recv() {
+        let requested_commands = meeting_requests.try_iter().map(|request| match request {
+            MeetingRequest::Start => ControllerCommand::Record(MeetingCandidate {
+                key: "manual".into(),
+                title: "Meeting".into(),
+                source: MeetingSource::Manual,
+            }),
+            MeetingRequest::Stop => ControllerCommand::Stop,
+        });
+        for command in commands.try_iter().chain(requested_commands) {
             match command {
                 ControllerCommand::Record(candidate) if recording.is_none() => {
                     let stop = Arc::new(AtomicBool::new(false));
@@ -311,7 +333,25 @@ fn controller_loop(
         }
 
         if recording.is_none() {
-            let application = active_microphone_applications()?
+            let microphone_apps = active_microphone_applications()?;
+            let observed = microphone_apps
+                .iter()
+                .map(|application| (application.pid, application.bundle_id.clone()))
+                .collect::<Vec<_>>();
+            if observed != observed_microphone_apps {
+                let applications = microphone_apps
+                    .iter()
+                    .map(|application| {
+                        format!(
+                            "{} ({}, pid {})",
+                            application.name, application.bundle_id, application.pid
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                tracing::info!(?applications, "microphone application activity changed");
+                observed_microphone_apps = observed;
+            }
+            let application = microphone_apps
                 .into_iter()
                 .filter(|application| application.is_supported_meeting_app())
                 .min_by_key(|application| application.detection_priority());
@@ -326,6 +366,11 @@ fn controller_loop(
             let candidate = application
                 .and_then(|application| candidate_from_microphone(&application, &context));
             if let Some(candidate) = detector.observe(candidate) {
+                tracing::info!(
+                    source = candidate.source.label(),
+                    title = candidate.title,
+                    "meeting recording offer triggered"
+                );
                 let _ = events.send(ControllerEvent::Offer(candidate));
             }
         }
