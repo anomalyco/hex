@@ -1,4 +1,6 @@
 use std::process::{Command, Stdio};
+use std::sync::mpsc::{self, Receiver, SyncSender, TrySendError};
+use std::thread;
 
 use color_eyre::eyre::{Result, WrapErr, eyre};
 
@@ -14,6 +16,7 @@ pub enum Mode {
 #[derive(Clone, Copy, Debug)]
 pub enum Action {
     StartDictation,
+    StartCaptainsLog,
     OpenApplication(&'static str),
     OpenUrl(&'static str),
     NavigateBrowser(&'static str),
@@ -55,7 +58,7 @@ impl Target {
 
     fn verbs(&self) -> &'static [&'static str] {
         match self.action {
-            Action::StartDictation => &[],
+            Action::StartDictation | Action::StartCaptainsLog => &[],
             Action::OpenApplication(_) => &["open", "launch"],
             Action::OpenUrl(_) => &["go to", "open"],
             Action::NavigateBrowser(_) => &[],
@@ -67,6 +70,7 @@ impl Target {
     fn description(&self) -> &'static str {
         match self.action {
             Action::StartDictation => "Start voice dictation",
+            Action::StartCaptainsLog => "Record a journal entry",
             Action::OpenApplication(_) => "Open application",
             Action::OpenUrl(_) => "Open website",
             Action::NavigateBrowser(_) => "Navigate active tab",
@@ -120,6 +124,19 @@ impl ContextualCommand {
             description: "Start voice dictation",
             context: ContextPredicate::Always,
             action: Action::StartDictation,
+        }
+    }
+
+    pub fn captains_log_start(
+        id: &'static str,
+        phrases: impl IntoIterator<Item = &'static str>,
+    ) -> Self {
+        Self {
+            id,
+            phrases: phrases.into_iter().collect(),
+            description: "Record a journal entry",
+            context: ContextPredicate::Always,
+            action: Action::StartCaptainsLog,
         }
     }
 
@@ -213,6 +230,70 @@ pub enum Decision {
     Wake,
     Sleep,
     Execute { id: &'static str, action: Action },
+}
+
+struct ActionRequest {
+    id: &'static str,
+    action: Action,
+    heard: String,
+    context: String,
+}
+
+pub struct ActionOutcome {
+    pub id: &'static str,
+    pub heard: String,
+    pub context: String,
+    pub result: Result<(), String>,
+}
+
+pub struct ActionExecutor {
+    requests: SyncSender<ActionRequest>,
+    outcomes: Receiver<ActionOutcome>,
+}
+
+impl ActionExecutor {
+    pub fn start() -> Self {
+        let (requests, request_receiver) = mpsc::sync_channel::<ActionRequest>(1);
+        let (outcome_sender, outcomes) = mpsc::channel();
+        thread::spawn(move || {
+            while let Ok(request) = request_receiver.recv() {
+                let outcome = ActionOutcome {
+                    id: request.id,
+                    heard: request.heard,
+                    context: request.context,
+                    result: execute(request.action).map_err(|error| error.to_string()),
+                };
+                if outcome_sender.send(outcome).is_err() {
+                    break;
+                }
+            }
+        });
+        Self { requests, outcomes }
+    }
+
+    pub fn submit(
+        &self,
+        id: &'static str,
+        action: Action,
+        heard: &str,
+        context: String,
+    ) -> Result<(), &'static str> {
+        self.requests
+            .try_send(ActionRequest {
+                id,
+                action,
+                heard: heard.into(),
+                context,
+            })
+            .map_err(|error| match error {
+                TrySendError::Full(_) => "command execution queue is full",
+                TrySendError::Disconnected(_) => "command executor is unavailable",
+            })
+    }
+
+    pub fn try_recv(&self) -> Option<ActionOutcome> {
+        self.outcomes.try_recv().ok()
+    }
 }
 
 impl CommandConfig {
@@ -369,7 +450,7 @@ impl CommandConfig {
 pub fn execute(action: Action) -> Result<()> {
     let mut command = Command::new("/usr/bin/open");
     match action {
-        Action::StartDictation => {
+        Action::StartDictation | Action::StartCaptainsLog => {
             return Err(eyre!("dictation actions require the recognition loop"));
         }
         Action::OpenApplication(application) => {
@@ -575,6 +656,7 @@ mod tests {
         let x = ContextSnapshot {
             application: Some("Brave Browser".into()),
             browser_url: Some(url::Url::parse("https://x.com/home").unwrap()),
+            window_title: None,
         };
         assert!(matches!(
             config.resolve(Mode::Listening, "go to chat", &x),
@@ -597,6 +679,7 @@ mod tests {
         let slack = ContextSnapshot {
             application: Some("Slack".into()),
             browser_url: None,
+            window_title: None,
         };
         assert!(matches!(
             config.resolve(Mode::Listening, "go to console", &slack),
@@ -639,6 +722,7 @@ mod tests {
         let slack = ContextSnapshot {
             application: Some("Slack".into()),
             browser_url: None,
+            window_title: None,
         };
         let slack_commands = config.available_catalog(Mode::Listening, &slack);
         assert!(

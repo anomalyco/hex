@@ -1,4 +1,6 @@
+use std::collections::HashMap;
 use std::ffi::c_void;
+use std::sync::OnceLock;
 
 use color_eyre::eyre::{Result, eyre};
 
@@ -49,6 +51,7 @@ const CONTROL_KEY_CODE: u16 = 59;
 const CONTROL_FLAG: u64 = 1 << 18;
 const EVENT_SOURCE_USER_DATA: u32 = 42;
 pub const SYNTHETIC_EVENT_MARKER: i64 = 0x0056_4f49_4345;
+static KEY_CODES: OnceLock<HashMap<char, u16>> = OnceLock::new();
 
 #[link(name = "Carbon", kind = "framework")]
 unsafe extern "C" {
@@ -89,6 +92,12 @@ unsafe extern "C" {
 }
 
 pub fn key_code_for(character: char) -> Result<u16> {
+    if let Some(key_code) = KEY_CODES
+        .get()
+        .and_then(|codes| codes.get(&character.to_ascii_lowercase()))
+    {
+        return Ok(*key_code);
+    }
     let source = input_source()?;
     // SAFETY: The retained TIS source remains alive until after all property reads.
     let layout_data =
@@ -106,6 +115,30 @@ pub fn key_code_for(character: char) -> Result<u16> {
     // SAFETY: TIS copy functions return a retained source.
     unsafe { CFRelease(source) };
     result.ok_or_else(|| eyre!("current keyboard layout has no key for {character:?}"))
+}
+
+pub fn initialize_layout() -> Result<()> {
+    if KEY_CODES.get().is_some() {
+        return Ok(());
+    }
+    let source = input_source()?;
+    let layout_data =
+        unsafe { TISGetInputSourceProperty(source, kTISPropertyUnicodeKeyLayoutData) };
+    if layout_data.is_null() {
+        unsafe { CFRelease(source) };
+        return Err(eyre!("active keyboard layout has no Unicode mapping"));
+    }
+    let layout = unsafe { CFDataGetBytePtr(layout_data) };
+    let codes = (0..128)
+        .filter_map(|key_code| {
+            let translated = translate(layout, key_code)?;
+            let character = translated.chars().next()?.to_ascii_lowercase();
+            Some((character, key_code))
+        })
+        .collect();
+    unsafe { CFRelease(source) };
+    let _ = KEY_CODES.set(codes);
+    Ok(())
 }
 
 pub fn post_command(character: char) -> Result<()> {

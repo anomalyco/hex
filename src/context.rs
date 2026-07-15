@@ -10,6 +10,7 @@ use url::Url;
 pub struct ContextSnapshot {
     pub application: Option<String>,
     pub browser_url: Option<Url>,
+    pub window_title: Option<String>,
 }
 
 pub struct ContextMonitor {
@@ -68,9 +69,11 @@ impl ContextSnapshot {
             .next()
             .filter(|line| !line.is_empty())
             .and_then(|line| Url::parse(line).ok());
+        let window_title = lines.next().filter(|line| !line.is_empty()).map(Into::into);
         Ok(Self {
             application,
             browser_url,
+            window_title,
         })
     }
 
@@ -108,10 +111,16 @@ tell application "System Events"
     set frontApp to name of first application process whose frontmost is true
 end tell
 set activeUrl to ""
+set windowTitle to ""
+tell application "System Events"
+    try
+        set windowTitle to name of front window of first application process whose frontmost is true
+    end try
+end tell
 if frontApp is "Brave Browser" then
     tell application "Brave Browser"
         if (count of windows) > 0 then set activeUrl to URL of active tab of front window
     end tell
 end if
-return frontApp & linefeed & activeUrl
+return frontApp & linefeed & activeUrl & linefeed & windowTitle
 "#;

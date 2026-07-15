@@ -61,6 +61,7 @@ pub enum DictationPhase {
     Cancelled,
     Transcribing,
     Pasted,
+    Logged,
     Repasted,
     Failed(String),
 }
@@ -71,6 +72,7 @@ pub enum CommandOutcome {
     Ignored,
     Woke,
     Slept,
+    Submitted,
     Executed,
     Failed(String),
 }

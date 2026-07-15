@@ -246,6 +246,14 @@ impl Drop for Moonshine {
 }
 
 fn find_library(project_root: &Path) -> Result<PathBuf> {
+    if let Ok(executable) = std::env::current_exe()
+        && let Some(contents) = executable.parent().and_then(Path::parent)
+    {
+        let bundled = contents.join("Frameworks/libmoonshine.dylib");
+        if bundled.exists() {
+            return Ok(bundled);
+        }
+    }
     let lib = project_root.join(".venv/lib");
     for python in
         fs::read_dir(&lib).wrap_err_with(|| format!("could not read {}", lib.display()))?

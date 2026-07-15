@@ -1,4 +1,6 @@
-use std::sync::mpsc::{self, Receiver, SyncSender};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::mpsc::{self, Receiver, SyncSender, TrySendError};
 
 use color_eyre::eyre::{Result, WrapErr, eyre};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
@@ -9,6 +11,7 @@ pub struct AudioInput {
     pub chunks: Receiver<Vec<f32>>,
     pub sample_rate: u32,
     pub device_name: String,
+    dropped_chunks: Arc<AtomicU64>,
 }
 
 impl AudioInput {
@@ -24,11 +27,18 @@ impl AudioInput {
         let sample_rate = config.sample_rate;
         let channels = usize::from(config.channels);
         let (sender, chunks) = mpsc::sync_channel(32);
+        let dropped_chunks = Arc::new(AtomicU64::new(0));
 
         let stream = match sample_format {
-            SampleFormat::F32 => build_f32_stream(&device, &config, channels, sender)?,
-            SampleFormat::I16 => build_i16_stream(&device, &config, channels, sender)?,
-            SampleFormat::U16 => build_u16_stream(&device, &config, channels, sender)?,
+            SampleFormat::F32 => {
+                build_f32_stream(&device, &config, channels, sender, dropped_chunks.clone())?
+            }
+            SampleFormat::I16 => {
+                build_i16_stream(&device, &config, channels, sender, dropped_chunks.clone())?
+            }
+            SampleFormat::U16 => {
+                build_u16_stream(&device, &config, channels, sender, dropped_chunks.clone())?
+            }
             format => return Err(eyre!("unsupported microphone sample format: {format:?}")),
         };
         stream
@@ -40,7 +50,12 @@ impl AudioInput {
             chunks,
             sample_rate,
             device_name,
+            dropped_chunks,
         })
+    }
+
+    pub fn take_dropped_chunks(&self) -> u64 {
+        self.dropped_chunks.swap(0, Ordering::Relaxed)
     }
 }
 
@@ -74,8 +89,10 @@ fn mono<T>(samples: &[T], channels: usize, convert: impl Fn(&T) -> f32) -> Vec<f
         .collect()
 }
 
-fn send(sender: &SyncSender<Vec<f32>>, chunk: Vec<f32>) {
-    let _ = sender.try_send(chunk);
+fn send(sender: &SyncSender<Vec<f32>>, dropped_chunks: &AtomicU64, chunk: Vec<f32>) {
+    if matches!(sender.try_send(chunk), Err(TrySendError::Full(_))) {
+        dropped_chunks.fetch_add(1, Ordering::Relaxed);
+    }
 }
 
 fn stream_error(error: cpal::Error) {
@@ -87,11 +104,18 @@ fn build_f32_stream(
     config: &StreamConfig,
     channels: usize,
     sender: SyncSender<Vec<f32>>,
+    dropped_chunks: Arc<AtomicU64>,
 ) -> Result<Stream> {
     device
         .build_input_stream(
             *config,
-            move |data: &[f32], _| send(&sender, mono(data, channels, |sample| *sample)),
+            move |data: &[f32], _| {
+                send(
+                    &sender,
+                    &dropped_chunks,
+                    mono(data, channels, |sample| *sample),
+                )
+            },
             stream_error,
             None,
         )
@@ -103,6 +127,7 @@ fn build_i16_stream(
     config: &StreamConfig,
     channels: usize,
     sender: SyncSender<Vec<f32>>,
+    dropped_chunks: Arc<AtomicU64>,
 ) -> Result<Stream> {
     device
         .build_input_stream(
@@ -110,6 +135,7 @@ fn build_i16_stream(
             move |data: &[i16], _| {
                 send(
                     &sender,
+                    &dropped_chunks,
                     mono(data, channels, |sample| *sample as f32 / i16::MAX as f32),
                 )
             },
@@ -124,6 +150,7 @@ fn build_u16_stream(
     config: &StreamConfig,
     channels: usize,
     sender: SyncSender<Vec<f32>>,
+    dropped_chunks: Arc<AtomicU64>,
 ) -> Result<Stream> {
     device
         .build_input_stream(
@@ -131,6 +158,7 @@ fn build_u16_stream(
             move |data: &[u16], _| {
                 send(
                     &sender,
+                    &dropped_chunks,
                     mono(data, channels, |sample| *sample as f32 / 32768.0 - 1.0),
                 )
             },

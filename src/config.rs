@@ -1,4 +1,5 @@
 use crate::commands::{CommandConfig, ContextualCommand, Target};
+use crate::dictation::{CAPTAINS_LOG_START_PHRASES, DICTATION_START_PHRASES};
 use crate::keyboard::{Key, Modifiers};
 
 pub const INPUT_DEVICES: &[&str] = &["Universal Audio Thunderbolt", "Studio Display Microphone"];
@@ -32,7 +33,11 @@ pub fn voice_control() -> CommandConfig {
         ))
         .contextual(ContextualCommand::dictation_start(
             "dictation.start",
-            ["dictate start", "start dictating"],
+            DICTATION_START_PHRASES.iter().copied(),
+        ))
+        .contextual(ContextualCommand::captains_log_start(
+            "captains-log.start",
+            CAPTAINS_LOG_START_PHRASES.iter().copied(),
         ))
         .contextual(ContextualCommand::global_shortcut(
             "shortcut.command-one",

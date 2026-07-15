@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "https://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleDisplayName</key>
+  <string>HEX</string>
+  <key>CFBundleExecutable</key>
+  <string>voice-control-watch</string>
+  <key>CFBundleIdentifier</key>
+  <string>com.kitlangton.voice-control.agent</string>
+  <key>CFBundleInfoDictionaryVersion</key>
+  <string>6.0</string>
+  <key>CFBundleIconFile</key>
+  <string>HEX.icns</string>
+  <key>CFBundleName</key>
+  <string>HEX</string>
+  <key>CFBundlePackageType</key>
+  <string>APPL</string>
+  <key>CFBundleShortVersionString</key>
+  <string>2.0.0</string>
+  <key>CFBundleVersion</key>
+  <string>2</string>
+  <key>LSMinimumSystemVersion</key>
+  <string>15.0</string>
+  <key>NSAppleEventsUsageDescription</key>
+  <string>HEX identifies active Google Meet tabs in Brave.</string>
+  <key>NSAudioCaptureUsageDescription</key>
+  <string>HEX records computer audio only after you approve a meeting recording.</string>
+  <key>NSMicrophoneUsageDescription</key>
+  <string>HEX records your microphone only after you approve a meeting recording.</string>
+  <key>NSScreenCaptureUsageDescription</key>
+  <string>HEX uses ScreenCaptureKit to record computer audio after you approve a meeting recording.</string>
+</dict>
+</plist>

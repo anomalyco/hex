@@ -1,0 +1,1845 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Voice Control - Operations Journal</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #0c0d0d;
+        --surface: #121414;
+        --surface-raised: #171919;
+        --surface-soft: #1d2020;
+        --line: #292d2c;
+        --line-strong: #3a403e;
+        --text: #e6e9e7;
+        --muted: #8d9692;
+        --faint: #5f6864;
+        --green: #78b98f;
+        --green-soft: #173326;
+        --amber: #d0a65c;
+        --amber-soft: #352916;
+        --red: #d07972;
+        --red-soft: #371d1b;
+        --blue: #7ca6bd;
+        --violet: #a392be;
+        --focus: #9cc7b0;
+        font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", Inter, sans-serif;
+        font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html {
+        background: #070808;
+        -webkit-font-smoothing: antialiased;
+      }
+
+      body {
+        min-height: 100dvh;
+        margin: 0;
+        display: grid;
+        place-items: center;
+        background: #070808;
+        color: var(--text);
+      }
+
+      button,
+      input,
+      select {
+        font: inherit;
+      }
+
+      button {
+        color: inherit;
+      }
+
+      button:focus-visible,
+      input:focus-visible,
+      select:focus-visible {
+        outline: 2px solid var(--focus);
+        outline-offset: 2px;
+      }
+
+      .app-window {
+        isolation: isolate;
+        width: min(100vw, 1000px);
+        height: min(100dvh, 700px);
+        min-height: 580px;
+        display: grid;
+        grid-template-rows: 38px 56px 45px minmax(0, 1fr) 28px;
+        overflow: hidden;
+        border: 1px solid #303433;
+        background: var(--bg);
+        box-shadow: 0 24px 70px rgb(0 0 0 / 55%);
+      }
+
+      .titlebar {
+        display: grid;
+        grid-template-columns: 110px 1fr 110px;
+        align-items: center;
+        border-bottom: 1px solid var(--line);
+        background: #161818;
+        -webkit-user-select: none;
+        user-select: none;
+      }
+
+      .traffic-lights {
+        display: flex;
+        gap: 8px;
+        padding-left: 14px;
+      }
+
+      .traffic-light {
+        width: 12px;
+        height: 12px;
+        border: 1px solid rgb(0 0 0 / 35%);
+        border-radius: 50%;
+      }
+
+      .traffic-light.close { background: #ee6a5f; }
+      .traffic-light.minimize { background: #f4bd4f; }
+      .traffic-light.zoom { background: #61c454; }
+
+      .window-title {
+        overflow: hidden;
+        color: #c8cecb;
+        font-size: 13px;
+        font-weight: 600;
+        text-align: center;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .local-mark {
+        padding-right: 14px;
+        color: var(--faint);
+        font-family: "SFMono-Regular", Consolas, monospace;
+        font-size: 10px;
+        letter-spacing: 0.04em;
+        text-align: right;
+      }
+
+      .runtime-strip {
+        display: grid;
+        grid-template-columns: 156px minmax(230px, 1fr) minmax(280px, 390px);
+        border-bottom: 1px solid var(--line);
+        background: #101212;
+      }
+
+      .runtime-state,
+      .runtime-facts,
+      .recording-strip {
+        min-width: 0;
+        display: flex;
+        align-items: center;
+      }
+
+      .runtime-state {
+        gap: 9px;
+        padding: 0 16px;
+        border-right: 1px solid var(--line);
+      }
+
+      .state-dot {
+        width: 8px;
+        height: 8px;
+        flex: 0 0 auto;
+        border-radius: 50%;
+        background: var(--green);
+        box-shadow: 0 0 0 4px rgb(120 185 143 / 9%);
+      }
+
+      .runtime-state strong,
+      .recording-strip strong {
+        display: block;
+        font-size: 11px;
+        font-weight: 650;
+        letter-spacing: 0.07em;
+      }
+
+      .runtime-state small,
+      .recording-strip small {
+        display: block;
+        margin-top: 3px;
+        overflow: hidden;
+        color: var(--muted);
+        font-size: 11px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .runtime-facts {
+        gap: 18px;
+        padding: 0 16px;
+        overflow: hidden;
+      }
+
+      .runtime-fact {
+        min-width: 0;
+      }
+
+      .runtime-fact span {
+        display: block;
+        color: var(--faint);
+        font-size: 9px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .runtime-fact b {
+        display: block;
+        margin-top: 3px;
+        overflow: hidden;
+        color: #bdc5c1;
+        font-size: 11px;
+        font-weight: 500;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .recording-strip {
+        gap: 10px;
+        justify-content: space-between;
+        padding: 0 10px 0 14px;
+        border-left: 1px solid #3b3020;
+        background: #18150f;
+      }
+
+      .recording-summary {
+        min-width: 0;
+        display: flex;
+        align-items: center;
+        gap: 9px;
+      }
+
+      .recording-dot {
+        width: 8px;
+        height: 8px;
+        flex: 0 0 auto;
+        border-radius: 50%;
+        background: var(--red);
+      }
+
+      .elapsed {
+        color: #d7c19b;
+        font-family: "SFMono-Regular", Consolas, monospace;
+        font-variant-numeric: tabular-nums;
+      }
+
+      .strip-action,
+      .quiet-button,
+      .solid-button,
+      .filter-button,
+      .meeting-row,
+      .context-button,
+      .event-row,
+      .lens-button {
+        border: 0;
+        cursor: pointer;
+      }
+
+      .strip-action {
+        min-height: 30px;
+        flex: 0 0 auto;
+        padding: 6px 9px;
+        border: 1px solid #493b25;
+        border-radius: 3px;
+        background: transparent;
+        color: #d5bd92;
+        font-size: 11px;
+      }
+
+      .strip-action:hover { background: #262015; }
+
+      .lens-nav {
+        min-width: 0;
+        display: flex;
+        align-items: stretch;
+        gap: 2px;
+        overflow-x: auto;
+        border-bottom: 1px solid var(--line);
+        background: #141616;
+        scrollbar-width: none;
+      }
+
+      .lens-nav::-webkit-scrollbar { display: none; }
+
+      .lens-button {
+        position: relative;
+        min-width: max-content;
+        padding: 0 17px;
+        background: transparent;
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 500;
+      }
+
+      .lens-button:hover { color: #d2d7d4; }
+
+      .lens-button.active {
+        background: #1b1e1d;
+        color: var(--text);
+      }
+
+      .lens-button.active::after {
+        position: absolute;
+        right: 14px;
+        bottom: 0;
+        left: 14px;
+        height: 2px;
+        background: var(--green);
+        content: "";
+      }
+
+      .lens-spacer { flex: 1; }
+
+      .today-marker {
+        min-width: max-content;
+        display: flex;
+        align-items: center;
+        padding: 0 15px;
+        color: var(--faint);
+        font-family: "SFMono-Regular", Consolas, monospace;
+        font-size: 10px;
+      }
+
+      .workspace {
+        min-height: 0;
+        display: grid;
+        grid-template-columns: minmax(0, 61fr) minmax(330px, 39fr);
+      }
+
+      .journal,
+      .inspector {
+        min-height: 0;
+        overflow: hidden;
+      }
+
+      .journal {
+        display: grid;
+        grid-template-rows: 48px minmax(0, 1fr);
+        border-right: 1px solid var(--line);
+      }
+
+      .journal-heading {
+        min-width: 0;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        justify-content: space-between;
+        padding: 0 14px 0 18px;
+        border-bottom: 1px solid var(--line);
+        background: #0f1111;
+      }
+
+      .journal-heading h1,
+      .inspector-heading h2 {
+        margin: 0;
+        color: #f0f2f1;
+        font-size: 14px;
+        font-weight: 600;
+      }
+
+      .journal-heading p {
+        margin: 2px 0 0;
+        overflow: hidden;
+        color: var(--faint);
+        font-size: 10px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .filter-set {
+        display: flex;
+        align-items: center;
+        gap: 2px;
+      }
+
+      .filter-button {
+        padding: 5px 7px;
+        border-radius: 2px;
+        background: transparent;
+        color: var(--faint);
+        font-size: 10px;
+      }
+
+      .filter-button:hover { color: var(--text); }
+
+      .filter-button.active {
+        background: var(--surface-soft);
+        color: #d7dcd9;
+      }
+
+      .timeline {
+        position: relative;
+        min-height: 0;
+        overflow-y: auto;
+        overscroll-behavior: contain;
+        scrollbar-color: #3b403f transparent;
+      }
+
+      .timeline::before {
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        left: 82px;
+        width: 1px;
+        background: var(--line);
+        content: "";
+      }
+
+      .day-divider {
+        position: relative;
+        z-index: 1;
+        display: grid;
+        grid-template-columns: 70px 24px 1fr;
+        align-items: center;
+        min-height: 34px;
+        color: var(--faint);
+        font-size: 10px;
+      }
+
+      .day-divider time {
+        padding-right: 9px;
+        font-family: "SFMono-Regular", Consolas, monospace;
+        text-align: right;
+      }
+
+      .day-divider .day-node {
+        width: 7px;
+        height: 7px;
+        justify-self: center;
+        border: 1px solid var(--line-strong);
+        border-radius: 50%;
+        background: var(--bg);
+      }
+
+      .day-divider strong {
+        font-weight: 500;
+      }
+
+      .event-row {
+        position: relative;
+        z-index: 1;
+        width: 100%;
+        display: grid;
+        grid-template-columns: 70px 24px minmax(0, 1fr);
+        min-height: 58px;
+        padding: 0;
+        background: transparent;
+        color: inherit;
+        text-align: left;
+      }
+
+      .event-row:hover { background: #131515; }
+
+      .event-row.selected {
+        background: #191c1b;
+        box-shadow: inset 3px 0 var(--green);
+      }
+
+      .event-time {
+        padding: 13px 9px 0 4px;
+        color: var(--faint);
+        font-family: "SFMono-Regular", Consolas, monospace;
+        font-size: 10px;
+        font-variant-numeric: tabular-nums;
+        text-align: right;
+      }
+
+      .event-node-wrap {
+        display: flex;
+        justify-content: center;
+        padding-top: 15px;
+      }
+
+      .event-node {
+        width: 9px;
+        height: 9px;
+        border: 2px solid var(--bg);
+        border-radius: 50%;
+        background: var(--muted);
+        box-shadow: 0 0 0 1px var(--line-strong);
+      }
+
+      .event-node.command { background: var(--green); }
+      .event-node.dictation { background: var(--violet); }
+      .event-node.meeting { background: var(--red); }
+      .event-node.recognition { background: var(--blue); }
+      .event-node.context { background: #78817d; }
+      .event-node.error { background: var(--amber); }
+      .event-node.setting { background: #a2aaa6; }
+
+      .event-content {
+        min-width: 0;
+        padding: 10px 14px 10px 5px;
+        border-bottom: 1px solid #1e2120;
+      }
+
+      .event-line {
+        min-width: 0;
+        display: flex;
+        align-items: baseline;
+        gap: 8px;
+      }
+
+      .event-kind {
+        flex: 0 0 auto;
+        color: var(--muted);
+        font-family: "SFMono-Regular", Consolas, monospace;
+        font-size: 9px;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+      }
+
+      .event-title {
+        min-width: 0;
+        overflow: hidden;
+        color: #dce1de;
+        font-size: 12px;
+        font-weight: 560;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .event-detail {
+        margin: 5px 0 0;
+        overflow: hidden;
+        color: #7f8985;
+        font-size: 11px;
+        line-height: 1.35;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .event-detail .outcome-good { color: var(--green); }
+      .event-detail .outcome-warn { color: var(--amber); }
+      .event-detail .outcome-bad { color: var(--red); }
+
+      .decision-event {
+        position: relative;
+        z-index: 2;
+        display: grid;
+        grid-template-columns: 70px 24px minmax(0, 1fr);
+        background: #17130d;
+      }
+
+      .decision-event .event-time { padding-top: 15px; }
+      .decision-event .event-node-wrap { padding-top: 17px; }
+
+      .decision-body {
+        margin: 7px 12px 9px 5px;
+        padding: 10px 11px 11px;
+        border: 1px solid #594829;
+        border-radius: 4px;
+        background: #1e190f;
+      }
+
+      .decision-body h3 {
+        margin: 0;
+        color: #edd8ae;
+        font-size: 12px;
+        font-weight: 600;
+      }
+
+      .decision-body p {
+        margin: 4px 0 9px;
+        color: #a99672;
+        font-size: 11px;
+        line-height: 1.4;
+      }
+
+      .decision-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 7px;
+      }
+
+      .quiet-button,
+      .solid-button {
+        min-height: 30px;
+        padding: 6px 10px;
+        border-radius: 3px;
+        font-size: 11px;
+        font-weight: 600;
+      }
+
+      .quiet-button {
+        border: 1px solid var(--line-strong);
+        background: #202322;
+        color: #c4cbc7;
+      }
+
+      .quiet-button:hover { background: #292d2b; }
+
+      .solid-button {
+        border: 1px solid #e6e9e7;
+        background: #e6e9e7;
+        color: #111313;
+      }
+
+      .solid-button:hover { background: #f5f7f6; }
+
+      .inspector {
+        display: grid;
+        grid-template-rows: 48px minmax(0, 1fr);
+        background: var(--surface);
+      }
+
+      .inspector-heading {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 0 16px;
+        border-bottom: 1px solid var(--line);
+        background: #151717;
+      }
+
+      .inspector-heading span {
+        color: var(--faint);
+        font-family: "SFMono-Regular", Consolas, monospace;
+        font-size: 9px;
+      }
+
+      .inspector-body {
+        min-height: 0;
+        overflow-y: auto;
+        scrollbar-color: #3b403f transparent;
+      }
+
+      .inspector-section {
+        padding: 14px 16px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .section-label {
+        margin: 0 0 9px;
+        color: var(--faint);
+        font-family: "SFMono-Regular", Consolas, monospace;
+        font-size: 9px;
+        font-weight: 500;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .inspector-title {
+        margin: 0;
+        color: #eef0ef;
+        font-size: 16px;
+        font-weight: 600;
+        letter-spacing: -0.01em;
+      }
+
+      .inspector-copy {
+        margin: 6px 0 0;
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.5;
+      }
+
+      .fact-list {
+        margin: 0;
+      }
+
+      .fact-row {
+        display: grid;
+        grid-template-columns: 104px minmax(0, 1fr);
+        gap: 10px;
+        padding: 7px 0;
+        border-bottom: 1px solid #242726;
+        font-size: 11px;
+      }
+
+      .fact-row:last-child { border-bottom: 0; }
+
+      .fact-row dt { color: var(--faint); }
+
+      .fact-row dd {
+        min-width: 0;
+        margin: 0;
+        overflow-wrap: anywhere;
+        color: #bcc4c0;
+        font-family: "SFMono-Regular", Consolas, monospace;
+      }
+
+      .journal-counts {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        border: 1px solid var(--line);
+      }
+
+      .journal-count {
+        padding: 10px;
+        border-right: 1px solid var(--line);
+      }
+
+      .journal-count:last-child { border-right: 0; }
+
+      .journal-count b {
+        display: block;
+        color: #dce1de;
+        font-family: "SFMono-Regular", Consolas, monospace;
+        font-size: 16px;
+        font-variant-numeric: tabular-nums;
+        font-weight: 500;
+      }
+
+      .journal-count span {
+        display: block;
+        margin-top: 3px;
+        color: var(--faint);
+        font-size: 9px;
+      }
+
+      .meeting-library {
+        border-top: 1px solid var(--line);
+      }
+
+      .meeting-row {
+        width: 100%;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 10px;
+        padding: 10px 16px;
+        border-bottom: 1px solid var(--line);
+        background: transparent;
+        color: inherit;
+        text-align: left;
+      }
+
+      .meeting-row:hover { background: #191c1b; }
+
+      .meeting-row.active {
+        background: #1d211f;
+        box-shadow: inset 3px 0 var(--green);
+      }
+
+      .meeting-row strong {
+        display: block;
+        overflow: hidden;
+        color: #d8ddda;
+        font-size: 12px;
+        font-weight: 600;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .meeting-row small {
+        display: block;
+        margin-top: 4px;
+        color: var(--faint);
+        font-size: 10px;
+      }
+
+      .meeting-status {
+        align-self: start;
+        padding-top: 1px;
+        color: var(--green);
+        font-family: "SFMono-Regular", Consolas, monospace;
+        font-size: 9px;
+      }
+
+      .meeting-status.interrupted { color: var(--amber); }
+
+      .transcript {
+        padding: 0 16px 16px;
+      }
+
+      .transcript-entry {
+        display: grid;
+        grid-template-columns: 42px 58px minmax(0, 1fr);
+        gap: 8px;
+        padding: 9px 0;
+        border-bottom: 1px solid #242726;
+        font-size: 11px;
+        line-height: 1.45;
+      }
+
+      .transcript-time {
+        color: var(--faint);
+        font-family: "SFMono-Regular", Consolas, monospace;
+      }
+
+      .transcript-source { color: var(--blue); }
+      .transcript-source.you { color: var(--violet); }
+      .transcript-text { color: #b6bfba; }
+
+      .context-switcher {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        border: 1px solid var(--line-strong);
+      }
+
+      .context-button {
+        min-height: 32px;
+        padding: 5px 6px;
+        border-right: 1px solid var(--line-strong);
+        background: transparent;
+        color: var(--muted);
+        font-size: 10px;
+      }
+
+      .context-button:last-child { border-right: 0; }
+      .context-button:hover { color: var(--text); }
+
+      .context-button.active {
+        background: #242826;
+        color: var(--text);
+      }
+
+      .catalog-row {
+        padding: 10px 0;
+        border-bottom: 1px solid #262a28;
+      }
+
+      .catalog-row:last-child { border-bottom: 0; }
+
+      .catalog-scope {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        color: var(--green);
+        font-family: "SFMono-Regular", Consolas, monospace;
+        font-size: 9px;
+      }
+
+      .catalog-scope span:last-child { color: var(--faint); }
+
+      .catalog-phrase {
+        margin-top: 5px;
+        color: #e0e4e2;
+        font-size: 12px;
+        font-weight: 600;
+      }
+
+      .catalog-description,
+      .catalog-aliases {
+        margin-top: 4px;
+        color: var(--muted);
+        font-size: 10px;
+        line-height: 1.4;
+      }
+
+      .catalog-aliases { color: var(--faint); }
+
+      .raw-block {
+        margin: 0;
+        padding: 12px;
+        overflow-x: auto;
+        border: 1px solid var(--line);
+        border-radius: 3px;
+        background: #0b0d0d;
+        color: #9eaaa4;
+        font-family: "SFMono-Regular", Consolas, monospace;
+        font-size: 10px;
+        line-height: 1.55;
+        white-space: pre-wrap;
+      }
+
+      .source-row {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 12px;
+        padding: 8px 0;
+        border-bottom: 1px solid #262a28;
+      }
+
+      .source-row:last-child { border-bottom: 0; }
+
+      .source-row strong {
+        display: block;
+        font-family: "SFMono-Regular", Consolas, monospace;
+        font-size: 10px;
+        font-weight: 500;
+      }
+
+      .source-row small {
+        display: block;
+        margin-top: 4px;
+        color: var(--faint);
+        font-size: 10px;
+      }
+
+      .source-state {
+        color: var(--green);
+        font-family: "SFMono-Regular", Consolas, monospace;
+        font-size: 9px;
+      }
+
+      .setting-row {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        align-items: center;
+        gap: 14px;
+        padding: 12px 0;
+        border-bottom: 1px solid #262a28;
+      }
+
+      .setting-row:last-child { border-bottom: 0; }
+
+      .setting-row strong {
+        display: block;
+        color: #d9dddb;
+        font-size: 12px;
+        font-weight: 600;
+      }
+
+      .setting-row p {
+        margin: 4px 0 0;
+        color: var(--faint);
+        font-size: 10px;
+        line-height: 1.4;
+      }
+
+      .toggle {
+        position: relative;
+        width: 38px;
+        height: 22px;
+        padding: 2px;
+        border: 1px solid #3d4440;
+        border-radius: 11px;
+        background: #2b2f2d;
+        cursor: pointer;
+      }
+
+      .toggle::after {
+        position: absolute;
+        top: 2px;
+        left: 2px;
+        width: 16px;
+        height: 16px;
+        border-radius: 50%;
+        background: #949d98;
+        content: "";
+        transition: transform 140ms ease;
+      }
+
+      .toggle.on {
+        border-color: #6fa382;
+        background: #365c45;
+      }
+
+      .toggle.on::after {
+        background: #edf1ef;
+        transform: translateX(16px);
+      }
+
+      .setting-select {
+        max-width: 150px;
+        min-height: 32px;
+        padding: 5px 28px 5px 8px;
+        border: 1px solid var(--line-strong);
+        border-radius: 3px;
+        appearance: none;
+        background: #202322
+          url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5' viewBox='0 0 8 5'%3E%3Cpath d='M.5.5 4 4 7.5.5' fill='none' stroke='%238d9692'/%3E%3C/svg%3E")
+          no-repeat right 9px center;
+        color: #cbd1ce;
+        font-size: 10px;
+      }
+
+      .permission-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        padding: 7px 0;
+        border-bottom: 1px solid #242726;
+        font-size: 11px;
+      }
+
+      .permission-row:last-child { border-bottom: 0; }
+      .permission-row span:last-child { color: var(--green); }
+
+      .footer {
+        min-width: 0;
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        padding: 0 12px;
+        overflow: hidden;
+        border-top: 1px solid var(--line);
+        background: #111313;
+        color: var(--faint);
+        font-size: 9px;
+      }
+
+      .footer-path {
+        min-width: 0;
+        flex: 1;
+        overflow: hidden;
+        font-family: "SFMono-Regular", Consolas, monospace;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .footer-local {
+        flex: 0 0 auto;
+        color: #87918c;
+      }
+
+      .empty-state {
+        padding: 28px;
+        color: var(--faint);
+        font-size: 12px;
+        text-align: center;
+      }
+
+      @media (max-width: 760px) {
+        body { display: block; }
+
+        .app-window {
+          width: 100%;
+          height: auto;
+          min-height: 100dvh;
+          grid-template-rows: 38px auto 45px auto 28px;
+          border: 0;
+          box-shadow: none;
+        }
+
+        .titlebar { grid-template-columns: 90px 1fr 70px; }
+        .local-mark { padding-right: 10px; }
+
+        .runtime-strip {
+          grid-template-columns: 1fr 1fr;
+        }
+
+        .runtime-state { min-height: 54px; }
+        .runtime-facts { display: none; }
+        .recording-strip { min-height: 54px; }
+
+        .workspace {
+          display: block;
+        }
+
+        .journal {
+          height: 520px;
+          border-right: 0;
+          border-bottom: 1px solid var(--line);
+        }
+
+        .inspector {
+          min-height: 460px;
+        }
+
+        .journal-heading { padding-left: 13px; }
+        .journal-heading p { display: none; }
+        .timeline::before { left: 64px; }
+        .day-divider { grid-template-columns: 53px 22px 1fr; }
+        .event-row,
+        .decision-event { grid-template-columns: 53px 22px minmax(0, 1fr); }
+        .event-time { padding-right: 6px; font-size: 9px; }
+        .event-content { padding-right: 10px; }
+        .filter-button { min-height: 32px; }
+        .footer { position: sticky; bottom: 0; }
+      }
+
+      @media (max-width: 500px) {
+        .runtime-strip { grid-template-columns: 122px minmax(0, 1fr); }
+        .runtime-state { padding: 0 10px; }
+        .recording-strip { padding-left: 10px; }
+        .recording-strip small { display: none; }
+        .strip-action { padding: 5px 7px; }
+        .today-marker { display: none; }
+        .lens-button { padding: 0 13px; }
+        .filter-set .filter-button:nth-child(2),
+        .filter-set .filter-button:nth-child(3) { display: none; }
+        .fact-row { grid-template-columns: 88px minmax(0, 1fr); }
+        .context-switcher { grid-template-columns: 1fr; }
+        .context-button { border-right: 0; border-bottom: 1px solid var(--line-strong); }
+        .context-button:last-child { border-bottom: 0; }
+      }
+    </style>
+  </head>
+  <body>
+    <!-- Throwaway prototype for Variant B; not production application code. -->
+    <main class="app-window" aria-label="Voice Control operations journal">
+      <header class="titlebar">
+        <div class="traffic-lights" aria-hidden="true">
+          <span class="traffic-light close"></span>
+          <span class="traffic-light minimize"></span>
+          <span class="traffic-light zoom"></span>
+        </div>
+        <div class="window-title">Voice Control - Operations Journal</div>
+        <div class="local-mark">LOCAL</div>
+      </header>
+
+      <section class="runtime-strip" aria-label="Current runtime state">
+        <div class="runtime-state">
+          <span class="state-dot" aria-hidden="true"></span>
+          <div>
+            <strong>LISTENING</strong>
+            <small>Option to dictate</small>
+          </div>
+        </div>
+        <div class="runtime-facts">
+          <div class="runtime-fact">
+            <span>Input</span>
+            <b>Universal Audio Thunderbolt</b>
+          </div>
+          <div class="runtime-fact">
+            <span>Context</span>
+            <b>Slack / #console</b>
+          </div>
+        </div>
+        <div class="recording-strip" id="recordingStrip">
+          <div class="recording-summary">
+            <span class="recording-dot" aria-hidden="true"></span>
+            <div>
+              <strong id="recordingLabel">RECORDING <span class="elapsed" id="recordingElapsed">42:18</span></strong>
+              <small id="recordingDetail">Design sync / Mic + Computer Audio</small>
+            </div>
+          </div>
+          <button class="strip-action" id="simulateEnd" type="button">Call signal ended</button>
+        </div>
+      </section>
+
+      <nav class="lens-nav" aria-label="Journal lenses">
+        <button class="lens-button" data-lens="activity" type="button">Activity</button>
+        <button class="lens-button" data-lens="meetings" type="button">Meetings</button>
+        <button class="lens-button" data-lens="commands" type="button">Commands</button>
+        <button class="lens-button" data-lens="debug" type="button">Activity / Debug</button>
+        <button class="lens-button active" data-lens="settings" type="button">Settings</button>
+        <span class="lens-spacer"></span>
+        <span class="today-marker">WED 15 JUL / 13:44</span>
+      </nav>
+
+      <section class="workspace">
+        <section class="journal" aria-labelledby="journalTitle">
+          <header class="journal-heading">
+            <div>
+              <h1 id="journalTitle">Today's activity</h1>
+              <p id="journalSubtitle">One local chronology across recognition, dictation, commands, and meetings</p>
+            </div>
+            <div class="filter-set" id="filterSet" aria-label="Activity filters">
+              <button class="filter-button active" data-filter="all" type="button">All</button>
+              <button class="filter-button" data-filter="voice" type="button">Voice</button>
+              <button class="filter-button" data-filter="meetings" type="button">Meetings</button>
+              <button class="filter-button" data-filter="issues" type="button">Issues</button>
+            </div>
+          </header>
+          <div class="timeline" id="timeline" aria-live="polite"></div>
+        </section>
+
+        <aside class="inspector" aria-labelledby="inspectorTitle">
+          <header class="inspector-heading">
+            <h2 id="inspectorTitle">Event inspector</h2>
+            <span id="inspectorIndex">EVENT 19/24</span>
+          </header>
+          <div class="inspector-body" id="inspectorBody"></div>
+        </aside>
+      </section>
+
+      <footer class="footer">
+        <span class="footer-path">~/Library/Application Support/voice-control / logs/live.ndjson</span>
+        <span>ScreenCaptureKit 16 kHz</span>
+        <span class="footer-local">NO NETWORK ACTIVITY</span>
+      </footer>
+    </main>
+
+    <script>
+      const events = [
+        {
+          id: "meeting-signal-ended",
+          time: "13:44:06",
+          type: "meeting",
+          kind: "meeting",
+          title: "Microphone-process activity disappeared",
+          detail: "Zoom is no longer using the microphone; local recording is still active.",
+          raw: {
+            kind: "meeting_detection",
+            source: "zoom",
+            process_active: false,
+            recording_active: true,
+            meeting_id: "1721050908124-4412"
+          }
+        },
+        {
+          id: "meeting-recording",
+          time: "13:01:48",
+          type: "meeting",
+          kind: "meeting",
+          title: "Recording started - Design sync",
+          detail: "Separate microphone and system-audio tracks / owner-only artifacts",
+          raw: {
+            status: "recording",
+            title: "Design sync",
+            system: "system.wav",
+            microphone: "microphone.wav",
+            sample_rate: 16000
+          }
+        },
+        {
+          id: "command-threads",
+          time: "12:59:31",
+          type: "command",
+          kind: "command",
+          title: "\"go to threads\"",
+          detail: "slack.threads / executed / Slack",
+          outcome: "good",
+          raw: {
+            kind: "command",
+            heard: "go to threads",
+            command: "slack.threads",
+            outcome: "executed",
+            context: "Slack"
+          }
+        },
+        {
+          id: "transcript-threads",
+          time: "12:59:31",
+          type: "recognition",
+          kind: "recognition",
+          title: "Completed \"go to threads\"",
+          detail: "Moonshine streaming / 73 ms inference latency",
+          raw: {
+            kind: "transcript",
+            phase: "completed",
+            latency_ms: 73,
+            text: "go to threads"
+          }
+        },
+        {
+          id: "dictation-pasted",
+          time: "12:54:22",
+          type: "dictation",
+          kind: "dictation",
+          title: "Dictation pasted into Slack",
+          detail: "\"I'll send the revised notes after this call.\" / Option hold 4.8 s",
+          outcome: "good",
+          raw: {
+            kind: "dictation",
+            phase: "pasted",
+            text: "I'll send the revised notes after this call.",
+            application: "Slack"
+          }
+        },
+        {
+          id: "command-mismatch",
+          time: "12:51:09",
+          type: "error",
+          kind: "command",
+          title: "\"go to notifications\" was ignored",
+          detail: "Context predicate mismatch / requires x.com / current context Slack",
+          outcome: "warn",
+          raw: {
+            kind: "command",
+            heard: "go to notifications",
+            command: null,
+            outcome: "ignored",
+            context: "Slack",
+            candidate_rejected: "BrowserHost(\"x.com\")"
+          }
+        },
+        {
+          id: "context-slack",
+          time: "12:48:52",
+          type: "context",
+          kind: "context",
+          title: "Foreground context changed to Slack",
+          detail: "Application commands are now available / browser host unavailable",
+          raw: {
+            kind: "context",
+            application: "Slack",
+            browser_url: null,
+            window_title: "console - Anomaly"
+          }
+        },
+        {
+          id: "meeting-offer",
+          time: "12:48:10",
+          type: "meeting",
+          kind: "meeting",
+          title: "Meeting detected - Zoom",
+          detail: "Stable microphone-process activity for 2 s / Record Locally selected",
+          outcome: "good",
+          raw: {
+            kind: "meeting_offer",
+            source: "Zoom",
+            title: "Design sync",
+            debounce_ms: 2000,
+            decision: "record_locally"
+          }
+        },
+        {
+          id: "command-failed",
+          time: "11:32:17",
+          type: "error",
+          kind: "command",
+          title: "\"open training\" failed",
+          detail: "website.open.training / macOS open exited with status 1",
+          outcome: "bad",
+          raw: {
+            kind: "command",
+            heard: "open training",
+            command: "website.open.training",
+            outcome: { failed: "macOS open exited with status 1" },
+            context: "Brave Browser / x.com"
+          }
+        },
+        {
+          id: "captains-log",
+          time: "09:18:43",
+          type: "dictation",
+          kind: "dictation",
+          title: "Captain's Log added to today's journal",
+          detail: "captains-log.start / logged through the local Organizer CLI",
+          outcome: "good",
+          raw: {
+            kind: "dictation",
+            phase: "logged",
+            command: "log add",
+            text: "Prototype the meeting flow before changing the app shell."
+          }
+        },
+        {
+          id: "session-started",
+          time: "08:42:03",
+          type: "setting",
+          kind: "system",
+          title: "Voice Control session started",
+          detail: "Listening / Universal Audio Thunderbolt / sound effects enabled",
+          raw: {
+            kind: "session_started",
+            state: "listening",
+            device: "Universal Audio Thunderbolt",
+            sound_effects: true
+          }
+        }
+      ];
+
+      const meetings = [
+        {
+          id: "1721050908124-4412",
+          title: "Design sync",
+          date: "Today, 12:48 PM",
+          duration: "42:18",
+          status: "RECORDING",
+          source: "Zoom",
+          tracks: "Mic + Computer Audio",
+          transcript: [
+            ["00:04", "Computer", "Let's start with the app-shell question and work backward from the daily record."],
+            ["00:17", "You", "The timeline should be the product, not another destination in the navigation."],
+            ["00:31", "Computer", "Then meetings and commands can be lenses over the same facts."],
+            ["01:02", "You", "Exactly. Debug should expose those facts without translating them away."]
+          ]
+        },
+        {
+          id: "1720969204351-3188",
+          title: "Voice workflow review",
+          date: "Tue, Jul 14 / 10:20 AM",
+          duration: "31:06",
+          status: "COMPLETE",
+          source: "Google Meet",
+          tracks: "Mic + Computer Audio",
+          transcript: [
+            ["00:08", "You", "Option dictation needs to remain available while command recognition sleeps."],
+            ["00:22", "Computer", "And brief taps should disappear without becoming errors."],
+            ["01:14", "You", "Meeting capture is the only persisted audio, and it must stay visibly active."]
+          ]
+        },
+        {
+          id: "1720880101892-2870",
+          title: "Untitled meeting",
+          date: "Mon, Jul 13 / 9:35 AM",
+          duration: "06:44",
+          status: "INTERRUPTED",
+          source: "Browser call",
+          tracks: "Mic + Computer Audio",
+          transcript: []
+        }
+      ];
+
+      const catalogs = {
+        slack: [
+          ["Slack", "go to threads", "Use application shortcut", "slack.threads", "open threads"],
+          ["Slack", "next unread", "Use application shortcut", "slack.next-unread", "go to next unread"],
+          ["Slack", "previous unread", "Use application shortcut", "slack.previous-unread", "go to previous unread"],
+          ["Slack", "go to console", "Open application destination", "slack.channel.console", "open console / go to console channel"],
+          ["global", "dictate start", "Start voice dictation", "dictation.start", ""],
+          ["global", "go to sleep", "Put voice control to sleep", "mode.sleep", "stop voice control"]
+        ],
+        brave: [
+          ["x.com", "go to notifications", "Navigate active tab", "x.notifications", "open notifications"],
+          ["x.com", "go to chat", "Navigate active tab", "x.chat", "open chat / go to messages"],
+          ["x.com", "go home", "Navigate active tab", "x.home", "go to home"],
+          ["global", "open Slack", "Open application", "app.open.slack", "launch Slack"],
+          ["global", "captain's log", "Record a journal entry", "captains-log.start", ""],
+          ["global", "go to sleep", "Put voice control to sleep", "mode.sleep", "stop voice control"]
+        ],
+        sleeping: [
+          ["sleeping", "voice control", "Wake voice control", "mode.wake", "wake up / start voice control"]
+        ]
+      };
+
+      const state = {
+        lens: "settings",
+        filter: "all",
+        selectedEvent: "meeting-signal-ended",
+        selectedMeeting: 0,
+        commandContext: "slack",
+        callEnded: true,
+        recording: "recording",
+        soundEffects: true,
+        launchAtLogin: true,
+        elapsedSeconds: 42 * 60 + 18
+      };
+
+      const timeline = document.querySelector("#timeline");
+      const inspectorBody = document.querySelector("#inspectorBody");
+      const inspectorTitle = document.querySelector("#inspectorTitle");
+      const inspectorIndex = document.querySelector("#inspectorIndex");
+      const journalTitle = document.querySelector("#journalTitle");
+      const journalSubtitle = document.querySelector("#journalSubtitle");
+      const filterSet = document.querySelector("#filterSet");
+
+      const lensCopy = {
+        activity: ["Recent activity", "A fixed recent window across recognition, dictation, commands, and meetings"],
+        meetings: ["Meeting record", "Detection, recording, transcription, and completed meetings in time order"],
+        commands: ["Command decisions", "What was heard, which context applied, and what executed"],
+        debug: ["Diagnostic activity", "Raw facts from live.ndjson and process diagnostics, without interpretation"],
+        settings: ["Configuration changes", "Settings remain grounded in the same local runtime record"]
+      };
+
+      function escapeHtml(value) {
+        return String(value)
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;")
+          .replaceAll("'", "&#039;");
+      }
+
+      function visibleEvents() {
+        let visible = events;
+        if (state.lens === "meetings") visible = events.filter((event) => event.type === "meeting");
+        if (state.lens === "commands") visible = events.filter((event) => ["command", "recognition", "context", "error"].includes(event.type));
+        if (state.lens === "debug") visible = events;
+        if (state.lens === "settings") visible = events.filter((event) => ["setting", "context"].includes(event.type));
+        if (state.lens === "activity" && state.filter !== "all") {
+          if (state.filter === "voice") visible = events.filter((event) => ["command", "recognition", "dictation"].includes(event.type));
+          if (state.filter === "meetings") visible = events.filter((event) => event.type === "meeting");
+          if (state.filter === "issues") visible = events.filter((event) => event.type === "error" || event.id === "meeting-signal-ended");
+        }
+        return visible;
+      }
+
+      function renderTimeline() {
+        const visible = visibleEvents();
+        if (!visible.some((event) => event.id === state.selectedEvent) && visible[0]) {
+          state.selectedEvent = visible[0].id;
+        }
+
+        const rows = visible.map((event) => {
+          const detailClass = event.outcome ? `outcome-${event.outcome}` : "";
+          return `
+            <button class="event-row ${state.selectedEvent === event.id ? "selected" : ""}" data-event-id="${event.id}" type="button">
+              <time class="event-time">${event.time}</time>
+              <span class="event-node-wrap"><span class="event-node ${event.type}"></span></span>
+              <span class="event-content">
+                <span class="event-line">
+                  <span class="event-kind">${event.kind}</span>
+                  <span class="event-title">${escapeHtml(event.title)}</span>
+                </span>
+                <span class="event-detail ${detailClass}">${escapeHtml(event.detail)}</span>
+              </span>
+            </button>`;
+        });
+
+        if (state.callEnded && state.recording === "recording" && visible.some((event) => event.id === "meeting-signal-ended")) {
+          const signalIndex = visible.findIndex((event) => event.id === "meeting-signal-ended");
+          rows.splice(signalIndex + 1, 0, `
+            <section class="decision-event" aria-label="Recording decision required">
+              <time class="event-time">now</time>
+              <span class="event-node-wrap"><span class="event-node error"></span></span>
+              <div class="decision-body">
+                <h3>The call may have ended. Keep recording?</h3>
+                <p>Zoom's microphone-process activity disappeared. Recording continues until you decide, so a temporary process change cannot cut off the meeting.</p>
+                <div class="decision-actions">
+                  <button class="quiet-button" id="keepRecording" type="button">Keep Recording</button>
+                  <button class="solid-button" id="stopTranscribe" type="button">Stop &amp; Transcribe</button>
+                </div>
+              </div>
+            </section>`);
+        }
+
+        timeline.innerHTML = `
+          <div class="day-divider">
+            <time>NOW</time>
+            <span class="day-node"></span>
+            <strong>Wednesday, July 15</strong>
+          </div>
+          ${rows.join("") || '<div class="empty-state">No local events match this lens.</div>'}
+        `;
+
+        timeline.querySelectorAll("[data-event-id]").forEach((button) => {
+          button.addEventListener("click", () => {
+            state.selectedEvent = button.dataset.eventId;
+            renderTimeline();
+            renderInspector();
+          });
+        });
+
+        document.querySelector("#keepRecording")?.addEventListener("click", keepRecording);
+        document.querySelector("#stopTranscribe")?.addEventListener("click", stopAndTranscribe);
+      }
+
+      function selectedEvent() {
+        return events.find((event) => event.id === state.selectedEvent) || events[0];
+      }
+
+      function factsMarkup(event) {
+        return Object.entries(event.raw).map(([key, value]) => `
+          <div class="fact-row">
+            <dt>${escapeHtml(key)}</dt>
+            <dd>${escapeHtml(typeof value === "object" && value !== null ? JSON.stringify(value) : value)}</dd>
+          </div>`).join("");
+      }
+
+      function renderActivityInspector() {
+        const event = selectedEvent();
+        inspectorTitle.textContent = "Event inspector";
+        inspectorIndex.textContent = `EVENT ${events.indexOf(event) + 14}/24`;
+        inspectorBody.innerHTML = `
+          <section class="inspector-section">
+            <p class="section-label">${event.time} / ${escapeHtml(event.kind)}</p>
+            <h3 class="inspector-title">${escapeHtml(event.title)}</h3>
+            <p class="inspector-copy">${escapeHtml(event.detail)}</p>
+          </section>
+          <section class="inspector-section">
+            <p class="section-label">Observed facts</p>
+            <dl class="fact-list">${factsMarkup(event)}</dl>
+          </section>
+          <section class="inspector-section">
+            <p class="section-label">Today's local record</p>
+            <div class="journal-counts">
+              <div class="journal-count"><b>38</b><span>commands</span></div>
+              <div class="journal-count"><b>11</b><span>dictations</span></div>
+              <div class="journal-count"><b>2</b><span>issues</span></div>
+            </div>
+          </section>`;
+      }
+
+      function renderMeetingsInspector() {
+        const meeting = meetings[state.selectedMeeting];
+        inspectorTitle.textContent = "Meeting library";
+        inspectorIndex.textContent = `${meetings.length} LOCAL`;
+        const list = meetings.map((item, index) => `
+          <button class="meeting-row ${index === state.selectedMeeting ? "active" : ""}" data-meeting-index="${index}" type="button">
+            <span>
+              <strong>${escapeHtml(item.title)}</strong>
+              <small>${escapeHtml(item.date)} / ${item.duration} / ${escapeHtml(item.source)}</small>
+            </span>
+            <span class="meeting-status ${item.status === "INTERRUPTED" ? "interrupted" : ""}">${item.status}</span>
+          </button>`).join("");
+        const transcript = meeting.transcript.length
+          ? meeting.transcript.map(([time, source, text]) => `
+              <div class="transcript-entry">
+                <span class="transcript-time">${time}</span>
+                <span class="transcript-source ${source === "You" ? "you" : ""}">${source}</span>
+                <span class="transcript-text">${escapeHtml(text)}</span>
+              </div>`).join("")
+          : '<p class="inspector-copy">No transcript available. The recording was interrupted before transcription completed.</p>';
+        inspectorBody.innerHTML = `
+          <section class="inspector-section">
+            <p class="section-label">Private meeting artifacts</p>
+            <p class="inspector-copy">Separate source tracks and transcripts stay under Application Support with owner-only permissions.</p>
+          </section>
+          <div class="meeting-library">${list}</div>
+          <section class="inspector-section">
+            <p class="section-label">Selected meeting</p>
+            <h3 class="inspector-title">${escapeHtml(meeting.title)}</h3>
+            <dl class="fact-list">
+              <div class="fact-row"><dt>meeting id</dt><dd>${meeting.id}</dd></div>
+              <div class="fact-row"><dt>tracks</dt><dd>${meeting.tracks}</dd></div>
+              <div class="fact-row"><dt>status</dt><dd>${meeting.status.toLowerCase()}</dd></div>
+            </dl>
+          </section>
+          <section>
+            <div class="inspector-section"><p class="section-label">Source-labeled transcript</p></div>
+            <div class="transcript">${transcript}</div>
+          </section>`;
+        inspectorBody.querySelectorAll("[data-meeting-index]").forEach((button) => {
+          button.addEventListener("click", () => {
+            state.selectedMeeting = Number(button.dataset.meetingIndex);
+            renderMeetingsInspector();
+          });
+        });
+      }
+
+      function renderCommandsInspector() {
+        inspectorTitle.textContent = "Available commands";
+        inspectorIndex.textContent = state.commandContext === "sleeping" ? "1 ACTIVE" : `${catalogs[state.commandContext].length} SHOWN`;
+        const labels = { slack: "Slack", brave: "Brave / x.com", sleeping: "Sleeping" };
+        const rows = catalogs[state.commandContext].map(([scope, phrase, description, id, aliases]) => `
+          <div class="catalog-row">
+            <div class="catalog-scope"><span>${escapeHtml(scope)}</span><span>${escapeHtml(id)}</span></div>
+            <div class="catalog-phrase">&quot;${escapeHtml(phrase)}&quot;</div>
+            <div class="catalog-description">${escapeHtml(description)}</div>
+            ${aliases ? `<div class="catalog-aliases">Also: ${escapeHtml(aliases)}</div>` : ""}
+          </div>`).join("");
+        inspectorBody.innerHTML = `
+          <section class="inspector-section">
+            <p class="section-label">Context availability</p>
+            <div class="context-switcher">
+              ${Object.entries(labels).map(([key, label]) => `<button class="context-button ${key === state.commandContext ? "active" : ""}" data-context="${key}" type="button">${label}</button>`).join("")}
+            </div>
+            <p class="inspector-copy">The catalog is generated from resolver definitions. Contextual commands only enter the candidate set when their predicate matches.</p>
+          </section>
+          <section class="inspector-section">
+            <p class="section-label">${escapeHtml(labels[state.commandContext])} candidate set</p>
+            ${rows}
+          </section>`;
+        inspectorBody.querySelectorAll("[data-context]").forEach((button) => {
+          button.addEventListener("click", () => {
+            state.commandContext = button.dataset.context;
+            renderCommandsInspector();
+          });
+        });
+      }
+
+      function renderDebugInspector() {
+        const event = selectedEvent();
+        inspectorTitle.textContent = "Raw facts";
+        inspectorIndex.textContent = "READ ONLY";
+        inspectorBody.innerHTML = `
+          <section class="inspector-section">
+            <p class="section-label">Selected NDJSON projection</p>
+            <pre class="raw-block">${escapeHtml(JSON.stringify({ timestamp_ms: 1784123046000, ...event.raw }, null, 2))}</pre>
+          </section>
+          <section class="inspector-section">
+            <p class="section-label">Diagnostic sources</p>
+            <div class="source-row">
+              <div><strong>logs/live.ndjson</strong><small>State, transcript, command decision, outcome, context</small></div>
+              <span class="source-state">TAILING</span>
+            </div>
+            <div class="source-row">
+              <div><strong>logs/process.log</strong><small>Rust, CoreAudio, Moonshine, context adapters</small></div>
+              <span class="source-state">TAILING</span>
+            </div>
+            <div class="source-row">
+              <div><strong>manifest.json</strong><small>Track timing, sample counts, dropped packets</small></div>
+              <span class="source-state">LOCAL</span>
+            </div>
+          </section>
+          <section class="inspector-section">
+            <p class="section-label">Capture facts</p>
+            <dl class="fact-list">
+              <div class="fact-row"><dt>system samples</dt><dd>40,608,128</dd></div>
+              <div class="fact-row"><dt>mic samples</dt><dd>40,607,744</dd></div>
+              <div class="fact-row"><dt>dropped packets</dt><dd>0 system / 0 microphone</dd></div>
+              <div class="fact-row"><dt>model</dt><dd>Parakeet v2 / local ONNX</dd></div>
+            </dl>
+          </section>`;
+      }
+
+      function toggleButton(name, enabled) {
+        return `<button class="toggle ${enabled ? "on" : ""}" data-toggle="${name}" type="button" role="switch" aria-checked="${enabled}" aria-label="${name}"></button>`;
+      }
+
+      function renderSettingsInspector() {
+        inspectorTitle.textContent = "Local settings";
+        inspectorIndex.textContent = "settings.json";
+        inspectorBody.innerHTML = `
+          <section class="inspector-section">
+            <p class="section-label">Feedback</p>
+            <div class="setting-row">
+              <div><strong>Sound effects</strong><p>Start, stop, cancellation, mode, and error tones</p></div>
+              ${toggleButton("soundEffects", state.soundEffects)}
+            </div>
+          </section>
+          <section class="inspector-section">
+            <p class="section-label">Input and startup</p>
+            <div class="setting-row">
+              <div><strong>Preferred input</strong><p>Falls back to Studio Display Microphone, then macOS default</p></div>
+              <select class="setting-select" name="preferred-input" aria-label="Preferred input">
+                <option>Universal Audio Thunderbolt</option>
+                <option>Studio Display Microphone</option>
+                <option>macOS default</option>
+              </select>
+            </div>
+            <div class="setting-row">
+              <div><strong>Open at login</strong><p>Keep meeting detection and command listening available</p></div>
+              ${toggleButton("launchAtLogin", state.launchAtLogin)}
+            </div>
+          </section>
+          <section class="inspector-section">
+            <p class="section-label">System access</p>
+            <div class="permission-row"><span>Microphone</span><span>Granted</span></div>
+            <div class="permission-row"><span>Input Monitoring</span><span>Granted</span></div>
+            <div class="permission-row"><span>Accessibility</span><span>Granted</span></div>
+            <div class="permission-row"><span>Screen &amp; System Audio Recording</span><span>Granted</span></div>
+          </section>
+          <section class="inspector-section">
+            <p class="section-label">Local storage</p>
+            <p class="inspector-copy">Captured audio is not persisted by default. Explicit meeting recordings are the only exception.</p>
+            <dl class="fact-list">
+              <div class="fact-row"><dt>meetings</dt><dd>~/Library/Application Support/voice-control/meetings</dd></div>
+              <div class="fact-row"><dt>settings</dt><dd>voice-control/settings.json</dd></div>
+            </dl>
+          </section>`;
+        inspectorBody.querySelectorAll("[data-toggle]").forEach((button) => {
+          button.addEventListener("click", () => {
+            const key = button.dataset.toggle;
+            state[key] = !state[key];
+            renderSettingsInspector();
+          });
+        });
+      }
+
+      function renderInspector() {
+        if (state.lens === "meetings") return renderMeetingsInspector();
+        if (state.lens === "commands") return renderCommandsInspector();
+        if (state.lens === "debug") return renderDebugInspector();
+        if (state.lens === "settings") return renderSettingsInspector();
+        return renderActivityInspector();
+      }
+
+      function switchLens(lens) {
+        state.lens = lens;
+        if (lens === "meetings") state.selectedEvent = "meeting-signal-ended";
+        if (lens === "commands") state.selectedEvent = "command-threads";
+        if (lens === "debug") state.selectedEvent = "command-mismatch";
+        if (lens === "settings") state.selectedEvent = "session-started";
+        document.querySelectorAll("[data-lens]").forEach((button) => {
+          button.classList.toggle("active", button.dataset.lens === lens);
+        });
+        [journalTitle.textContent, journalSubtitle.textContent] = lensCopy[lens];
+        filterSet.hidden = lens !== "activity";
+        renderTimeline();
+        renderInspector();
+      }
+
+      function keepRecording() {
+        state.callEnded = false;
+        events.unshift({
+          id: "recording-kept",
+          time: "13:44:12",
+          type: "meeting",
+          kind: "meeting",
+          title: "Recording kept active",
+          detail: "User confirmed the meeting is continuing without microphone-process activity",
+          outcome: "good",
+          raw: { kind: "meeting_decision", decision: "keep_recording", recording_active: true }
+        });
+        state.selectedEvent = "recording-kept";
+        document.querySelector("#simulateEnd").textContent = "Signal ended again";
+        renderTimeline();
+        renderInspector();
+      }
+
+      function stopAndTranscribe() {
+        state.callEnded = false;
+        state.recording = "transcribing";
+        events.unshift({
+          id: "meeting-transcribing",
+          time: "13:44:12",
+          type: "meeting",
+          kind: "meeting",
+          title: "Recording stopped - transcribing locally",
+          detail: "Audio is saved locally / Parakeet is processing 30-second chunks",
+          raw: { kind: "meeting_status", status: "transcribing", model: "Parakeet v2", network: false }
+        });
+        state.selectedEvent = "meeting-transcribing";
+        updateRecordingStrip();
+        renderTimeline();
+        renderInspector();
+        setTimeout(() => {
+          if (state.recording !== "transcribing") return;
+          state.recording = "complete";
+          events.unshift({
+            id: "meeting-complete",
+            time: "13:44:15",
+            type: "meeting",
+            kind: "meeting",
+            title: "Transcript ready - Design sync",
+            detail: "transcript.ndjson and transcript.md saved with source labels",
+            outcome: "good",
+            raw: { kind: "meeting_status", status: "complete", meeting_id: "1721050908124-4412" }
+          });
+          meetings[0].status = "COMPLETE";
+          state.selectedEvent = "meeting-complete";
+          updateRecordingStrip();
+          renderTimeline();
+          renderInspector();
+        }, 1800);
+      }
+
+      function updateRecordingStrip() {
+        const strip = document.querySelector("#recordingStrip");
+        const label = document.querySelector("#recordingLabel");
+        const detail = document.querySelector("#recordingDetail");
+        const action = document.querySelector("#simulateEnd");
+        if (state.recording === "recording") {
+          label.innerHTML = `RECORDING <span class="elapsed" id="recordingElapsed">${formatElapsed(state.elapsedSeconds)}</span>`;
+          detail.textContent = "Design sync / Mic + Computer Audio";
+          action.textContent = state.callEnded ? "Call signal ended" : "Signal ended again";
+          action.disabled = false;
+          strip.style.background = "#18150f";
+          return;
+        }
+        if (state.recording === "transcribing") {
+          label.textContent = "TRANSCRIBING LOCALLY";
+          detail.textContent = "Audio saved / processing 30-second chunks";
+          action.textContent = "Working...";
+          action.disabled = true;
+          strip.style.background = "#11191b";
+          return;
+        }
+        label.textContent = "MEETING READY";
+        detail.textContent = "Design sync / transcript saved locally";
+        action.textContent = "View meeting";
+        action.disabled = false;
+        strip.style.background = "#111912";
+      }
+
+      function formatElapsed(seconds) {
+        return `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
+      }
+
+      document.querySelectorAll("[data-lens]").forEach((button) => {
+        button.addEventListener("click", () => switchLens(button.dataset.lens));
+      });
+
+      document.querySelectorAll("[data-filter]").forEach((button) => {
+        button.addEventListener("click", () => {
+          state.filter = button.dataset.filter;
+          document.querySelectorAll("[data-filter]").forEach((candidate) => {
+            candidate.classList.toggle("active", candidate === button);
+          });
+          renderTimeline();
+          renderInspector();
+        });
+      });
+
+      document.querySelector("#simulateEnd").addEventListener("click", () => {
+        if (state.recording === "complete") {
+          switchLens("meetings");
+          return;
+        }
+        if (state.recording === "recording") {
+          state.callEnded = true;
+          state.selectedEvent = "meeting-signal-ended";
+          renderTimeline();
+          renderInspector();
+          timeline.scrollTo({ top: 0, behavior: "smooth" });
+        }
+      });
+
+      setInterval(() => {
+        if (state.recording !== "recording") return;
+        state.elapsedSeconds += 1;
+        const elapsed = document.querySelector("#recordingElapsed");
+        if (elapsed) elapsed.textContent = formatElapsed(state.elapsedSeconds);
+      }, 1000);
+
+      switchLens("settings");
+    </script>
+  </body>
+</html>

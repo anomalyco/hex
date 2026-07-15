@@ -8,7 +8,11 @@ const PRE_ROLL_DURATION: Duration = Duration::from_millis(450);
 const MINIMUM_HOLD_DURATION: Duration = Duration::from_millis(300);
 const MINIMUM_PARAKEET_DURATION: Duration = Duration::from_millis(1500);
 const MAXIMUM_DICTATION_DURATION: Duration = Duration::from_secs(60);
+const INITIAL_RECORDING_CAPACITY: Duration = Duration::from_secs(10);
 const PARAKEET_SAMPLE_RATE: u32 = 16_000;
+
+pub const DICTATION_START_PHRASES: &[&str] = &["dictate start", "start dictating"];
+pub const CAPTAINS_LOG_START_PHRASES: &[&str] = &["captain's log", "captains log", "captain log"];
 
 pub enum Finish {
     Discard,
@@ -20,6 +24,33 @@ pub enum DictationControl {
     Stop,
     Send,
     Cancel,
+}
+
+#[derive(Default)]
+pub struct ControlStability {
+    pending: Option<DictationControl>,
+}
+
+impl ControlStability {
+    pub fn observe(
+        &mut self,
+        control: Option<DictationControl>,
+        completed: bool,
+    ) -> Option<DictationControl> {
+        let Some(control) = control else {
+            self.pending = None;
+            return None;
+        };
+        let accepted = matches!(control, DictationControl::Cancel)
+            || completed
+            || self.pending == Some(control);
+        self.pending = (!accepted).then_some(control);
+        accepted.then_some(control)
+    }
+
+    pub fn reset(&mut self) {
+        self.pending = None;
+    }
 }
 
 pub fn dictation_control_suffix(text: &str) -> Option<(DictationControl, usize)> {
@@ -52,24 +83,90 @@ pub fn dictation_control_suffix(text: &str) -> Option<(DictationControl, usize)>
 }
 
 pub fn dictation_start_prefix(text: &str) -> Option<usize> {
+    control_prefix(
+        text,
+        &[
+            "dictate start",
+            "dictates start",
+            "dictate starts",
+            "dictates starts",
+            "start dictating",
+        ],
+    )
+}
+
+pub fn captains_log_start_prefix(text: &str) -> Option<usize> {
+    control_prefix(text, CAPTAINS_LOG_START_PHRASES)
+}
+
+pub fn captains_log_end_suffix(text: &str) -> Option<usize> {
+    control_suffix(
+        text,
+        &["captain's log end", "captains log end", "captain log end"],
+    )
+}
+
+pub fn strip_dictation_protocol(text: &str) -> String {
+    let mut text = text.trim();
+    while let Some((_, prefix_end)) = dictation_control_suffix(text) {
+        text = trim_control_end(&text[..prefix_end]);
+    }
+    if let Some(prefix_end) = dictation_start_prefix(text) {
+        text = trim_control_start(&text[prefix_end..]);
+    }
+    text.to_string()
+}
+
+pub fn strip_captains_log_protocol(text: &str) -> String {
+    let mut text = text.trim();
+    while let Some(prefix_end) = captains_log_end_suffix(text) {
+        text = trim_control_end(&text[..prefix_end]);
+    }
+    if let Some(prefix_end) = captains_log_start_prefix(text) {
+        text = trim_control_start(&text[prefix_end..]);
+    }
+    text.to_string()
+}
+
+fn control_prefix(text: &str, prefixes: &[&str]) -> Option<usize> {
     let text = text.trim_start();
     let lowercase = text.to_ascii_lowercase();
-    for prefix in [
-        "dictate start",
-        "dictates start",
-        "dictate starts",
-        "dictates starts",
-        "start dictating",
-    ] {
-        if let Some(remainder) = lowercase.strip_prefix(prefix)
-            && (remainder.is_empty()
+    prefixes.iter().find_map(|prefix| {
+        lowercase.strip_prefix(prefix).and_then(|remainder| {
+            (remainder.is_empty()
                 || remainder.starts_with(char::is_whitespace)
                 || remainder.starts_with(|character: char| character.is_ascii_punctuation()))
-        {
-            return Some(text.len() - remainder.len());
-        }
-    }
-    None
+            .then_some(text.len() - remainder.len())
+        })
+    })
+}
+
+fn control_suffix(text: &str, suffixes: &[&str]) -> Option<usize> {
+    let text = text
+        .trim_end()
+        .trim_end_matches(|character: char| character.is_ascii_punctuation())
+        .trim_end();
+    let lowercase = text.to_ascii_lowercase();
+    suffixes.iter().find_map(|suffix| {
+        lowercase.strip_suffix(suffix).and_then(|prefix| {
+            (prefix.is_empty()
+                || prefix.ends_with(char::is_whitespace)
+                || prefix.ends_with(|character: char| character.is_ascii_punctuation()))
+            .then_some(prefix.len())
+        })
+    })
+}
+
+fn trim_control_start(text: &str) -> &str {
+    text.trim_start_matches(|character: char| {
+        character.is_whitespace() || character.is_ascii_punctuation()
+    })
+}
+
+fn trim_control_end(text: &str) -> &str {
+    text.trim_end_matches(|character: char| {
+        character.is_whitespace() || character.is_ascii_punctuation()
+    })
 }
 
 pub struct DictationClip {
@@ -87,6 +184,12 @@ impl DictationClip {
         );
         samples
     }
+}
+
+pub fn resample_for_parakeet(samples: &[f32], source_rate: u32) -> Vec<f32> {
+    let mut recording = Recording::new(Instant::now(), source_rate);
+    recording.push(samples);
+    recording.finish()
 }
 
 pub struct DictationCapture {
@@ -121,7 +224,7 @@ impl Recording {
         Self {
             started_at,
             samples: Vec::with_capacity(samples_for(
-                MAXIMUM_DICTATION_DURATION,
+                INITIAL_RECORDING_CAPACITY,
                 PARAKEET_SAMPLE_RATE,
             )),
             source_samples: 0,
@@ -188,6 +291,10 @@ impl Recording {
         }
         self.samples
     }
+
+    fn is_full(&self) -> bool {
+        self.source_samples >= samples_for(MAXIMUM_DICTATION_DURATION, self.source_rate)
+    }
 }
 
 impl DictationCapture {
@@ -222,19 +329,20 @@ impl DictationCapture {
     }
 
     pub fn start_voice(&mut self, now: Instant) {
-        self.start_with_pre_roll(now, RING_BUFFER_DURATION);
+        self.start_with_pre_roll(now, Duration::ZERO);
     }
 
     fn start_with_pre_roll(&mut self, now: Instant, duration: Duration) {
         let pre_roll = samples_for(duration, self.sample_rate).min(self.ring.len());
         let mut recording = Recording::new(now, self.sample_rate);
-        let samples: Vec<_> = self
-            .ring
-            .iter()
-            .skip(self.ring.len() - pre_roll)
-            .copied()
-            .collect();
-        recording.push(&samples);
+        let skip = self.ring.len() - pre_roll;
+        let (front, back) = self.ring.as_slices();
+        if skip < front.len() {
+            recording.push(&front[skip..]);
+            recording.push(back);
+        } else {
+            recording.push(&back[skip - front.len()..]);
+        }
         self.recording = Some(recording);
     }
 
@@ -246,6 +354,10 @@ impl DictationCapture {
 
     pub fn cancel(&mut self) {
         self.recording = None;
+    }
+
+    pub fn is_full(&self) -> bool {
+        self.recording.as_ref().is_some_and(Recording::is_full)
     }
 
     pub fn finish(&mut self, now: Instant) -> Finish {
@@ -307,6 +419,24 @@ mod tests {
     }
 
     #[test]
+    fn voice_start_excludes_audio_already_seen_by_recognizer() {
+        let mut capture = DictationCapture::new(16_000);
+        capture.keep_warm(&[0.25; 8_000]);
+        capture.keep_warm(&[0.25; 8_000]);
+        let start = Instant::now();
+
+        capture.start_voice(start);
+        capture.push(&[0.5; 8_000]);
+
+        let Finish::Transcribe(clip) = capture.finish(start + Duration::from_millis(500)) else {
+            panic!("expected transcription")
+        };
+        let samples = clip.into_parakeet_samples();
+        assert_eq!(samples[0], 0.5);
+        assert!(!samples.contains(&0.25));
+    }
+
+    #[test]
     fn resampling_flushes_the_end_of_the_recording() {
         for (sample_rate, input_len) in [
             (44_100, 1_337),
@@ -347,5 +477,40 @@ mod tests {
         assert!(dictation_start_prefix("Dictate start as you can see").is_some());
         assert!(dictation_start_prefix("Dictates start, testing").is_some());
         assert!(dictation_start_prefix("Okay, dictate start").is_none());
+    }
+
+    #[test]
+    fn strips_voice_protocols_from_transcripts() {
+        assert_eq!(
+            strip_dictation_protocol("Dictate start, this should keep the message. Dictates stop."),
+            "this should keep the message"
+        );
+        assert_eq!(
+            strip_captains_log_protocol(
+                "Captain's log, architecture review complete. Captain's log end."
+            ),
+            "architecture review complete"
+        );
+    }
+
+    #[test]
+    fn control_requires_stability_or_completion() {
+        let mut stability = ControlStability::default();
+        assert_eq!(stability.observe(Some(DictationControl::Send), false), None);
+        assert_eq!(stability.observe(None, false), None);
+        assert_eq!(stability.observe(Some(DictationControl::Send), false), None);
+        assert_eq!(
+            stability.observe(Some(DictationControl::Send), false),
+            Some(DictationControl::Send)
+        );
+        stability.reset();
+        assert_eq!(
+            stability.observe(Some(DictationControl::Stop), true),
+            Some(DictationControl::Stop)
+        );
+        assert_eq!(
+            stability.observe(Some(DictationControl::Cancel), false),
+            Some(DictationControl::Cancel)
+        );
     }
 }

@@ -14,11 +14,13 @@ use ratatui::widgets::{Block, Borders, List, ListItem, Paragraph, Wrap};
 use crate::commands::{CommandConfig, CommandScope, Mode};
 use crate::context::ContextSnapshot;
 use crate::events::{CommandOutcome, DictationPhase, TranscriptPhase, VoiceEvent, VoiceState};
+use crate::meeting::{self, MeetingManifest, MeetingStatus};
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Eq, PartialEq)]
 enum View {
     Activity,
     Commands,
+    Meetings,
 }
 
 enum RecentAction<'a> {
@@ -39,9 +41,22 @@ fn run_loop(
     commands: CommandConfig,
 ) -> io::Result<()> {
     let mut view = View::Commands;
+    let mut selected_meeting = 0;
     loop {
         let events = read_events(&path);
-        terminal.draw(|frame| draw(frame, &events, &commands, view, &path))?;
+        let meetings = meeting::list().unwrap_or_default();
+        selected_meeting = selected_meeting.min(meetings.len().saturating_sub(1));
+        terminal.draw(|frame| {
+            draw(
+                frame,
+                &events,
+                &commands,
+                view,
+                &path,
+                &meetings,
+                selected_meeting,
+            )
+        })?;
         if event::poll(Duration::from_millis(100))?
             && let TerminalEvent::Key(key) = event::read()?
         {
@@ -49,10 +64,18 @@ fn run_loop(
                 KeyCode::Char('q') | KeyCode::Esc => return Ok(()),
                 KeyCode::Char('1') => view = View::Commands,
                 KeyCode::Char('2') => view = View::Activity,
+                KeyCode::Char('3') => view = View::Meetings,
+                KeyCode::Down | KeyCode::Char('j') if view == View::Meetings => {
+                    selected_meeting = (selected_meeting + 1).min(meetings.len().saturating_sub(1));
+                }
+                KeyCode::Up | KeyCode::Char('k') if view == View::Meetings => {
+                    selected_meeting = selected_meeting.saturating_sub(1);
+                }
                 KeyCode::Tab => {
                     view = match view {
                         View::Activity => View::Commands,
-                        View::Commands => View::Activity,
+                        View::Commands => View::Meetings,
+                        View::Meetings => View::Activity,
                     }
                 }
                 _ => {}
@@ -82,6 +105,8 @@ fn draw(
     commands: &CommandConfig,
     view: View,
     path: &Path,
+    meetings: &[MeetingManifest],
+    selected_meeting: usize,
 ) {
     let areas = Layout::default()
         .direction(Direction::Vertical)
@@ -148,6 +173,7 @@ fn draw(
                 browser_url: browser_url
                     .as_deref()
                     .and_then(|url| url::Url::parse(url).ok()),
+                window_title: None,
             }),
             _ => None,
         })
@@ -235,6 +261,7 @@ fn draw(
 
     match view {
         View::Activity => draw_activity(frame, events, areas[2]),
+        View::Meetings => draw_meetings(frame, meetings, selected_meeting, areas[2]),
         View::Commands => draw_commands(
             frame,
             commands,
@@ -256,6 +283,8 @@ fn draw(
             Span::raw(" commands  "),
             Span::styled("2", tab_style(matches!(view, View::Activity))),
             Span::raw(" log  "),
+            Span::styled("3", tab_style(matches!(view, View::Meetings))),
+            Span::raw(" meetings  "),
             Span::styled(
                 path.display().to_string(),
                 Style::default().fg(Color::DarkGray),
@@ -263,6 +292,75 @@ fn draw(
         ])),
         areas[3],
     );
+}
+
+fn draw_meetings(
+    frame: &mut ratatui::Frame,
+    meetings: &[MeetingManifest],
+    selected: usize,
+    area: ratatui::layout::Rect,
+) {
+    let direction = if area.width >= 90 {
+        Direction::Horizontal
+    } else {
+        Direction::Vertical
+    };
+    let panes = Layout::default()
+        .direction(direction)
+        .constraints([Constraint::Percentage(40), Constraint::Percentage(60)])
+        .split(area);
+    let rows: Vec<_> = meetings
+        .iter()
+        .enumerate()
+        .map(|(index, meeting)| {
+            let marker = if index == selected { "›" } else { " " };
+            let status = match meeting.status {
+                MeetingStatus::Recording => "REC",
+                MeetingStatus::Transcribing => "ASR",
+                MeetingStatus::Complete => "OK ",
+                MeetingStatus::Interrupted => "INT",
+                MeetingStatus::Failed => "ERR",
+            };
+            let color = match meeting.status {
+                MeetingStatus::Recording => Color::Red,
+                MeetingStatus::Transcribing => Color::Cyan,
+                MeetingStatus::Complete => Color::Green,
+                MeetingStatus::Interrupted => Color::Yellow,
+                MeetingStatus::Failed => Color::Red,
+            };
+            ListItem::new(Line::from(vec![
+                Span::styled(format!("{marker} {status} "), Style::default().fg(color)),
+                Span::raw(&meeting.title),
+                Span::styled(
+                    format!(
+                        "  {}",
+                        format_duration(meeting.duration_ms.unwrap_or_default())
+                    ),
+                    Style::default().fg(Color::DarkGray),
+                ),
+            ]))
+        })
+        .collect();
+    frame.render_widget(
+        List::new(rows).block(Block::default().title(" Meetings ").borders(Borders::ALL)),
+        panes[0],
+    );
+
+    let transcript = meetings
+        .get(selected)
+        .and_then(|meeting| meeting::show(&meeting.id).ok())
+        .unwrap_or_else(|| "No transcript available".into());
+    frame.render_widget(
+        Paragraph::new(transcript)
+            .wrap(Wrap { trim: false })
+            .block(Block::default().title(" Transcript ").borders(Borders::ALL)),
+        panes[1],
+    );
+}
+
+fn format_duration(milliseconds: u64) -> String {
+    let seconds = milliseconds / 1_000;
+    format!("{:02}:{:02}", seconds / 60, seconds % 60)
 }
 
 fn draw_activity(
@@ -279,33 +377,56 @@ fn draw_activity(
                 outcome,
                 context,
                 ..
-            } => Some((heard, command.as_deref(), outcome, context)),
+            } => {
+                let (symbol, label) = outcome_display(outcome);
+                let error = match outcome {
+                    CommandOutcome::Failed(error) => format!("  {error}"),
+                    _ => String::new(),
+                };
+                Some(Line::from(vec![
+                    Span::styled(
+                        format!("{symbol} {label:<12}"),
+                        Style::default().fg(command_color(outcome)),
+                    ),
+                    Span::raw(heard),
+                    Span::styled(
+                        command
+                            .as_deref()
+                            .map_or_else(String::new, |id| format!("  {id}")),
+                        Style::default().fg(Color::DarkGray),
+                    ),
+                    Span::styled(
+                        format!("  [{context}]{error}"),
+                        Style::default().fg(Color::DarkGray),
+                    ),
+                ]))
+            }
+            VoiceEvent::Dictation { phase, text, .. } => {
+                let detail = match phase {
+                    DictationPhase::Failed(error) => error.as_str(),
+                    _ => text.as_str(),
+                };
+                Some(Line::from(vec![
+                    Span::styled(
+                        format!("◆ {:<12}", dictation_label(phase)),
+                        Style::default().fg(dictation_color(phase)),
+                    ),
+                    Span::styled("dictation", Style::default().fg(Color::DarkGray)),
+                    Span::raw(if detail.is_empty() {
+                        String::new()
+                    } else {
+                        format!("  {detail}")
+                    }),
+                ]))
+            }
             VoiceEvent::SessionStarted { .. }
             | VoiceEvent::State { .. }
             | VoiceEvent::Transcript { .. }
-            | VoiceEvent::Dictation { .. }
             | VoiceEvent::Context { .. } => None,
         })
         .rev()
         .take(area.height.saturating_sub(2) as usize)
-        .map(|(heard, command, outcome, context)| {
-            let (symbol, label) = outcome_display(outcome);
-            ListItem::new(Line::from(vec![
-                Span::styled(
-                    format!("{symbol} {label:<8} "),
-                    Style::default().fg(command_color(outcome)),
-                ),
-                Span::raw(heard),
-                Span::styled(
-                    command.map_or_else(String::new, |id| format!("  {id}")),
-                    Style::default().fg(Color::DarkGray),
-                ),
-                Span::styled(
-                    format!("  [{context}]"),
-                    Style::default().fg(Color::DarkGray),
-                ),
-            ]))
-        })
+        .map(ListItem::new)
         .collect();
     frame.render_widget(
         List::new(activity).block(Block::default().title(" Log ").borders(Borders::ALL)),
@@ -389,6 +510,7 @@ fn command_outcome(outcome: &CommandOutcome) -> &'static str {
         CommandOutcome::Ignored => "ignored",
         CommandOutcome::Woke => "woke",
         CommandOutcome::Slept => "slept",
+        CommandOutcome::Submitted => "submitted",
         CommandOutcome::Executed => "executed",
         CommandOutcome::Failed(_) => "failed",
     }
@@ -399,6 +521,7 @@ fn outcome_display(outcome: &CommandOutcome) -> (&'static str, &'static str) {
         CommandOutcome::Ignored => ("○", "ignored"),
         CommandOutcome::Woke => ("↑", "woke"),
         CommandOutcome::Slept => ("↓", "slept"),
+        CommandOutcome::Submitted => ("…", "submitted"),
         CommandOutcome::Executed => ("✓", "executed"),
         CommandOutcome::Failed(_) => ("!", "failed"),
     }
@@ -407,6 +530,7 @@ fn outcome_display(outcome: &CommandOutcome) -> (&'static str, &'static str) {
 fn command_color(outcome: &CommandOutcome) -> Color {
     match outcome {
         CommandOutcome::Executed | CommandOutcome::Woke | CommandOutcome::Slept => Color::Green,
+        CommandOutcome::Submitted => Color::Cyan,
         CommandOutcome::Failed(_) => Color::Red,
         CommandOutcome::Ignored => Color::DarkGray,
     }
@@ -419,6 +543,7 @@ fn dictation_label(phase: &DictationPhase) -> &'static str {
         DictationPhase::Cancelled => "cancelled",
         DictationPhase::Transcribing => "transcribing",
         DictationPhase::Pasted => "pasted",
+        DictationPhase::Logged => "logged",
         DictationPhase::Repasted => "repasted",
         DictationPhase::Failed(_) => "failed",
     }
@@ -429,6 +554,7 @@ fn dictation_color(phase: &DictationPhase) -> Color {
         DictationPhase::Started => Color::Magenta,
         DictationPhase::Transcribing => Color::Cyan,
         DictationPhase::Pasted => Color::Green,
+        DictationPhase::Logged => Color::Green,
         DictationPhase::Repasted => Color::Green,
         DictationPhase::Discarded => Color::DarkGray,
         DictationPhase::Cancelled => Color::Yellow,

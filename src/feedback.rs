@@ -1,6 +1,7 @@
 use std::io::Cursor;
 use std::process::{Command, Stdio};
 use std::sync::OnceLock;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, SyncSender};
 use std::thread;
 use std::time::Duration;
@@ -20,6 +21,11 @@ pub enum Tone {
 }
 
 static DICTATION_PLAYER: OnceLock<SyncSender<Tone>> = OnceLock::new();
+static ENABLED: AtomicBool = AtomicBool::new(true);
+
+pub fn set_enabled(enabled: bool) {
+    ENABLED.store(enabled, Ordering::Relaxed);
+}
 
 pub fn preload() -> Result<()> {
     if DICTATION_PLAYER.get().is_some() {
@@ -68,6 +74,9 @@ pub fn preload() -> Result<()> {
 }
 
 pub fn play(tone: Tone) {
+    if !ENABLED.load(Ordering::Relaxed) {
+        return;
+    }
     if matches!(
         tone,
         Tone::DictationStart | Tone::DictationStop | Tone::Cancel

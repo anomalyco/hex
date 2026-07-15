@@ -74,6 +74,19 @@ pub enum InputEvent {
     TapDisabled,
 }
 
+impl InputEvent {
+    pub fn is_escape_down(self) -> bool {
+        matches!(
+            self,
+            Self::Key {
+                code: ESCAPE_KEY_CODE,
+                down: true,
+                ..
+            }
+        )
+    }
+}
+
 pub struct InputMonitor {
     pub events: Receiver<InputEvent>,
 }

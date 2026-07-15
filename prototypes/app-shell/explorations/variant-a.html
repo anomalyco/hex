@@ -1,0 +1,2124 @@
+<!doctype html>
+<!-- PROTOTYPE: Variant A app-shell exploration. Throwaway, local-only, and not production UI. -->
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Voice Control - App Shell Variant A</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --canvas: #090909;
+        --window: #111111;
+        --sidebar: #0e0e0e;
+        --surface: #171717;
+        --surface-raised: #1c1c1c;
+        --surface-hover: #202020;
+        --line: rgba(255, 255, 255, 0.1);
+        --line-strong: rgba(255, 255, 255, 0.16);
+        --text: #eeeeee;
+        --text-soft: #b8b8b8;
+        --muted: #858585;
+        --faint: #616161;
+        --positive: #98b69e;
+        --warning: #c3aa78;
+        --negative: #c98f89;
+        --focus: #bfc8d6;
+        --sidebar-width: 188px;
+        --titlebar-height: 43px;
+        font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+        font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      [hidden] {
+        display: none !important;
+      }
+
+      html,
+      body {
+        width: 100%;
+        min-width: 320px;
+        height: 100%;
+        margin: 0;
+        background: var(--canvas);
+        color: var(--text);
+        -webkit-font-smoothing: antialiased;
+      }
+
+      body {
+        display: grid;
+        place-items: center;
+        padding: 16px;
+        overflow: hidden;
+      }
+
+      button,
+      input,
+      select {
+        font: inherit;
+      }
+
+      button,
+      select,
+      input {
+        color: inherit;
+      }
+
+      button {
+        border: 0;
+      }
+
+      button:focus-visible,
+      input:focus-visible,
+      select:focus-visible {
+        outline: 2px solid var(--focus);
+        outline-offset: 2px;
+      }
+
+      svg {
+        display: block;
+      }
+
+      .app-window {
+        isolation: isolate;
+        width: min(1060px, calc(100vw - 32px));
+        height: min(720px, calc(100vh - 32px));
+        min-height: 590px;
+        overflow: hidden;
+        border: 1px solid rgba(255, 255, 255, 0.14);
+        border-radius: 12px;
+        background: var(--window);
+        box-shadow: 0 24px 70px rgba(0, 0, 0, 0.55), 0 2px 12px rgba(0, 0, 0, 0.45);
+      }
+
+      .titlebar {
+        height: var(--titlebar-height);
+        display: grid;
+        grid-template-columns: var(--sidebar-width) minmax(0, 1fr) auto;
+        align-items: center;
+        border-bottom: 1px solid var(--line);
+        background: #121212;
+        user-select: none;
+      }
+
+      .traffic-lights {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding-left: 15px;
+      }
+
+      .traffic-light {
+        width: 12px;
+        height: 12px;
+        border: 1px solid rgba(0, 0, 0, 0.25);
+        border-radius: 999px;
+      }
+
+      .traffic-light.close {
+        background: #ee6a5f;
+      }
+
+      .traffic-light.minimize {
+        background: #f4bd4f;
+      }
+
+      .traffic-light.zoom {
+        background: #61c454;
+      }
+
+      .window-title {
+        min-width: 0;
+        padding-left: 15px;
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 500;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .global-status {
+        display: flex;
+        align-items: center;
+        height: 100%;
+      }
+
+      .status-control {
+        height: 100%;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 0 13px;
+        border-left: 1px solid var(--line);
+        background: transparent;
+        color: var(--text-soft);
+        cursor: pointer;
+      }
+
+      .status-control:hover {
+        background: var(--surface-hover);
+      }
+
+      .status-dot {
+        width: 7px;
+        height: 7px;
+        flex: 0 0 auto;
+        border-radius: 999px;
+        background: var(--positive);
+        box-shadow: 0 0 0 3px rgba(152, 182, 158, 0.09);
+      }
+
+      .status-dot.recording {
+        background: var(--negative);
+        box-shadow: 0 0 0 3px rgba(201, 143, 137, 0.09);
+      }
+
+      .status-label {
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: 0.02em;
+      }
+
+      .status-detail {
+        max-width: 150px;
+        color: var(--faint);
+        font-size: 11px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .workspace {
+        height: calc(100% - var(--titlebar-height));
+        display: grid;
+        grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
+      }
+
+      .sidebar {
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        padding: 19px 12px 13px;
+        border-right: 1px solid var(--line);
+        background: var(--sidebar);
+      }
+
+      .app-identity {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 0 8px 18px;
+      }
+
+      .app-mark {
+        width: 27px;
+        height: 27px;
+        display: grid;
+        place-items: center;
+        flex: 0 0 auto;
+        border: 1px solid var(--line-strong);
+        border-radius: 7px;
+        background: #191919;
+      }
+
+      .app-mark::before {
+        content: "";
+        width: 8px;
+        height: 13px;
+        border: 1.5px solid #d1d1d1;
+        border-radius: 5px;
+      }
+
+      .identity-copy {
+        min-width: 0;
+      }
+
+      .identity-title {
+        font-size: 13px;
+        font-weight: 600;
+        white-space: nowrap;
+      }
+
+      .identity-subtitle {
+        margin-top: 2px;
+        color: var(--faint);
+        font-size: 10px;
+        white-space: nowrap;
+      }
+
+      .nav-label {
+        padding: 0 9px 7px;
+        color: var(--faint);
+        font-family: "SFMono-Regular", Consolas, monospace;
+        font-size: 9px;
+        font-weight: 600;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+      }
+
+      .nav-list {
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+      }
+
+      .nav-button {
+        width: 100%;
+        height: 34px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 0 9px;
+        border-radius: 7px;
+        background: transparent;
+        color: var(--muted);
+        font-size: 13px;
+        font-weight: 500;
+        text-align: left;
+        cursor: pointer;
+      }
+
+      .nav-button:hover {
+        background: rgba(255, 255, 255, 0.045);
+        color: var(--text-soft);
+      }
+
+      .nav-button[aria-selected="true"] {
+        background: rgba(255, 255, 255, 0.08);
+        color: var(--text);
+      }
+
+      .nav-button svg {
+        width: 16px;
+        height: 16px;
+        flex: 0 0 auto;
+        stroke: currentColor;
+      }
+
+      .nav-name {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .nav-count {
+        min-width: 16px;
+        margin-left: auto;
+        color: var(--faint);
+        font-family: "SFMono-Regular", Consolas, monospace;
+        font-size: 10px;
+        text-align: right;
+      }
+
+      .sidebar-footer {
+        margin-top: auto;
+        padding: 14px 8px 2px;
+        border-top: 1px solid var(--line);
+      }
+
+      .privacy-line {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        color: var(--muted);
+        font-size: 11px;
+      }
+
+      .privacy-line svg {
+        width: 13px;
+        height: 13px;
+        flex: 0 0 auto;
+      }
+
+      .privacy-detail {
+        margin-top: 5px;
+        color: var(--faint);
+        font-size: 10px;
+        line-height: 1.4;
+      }
+
+      .main {
+        min-width: 0;
+        min-height: 0;
+        overflow: hidden;
+        background: var(--window);
+      }
+
+      .pane {
+        width: 100%;
+        height: 100%;
+        min-width: 0;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+      }
+
+      .pane[hidden] {
+        display: none;
+      }
+
+      .pane-header {
+        min-height: 69px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 18px;
+        padding: 13px 22px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .heading-group {
+        min-width: 0;
+      }
+
+      .pane-title {
+        margin: 0;
+        font-size: 19px;
+        font-weight: 600;
+        letter-spacing: -0.015em;
+      }
+
+      .pane-subtitle {
+        margin: 4px 0 0;
+        color: var(--muted);
+        font-size: 11px;
+        line-height: 1.35;
+      }
+
+      .header-actions {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .button {
+        min-height: 30px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 7px;
+        padding: 6px 10px;
+        border-radius: 6px;
+        background: #242424;
+        color: var(--text-soft);
+        font-size: 12px;
+        font-weight: 600;
+        cursor: pointer;
+      }
+
+      .button:hover {
+        background: #2b2b2b;
+        color: var(--text);
+      }
+
+      .button.primary {
+        background: #e5e5e5;
+        color: #151515;
+      }
+
+      .button.primary:hover {
+        background: #f1f1f1;
+      }
+
+      .button.quiet {
+        background: transparent;
+        color: var(--muted);
+      }
+
+      .button.quiet:hover {
+        background: rgba(255, 255, 255, 0.055);
+        color: var(--text-soft);
+      }
+
+      .button.danger {
+        background: rgba(201, 143, 137, 0.13);
+        color: #dbaba6;
+      }
+
+      .button.danger:hover {
+        background: rgba(201, 143, 137, 0.2);
+      }
+
+      .button:disabled {
+        cursor: default;
+        opacity: 0.45;
+      }
+
+      .button svg {
+        width: 14px;
+        height: 14px;
+        stroke: currentColor;
+      }
+
+      .field {
+        height: 30px;
+        border: 1px solid var(--line-strong);
+        border-radius: 6px;
+        background: #141414;
+        color: var(--text-soft);
+        font-size: 12px;
+      }
+
+      .search-field {
+        width: 190px;
+        padding: 0 10px 0 29px;
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%237d7d7d' stroke-width='2' stroke-linecap='round'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='m20 20-4-4'/%3E%3C/svg%3E");
+        background-repeat: no-repeat;
+        background-position: 9px center;
+      }
+
+      .search-field::placeholder {
+        color: var(--faint);
+      }
+
+      .select-field {
+        min-width: 150px;
+        padding: 0 29px 0 10px;
+        appearance: none;
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5' viewBox='0 0 8 5' fill='none'%3E%3Cpath d='M.5.5 4 4 7.5.5' stroke='%23858585'/%3E%3C/svg%3E");
+        background-repeat: no-repeat;
+        background-position: right 10px center;
+      }
+
+      .section-kicker {
+        color: var(--faint);
+        font-family: "SFMono-Regular", Consolas, monospace;
+        font-size: 9px;
+        font-weight: 600;
+        letter-spacing: 0.09em;
+        text-transform: uppercase;
+      }
+
+      .mono {
+        font-family: "SFMono-Regular", Consolas, monospace;
+        font-variant-numeric: tabular-nums;
+      }
+
+      .meeting-workspace {
+        min-height: 0;
+        flex: 1;
+        display: grid;
+        grid-template-columns: 255px minmax(0, 1fr);
+      }
+
+      .library-column {
+        min-width: 0;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+        border-right: 1px solid var(--line);
+        background: #101010;
+      }
+
+      .library-tools {
+        padding: 12px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .library-tools .search-field {
+        width: 100%;
+      }
+
+      .meeting-list {
+        min-height: 0;
+        overflow: auto;
+        padding: 5px 0 12px;
+      }
+
+      .meeting-group-label {
+        padding: 12px 14px 6px;
+        color: var(--faint);
+        font-size: 10px;
+        font-weight: 600;
+      }
+
+      .meeting-row {
+        width: 100%;
+        display: block;
+        padding: 10px 14px 11px;
+        border-left: 2px solid transparent;
+        background: transparent;
+        color: var(--text-soft);
+        text-align: left;
+        cursor: pointer;
+      }
+
+      .meeting-row:hover {
+        background: rgba(255, 255, 255, 0.035);
+      }
+
+      .meeting-row.selected {
+        border-left-color: #c6c6c6;
+        background: rgba(255, 255, 255, 0.065);
+      }
+
+      .meeting-row-top,
+      .meeting-row-bottom {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+      }
+
+      .meeting-row-title {
+        min-width: 0;
+        color: var(--text);
+        font-size: 12px;
+        font-weight: 550;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .meeting-row-bottom {
+        margin-top: 5px;
+        color: var(--faint);
+        font-size: 10px;
+      }
+
+      .record-mark {
+        width: 6px;
+        height: 6px;
+        flex: 0 0 auto;
+        border-radius: 999px;
+        background: var(--negative);
+      }
+
+      .meeting-detail {
+        min-width: 0;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+        background: #131313;
+      }
+
+      .detail-top {
+        padding: 18px 24px 15px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .detail-heading-row {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 18px;
+      }
+
+      .detail-title {
+        margin: 0;
+        font-size: 21px;
+        font-weight: 600;
+        letter-spacing: -0.02em;
+      }
+
+      .detail-meta {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 6px 13px;
+        margin-top: 7px;
+        color: var(--muted);
+        font-size: 11px;
+      }
+
+      .detail-meta span + span::before {
+        content: "";
+        display: inline-block;
+        width: 3px;
+        height: 3px;
+        margin: 0 9px 2px 0;
+        border-radius: 999px;
+        background: var(--faint);
+      }
+
+      .recording-strip {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 15px;
+        margin-top: 15px;
+        padding: 9px 10px 9px 12px;
+        border: 1px solid rgba(201, 143, 137, 0.24);
+        border-radius: 7px;
+        background: rgba(201, 143, 137, 0.055);
+      }
+
+      .recording-copy {
+        min-width: 0;
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        color: var(--text-soft);
+        font-size: 11px;
+      }
+
+      .recording-copy strong {
+        color: var(--text);
+        font-weight: 600;
+      }
+
+      .transcript-toolbar {
+        min-height: 43px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 0 24px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .transcript-title {
+        font-size: 11px;
+        font-weight: 600;
+      }
+
+      .transcript-tools {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        color: var(--faint);
+        font-size: 10px;
+      }
+
+      .transcript {
+        min-height: 0;
+        flex: 1;
+        overflow: auto;
+        padding: 8px 24px 24px;
+      }
+
+      .transcript-entry {
+        display: grid;
+        grid-template-columns: 48px 72px minmax(0, 1fr);
+        gap: 10px;
+        padding: 10px 0;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.055);
+      }
+
+      .transcript-time {
+        padding-top: 2px;
+        color: var(--faint);
+        font-family: "SFMono-Regular", Consolas, monospace;
+        font-size: 9px;
+        font-variant-numeric: tabular-nums;
+      }
+
+      .transcript-speaker {
+        padding-top: 1px;
+        color: var(--text-soft);
+        font-size: 11px;
+        font-weight: 600;
+      }
+
+      .transcript-text {
+        color: #c5c5c5;
+        font-size: 12px;
+        line-height: 1.55;
+      }
+
+      .end-confirmation {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 18px;
+        padding: 13px 18px;
+        border-top: 1px solid rgba(195, 170, 120, 0.28);
+        background: #1b1915;
+      }
+
+      .end-confirmation[hidden] {
+        display: none;
+      }
+
+      .confirmation-copy {
+        min-width: 0;
+      }
+
+      .confirmation-title {
+        font-size: 12px;
+        font-weight: 600;
+      }
+
+      .confirmation-detail {
+        margin-top: 3px;
+        color: #9b927e;
+        font-size: 10px;
+        line-height: 1.4;
+      }
+
+      .confirmation-actions {
+        display: flex;
+        flex: 0 0 auto;
+        align-items: center;
+        gap: 7px;
+      }
+
+      .commands-workspace,
+      .activity-workspace {
+        min-height: 0;
+        flex: 1;
+        display: grid;
+        grid-template-columns: minmax(330px, 5fr) minmax(270px, 4fr);
+      }
+
+      .command-browser,
+      .event-browser {
+        min-width: 0;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+        border-right: 1px solid var(--line);
+      }
+
+      .browser-strip {
+        min-height: 42px;
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        padding: 0 16px;
+        border-bottom: 1px solid var(--line);
+        color: var(--muted);
+        font-size: 10px;
+      }
+
+      .browser-strip strong {
+        color: var(--text-soft);
+        font-weight: 600;
+      }
+
+      .browser-strip .strip-spacer {
+        margin-left: auto;
+      }
+
+      .availability-filter {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        cursor: pointer;
+      }
+
+      .availability-filter input {
+        accent-color: #d1d1d1;
+      }
+
+      .command-list,
+      .event-list {
+        min-height: 0;
+        overflow: auto;
+      }
+
+      .command-group {
+        padding: 13px 15px 5px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+      }
+
+      .command-group-title {
+        margin-bottom: 7px;
+        color: var(--faint);
+        font-size: 10px;
+        font-weight: 600;
+      }
+
+      .command-row {
+        width: 100%;
+        display: grid;
+        grid-template-columns: minmax(125px, 1fr) minmax(130px, 1fr) auto;
+        align-items: center;
+        gap: 10px;
+        padding: 8px 8px;
+        border-radius: 5px;
+        background: transparent;
+        text-align: left;
+        cursor: pointer;
+      }
+
+      .command-row:hover {
+        background: rgba(255, 255, 255, 0.04);
+      }
+
+      .command-row.selected {
+        background: rgba(255, 255, 255, 0.075);
+      }
+
+      .command-phrase {
+        min-width: 0;
+        color: var(--text);
+        font-size: 12px;
+        font-weight: 600;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .command-description {
+        min-width: 0;
+        color: var(--muted);
+        font-size: 10px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .availability {
+        color: var(--faint);
+        font-size: 9px;
+        white-space: nowrap;
+      }
+
+      .availability.available {
+        color: var(--positive);
+      }
+
+      .availability-state.available {
+        color: var(--positive);
+      }
+
+      .availability-state.unavailable {
+        color: var(--warning);
+      }
+
+      .command-inspector,
+      .event-inspector {
+        min-width: 0;
+        min-height: 0;
+        overflow: auto;
+        padding: 22px 24px 30px;
+        background: #131313;
+      }
+
+      .inspector-eyebrow {
+        color: var(--faint);
+        font-family: "SFMono-Regular", Consolas, monospace;
+        font-size: 9px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .inspector-title {
+        margin: 7px 0 0;
+        font-size: 19px;
+        font-weight: 600;
+        letter-spacing: -0.015em;
+      }
+
+      .inspector-summary {
+        margin: 7px 0 0;
+        color: var(--muted);
+        font-size: 11px;
+        line-height: 1.55;
+      }
+
+      .detail-section {
+        padding-top: 18px;
+        margin-top: 18px;
+        border-top: 1px solid var(--line);
+      }
+
+      .definition-list {
+        margin: 9px 0 0;
+      }
+
+      .definition-row {
+        display: grid;
+        grid-template-columns: 86px minmax(0, 1fr);
+        gap: 10px;
+        padding: 6px 0;
+      }
+
+      .definition-row dt {
+        color: var(--faint);
+        font-size: 10px;
+      }
+
+      .definition-row dd {
+        min-width: 0;
+        margin: 0;
+        color: var(--text-soft);
+        font-size: 11px;
+        line-height: 1.45;
+        overflow-wrap: anywhere;
+      }
+
+      .example-list {
+        margin: 9px 0 0;
+        padding: 0;
+        list-style: none;
+      }
+
+      .example-list li {
+        padding: 7px 9px;
+        margin-top: 6px;
+        border-left: 2px solid var(--line-strong);
+        background: rgba(255, 255, 255, 0.025);
+        color: var(--text-soft);
+        font-size: 11px;
+      }
+
+      .session-ribbon {
+        min-height: 48px;
+        display: flex;
+        align-items: center;
+        gap: 0;
+        padding: 0 18px;
+        border-bottom: 1px solid var(--line);
+        background: #101010;
+      }
+
+      .session-fact {
+        min-width: 0;
+        padding: 0 18px;
+        border-left: 1px solid var(--line);
+      }
+
+      .session-fact:first-child {
+        padding-left: 0;
+        border-left: 0;
+      }
+
+      .session-fact-label {
+        color: var(--faint);
+        font-size: 9px;
+      }
+
+      .session-fact-value {
+        max-width: 190px;
+        margin-top: 3px;
+        color: var(--text-soft);
+        font-size: 10px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .event-row {
+        width: 100%;
+        display: grid;
+        grid-template-columns: 62px 20px minmax(110px, 1fr) minmax(100px, 0.8fr) 52px;
+        align-items: center;
+        gap: 8px;
+        padding: 10px 15px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.055);
+        background: transparent;
+        text-align: left;
+        cursor: pointer;
+      }
+
+      .event-row:hover {
+        background: rgba(255, 255, 255, 0.035);
+      }
+
+      .event-row.selected {
+        background: rgba(255, 255, 255, 0.07);
+      }
+
+      .event-time {
+        color: var(--faint);
+        font-family: "SFMono-Regular", Consolas, monospace;
+        font-size: 9px;
+        font-variant-numeric: tabular-nums;
+      }
+
+      .event-symbol {
+        width: 16px;
+        height: 16px;
+        display: grid;
+        place-items: center;
+        border: 1px solid var(--line-strong);
+        border-radius: 999px;
+        color: var(--muted);
+        font-size: 9px;
+      }
+
+      .event-symbol.success {
+        border-color: rgba(152, 182, 158, 0.35);
+        color: var(--positive);
+      }
+
+      .event-symbol.failure {
+        border-color: rgba(201, 143, 137, 0.42);
+        color: var(--negative);
+      }
+
+      .event-heard {
+        min-width: 0;
+        color: var(--text-soft);
+        font-size: 11px;
+        font-weight: 550;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .event-context {
+        min-width: 0;
+        color: var(--faint);
+        font-size: 10px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .event-latency {
+        color: var(--faint);
+        font-family: "SFMono-Regular", Consolas, monospace;
+        font-size: 9px;
+        text-align: right;
+      }
+
+      .diagnostic-state {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-top: 10px;
+        color: var(--text-soft);
+        font-size: 11px;
+      }
+
+      .diagnostic-state .status-dot {
+        width: 6px;
+        height: 6px;
+        box-shadow: none;
+      }
+
+      .diagnostic-state.warning .status-dot {
+        background: var(--warning);
+      }
+
+      .pipeline {
+        margin-top: 10px;
+        border-top: 1px solid rgba(255, 255, 255, 0.055);
+      }
+
+      .pipeline-step {
+        display: grid;
+        grid-template-columns: 19px 72px minmax(0, 1fr);
+        gap: 8px;
+        align-items: start;
+        padding: 8px 0;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.055);
+      }
+
+      .pipeline-marker {
+        width: 15px;
+        height: 15px;
+        display: grid;
+        place-items: center;
+        border: 1px solid var(--line-strong);
+        border-radius: 999px;
+        color: var(--positive);
+        font-size: 8px;
+      }
+
+      .pipeline-marker.failed {
+        color: var(--negative);
+      }
+
+      .pipeline-label {
+        color: var(--faint);
+        font-size: 10px;
+      }
+
+      .pipeline-value {
+        color: var(--text-soft);
+        font-size: 10px;
+        line-height: 1.45;
+      }
+
+      .settings-scroll {
+        min-height: 0;
+        flex: 1;
+        overflow: auto;
+        padding: 4px 28px 38px;
+      }
+
+      .settings-section {
+        max-width: 720px;
+        padding-top: 24px;
+      }
+
+      .settings-section-title {
+        margin: 0 0 9px;
+        color: var(--muted);
+        font-size: 11px;
+        font-weight: 600;
+      }
+
+      .settings-group {
+        border-top: 1px solid var(--line);
+      }
+
+      .setting-row {
+        min-height: 58px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 24px;
+        padding: 11px 0;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .setting-copy {
+        min-width: 0;
+      }
+
+      .setting-title {
+        color: var(--text);
+        font-size: 12px;
+        font-weight: 550;
+      }
+
+      .setting-description {
+        max-width: 490px;
+        margin-top: 4px;
+        color: var(--faint);
+        font-size: 10px;
+        line-height: 1.45;
+      }
+
+      .setting-control {
+        flex: 0 0 auto;
+      }
+
+      .toggle {
+        position: relative;
+        width: 38px;
+        height: 22px;
+        display: inline-flex;
+        padding: 3px;
+        border-radius: 999px;
+        background: #343434;
+        cursor: pointer;
+      }
+
+      .toggle::after {
+        content: "";
+        width: 16px;
+        height: 16px;
+        border-radius: 999px;
+        background: #969696;
+        transform: translateX(0);
+        transition: transform 160ms ease;
+      }
+
+      .toggle:has(input:checked) {
+        background: #dedede;
+      }
+
+      .toggle:has(input:checked)::after {
+        background: #171717;
+        transform: translateX(16px);
+      }
+
+      .toggle input {
+        position: absolute;
+        inset: 0;
+        margin: 0;
+        appearance: none;
+        cursor: pointer;
+      }
+
+      .permission-status {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        color: var(--positive);
+        font-size: 10px;
+      }
+
+      .permission-status.needs-action {
+        color: var(--warning);
+      }
+
+      .permission-status .status-dot {
+        width: 6px;
+        height: 6px;
+        box-shadow: none;
+        background: currentColor;
+      }
+
+      .toast {
+        position: fixed;
+        left: 50%;
+        bottom: 25px;
+        z-index: 20;
+        padding: 8px 11px;
+        border: 1px solid var(--line-strong);
+        border-radius: 6px;
+        background: #242424;
+        color: var(--text-soft);
+        box-shadow: 0 8px 25px rgba(0, 0, 0, 0.45);
+        font-size: 11px;
+        opacity: 0;
+        pointer-events: none;
+        transform: translate(-50%, 8px);
+        transition: opacity 120ms ease, transform 120ms ease;
+      }
+
+      .toast.visible {
+        opacity: 1;
+        transform: translate(-50%, 0);
+      }
+
+      @media (max-width: 780px) {
+        :root {
+          --sidebar-width: 62px;
+        }
+
+        body {
+          padding: 0;
+        }
+
+        .app-window {
+          width: 100vw;
+          height: 100vh;
+          min-height: 520px;
+          border: 0;
+          border-radius: 0;
+        }
+
+        .window-title {
+          padding-left: 10px;
+        }
+
+        .sidebar {
+          padding: 15px 8px 10px;
+        }
+
+        .app-identity {
+          justify-content: center;
+          padding: 0 0 16px;
+        }
+
+        .identity-copy,
+        .nav-label,
+        .nav-name,
+        .nav-count,
+        .sidebar-footer {
+          display: none;
+        }
+
+        .nav-button {
+          height: 40px;
+          justify-content: center;
+          padding: 0;
+        }
+
+        .nav-button svg {
+          width: 18px;
+          height: 18px;
+        }
+
+        .status-detail {
+          display: none;
+        }
+
+        .pane-header {
+          padding: 12px 16px;
+        }
+
+        .pane-subtitle {
+          display: none;
+        }
+
+        .meeting-workspace {
+          grid-template-columns: 205px minmax(0, 1fr);
+        }
+
+        .commands-workspace,
+        .activity-workspace {
+          grid-template-columns: minmax(250px, 1fr) minmax(240px, 0.8fr);
+        }
+
+        .command-row {
+          grid-template-columns: minmax(120px, 1fr) auto;
+        }
+
+        .command-description,
+        .event-context {
+          display: none;
+        }
+
+        .event-row {
+          grid-template-columns: 54px 20px minmax(95px, 1fr) 45px;
+        }
+
+        .command-inspector,
+        .event-inspector {
+          padding: 18px;
+        }
+
+        .search-field {
+          width: 150px;
+        }
+      }
+
+      @media (max-width: 570px) {
+        .global-status .status-control:first-child {
+          display: none;
+        }
+
+        .pane-header {
+          min-height: 64px;
+        }
+
+        .pane-title {
+          font-size: 17px;
+        }
+
+        .header-actions .search-field,
+        .header-actions .select-field {
+          display: none;
+        }
+
+        .meeting-workspace,
+        .commands-workspace,
+        .activity-workspace {
+          grid-template-columns: minmax(0, 1fr);
+        }
+
+        .library-column,
+        .command-browser,
+        .event-browser {
+          border-right: 0;
+        }
+
+        .library-column {
+          max-height: 205px;
+          border-bottom: 1px solid var(--line);
+        }
+
+        .meeting-detail {
+          min-height: 330px;
+        }
+
+        .detail-top {
+          padding: 14px 16px;
+        }
+
+        .transcript-toolbar,
+        .transcript {
+          padding-left: 16px;
+          padding-right: 16px;
+        }
+
+        .transcript-entry {
+          grid-template-columns: 42px minmax(0, 1fr);
+        }
+
+        .transcript-speaker {
+          grid-column: 2;
+        }
+
+        .transcript-text {
+          grid-column: 2;
+        }
+
+        .end-confirmation {
+          align-items: flex-start;
+          flex-direction: column;
+        }
+
+        .confirmation-actions {
+          width: 100%;
+          justify-content: flex-end;
+        }
+
+        .command-browser,
+        .event-browser {
+          max-height: 48%;
+          border-bottom: 1px solid var(--line);
+        }
+
+        .command-inspector,
+        .event-inspector {
+          min-height: 260px;
+        }
+
+        .session-ribbon {
+          overflow-x: auto;
+        }
+
+        .session-fact {
+          flex: 0 0 auto;
+        }
+
+        .settings-scroll {
+          padding: 4px 18px 30px;
+        }
+
+        .setting-row {
+          gap: 14px;
+        }
+
+        .setting-description {
+          font-size: 11px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="app-window">
+      <header class="titlebar">
+        <div class="traffic-lights" aria-hidden="true">
+          <span class="traffic-light close"></span>
+          <span class="traffic-light minimize"></span>
+          <span class="traffic-light zoom"></span>
+        </div>
+        <div class="window-title">Voice Control</div>
+        <div class="global-status">
+          <button class="status-control" id="listening-control" type="button" title="Click to sleep or resume listening">
+            <span class="status-dot" id="listening-dot"></span>
+            <span class="status-label" id="listening-label">LISTENING</span>
+            <span class="status-detail" id="global-device">Universal Audio Thunderbolt</span>
+          </button>
+          <button class="status-control" id="recording-control" type="button" title="Open the active meeting">
+            <span class="status-dot recording"></span>
+            <span class="status-label">REC</span>
+            <span class="status-detail mono" id="global-recording-time">18:42</span>
+          </button>
+        </div>
+      </header>
+
+      <div class="workspace">
+        <aside class="sidebar" aria-label="Primary navigation">
+          <div class="app-identity">
+            <div class="app-mark" aria-hidden="true"></div>
+            <div class="identity-copy">
+              <div class="identity-title">Voice Control</div>
+              <div class="identity-subtitle">Local workspace</div>
+            </div>
+          </div>
+          <div class="nav-label">Library</div>
+          <nav class="nav-list">
+            <button class="nav-button" type="button" data-pane="meetings" aria-selected="false" title="Meetings">
+              <svg viewBox="0 0 24 24" fill="none" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3.5h9.5L19 7v13.5H6z"/><path d="M15.5 3.5V7H19M9 11h7M9 14.5h7M9 18h4"/></svg>
+              <span class="nav-name">Meetings</span>
+              <span class="nav-count">4</span>
+            </button>
+            <button class="nav-button" type="button" data-pane="commands" aria-selected="false" title="Commands">
+              <svg viewBox="0 0 24 24" fill="none" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 7 4 4-4 4M11.5 16H19"/><rect x="2.5" y="3.5" width="19" height="17" rx="2"/></svg>
+              <span class="nav-name">Commands</span>
+              <span class="nav-count">24</span>
+            </button>
+            <button class="nav-button" type="button" data-pane="activity" aria-selected="false" title="Activity and Debug">
+              <svg viewBox="0 0 24 24" fill="none" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 17.5h16M5 14l3-3 3 2 4-6 4 3"/><circle cx="8" cy="11" r="1"/><circle cx="15" cy="7" r="1"/></svg>
+              <span class="nav-name">Activity / Debug</span>
+              <span class="nav-count">1</span>
+            </button>
+            <button class="nav-button" type="button" data-pane="settings" aria-selected="true" title="Settings">
+              <svg viewBox="0 0 24 24" fill="none" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6 1.7 1.7 0 0 0-.4 1.1V21h-4v-.09A1.7 1.7 0 0 0 8.5 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.5-1H3v-4h.09A1.7 1.7 0 0 0 4.6 8.5a1.7 1.7 0 0 0-.34-1.88l-.06-.06 2.83-2.83.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-1.5V3h4v.09A1.7 1.7 0 0 0 15.5 4.6a1.7 1.7 0 0 0 1.88-.34l.06-.06 2.83 2.83-.06.06A1.7 1.7 0 0 0 19.4 9c.13.39.35.74.65 1H21v4h-.09a1.7 1.7 0 0 0-1.51 1Z"/></svg>
+              <span class="nav-name">Settings</span>
+            </button>
+          </nav>
+          <div class="sidebar-footer">
+            <div class="privacy-line">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="5" y="10" width="14" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>
+              <span>Local by default</span>
+            </div>
+            <div class="privacy-detail">Audio stays on this Mac unless you explicitly record a meeting.</div>
+          </div>
+        </aside>
+
+        <main class="main">
+          <section class="pane" id="pane-meetings" data-pane-content="meetings" hidden>
+            <div class="pane-header">
+              <div class="heading-group">
+                <h1 class="pane-title">Meetings</h1>
+                <p class="pane-subtitle">Local recordings, source-separated transcripts, and capture history.</p>
+              </div>
+              <div class="header-actions">
+                <button class="button primary" id="new-recording" type="button">
+                  <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><circle cx="12" cy="12" r="9"/></svg>
+                  Record locally
+                </button>
+              </div>
+            </div>
+            <div class="meeting-workspace">
+              <div class="library-column">
+                <div class="library-tools">
+                  <input class="field search-field" id="meeting-search" name="meeting-search" type="search" placeholder="Search meetings" aria-label="Search meetings" />
+                </div>
+                <div class="meeting-list" id="meeting-list" aria-label="Local meetings"></div>
+              </div>
+              <article class="meeting-detail">
+                <div class="detail-top">
+                  <div class="detail-heading-row">
+                    <div>
+                      <h2 class="detail-title" id="meeting-title">Design sync</h2>
+                      <div class="detail-meta" id="meeting-meta"></div>
+                    </div>
+                    <button class="button quiet" id="reveal-meeting" type="button" title="Reveal local files">Reveal files</button>
+                  </div>
+                  <div class="recording-strip" id="recording-strip">
+                    <div class="recording-copy">
+                      <span class="record-mark"></span>
+                      <span><strong>Recording locally</strong> &nbsp; Mic + Computer Audio &nbsp; <span class="mono" id="detail-recording-time">18:42</span></span>
+                    </div>
+                    <button class="button danger" id="request-stop" type="button">End recording</button>
+                  </div>
+                </div>
+                <div class="transcript-toolbar">
+                  <div class="transcript-title">Transcript</div>
+                  <div class="transcript-tools"><span id="transcript-count">6 segments</span><span>Source separated</span></div>
+                </div>
+                <div class="transcript" id="transcript" aria-live="polite"></div>
+                <div class="end-confirmation" id="end-confirmation">
+                  <div class="confirmation-copy">
+                    <div class="confirmation-title">End this meeting recording?</div>
+                    <div class="confirmation-detail">Ask before stopping is on. Both WAV tracks will be finalized, then transcribed locally.</div>
+                  </div>
+                  <div class="confirmation-actions">
+                    <button class="button" id="keep-recording" type="button">Keep recording</button>
+                    <button class="button danger" id="confirm-stop" type="button">Stop &amp; transcribe</button>
+                  </div>
+                </div>
+              </article>
+            </div>
+          </section>
+
+          <section class="pane" id="pane-commands" data-pane-content="commands" hidden>
+            <div class="pane-header">
+              <div class="heading-group">
+                <h1 class="pane-title">Commands</h1>
+                <p class="pane-subtitle">The catalog is generated from resolver definitions and filtered by current context.</p>
+              </div>
+              <div class="header-actions">
+                <input class="field search-field" id="command-search" name="command-search" type="search" placeholder="Find a command" aria-label="Find a command" />
+                <select class="field select-field" id="context-select" name="context-select" aria-label="Preview command context">
+                  <option value="slack">Slack</option>
+                  <option value="x">Brave Browser · x.com</option>
+                  <option value="global">No application context</option>
+                  <option value="sleeping">Sleeping</option>
+                </select>
+              </div>
+            </div>
+            <div class="commands-workspace">
+              <div class="command-browser">
+                <div class="browser-strip">
+                  <span>Context <strong id="command-context-label">Slack</strong></span>
+                  <span class="strip-spacer"></span>
+                  <label class="availability-filter" for="available-only">
+                    <input id="available-only" name="available-only" type="checkbox" />
+                    Available now
+                  </label>
+                </div>
+                <div class="command-list" id="command-list"></div>
+              </div>
+              <aside class="command-inspector" id="command-inspector" aria-live="polite"></aside>
+            </div>
+          </section>
+
+          <section class="pane" id="pane-activity" data-pane-content="activity" hidden>
+            <div class="pane-header">
+              <div class="heading-group">
+                <h1 class="pane-title">Activity / Debug</h1>
+                <p class="pane-subtitle">Recent recognition decisions with deeper runtime evidence on demand.</p>
+              </div>
+              <div class="header-actions">
+                <select class="field select-field" id="event-filter" name="event-filter" aria-label="Filter activity">
+                  <option value="all">All activity</option>
+                  <option value="command">Commands</option>
+                  <option value="dictation">Dictation</option>
+                  <option value="failure">Failures only</option>
+                </select>
+                <button class="button" id="copy-diagnostics" type="button">Copy diagnostics</button>
+              </div>
+            </div>
+            <div class="session-ribbon" aria-label="Current device and context">
+              <div class="session-fact"><div class="session-fact-label">Input</div><div class="session-fact-value" id="activity-device">Universal Audio Thunderbolt</div></div>
+              <div class="session-fact"><div class="session-fact-label">Recognizer</div><div class="session-fact-value">Moonshine Medium Streaming</div></div>
+              <div class="session-fact"><div class="session-fact-label">Foreground context</div><div class="session-fact-value">Slack · #voice-control</div></div>
+              <div class="session-fact"><div class="session-fact-label">Session log</div><div class="session-fact-value mono">logs/live.ndjson</div></div>
+            </div>
+            <div class="activity-workspace">
+              <div class="event-browser">
+                <div class="browser-strip"><span><strong>Recent activity</strong> · 100 event window</span><span class="strip-spacer mono" id="event-count">7 events</span></div>
+                <div class="event-list" id="event-list"></div>
+              </div>
+              <aside class="event-inspector" id="event-inspector" aria-live="polite"></aside>
+            </div>
+          </section>
+
+          <section class="pane" id="pane-settings" data-pane-content="settings">
+            <div class="pane-header">
+              <div class="heading-group">
+                <h1 class="pane-title">Settings</h1>
+                <p class="pane-subtitle">Capture, feedback, permissions, and launch behavior for this Mac.</p>
+              </div>
+              <div class="header-actions">
+                <button class="button" id="open-data-folder" type="button">Open data folder</button>
+              </div>
+            </div>
+            <div class="settings-scroll">
+              <section class="settings-section">
+                <h2 class="settings-section-title">Audio</h2>
+                <div class="settings-group">
+                  <div class="setting-row">
+                    <div class="setting-copy"><div class="setting-title">Input device</div><div class="setting-description">Used for commands and Option dictation. Falls back to the macOS default if unavailable.</div></div>
+                    <div class="setting-control">
+                      <select class="field select-field" id="device-select" name="device-select" aria-label="Input device">
+                        <option>Universal Audio Thunderbolt</option>
+                        <option>Studio Display Microphone</option>
+                        <option>MacBook Pro Microphone</option>
+                        <option>macOS default input</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div class="setting-row">
+                    <div class="setting-copy"><div class="setting-title">Sound effects</div><div class="setting-description">Play start, stop, cancellation, mode, and error tones.</div></div>
+                    <div class="setting-control"><label class="toggle" title="Sound effects"><input type="checkbox" name="sound-effects" checked aria-label="Sound effects" /></label></div>
+                  </div>
+                </div>
+              </section>
+
+              <section class="settings-section">
+                <h2 class="settings-section-title">Meetings</h2>
+                <div class="settings-group">
+                  <div class="setting-row">
+                    <div class="setting-copy"><div class="setting-title">Ask before stopping</div><div class="setting-description">Confirm before ending an active meeting so an accidental click cannot finalize the capture.</div></div>
+                    <div class="setting-control"><label class="toggle" title="Ask before stopping"><input id="ask-before-stopping" type="checkbox" name="ask-before-stopping" checked aria-label="Ask before stopping" /></label></div>
+                  </div>
+                  <div class="setting-row">
+                    <div class="setting-copy"><div class="setting-title">Automatic meeting offers</div><div class="setting-description">Offer Record Locally after two seconds of supported microphone activity. Detection never begins recording.</div></div>
+                    <div class="setting-control"><label class="toggle" title="Automatic meeting offers"><input type="checkbox" name="meeting-offers" checked aria-label="Automatic meeting offers" /></label></div>
+                  </div>
+                </div>
+              </section>
+
+              <section class="settings-section">
+                <h2 class="settings-section-title">Permissions</h2>
+                <div class="settings-group">
+                  <div class="setting-row">
+                    <div class="setting-copy"><div class="setting-title">Microphone</div><div class="setting-description">Required for commands, dictation, and the local microphone meeting track.</div></div>
+                    <div class="setting-control permission-status"><span class="status-dot"></span><span>Granted</span></div>
+                  </div>
+                  <div class="setting-row">
+                    <div class="setting-copy"><div class="setting-title">Accessibility &amp; Input Monitoring</div><div class="setting-description">Required to observe Option and send shortcuts or pasted dictation.</div></div>
+                    <div class="setting-control permission-status"><span class="status-dot"></span><span>Granted</span></div>
+                  </div>
+                  <div class="setting-row">
+                    <div class="setting-copy"><div class="setting-title">Screen &amp; System Audio Recording</div><div class="setting-description">Required on macOS 15+ for the separate Computer meeting track.</div></div>
+                    <button class="button setting-control permission-action" type="button">Review access</button>
+                  </div>
+                </div>
+              </section>
+
+              <section class="settings-section">
+                <h2 class="settings-section-title">Launch</h2>
+                <div class="settings-group">
+                  <div class="setting-row">
+                    <div class="setting-copy"><div class="setting-title">Open Voice Control at login</div><div class="setting-description">Start the signed background agent after you log in to this Mac.</div></div>
+                    <div class="setting-control"><label class="toggle" title="Open at login"><input type="checkbox" name="open-at-login" checked aria-label="Open Voice Control at login" /></label></div>
+                  </div>
+                  <div class="setting-row">
+                    <div class="setting-copy"><div class="setting-title">Start listening on launch</div><div class="setting-description">Voice Control begins in listening mode. Option dictation remains available when command recognition sleeps.</div></div>
+                    <div class="setting-control"><label class="toggle" title="Start listening on launch"><input type="checkbox" name="start-listening" checked aria-label="Start listening on launch" /></label></div>
+                  </div>
+                </div>
+              </section>
+            </div>
+          </section>
+        </main>
+      </div>
+    </div>
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+    <script>
+      const meetings = [
+        {
+          id: "design-sync",
+          title: "Design sync",
+          group: "Today",
+          date: "Today, 10:02 AM",
+          source: "Google Meet",
+          duration: "18:42",
+          status: "recording",
+          location: "~/Library/Application Support/voice-control/meetings/",
+          transcript: [
+            ["00:06", "Computer", "Let’s make the desktop app feel like one place to work, rather than a collection of utilities."],
+            ["00:18", "You", "The meeting library should be the anchor. Commands and diagnostics can sit alongside it as tools."],
+            ["02:41", "Computer", "Can we keep the listening state visible without turning the whole window into a recorder?"],
+            ["02:52", "You", "Yes. A compact global status belongs in the title bar; recording gets a second, explicit indicator."],
+            ["11:09", "Computer", "For stopping, I’d rather ask than lose the tail end of a call because of a stray click."],
+            ["11:17", "You", "Agreed. Ask before stopping, then finalize both tracks and transcribe locally."],
+          ],
+        },
+        {
+          id: "research-interviews",
+          title: "Research interview synthesis",
+          group: "Today",
+          date: "Today, 8:31 AM",
+          source: "Zoom",
+          duration: "42:18",
+          status: "complete",
+          location: "~/Library/Application Support/voice-control/meetings/1752571860000-4492/",
+          transcript: [
+            ["00:11", "You", "I grouped the notes around trust, speed, and knowing where the audio went."],
+            ["00:26", "Computer", "The local-first story is strongest when it’s visible in the product, not hidden in a privacy page."],
+            ["06:04", "You", "Then every recorded meeting should reveal its source files and capture status."],
+            ["18:37", "Computer", "People also wanted to understand why a command did not run without reading raw logs."],
+            ["35:20", "You", "We can show the resolver path, context snapshot, and action outcome together."],
+          ],
+        },
+        {
+          id: "infra-review",
+          title: "Voice pipeline review",
+          group: "Yesterday",
+          date: "Yesterday, 4:15 PM",
+          source: "Slack Huddle",
+          duration: "31:02",
+          status: "complete",
+          location: "~/Library/Application Support/voice-control/meetings/1752519300000-4028/",
+          transcript: [
+            ["00:03", "Computer", "The bounded worker is holding up. The next concern is making queue occupancy observable."],
+            ["00:16", "You", "Activity should distinguish capture, recognition, resolution, and action execution."],
+            ["09:44", "Computer", "And context predicates need to be inspectable when a command is unavailable."],
+            ["15:08", "You", "We’ll expose the foreground application, browser host, and matched command scope."],
+          ],
+        },
+        {
+          id: "weekly-planning",
+          title: "Weekly planning",
+          group: "Jul 11",
+          date: "Jul 11, 9:00 AM",
+          source: "Microsoft Teams",
+          duration: "07:13",
+          status: "interrupted",
+          location: "~/Library/Application Support/voice-control/meetings/1752220800000-3881/",
+          transcript: [
+            ["00:00", "System", "Recording was interrupted before transcription completed."],
+          ],
+        },
+      ];
+
+      const commands = [
+        { id: "mode.sleep", phrase: "go to sleep", group: "Voice Control", description: "Put voice control to sleep", scope: "global", aliases: ["stop voice control"], action: "Change command mode to Sleeping", examples: ["Go to sleep"] },
+        { id: "dictation.start", phrase: "dictate start", group: "Dictation & Notes", description: "Start voice dictation", scope: "global", aliases: ["start dictation"], action: "Begin voice-delimited dictation", examples: ["Dictate start this is my message", "Dictate start"] },
+        { id: "captains-log.start", phrase: "captain's log", group: "Dictation & Notes", description: "Record a journal entry", scope: "global", aliases: [], action: "Capture and send an entry to Organizer", examples: ["Captain’s log"] },
+        { id: "app.open.brave", phrase: "open brave", group: "Open Apps & Websites", description: "Open application", scope: "global", aliases: ["launch brave"], action: "Open Brave Browser", examples: ["Open Brave", "Launch Brave"] },
+        { id: "app.open.slack", phrase: "open slack", group: "Open Apps & Websites", description: "Open application", scope: "global", aliases: ["launch slack"], action: "Open Slack", examples: ["Open Slack"] },
+        { id: "website.open.x", phrase: "go to x", group: "Open Apps & Websites", description: "Open website", scope: "global", aliases: ["open x", "go to twitter", "go to x dot com"], action: "Open https://x.com", examples: ["Go to X", "Open Twitter"] },
+        { id: "shortcut.command-one", phrase: "command one", group: "Keyboard", description: "Use keyboard shortcut", scope: "global", aliases: ["terminal one", "tab one", "key command one"], action: "Press Command-1", examples: ["Command one", "Terminal one"] },
+        { id: "shortcut.command-two", phrase: "command two", group: "Keyboard", description: "Use keyboard shortcut", scope: "global", aliases: ["terminal two", "tab two"], action: "Press Command-2", examples: ["Command two"] },
+        { id: "slack.threads", phrase: "go to threads", group: "Navigation", description: "Use application shortcut", scope: "slack", aliases: ["open threads"], action: "Press Command-Shift-T", examples: ["Go to threads", "Open threads"] },
+        { id: "slack.next-unread", phrase: "next unread", group: "Navigation", description: "Use application shortcut", scope: "slack", aliases: ["go to next unread"], action: "Press Option-Shift-Down", examples: ["Next unread"] },
+        { id: "slack.previous-unread", phrase: "previous unread", group: "Navigation", description: "Use application shortcut", scope: "slack", aliases: ["go to previous unread"], action: "Press Option-Shift-Up", examples: ["Previous unread"] },
+        { id: "slack.channel.console", phrase: "go to console", group: "Navigation", description: "Open application destination", scope: "slack", aliases: ["open console", "go to console channel"], action: "Open Slack quick switcher for console", examples: ["Go to console"] },
+        { id: "x.notifications", phrase: "go to notifications", group: "Navigation", description: "Navigate active tab", scope: "x", aliases: ["open notifications"], action: "Navigate active browser tab to /notifications", examples: ["Go to notifications"] },
+        { id: "x.chat", phrase: "go to chat", group: "Navigation", description: "Navigate active tab", scope: "x", aliases: ["open chat", "go to messages"], action: "Navigate active browser tab to /messages", examples: ["Go to chat", "Go to messages"] },
+        { id: "x.home", phrase: "go home", group: "Navigation", description: "Navigate active tab", scope: "x", aliases: ["go to home"], action: "Navigate active browser tab to /home", examples: ["Go home"] },
+        { id: "mode.wake", phrase: "voice control", group: "Sleeping", description: "Wake voice control", scope: "sleeping", aliases: ["wake up", "start voice control"], action: "Change command mode to Listening", examples: ["Voice control", "Wake up"] },
+      ];
+
+      const events = [
+        { id: 1, time: "10:20:41", type: "command", heard: "go to threads", context: "Brave Browser · x.com", latency: 74, outcome: "ignored", command: "no match", detail: "The Slack-only command was not in the candidate set for the foreground browser context.", pipeline: [["Capture", "Universal Audio Thunderbolt · 16 kHz mono", true], ["Recognize", "Completed ‘go to threads’ in 74 ms", true], ["Context", "Brave Browser · x.com", true], ["Resolve", "No available command matched", false]] },
+        { id: 2, time: "10:20:18", type: "command", heard: "open slack", context: "Brave Browser · x.com", latency: 68, outcome: "executed", command: "app.open.slack", detail: "Opened Slack through the macOS application action.", pipeline: [["Capture", "Universal Audio Thunderbolt · 16 kHz mono", true], ["Recognize", "Completed ‘open slack’ in 68 ms", true], ["Resolve", "Matched app.open.slack", true], ["Action", "macOS open completed", true]] },
+        { id: 3, time: "10:18:57", type: "dictation", heard: "Paste the launch notes here", context: "Slack · #voice-control", latency: 412, outcome: "pasted", command: "dictation", detail: "Option dictation transcribed locally with Parakeet and pasted into Slack.", pipeline: [["Capture", "Option held 3.8 s · pre-roll protected", true], ["Transcribe", "Parakeet v2 · 412 ms", true], ["Paste", "Accessibility action completed", true]] },
+        { id: 4, time: "10:17:05", type: "command", heard: "go to console", context: "Slack · #voice-control", latency: 71, outcome: "executed", command: "slack.channel.console", detail: "Opened Slack quick switcher and selected console.", pipeline: [["Capture", "Universal Audio Thunderbolt", true], ["Context", "Application predicate: Slack", true], ["Resolve", "Matched slack.channel.console", true], ["Action", "Quick switch completed", true]] },
+        { id: 5, time: "10:14:22", type: "failure", heard: "command three", context: "Zed", latency: 63, outcome: "failed", command: "shortcut.command-three", detail: "The command resolved, but macOS rejected the keyboard event because Accessibility access was temporarily unavailable.", pipeline: [["Capture", "Universal Audio Thunderbolt", true], ["Recognize", "Completed ‘command three’ in 63 ms", true], ["Resolve", "Matched shortcut.command-three", true], ["Action", "Accessibility permission denied", false]] },
+        { id: 6, time: "10:12:09", type: "command", heard: "go to sleep", context: "Zed", latency: 59, outcome: "slept", command: "mode.sleep", detail: "Voice Control entered Sleeping mode. Option dictation remained available.", pipeline: [["Recognize", "Completed ‘go to sleep’", true], ["Resolve", "Matched mode.sleep", true], ["Mode", "Listening → Sleeping", true]] },
+        { id: 7, time: "10:11:44", type: "dictation", heard: "", context: "Zed", latency: 0, outcome: "discarded", command: "dictation", detail: "Option was held for 184 ms, below the 300 ms intent threshold. No audio was persisted.", pipeline: [["Input", "Option held 184 ms", true], ["Capture", "Discarded before transcription", true]] },
+      ];
+
+      let selectedMeetingId = "design-sync";
+      let selectedCommandId = "slack.threads";
+      let selectedEventId = 1;
+      let elapsedSeconds = 18 * 60 + 42;
+      let recordingActive = true;
+      let toastTimeout;
+
+      const $ = (selector, root = document) => root.querySelector(selector);
+      const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
+
+      function escapeHtml(value) {
+        return String(value)
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;")
+          .replaceAll("'", "&#039;");
+      }
+
+      function formatElapsed(seconds) {
+        return `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
+      }
+
+      function showToast(message) {
+        const toast = $("#toast");
+        toast.textContent = message;
+        toast.classList.add("visible");
+        clearTimeout(toastTimeout);
+        toastTimeout = setTimeout(() => toast.classList.remove("visible"), 1800);
+      }
+
+      function showPane(name) {
+        $$("[data-pane-content]").forEach((pane) => {
+          pane.hidden = pane.dataset.paneContent !== name;
+        });
+        $$("[data-pane]").forEach((button) => {
+          button.setAttribute("aria-selected", String(button.dataset.pane === name));
+        });
+      }
+
+      $$("[data-pane]").forEach((button) => {
+        button.addEventListener("click", () => showPane(button.dataset.pane));
+      });
+
+      function renderMeetingList() {
+        const query = $("#meeting-search").value.trim().toLowerCase();
+        const filtered = meetings.filter((meeting) => meeting.title.toLowerCase().includes(query));
+        const groups = [...new Set(filtered.map((meeting) => meeting.group))];
+        $("#meeting-list").innerHTML = groups.map((group) => `
+          <div class="meeting-group-label">${escapeHtml(group)}</div>
+          ${filtered.filter((meeting) => meeting.group === group).map((meeting) => `
+            <button class="meeting-row ${meeting.id === selectedMeetingId ? "selected" : ""}" type="button" data-meeting-id="${meeting.id}">
+              <span class="meeting-row-top">
+                <span class="meeting-row-title">${escapeHtml(meeting.title)}</span>
+                ${meeting.status === "recording" ? '<span class="record-mark" title="Recording"></span>' : ""}
+              </span>
+              <span class="meeting-row-bottom"><span>${escapeHtml(meeting.source)}</span><span class="mono">${escapeHtml(meeting.duration)}</span></span>
+            </button>
+          `).join("")}
+        `).join("");
+
+        $$("[data-meeting-id]").forEach((button) => {
+          button.addEventListener("click", () => selectMeeting(button.dataset.meetingId));
+        });
+      }
+
+      function selectMeeting(id) {
+        selectedMeetingId = id;
+        const meeting = meetings.find((candidate) => candidate.id === id);
+        if (!meeting) return;
+        $("#meeting-title").textContent = meeting.title;
+        $("#meeting-meta").innerHTML = `<span>${escapeHtml(meeting.date)}</span><span>${escapeHtml(meeting.source)}</span><span>${meeting.status === "recording" ? "Recording" : meeting.status === "interrupted" ? "Interrupted" : "Complete"}</span>`;
+        $("#transcript-count").textContent = `${meeting.transcript.length} ${meeting.transcript.length === 1 ? "segment" : "segments"}`;
+        $("#transcript").innerHTML = meeting.transcript.map(([time, speaker, text]) => `
+          <div class="transcript-entry">
+            <div class="transcript-time">${escapeHtml(time)}</div>
+            <div class="transcript-speaker">${escapeHtml(speaker)}</div>
+            <div class="transcript-text">${escapeHtml(text)}</div>
+          </div>
+        `).join("");
+        const isActive = meeting.status === "recording" && recordingActive;
+        $("#recording-strip").hidden = !isActive;
+        $("#end-confirmation").hidden = !isActive || id !== "design-sync";
+        renderMeetingList();
+      }
+
+      $("#meeting-search").addEventListener("input", renderMeetingList);
+      $("#keep-recording").addEventListener("click", () => {
+        $("#end-confirmation").hidden = true;
+        showToast("Recording continues");
+      });
+      $("#request-stop").addEventListener("click", () => {
+        if ($("#ask-before-stopping").checked) {
+          $("#end-confirmation").hidden = false;
+        } else {
+          stopRecording();
+        }
+      });
+      $("#confirm-stop").addEventListener("click", stopRecording);
+      $("#new-recording").addEventListener("click", () => {
+        showPane("meetings");
+        selectMeeting("design-sync");
+        if (recordingActive) showToast("A local recording is already active");
+      });
+      $("#recording-control").addEventListener("click", () => {
+        showPane("meetings");
+        selectMeeting("design-sync");
+      });
+      $("#reveal-meeting").addEventListener("click", () => {
+        const meeting = meetings.find((candidate) => candidate.id === selectedMeetingId);
+        showToast(`Would reveal ${meeting.location}`);
+      });
+
+      function stopRecording() {
+        if (!recordingActive) return;
+        recordingActive = false;
+        const meeting = meetings.find((candidate) => candidate.id === "design-sync");
+        meeting.status = "transcribing";
+        meeting.duration = formatElapsed(elapsedSeconds);
+        $("#recording-strip").hidden = true;
+        $("#end-confirmation").hidden = true;
+        $("#recording-control").hidden = true;
+        $("#meeting-meta").innerHTML = `<span>${escapeHtml(meeting.date)}</span><span>${escapeHtml(meeting.source)}</span><span>Transcribing locally</span>`;
+        renderMeetingList();
+        showToast("Audio saved locally. Building transcript…");
+      }
+
+      function commandAvailable(command, context) {
+        if (context === "sleeping") return command.scope === "sleeping";
+        if (command.scope === "sleeping") return false;
+        return command.scope === "global" || command.scope === context;
+      }
+
+      function contextLabel(context) {
+        return { slack: "Slack", x: "Brave Browser · x.com", global: "No application context", sleeping: "Sleeping" }[context];
+      }
+
+      function scopeLabel(scope) {
+        return { global: "Global", slack: "Slack only", x: "x.com only", sleeping: "Sleeping only" }[scope];
+      }
+
+      function renderCommands() {
+        const context = $("#context-select").value;
+        const query = $("#command-search").value.trim().toLowerCase();
+        const onlyAvailable = $("#available-only").checked;
+        $("#command-context-label").textContent = contextLabel(context);
+        const filtered = commands.filter((command) => {
+          const matchesQuery = [command.phrase, command.description, command.id, ...command.aliases].join(" ").toLowerCase().includes(query);
+          return matchesQuery && (!onlyAvailable || commandAvailable(command, context));
+        });
+        if (filtered.length && !filtered.some((command) => command.id === selectedCommandId)) {
+          selectedCommandId = filtered[0].id;
+        }
+        const groups = [...new Set(filtered.map((command) => command.group))];
+        $("#command-list").innerHTML = groups.map((group) => `
+          <div class="command-group">
+            <div class="command-group-title">${escapeHtml(group)}</div>
+            ${filtered.filter((command) => command.group === group).map((command) => {
+              const available = commandAvailable(command, context);
+              return `<button class="command-row ${command.id === selectedCommandId ? "selected" : ""}" type="button" data-command-id="${command.id}">
+                <span class="command-phrase">${escapeHtml(command.phrase)}</span>
+                <span class="command-description">${escapeHtml(command.description)}</span>
+                <span class="availability ${available ? "available" : ""}">${available ? "Available" : scopeLabel(command.scope)}</span>
+              </button>`;
+            }).join("")}
+          </div>
+        `).join("") || '<div class="command-group"><div class="command-group-title">No matching commands</div></div>';
+
+        $$("[data-command-id]").forEach((button) => {
+          button.addEventListener("click", () => selectCommand(button.dataset.commandId));
+        });
+        renderCommandInspector();
+      }
+
+      function selectCommand(id) {
+        selectedCommandId = id;
+        renderCommands();
+      }
+
+      function renderCommandInspector() {
+        const command = commands.find((candidate) => candidate.id === selectedCommandId) || commands[0];
+        const context = $("#context-select").value;
+        const available = commandAvailable(command, context);
+        $("#command-inspector").innerHTML = `
+          <div class="inspector-eyebrow">${escapeHtml(command.id)}</div>
+          <h2 class="inspector-title">“${escapeHtml(command.phrase)}”</h2>
+          <p class="inspector-summary">${escapeHtml(command.description)}. ${available ? `Available in the current ${escapeHtml(contextLabel(context))} context.` : `Unavailable in the current context because this command is ${escapeHtml(scopeLabel(command.scope).toLowerCase())}.`}</p>
+          <div class="detail-section">
+            <div class="section-kicker">Resolution</div>
+            <dl class="definition-list">
+              <div class="definition-row"><dt>Availability</dt><dd class="availability-state ${available ? "available" : "unavailable"}">${available ? "Available now" : "Context predicate does not match"}</dd></div>
+              <div class="definition-row"><dt>Scope</dt><dd>${escapeHtml(scopeLabel(command.scope))}</dd></div>
+              <div class="definition-row"><dt>Action</dt><dd>${escapeHtml(command.action)}</dd></div>
+              <div class="definition-row"><dt>Aliases</dt><dd>${command.aliases.length ? command.aliases.map(escapeHtml).join(" · ") : "None"}</dd></div>
+            </dl>
+          </div>
+          <div class="detail-section">
+            <div class="section-kicker">Try saying</div>
+            <ul class="example-list">${command.examples.map((example) => `<li>“${escapeHtml(example)}”</li>`).join("")}</ul>
+          </div>
+        `;
+      }
+
+      $("#command-search").addEventListener("input", renderCommands);
+      $("#context-select").addEventListener("change", renderCommands);
+      $("#available-only").addEventListener("change", renderCommands);
+
+      function renderEvents() {
+        const filter = $("#event-filter").value;
+        const filtered = events.filter((event) => filter === "all" || event.type === filter || (filter === "failure" && event.outcome === "failed"));
+        $("#event-count").textContent = `${filtered.length} ${filtered.length === 1 ? "event" : "events"}`;
+        $("#event-list").innerHTML = filtered.map((event) => {
+          const successful = ["executed", "pasted", "slept"].includes(event.outcome);
+          const failed = event.outcome === "failed";
+          return `<button class="event-row ${event.id === selectedEventId ? "selected" : ""}" type="button" data-event-id="${event.id}">
+            <span class="event-time">${event.time}</span>
+            <span class="event-symbol ${successful ? "success" : failed ? "failure" : ""}">${successful ? "✓" : failed ? "!" : "·"}</span>
+            <span class="event-heard">${escapeHtml(event.heard || event.outcome)}</span>
+            <span class="event-context">${escapeHtml(event.context)}</span>
+            <span class="event-latency">${event.latency ? `${event.latency}ms` : "—"}</span>
+          </button>`;
+        }).join("");
+        $$("[data-event-id]").forEach((button) => button.addEventListener("click", () => selectEvent(Number(button.dataset.eventId))));
+        if (!filtered.some((event) => event.id === selectedEventId) && filtered[0]) selectedEventId = filtered[0].id;
+        renderEventInspector();
+      }
+
+      function selectEvent(id) {
+        selectedEventId = id;
+        renderEvents();
+      }
+
+      function renderEventInspector() {
+        const event = events.find((candidate) => candidate.id === selectedEventId) || events[0];
+        const warning = ["failed", "ignored", "discarded"].includes(event.outcome);
+        $("#event-inspector").innerHTML = `
+          <div class="inspector-eyebrow">${escapeHtml(event.type)} · ${escapeHtml(event.time)}</div>
+          <h2 class="inspector-title">${event.heard ? `“${escapeHtml(event.heard)}”` : "Discarded Option tap"}</h2>
+          <div class="diagnostic-state ${warning ? "warning" : ""}"><span class="status-dot"></span><span>${escapeHtml(event.outcome)}</span></div>
+          <p class="inspector-summary">${escapeHtml(event.detail)}</p>
+          <div class="detail-section">
+            <div class="section-kicker">Decision path</div>
+            <div class="pipeline">${event.pipeline.map(([label, value, ok]) => `
+              <div class="pipeline-step"><span class="pipeline-marker ${ok ? "" : "failed"}">${ok ? "✓" : "!"}</span><span class="pipeline-label">${escapeHtml(label)}</span><span class="pipeline-value">${escapeHtml(value)}</span></div>
+            `).join("")}</div>
+          </div>
+          <div class="detail-section">
+            <div class="section-kicker">Event snapshot</div>
+            <dl class="definition-list">
+              <div class="definition-row"><dt>Command</dt><dd class="mono">${escapeHtml(event.command)}</dd></div>
+              <div class="definition-row"><dt>Context</dt><dd>${escapeHtml(event.context)}</dd></div>
+              <div class="definition-row"><dt>Mode</dt><dd>Listening</dd></div>
+              <div class="definition-row"><dt>Device</dt><dd>${escapeHtml($("#activity-device").textContent)}</dd></div>
+              <div class="definition-row"><dt>Persisted</dt><dd>Metadata only · no captured audio</dd></div>
+            </dl>
+          </div>
+        `;
+      }
+
+      $("#event-filter").addEventListener("change", renderEvents);
+      $("#copy-diagnostics").addEventListener("click", () => showToast("Diagnostic summary copied (prototype)"));
+
+      $("#listening-control").addEventListener("click", () => {
+        const label = $("#listening-label");
+        const sleeping = label.textContent === "SLEEPING";
+        label.textContent = sleeping ? "LISTENING" : "SLEEPING";
+        $("#listening-dot").style.background = sleeping ? "var(--positive)" : "var(--muted)";
+        showToast(sleeping ? "Command listening resumed" : "Sleeping · Option dictation remains available");
+      });
+
+      $("#device-select").addEventListener("change", (event) => {
+        $("#global-device").textContent = event.target.value;
+        $("#activity-device").textContent = event.target.value;
+        renderEventInspector();
+        showToast(`Input set to ${event.target.value}`);
+      });
+
+      $$(".permission-action").forEach((button) => button.addEventListener("click", () => showToast("Would open macOS Privacy & Security")));
+      $("#open-data-folder").addEventListener("click", () => showToast("Would open ~/Library/Application Support/voice-control/"));
+
+      setInterval(() => {
+        if (!recordingActive) return;
+        elapsedSeconds += 1;
+        const formatted = formatElapsed(elapsedSeconds);
+        $("#global-recording-time").textContent = formatted;
+        $("#detail-recording-time").textContent = formatted;
+        const meeting = meetings.find((candidate) => candidate.id === "design-sync");
+        meeting.duration = formatted;
+      }, 1000);
+
+      renderMeetingList();
+      selectMeeting(selectedMeetingId);
+      renderCommands();
+      renderEvents();
+    </script>
+  </body>
+</html>
