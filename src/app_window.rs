@@ -296,18 +296,10 @@ impl AppWindow {
             .h_full()
             .flex_none()
             .px_3()
-            .pt_6()
+            .pt(px(68.0))
             .bg(rgb(SIDEBAR))
             .border_r_1()
             .border_color(rgb(LINE))
-            .child(
-                div()
-                    .px_2()
-                    .pb_6()
-                    .text_size(px(15.0))
-                    .font_weight(FontWeight::BOLD)
-                    .child("HEX"),
-            )
             .child(div().flex().flex_col().gap_1().children(items))
             .into_any_element()
     }

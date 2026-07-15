@@ -12,6 +12,7 @@ struct Uniforms {
     float average;
     float peak;
     float processing;
+    float completion;
 };
 
 struct VertexOutput {
@@ -73,6 +74,9 @@ fragment float4 indicator_fragment(
     float4 result = 0.0;
 
     float processing = clamp(uniforms.processing, 0.0, 1.0);
+    float completion = clamp(uniforms.completion, 0.0, 1.0);
+    float completion_flash = smoothstep(0.0, 0.16, completion)
+        * (1.0 - smoothstep(0.32, 1.0, completion));
     float recording = 1.0 - processing;
     float circularity = 1.0 - smoothstep(0.5, 2.25, abs(uniforms.width - uniforms.height));
 
@@ -87,6 +91,7 @@ fragment float4 indicator_fragment(
         glow(distance, 4.0 + lifecycle_softness * 0.5) * average_power * 0.72
         + glow(distance, 8.0 + lifecycle_softness) * average_power * 0.36);
     outer += processing * glow(distance, 6.0 + lifecycle_softness) * 0.13;
+    outer += glow(distance, 10.0 + lifecycle_softness) * completion_flash * 0.32;
     composite(result, accent, outer * (1.0 - shape));
 
     float3 recording_base = mix(
@@ -154,8 +159,11 @@ fragment float4 indicator_fragment(
         composite(
             result,
             float3(0.7, 0.87, 1.0),
-            sweep * orb_mask * sweep_reveal * 0.68 * detail_clarity);
+            sweep * orb_mask * sweep_reveal * (1.0 - smoothstep(0.0, 0.5, completion))
+                * 0.68 * detail_clarity);
     }
+
+    screen(result, float3(0.72, 0.88, 1.0), shape * completion_flash * 0.42);
 
     float stroke = coverage(
         abs(distance) - 0.5,

@@ -27,11 +27,11 @@ const WINDOW_HEIGHT: f32 = 64.0;
 const CAPSULE_WIDTH: f32 = 56.0;
 const CAPSULE_HEIGHT: f32 = 16.0;
 const TOP_OFFSET: f64 = 12.0;
-const ENTRANCE_ANGULAR_FREQUENCY: f32 = 32.0;
-const EXIT_ANGULAR_FREQUENCY: f32 = 30.0;
+const ENTRANCE_ANGULAR_FREQUENCY: f32 = 24.0;
+const EXIT_ANGULAR_FREQUENCY: f32 = 24.0;
 const GEOMETRY_ANGULAR_FREQUENCY: f32 = 24.0;
-const HIDDEN_SCALE: f32 = 0.94;
-const HIDDEN_SOFTNESS: f32 = 2.0;
+const HIDDEN_SCALE: f32 = 0.82;
+const HIDDEN_SOFTNESS: f32 = 4.0;
 
 #[derive(Clone, Copy, Debug)]
 pub enum DictationIndicatorEvent {
@@ -336,7 +336,8 @@ enum Phase {
 impl Phase {
     fn visible_duration(self) -> Option<Duration> {
         match self {
-            Self::Completed | Self::Cancelled => Some(Duration::ZERO),
+            Self::Completed => Some(Duration::from_millis(240)),
+            Self::Cancelled => Some(Duration::ZERO),
             Self::Failed => Some(Duration::from_millis(600)),
             _ => None,
         }
@@ -356,6 +357,7 @@ struct Uniforms {
     average: f32,
     peak: f32,
     processing: f32,
+    completion: f32,
 }
 
 struct MetalRenderer {
@@ -603,6 +605,11 @@ impl MetalRenderer {
             average: self.average.value.clamp(0.0, 1.0),
             peak: self.peak.value.clamp(0.0, 1.0),
             processing: self.processing.value.clamp(0.0, 1.0),
+            completion: if matches!(self.phase, Phase::Completed) {
+                (elapsed.as_secs_f32() / 0.24).clamp(0.0, 1.0)
+            } else {
+                0.0
+            },
         };
         encoder.set_fragment_bytes(
             0,
@@ -673,12 +680,12 @@ mod tests {
     }
 
     #[test]
-    fn entrance_reaches_recording_state_in_about_200ms_without_overshoot() {
+    fn entrance_reaches_recording_state_in_about_250ms_without_overshoot() {
         let simulate = |frame_rate: usize| {
             let mut opacity = Spring::new(0.0);
             let mut scale = Spring::new(HIDDEN_SCALE);
             let mut softness = Spring::new(HIDDEN_SOFTNESS);
-            for _ in 0..frame_rate / 5 {
+            for _ in 0..frame_rate / 4 {
                 let dt = 1.0 / frame_rate as f32;
                 opacity.step_critical(1.0, dt, ENTRANCE_ANGULAR_FREQUENCY);
                 scale.step_critical(1.0, dt, ENTRANCE_ANGULAR_FREQUENCY);
@@ -695,19 +702,19 @@ mod tests {
         assert!((at_60_hz.0 - at_120_hz.0).abs() < 0.000_01);
         assert!((at_60_hz.1 - at_120_hz.1).abs() < 0.000_01);
         assert!((at_60_hz.2 - at_120_hz.2).abs() < 0.000_01);
-        assert!(at_60_hz.0 >= 0.985);
-        assert!(at_60_hz.1 >= 0.998);
-        assert!(at_60_hz.2 <= 0.04);
+        assert!(at_60_hz.0 >= 0.98);
+        assert!(at_60_hz.1 >= 0.996);
+        assert!(at_60_hz.2 <= 0.08);
     }
 
     #[test]
-    fn lifecycle_exit_is_monotonic_and_visually_gone_in_about_200ms() {
+    fn lifecycle_exit_is_monotonic_and_visually_gone_in_about_250ms() {
         let mut opacity = Spring::new(1.0);
         let mut scale = Spring::new(1.0);
         let mut softness = Spring::new(0.0);
         let mut previous = (opacity.value, scale.value, softness.value);
 
-        for _ in 0..12 {
+        for _ in 0..15 {
             opacity.step_critical(0.0, 1.0 / 60.0, EXIT_ANGULAR_FREQUENCY);
             scale.step_critical(HIDDEN_SCALE, 1.0 / 60.0, EXIT_ANGULAR_FREQUENCY);
             softness.step_critical(HIDDEN_SOFTNESS, 1.0 / 60.0, EXIT_ANGULAR_FREQUENCY);
@@ -718,8 +725,16 @@ mod tests {
         }
 
         assert!(opacity.value < 0.02);
-        assert!((scale.value - HIDDEN_SCALE).abs() < 0.002);
-        assert!((softness.value - HIDDEN_SOFTNESS).abs() < 0.04);
+        assert!((scale.value - HIDDEN_SCALE).abs() < 0.004);
+        assert!((softness.value - HIDDEN_SOFTNESS).abs() < 0.08);
+    }
+
+    #[test]
+    fn completion_has_a_visible_bloom_before_exit() {
+        assert_eq!(
+            Phase::Completed.visible_duration(),
+            Some(Duration::from_millis(240))
+        );
     }
 
     #[test]
