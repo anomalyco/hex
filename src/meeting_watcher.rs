@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::mpsc::{self, Receiver, SyncSender};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
@@ -38,16 +38,26 @@ enum ControllerCommand {
 
 enum ControllerEvent {
     Offer(MeetingCandidate),
-    RecordingStarted { title: String },
+    Starting,
+    RecordingStarted,
     Transcribing,
-    Finished { meeting_id: String },
+    Finished,
     Failed { title: String, error: String },
 }
 
 struct ActiveRecording {
     title: String,
     stop: Arc<AtomicBool>,
+    started: Receiver<()>,
+    reported_started: bool,
     worker: JoinHandle<Result<meeting::MeetingManifest>>,
+}
+
+struct MeetingUi {
+    commands: SyncSender<ControllerCommand>,
+    app_window: Rc<RefCell<Option<WindowHandle<AppWindow>>>>,
+    event_path: PathBuf,
+    meeting_requests: SyncSender<MeetingRequest>,
 }
 
 pub struct ListenerConfig {
@@ -69,10 +79,17 @@ pub fn run(
     let app_event_path = listener
         .as_ref()
         .map(|listener| listener.event_path.clone());
+    let meeting_project_root = listener
+        .as_ref()
+        .map(|listener| listener.project_root.clone())
+        .unwrap_or(std::env::current_dir()?);
+    let shell_event_path = app_event_path
+        .clone()
+        .unwrap_or_else(|| meeting_project_root.join("logs/live.ndjson"));
     let show_app_on_launch = app_event_path.is_some() && !dictation_preview;
-    let (event_sender, event_receiver) = mpsc::channel();
-    let (command_sender, command_receiver) = mpsc::channel();
-    let (meeting_request_sender, meeting_request_receiver) = mpsc::channel();
+    let (event_sender, event_receiver) = mpsc::sync_channel(32);
+    let (command_sender, command_receiver) = mpsc::sync_channel(8);
+    let (meeting_request_sender, meeting_request_receiver) = mpsc::sync_channel(8);
     let (indicator_sender, indicator_receiver) = dictation_indicator::channel();
     if dictation_preview {
         let preview_sender = indicator_sender.clone();
@@ -107,6 +124,7 @@ pub fn run(
             controller_events.clone(),
             command_receiver,
             meeting_request_receiver,
+            meeting_project_root,
         ) {
             tracing::error!(%error, "meeting controller stopped");
             let _ = controller_events.send(ControllerEvent::Failed {
@@ -138,19 +156,17 @@ pub fn run(
 
     let app_window = Rc::new(RefCell::new(None::<WindowHandle<AppWindow>>));
     let reopen_window = app_window.clone();
-    let reopen_event_path = app_event_path.clone();
+    let reopen_event_path = shell_event_path.clone();
     let reopen_meeting_requests = meeting_request_sender.clone();
     let application = Application::new();
     application.on_reopen(move |cx| {
-        if let Some(event_path) = reopen_event_path.clone()
-            && let Err(error) = crate::app_window::open_or_focus(
-                &reopen_window,
-                event_path,
-                config::voice_control(),
-                reopen_meeting_requests.clone(),
-                cx,
-            )
-        {
+        if let Err(error) = crate::app_window::open_or_focus(
+            &reopen_window,
+            reopen_event_path.clone(),
+            config::voice_control(),
+            reopen_meeting_requests.clone(),
+            cx,
+        ) {
             tracing::error!(%error, "could not open HEX");
         }
     });
@@ -178,7 +194,12 @@ pub fn run(
             drive_ui(
                 event_receiver,
                 indicator_receiver,
-                command_sender,
+                MeetingUi {
+                    commands: command_sender,
+                    app_window: app_window.clone(),
+                    event_path: shell_event_path.clone(),
+                    meeting_requests: meeting_request_sender.clone(),
+                },
                 shutdown,
                 cx,
             )
@@ -201,12 +222,11 @@ pub fn run(
 async fn drive_ui(
     events: Receiver<ControllerEvent>,
     indicator_events: Receiver<crate::dictation_indicator::DictationIndicatorEvent>,
-    commands: Sender<ControllerCommand>,
+    ui: MeetingUi,
     shutdown: &AtomicBool,
     cx: &mut gpui::AsyncApp,
 ) {
     let mut offer_window: Option<WindowHandle<MeetingOffer>> = None;
-    let mut status_window: Option<WindowHandle<RecordingStatus>> = None;
     let mut dictation_indicator = DictationIndicatorUi::new();
 
     loop {
@@ -225,30 +245,61 @@ async fn drive_ui(
             let result = cx.update(|cx| match event {
                 ControllerEvent::Offer(candidate) => {
                     close_window(offer_window.take(), cx);
-                    offer_window = open_offer(candidate, commands.clone(), cx).ok();
+                    offer_window = open_offer(candidate, ui.commands.clone(), cx).ok();
                 }
-                ControllerEvent::RecordingStarted { title } => {
+                ControllerEvent::Starting => {
                     close_window(offer_window.take(), cx);
-                    close_window(status_window.take(), cx);
-                    status_window = open_status(title, commands.clone(), cx).ok();
-                }
-                ControllerEvent::Transcribing => {
-                    update_status(&status_window, cx, |status| {
-                        status.phase = RecordingPhase::Transcribing;
+                    if let Err(error) = crate::app_window::open_or_focus(
+                        &ui.app_window,
+                        ui.event_path.clone(),
+                        config::voice_control(),
+                        ui.meeting_requests.clone(),
+                        cx,
+                    ) {
+                        tracing::error!(%error, "could not open HEX for starting meeting");
+                    }
+                    update_app_window(&ui.app_window, cx, |window, cx| {
+                        window.meeting_starting(cx);
                     });
                 }
-                ControllerEvent::Finished { meeting_id } => {
-                    update_status(&status_window, cx, |status| {
-                        status.phase = RecordingPhase::Complete { meeting_id };
+                ControllerEvent::RecordingStarted => {
+                    close_window(offer_window.take(), cx);
+                    if let Err(error) = crate::app_window::open_or_focus(
+                        &ui.app_window,
+                        ui.event_path.clone(),
+                        config::voice_control(),
+                        ui.meeting_requests.clone(),
+                        cx,
+                    ) {
+                        tracing::error!(%error, "could not open HEX for active meeting");
+                    }
+                    update_app_window(&ui.app_window, cx, |window, cx| {
+                        window.meeting_started(cx);
+                    });
+                }
+                ControllerEvent::Transcribing => {
+                    update_app_window(&ui.app_window, cx, |window, cx| {
+                        window.meeting_updated(cx);
+                    });
+                }
+                ControllerEvent::Finished => {
+                    update_app_window(&ui.app_window, cx, |window, cx| {
+                        window.meeting_finished(cx);
                     });
                 }
                 ControllerEvent::Failed { title, error } => {
                     close_window(offer_window.take(), cx);
-                    if status_window.is_none() {
-                        status_window = open_status(title, commands.clone(), cx).ok();
+                    if let Err(open_error) = crate::app_window::open_or_focus(
+                        &ui.app_window,
+                        ui.event_path.clone(),
+                        config::voice_control(),
+                        ui.meeting_requests.clone(),
+                        cx,
+                    ) {
+                        tracing::error!(%open_error, "could not open HEX for meeting failure");
                     }
-                    update_status(&status_window, cx, |status| {
-                        status.phase = RecordingPhase::Failed { error };
+                    update_app_window(&ui.app_window, cx, |window, cx| {
+                        window.meeting_failed(title, error, cx);
                     });
                 }
             });
@@ -263,9 +314,10 @@ async fn drive_ui(
 
 fn controller_loop(
     shutdown: &AtomicBool,
-    events: Sender<ControllerEvent>,
+    events: SyncSender<ControllerEvent>,
     commands: Receiver<ControllerCommand>,
     meeting_requests: Receiver<MeetingRequest>,
+    project_root: PathBuf,
 ) -> Result<()> {
     let mut detector = MeetingDetector::default();
     let mut recording: Option<ActiveRecording> = None;
@@ -273,39 +325,61 @@ fn controller_loop(
     tracing::info!("GPUI meeting watcher started");
 
     while !shutdown.load(Ordering::Relaxed) {
-        let requested_commands = meeting_requests.try_iter().map(|request| match request {
-            MeetingRequest::Start => ControllerCommand::Record(MeetingCandidate {
-                key: "manual".into(),
-                title: "Meeting".into(),
-                source: MeetingSource::Manual,
-            }),
-            MeetingRequest::Stop => ControllerCommand::Stop,
-        });
-        for command in commands.try_iter().chain(requested_commands) {
+        let requested_commands = meeting_requests
+            .try_iter()
+            .take(8)
+            .map(|request| match request {
+                MeetingRequest::Start => ControllerCommand::Record(MeetingCandidate {
+                    key: "manual".into(),
+                    title: "Meeting".into(),
+                    source: MeetingSource::Manual,
+                }),
+                MeetingRequest::Stop => ControllerCommand::Stop,
+            });
+        for command in commands.try_iter().take(8).chain(requested_commands) {
             match command {
                 ControllerCommand::Record(candidate) if recording.is_none() => {
                     let stop = Arc::new(AtomicBool::new(false));
                     let worker_stop = stop.clone();
+                    let (started_sender, started) = mpsc::sync_channel(1);
                     let title = candidate.title;
                     let worker_title = title.clone();
-                    let worker =
-                        thread::spawn(move || meeting::record(Some(worker_title), &worker_stop));
-                    let _ = events.send(ControllerEvent::RecordingStarted {
-                        title: title.clone(),
+                    let worker_project_root = project_root.clone();
+                    let worker = thread::spawn(move || {
+                        meeting::record(
+                            Some(worker_title),
+                            &worker_stop,
+                            &worker_project_root,
+                            Some(started_sender),
+                        )
                     });
+                    let _ = events.send(ControllerEvent::Starting);
                     recording = Some(ActiveRecording {
                         title,
                         stop,
+                        started,
+                        reported_started: false,
                         worker,
                     });
                 }
                 ControllerCommand::Stop => {
-                    if let Some(active) = &recording {
-                        active.stop.store(true, Ordering::Relaxed);
+                    if let Some(active) = &recording
+                        && !active.stop.swap(true, Ordering::Relaxed)
+                    {
                         let _ = events.send(ControllerEvent::Transcribing);
                     }
                 }
                 ControllerCommand::Dismiss | ControllerCommand::Record(_) => {}
+            }
+        }
+
+        if let Some(active) = &mut recording
+            && !active.reported_started
+            && active.started.try_recv().is_ok()
+        {
+            active.reported_started = true;
+            if !active.stop.load(Ordering::Relaxed) {
+                let _ = events.send(ControllerEvent::RecordingStarted);
             }
         }
 
@@ -317,9 +391,7 @@ fn controller_loop(
                 .take()
                 .ok_or_else(|| eyre!("recording disappeared"))?;
             let event = match active.worker.join() {
-                Ok(Ok(manifest)) => ControllerEvent::Finished {
-                    meeting_id: manifest.id,
-                },
+                Ok(Ok(_manifest)) => ControllerEvent::Finished,
                 Ok(Err(error)) => ControllerEvent::Failed {
                     title: active.title,
                     error: error.to_string(),
@@ -420,7 +492,7 @@ fn popup_options(cx: &App) -> WindowOptions {
 
 fn open_offer(
     candidate: MeetingCandidate,
-    commands: Sender<ControllerCommand>,
+    commands: SyncSender<ControllerCommand>,
     cx: &mut App,
 ) -> gpui::Result<WindowHandle<MeetingOffer>> {
     cx.open_window(popup_options(cx), |_, cx| {
@@ -428,16 +500,6 @@ fn open_offer(
             candidate,
             commands,
         })
-    })
-}
-
-fn open_status(
-    title: String,
-    commands: Sender<ControllerCommand>,
-    cx: &mut App,
-) -> gpui::Result<WindowHandle<RecordingStatus>> {
-    cx.open_window(popup_options(cx), |_, cx| {
-        cx.new(|cx| RecordingStatus::new(title, commands, cx))
     })
 }
 
@@ -449,24 +511,19 @@ fn close_window<T: Render + 'static>(window: Option<WindowHandle<T>>, cx: &mut A
     }
 }
 
-fn update_status(
-    window: &Option<WindowHandle<RecordingStatus>>,
+fn update_app_window(
+    app_window: &Rc<RefCell<Option<WindowHandle<AppWindow>>>>,
     cx: &mut App,
-    update: impl FnOnce(&mut RecordingStatus),
+    update: impl FnOnce(&mut AppWindow, &mut Context<AppWindow>),
 ) {
-    if let Some(window) = window {
-        window
-            .update(cx, |status, _, cx| {
-                update(status);
-                cx.notify();
-            })
-            .ok();
+    if let Some(window) = app_window.borrow().as_ref().copied() {
+        window.update(cx, |window, _, cx| update(window, cx)).ok();
     }
 }
 
 struct MeetingOffer {
     candidate: MeetingCandidate,
-    commands: Sender<ControllerCommand>,
+    commands: SyncSender<ControllerCommand>,
 }
 
 impl Render for MeetingOffer {
@@ -502,8 +559,9 @@ impl Render for MeetingOffer {
                     .justify_end()
                     .gap_2()
                     .child(secondary_button("not-now", "Not Now", move |window| {
-                        let _ = dismiss.send(ControllerCommand::Dismiss);
-                        window.remove_window();
+                        if dismiss.try_send(ControllerCommand::Dismiss).is_ok() {
+                            window.remove_window();
+                        }
                     }))
                     .child(primary_button("record", "Record Locally", move |window| {
                         let command = if is_preview {
@@ -511,108 +569,11 @@ impl Render for MeetingOffer {
                         } else {
                             ControllerCommand::Record(candidate.clone())
                         };
-                        let _ = record.send(command);
-                        window.remove_window();
-                    })),
-            )
-    }
-}
-
-enum RecordingPhase {
-    Recording { started: Instant },
-    Transcribing,
-    Complete { meeting_id: String },
-    Failed { error: String },
-}
-
-struct RecordingStatus {
-    title: String,
-    phase: RecordingPhase,
-    commands: Sender<ControllerCommand>,
-}
-
-impl RecordingStatus {
-    fn new(title: String, commands: Sender<ControllerCommand>, cx: &mut Context<Self>) -> Self {
-        cx.spawn(async move |status, cx| {
-            loop {
-                Timer::after(Duration::from_secs(1)).await;
-                if status
-                    .update(cx, |status, cx| {
-                        if matches!(status.phase, RecordingPhase::Recording { .. }) {
-                            cx.notify();
-                        }
-                    })
-                    .is_err()
-                {
-                    break;
-                }
-            }
-        })
-        .detach();
-        Self {
-            title,
-            phase: RecordingPhase::Recording {
-                started: Instant::now(),
-            },
-            commands,
-        }
-    }
-}
-
-impl Render for RecordingStatus {
-    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
-        let stop = self.commands.clone();
-        let (eyebrow, detail, action) = match &self.phase {
-            RecordingPhase::Recording { started } => (
-                "RECORDING",
-                format!("Mic + Computer Audio  ·  {}", elapsed(*started)),
-                Some(("stop", "Stop Recording")),
-            ),
-            RecordingPhase::Transcribing => (
-                "TRANSCRIBING",
-                "Audio is saved locally. Building the transcript...".into(),
-                None,
-            ),
-            RecordingPhase::Complete { meeting_id } => (
-                "READY",
-                format!("Transcript saved with meeting {meeting_id}"),
-                Some(("close-ready", "Close")),
-            ),
-            RecordingPhase::Failed { error } => (
-                "NEEDS ATTENTION",
-                error.clone(),
-                Some(("close-error", "Close")),
-            ),
-        };
-
-        panel()
-            .child(header(eyebrow))
-            .child(
-                div()
-                    .text_size(px(18.0))
-                    .font_weight(gpui::FontWeight::SEMIBOLD)
-                    .text_color(rgb(0xf1f1f1))
-                    .child(self.title.clone()),
-            )
-            .child(
-                div()
-                    .flex_1()
-                    .text_sm()
-                    .text_color(rgb(0x9a9a9a))
-                    .child(detail),
-            )
-            .children(action.map(|(id, label)| {
-                div()
-                    .flex()
-                    .justify_end()
-                    .child(primary_button(id, label, move |window| {
-                        if id == "stop" {
-                            let _ = stop.send(ControllerCommand::Stop);
-                        } else {
+                        if record.try_send(command).is_ok() {
                             window.remove_window();
                         }
-                    }))
-            }))
+                    })),
+            )
     }
 }
 
@@ -685,11 +646,6 @@ fn button(
         .active(|style| style.opacity(0.8))
         .child(label)
         .on_click(move |_, window, _| on_click(window))
-}
-
-fn elapsed(started: Instant) -> String {
-    let elapsed = started.elapsed().as_secs();
-    format!("{:02}:{:02}", elapsed / 60, elapsed % 60)
 }
 
 pub fn probe() -> Result<()> {

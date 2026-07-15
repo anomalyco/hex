@@ -48,9 +48,10 @@ chunks locally, and exposes merged source-labeled transcripts in the dashboard.
 
 The signed HEX app observes CoreAudio process input state for supported
 meeting applications, debounces activations, and offers explicit Record/Not Now
-actions in a non-activating GPUI panel. Recording remains opt-in; the same panel
-becomes a visible recording timer, Stop control, transcription state, and
-terminal outcome.
+actions in a non-activating GPUI panel. Recording remains opt-in. Once recording
+starts, the Meetings pane owns the timer, Stop control, source-separated
+Moonshine live draft, Parakeet finalization state, and atomically published final
+transcript. The live draft remains available when final transcription fails.
 
 Next priorities are local EventKit correlation for calendar titles and scheduled
 reminders, asking whether to stop when a meeting application's microphone becomes

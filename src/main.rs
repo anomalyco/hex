@@ -154,7 +154,7 @@ fn main() -> Result<()> {
         Command::Status => dashboard::run(event_path, config::voice_control()),
         Command::Meeting {
             command: MeetingCommand::Record { title },
-        } => meeting::record(title, &SHUTDOWN).map(|_| ()),
+        } => meeting::record(title, &SHUTDOWN, &root, None).map(|_| ()),
         Command::Meeting {
             command: MeetingCommand::List,
         } => {

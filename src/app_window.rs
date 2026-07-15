@@ -3,12 +3,13 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command as ProcessCommand;
 use std::rc::Rc;
-use std::sync::mpsc::Sender;
+use std::sync::mpsc::{SyncSender, TrySendError};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use gpui::{
-    AnyElement, App, Bounds, Context, FontWeight, IntoElement, Render, Rgba, TitlebarOptions,
-    Window, WindowBounds, WindowHandle, WindowOptions, div, prelude::*, px, rgb, size,
+    AnyElement, App, Bounds, Context, FontWeight, IntoElement, Render, Rgba, ScrollHandle, Timer,
+    TitlebarOptions, Window, WindowBounds, WindowHandle, WindowOptions, div, prelude::*, px, rgb,
+    size,
 };
 
 use crate::app_settings::AppSettings;
@@ -40,7 +41,7 @@ pub fn open_or_focus(
     app_window: &Rc<RefCell<Option<WindowHandle<AppWindow>>>>,
     event_path: PathBuf,
     commands: CommandConfig,
-    meeting_requests: Sender<MeetingRequest>,
+    meeting_requests: SyncSender<MeetingRequest>,
     cx: &mut App,
 ) -> gpui::Result<WindowHandle<AppWindow>> {
     if let Some(handle) = app_window.borrow().as_ref().copied()
@@ -70,7 +71,7 @@ pub fn open_or_focus(
             window_min_size: Some(size(px(MINIMUM_WIDTH), px(MINIMUM_HEIGHT))),
             ..Default::default()
         },
-        |_, cx| cx.new(|_| AppWindow::new(event_path, commands, meeting_requests)),
+        |_, cx| cx.new(|cx| AppWindow::new(event_path, commands, meeting_requests, cx)),
     )?;
     *app_window.borrow_mut() = Some(handle);
     cx.activate(true);
@@ -132,7 +133,7 @@ impl ContextFilter {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 struct TranscriptLine {
     source: String,
     text: String,
@@ -203,13 +204,19 @@ impl ToggleSpring {
 pub struct AppWindow {
     pane: Pane,
     event_path: PathBuf,
-    meeting_requests: Sender<MeetingRequest>,
+    meeting_requests: SyncSender<MeetingRequest>,
     settings: AppSettings,
     sound_toggle: ToggleSpring,
     meetings: Vec<MeetingManifest>,
     meetings_error: Option<String>,
+    meeting_runtime_error: Option<String>,
+    meeting_refresh_started_ms: Option<u64>,
+    meeting_stop_pending: bool,
     selected_meeting: Option<String>,
     meeting_transcript: MeetingTranscript,
+    meeting_transcript_id: Option<String>,
+    meeting_transcript_reader: meeting::TranscriptReader,
+    meeting_transcript_scroll: ScrollHandle,
     commands: Vec<CatalogCommand>,
     command_filter: ContextFilter,
     selected_command: Option<&'static str>,
@@ -223,8 +230,28 @@ impl AppWindow {
     fn new(
         event_path: PathBuf,
         commands: CommandConfig,
-        meeting_requests: Sender<MeetingRequest>,
+        meeting_requests: SyncSender<MeetingRequest>,
+        cx: &mut Context<Self>,
     ) -> Self {
+        cx.spawn(async move |window, cx| {
+            loop {
+                Timer::after(Duration::from_millis(500)).await;
+                if window
+                    .update(cx, |window, cx| {
+                        if window.meeting_refresh_started_ms.is_some()
+                            || active_meeting(&window.meetings).is_some()
+                        {
+                            window.reload_meetings();
+                            cx.notify();
+                        }
+                    })
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        })
+        .detach();
         let settings = AppSettings::load().unwrap_or_else(|error| {
             tracing::error!(%error, "could not load app settings");
             AppSettings::default()
@@ -249,8 +276,14 @@ impl AppWindow {
             settings,
             meetings: Vec::new(),
             meetings_error: None,
+            meeting_runtime_error: None,
+            meeting_refresh_started_ms: None,
+            meeting_stop_pending: false,
             selected_meeting: None,
             meeting_transcript: MeetingTranscript::Empty,
+            meeting_transcript_id: None,
+            meeting_transcript_reader: meeting::TranscriptReader::default(),
+            meeting_transcript_scroll: ScrollHandle::new(),
             commands,
             command_filter: ContextFilter::All,
             selected_command: None,
@@ -260,6 +293,9 @@ impl AppWindow {
             selected_event: None,
         };
         window.reload_meetings();
+        if active_meeting(&window.meetings).is_some() {
+            window.pane = Pane::Meetings;
+        }
         window.reload_events();
         window
     }
@@ -272,10 +308,83 @@ impl AppWindow {
         cx.notify();
     }
 
+    pub fn meeting_starting(&mut self, cx: &mut Context<Self>) {
+        self.meeting_runtime_error = None;
+        self.meeting_refresh_started_ms = Some(now_ms());
+        self.meeting_stop_pending = false;
+        self.pane = Pane::Meetings;
+        self.reload_meetings();
+        cx.notify();
+    }
+
+    pub fn meeting_started(&mut self, cx: &mut Context<Self>) {
+        self.meeting_refresh_started_ms = None;
+        self.reload_meetings();
+        cx.notify();
+    }
+
+    pub fn meeting_updated(&mut self, cx: &mut Context<Self>) {
+        self.meeting_stop_pending = true;
+        self.reload_meetings();
+        cx.notify();
+    }
+
+    pub fn meeting_finished(&mut self, cx: &mut Context<Self>) {
+        self.meeting_refresh_started_ms = None;
+        self.meeting_stop_pending = false;
+        self.reload_meetings();
+        cx.notify();
+    }
+
+    pub fn meeting_failed(&mut self, title: String, error: String, cx: &mut Context<Self>) {
+        self.meeting_runtime_error = Some(format!("{title}: {error}"));
+        self.meeting_refresh_started_ms = None;
+        self.meeting_stop_pending = false;
+        self.pane = Pane::Meetings;
+        self.reload_meetings();
+        if let Some(failed) = self
+            .meetings
+            .iter()
+            .find(|meeting| meeting.status == MeetingStatus::Failed && meeting.title == title)
+        {
+            self.selected_meeting = Some(failed.id.clone());
+            self.load_selected_meeting();
+        }
+        cx.notify();
+    }
+
     fn reload_meetings(&mut self) {
         match meeting::list() {
             Ok(meetings) => {
+                let previous_active = active_meeting(&self.meetings).map(|meeting| &meeting.id);
+                let next_active = active_meeting(&meetings).map(|meeting| meeting.id.clone());
+                if next_active.as_deref() != previous_active.map(String::as_str)
+                    && next_active.is_some()
+                {
+                    self.selected_meeting = next_active;
+                }
+                if active_meeting(&meetings).is_none()
+                    && (previous_active.is_some()
+                        || self.meeting_refresh_started_ms.is_some_and(|started| {
+                            meetings.iter().any(|meeting| {
+                                meeting.created_at_ms >= started
+                                    && matches!(
+                                        meeting.status,
+                                        MeetingStatus::Complete
+                                            | MeetingStatus::Interrupted
+                                            | MeetingStatus::Failed
+                                    )
+                            })
+                        }))
+                {
+                    self.meeting_refresh_started_ms = None;
+                }
                 self.meetings = meetings;
+                if active_meeting(&self.meetings)
+                    .is_none_or(|meeting| meeting.status == MeetingStatus::Transcribing)
+                {
+                    self.meeting_stop_pending = false;
+                }
                 self.meetings_error = None;
                 if self
                     .selected_meeting
@@ -296,14 +405,52 @@ impl AppWindow {
     }
 
     fn load_selected_meeting(&mut self) {
-        let Some(id) = self.selected_meeting.as_deref() else {
+        let Some(id) = self.selected_meeting.clone() else {
             self.meeting_transcript = MeetingTranscript::Empty;
+            self.meeting_transcript_id = None;
             return;
         };
-        self.meeting_transcript = match meeting::show(id) {
-            Ok(markdown) => MeetingTranscript::Loaded(parse_transcript(&markdown)),
+        let selection_changed = self.meeting_transcript_id.as_deref() != Some(&id);
+        if selection_changed {
+            self.meeting_transcript_id = Some(id.clone());
+            self.meeting_transcript_scroll = ScrollHandle::new();
+        }
+        let previous_lines = match &self.meeting_transcript {
+            MeetingTranscript::Loaded(lines) if !selection_changed => Some(lines.clone()),
+            MeetingTranscript::Empty
+            | MeetingTranscript::Loaded(_)
+            | MeetingTranscript::Unavailable(_) => None,
+        };
+        let was_following = previous_lines.as_ref().is_none_or(|lines| {
+            lines.is_empty()
+                || self.meeting_transcript_scroll.max_offset().height
+                    + self.meeting_transcript_scroll.offset().y
+                    <= px(48.0)
+        });
+        self.meeting_transcript = match self.meeting_transcript_reader.read(&id) {
+            Ok(entries) => MeetingTranscript::Loaded(
+                entries
+                    .into_iter()
+                    .map(|entry| TranscriptLine {
+                        source: format!(
+                            "{} {}",
+                            format_duration(entry.start_ms),
+                            entry.source.label()
+                        ),
+                        text: entry.text,
+                    })
+                    .collect(),
+            ),
             Err(error) => MeetingTranscript::Unavailable(error.to_string()),
         };
+        if !selection_changed
+            && matches!(
+                &self.meeting_transcript,
+                MeetingTranscript::Loaded(lines) if was_following && previous_lines.as_ref() != Some(lines)
+            )
+        {
+            self.meeting_transcript_scroll.scroll_to_bottom();
+        }
     }
 
     fn reload_events(&mut self) {
@@ -429,50 +576,63 @@ impl AppWindow {
     }
 
     fn render_meetings(&mut self, cx: &mut Context<Self>) -> AnyElement {
-        let refresh = div()
-            .id("refresh-meetings")
-            .h(px(30.0))
-            .px_3()
-            .flex()
-            .items_center()
-            .rounded_sm()
-            .bg(rgb(SURFACE))
-            .text_size(px(12.0))
-            .text_color(rgb(TEXT_SOFT))
-            .cursor_pointer()
-            .hover(|button| button.bg(rgb(SURFACE_HOVER)).text_color(rgb(TEXT)))
-            .child("Refresh")
-            .on_click(cx.listener(|this, _, _, cx| {
-                this.reload_meetings();
-                cx.notify();
-            }))
-            .into_any_element();
-        let start = div()
-            .id("start-meeting")
-            .h(px(30.0))
-            .px_3()
-            .flex()
-            .items_center()
-            .rounded_sm()
-            .bg(rgb(0xe8e8e8))
-            .text_size(px(12.0))
-            .font_weight(FontWeight::SEMIBOLD)
-            .text_color(rgb(0x171717))
-            .cursor_pointer()
-            .hover(|button| button.bg(rgb(0xffffff)))
-            .child("Start Recording")
-            .on_click(cx.listener(|this, _, _, _| {
-                if this.meeting_requests.send(MeetingRequest::Start).is_err() {
-                    tracing::error!("meeting controller is unavailable");
+        let action = if self.meeting_stop_pending {
+            meeting_progress_action("Finalizing...")
+        } else {
+            match active_meeting(&self.meetings).map(|meeting| meeting.status) {
+                Some(MeetingStatus::Starting) => meeting_progress_action("Starting..."),
+                Some(MeetingStatus::Recording) => div()
+                    .id("stop-meeting")
+                    .h(px(30.0))
+                    .px_3()
+                    .flex()
+                    .items_center()
+                    .rounded_sm()
+                    .bg(rgb(0xe8e8e8))
+                    .text_size(px(12.0))
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .text_color(rgb(0x171717))
+                    .cursor_pointer()
+                    .hover(|button| button.bg(rgb(0xffffff)))
+                    .child("Stop & Transcribe")
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.meeting_stop_pending = true;
+                        if let Err(error) = this.meeting_requests.try_send(MeetingRequest::Stop) {
+                            this.meeting_stop_pending = false;
+                            log_meeting_request_error(error);
+                        }
+                        cx.notify();
+                    }))
+                    .into_any_element(),
+                Some(MeetingStatus::Transcribing) => meeting_progress_action("Finalizing..."),
+                _ if self.meeting_refresh_started_ms.is_some() => {
+                    meeting_progress_action("Starting...")
                 }
-            }))
-            .into_any_element();
-        let actions = div()
-            .flex()
-            .items_center()
-            .gap_2()
-            .child(refresh)
-            .child(start);
+                _ => div()
+                    .id("start-meeting")
+                    .h(px(30.0))
+                    .px_3()
+                    .flex()
+                    .items_center()
+                    .rounded_sm()
+                    .bg(rgb(0xe8e8e8))
+                    .text_size(px(12.0))
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .text_color(rgb(0x171717))
+                    .cursor_pointer()
+                    .hover(|button| button.bg(rgb(0xffffff)))
+                    .child("Start Recording")
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.meeting_refresh_started_ms = Some(now_ms());
+                        if let Err(error) = this.meeting_requests.try_send(MeetingRequest::Start) {
+                            this.meeting_refresh_started_ms = None;
+                            log_meeting_request_error(error);
+                        }
+                        cx.notify();
+                    }))
+                    .into_any_element(),
+            }
+        };
 
         let rows: Vec<AnyElement> = self
             .meetings
@@ -482,7 +642,7 @@ impl AppWindow {
                 let id = meeting.id.clone();
                 let selected = self.selected_meeting.as_deref() == Some(id.as_str());
                 let title = meeting.title.clone();
-                let duration = format_duration(meeting.duration_ms.unwrap_or_default());
+                let duration = format_duration(meeting_duration(meeting));
                 let status = meeting_status(meeting.status);
                 div()
                     .id(("meeting", index))
@@ -544,7 +704,19 @@ impl AppWindow {
             .size_full()
             .flex()
             .flex_col()
-            .child(pane_header("Meetings", Some(actions.into_any_element())))
+            .child(pane_header("Meetings", Some(action)))
+            .when_some(self.meeting_runtime_error.clone(), |pane, error| {
+                pane.child(
+                    div()
+                        .px_6()
+                        .py_3()
+                        .border_b_1()
+                        .border_color(rgb(LINE))
+                        .text_size(px(12.0))
+                        .text_color(rgb(NEGATIVE))
+                        .child(error),
+                )
+            })
             .child(
                 div()
                     .id("meetings-workspace")
@@ -602,7 +774,23 @@ impl AppWindow {
         let transcript = match &self.meeting_transcript {
             MeetingTranscript::Empty => empty_message("No transcript selected."),
             MeetingTranscript::Loaded(lines) if lines.is_empty() => {
-                empty_message("The transcript is empty.")
+                empty_message(match meeting.status {
+                    MeetingStatus::Starting => "Preparing local audio capture...",
+                    MeetingStatus::Recording if meeting.live_transcription_error.is_some() => {
+                        "Live transcription is unavailable. Audio is still recording safely."
+                    }
+                    MeetingStatus::Recording if self.meeting_stop_pending => {
+                        "Building the final transcript..."
+                    }
+                    MeetingStatus::Recording => "Listening for speech...",
+                    MeetingStatus::Transcribing => {
+                        "The live draft is empty. Building the final transcript..."
+                    }
+                    MeetingStatus::Complete => "The final transcript is empty.",
+                    MeetingStatus::Interrupted | MeetingStatus::Failed => {
+                        "No recoverable transcript is available."
+                    }
+                })
             }
             MeetingTranscript::Loaded(lines) => div()
                 .children(lines.iter().enumerate().map(|(index, line)| {
@@ -636,6 +824,17 @@ impl AppWindow {
                 error_message("Transcript unavailable.", error.clone())
             }
         };
+        let transcript_state = match meeting.status {
+            MeetingStatus::Starting => "STARTING CAPTURE",
+            MeetingStatus::Recording if meeting.live_transcription_error.is_some() => {
+                "LIVE DRAFT UNAVAILABLE"
+            }
+            MeetingStatus::Recording if self.meeting_stop_pending => "FINALIZING WITH PARAKEET V2",
+            MeetingStatus::Recording => "LIVE DRAFT",
+            MeetingStatus::Transcribing => "FINALIZING WITH PARAKEET V2",
+            MeetingStatus::Complete => "FINAL TRANSCRIPT",
+            MeetingStatus::Interrupted | MeetingStatus::Failed => "RECOVERED DRAFT",
+        };
 
         div()
             .flex_1()
@@ -661,7 +860,7 @@ impl AppWindow {
                                 div()
                                     .text_size(px(20.0))
                                     .font_weight(FontWeight::SEMIBOLD)
-                                    .child(meeting.title),
+                                    .child(meeting.title.clone()),
                             )
                             .child(
                                 div()
@@ -669,11 +868,27 @@ impl AppWindow {
                                     .gap_4()
                                     .text_size(px(11.0))
                                     .text_color(rgb(MUTED))
-                                    .child(meeting_status(meeting.status))
-                                    .child(format_duration(
-                                        meeting.duration_ms.unwrap_or_default(),
-                                    )),
-                            ),
+                                    .child(
+                                        if self.meeting_stop_pending
+                                            && meeting.status == MeetingStatus::Recording
+                                        {
+                                            "Finalizing"
+                                        } else {
+                                            meeting_status(meeting.status)
+                                        },
+                                    )
+                                    .child(format_duration(meeting_duration(&meeting))),
+                            )
+                            .when_some(meeting.error.clone(), |header, error| {
+                                header.child(
+                                    div()
+                                        .max_w(px(620.0))
+                                        .text_size(px(11.0))
+                                        .line_height(px(17.0))
+                                        .text_color(rgb(NEGATIVE))
+                                        .child(error),
+                                )
+                            }),
                     )
                     .child(reveal),
             )
@@ -682,8 +897,33 @@ impl AppWindow {
                     .id("meeting-transcript")
                     .flex_1()
                     .overflow_y_scroll()
+                    .track_scroll(&self.meeting_transcript_scroll)
                     .px_6()
                     .pb_6()
+                    .child(
+                        div()
+                            .h(px(42.0))
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .text_size(px(10.0))
+                            .font_weight(FontWeight::BOLD)
+                            .text_color(rgb(MUTED))
+                            .when(
+                                meeting.status == MeetingStatus::Recording
+                                    && !self.meeting_stop_pending,
+                                |label| {
+                                    label
+                                        .child(div().size(px(6.0)).rounded_full().bg(rgb(0xd64f4f)))
+                                },
+                            )
+                            .child(transcript_state)
+                            .when_some(meeting.live_transcription_error.clone(), |label, error| {
+                                label.child(
+                                    div().text_color(rgb(NEGATIVE)).child(format!("  {error}")),
+                                )
+                            }),
+                    )
                     .child(transcript),
             )
             .into_any_element()
@@ -1257,12 +1497,58 @@ fn command_scope(scope: CommandScope) -> &'static str {
 
 fn meeting_status(status: MeetingStatus) -> &'static str {
     match status {
+        MeetingStatus::Starting => "Starting",
         MeetingStatus::Recording => "Recording",
-        MeetingStatus::Transcribing => "Transcribing",
+        MeetingStatus::Transcribing => "Finalizing",
         MeetingStatus::Complete => "Complete",
         MeetingStatus::Interrupted => "Interrupted",
         MeetingStatus::Failed => "Failed",
     }
+}
+
+fn meeting_progress_action(label: &'static str) -> AnyElement {
+    div()
+        .h(px(30.0))
+        .px_3()
+        .flex()
+        .items_center()
+        .rounded_sm()
+        .bg(rgb(SURFACE))
+        .text_size(px(12.0))
+        .text_color(rgb(MUTED))
+        .child(label)
+        .into_any_element()
+}
+
+fn active_meeting(meetings: &[MeetingManifest]) -> Option<&MeetingManifest> {
+    meetings.iter().find(|meeting| {
+        matches!(
+            meeting.status,
+            MeetingStatus::Starting | MeetingStatus::Recording | MeetingStatus::Transcribing
+        )
+    })
+}
+
+fn log_meeting_request_error(error: TrySendError<MeetingRequest>) {
+    match error {
+        TrySendError::Full(_) => tracing::warn!("meeting controller is busy"),
+        TrySendError::Disconnected(_) => tracing::error!("meeting controller is unavailable"),
+    }
+}
+
+fn meeting_duration(meeting: &MeetingManifest) -> u64 {
+    meeting.duration_ms.unwrap_or_else(|| {
+        if matches!(
+            meeting.status,
+            MeetingStatus::Starting | MeetingStatus::Recording
+        ) {
+            now_ms().saturating_sub(meeting.created_at_ms)
+        } else {
+            meeting
+                .ended_at_ms
+                .map_or(0, |ended| ended.saturating_sub(meeting.created_at_ms))
+        }
+    })
 }
 
 fn format_duration(milliseconds: u64) -> String {
@@ -1270,22 +1556,11 @@ fn format_duration(milliseconds: u64) -> String {
     format!("{:02}:{:02}", seconds / 60, seconds % 60)
 }
 
-fn parse_transcript(markdown: &str) -> Vec<TranscriptLine> {
-    markdown
-        .lines()
-        .filter_map(|line| {
-            let line = line.trim();
-            if line.is_empty() || line.starts_with('#') {
-                return None;
-            }
-            let content = line.strip_prefix("**")?;
-            let marker_end = content.find("**")?;
-            Some(TranscriptLine {
-                source: content[..marker_end].to_string(),
-                text: content[marker_end + 2..].trim().to_string(),
-            })
-        })
-        .collect()
+fn now_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
 }
 
 struct RecentEvents {
@@ -1351,11 +1626,7 @@ fn event_timestamp(event: &VoiceEvent) -> u64 {
 }
 
 fn event_age(timestamp_ms: u64) -> String {
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64;
-    let seconds = now.saturating_sub(timestamp_ms) / 1_000;
+    let seconds = now_ms().saturating_sub(timestamp_ms) / 1_000;
     match seconds {
         0..=59 => format!("{seconds}s ago"),
         60..=3_599 => format!("{}m ago", seconds / 60),

@@ -315,6 +315,7 @@ fn draw_meetings(
         .map(|(index, meeting)| {
             let marker = if index == selected { "›" } else { " " };
             let status = match meeting.status {
+                MeetingStatus::Starting => "...",
                 MeetingStatus::Recording => "REC",
                 MeetingStatus::Transcribing => "ASR",
                 MeetingStatus::Complete => "OK ",
@@ -322,6 +323,7 @@ fn draw_meetings(
                 MeetingStatus::Failed => "ERR",
             };
             let color = match meeting.status {
+                MeetingStatus::Starting => Color::Yellow,
                 MeetingStatus::Recording => Color::Red,
                 MeetingStatus::Transcribing => Color::Cyan,
                 MeetingStatus::Complete => Color::Green,

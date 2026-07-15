@@ -1,6 +1,6 @@
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{RecvTimeoutError, Sender};
+use std::sync::mpsc::{RecvTimeoutError, SyncSender, TrySendError};
 use std::time::{Duration, Instant};
 
 use color_eyre::Result;
@@ -44,7 +44,7 @@ pub fn listen(
     commands: CommandConfig,
     shutdown: &AtomicBool,
     indicator: Option<DictationIndicatorSender>,
-    meeting_requests: Option<Sender<MeetingRequest>>,
+    meeting_requests: Option<SyncSender<MeetingRequest>>,
 ) -> Result<()> {
     shutdown.store(false, Ordering::Relaxed);
     let overridden;
@@ -395,7 +395,7 @@ fn handle_command(
     recognizer: &mut Moonshine,
     dictation: &mut DictationCapture,
     action_executor: &ActionExecutor,
-    meeting_requests: Option<&Sender<MeetingRequest>>,
+    meeting_requests: Option<&SyncSender<MeetingRequest>>,
     heard: &str,
     context: &ContextSnapshot,
     device: &str,
@@ -442,9 +442,10 @@ fn handle_command(
             let outcome = meeting_requests
                 .ok_or("meeting controls require the HEX app")
                 .and_then(|requests| {
-                    requests
-                        .send(request)
-                        .map_err(|_| "meeting controller is unavailable")
+                    requests.try_send(request).map_err(|error| match error {
+                        TrySendError::Full(_) => "meeting controller is busy",
+                        TrySendError::Disconnected(_) => "meeting controller is unavailable",
+                    })
                 });
             match outcome {
                 Ok(()) => (Some(id.into()), CommandOutcome::Executed),

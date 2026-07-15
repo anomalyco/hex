@@ -82,9 +82,12 @@ Record a local Granola-style meeting with separate system and microphone tracks:
 cargo run -- meeting record --title "Design sync"
 ```
 
-Press Ctrl-C to stop. HEX finalizes both WAV tracks, transcribes them
-locally in 30-second Parakeet chunks, merges the timestamped segments, and saves
-source-labeled `transcript.ndjson` and `transcript.md` files under
+Press Ctrl-C to stop. While recording, one Moonshine model maintains independent
+Computer and You streams and appends a recoverable `transcript.live.ndjson`
+draft. Live inference is bounded and may skip draft packets under load without
+affecting WAV capture. HEX then retranscribes both complete WAV tracks locally
+in 30-second Parakeet chunks, merges the timestamped segments, and atomically
+publishes source-labeled `transcript.ndjson` and `transcript.md` files under
 `~/Library/Application Support/voice-control/meetings/`.
 
 ```sh
@@ -117,11 +120,17 @@ After two seconds of stable activity, HEX opens a non-activating
 floating panel with `Record Locally` and `Not Now` actions. It appears across
 Spaces and beside fullscreen applications without requiring Notification Center
 permission. Recording never begins from detection alone. Selecting
-`Record Locally` starts the existing two-track recorder and turns the panel into
-a persistent recording timer with a `Stop Recording` action. The same surface
-shows transcription progress and its terminal outcome. One offer is shown per
-microphone activation; a call must be inactive for five seconds before it can
-prompt again.
+`Record Locally` starts the existing two-track recorder. Recording state, timer,
+`Stop & Transcribe`, live draft, finalization, and the final transcript remain
+inside the Meetings pane rather than a floating status window. The pane updates
+automatically throughout the lifecycle and falls back to the live draft if final
+transcription fails. One offer is shown per microphone activation; a call must
+be inactive for five seconds before it can prompt again.
+
+Recording can also be started explicitly from the Meetings pane or by saying
+`start a meeting` / `record this meeting`. Say `stop meeting` to save the tracks
+and begin final transcription. These direct actions count as explicit approval;
+automatic detection remains offer-only.
 
 Inspect the permission-light signal without launching the agent:
 
@@ -194,12 +203,13 @@ The executable is native Rust. Unsafe code is isolated in three adapters:
 - `parakeet` owns a bounded background ONNX transcription worker.
 - `dictation` owns warm pre-roll, duration limits, and band-limited resampling.
 - `meeting` owns explicit ScreenCaptureKit capture, private durable artifacts,
-  chunked transcription, and source-aware transcript projections.
+  bounded source-separated live transcription, atomic final transcription, and
+  source-aware transcript projections.
 - `dictation_indicator` owns the click-through GPUI hold-to-talk HUD, audio
   metering projection, and recording/transcription outcome animation.
 - `microphone_activity` observes CoreAudio process metadata without capturing
   audio; `meeting_detection` debounces supported app families; the bundled
-  GPUI desktop runtime owns meeting offers and recording status.
+  GPUI desktop runtime owns meeting offers and inline recording state.
 
 The remaining modules are safe Rust:
 

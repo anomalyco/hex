@@ -1,16 +1,16 @@
-use std::collections::HashSet;
-use std::fs::{self, File};
+use std::fs::{self, File, OpenOptions};
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::mpsc::{self, SyncSender, TrySendError};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::mpsc::{self, Receiver, SyncSender, TrySendError};
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use color_eyre::eyre::{Result, WrapErr, eyre};
 use hound::{SampleFormat, WavReader, WavSpec, WavWriter};
 use screencapturekit::prelude::*;
+use screencapturekit::stream::delegate_trait::ErrorHandler;
 use serde::{Deserialize, Serialize};
 
 use crate::dictation::resample_for_parakeet;
@@ -18,7 +18,10 @@ use crate::parakeet::Parakeet;
 
 const SAMPLE_RATE: u32 = 16_000;
 const TRANSCRIPTION_CHUNK: usize = SAMPLE_RATE as usize * 30;
-static ACTIVE_MEETINGS: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+
+#[path = "meeting_live.rs"]
+mod live;
+pub use live::TranscriptReader;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum MeetingRequest {
@@ -37,12 +40,17 @@ pub struct MeetingManifest {
     pub duration_ms: Option<u64>,
     pub system: TrackManifest,
     pub microphone: TrackManifest,
+    #[serde(default)]
+    pub live_dropped_packets: u64,
+    #[serde(default)]
+    pub live_transcription_error: Option<String>,
     pub error: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MeetingStatus {
+    Starting,
     Recording,
     Transcribing,
     Complete,
@@ -69,7 +77,7 @@ pub struct TranscriptEntry {
     pub text: String,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MeetingSource {
     System,
@@ -99,23 +107,23 @@ struct CaptureStats {
     microphone: TrackManifest,
 }
 
-struct ActiveMeeting(String);
+struct ActiveMeeting {
+    _file: File,
+}
 
 impl ActiveMeeting {
-    fn new(id: String) -> Self {
-        active_meetings().lock().unwrap().insert(id.clone());
-        Self(id)
+    fn acquire(directory: &Path) -> Result<Self> {
+        let path = directory.join("active.lock");
+        let file = OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .read(true)
+            .write(true)
+            .open(&path)?;
+        set_owner_only(&path, false)?;
+        fs2::FileExt::lock_exclusive(&file)?;
+        Ok(Self { _file: file })
     }
-}
-
-impl Drop for ActiveMeeting {
-    fn drop(&mut self) {
-        active_meetings().lock().unwrap().remove(&self.0);
-    }
-}
-
-fn active_meetings() -> &'static Mutex<HashSet<String>> {
-    ACTIVE_MEETINGS.get_or_init(|| Mutex::new(HashSet::new()))
 }
 
 pub fn root() -> Result<PathBuf> {
@@ -124,20 +132,24 @@ pub fn root() -> Result<PathBuf> {
         .join("voice-control/meetings"))
 }
 
-pub fn record(title: Option<String>, shutdown: &AtomicBool) -> Result<MeetingManifest> {
-    shutdown.store(false, Ordering::Relaxed);
+pub fn record(
+    title: Option<String>,
+    shutdown: &AtomicBool,
+    project_root: &Path,
+    started_sender: Option<SyncSender<()>>,
+) -> Result<MeetingManifest> {
     let created_at_ms = now_ms();
     let id = format!("{created_at_ms}-{}", std::process::id());
-    let _active = ActiveMeeting::new(id.clone());
     let meeting_dir = root()?.join(&id);
     fs::create_dir_all(&meeting_dir).wrap_err("could not create meeting directory")?;
     set_owner_only(&meeting_dir, true)?;
+    let _active = ActiveMeeting::acquire(&meeting_dir)?;
 
     let mut manifest = MeetingManifest {
         schema_version: 1,
         id,
         title: title.unwrap_or_else(|| "Untitled meeting".into()),
-        status: MeetingStatus::Recording,
+        status: MeetingStatus::Starting,
         created_at_ms,
         ended_at_ms: None,
         duration_ms: None,
@@ -149,91 +161,237 @@ pub fn record(title: Option<String>, shutdown: &AtomicBool) -> Result<MeetingMan
             file: "microphone.wav".into(),
             ..TrackManifest::default()
         },
+        live_dropped_packets: 0,
+        live_transcription_error: None,
         error: None,
     };
     write_manifest(&meeting_dir, &manifest)?;
 
-    let (sender, receiver) = mpsc::sync_channel::<AudioPacket>(128);
-    let system_drops = Arc::new(AtomicU64::new(0));
-    let microphone_drops = Arc::new(AtomicU64::new(0));
-    let writer_dir = meeting_dir.clone();
-    let writer = thread::spawn(move || write_tracks(&writer_dir, receiver));
-
-    let content = SCShareableContent::get().wrap_err("could not enumerate screen content")?;
-    let display = content
-        .displays()
-        .into_iter()
-        .next()
-        .ok_or_else(|| eyre!("no display is available for system audio capture"))?;
-    let filter = SCContentFilter::create()
-        .with_display(&display)
-        .with_excluding_windows(&[])
-        .build();
-    let config = SCStreamConfiguration::new()
-        .with_width(2)
-        .with_height(2)
-        .with_captures_audio(true)
-        .with_captures_microphone(true)
-        .with_excludes_current_process_audio(true)
-        .with_sample_rate(SAMPLE_RATE as i32)
-        .with_channel_count(1);
-    let mut stream = SCStream::new(&filter, &config);
-    let capture_clock = Instant::now();
-    add_audio_handler(
-        &mut stream,
-        sender.clone(),
-        MeetingSource::System,
-        system_drops.clone(),
-        SCStreamOutputType::Audio,
-        capture_clock,
-    )?;
-    add_audio_handler(
-        &mut stream,
-        sender.clone(),
-        MeetingSource::Microphone,
-        microphone_drops.clone(),
-        SCStreamOutputType::Microphone,
-        capture_clock,
-    )?;
-
-    let started = Instant::now();
-    stream
-        .start_capture()
-        .wrap_err("could not start meeting capture")?;
-    println!("Recording '{}' (Ctrl-C to stop)", manifest.title);
-    while !shutdown.load(Ordering::Relaxed) {
-        thread::sleep(Duration::from_millis(100));
-    }
-    stream
-        .stop_capture()
-        .wrap_err("could not stop meeting capture")?;
-    drop(stream);
-    drop(sender);
-
-    let mut stats = writer
-        .join()
-        .map_err(|_| eyre!("meeting audio writer panicked"))??;
-    stats.system.dropped_packets = system_drops.load(Ordering::Relaxed);
-    stats.microphone.dropped_packets = microphone_drops.load(Ordering::Relaxed);
-    manifest.system = stats.system;
-    manifest.microphone = stats.microphone;
-    manifest.ended_at_ms = Some(now_ms());
-    manifest.duration_ms = Some(started.elapsed().as_millis() as u64);
-    manifest.status = MeetingStatus::Transcribing;
-    write_manifest(&meeting_dir, &manifest)?;
-
-    match transcribe(&meeting_dir, &manifest) {
-        Ok(()) => manifest.status = MeetingStatus::Complete,
-        Err(error) => {
-            manifest.status = MeetingStatus::Failed;
-            manifest.error = Some(error.to_string());
-            write_manifest(&meeting_dir, &manifest)?;
+    let result = (|| -> Result<MeetingManifest> {
+        if shutdown.load(Ordering::Relaxed) {
+            return Err(eyre!("meeting recording stopped before capture started"));
+        }
+        let content = SCShareableContent::get().wrap_err("could not enumerate screen content")?;
+        let display = content
+            .displays()
+            .into_iter()
+            .next()
+            .ok_or_else(|| eyre!("no display is available for system audio capture"))?;
+        let filter = SCContentFilter::create()
+            .with_display(&display)
+            .with_excluding_windows(&[])
+            .build();
+        let config = SCStreamConfiguration::new()
+            .with_width(2)
+            .with_height(2)
+            .with_captures_audio(true)
+            .with_captures_microphone(true)
+            .with_excludes_current_process_audio(true)
+            .with_sample_rate(SAMPLE_RATE as i32)
+            .with_channel_count(1);
+        let (sender, receiver) = mpsc::sync_channel::<AudioPacket>(128);
+        let (live_sender, live_receiver) = mpsc::sync_channel(live::QUEUE_CAPACITY);
+        let system_drops = Arc::new(AtomicU64::new(0));
+        let microphone_drops = Arc::new(AtomicU64::new(0));
+        let live_drops = Arc::new(AtomicU64::new(0));
+        let manifest_live_drops = live_drops.clone();
+        let live_worker_dir = meeting_dir.clone();
+        let live_worker_root = project_root.to_path_buf();
+        let live_worker_drops = live_drops.clone();
+        let live_worker = thread::spawn(move || {
+            let result = live::transcribe(
+                &live_worker_root,
+                &live_worker_dir,
+                live_receiver,
+                &live_worker_drops,
+            );
+            if let Err(error) = &result {
+                live::persist_error(&live_worker_dir, error);
+            }
+            result
+        });
+        let writer_dir = meeting_dir.clone();
+        let writer = thread::spawn(move || {
+            write_tracks(&writer_dir, receiver, Some(live_sender), &live_drops)
+        });
+        let stream_error = Arc::new(Mutex::new(None::<String>));
+        let delegate_error = stream_error.clone();
+        let mut stream = SCStream::new_with_delegate(
+            &filter,
+            &config,
+            ErrorHandler::new(move |error| {
+                *delegate_error
+                    .lock()
+                    .unwrap_or_else(|error| error.into_inner()) = Some(error.to_string());
+            }),
+        );
+        let capture_clock = Instant::now();
+        let start_result = (|| -> Result<()> {
+            add_audio_handler(
+                &mut stream,
+                sender.clone(),
+                MeetingSource::System,
+                system_drops.clone(),
+                SCStreamOutputType::Audio,
+                capture_clock,
+            )?;
+            add_audio_handler(
+                &mut stream,
+                sender.clone(),
+                MeetingSource::Microphone,
+                microphone_drops.clone(),
+                SCStreamOutputType::Microphone,
+                capture_clock,
+            )?;
+            if shutdown.load(Ordering::Relaxed) {
+                return Err(eyre!("meeting recording stopped before capture started"));
+            }
+            stream
+                .start_capture()
+                .wrap_err("could not start meeting capture")
+        })();
+        if let Err(error) = start_result {
+            drop(stream);
+            drop(sender);
+            if let Err(cleanup_error) = join_capture_workers(writer, live_worker) {
+                tracing::error!(%cleanup_error, "could not finalize failed meeting setup");
+            }
             return Err(error);
         }
+        manifest.status = MeetingStatus::Recording;
+        if let Err(error) = write_manifest(&meeting_dir, &manifest) {
+            if let Err(stop_error) = stream.stop_capture() {
+                tracing::error!(%stop_error, "could not stop meeting capture after manifest failure");
+            }
+            drop(stream);
+            drop(sender);
+            if let Err(cleanup_error) = join_capture_workers(writer, live_worker) {
+                tracing::error!(%cleanup_error, "could not finalize failed meeting setup");
+            }
+            return Err(error);
+        }
+        if let Some(started_sender) = started_sender {
+            let _ = started_sender.send(());
+        }
+
+        let started = Instant::now();
+        println!("Recording '{}' (Ctrl-C to stop)", manifest.title);
+        while !shutdown.load(Ordering::Relaxed)
+            && stream_error
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .is_none()
+            && !writer.is_finished()
+        {
+            thread::sleep(Duration::from_millis(100));
+        }
+        let stop_result = stream.stop_capture();
+        drop(stream);
+        drop(sender);
+
+        manifest.ended_at_ms = Some(now_ms());
+        manifest.duration_ms = Some(started.elapsed().as_millis() as u64);
+        let capture_error = stream_error
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .take();
+        let mut stats = match join_audio_writer(writer) {
+            Ok(stats) => stats,
+            Err(error) => {
+                let _ = finish_live_worker(live_worker);
+                return Err(error);
+            }
+        };
+        stats.system.dropped_packets = system_drops.load(Ordering::Relaxed);
+        stats.microphone.dropped_packets = microphone_drops.load(Ordering::Relaxed);
+        manifest.system = stats.system;
+        manifest.microphone = stats.microphone;
+        manifest.live_dropped_packets = manifest_live_drops.load(Ordering::Relaxed);
+        let transition_result = if capture_error.is_none() && stop_result.is_ok() {
+            manifest.status = MeetingStatus::Transcribing;
+            write_manifest(&meeting_dir, &manifest)
+        } else {
+            Ok(())
+        };
+        manifest.live_transcription_error = finish_live_worker(live_worker);
+        transition_result?;
+        if let Some(error) = capture_error {
+            write_manifest(&meeting_dir, &manifest)?;
+            return Err(eyre!("meeting capture stopped unexpectedly: {error}"));
+        }
+        if let Err(error) = stop_result {
+            write_manifest(&meeting_dir, &manifest)?;
+            return Err(error).wrap_err("could not stop meeting capture");
+        }
+        write_manifest(&meeting_dir, &manifest)?;
+
+        match transcribe(&meeting_dir, &manifest) {
+            Ok(()) => manifest.status = MeetingStatus::Complete,
+            Err(error) => {
+                manifest.status = MeetingStatus::Failed;
+                manifest.error = Some(error.to_string());
+                write_manifest(&meeting_dir, &manifest)?;
+                return Err(error);
+            }
+        }
+        write_manifest(&meeting_dir, &manifest)?;
+        println!("Saved meeting {}", meeting_dir.display());
+        Ok(manifest)
+    })();
+    if let Err(error) = &result {
+        persist_meeting_failure(&meeting_dir, error);
     }
-    write_manifest(&meeting_dir, &manifest)?;
-    println!("Saved meeting {}", meeting_dir.display());
-    Ok(manifest)
+    result
+}
+
+fn join_capture_workers(
+    writer: thread::JoinHandle<Result<CaptureStats>>,
+    live_worker: thread::JoinHandle<Result<()>>,
+) -> Result<CaptureStats> {
+    let stats = join_audio_writer(writer);
+    let _ = finish_live_worker(live_worker);
+    stats
+}
+
+fn join_audio_writer(writer: thread::JoinHandle<Result<CaptureStats>>) -> Result<CaptureStats> {
+    writer
+        .join()
+        .map_err(|_| eyre!("meeting audio writer panicked"))
+        .and_then(|result| result)
+}
+
+fn finish_live_worker(live_worker: thread::JoinHandle<Result<()>>) -> Option<String> {
+    match live_worker.join() {
+        Ok(Ok(())) => None,
+        Ok(Err(error)) => {
+            tracing::warn!(%error, "live meeting transcription stopped");
+            Some(error.to_string())
+        }
+        Err(_) => {
+            tracing::warn!("live meeting transcription panicked");
+            Some("live meeting transcription panicked".into())
+        }
+    }
+}
+
+fn persist_meeting_failure(directory: &Path, error: &color_eyre::Report) {
+    let result = (|| -> Result<()> {
+        let mut manifest = read_manifest(directory)?;
+        if manifest.status != MeetingStatus::Complete {
+            let ended_at_ms = now_ms();
+            manifest.status = MeetingStatus::Failed;
+            manifest.ended_at_ms.get_or_insert(ended_at_ms);
+            manifest
+                .duration_ms
+                .get_or_insert(ended_at_ms.saturating_sub(manifest.created_at_ms));
+            manifest.error = Some(error.to_string());
+            write_manifest(directory, &manifest)?;
+        }
+        Ok(())
+    })();
+    if let Err(persist_error) = result {
+        tracing::error!(%persist_error, %error, "could not persist meeting failure");
+    }
 }
 
 fn add_audio_handler(
@@ -405,7 +563,12 @@ fn decode_samples(
         .collect()
 }
 
-fn write_tracks(directory: &Path, receiver: mpsc::Receiver<AudioPacket>) -> Result<CaptureStats> {
+fn write_tracks(
+    directory: &Path,
+    receiver: Receiver<AudioPacket>,
+    mut live_sender: Option<SyncSender<AudioPacket>>,
+    live_drops: &AtomicU64,
+) -> Result<CaptureStats> {
     let mut system = None;
     let mut microphone = None;
     let mut stats = CaptureStats::default();
@@ -426,15 +589,18 @@ fn write_tracks(directory: &Path, receiver: mpsc::Receiver<AudioPacket>) -> Resu
         }
         track.sample_rate = Some(packet.sample_rate);
         if writer.is_none() {
-            *writer = Some(WavWriter::create(
-                directory.join(file_name),
+            let path = directory.join(file_name);
+            let created = WavWriter::create(
+                &path,
                 WavSpec {
                     channels: 1,
                     sample_rate: packet.sample_rate,
                     bits_per_sample: 32,
                     sample_format: SampleFormat::Float,
                 },
-            )?);
+            )?;
+            set_owner_only(&path, false)?;
+            *writer = Some(created);
         }
         let writer = writer
             .as_mut()
@@ -445,17 +611,28 @@ fn write_tracks(directory: &Path, receiver: mpsc::Receiver<AudioPacket>) -> Resu
         }
         track.first_arrival_us.get_or_insert(packet.arrival_us);
         track.samples += packet.samples.len() as u64;
-        for sample in packet.samples {
+        for &sample in &packet.samples {
             writer.write_sample(sample)?;
+        }
+        if let Some(sender) = &live_sender {
+            match sender.try_send(packet) {
+                Ok(()) => {}
+                Err(TrySendError::Full(_)) => {
+                    live_drops.fetch_add(1, Ordering::Relaxed);
+                }
+                Err(TrySendError::Disconnected(_)) => live_sender = None,
+            }
         }
     }
     if let Some(writer) = system {
         writer.finalize()?;
+        File::open(directory.join("system.wav"))?.sync_all()?;
     } else {
         create_empty_track(directory.join("system.wav"))?;
     }
     if let Some(writer) = microphone {
         writer.finalize()?;
+        File::open(directory.join("microphone.wav"))?.sync_all()?;
     } else {
         create_empty_track(directory.join("microphone.wav"))?;
     }
@@ -466,7 +643,7 @@ fn write_tracks(directory: &Path, receiver: mpsc::Receiver<AudioPacket>) -> Resu
 
 fn create_empty_track(path: PathBuf) -> Result<()> {
     WavWriter::create(
-        path,
+        &path,
         WavSpec {
             channels: 1,
             sample_rate: SAMPLE_RATE,
@@ -475,6 +652,8 @@ fn create_empty_track(path: PathBuf) -> Result<()> {
         },
     )?
     .finalize()?;
+    set_owner_only(&path, false)?;
+    File::open(path)?.sync_all()?;
     Ok(())
 }
 
@@ -505,8 +684,12 @@ fn transcribe(directory: &Path, manifest: &MeetingManifest) -> Result<()> {
     )?;
     transcript.sort_by_key(|entry| entry.start_ms);
 
-    let mut ndjson = BufWriter::new(File::create(directory.join("transcript.ndjson"))?);
-    let mut markdown = BufWriter::new(File::create(directory.join("transcript.md"))?);
+    let ndjson_temporary = directory.join("transcript.ndjson.tmp");
+    let markdown_temporary = directory.join("transcript.md.tmp");
+    let mut ndjson = BufWriter::new(File::create(&ndjson_temporary)?);
+    let mut markdown = BufWriter::new(File::create(&markdown_temporary)?);
+    set_owner_only(&ndjson_temporary, false)?;
+    set_owner_only(&markdown_temporary, false)?;
     writeln!(markdown, "# {}\n", manifest.title)?;
     for entry in &transcript {
         serde_json::to_writer(&mut ndjson, entry)?;
@@ -521,8 +704,12 @@ fn transcribe(directory: &Path, manifest: &MeetingManifest) -> Result<()> {
     }
     ndjson.flush()?;
     markdown.flush()?;
-    set_owner_only(&directory.join("transcript.ndjson"), false)?;
-    set_owner_only(&directory.join("transcript.md"), false)?;
+    ndjson.get_ref().sync_all()?;
+    markdown.get_ref().sync_all()?;
+    sync_directory(directory)?;
+    fs::rename(&ndjson_temporary, directory.join("transcript.ndjson"))?;
+    fs::rename(&markdown_temporary, directory.join("transcript.md"))?;
+    sync_directory(directory)?;
     Ok(())
 }
 
@@ -569,19 +756,51 @@ fn transcribe_track(
 
 pub fn list() -> Result<Vec<MeetingManifest>> {
     let root = root()?;
-    let active = active_meetings().lock().unwrap().clone();
     let mut meetings = Vec::new();
     for entry in match fs::read_dir(root) {
         Ok(entries) => entries,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(meetings),
         Err(error) => return Err(error.into()),
     } {
-        let path = entry?.path().join("manifest.json");
+        let directory = entry?.path();
+        let path = directory.join("manifest.json");
         if let Ok(data) = fs::read(&path)
             && let Ok(mut manifest) = serde_json::from_slice::<MeetingManifest>(&data)
         {
-            if manifest.status == MeetingStatus::Recording && !active.contains(&manifest.id) {
-                manifest.status = MeetingStatus::Interrupted;
+            manifest.live_transcription_error = fs::read_to_string(
+                path.parent()
+                    .unwrap_or_else(|| Path::new("."))
+                    .join("transcript.live.error.txt"),
+            )
+            .ok()
+            .map(|error| error.trim().to_string());
+            let process_is_active = meeting_is_active(&directory);
+            if process_is_active == Some(false) {
+                if let Err(error) = recover_final_publication(&directory) {
+                    tracing::warn!(%error, meeting = manifest.id, "could not recover final transcript publication");
+                }
+                let recovered =
+                    recovered_status(manifest.status, false, final_transcript_exists(&directory));
+                if recovered != manifest.status {
+                    manifest.status = recovered;
+                    match recovered {
+                        MeetingStatus::Complete => manifest.error = None,
+                        MeetingStatus::Interrupted => {
+                            let ended_at_ms = now_ms();
+                            manifest.ended_at_ms.get_or_insert(ended_at_ms);
+                            manifest
+                                .duration_ms
+                                .get_or_insert(ended_at_ms.saturating_sub(manifest.created_at_ms));
+                        }
+                        MeetingStatus::Starting
+                        | MeetingStatus::Recording
+                        | MeetingStatus::Transcribing
+                        | MeetingStatus::Failed => {}
+                    }
+                    if let Err(error) = write_manifest(&directory, &manifest) {
+                        tracing::warn!(%error, meeting = manifest.id, "could not persist recovered meeting status");
+                    }
+                }
             }
             meetings.push(manifest);
         }
@@ -590,20 +809,140 @@ pub fn list() -> Result<Vec<MeetingManifest>> {
     Ok(meetings)
 }
 
+fn meeting_is_active(directory: &Path) -> Option<bool> {
+    let file = match OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(directory.join("active.lock"))
+    {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Some(false),
+        Err(error) => {
+            tracing::warn!(%error, directory = %directory.display(), "could not open meeting lock");
+            return None;
+        }
+    };
+    match fs2::FileExt::try_lock_exclusive(&file) {
+        Ok(()) => {
+            let _ = fs2::FileExt::unlock(&file);
+            Some(false)
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => Some(true),
+        Err(error) => {
+            tracing::warn!(%error, directory = %directory.display(), "could not inspect meeting lock");
+            None
+        }
+    }
+}
+
+fn recovered_status(
+    status: MeetingStatus,
+    process_is_active: bool,
+    final_transcript_exists: bool,
+) -> MeetingStatus {
+    match (status, process_is_active, final_transcript_exists) {
+        (
+            MeetingStatus::Transcribing | MeetingStatus::Interrupted | MeetingStatus::Failed,
+            false,
+            true,
+        ) => MeetingStatus::Complete,
+        (MeetingStatus::Complete, false, false) => MeetingStatus::Interrupted,
+        (
+            MeetingStatus::Starting | MeetingStatus::Recording | MeetingStatus::Transcribing,
+            false,
+            _,
+        ) => MeetingStatus::Interrupted,
+        _ => status,
+    }
+}
+
 pub fn show(id: &str) -> Result<String> {
-    let path = root()?.join(id).join("transcript.md");
-    fs::read_to_string(&path).wrap_err_with(|| format!("could not read {}", path.display()))
+    let directory = root()?.join(id);
+    let path = directory.join("transcript.md");
+    recover_final_publication(&directory)?;
+    if final_transcript_exists(&directory) {
+        return fs::read_to_string(&path)
+            .wrap_err_with(|| format!("could not read {}", path.display()));
+    }
+    let manifest = read_manifest(&directory)?;
+    let mut markdown = format!("# {}\n\n", manifest.title);
+    for entry in transcript_entries_in(&directory)? {
+        markdown.push_str(&format!(
+            "**{} {}**  {}\n",
+            format_duration(entry.start_ms),
+            entry.source.label(),
+            entry.text
+        ));
+    }
+    Ok(markdown)
+}
+
+fn transcript_entries_in(directory: &Path) -> Result<Vec<TranscriptEntry>> {
+    recover_final_publication(directory)?;
+    let final_path = directory.join("transcript.ndjson");
+    if final_transcript_exists(directory) {
+        return read_ndjson(&final_path);
+    }
+    let live_path = directory.join("transcript.live.ndjson");
+    if !live_path.exists() {
+        return Ok(Vec::new());
+    }
+    live::read_snapshot(&live_path)
+}
+
+fn read_ndjson<T: for<'de> Deserialize<'de>>(path: &Path) -> Result<Vec<T>> {
+    let contents = fs::read(path).wrap_err_with(|| format!("could not read {}", path.display()))?;
+    let complete = contents
+        .iter()
+        .rposition(|byte| *byte == b'\n')
+        .map_or(&[][..], |newline| &contents[..newline]);
+    complete
+        .split(|byte| *byte == b'\n')
+        .filter(|line| !line.is_empty())
+        .map(|line| serde_json::from_slice(line).map_err(Into::into))
+        .collect()
+}
+
+fn final_transcript_exists(directory: &Path) -> bool {
+    directory.join("transcript.ndjson").exists() && directory.join("transcript.md").exists()
+}
+
+fn recover_final_publication(directory: &Path) -> Result<()> {
+    if meeting_is_active(directory) != Some(false) {
+        return Ok(());
+    }
+    let ndjson = directory.join("transcript.ndjson");
+    let markdown = directory.join("transcript.md");
+    let markdown_temporary = directory.join("transcript.md.tmp");
+    if ndjson.exists() && !markdown.exists() && markdown_temporary.exists() {
+        fs::rename(markdown_temporary, markdown)?;
+        sync_directory(directory)?;
+    }
+    Ok(())
+}
+
+fn read_manifest(directory: &Path) -> Result<MeetingManifest> {
+    let path = directory.join("manifest.json");
+    let data = fs::read(&path).wrap_err_with(|| format!("could not read {}", path.display()))?;
+    serde_json::from_slice(&data).wrap_err("could not decode meeting manifest")
 }
 
 fn write_manifest(directory: &Path, manifest: &MeetingManifest) -> Result<()> {
     let temporary = directory.join("manifest.json.tmp");
     let final_path = directory.join("manifest.json");
     let mut file = BufWriter::new(File::create(&temporary)?);
+    set_owner_only(&temporary, false)?;
     serde_json::to_writer_pretty(&mut file, manifest)?;
     file.write_all(b"\n")?;
     file.flush()?;
+    file.get_ref().sync_all()?;
     fs::rename(&temporary, &final_path)?;
-    set_owner_only(&final_path, false)
+    sync_directory(directory)
+}
+
+fn sync_directory(directory: &Path) -> Result<()> {
+    File::open(directory)?.sync_all()?;
+    Ok(())
 }
 
 fn format_duration(milliseconds: u64) -> String {
@@ -634,26 +973,5 @@ fn set_owner_only(_path: &Path, _directory: bool) -> Result<()> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn decodes_float_and_aligned_24_bit_integer_samples() {
-        let float = [0.25_f32.to_le_bytes(), (-0.5_f32).to_le_bytes()].concat();
-        assert_eq!(decode_samples(&float, 2, 4, 32, 1).unwrap(), [0.25, -0.5]);
-
-        let integer = [
-            0x4000_0000_i32.to_le_bytes(),
-            (-0x4000_0000_i32).to_le_bytes(),
-        ]
-        .concat();
-        assert_eq!(decode_samples(&integer, 2, 4, 24, 20).unwrap(), [0.5, -0.5]);
-    }
-
-    #[test]
-    fn rejects_non_numeric_media_times() {
-        assert_eq!(media_time_us(CMTime::new(3, 2)), Some(1_500_000));
-        assert_eq!(media_time_us(CMTime::INVALID), None);
-        assert_eq!(media_time_us(CMTime::positive_infinity()), None);
-    }
-}
+#[path = "meeting_tests.rs"]
+mod tests;
