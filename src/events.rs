@@ -35,6 +35,8 @@ pub enum VoiceEvent {
         phase: DictationPhase,
         #[serde(default)]
         text: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        processing: Option<DictationProcessing>,
     },
     Context {
         timestamp_ms: u64,
@@ -61,9 +63,19 @@ pub enum DictationPhase {
     Cancelled,
     Transcribing,
     Pasted,
+    Edited,
     Logged,
     Repasted,
+    MeetingPasted,
     Failed(String),
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct DictationProcessing {
+    pub profile: String,
+    pub latency_ms: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fallback: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -111,6 +123,21 @@ impl EventLog {
             timestamp_ms: now_ms(),
             phase,
             text: text.into(),
+            processing: None,
+        })
+    }
+
+    pub fn processed_dictation(
+        &mut self,
+        phase: DictationPhase,
+        text: impl Into<String>,
+        processing: Option<DictationProcessing>,
+    ) -> io::Result<()> {
+        self.emit(&VoiceEvent::Dictation {
+            timestamp_ms: now_ms(),
+            phase,
+            text: text.into(),
+            processing,
         })
     }
 }
@@ -146,6 +173,35 @@ mod tests {
                 latency_ms: 73,
                 ref text,
             } if text == "Open Zed"
+        ));
+    }
+
+    #[test]
+    fn dictation_processing_observation_round_trips() {
+        let event = VoiceEvent::Dictation {
+            timestamp_ms: 42,
+            phase: DictationPhase::Pasted,
+            text: "Processed text".into(),
+            processing: Some(DictationProcessing {
+                profile: "slack".into(),
+                latency_ms: 321,
+                fallback: Some("deadline exceeded".into()),
+            }),
+        };
+
+        let decoded: VoiceEvent =
+            serde_json::from_str(&serde_json::to_string(&event).unwrap()).unwrap();
+
+        assert!(matches!(
+            decoded,
+            VoiceEvent::Dictation {
+                processing: Some(DictationProcessing {
+                    profile,
+                    latency_ms: 321,
+                    fallback: Some(fallback),
+                }),
+                ..
+            } if profile == "slack" && fallback == "deadline exceeded"
         ));
     }
 

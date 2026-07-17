@@ -3,11 +3,13 @@ use std::time::{Duration, Instant};
 
 use rubato::{FftFixedIn, Resampler};
 
+use crate::recording_environment::{RecordingEnvironmentController, RecordingEnvironmentSession};
+
 const RING_BUFFER_DURATION: Duration = Duration::from_secs(1);
 const PRE_ROLL_DURATION: Duration = Duration::from_millis(450);
-const MINIMUM_HOLD_DURATION: Duration = Duration::from_millis(300);
+pub const MINIMUM_HOLD_DURATION: Duration = Duration::from_millis(300);
 const MINIMUM_PARAKEET_DURATION: Duration = Duration::from_millis(1500);
-const MAXIMUM_DICTATION_DURATION: Duration = Duration::from_secs(60);
+pub(crate) const MAXIMUM_DICTATION_DURATION: Duration = Duration::from_secs(60);
 const INITIAL_RECORDING_CAPACITY: Duration = Duration::from_secs(10);
 const PARAKEET_SAMPLE_RATE: u32 = 16_000;
 
@@ -174,16 +176,24 @@ pub struct DictationClip {
 }
 
 impl DictationClip {
+    pub fn duration_ms(&self) -> u64 {
+        self.samples.len() as u64 * 1_000 / u64::from(PARAKEET_SAMPLE_RATE)
+    }
+
     pub fn into_parakeet_samples(self) -> Vec<f32> {
         let mut samples = self.samples;
-        samples.resize(
-            samples
-                .len()
-                .max(samples_for(MINIMUM_PARAKEET_DURATION, PARAKEET_SAMPLE_RATE)),
-            0.0,
-        );
+        pad_for_parakeet(&mut samples);
         samples
     }
+}
+
+pub(crate) fn pad_for_parakeet(samples: &mut Vec<f32>) {
+    samples.resize(
+        samples
+            .len()
+            .max(samples_for(MINIMUM_PARAKEET_DURATION, PARAKEET_SAMPLE_RATE)),
+        0.0,
+    );
 }
 
 pub fn resample_for_parakeet(samples: &[f32], source_rate: u32) -> Vec<f32> {
@@ -196,6 +206,7 @@ pub struct DictationCapture {
     sample_rate: u32,
     ring: VecDeque<f32>,
     recording: Option<Recording>,
+    recording_environment: Option<RecordingEnvironmentController>,
 }
 
 struct Recording {
@@ -205,6 +216,25 @@ struct Recording {
     source_rate: u32,
     input_buffer: Vec<f32>,
     resampler: Option<FftFixedIn<f32>>,
+    environment: RecordingEnvironmentState,
+}
+
+enum RecordingEnvironmentState {
+    Disabled,
+    Pending(RecordingEnvironmentController),
+    Active {
+        _session: RecordingEnvironmentSession,
+    },
+}
+
+impl RecordingEnvironmentState {
+    fn activate(&mut self) {
+        if let Self::Pending(controller) = self {
+            *self = Self::Active {
+                _session: controller.begin(),
+            };
+        }
+    }
 }
 
 impl Recording {
@@ -231,7 +261,13 @@ impl Recording {
             source_rate,
             input_buffer: Vec::with_capacity(Self::CHUNK_SIZE),
             resampler,
+            environment: RecordingEnvironmentState::Disabled,
         }
+    }
+
+    fn with_environment(mut self, environment: RecordingEnvironmentState) -> Self {
+        self.environment = environment;
+        self
     }
 
     fn push(&mut self, mut samples: &[f32]) {
@@ -303,7 +339,12 @@ impl DictationCapture {
             sample_rate,
             ring: VecDeque::with_capacity(samples_for(RING_BUFFER_DURATION, sample_rate)),
             recording: None,
+            recording_environment: None,
         }
+    }
+
+    pub fn enable_recording_environment(&mut self, controller: RecordingEnvironmentController) {
+        self.recording_environment = Some(controller);
     }
 
     pub fn keep_warm(&mut self, samples: &[f32]) {
@@ -325,16 +366,23 @@ impl DictationCapture {
     }
 
     pub fn start(&mut self, now: Instant) {
-        self.start_with_pre_roll(now, PRE_ROLL_DURATION);
+        self.start_with_pre_roll(now, PRE_ROLL_DURATION, false);
     }
 
     pub fn start_voice(&mut self, now: Instant) {
-        self.start_with_pre_roll(now, Duration::ZERO);
+        self.start_with_pre_roll(now, Duration::ZERO, true);
     }
 
-    fn start_with_pre_roll(&mut self, now: Instant, duration: Duration) {
+    fn start_with_pre_roll(&mut self, now: Instant, duration: Duration, intentional: bool) {
+        let environment = match &self.recording_environment {
+            Some(controller) if intentional => RecordingEnvironmentState::Active {
+                _session: controller.begin(),
+            },
+            Some(controller) => RecordingEnvironmentState::Pending(controller.clone()),
+            None => RecordingEnvironmentState::Disabled,
+        };
         let pre_roll = samples_for(duration, self.sample_rate).min(self.ring.len());
-        let mut recording = Recording::new(now, self.sample_rate);
+        let mut recording = Recording::new(now, self.sample_rate).with_environment(environment);
         let skip = self.ring.len() - pre_roll;
         let (front, back) = self.ring.as_slices();
         if skip < front.len() {
@@ -348,6 +396,9 @@ impl DictationCapture {
 
     pub fn push(&mut self, samples: &[f32]) {
         if let Some(recording) = &mut self.recording {
+            if recording.started_at.elapsed() >= MINIMUM_HOLD_DURATION {
+                recording.environment.activate();
+            }
             recording.push(samples);
         }
     }
@@ -412,6 +463,7 @@ mod tests {
         let Finish::Transcribe(clip) = capture.finish(start + Duration::from_millis(500)) else {
             panic!("expected transcription")
         };
+        assert_eq!(clip.duration_ms(), 950);
         let samples = clip.into_parakeet_samples();
         assert_eq!(samples.len(), 24_000);
         assert_eq!(samples[0], 0.25);

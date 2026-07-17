@@ -943,6 +943,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "cmake"
+version = "0.1.58"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c0f78a02292a74a88ac736019ab962ece0bc380e3f977bf72e376c5d78ff0678"
+dependencies = [
+ "cc",
+]
+
+[[package]]
 name = "cocoa"
 version = "0.26.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4312,6 +4321,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "objc2-security"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "709fe137109bd1e8b5a99390f77a7d8b2961dafc1a1c5db8f2e60329ad6d895a"
+dependencies = [
+ "bitflags 2.13.0",
+ "objc2",
+ "objc2-core-foundation",
+]
+
+[[package]]
+name = "objc2-service-management"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b213642d6959cc6023ceb1217aa595eaaf09b8094ce95127c103cab611fe65e8"
+dependencies = [
+ "block2",
+ "objc2",
+ "objc2-core-foundation",
+ "objc2-foundation",
+ "objc2-security",
+]
+
+[[package]]
 name = "object"
 version = "0.37.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6924,10 +6957,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "transcribe-cpp"
+version = "0.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4c3c4d6136eeccf56cfe8a6669e2d63770d1ef051c7cafd2cb9226218c66cded"
+dependencies = [
+ "log",
+ "thiserror 2.0.18",
+ "transcribe-cpp-sys",
+]
+
+[[package]]
+name = "transcribe-cpp-sys"
+version = "0.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "278fd6a6da4d9d8d5f2716bd6761a76ea55c129fda6ba57856b80249a8570ed4"
+dependencies = [
+ "cmake",
+ "serde_json",
+]
+
+[[package]]
 name = "transcribe-rs"
 version = "0.3.11"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fb9d5cfb8e68a2a8fc27fb548987473221d3cc3776a331ccde46c8bd8b2eda0f"
+source = "git+https://github.com/cjpais/transcribe-rs?rev=e37c66b6df43af51fde8dec34f98a07aaf09564c#e37c66b6df43af51fde8dec34f98a07aaf09564c"
 dependencies = [
  "base64",
  "derive_builder",
@@ -7250,9 +7303,10 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "voice-control"
-version = "0.1.0"
+version = "2.0.9"
 dependencies = [
  "arboard",
+ "block2",
  "clap",
  "color-eyre",
  "core-graphics-types 0.1.3",
@@ -7271,16 +7325,21 @@ dependencies = [
  "objc2-core-audio",
  "objc2-foundation",
  "objc2-quartz-core",
+ "objc2-service-management",
  "ratatui",
  "raw-window-handle",
+ "regex",
  "rodio",
  "rubato",
  "screencapturekit",
  "serde",
  "serde_json",
+ "sha2 0.11.0",
  "tracing",
  "tracing-subscriber",
+ "transcribe-cpp",
  "transcribe-rs",
+ "unicode-segmentation",
  "url",
 ]
 

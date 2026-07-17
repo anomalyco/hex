@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::ffi::c_void;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
@@ -36,13 +37,47 @@ const PROCESSING_MORPH_DURATION: Duration = Duration::from_millis(250);
 
 #[derive(Clone, Copy, Debug)]
 pub enum DictationIndicatorEvent {
+    Reset,
+    Configure(HudTuning),
     Started,
+    EditingStarted,
     Meter { average: f32, peak: f32 },
-    Transcribing,
+    Submitted { job_id: u64 },
+    Transcribing { job_id: u64 },
+    Processing { job_id: u64 },
     Discarded,
     Cancelled,
-    Completed,
+    JobCompleted { job_id: u64 },
+    JobCancelled { job_id: u64 },
+    JobFailed { job_id: u64 },
     Failed,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct HudTuning {
+    pub style: f32,
+    pub line_count: f32,
+    pub curvature: f32,
+    pub speed: f32,
+    pub sharpness: f32,
+    pub glow: f32,
+    pub depth: f32,
+    pub light_angle: f32,
+}
+
+impl Default for HudTuning {
+    fn default() -> Self {
+        Self {
+            style: -1.0,
+            line_count: 3.0,
+            curvature: 0.55,
+            speed: 1.0,
+            sharpness: 0.65,
+            glow: 0.3,
+            depth: 0.75,
+            light_angle: 0.35,
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -99,7 +134,12 @@ impl DictationIndicatorUi {
     }
 
     pub fn handle(&mut self, event: DictationIndicatorEvent, _cx: &mut App) {
-        if self.indicator.is_none() && matches!(event, DictationIndicatorEvent::Started) {
+        if self.indicator.is_none()
+            && matches!(
+                event,
+                DictationIndicatorEvent::Started | DictationIndicatorEvent::EditingStarted
+            )
+        {
             match MetalIndicator::new() {
                 Ok(indicator) => self.indicator = Some(indicator),
                 Err(error) => {
@@ -194,7 +234,10 @@ impl MetalIndicator {
 
     fn handle(&mut self, event: DictationIndicatorEvent) {
         self.renderer.handle(event);
-        if matches!(event, DictationIndicatorEvent::Started) {
+        if matches!(
+            event,
+            DictationIndicatorEvent::Started | DictationIndicatorEvent::EditingStarted
+        ) {
             self.position_on_pointer_screen();
             self.window.orderFrontRegardless();
             self.ordered = true;
@@ -324,7 +367,7 @@ impl SharedRenderer {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum Phase {
     Hidden,
     Recording,
@@ -332,6 +375,23 @@ enum Phase {
     Completed,
     Cancelled,
     Failed,
+}
+
+fn active_phase(capturing: bool, pending_jobs: usize) -> Option<Phase> {
+    if capturing {
+        Some(Phase::Recording)
+    } else if pending_jobs > 0 {
+        Some(Phase::Transcribing)
+    } else {
+        None
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum JobPhase {
+    Queued,
+    Transcribing,
+    Processing,
 }
 
 impl Phase {
@@ -358,6 +418,18 @@ struct Uniforms {
     average: f32,
     peak: f32,
     processing: f32,
+    post_processing: f32,
+    capturing: f32,
+    editing: f32,
+    queued_count: f32,
+    line_style: f32,
+    line_count: f32,
+    line_curvature: f32,
+    line_speed: f32,
+    line_sharpness: f32,
+    line_glow: f32,
+    sphere_depth: f32,
+    light_angle: f32,
     completion: f32,
 }
 
@@ -366,6 +438,9 @@ struct MetalRenderer {
     command_queue: CommandQueue,
     pipeline: RenderPipelineState,
     phase: Phase,
+    capturing: bool,
+    editing: bool,
+    jobs: BTreeMap<u64, JobPhase>,
     phase_started: Instant,
     render_started: Instant,
     last_frame: Instant,
@@ -382,6 +457,8 @@ struct MetalRenderer {
     visual_scale: Spring,
     softness: Spring,
     processing: Spring,
+    post_processing: Spring,
+    tuning: HudTuning,
 }
 
 impl MetalRenderer {
@@ -428,6 +505,9 @@ impl MetalRenderer {
             layer,
             pipeline,
             phase: Phase::Hidden,
+            capturing: false,
+            editing: false,
+            jobs: BTreeMap::new(),
             phase_started: now,
             render_started: now,
             last_frame: now,
@@ -444,13 +524,29 @@ impl MetalRenderer {
             visual_scale: Spring::new(HIDDEN_SCALE),
             softness: Spring::new(HIDDEN_SOFTNESS),
             processing: Spring::new(0.0),
+            post_processing: Spring::new(0.0),
+            tuning: HudTuning::default(),
         })
     }
 
     fn handle(&mut self, event: DictationIndicatorEvent) {
         let now = Instant::now();
+        let editing_started = matches!(event, DictationIndicatorEvent::EditingStarted);
         match event {
-            DictationIndicatorEvent::Started => {
+            DictationIndicatorEvent::Reset => {
+                self.capturing = false;
+                self.editing = false;
+                self.jobs.clear();
+                self.phase = Phase::Hidden;
+                self.completion_pending = false;
+                self.freeze_visual_state();
+            }
+            DictationIndicatorEvent::Configure(tuning) => {
+                self.tuning = tuning;
+            }
+            DictationIndicatorEvent::Started | DictationIndicatorEvent::EditingStarted => {
+                self.capturing = true;
+                self.editing = editing_started;
                 self.phase = Phase::Recording;
                 self.phase_started = now;
                 self.render_started = now;
@@ -467,40 +563,108 @@ impl MetalRenderer {
                 self.visual_scale.reset(HIDDEN_SCALE);
                 self.softness.reset(HIDDEN_SOFTNESS);
                 self.processing.reset(0.0);
+                self.post_processing.reset(0.0);
             }
             DictationIndicatorEvent::Meter { average, peak } => {
                 self.target_average = (average * 7.0).clamp(0.0, 1.0);
                 self.target_peak = (peak * 2.5).clamp(0.0, 1.0);
             }
-            DictationIndicatorEvent::Transcribing => {
-                self.phase = Phase::Transcribing;
-                self.phase_started = now;
-                self.completion_pending = false;
-                self.target_average = 0.0;
-                self.target_peak = 0.0;
+            DictationIndicatorEvent::Submitted { job_id } => {
+                self.capturing = false;
+                self.editing = false;
+                self.jobs.insert(job_id, JobPhase::Queued);
+                self.show_pipeline(now);
             }
-            DictationIndicatorEvent::Discarded => {
-                self.phase = Phase::Hidden;
-                self.completion_pending = false;
-                self.freeze_visual_state();
-            }
-            DictationIndicatorEvent::Cancelled => {
-                self.phase = Phase::Cancelled;
-                self.phase_started = now;
-                self.completion_pending = false;
-                self.freeze_visual_state();
-            }
-            DictationIndicatorEvent::Completed => {
-                if matches!(self.phase, Phase::Transcribing) {
-                    self.completion_pending = true;
+            DictationIndicatorEvent::Transcribing { job_id } => {
+                if let Some(phase) = self.jobs.get_mut(&job_id) {
+                    *phase = JobPhase::Transcribing;
+                    self.show_pipeline(now);
                 }
             }
-            DictationIndicatorEvent::Failed => {
-                self.phase = Phase::Failed;
+            DictationIndicatorEvent::Processing { job_id } => {
+                if let Some(phase) = self.jobs.get_mut(&job_id) {
+                    *phase = JobPhase::Processing;
+                    self.show_pipeline(now);
+                }
+            }
+            DictationIndicatorEvent::Discarded => {
+                self.capturing = false;
+                self.editing = false;
+                self.completion_pending = false;
+                self.freeze_visual_state();
+                if self.jobs.is_empty() {
+                    self.phase = Phase::Hidden;
+                } else {
+                    self.show_pipeline(now);
+                }
+            }
+            DictationIndicatorEvent::Cancelled => {
+                self.capturing = false;
+                self.editing = false;
                 self.phase_started = now;
                 self.completion_pending = false;
                 self.freeze_visual_state();
+                if self.jobs.is_empty() {
+                    self.phase = Phase::Cancelled;
+                } else {
+                    self.show_pipeline(now);
+                }
             }
+            DictationIndicatorEvent::JobCompleted { job_id } => {
+                self.finish_job(job_id, now, Phase::Completed);
+            }
+            DictationIndicatorEvent::JobCancelled { job_id } => {
+                self.finish_job(job_id, now, Phase::Cancelled);
+            }
+            DictationIndicatorEvent::JobFailed { job_id } => {
+                self.finish_job(job_id, now, Phase::Failed);
+            }
+            DictationIndicatorEvent::Failed => {
+                self.capturing = false;
+                self.editing = false;
+                self.phase_started = now;
+                self.completion_pending = false;
+                self.freeze_visual_state();
+                if self.jobs.is_empty() {
+                    self.phase = Phase::Failed;
+                } else {
+                    self.show_pipeline(now);
+                }
+            }
+        }
+    }
+
+    fn show_pipeline(&mut self, now: Instant) {
+        let Some(phase) = active_phase(self.capturing, self.jobs.len()) else {
+            return;
+        };
+        self.phase = phase;
+        if matches!(phase, Phase::Recording) {
+            return;
+        }
+        self.phase_started = now;
+        self.completion_pending = false;
+        self.target_average = 0.0;
+        self.target_peak = 0.0;
+    }
+
+    fn finish_job(&mut self, job_id: u64, now: Instant, terminal: Phase) {
+        if self.jobs.remove(&job_id).is_none() {
+            return;
+        }
+        if active_phase(self.capturing, self.jobs.len()).is_some() {
+            self.show_pipeline(now);
+            return;
+        }
+        if matches!(terminal, Phase::Completed) {
+            self.phase = Phase::Transcribing;
+            self.phase_started = now;
+            self.completion_pending = true;
+        } else {
+            self.phase = terminal;
+            self.phase_started = now;
+            self.completion_pending = false;
+            self.freeze_visual_state();
         }
     }
 
@@ -512,6 +676,7 @@ impl MetalRenderer {
         self.width.velocity = 0.0;
         self.height.velocity = 0.0;
         self.processing.velocity = 0.0;
+        self.post_processing.velocity = 0.0;
     }
 
     fn set_scale(&mut self, scale: f32) {
@@ -570,6 +735,15 @@ impl MetalRenderer {
                 self.processing.value
             }
         };
+        let target_post_processing = if self
+            .jobs
+            .first_key_value()
+            .is_some_and(|(_, phase)| matches!(phase, JobPhase::Processing))
+        {
+            1.0
+        } else {
+            0.0
+        };
 
         self.average.step_critical(self.target_average, dt, 16.0);
         self.peak.step_critical(self.target_peak, dt, 19.0);
@@ -579,6 +753,8 @@ impl MetalRenderer {
             .step_critical(target_height, dt, GEOMETRY_ANGULAR_FREQUENCY);
         self.processing
             .step_critical(target_processing, dt, GEOMETRY_ANGULAR_FREQUENCY);
+        self.post_processing
+            .step_critical(target_post_processing, dt, GEOMETRY_ANGULAR_FREQUENCY);
         let visibility_frequency = if visible {
             ENTRANCE_ANGULAR_FREQUENCY
         } else {
@@ -622,6 +798,22 @@ impl MetalRenderer {
             average: self.average.value.clamp(0.0, 1.0),
             peak: self.peak.value.clamp(0.0, 1.0),
             processing: self.processing.value.clamp(0.0, 1.0),
+            post_processing: self.post_processing.value.clamp(0.0, 1.0),
+            capturing: if self.capturing { 1.0 } else { 0.0 },
+            editing: if self.editing { 1.0 } else { 0.0 },
+            queued_count: if self.capturing {
+                self.jobs.len() as f32
+            } else {
+                self.jobs.len().saturating_sub(1) as f32
+            },
+            line_style: self.tuning.style,
+            line_count: self.tuning.line_count,
+            line_curvature: self.tuning.curvature,
+            line_speed: self.tuning.speed,
+            line_sharpness: self.tuning.sharpness,
+            line_glow: self.tuning.glow,
+            sphere_depth: self.tuning.depth,
+            light_angle: self.tuning.light_angle,
             completion: if matches!(self.phase, Phase::Completed) {
                 (elapsed.as_secs_f32() / 0.24).clamp(0.0, 1.0)
             } else {
@@ -752,6 +944,14 @@ mod tests {
             Phase::Completed.visible_duration(),
             Some(Duration::from_millis(240))
         );
+    }
+
+    #[test]
+    fn pending_completion_cannot_replace_a_new_recording_phase() {
+        assert_eq!(active_phase(true, 0), Some(Phase::Recording));
+        assert_eq!(active_phase(true, 2), Some(Phase::Recording));
+        assert_eq!(active_phase(false, 2), Some(Phase::Transcribing));
+        assert_eq!(active_phase(false, 0), None);
     }
 
     #[test]

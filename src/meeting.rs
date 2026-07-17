@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, SyncSender, TrySendError};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant};
 
 use color_eyre::eyre::{Result, WrapErr, eyre};
 use hound::{SampleFormat, WavReader, WavSpec, WavWriter};
@@ -14,10 +14,12 @@ use screencapturekit::stream::delegate_trait::ErrorHandler;
 use serde::{Deserialize, Serialize};
 
 use crate::dictation::resample_for_parakeet;
+use crate::events::now_ms;
 use crate::parakeet::Parakeet;
 
 const SAMPLE_RATE: u32 = 16_000;
 const TRANSCRIPTION_CHUNK: usize = SAMPLE_RATE as usize * 30;
+const TRANSCRIPT_TURN_GAP_MS: u64 = 3_000;
 
 #[path = "meeting_live.rs"]
 mod live;
@@ -58,6 +60,20 @@ pub enum MeetingStatus {
     Failed,
 }
 
+impl MeetingStatus {
+    pub fn is_active(self) -> bool {
+        matches!(self, Self::Starting | Self::Recording | Self::Transcribing)
+    }
+}
+
+pub fn active(meetings: &[MeetingManifest]) -> Option<&MeetingManifest> {
+    meetings.iter().find(|meeting| meeting.status.is_active())
+}
+
+pub fn active_or_latest(meetings: &[MeetingManifest]) -> Option<&MeetingManifest> {
+    active(meetings).or_else(|| meetings.first())
+}
+
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct TrackManifest {
     pub file: String,
@@ -69,12 +85,44 @@ pub struct TrackManifest {
     pub dropped_packets: u64,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 pub struct TranscriptEntry {
     pub source: MeetingSource,
     pub start_ms: u64,
     pub end_ms: u64,
     pub text: String,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TranscriptPublication {
+    Live,
+    Final,
+}
+
+pub struct CompletedTranscript {
+    pub publication: TranscriptPublication,
+    pub entries: Vec<TranscriptEntry>,
+}
+
+pub fn coalesce_transcript(
+    entries: impl IntoIterator<Item = TranscriptEntry>,
+) -> Vec<TranscriptEntry> {
+    let mut turns: Vec<TranscriptEntry> = Vec::new();
+    for entry in entries {
+        if let Some(turn) = turns.last_mut()
+            && turn.source == entry.source
+            && entry.start_ms.saturating_sub(turn.end_ms) <= TRANSCRIPT_TURN_GAP_MS
+        {
+            if !turn.text.ends_with(char::is_whitespace) {
+                turn.text.push(' ');
+            }
+            turn.text.push_str(entry.text.trim());
+            turn.end_ms = turn.end_ms.max(entry.end_ms);
+        } else {
+            turns.push(entry);
+        }
+    }
+    turns
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
@@ -138,6 +186,12 @@ pub fn record(
     project_root: &Path,
     started_sender: Option<SyncSender<()>>,
 ) -> Result<MeetingManifest> {
+    let _sleep_prevention = crate::recording_environment::prevent_sleep();
+    let (_, transcription_selection) = crate::app_settings::transcription_selection();
+    let transcription_model = crate::transcription_models::validate(&transcription_selection)?;
+    if !crate::transcription_models::is_installed(transcription_model) {
+        return Err(eyre!("{} is not installed", transcription_model.name));
+    }
     let created_at_ms = now_ms();
     let id = format!("{created_at_ms}-{}", std::process::id());
     let meeting_dir = root()?.join(&id);
@@ -325,7 +379,7 @@ pub fn record(
         }
         write_manifest(&meeting_dir, &manifest)?;
 
-        match transcribe(&meeting_dir, &manifest) {
+        match transcribe(&meeting_dir, &manifest, &transcription_selection) {
             Ok(()) => manifest.status = MeetingStatus::Complete,
             Err(error) => {
                 manifest.status = MeetingStatus::Failed;
@@ -657,7 +711,11 @@ fn create_empty_track(path: PathBuf) -> Result<()> {
     Ok(())
 }
 
-fn transcribe(directory: &Path, manifest: &MeetingManifest) -> Result<()> {
+fn transcribe(
+    directory: &Path,
+    manifest: &MeetingManifest,
+    selection: &crate::transcription_models::TranscriptionSelection,
+) -> Result<()> {
     let origin = [
         manifest.system.first_arrival_us,
         manifest.microphone.first_arrival_us,
@@ -666,7 +724,7 @@ fn transcribe(directory: &Path, manifest: &MeetingManifest) -> Result<()> {
     .flatten()
     .min()
     .unwrap_or(0);
-    let mut model = Parakeet::load()?;
+    let mut model = Parakeet::load_selection(selection)?;
     let mut transcript = Vec::new();
     transcribe_track(
         &mut model,
@@ -732,13 +790,13 @@ fn transcribe_track(
         }
         let chunk_start_ms = chunk_index as u64 * 30_000 + source_offset_ms;
         let result = model.transcribe_segments(chunk)?;
-        if let Some(segments) = result.segments {
-            transcript.extend(segments.into_iter().filter_map(|segment| {
+        if !result.segments.is_empty() {
+            transcript.extend(result.segments.into_iter().filter_map(|segment| {
                 let text = segment.text.trim().to_string();
                 (!text.is_empty()).then(|| TranscriptEntry {
                     source,
-                    start_ms: chunk_start_ms + (segment.start.max(0.0) * 1_000.0) as u64,
-                    end_ms: chunk_start_ms + (segment.end.max(0.0) * 1_000.0) as u64,
+                    start_ms: chunk_start_ms + segment.t0_ms.max(0) as u64,
+                    end_ms: chunk_start_ms + segment.t1_ms.max(0) as u64,
                     text,
                 })
             }));
@@ -747,7 +805,7 @@ fn transcribe_track(
                 source,
                 start_ms: chunk_start_ms,
                 end_ms: chunk_start_ms + chunk.len() as u64 * 1_000 / u64::from(SAMPLE_RATE),
-                text: result.text.trim().into(),
+                text: result.text.trim().to_string(),
             });
         }
     }
@@ -856,6 +914,7 @@ fn recovered_status(
     }
 }
 
+#[cfg_attr(not(debug_assertions), allow(dead_code))]
 pub fn show(id: &str) -> Result<String> {
     let directory = root()?.join(id);
     let path = directory.join("transcript.md");
@@ -877,6 +936,7 @@ pub fn show(id: &str) -> Result<String> {
     Ok(markdown)
 }
 
+#[cfg_attr(not(debug_assertions), allow(dead_code))]
 fn transcript_entries_in(directory: &Path) -> Result<Vec<TranscriptEntry>> {
     recover_final_publication(directory)?;
     let final_path = directory.join("transcript.ndjson");
@@ -888,6 +948,56 @@ fn transcript_entries_in(directory: &Path) -> Result<Vec<TranscriptEntry>> {
         return Ok(Vec::new());
     }
     live::read_snapshot(&live_path)
+}
+
+pub fn completed_transcript(
+    id: &str,
+    publication: Option<TranscriptPublication>,
+) -> Result<CompletedTranscript> {
+    let directory = root()?.join(id);
+    recover_final_publication(&directory)?;
+    let final_path = directory.join("transcript.ndjson");
+    let live_path = directory.join("transcript.live.ndjson");
+    let publication = publication.unwrap_or_else(|| {
+        if final_transcript_exists(&directory) {
+            TranscriptPublication::Final
+        } else {
+            TranscriptPublication::Live
+        }
+    });
+    let entries = match publication {
+        TranscriptPublication::Final => read_ndjson(&final_path)?,
+        TranscriptPublication::Live if live_path.exists() => {
+            let mut entries = live::read_completed_snapshot(&live_path)?;
+            if final_transcript_exists(&directory) {
+                supplement_live_transcript(&mut entries, read_ndjson(&final_path)?);
+            }
+            entries
+        }
+        TranscriptPublication::Live => Vec::new(),
+    };
+    Ok(CompletedTranscript {
+        publication,
+        entries,
+    })
+}
+
+fn supplement_live_transcript(
+    live_entries: &mut Vec<TranscriptEntry>,
+    final_entries: Vec<TranscriptEntry>,
+) {
+    let supplements = final_entries
+        .into_iter()
+        .filter(|final_entry| {
+            !live_entries.iter().any(|live_entry| {
+                live_entry.source == final_entry.source
+                    && live_entry.start_ms < final_entry.end_ms
+                    && final_entry.start_ms < live_entry.end_ms
+            })
+        })
+        .collect::<Vec<_>>();
+    live_entries.extend(supplements);
+    live_entries.sort_by_key(|entry| entry.start_ms);
 }
 
 fn read_ndjson<T: for<'de> Deserialize<'de>>(path: &Path) -> Result<Vec<T>> {
@@ -945,16 +1055,9 @@ fn sync_directory(directory: &Path) -> Result<()> {
     Ok(())
 }
 
-fn format_duration(milliseconds: u64) -> String {
+pub fn format_duration(milliseconds: u64) -> String {
     let total_seconds = milliseconds / 1_000;
     format!("{:02}:{:02}", total_seconds / 60, total_seconds % 60)
-}
-
-fn now_ms() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64
 }
 
 #[cfg(unix)]

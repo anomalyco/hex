@@ -1,62 +1,110 @@
 # Roadmap
 
-## Browser Context
+HEX ships the coworker product loop: configurable hold-to-talk local dictation,
+explicit selected-text voice editing, optional context-aware OpenCode
+post-processing, a Metal HUD, bounded paste workers, settings, and a signed GPUI
+app bundle. Streaming commands and meetings remain implemented developer
+prototypes, but are intentionally absent from distributed builds until their
+product surfaces are redesigned.
 
-Generalize the current Brave AppleScript implementation into browser adapters
-without leaking browser identity into command definitions. Candidate adapters
-include Chromium-family AppleScript, Safari AppleScript, browser extensions,
-and accessibility APIs. Contextual commands should continue to depend on facts
-such as foreground application, active URL, host, and page identity.
+## Validate The Coworker Release
 
-## Assisted Diagnostics
+Runtime logs now live in Application Support, first-run setup installs the
+selected dictation model, and the release flow signs, notarizes,
+staples, Gatekeeper-assesses, and publishes Sparkle updates through R2.
 
-Add an explicit log-audit workflow that can summarize a selected time range and
-recommend command-taxonomy improvements. It should separate:
+The quarantined public DMG and a genuine automatic 2.0.0-to-2.0.1 Sparkle update
+have been validated on the development Mac. Before broadly sharing it, validate
+the DMG from a clean macOS account, including every TCC permission, model
+installation, and source-free launch. Preserve the stable bundle identity that
+owns Microphone, Accessibility, Input Monitoring, and Automation permissions.
 
-- Audio capture or device failures
-- Recognition errors and recurring observed forms
-- Sleeping command utterances or discarded Option taps
-- Context predicate mismatches
-- Ambiguous, unmatched, or incorrectly resolved commands
-- Action execution failures
+## Finish Settings And First-Run Health
 
-Recommendations should be inspectable proposals, not automatic mutations of
-the command configuration.
+Microphone selection, idle-safe live switching, unavailable-device fallback,
+sound-effect volume, application/browser-host processing modes, and the native
+`SMAppService` login-item toggle now ship. Runtime settings changes project live
+and persist atomically; launch-at-login remains owned by macOS rather than the
+settings file.
 
-## Dictation Pipelines
+Add a persistent permission-health surface so revoked Microphone, Accessibility,
+or Input Monitoring access remains diagnosable after onboarding. Keep true
+processor chains as future work only if real profiles need composition.
 
-Option push-to-talk uses Parakeet v2 through `transcribe-rs` ONNX inference and
-remains available while command recognition sleeps. Voice-delimited sessions
-now support paste, send, cancel, and Captain's Log journal capture. Add
-composable effectful `String -> Result<String>` processors, including optional
-OpenCode-backed processors.
+Import useful original-Hex preferences once from the preferred Application
+Support file. Validate each field, ignore malformed and unknown values, and
+record completion. The legacy files disagree about launch-at-login, so migration
+must ask or defer rather than guess.
 
-The HEX desktop app now owns command recognition and presents a click-through,
-top-center Option HUD. Its red recording capsule is driven by live RMS/peak
-levels and contracts into a fixed blue processing orb without changing capture
-semantics.
+## Harden The Real-Time Boundary
 
-Add end-of-speech detection without weakening the explicit consequential
-controls. Keep Option dictation available while command recognition sleeps;
-voice-delimited sessions remain gated by listening mode.
+Move append-only observation serialization and flushing off the microphone loop
+without making event delivery unbounded. Coalesce replaceable partial transcript
+updates if pressure requires dropping work; preserve completed transcripts,
+state transitions, command outcomes, and failures.
 
-## Meetings
+Diagnose recurring microphone chunk drops with runtime evidence before changing
+queue sizes or recognition cadence. Physically smoke-test custom modifier and
+key chords, lock behavior, cancellation, foreground insertion, and both reserved
+paste shortcuts.
 
-The first macOS 15+ vertical slice records separate ScreenCaptureKit microphone
-and system-audio tracks, writes owner-only artifacts, transcribes 30-second
-chunks locally, and exposes merged source-labeled transcripts in the dashboard.
+Add end-of-speech detection only if it preserves explicit Send, Cancel, and
+locked-capture controls.
 
-The signed HEX app observes CoreAudio process input state for supported
-meeting applications, debounces activations, and offers explicit Record/Not Now
-actions in a non-activating GPUI panel. Recording remains opt-in. Once recording
-starts, the Meetings pane owns the timer, Stop control, source-separated
-Moonshine live draft, Parakeet finalization state, and atomically published final
-transcript. The live draft remains available when final transcription fails.
+## Make Diagnostics Incremental
 
-Next priorities are local EventKit correlation for calendar titles and scheduled
-reminders, asking whether to stop when a meeting application's microphone becomes
-inactive, menu-bar controls, crash recovery for active WAV files, resumable
-transcription, explicit input-device selection, capture-gap events, and transcript
-scrolling/search. Evaluate synchronized audio playback, echo annotation, and
-person-level diarization only against a real recording corpus. Add a Linux capture
-seam only when implementing the PipeWire adapter.
+Replace repeated full-file parsing in Ratatui and GPUI with a shared bounded tail
+projection. Normal shutdown already emits `Stopping`; add heartbeat or process
+liveness evidence so a crash cannot leave an old `Listening` event looking live.
+
+Add an inspectable audit that separates capture failures, recognition errors,
+sleeping or discarded utterances, context mismatches, resolution misses, queue
+pressure, and action failures. Recommendations may propose command-taxonomy
+changes but must not mutate compiled configuration automatically.
+
+## Generalize Context From Evidence
+
+Replace System Events foreground polling with
+`NSWorkspace.frontmostApplication` when context capture is next revised. Keep
+command and dictation-profile semantics expressed in application and browser-host
+terms rather than Brave-specific types.
+
+Add one real second browser adapter before extracting a generalized adapter
+framework. Candidate implementations include Chromium-family AppleScript,
+Safari AppleScript, browser extensions, or Accessibility APIs. Diagnose Slack
+Huddle detection separately from generic browser context. Surface context age
+and failures instead of silently retaining an indefinitely stale snapshot.
+
+## Complete Meeting Lifecycle Recovery
+
+When meeting microphone activity disappears, ask `Keep Recording` or
+`Stop & Transcribe`; never stop automatically. Add EventKit correlation for
+titles and reminders, explicit input-device selection, structured capture-gap
+observations, active-WAV repair, and resumable final transcription. Status and
+final-publication recovery already exist; do not replace them.
+
+Keep active recording discoverable after the main window closes through a
+persistent menu-bar/status affordance. Add transcript search; scrolling and
+follow-live behavior are already implemented.
+
+Give durable transcript entries stable identities so live-to-final reconciliation,
+incremental UI refresh, and meeting-delta paste can advance without rereading
+broad history. Keep `You` and `Computer` source labels and the recoverable live
+draft when final transcription fails.
+
+Add end-to-end coverage for voice-triggered start/stop, shutdown during capture,
+forced final-transcription failure, and live provider detection. Evaluate
+synchronized playback, echo annotation, summarization, and person-level
+diarization only against real meeting recordings.
+
+## Deliberate Deferrals
+
+Keep commands and profiles in compiled Rust until a second real consumer needs a
+configuration format. Do not add a plugin or agent framework around the current
+deep modules.
+
+Do not add abstract platform seams before a concrete Linux implementation. If
+Linux work begins, introduce adapters only where PipeWire capture, input
+monitoring, keyboard output, foreground context, or action execution requires a
+real alternative. Follow the phased scope, capability contracts, and exit
+criteria in [`LINUX_PORT_PLAN.md`](LINUX_PORT_PLAN.md).

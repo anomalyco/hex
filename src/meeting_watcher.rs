@@ -3,15 +3,15 @@ use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{self, Receiver, SyncSender};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, SyncSender};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use color_eyre::eyre::{Result, eyre};
 use gpui::{
-    App, Application, Bounds, Context, IntoElement, Render, Rgba, Timer, Window,
-    WindowBackgroundAppearance, WindowBounds, WindowHandle, WindowKind, WindowOptions, div, point,
-    prelude::*, px, rgb, size,
+    App, Application, Bounds, Context, IntoElement, KeyBinding, Menu, MenuItem, Render, Rgba,
+    SystemMenuType, Timer, Window, WindowBackgroundAppearance, WindowBounds, WindowHandle,
+    WindowKind, WindowOptions, div, point, prelude::*, px, rgb, size,
 };
 
 use crate::app_settings::AppSettings;
@@ -58,6 +58,33 @@ struct MeetingUi {
     app_window: Rc<RefCell<Option<WindowHandle<AppWindow>>>>,
     event_path: PathBuf,
     meeting_requests: SyncSender<MeetingRequest>,
+    indicator: crate::dictation_indicator::DictationIndicatorSender,
+    recognition_start: Option<SyncSender<()>>,
+}
+
+struct RuntimeWorkers {
+    recognition: Option<thread::JoinHandle<()>>,
+    controller: thread::JoinHandle<()>,
+}
+
+impl RuntimeWorkers {
+    fn join(self) -> Result<()> {
+        if let Some(worker) = self.recognition {
+            worker
+                .join()
+                .map_err(|_| eyre!("recognition worker panicked during shutdown"))?;
+        }
+        self.controller
+            .join()
+            .map_err(|_| eyre!("meeting controller panicked during shutdown"))?;
+        Ok(())
+    }
+
+    fn join_and_log(self) {
+        if let Err(error) = self.join() {
+            tracing::error!(%error, "runtime worker shutdown failed");
+        }
+    }
 }
 
 pub struct ListenerConfig {
@@ -72,10 +99,32 @@ pub fn run(
     listener: Option<ListenerConfig>,
     dictation_preview: bool,
 ) -> Result<()> {
+    run_with_shell_preview(shutdown, preview, listener, dictation_preview, None)
+}
+
+pub fn preview_shell(
+    shutdown: &'static AtomicBool,
+    preview: crate::app_window::AppWindowPreview,
+) -> Result<()> {
+    run_with_shell_preview(shutdown, false, None, false, Some(preview))
+}
+
+fn run_with_shell_preview(
+    shutdown: &'static AtomicBool,
+    preview: bool,
+    listener: Option<ListenerConfig>,
+    dictation_preview: bool,
+    shell_preview: Option<crate::app_window::AppWindowPreview>,
+) -> Result<()> {
     shutdown.store(false, Ordering::Relaxed);
     crate::keyboard::initialize_layout()?;
-    let settings = AppSettings::load()?;
-    crate::feedback::set_enabled(settings.sound_effects);
+    let settings = if shell_preview.is_some() {
+        AppSettings::default()
+    } else {
+        AppSettings::load()?
+    };
+    let show_dock_icon = settings.show_dock_icon;
+    let setup_ready = crate::onboarding::status(&settings.transcription).ready();
     let app_event_path = listener
         .as_ref()
         .map(|listener| listener.event_path.clone());
@@ -86,7 +135,8 @@ pub fn run(
     let shell_event_path = app_event_path
         .clone()
         .unwrap_or_else(|| meeting_project_root.join("logs/live.ndjson"));
-    let show_app_on_launch = app_event_path.is_some() && !dictation_preview;
+    let show_app_on_launch =
+        shell_preview.is_some() || app_event_path.is_some() && !dictation_preview;
     let (event_sender, event_receiver) = mpsc::sync_channel(32);
     let (command_sender, command_receiver) = mpsc::sync_channel(8);
     let (meeting_request_sender, meeting_request_receiver) = mpsc::sync_channel(8);
@@ -105,87 +155,226 @@ pub fn run(
                 });
                 thread::sleep(Duration::from_millis(20));
             }
-            preview_sender.send(DictationIndicatorEvent::Transcribing);
-            thread::sleep(Duration::from_secs(2));
-            preview_sender.send(DictationIndicatorEvent::Completed);
+            preview_sender.send(DictationIndicatorEvent::Submitted { job_id: 0 });
+            preview_sender.send(DictationIndicatorEvent::Transcribing { job_id: 0 });
+            thread::sleep(Duration::from_millis(700));
+            preview_sender.send(DictationIndicatorEvent::Started);
+            thread::sleep(Duration::from_millis(500));
+            preview_sender.send(DictationIndicatorEvent::Processing { job_id: 0 });
+            thread::sleep(Duration::from_millis(800));
+            preview_sender.send(DictationIndicatorEvent::Submitted { job_id: 1 });
+            preview_sender.send(DictationIndicatorEvent::Transcribing { job_id: 1 });
+            thread::sleep(Duration::from_millis(700));
+            preview_sender.send(DictationIndicatorEvent::JobCompleted { job_id: 0 });
+            thread::sleep(Duration::from_millis(700));
+            preview_sender.send(DictationIndicatorEvent::Processing { job_id: 1 });
+            thread::sleep(Duration::from_secs(1));
+            preview_sender.send(DictationIndicatorEvent::JobCompleted { job_id: 1 });
         });
     }
-    let controller_events = event_sender.clone();
-    let controller_worker = thread::spawn(move || {
-        if preview {
-            let _ = controller_events.send(ControllerEvent::Offer(MeetingCandidate {
-                key: "preview".into(),
-                title: "Design sync".into(),
-                source: MeetingSource::Zoom,
-            }));
-        }
-        if let Err(error) = controller_loop(
-            shutdown,
-            controller_events.clone(),
-            command_receiver,
-            meeting_request_receiver,
-            meeting_project_root,
-        ) {
-            tracing::error!(%error, "meeting controller stopped");
-            let _ = controller_events.send(ControllerEvent::Failed {
-                title: "Meeting detection stopped".into(),
-                error: error.to_string(),
-            });
-        }
-    });
+    let controller_worker =
+        if shell_preview.is_some() || dictation_preview || !crate::DEVELOPER_FEATURES_ENABLED {
+            thread::spawn(move || {
+                while !shutdown.load(Ordering::Relaxed) {
+                    command_receiver.try_iter().for_each(drop);
+                    meeting_request_receiver.try_iter().for_each(drop);
+                    thread::sleep(Duration::from_millis(50));
+                }
+            })
+        } else {
+            let controller_events = event_sender.clone();
+            thread::spawn(move || {
+                if preview {
+                    let _ = controller_events.send(ControllerEvent::Offer(MeetingCandidate {
+                        key: "preview".into(),
+                        title: "Design sync".into(),
+                        source: MeetingSource::Zoom,
+                    }));
+                }
+                if let Err(error) = controller_loop(
+                    shutdown,
+                    controller_events.clone(),
+                    command_receiver,
+                    meeting_request_receiver,
+                    meeting_project_root,
+                ) {
+                    tracing::error!(%error, "meeting controller stopped");
+                    let _ = controller_events.send(ControllerEvent::Failed {
+                        title: "Meeting detection stopped".into(),
+                        error: error.to_string(),
+                    });
+                }
+            })
+        };
 
     let recognition_meeting_requests = meeting_request_sender.clone();
+    let (recognition_start_sender, recognition_start_receiver) = if listener.is_some() {
+        let (sender, receiver) = mpsc::sync_channel(1);
+        (Some(sender), Some(receiver))
+    } else {
+        (None, None)
+    };
     let recognition_worker = listener.map(|listener| {
         let failure_indicator = indicator_sender.clone();
-        let meeting_requests = recognition_meeting_requests.clone();
+        let recognition_indicator = indicator_sender.clone();
+        let meeting_requests =
+            crate::DEVELOPER_FEATURES_ENABLED.then(|| recognition_meeting_requests.clone());
+        let start = recognition_start_receiver.expect("listener start receiver must exist");
         thread::spawn(move || {
+            if !setup_ready {
+                loop {
+                    if shutdown.load(Ordering::Relaxed) {
+                        return;
+                    }
+                    match start.recv_timeout(Duration::from_millis(100)) {
+                        Ok(()) => break,
+                        Err(RecvTimeoutError::Timeout) => continue,
+                        Err(RecvTimeoutError::Disconnected) => return,
+                    }
+                }
+            }
             if let Err(error) = recognition::listen(
                 &listener.project_root,
                 &listener.event_path,
                 listener.device.as_deref(),
                 config::voice_control(),
                 shutdown,
-                Some(indicator_sender),
-                Some(meeting_requests),
+                Some(recognition_indicator),
+                meeting_requests,
             ) {
                 tracing::error!(%error, "desktop recognition stopped");
                 failure_indicator.send(crate::dictation_indicator::DictationIndicatorEvent::Failed);
             }
         })
     });
+    let runtime_workers = Rc::new(RefCell::new(Some(RuntimeWorkers {
+        recognition: recognition_worker,
+        controller: controller_worker,
+    })));
 
     let app_window = Rc::new(RefCell::new(None::<WindowHandle<AppWindow>>));
     let reopen_window = app_window.clone();
     let reopen_event_path = shell_event_path.clone();
     let reopen_meeting_requests = meeting_request_sender.clone();
+    let reopen_recognition_start = recognition_start_sender.clone();
+    let reopen_preview = shell_preview.clone();
+    let reopen_indicator = indicator_sender.clone();
+    let indicator_enabled = shell_preview
+        .as_ref()
+        .is_none_or(|preview| matches!(preview.pane, crate::app_window::PreviewPane::HudLab));
     let application = Application::new();
     application.on_reopen(move |cx| {
-        if let Err(error) = crate::app_window::open_or_focus(
-            &reopen_window,
-            reopen_event_path.clone(),
-            config::voice_control(),
-            reopen_meeting_requests.clone(),
-            cx,
-        ) {
+        let result = match reopen_preview.clone() {
+            Some(preview) => crate::app_window::open_preview(
+                &reopen_window,
+                reopen_event_path.clone(),
+                config::voice_control(),
+                reopen_meeting_requests.clone(),
+                reopen_indicator.clone(),
+                preview,
+                cx,
+            ),
+            None => crate::app_window::open_or_focus(
+                &reopen_window,
+                reopen_event_path.clone(),
+                config::voice_control(),
+                reopen_meeting_requests.clone(),
+                reopen_indicator.clone(),
+                reopen_recognition_start.clone(),
+                cx,
+            ),
+        };
+        if let Err(error) = result {
             tracing::error!(%error, "could not open HEX");
         }
     });
+    let application_runtime_workers = runtime_workers.clone();
     application.run(move |cx| {
-        if show_app_on_launch
-            && let Some(event_path) = app_event_path
-            && let Err(error) = crate::app_window::open_or_focus(
+        let close_app_window = app_window.clone();
+        cx.bind_keys([
+            KeyBinding::new("cmd-w", crate::app_window::CloseWindow, None),
+            KeyBinding::new("cmd-q", crate::app_window::QuitApplication, None),
+            KeyBinding::new("cmd-h", crate::app_window::HideApplication, None),
+            KeyBinding::new("cmd-m", crate::app_window::MinimizeWindow, None),
+            KeyBinding::new("ctrl-cmd-f", crate::app_window::ToggleFullscreen, None),
+            KeyBinding::new("cmd-,", crate::app_window::ShowSettings, None),
+        ]);
+        cx.bind_keys(crate::text_input::key_bindings());
+        cx.on_action(move |_: &crate::app_window::CloseWindow, cx| {
+            close_window(close_app_window.borrow_mut().take(), cx)
+        });
+        cx.on_action(|_: &crate::app_window::QuitApplication, cx| cx.quit());
+        cx.on_action(|_: &crate::app_window::CheckForUpdates, _| {
+            crate::sparkle::check_for_updates()
+        });
+        cx.on_action(|_: &crate::app_window::HideApplication, _| {
+            crate::app_settings::hide_application()
+        });
+        cx.set_menus(vec![
+            Menu {
+                name: "HEX".into(),
+                items: vec![
+                    MenuItem::action("Check for Updates…", crate::app_window::CheckForUpdates),
+                    MenuItem::separator(),
+                    MenuItem::action("Settings…", crate::app_window::ShowSettings),
+                    MenuItem::os_submenu("Services", SystemMenuType::Services),
+                    MenuItem::separator(),
+                    MenuItem::action("Hide HEX", crate::app_window::HideApplication),
+                    MenuItem::separator(),
+                    MenuItem::action("Quit HEX", crate::app_window::QuitApplication),
+                ],
+            },
+            Menu {
+                name: "File".into(),
+                items: vec![MenuItem::action(
+                    "Close Window",
+                    crate::app_window::CloseWindow,
+                )],
+            },
+            Menu {
+                name: "Window".into(),
+                items: vec![
+                    MenuItem::action("Minimize", crate::app_window::MinimizeWindow),
+                    MenuItem::action("Enter Full Screen", crate::app_window::ToggleFullscreen),
+                ],
+            },
+        ]);
+        if shell_preview.is_none() {
+            crate::sparkle::start();
+        }
+        crate::app_settings::set_dock_icon_visible(show_dock_icon);
+        let open_result = match shell_preview.clone() {
+            Some(preview) => Some(crate::app_window::open_preview(
                 &app_window,
-                event_path,
+                shell_event_path.clone(),
                 config::voice_control(),
                 meeting_request_sender.clone(),
+                indicator_sender.clone(),
+                preview,
                 cx,
-            )
-        {
+            )),
+            None => app_event_path.map(|event_path| {
+                crate::app_window::open_or_focus(
+                    &app_window,
+                    event_path,
+                    config::voice_control(),
+                    meeting_request_sender.clone(),
+                    indicator_sender.clone(),
+                    recognition_start_sender.clone(),
+                    cx,
+                )
+            }),
+        };
+        if show_app_on_launch && let Some(Err(error)) = open_result {
             tracing::error!(%error, "could not open HEX");
         }
         let quit_shutdown = shutdown;
+        let quit_workers = application_runtime_workers.clone();
         cx.on_app_quit(move |_| {
             quit_shutdown.store(true, Ordering::Relaxed);
+            if let Some(workers) = quit_workers.borrow_mut().take() {
+                workers.join_and_log();
+            }
             async {}
         })
         .detach();
@@ -199,8 +388,11 @@ pub fn run(
                     app_window: app_window.clone(),
                     event_path: shell_event_path.clone(),
                     meeting_requests: meeting_request_sender.clone(),
+                    indicator: indicator_sender.clone(),
+                    recognition_start: recognition_start_sender.clone(),
                 },
                 shutdown,
+                indicator_enabled,
                 cx,
             )
             .await;
@@ -208,14 +400,9 @@ pub fn run(
         .detach();
     });
     shutdown.store(true, Ordering::Relaxed);
-    if let Some(worker) = recognition_worker {
-        worker
-            .join()
-            .map_err(|_| eyre!("recognition worker panicked during shutdown"))?;
+    if let Some(workers) = runtime_workers.borrow_mut().take() {
+        workers.join()?
     }
-    controller_worker
-        .join()
-        .map_err(|_| eyre!("meeting controller panicked during shutdown"))?;
     Ok(())
 }
 
@@ -224,10 +411,11 @@ async fn drive_ui(
     indicator_events: Receiver<crate::dictation_indicator::DictationIndicatorEvent>,
     ui: MeetingUi,
     shutdown: &AtomicBool,
+    indicator_enabled: bool,
     cx: &mut gpui::AsyncApp,
 ) {
     let mut offer_window: Option<WindowHandle<MeetingOffer>> = None;
-    let mut dictation_indicator = DictationIndicatorUi::new();
+    let mut dictation_indicator = indicator_enabled.then(DictationIndicatorUi::new);
 
     loop {
         if shutdown.load(Ordering::Relaxed) {
@@ -235,12 +423,16 @@ async fn drive_ui(
             return;
         }
         while let Ok(event) = indicator_events.try_recv() {
-            if let Err(error) = cx.update(|cx| dictation_indicator.handle(event, cx)) {
+            if let Some(dictation_indicator) = &mut dictation_indicator
+                && let Err(error) = cx.update(|cx| dictation_indicator.handle(event, cx))
+            {
                 tracing::error!(%error, "could not update dictation indicator");
                 return;
             }
         }
-        let _ = cx.update(|cx| dictation_indicator.follow_pointer(cx));
+        if let Some(dictation_indicator) = &mut dictation_indicator {
+            let _ = cx.update(|cx| dictation_indicator.follow_pointer(cx));
+        }
         while let Ok(event) = events.try_recv() {
             let result = cx.update(|cx| match event {
                 ControllerEvent::Offer(candidate) => {
@@ -254,6 +446,8 @@ async fn drive_ui(
                         ui.event_path.clone(),
                         config::voice_control(),
                         ui.meeting_requests.clone(),
+                        ui.indicator.clone(),
+                        ui.recognition_start.clone(),
                         cx,
                     ) {
                         tracing::error!(%error, "could not open HEX for starting meeting");
@@ -269,6 +463,8 @@ async fn drive_ui(
                         ui.event_path.clone(),
                         config::voice_control(),
                         ui.meeting_requests.clone(),
+                        ui.indicator.clone(),
+                        ui.recognition_start.clone(),
                         cx,
                     ) {
                         tracing::error!(%error, "could not open HEX for active meeting");
@@ -294,6 +490,8 @@ async fn drive_ui(
                         ui.event_path.clone(),
                         config::voice_control(),
                         ui.meeting_requests.clone(),
+                        ui.indicator.clone(),
+                        ui.recognition_start.clone(),
                         cx,
                     ) {
                         tracing::error!(%open_error, "could not open HEX for meeting failure");
@@ -648,6 +846,7 @@ fn button(
         .on_click(move |_, window, _| on_click(window))
 }
 
+#[cfg_attr(not(debug_assertions), allow(dead_code))]
 pub fn probe() -> Result<()> {
     for application in active_microphone_applications()? {
         println!(

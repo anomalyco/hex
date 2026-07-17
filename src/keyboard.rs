@@ -150,6 +150,13 @@ pub fn post_enter() -> Result<()> {
 }
 
 pub fn post_shortcut(key: Key, modifiers: Modifiers) -> Result<()> {
+    post_repeated_shortcut(key, modifiers, 1)
+}
+
+pub fn post_repeated_shortcut(key: Key, modifiers: Modifiers, count: u8) -> Result<()> {
+    if count == 0 {
+        return Ok(());
+    }
     let key_code = match key {
         Key::Character(character) => key_code_for(character)?,
         Key::Home => 115,
@@ -169,15 +176,15 @@ pub fn post_shortcut(key: Key, modifiers: Modifiers) -> Result<()> {
     .into_iter()
     .filter_map(|(modifier, flag, key)| modifiers.contains(modifier).then_some((flag, key)))
     .collect::<Vec<_>>();
-    post_key_code(key_code, &modifiers)
+    post_key_code(key_code, &modifiers, count)
 }
 
-fn post_key_code(key_code: u16, modifiers: &[(u64, u16)]) -> Result<()> {
+fn post_key_code(key_code: u16, modifiers: &[(u64, u16)], count: u8) -> Result<()> {
     let flags = modifiers.iter().fold(0, |flags, (flag, _)| flags | flag);
     let specs = modifiers
         .iter()
         .map(|(_, key)| (*key, true, 0))
-        .chain([(key_code, true, flags), (key_code, false, flags)])
+        .chain((0..count).flat_map(|_| [(key_code, true, flags), (key_code, false, flags)]))
         .chain(modifiers.iter().rev().map(|(_, key)| (*key, false, 0)));
     let events = specs.map(KeyboardEvent::new).collect::<Result<Vec<_>>>()?;
     for event in events {

@@ -1,9 +1,16 @@
-use std::process::{Command, Stdio};
+use std::process::{Command as ProcessCommand, Stdio};
 use std::sync::mpsc::{self, Receiver, SyncSender, TrySendError};
 use std::thread;
 
 use color_eyre::eyre::{Result, WrapErr, eyre};
 
+use crate::command_grammar::normalize;
+#[allow(unused_imports)]
+pub use crate::command_grammar::{
+    CapturedCount, CapturedDigit, CapturedDirection, Command, CommandBuilder, ConfiguredCommand,
+    Count, Digit, Direction, OptionalCount, PatternSpec, TypedPattern,
+};
+pub use crate::context::ContextSelector as ContextPredicate;
 use crate::context::ContextSnapshot;
 use crate::keyboard::{Key, Modifiers};
 
@@ -22,229 +29,30 @@ pub enum Action {
     OpenApplication(&'static str),
     OpenUrl(&'static str),
     NavigateBrowser(&'static str),
-    Keystroke { key: Key, modifiers: Modifiers },
+    Keystroke {
+        key: Key,
+        modifiers: Modifiers,
+    },
+    RepeatedKeystroke {
+        key: Key,
+        modifiers: Modifiers,
+        count: u8,
+    },
     QuickSwitch(&'static str),
-}
-
-#[derive(Clone, Debug)]
-pub struct Target {
-    id: &'static str,
-    spoken: Vec<&'static str>,
-    action: Action,
-}
-
-impl Target {
-    pub fn application(
-        id: &'static str,
-        application: &'static str,
-        spoken: impl IntoIterator<Item = &'static str>,
-    ) -> Self {
-        Self {
-            id,
-            spoken: spoken.into_iter().collect(),
-            action: Action::OpenApplication(application),
-        }
-    }
-
-    pub fn website(
-        id: &'static str,
-        url: &'static str,
-        spoken: impl IntoIterator<Item = &'static str>,
-    ) -> Self {
-        Self {
-            id,
-            spoken: spoken.into_iter().collect(),
-            action: Action::OpenUrl(url),
-        }
-    }
-
-    fn verbs(&self) -> &'static [&'static str] {
-        match self.action {
-            Action::StartDictation
-            | Action::StartCaptainsLog
-            | Action::StartMeeting
-            | Action::StopMeeting => &[],
-            Action::OpenApplication(_) => &["open", "launch"],
-            Action::OpenUrl(_) => &["go to", "open"],
-            Action::NavigateBrowser(_) => &[],
-            Action::Keystroke { .. } => &[],
-            Action::QuickSwitch(_) => &[],
-        }
-    }
-
-    fn description(&self) -> &'static str {
-        match self.action {
-            Action::StartDictation => "Start voice dictation",
-            Action::StartCaptainsLog => "Record a journal entry",
-            Action::StartMeeting => "Start meeting recording",
-            Action::StopMeeting => "Stop meeting recording",
-            Action::OpenApplication(_) => "Open application",
-            Action::OpenUrl(_) => "Open website",
-            Action::NavigateBrowser(_) => "Navigate active tab",
-            Action::Keystroke { .. } => "Use application shortcut",
-            Action::QuickSwitch(_) => "Open application destination",
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug)]
-pub enum ContextPredicate {
-    Always,
-    BrowserHost(&'static str),
-    Application(&'static str),
-}
-
-impl ContextPredicate {
-    fn matches(self, context: &ContextSnapshot) -> bool {
-        match self {
-            Self::Always => true,
-            Self::BrowserHost(host) => context.browser_host_is(host),
-            Self::Application(application) => context.application_is(application),
-        }
-    }
-
-    fn scope(self) -> CommandScope {
-        match self {
-            Self::Always => CommandScope::Global,
-            Self::BrowserHost(host) => CommandScope::Browser(host),
-            Self::Application(application) => CommandScope::Application(application),
-        }
-    }
-}
-
-pub struct ContextualCommand {
-    id: &'static str,
-    phrases: Vec<&'static str>,
-    description: &'static str,
-    context: ContextPredicate,
-    action: Action,
-}
-
-impl ContextualCommand {
-    pub fn dictation_start(
-        id: &'static str,
-        phrases: impl IntoIterator<Item = &'static str>,
-    ) -> Self {
-        Self {
-            id,
-            phrases: phrases.into_iter().collect(),
-            description: "Start voice dictation",
-            context: ContextPredicate::Always,
-            action: Action::StartDictation,
-        }
-    }
-
-    pub fn captains_log_start(
-        id: &'static str,
-        phrases: impl IntoIterator<Item = &'static str>,
-    ) -> Self {
-        Self {
-            id,
-            phrases: phrases.into_iter().collect(),
-            description: "Record a journal entry",
-            context: ContextPredicate::Always,
-            action: Action::StartCaptainsLog,
-        }
-    }
-
-    pub fn meeting_start(
-        id: &'static str,
-        phrases: impl IntoIterator<Item = &'static str>,
-    ) -> Self {
-        Self {
-            id,
-            phrases: phrases.into_iter().collect(),
-            description: "Start meeting recording",
-            context: ContextPredicate::Always,
-            action: Action::StartMeeting,
-        }
-    }
-
-    pub fn meeting_stop(id: &'static str, phrases: impl IntoIterator<Item = &'static str>) -> Self {
-        Self {
-            id,
-            phrases: phrases.into_iter().collect(),
-            description: "Stop meeting recording",
-            context: ContextPredicate::Always,
-            action: Action::StopMeeting,
-        }
-    }
-
-    pub fn global_shortcut(
-        id: &'static str,
-        key: Key,
-        modifiers: Modifiers,
-        phrases: impl IntoIterator<Item = &'static str>,
-    ) -> Self {
-        Self {
-            id,
-            phrases: phrases.into_iter().collect(),
-            description: "Use keyboard shortcut",
-            context: ContextPredicate::Always,
-            action: Action::Keystroke { key, modifiers },
-        }
-    }
-
-    pub fn browser_navigation(
-        id: &'static str,
-        host: &'static str,
-        url: &'static str,
-        phrases: impl IntoIterator<Item = &'static str>,
-    ) -> Self {
-        Self {
-            id,
-            phrases: phrases.into_iter().collect(),
-            description: "Navigate active tab",
-            context: ContextPredicate::BrowserHost(host),
-            action: Action::NavigateBrowser(url),
-        }
-    }
-
-    pub fn application_shortcut(
-        id: &'static str,
-        application: &'static str,
-        key: Key,
-        modifiers: Modifiers,
-        phrases: impl IntoIterator<Item = &'static str>,
-    ) -> Self {
-        Self {
-            id,
-            phrases: phrases.into_iter().collect(),
-            description: "Use application shortcut",
-            context: ContextPredicate::Application(application),
-            action: Action::Keystroke { key, modifiers },
-        }
-    }
-
-    pub fn application_quick_switch(
-        id: &'static str,
-        application: &'static str,
-        query: &'static str,
-        phrases: impl IntoIterator<Item = &'static str>,
-    ) -> Self {
-        Self {
-            id,
-            phrases: phrases.into_iter().collect(),
-            description: "Open application destination",
-            context: ContextPredicate::Application(application),
-            action: Action::QuickSwitch(query),
-        }
-    }
 }
 
 pub struct CommandConfig {
     wake_phrases: Vec<&'static str>,
     sleep_phrases: Vec<&'static str>,
-    targets: Vec<Target>,
-    contextual: Vec<ContextualCommand>,
+    commands: Vec<ConfiguredCommand>,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum CommandScope {
     Sleeping,
     Global,
-    Application(&'static str),
-    Browser(&'static str),
+    Application(String),
+    Browser(String),
 }
 
 pub struct CommandInfo {
@@ -331,8 +139,7 @@ impl CommandConfig {
         Self {
             wake_phrases: Vec::new(),
             sleep_phrases: Vec::new(),
-            targets: Vec::new(),
-            contextual: Vec::new(),
+            commands: Vec::new(),
         }
     }
 
@@ -346,13 +153,24 @@ impl CommandConfig {
         self
     }
 
-    pub fn target(mut self, target: Target) -> Self {
-        self.targets.push(target);
-        self
-    }
-
-    pub fn contextual(mut self, command: ContextualCommand) -> Self {
-        self.contextual.push(command);
+    pub fn command(mut self, command: ConfiguredCommand) -> Self {
+        assert!(
+            !self
+                .commands
+                .iter()
+                .any(|existing| existing.id() == command.id()),
+            "duplicate command id: {}",
+            command.id()
+        );
+        for existing in &self.commands {
+            assert!(
+                !existing.overlaps(&command),
+                "command patterns overlap: {} and {}",
+                existing.id(),
+                command.id()
+            );
+        }
+        self.commands.push(command);
         self
     }
 
@@ -369,37 +187,19 @@ impl CommandConfig {
             return Decision::Sleep;
         }
 
-        if let Some(command) = self.contextual.iter().find(|command| {
-            command.context.matches(context)
-                && command
-                    .phrases
-                    .iter()
-                    .any(|phrase| normalize(phrase) == heard)
+        let words = heard.split_whitespace().collect::<Vec<_>>();
+        if let Some((command, action)) = self.commands.iter().find_map(|command| {
+            command
+                .match_words(&words, context)
+                .map(|action| (command, action))
         }) {
             return Decision::Execute {
-                id: command.id,
-                action: command.action,
+                id: command.id(),
+                action,
             };
         }
 
-        self.targets
-            .iter()
-            .find(|candidate| {
-                candidate.verbs().iter().any(|verb| {
-                    heard
-                        .strip_prefix(&format!("{verb} "))
-                        .is_some_and(|heard| {
-                            candidate
-                                .spoken
-                                .iter()
-                                .any(|spoken| normalize(spoken) == heard)
-                        })
-                })
-            })
-            .map_or(Decision::Ignore, |target| Decision::Execute {
-                id: target.id,
-                action: target.action,
-            })
+        Decision::Ignore
     }
 
     pub fn catalog(&self) -> Vec<CommandInfo> {
@@ -422,42 +222,11 @@ impl CommandConfig {
                 id: "mode.sleep",
             });
         }
-        commands.extend(self.targets.iter().map(|target| {
-            let canonical = target.spoken[0];
-            let verb = target.verbs()[0];
-            let mut aliases: Vec<_> = target
-                .spoken
-                .iter()
-                .skip(1)
-                .map(|spoken| format!("{verb} {spoken}"))
-                .collect();
-            aliases.extend(target.verbs().iter().skip(1).flat_map(|verb| {
-                target
-                    .spoken
-                    .iter()
-                    .map(move |spoken| format!("{verb} {spoken}"))
-            }));
-            CommandInfo {
-                scope: CommandScope::Global,
-                phrase: format!("{verb} {canonical}"),
-                aliases,
-                description: target.description(),
-                id: target.id,
-            }
-        }));
-        commands.extend(self.contextual.iter().map(|command| {
-            let (canonical, aliases) = command.phrases.split_first().expect("command has a phrase");
-            CommandInfo {
-                scope: command.context.scope(),
-                phrase: (*canonical).into(),
-                aliases: aliases.iter().map(|phrase| (*phrase).into()).collect(),
-                description: command.description,
-                id: command.id,
-            }
-        }));
+        commands.extend(self.commands.iter().map(ConfiguredCommand::catalog));
         commands
     }
 
+    #[cfg_attr(not(debug_assertions), allow(dead_code))]
     pub fn available_catalog(&self, mode: Mode, context: &ContextSnapshot) -> Vec<CommandInfo> {
         self.catalog()
             .into_iter()
@@ -466,8 +235,8 @@ impl CommandConfig {
                 Mode::Listening => match command.scope {
                     CommandScope::Global => true,
                     CommandScope::Application(_) | CommandScope::Browser(_) => {
-                        self.contextual.iter().any(|contextual| {
-                            contextual.id == command.id && contextual.context.matches(context)
+                        self.commands.iter().any(|configured| {
+                            configured.id() == command.id && configured.matches_context(context)
                         })
                     }
                     CommandScope::Sleeping => false,
@@ -478,7 +247,7 @@ impl CommandConfig {
 }
 
 pub fn execute(action: Action) -> Result<()> {
-    let mut command = Command::new("/usr/bin/open");
+    let mut command = ProcessCommand::new("/usr/bin/open");
     match action {
         Action::StartDictation
         | Action::StartCaptainsLog
@@ -498,20 +267,18 @@ pub fn execute(action: Action) -> Result<()> {
         Action::Keystroke { key, modifiers } => {
             return application_keystroke(key, modifiers);
         }
+        Action::RepeatedKeystroke {
+            key,
+            modifiers,
+            count,
+        } => {
+            return crate::keyboard::post_repeated_shortcut(key, modifiers, count);
+        }
         Action::QuickSwitch(query) => {
             return application_quick_switch(query);
         }
     }
-    let status = command
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .wrap_err("could not invoke macOS open")?;
-    if status.success() {
-        Ok(())
-    } else {
-        Err(eyre!("macOS open exited with {status}"))
-    }
+    checked_status(&mut command, "macOS open")
 }
 
 fn application_quick_switch(query: &str) -> Result<()> {
@@ -527,7 +294,7 @@ end tell
 end run
 "#;
     checked_status(
-        Command::new("/usr/bin/osascript").args(["-e", script, "--", query]),
+        ProcessCommand::new("/usr/bin/osascript").args(["-e", script, "--", query]),
         "application quick switch",
     )
 }
@@ -536,7 +303,7 @@ fn application_keystroke(key: Key, modifiers: Modifiers) -> Result<()> {
     crate::keyboard::post_shortcut(key, modifiers)
 }
 
-fn checked_status(command: &mut Command, operation: &str) -> Result<()> {
+fn checked_status(command: &mut ProcessCommand, operation: &str) -> Result<()> {
     let status = command
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -557,42 +324,14 @@ on run argv
     end tell
 end run
 "#;
-    let status = Command::new("/usr/bin/osascript")
-        .args(["-e", script, "--", url])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .wrap_err("could not navigate Brave")?;
-    if status.success() {
-        Ok(())
-    } else {
-        Err(eyre!("Brave navigation exited with {status}"))
-    }
+    checked_status(
+        ProcessCommand::new("/usr/bin/osascript").args(["-e", script, "--", url]),
+        "Brave navigation",
+    )
 }
 
 fn matches_phrase(heard: &str, phrases: &[&str]) -> bool {
     phrases.iter().any(|phrase| normalize(phrase) == heard)
-}
-
-fn normalize(text: &str) -> String {
-    text.trim()
-        .trim_matches(|character: char| character.is_ascii_punctuation())
-        .split_whitespace()
-        .map(|word| match word.to_ascii_lowercase().as_str() {
-            "zero" => "0".to_string(),
-            "one" => "1".to_string(),
-            "two" => "2".to_string(),
-            "three" => "3".to_string(),
-            "four" => "4".to_string(),
-            "five" => "5".to_string(),
-            "six" => "6".to_string(),
-            "seven" => "7".to_string(),
-            "eight" => "8".to_string(),
-            "nine" => "9".to_string(),
-            _ => word.to_ascii_lowercase(),
-        })
-        .collect::<Vec<_>>()
-        .join(" ")
 }
 
 #[cfg(test)]
@@ -607,7 +346,134 @@ mod tests {
         CommandConfig::new()
             .wake_with(["voice control"])
             .sleep_with(["go to sleep"])
-            .target(Target::application("app.open.slack", "Slack", ["slack"]))
+            .command(
+                Command::new("app.open.slack", "Open application")
+                    .phrases(["open slack", "launch slack"])
+                    .action(|()| Action::OpenApplication("Slack")),
+            )
+    }
+
+    fn digit_config() -> CommandConfig {
+        CommandConfig::new().command(
+            Command::new("shortcut.command-number", "Use keyboard shortcut")
+                .spoken(("command", Digit))
+                .spoken(("key", "command", Digit))
+                .action(|digit| Action::Keystroke {
+                    key: Key::Character(digit.as_char()),
+                    modifiers: Modifiers::COMMAND,
+                }),
+        )
+    }
+
+    #[test]
+    fn typed_digit_slot_accepts_words_and_digits_from_zero_through_nine() {
+        for heard in ["command zero", "command 5", "key command nine"] {
+            assert!(matches!(
+                digit_config().resolve(Mode::Listening, heard, &no_context()),
+                Decision::Execute {
+                    id: "shortcut.command-number",
+                    action: Action::Keystroke { .. },
+                }
+            ));
+        }
+    }
+
+    #[test]
+    fn typed_digit_slot_rejects_numbers_outside_a_single_digit() {
+        for heard in ["command ten", "command 11", "command negative one"] {
+            assert!(matches!(
+                digit_config().resolve(Mode::Listening, heard, &no_context()),
+                Decision::Ignore
+            ));
+        }
+    }
+
+    #[test]
+    fn typed_command_catalog_is_derived_from_its_patterns() {
+        let catalog = digit_config().catalog();
+
+        assert_eq!(catalog[0].phrase, "command <digit>");
+        assert_eq!(catalog[0].aliases, ["key command <digit>"]);
+    }
+
+    #[test]
+    fn direction_and_optional_count_produce_typed_captures() {
+        let commands = CommandConfig::new().command(
+            Command::new("edit.move", "Move the cursor")
+                .spoken(("GO", Direction, Count.optional()))
+                .action(|(direction, count)| Action::RepeatedKeystroke {
+                    key: direction.key(),
+                    modifiers: Modifiers::NONE,
+                    count: count.map_or(1, CapturedCount::get),
+                }),
+        );
+
+        assert!(matches!(
+            commands.resolve(Mode::Listening, "go left", &no_context()),
+            Decision::Execute {
+                action: Action::RepeatedKeystroke {
+                    key: Key::Left,
+                    count: 1,
+                    ..
+                },
+                ..
+            }
+        ));
+        assert!(matches!(
+            commands.resolve(Mode::Listening, "go down five", &no_context()),
+            Decision::Execute {
+                action: Action::RepeatedKeystroke {
+                    key: Key::Down,
+                    count: 5,
+                    ..
+                },
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    #[should_panic(expected = "command patterns overlap: digit and count")]
+    fn overlapping_typed_patterns_are_rejected_at_configuration_time() {
+        let _ = CommandConfig::new()
+            .command(
+                Command::new("digit", "Digit")
+                    .spoken(("choose", Digit))
+                    .action(|_| Action::StartMeeting),
+            )
+            .command(
+                Command::new("count", "Count")
+                    .spoken(("choose", Count))
+                    .action(|_| Action::StopMeeting),
+            );
+    }
+
+    #[test]
+    #[should_panic(expected = "command patterns overlap: digit and literal")]
+    fn literal_that_a_slot_accepts_is_rejected_as_an_overlap() {
+        let _ = CommandConfig::new()
+            .command(
+                Command::new("digit", "Digit")
+                    .spoken(("choose", Digit))
+                    .action(|_| Action::StartMeeting),
+            )
+            .command(
+                Command::new("literal", "Literal")
+                    .spoken(("choose", "1"))
+                    .action(|()| Action::StopMeeting),
+            );
+    }
+
+    #[test]
+    fn browser_and_application_scopes_are_conservatively_overlapping() {
+        assert!(
+            ContextPredicate::browser_host("x.com")
+                .overlaps(&ContextPredicate::application("Brave Browser"))
+        );
+        assert!(
+            !ContextPredicate::browser_host("x.com")
+                .overlaps(&ContextPredicate::browser_host("example.com"))
+        );
     }
 
     #[test]
@@ -639,12 +505,14 @@ mod tests {
 
     #[test]
     fn command_numbers_match_words_or_digits() {
-        let config = CommandConfig::new().contextual(ContextualCommand::global_shortcut(
-            "shortcut.command-one",
-            Key::Character('1'),
-            Modifiers::COMMAND,
-            ["command one"],
-        ));
+        let config = CommandConfig::new().command(
+            Command::new("shortcut.command-one", "Use keyboard shortcut")
+                .phrases(["command one"])
+                .action(|()| Action::Keystroke {
+                    key: Key::Character('1'),
+                    modifiers: Modifiers::COMMAND,
+                }),
+        );
         assert!(matches!(
             config.resolve(Mode::Listening, "Command 1.", &no_context()),
             Decision::Execute {
@@ -676,12 +544,12 @@ mod tests {
 
     #[test]
     fn contextual_command_requires_matching_foreground_browser() {
-        let config = CommandConfig::new().contextual(ContextualCommand::browser_navigation(
-            "x.chat",
-            "x.com",
-            "https://x.com/messages",
-            ["go to chat"],
-        ));
+        let config = CommandConfig::new().command(
+            Command::new("x.chat", "Navigate active tab")
+                .phrases(["go to chat"])
+                .when(ContextPredicate::browser_host("x.com"))
+                .action(|()| Action::NavigateBrowser("https://x.com/messages")),
+        );
         assert!(matches!(
             config.resolve(Mode::Listening, "go to chat", &no_context()),
             Decision::Ignore
@@ -690,6 +558,8 @@ mod tests {
             application: Some("Brave Browser".into()),
             browser_url: Some(url::Url::parse("https://x.com/home").unwrap()),
             window_title: None,
+            selected_text: None,
+            input_revision: None,
         };
         assert!(matches!(
             config.resolve(Mode::Listening, "go to chat", &x),
@@ -699,12 +569,12 @@ mod tests {
 
     #[test]
     fn application_command_requires_matching_foreground_application() {
-        let config = CommandConfig::new().contextual(ContextualCommand::application_quick_switch(
-            "slack.channel.console",
-            "Slack",
-            "console",
-            ["go to console"],
-        ));
+        let config = CommandConfig::new().command(
+            Command::new("slack.channel.console", "Open application destination")
+                .phrases(["go to console"])
+                .when(ContextPredicate::application("Slack"))
+                .action(|()| Action::QuickSwitch("console")),
+        );
         assert!(matches!(
             config.resolve(Mode::Listening, "go to console", &no_context()),
             Decision::Ignore
@@ -713,6 +583,8 @@ mod tests {
             application: Some("Slack".into()),
             browser_url: None,
             window_title: None,
+            selected_text: None,
+            input_revision: None,
         };
         assert!(matches!(
             config.resolve(Mode::Listening, "go to console", &slack),
@@ -728,18 +600,20 @@ mod tests {
         let config = CommandConfig::new()
             .wake_with(["voice control"])
             .sleep_with(["go to sleep"])
-            .target(Target::website(
-                "website.open.training",
-                "https://hub.kitlangton.dev/training",
-                ["training"],
-            ))
-            .contextual(ContextualCommand::application_shortcut(
-                "slack.threads",
-                "Slack",
-                Key::Character('t'),
-                Modifiers::COMMAND.with(Modifiers::SHIFT),
-                ["go to threads"],
-            ));
+            .command(
+                Command::new("website.open.training", "Open website")
+                    .phrases(["go to training", "open training"])
+                    .action(|()| Action::OpenUrl("https://hub.kitlangton.dev/training")),
+            )
+            .command(
+                Command::new("slack.threads", "Use application shortcut")
+                    .phrases(["go to threads"])
+                    .when(ContextPredicate::application("Slack"))
+                    .action(|()| Action::Keystroke {
+                        key: Key::Character('t'),
+                        modifiers: Modifiers::COMMAND.with(Modifiers::SHIFT),
+                    }),
+            );
 
         let no_context = config.available_catalog(Mode::Listening, &no_context());
         assert!(no_context.iter().any(|command| {
@@ -756,6 +630,8 @@ mod tests {
             application: Some("Slack".into()),
             browser_url: None,
             window_title: None,
+            selected_text: None,
+            input_revision: None,
         };
         let slack_commands = config.available_catalog(Mode::Listening, &slack);
         assert!(

@@ -8,9 +8,7 @@ pub struct InstanceLock {
 }
 
 pub fn acquire(name: &str) -> Result<InstanceLock> {
-    let directory = dirs::data_dir()
-        .ok_or_else(|| eyre!("macOS application support directory is unavailable"))?
-        .join("voice-control");
+    let directory = crate::app_paths::support_dir()?;
     fs::create_dir_all(&directory)?;
     let path = directory.join(format!("{name}.lock"));
     let file = OpenOptions::new()

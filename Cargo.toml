@@ -1,10 +1,14 @@
 [package]
 name = "voice-control"
-version = "0.1.0"
+version = "2.0.9"
 edition = "2024"
+
+[features]
+onnx-benchmark = ["dep:transcribe-rs"]
 
 [dependencies]
 arboard = { version = "3.6.1", default-features = false }
+block2 = "0.6.2"
 clap = { version = "4.6.1", features = ["derive"] }
 color-eyre = "0.6.5"
 cpal = "0.18.1"
@@ -15,13 +19,17 @@ fs2 = "0.4.3"
 hound = "3.5.1"
 libloading = "0.9.0"
 ratatui = "0.30.2"
+regex = "1.12.3"
 rodio = { version = "0.22.2", default-features = false, features = ["playback", "mp3"] }
 rubato = "0.16.2"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.150"
+sha2 = "0.11.0"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
-transcribe-rs = { version = "0.3.11", features = ["onnx"] }
+transcribe-cpp = "=0.1.3"
+transcribe-rs = { git = "https://github.com/cjpais/transcribe-rs", rev = "e37c66b6df43af51fde8dec34f98a07aaf09564c", features = ["onnx"], optional = true }
+unicode-segmentation = "1.13.3"
 url = "2.5.8"
 
 [target.'cfg(target_os = "macos")'.dependencies]
@@ -34,5 +42,6 @@ objc2-app-kit = "0.3.2"
 objc2-core-audio = "0.3.2"
 objc2-foundation = "0.3.2"
 objc2-quartz-core = { version = "0.3.2", features = ["CALayer"] }
+objc2-service-management = { version = "0.3.2", features = ["SMAppService"] }
 raw-window-handle = "0.6.2"
 screencapturekit = { version = "=8.0.0", features = ["macos_15_0"] }

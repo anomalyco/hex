@@ -1,5 +1,8 @@
 /target
 /.venv
 /logs
+/perf/transcription-corpus
+/dist
+/.wrangler
 __pycache__/
 *.py[cod]

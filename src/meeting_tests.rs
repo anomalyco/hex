@@ -63,6 +63,51 @@ fn live_transcript_projects_the_latest_version_of_each_source_line() {
 }
 
 #[test]
+fn transcript_entries_coalesce_into_source_turns_without_hiding_long_pauses() {
+    let entry = |source, start_ms, end_ms, text: &str| TranscriptEntry {
+        source,
+        start_ms,
+        end_ms,
+        text: text.into(),
+    };
+    let turns = coalesce_transcript([
+        entry(MeetingSource::Microphone, 0, 1_000, "First."),
+        entry(MeetingSource::Microphone, 1_400, 2_000, "Second."),
+        entry(MeetingSource::System, 2_000, 3_000, "Reply."),
+        entry(MeetingSource::System, 7_000, 8_000, "Later."),
+    ]);
+
+    assert_eq!(turns.len(), 3);
+    assert_eq!(turns[0].text, "First. Second.");
+    assert_eq!(turns[1].text, "Reply.");
+    assert_eq!(turns[2].text, "Later.");
+}
+
+#[test]
+fn final_transcript_supplements_gaps_without_replacing_live_entries() {
+    let entry = |source, start_ms, end_ms, text: &str| TranscriptEntry {
+        source,
+        start_ms,
+        end_ms,
+        text: text.into(),
+    };
+    let mut live = vec![entry(MeetingSource::Microphone, 0, 1_000, "Live words.")];
+    supplement_live_transcript(
+        &mut live,
+        vec![
+            entry(MeetingSource::Microphone, 100, 900, "Final replacement."),
+            entry(MeetingSource::System, 100, 900, "Other source."),
+            entry(MeetingSource::Microphone, 1_200, 2_000, "Recovered tail."),
+        ],
+    );
+
+    assert_eq!(live.len(), 3);
+    assert_eq!(live[0].text, "Live words.");
+    assert_eq!(live[1].text, "Other source.");
+    assert_eq!(live[2].text, "Recovered tail.");
+}
+
+#[test]
 fn live_timestamps_preserve_dropped_packet_gaps_and_match_final_origin() {
     let packet = AudioPacket {
         source: MeetingSource::System,

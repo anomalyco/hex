@@ -1,19 +1,31 @@
 # HEX
 
-HEX is the second-generation successor to Voice Control: a local, observable
-voice command system for macOS, built in Rust on top of Moonshine Voice.
+HEX is a private local dictation app for macOS, built in Rust with strict-Metal
+transcription. Experimental voice commands and meetings remain available only
+in development builds.
 
 ## Try It
 
-Moonshine `0.0.68` and the English Medium Streaming model are installed locally.
 Install and launch the signed GPUI desktop app with:
 
 ```sh
 ./scripts/install-app.sh
 ```
 
-The app starts command listening and meeting detection together. For CLI-only
-development, start the listener with:
+On first launch, HEX guides you through Microphone, Input Monitoring, and
+Accessibility access, then installs the selected checksum-pinned dictation
+model. Dictation starts only after those required capabilities are ready.
+
+The current coworker build is available from the stable download URL:
+
+<https://pub-089d681d41754031a4aefa7017d8c2fb.r2.dev/releases/HEX-latest-arm64.dmg>
+
+Open the DMG and drag HEX into Applications. The download is Apple-silicon-only
+and requires macOS 15 or newer.
+
+The distributed app starts hotkey dictation without command recognition or
+meeting detection. Debug builds retain those unfinished features for development.
+Start the developer listener with:
 
 ```sh
 cargo run -- listen
@@ -33,24 +45,44 @@ Press Ctrl-C to stop. To recreate the Python environment and model cache:
 ./scripts/setup.sh
 ```
 
-The first run requires macOS Microphone, Input Monitoring, and Accessibility
-permission. The setup scripts require `uv`, `curl`, and `tar`.
+The development setup scripts require `uv`, `curl`, and `tar`.
+Building the app bundle requires Xcode 26 to compile its Icon Composer source.
 
-Option dictation uses Parakeet v2 through the same ONNX engine as Handy. Install
-the model once with:
+Dictation uses curated local GGUF models through
+`transcribe.cpp` and strict Metal. Open **Settings > Local transcription** to
+choose a language; HEX recommends speed, accuracy, and recognition-hint options,
+then downloads, verifies, and prewarms the selected model before activating it.
+Parakeet v2 Q8 remains the default English model. For development or offline
+bootstrap, install that default directly with:
 
 ```sh
 ./scripts/setup-parakeet.sh
 ```
 
-Hold Option, speak, then release to transcribe and paste into the foreground
-application. Holds shorter than 300 ms are discarded, and 450 ms of warm
-pre-roll protects the first phoneme. Pressing or releasing Option resets
-Moonshine's stream so dictation audio cannot leak into a command.
+Hold the dictation shortcut, speak, then release to transcribe and paste into the
+foreground application. The shortcut defaults to Option and can be recorded in
+Settings as a modifier chord, modifier-plus-key chord, or standalone function
+key. Holds shorter than 300 ms are discarded, and 450 ms of warm pre-roll
+protects the first phoneme.
+Double-tap the shortcut within 300 ms to lock hands-free dictation, then press it
+again to finish or Escape to cancel. Settings can also disable double-tap lock,
+control other audio while dictating, choose a microphone, prevent idle sleep
+during recordings, launch HEX at login, adjust tone volume, and show or hide HEX
+in the Dock. Microphone changes apply as soon as the active capture ends. If a
+saved microphone is unavailable, HEX falls back to its automatic preference
+order instead of stopping dictation. Warm capture remains enabled so the
+in-memory pre-roll can protect speech onset. The language picker affects local
+dictation.
 Press Option-Shift-V to paste the last successful transcript again.
 
+To edit existing text, select it, hold Option-Command, describe the change, and
+release. HEX transcribes the instruction, asks OpenCode for replacement text,
+and replaces the selection only if the same application and exact text remain
+selected when processing finishes. The edit shortcut is configurable. Missing
+or changed selections and processing failures leave the document unchanged.
+
 The desktop app shows a click-through dictation indicator at the top center of
-the display under the pointer. A deliberate Option hold reveals a red capsule
+the display under the pointer. A deliberate shortcut hold reveals a red capsule
 whose inner energy follows live RMS and peak microphone levels. On release it
 contracts without overshoot into a fixed blue orb with a clipped processing
 sweep, then exits on completion, cancellation, failure, or a brief discarded
@@ -61,6 +93,46 @@ Preview the complete HUD sequence without microphone input:
 ```sh
 cargo run -- app --preview-dictation
 ```
+
+For deterministic UI development, launch the production shell without
+recognition, meeting detection, persisted settings, or real downloads:
+
+```sh
+cargo run -- preview settings
+cargo run -- preview onboarding
+cargo run -- preview transcription-picker --language zh --model-state installed
+cargo run -- preview transcription-picker --language en --model-state downloading
+cargo run -- preview transcription-picker --language zh --model-state error
+```
+
+Capture only the preview window without Apple Events or Accessibility access:
+
+```sh
+./scripts/capture-preview.sh /tmp/hex-picker.png transcription-picker \
+  --language zh --model-state installed
+```
+
+The installed app checks for and downloads signed Sparkle updates automatically,
+then installs them in the background or when HEX next quits. Use **HEX > Check
+for Updates…** or **Settings > Software updates** to check immediately. Every
+update is verified with both Developer ID and Sparkle EdDSA signatures before
+installation.
+
+Release builds are signed, notarized, stapled, Gatekeeper-assessed, and prepared
+locally before publication. Publishing is an explicit second step:
+
+```sh
+HEX_BUILD_NUMBER=20001 \
+HEX_RELEASE_NOTES=release-notes/2.0.1.md \
+./scripts/release-app.sh prepare
+
+./scripts/release-app.sh publish
+```
+
+## Developer Features
+
+The following command-recognition and meeting workflows are compiled into debug
+builds only. They are not present in the signed coworker release.
 
 For hands-free dictation, say `dictate start`, speak, then say `dictate stop` to
 transcribe and paste or `dictate send` to paste and press Enter. Say
@@ -76,6 +148,9 @@ at `~/.bun/bin/log`.
 
 ## Meetings
 
+Meetings are an unfinished developer feature and are disabled in distributed
+release builds.
+
 Record a local Granola-style meeting with separate system and microphone tracks:
 
 ```sh
@@ -86,8 +161,9 @@ Press Ctrl-C to stop. While recording, one Moonshine model maintains independent
 Computer and You streams and appends a recoverable `transcript.live.ndjson`
 draft. Live inference is bounded and may skip draft packets under load without
 affecting WAV capture. HEX then retranscribes both complete WAV tracks locally
-in 30-second Parakeet chunks, merges the timestamped segments, and atomically
-publishes source-labeled `transcript.ndjson` and `transcript.md` files under
+in 30-second chunks with the selected local model, merges available timestamped
+segments, and atomically publishes source-labeled `transcript.ndjson` and
+`transcript.md` files under
 `~/Library/Application Support/voice-control/meetings/`.
 
 ```sh
@@ -139,11 +215,12 @@ cargo run -- meeting probe
 cargo run -- meeting watch --preview
 ```
 
-The installed HEX app lives at `~/Applications/HEX.app` with bundle ID
+The installed HEX app lives at `/Applications/HEX.app` with bundle ID
 `com.kitlangton.voice-control.agent`. Microphone, Automation, and Screen & System
 Audio Recording permissions attach to that stable signed identity. The GPUI
-panel itself needs no notification permission. Add the app under System Settings
-> General > Login Items to run it after login.
+panel itself needs no notification permission. Use **Settings > Launch at login**
+to register the signed main app through macOS Service Management. If macOS has
+revoked approval, HEX links to **System Settings > General > Login Items**.
 
 Run the terminal dashboard in another terminal:
 
@@ -151,7 +228,8 @@ Run the terminal dashboard in another terminal:
 cargo run -- status
 ```
 
-The dashboard tails `logs/live.ndjson`, shows listening and dictation states,
+The dashboard polls
+`~/Library/Application Support/voice-control/logs/live.ndjson`, shows listening and dictation states,
 highlights partial and completed recognition, and displays inference latency.
 It opens on the contextually available command catalog. Press `1` for commands,
 `2` for the activity log, `3` for meetings, and `j`/`k` or the arrow keys to
@@ -193,20 +271,33 @@ AppleScript is only the first browser adapter.
 
 ## Architecture
 
-The executable is native Rust. Unsafe code is isolated in three adapters:
+The executable is native Rust. Model and macOS unsafe code stays inside focused
+adapters:
 
 - `moonshine` dynamically loads Moonshine's stable C interface and presents a
   safe streaming recognizer.
-- `suppression` reads the system-wide macOS Option modifier state.
+- `suppression` owns the bounded event tap, configurable hotkey state machine,
+  and reserved paste shortcuts.
 - `keyboard` resolves logical keys through the active layout and posts balanced
   native shortcuts.
-- `parakeet` owns a bounded background ONNX transcription worker.
+- `recording_environment` owns CoreAudio output muting, media pause/resume, and
+  parent-bound idle-sleep prevention.
+- `parakeet` owns a bounded background `transcribe.cpp` Metal worker.
 - `dictation` owns warm pre-roll, duration limits, and band-limited resampling.
+- `dictation_processor` owns optional context-aware OpenCode rewriting and raw
+  transcript fallback plus explicit selected-text editing; `selected_text` owns
+  bounded selection capture and destination validation; `paste` owns clipboard
+  insertion and restoration.
+- `command_grammar` compiles literal and typed patterns into the registry that
+  powers pure resolution and the generated catalog.
 - `meeting` owns explicit ScreenCaptureKit capture, private durable artifacts,
   bounded source-separated live transcription, atomic final transcription, and
   source-aware transcript projections.
 - `dictation_indicator` owns the click-through GPUI hold-to-talk HUD, audio
   metering projection, and recording/transcription outcome animation.
+- `app_settings` owns atomic persistence and live projection of microphone,
+  hotkey, transcription, recording, feedback, and Dock settings; `login_item`
+  keeps macOS `SMAppService` state authoritative for launch at login.
 - `microphone_activity` observes CoreAudio process metadata without capturing
   audio; `meeting_detection` debounces supported app families; the bundled
   GPUI desktop runtime owns meeting offers and inline recording state.

@@ -12,6 +12,18 @@ struct Uniforms {
     float average;
     float peak;
     float processing;
+    float post_processing;
+    float capturing;
+    float editing;
+    float queued_count;
+    float line_style;
+    float line_count;
+    float line_curvature;
+    float line_speed;
+    float line_sharpness;
+    float line_glow;
+    float sphere_depth;
+    float light_angle;
     float completion;
 };
 
@@ -68,21 +80,29 @@ fragment float4 indicator_fragment(
     float radius = uniforms.height * 0.5;
     float distance = rounded_box(point, half_size, radius);
     float lifecycle_softness = max(uniforms.softness, 0.0);
-    float edge = (0.55 + lifecycle_softness * 0.72) / max(uniforms.scale, 0.001);
+    float edge = (max(fwidth(distance), 0.32) + lifecycle_softness * 0.72)
+        / max(uniforms.scale, 0.001);
     float shape = coverage(distance, edge);
     float detail_clarity = exp2(-lifecycle_softness * 0.34);
     float4 result = 0.0;
 
     float processing = clamp(uniforms.processing, 0.0, 1.0);
+    float post_processing = clamp(uniforms.post_processing, 0.0, 1.0);
+    float editing = clamp(uniforms.editing, 0.0, 1.0);
     float completion = clamp(uniforms.completion, 0.0, 1.0);
     float completion_flash = smoothstep(0.0, 0.16, completion)
         * (1.0 - smoothstep(0.32, 1.0, completion));
     float recording = 1.0 - processing;
     float circularity = 1.0 - smoothstep(0.5, 2.25, abs(uniforms.width - uniforms.height));
 
-    float3 red_accent = float3(1.0, 0.025, 0.035);
+    float3 red_accent = mix(
+        float3(1.0, 0.025, 0.035),
+        float3(0.05, 0.85, 0.58),
+        editing);
     float3 blue_accent = float3(0.1, 0.34, 1.0);
-    float3 accent = mix(red_accent, blue_accent, processing);
+    float3 violet_accent = float3(0.64, 0.2, 1.0);
+    float3 pipeline_accent = mix(blue_accent, violet_accent, post_processing);
+    float3 accent = mix(red_accent, pipeline_accent, processing);
 
     float average_power = clamp(uniforms.average, 0.0, 1.0);
     float peak_power = clamp(uniforms.peak, 0.0, 1.0);
@@ -90,32 +110,38 @@ fragment float4 indicator_fragment(
     float outer = recording * (
         glow(distance, 4.0 + lifecycle_softness * 0.5) * average_power * 0.72
         + glow(distance, 8.0 + lifecycle_softness) * average_power * 0.36);
-    outer += processing * glow(distance, 6.0 + lifecycle_softness) * 0.13;
-    outer += glow(distance, 10.0 + lifecycle_softness) * completion_flash * 0.32;
+    outer += processing * glow(distance, 2.6 + lifecycle_softness) * 0.045;
+    outer += glow(distance, 6.0 + lifecycle_softness * 0.5) * completion_flash * 0.22;
     composite(result, accent, outer * (1.0 - shape));
 
     float3 recording_base = mix(
         float3(0.5, 0.0, 0.0),
         float3(1.0, 0.0, 0.0),
         average_power);
+    recording_base = mix(recording_base, float3(0.0, 0.48, 0.3), editing);
     float sphere_light = clamp(0.48 - point.x * 0.035 - point.y * 0.045, 0.0, 1.0);
     float3 blue_base = mix(
         float3(0.0, 0.02, 0.32),
         float3(0.04, 0.18, 0.68),
         sphere_light);
-    float3 base = mix(recording_base, blue_base, processing);
+    float3 violet_base = mix(
+        float3(0.12, 0.0, 0.3),
+        float3(0.38, 0.04, 0.68),
+        sphere_light);
+    float3 pipeline_base = mix(blue_base, violet_base, post_processing);
+    float3 base = mix(recording_base, pipeline_base, processing);
     composite(result, base, shape);
 
     float inside_edge = clamp(-distance / 4.0, 0.0, 1.0);
     float inner_edge = shape * (1.0 - inside_edge);
-    float inner_edge_strength = mix(0.48, 0.4, processing);
+    float inner_edge_strength = mix(0.48, 0.07, processing);
     composite(result, accent, inner_edge * inner_edge_strength);
 
     // Match the original Hex recording stack: a padded red fill, a nearly
     // full-width white beam, and a broad peak-driven red glow.
     float red_fill_distance = rounded_box(point, float2(22.0, 2.0), 2.0);
     float red_fill = exp2(-pow(max(red_fill_distance, 0.0) / 2.0, 2.0)) * shape;
-    screen(result, float3(1.0, 0.0, 0.0), red_fill * average_activation * recording * detail_clarity);
+    screen(result, red_accent, red_fill * average_activation * recording * detail_clarity);
 
     float white_beam_distance = rounded_box(point, float2(21.0, 1.0), 1.0);
     float white_beam = exp2(-pow(max(white_beam_distance, 0.0) / 1.0, 2.0)) * shape;
@@ -129,45 +155,70 @@ fragment float4 indicator_fragment(
     float peak_beam = exp2(-pow(max(peak_distance, 0.0) / 4.0, 2.0)) * shape;
     screen(
         result,
-        float3(1.0, 0.0, 0.0),
+        red_accent,
         peak_beam * smoothstep(0.0, 0.1, peak_power) * 0.5 * recording * detail_clarity);
 
     if (processing > 0.0) {
         float orb_radius = uniforms.height * 0.5 - 0.6;
         float orb_distance = length(point) - orb_radius;
-        float orb_mask = coverage(orb_distance, edge) * circularity;
-        float charged_center = exp2(-dot(point, point) / 32.0) * 0.29;
-        composite(result, blue_accent, charged_center * orb_mask * processing * detail_clarity);
+        float orb_edge = max(fwidth(orb_distance), 0.26);
+        float orb_mask = coverage(orb_distance, orb_edge) * circularity;
+        float2 sphere_uv = point / max(orb_radius, 0.001);
+        float surface_z = sqrt(max(1.0 - dot(sphere_uv, sphere_uv), 0.0));
+        float light = clamp(0.42 - sphere_uv.x * 0.22 - sphere_uv.y * 0.28, 0.0, 1.0);
+        float3 orb_shadow = mix(float3(0.0, 0.015, 0.24), float3(0.1, 0.0, 0.26), post_processing);
+        float3 orb_light = mix(float3(0.05, 0.22, 0.72), float3(0.4, 0.05, 0.7), post_processing);
+        composite(result, mix(orb_shadow, orb_light, light), orb_mask * processing * detail_clarity);
 
-        float radial = length(point);
-        float rim = exp2(-pow((radial - orb_radius + 1.25) / 0.7, 2.0));
-        composite(result, float3(0.35, 0.65, 1.0), rim * orb_mask * processing * 0.36 * detail_clarity);
+        float rim = pow(1.0 - surface_z, 2.4);
+        composite(result, pipeline_accent, rim * orb_mask * processing * 0.3 * detail_clarity);
 
-        // Kinograph-style processing energy: fixed geometry with one broad light
-        // band sweeping through the clipped surface, never orbiting or breathing.
-        float sweep_position = point.x + uniforms.width * 0.5;
-        float sweep_travel = uniforms.width + 70.0;
-        float sweep_start = fmod(uniforms.time * 110.0, sweep_travel) - 8.0;
-        float sweep = 0.0;
+        // Preserve the original three-part shine, but bow it subtly with the
+        // surface and filter every edge to the current pixel footprint.
+        float sweep_coordinate = point.x + sphere_uv.y * sphere_uv.y * 0.75;
+        float sweep_travel = orb_radius * 2.0 + 18.0;
+        float sweep_start = fmod(uniforms.time * 38.0, sweep_travel) - orb_radius - 7.0;
+        float shine = 0.0;
         for (int index = 0; index < 3; index++) {
-            float band_center = sweep_start - float(index) * 27.0;
-            float band_distance = abs(sweep_position - band_center);
-            float band = 1.0 - smoothstep(0.25, 8.0, band_distance);
-            sweep = max(sweep, band);
+            float line_distance = abs(sweep_coordinate - (sweep_start - float(index) * 4.1));
+            float aa = max(fwidth(line_distance), 0.24);
+            float band = 1.0 - smoothstep(1.0 - aa, 3.6 + aa, line_distance);
+            shine = max(shine, band);
         }
-        float sweep_reveal = smoothstep(0.58, 0.92, processing) * circularity;
+        float3 shine_color = mix(float3(0.66, 0.84, 1.0), float3(0.92, 0.72, 1.0), post_processing);
         composite(
             result,
-            float3(0.7, 0.87, 1.0),
-            sweep * orb_mask * sweep_reveal * (1.0 - smoothstep(0.0, 0.5, completion))
-                * 0.68 * detail_clarity);
+            shine_color,
+            shine * surface_z * orb_mask * processing * 0.58 * detail_clarity);
     }
 
-    screen(result, float3(0.72, 0.88, 1.0), shape * completion_flash * 0.42);
+    // Pending jobs sit beside the foreground state. Keeping this geometry
+    // stationary prevents queue status from reading as part of the sphere.
+    float queued_count = min(uniforms.queued_count, 4.0);
+    for (int index = 0; index < 4; index++) {
+        if (float(index) >= queued_count) {
+            break;
+        }
+        float2 center = float2(
+            uniforms.width * 0.5 + 10.0 + float(index) * 3.4,
+            0.0);
+        float dot_distance = length(point - center) - 0.68;
+        float dot = coverage(dot_distance, 0.22);
+        float leading_processing = index == 0
+            ? post_processing * clamp(uniforms.capturing, 0.0, 1.0)
+            : 0.0;
+        float3 queued_blue = float3(0.12, 0.58, 1.0);
+        float3 dot_color = mix(queued_blue, violet_accent, leading_processing);
+        composite(result, dot_color, dot * (index == 0 ? 0.92 : 0.52));
+    }
+
+    screen(result, float3(0.72, 0.88, 1.0), shape * completion_flash * 0.32);
+    float completion_rim = exp2(-pow(abs(distance) / 0.72, 2.0));
+    screen(result, float3(0.82, 0.93, 1.0), completion_rim * completion_flash * 0.58);
 
     float stroke = coverage(
-        abs(distance) - 0.5,
-        0.45 + lifecycle_softness * 0.3) * 0.56 * detail_clarity;
+        abs(distance) - 0.4,
+        0.38 + lifecycle_softness * 0.3) * mix(0.56, 0.09, processing) * detail_clarity;
     composite(result, mix(accent, float3(1.0), 0.1), stroke);
 
     result *= uniforms.opacity;

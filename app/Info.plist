@@ -11,24 +11,34 @@
   <key>CFBundleInfoDictionaryVersion</key>
   <string>6.0</string>
   <key>CFBundleIconFile</key>
-  <string>HEX.icns</string>
+  <string>AppIcon</string>
+  <key>CFBundleIconName</key>
+  <string>AppIcon</string>
   <key>CFBundleName</key>
   <string>HEX</string>
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>CFBundleShortVersionString</key>
-  <string>2.0.0</string>
+  <string>2.0.9</string>
   <key>CFBundleVersion</key>
-  <string>2</string>
+  <string>20009</string>
   <key>LSMinimumSystemVersion</key>
   <string>15.0</string>
+  <key>LSUIElement</key>
+  <true/>
   <key>NSAppleEventsUsageDescription</key>
-  <string>HEX identifies active Google Meet tabs in Brave.</string>
-  <key>NSAudioCaptureUsageDescription</key>
-  <string>HEX records computer audio only after you approve a meeting recording.</string>
+  <string>HEX uses automation to identify the foreground app and browser and pause supported media while you dictate.</string>
   <key>NSMicrophoneUsageDescription</key>
-  <string>HEX records your microphone only after you approve a meeting recording.</string>
-  <key>NSScreenCaptureUsageDescription</key>
-  <string>HEX uses ScreenCaptureKit to record computer audio after you approve a meeting recording.</string>
+  <string>HEX uses your microphone for private local dictation and does not store the captured audio.</string>
+  <key>SUEnableAutomaticChecks</key>
+  <true/>
+  <key>SUAutomaticallyUpdate</key>
+  <true/>
+  <key>SUFeedURL</key>
+  <string>https://pub-089d681d41754031a4aefa7017d8c2fb.r2.dev/appcast.xml</string>
+  <key>SUPublicEDKey</key>
+  <string>mIek27lttJe8cIBqVZFhh6reRKjpTx1h9ZY9OKWPtuM=</string>
+  <key>SUVerifyUpdateBeforeExtraction</key>
+  <true/>
 </dict>
 </plist>

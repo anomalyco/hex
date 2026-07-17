@@ -1,21 +1,191 @@
 use std::ffi::{CStr, CString, c_char, c_float, c_int, c_uint, c_ulonglong, c_void};
-use std::fs;
+use std::fs::{self, File};
+use std::io::Read;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::ptr;
 use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use color_eyre::eyre::{Result, WrapErr, eyre};
+use fs2::FileExt;
 use libloading::Library;
+use sha2::{Digest, Sha256};
 
 use crate::events::TranscriptPhase;
 
 const HEADER_VERSION: c_int = 20_000;
 const MEDIUM_STREAMING: c_uint = 5;
 const FORCE_UPDATE: c_uint = 1;
+const MODEL_BASE_URL: &str = "https://download.moonshine.ai/model/medium-streaming-en/quantized";
+const MODEL_COMPONENTS: &[ModelComponent] = &[
+    ModelComponent::new(
+        "adapter.ort",
+        3_647_712,
+        "16307442b7f4229f2f1511fc51b545cec9616e55872c588f3a297bbc6f4762ea",
+    ),
+    ModelComponent::new(
+        "cross_kv.ort",
+        11_544_952,
+        "354b9a955caeb768b528f447f0a36ce4b850ca7b4531900165df304d97904fba",
+    ),
+    ModelComponent::new(
+        "decoder_kv.ort",
+        146_216_448,
+        "fa67aa87521247f5bf44d3e44d4e4978e58c1f114249c3c6909c882624056715",
+    ),
+    ModelComponent::new(
+        "decoder_kv_with_attention.ort",
+        146_138_304,
+        "40919de95d08690da3a8ff6df14cf55b3220046f3b767b4a4b769e7b32aaf2d2",
+    ),
+    ModelComponent::new(
+        "encoder.ort",
+        94_202_872,
+        "a5f11167a62eef61787fe8410453257d6ddb8eba90af461a9604e5f2e93d5322",
+    ),
+    ModelComponent::new(
+        "frontend.ort",
+        47_467_256,
+        "378fe8a5d7090a1b9ab88bbb1fc95bde010cdd64ec23419350d2d23c675636e9",
+    ),
+    ModelComponent::new(
+        "streaming_config.json",
+        513,
+        "28e83b7a28e91472692a035e0dae3116422ae43aeb2bef5ed822c44ce89b88af",
+    ),
+    ModelComponent::new(
+        "tokenizer.bin",
+        249_974,
+        "6884b35fd6377d4c4d32336a0bc152f36b64d1e45b6503683cdc238250a8472d",
+    ),
+];
 // Moonshine's native handle registry does not synchronize lookups against
 // transcriber insertion/removal. Lifecycle calls are exclusive; inference on
 // already-created transcribers may remain concurrent.
 static NATIVE_LOCK: RwLock<()> = RwLock::new(());
+
+struct ModelComponent {
+    filename: &'static str,
+    bytes: u64,
+    sha256: &'static str,
+}
+
+impl ModelComponent {
+    const fn new(filename: &'static str, bytes: u64, sha256: &'static str) -> Self {
+        Self {
+            filename,
+            bytes,
+            sha256,
+        }
+    }
+}
+
+pub fn model_installed() -> bool {
+    model_path().is_ok_and(|path| {
+        MODEL_COMPONENTS.iter().all(|component| {
+            fs::metadata(path.join(component.filename))
+                .is_ok_and(|metadata| metadata.len() == component.bytes)
+        })
+    })
+}
+
+pub fn install_model() -> Result<PathBuf> {
+    let destination = model_path()?;
+    let parent = destination
+        .parent()
+        .ok_or_else(|| eyre!("Moonshine model path has no parent"))?;
+    fs::create_dir_all(parent)?;
+    let lock = File::create(parent.join(".download.lock"))?;
+    lock.lock_exclusive()?;
+    if model_installed() {
+        return Ok(destination);
+    }
+
+    let staging = parent.join("quantized.partial");
+    fs::create_dir_all(&staging)?;
+    for component in MODEL_COMPONENTS {
+        let completed = staging.join(component.filename);
+        if verify_component(&completed, component).is_ok() {
+            continue;
+        }
+        let partial = staging.join(format!("{}.download", component.filename));
+        if fs::metadata(&partial).is_ok_and(|metadata| metadata.len() >= component.bytes) {
+            fs::remove_file(&partial)?;
+        }
+        let output = Command::new("/usr/bin/curl")
+            .args([
+                "--fail",
+                "--location",
+                "--retry",
+                "3",
+                "--continue-at",
+                "-",
+                "--silent",
+                "--show-error",
+                "--output",
+            ])
+            .arg(&partial)
+            .arg(format!("{MODEL_BASE_URL}/{}", component.filename))
+            .output()
+            .wrap_err("could not start Moonshine model download")?;
+        if !output.status.success() {
+            return Err(eyre!(
+                "Moonshine model download failed with {}: {}",
+                output.status,
+                String::from_utf8_lossy(&output.stderr).trim()
+            ));
+        }
+        verify_component(&partial, component)?;
+        File::open(&partial)?.sync_all()?;
+        fs::rename(partial, completed)?;
+    }
+    File::open(&staging)?.sync_all()?;
+
+    let previous = parent.join("quantized.replaced");
+    if previous.exists() {
+        fs::remove_dir_all(&previous)?;
+    }
+    if destination.exists() {
+        fs::rename(&destination, &previous)?;
+    }
+    fs::rename(&staging, &destination)?;
+    File::open(parent)?.sync_all()?;
+    if previous.exists() {
+        fs::remove_dir_all(previous)?;
+    }
+    Ok(destination)
+}
+
+fn model_path() -> Result<PathBuf> {
+    Ok(dirs::cache_dir()
+        .ok_or_else(|| eyre!("macOS cache directory is unavailable"))?
+        .join("moonshine_voice/download.moonshine.ai/model/medium-streaming-en/quantized"))
+}
+
+fn verify_component(path: &Path, component: &ModelComponent) -> Result<()> {
+    if fs::metadata(path)?.len() != component.bytes {
+        return Err(eyre!("invalid byte length for {}", component.filename));
+    }
+    let mut file = File::open(path)?;
+    let mut digest = Sha256::new();
+    let mut buffer = [0_u8; 1024 * 1024];
+    loop {
+        let read = file.read(&mut buffer)?;
+        if read == 0 {
+            break;
+        }
+        digest.update(&buffer[..read]);
+    }
+    let actual = digest
+        .finalize()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    if actual != component.sha256 {
+        return Err(eyre!("checksum mismatch for {}", component.filename));
+    }
+    Ok(())
+}
 
 #[repr(C)]
 struct TranscriptLine {
@@ -94,12 +264,10 @@ impl Moonshine {
             return Err(eyre!("Moonshine requires at least one stream"));
         }
         let library_path = find_library(project_root)?;
-        let model_path = dirs::cache_dir()
-            .ok_or_else(|| eyre!("macOS cache directory is unavailable"))?
-            .join("moonshine_voice/download.moonshine.ai/model/medium-streaming-en/quantized");
+        let model_path = model_path()?;
         if !model_path.exists() {
             return Err(eyre!(
-                "Moonshine model is missing at {}. Run ./scripts/setup.sh",
+                "Moonshine command model is missing at {}. Finish setup in HEX.",
                 model_path.display()
             ));
         }

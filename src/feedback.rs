@@ -1,7 +1,7 @@
 use std::io::Cursor;
 use std::process::{Command, Stdio};
 use std::sync::OnceLock;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::mpsc::{self, SyncSender};
 use std::thread;
 use std::time::Duration;
@@ -22,9 +22,18 @@ pub enum Tone {
 
 static DICTATION_PLAYER: OnceLock<SyncSender<Tone>> = OnceLock::new();
 static ENABLED: AtomicBool = AtomicBool::new(true);
+static VOLUME: AtomicU32 = AtomicU32::new(0.5_f32.to_bits());
 
 pub fn set_enabled(enabled: bool) {
     ENABLED.store(enabled, Ordering::Relaxed);
+}
+
+pub fn set_volume(volume: f32) {
+    VOLUME.store(volume.clamp(0.0, 1.0).to_bits(), Ordering::Relaxed);
+}
+
+fn volume() -> f32 {
+    f32::from_bits(VOLUME.load(Ordering::Relaxed))
 }
 
 pub fn preload() -> Result<()> {
@@ -63,7 +72,7 @@ pub fn preload() -> Result<()> {
                 Tone::Cancel => &cancel,
                 Tone::Wake | Tone::Sleep | Tone::Error => continue,
             };
-            output.mixer().add(sound.clone().amplify(0.45));
+            output.mixer().add(sound.clone().amplify(volume()));
         }
     });
     ready_receiver
@@ -93,10 +102,11 @@ pub fn play(tone: Tone) {
         Tone::Error => "Basso",
         Tone::DictationStart | Tone::DictationStop | Tone::Cancel => return,
     };
+    let volume = volume().to_string();
     let child = Command::new("/usr/bin/afplay")
         .args([
             "-v",
-            "0.45",
+            &volume,
             &format!("/System/Library/Sounds/{sound}.aiff"),
         ])
         .stdin(Stdio::null())

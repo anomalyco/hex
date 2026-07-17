@@ -174,6 +174,8 @@ fn draw(
                     .as_deref()
                     .and_then(|url| url::Url::parse(url).ok()),
                 window_title: None,
+                selected_text: None,
+                input_revision: None,
             }),
             _ => None,
         })
@@ -336,7 +338,7 @@ fn draw_meetings(
                 Span::styled(
                     format!(
                         "  {}",
-                        format_duration(meeting.duration_ms.unwrap_or_default())
+                        meeting::format_duration(meeting.duration_ms.unwrap_or_default())
                     ),
                     Style::default().fg(Color::DarkGray),
                 ),
@@ -358,11 +360,6 @@ fn draw_meetings(
             .block(Block::default().title(" Transcript ").borders(Borders::ALL)),
         panes[1],
     );
-}
-
-fn format_duration(milliseconds: u64) -> String {
-    let seconds = milliseconds / 1_000;
-    format!("{:02}:{:02}", seconds / 60, seconds % 60)
 }
 
 fn draw_activity(
@@ -403,11 +400,27 @@ fn draw_activity(
                     ),
                 ]))
             }
-            VoiceEvent::Dictation { phase, text, .. } => {
+            VoiceEvent::Dictation {
+                phase,
+                text,
+                processing,
+                ..
+            } => {
                 let detail = match phase {
                     DictationPhase::Failed(error) => error.as_str(),
                     _ => text.as_str(),
                 };
+                let processing = processing.as_ref().map_or_else(String::new, |processing| {
+                    processing.fallback.as_ref().map_or_else(
+                        || format!("  [{} · {} ms]", processing.profile, processing.latency_ms),
+                        |error| {
+                            format!(
+                                "  [{} · {} ms · raw fallback: {}]",
+                                processing.profile, processing.latency_ms, error
+                            )
+                        },
+                    )
+                });
                 Some(Line::from(vec![
                     Span::styled(
                         format!("◆ {:<12}", dictation_label(phase)),
@@ -419,6 +432,7 @@ fn draw_activity(
                     } else {
                         format!("  {detail}")
                     }),
+                    Span::styled(processing, Style::default().fg(Color::DarkGray)),
                 ]))
             }
             VoiceEvent::SessionStarted { .. }
@@ -449,10 +463,10 @@ fn draw_commands(
     let catalog: Vec<ListItem> = available
         .into_iter()
         .flat_map(|command| {
-            let scope = match command.scope {
+            let scope = match &command.scope {
                 CommandScope::Sleeping | CommandScope::Global => "global",
-                CommandScope::Application(application) => application,
-                CommandScope::Browser(host) => host,
+                CommandScope::Application(application) => application.as_str(),
+                CommandScope::Browser(host) => host.as_str(),
             };
             let mut rows = vec![ListItem::new(Line::from(vec![
                 Span::styled(
@@ -545,8 +559,10 @@ fn dictation_label(phase: &DictationPhase) -> &'static str {
         DictationPhase::Cancelled => "cancelled",
         DictationPhase::Transcribing => "transcribing",
         DictationPhase::Pasted => "pasted",
+        DictationPhase::Edited => "edited",
         DictationPhase::Logged => "logged",
         DictationPhase::Repasted => "repasted",
+        DictationPhase::MeetingPasted => "meeting pasted",
         DictationPhase::Failed(_) => "failed",
     }
 }
@@ -556,8 +572,10 @@ fn dictation_color(phase: &DictationPhase) -> Color {
         DictationPhase::Started => Color::Magenta,
         DictationPhase::Transcribing => Color::Cyan,
         DictationPhase::Pasted => Color::Green,
+        DictationPhase::Edited => Color::Green,
         DictationPhase::Logged => Color::Green,
         DictationPhase::Repasted => Color::Green,
+        DictationPhase::MeetingPasted => Color::Green,
         DictationPhase::Discarded => Color::DarkGray,
         DictationPhase::Cancelled => Color::Yellow,
         DictationPhase::Failed(_) => Color::Red,

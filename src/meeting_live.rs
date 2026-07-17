@@ -212,9 +212,19 @@ pub(super) fn persist_error(directory: &Path, error: &color_eyre::Report) {
     }
 }
 
+#[cfg_attr(not(debug_assertions), allow(dead_code))]
 pub(super) fn read_snapshot(path: &Path) -> Result<Vec<TranscriptEntry>> {
     let events: Vec<Event> = read_ndjson(path)?;
     Ok(project(events))
+}
+
+pub(super) fn read_completed_snapshot(path: &Path) -> Result<Vec<TranscriptEntry>> {
+    let events: Vec<Event> = read_ndjson(path)?;
+    Ok(project(
+        events
+            .into_iter()
+            .filter(|event| event.phase == TranscriptPhase::Completed),
+    ))
 }
 
 #[derive(Debug, Eq, PartialEq)]

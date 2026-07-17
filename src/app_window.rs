@@ -3,19 +3,41 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command as ProcessCommand;
 use std::rc::Rc;
-use std::sync::mpsc::{SyncSender, TrySendError};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::mpsc::{Receiver, SyncSender, TrySendError, sync_channel};
+use std::thread;
+use std::time::{Duration, Instant};
 
 use gpui::{
-    AnyElement, App, Bounds, Context, FontWeight, IntoElement, Render, Rgba, ScrollHandle, Timer,
-    TitlebarOptions, Window, WindowBounds, WindowHandle, WindowOptions, div, prelude::*, px, rgb,
-    size,
+    AnyElement, App, Bounds, Context, Div, Entity, FocusHandle, Focusable, FontWeight, IntoElement,
+    KeyDownEvent, Modifiers as GpuiModifiers, ModifiersChangedEvent, MouseButton, MouseDownEvent,
+    MouseMoveEvent, PathPromptOptions, Render, Rgba, ScrollHandle, Subscription, Timer,
+    TitlebarOptions, Window, WindowBounds, WindowHandle, WindowOptions, actions, div, img,
+    prelude::*, px, relative, rgb, rgba, size,
 };
 
-use crate::app_settings::AppSettings;
+use crate::app_settings::{
+    AppSettings, DictationMode, HotkeyBinding, HotkeyKey, HotkeyModifiers, RecordingAudioBehavior,
+    TextReplacement,
+};
+use crate::application_catalog::InstalledApplication;
 use crate::commands::{CommandConfig, CommandInfo, CommandScope};
-use crate::events::{CommandOutcome, DictationPhase, TranscriptPhase, VoiceEvent, VoiceState};
+use crate::dictation_indicator::{DictationIndicatorEvent, DictationIndicatorSender, HudTuning};
+use crate::dictation_processor::ModelCatalog;
+use crate::events::{
+    CommandOutcome, DictationPhase, TranscriptPhase, VoiceEvent, VoiceState, now_ms,
+};
+use crate::login_item::LoginItemStatus;
 use crate::meeting::{self, MeetingManifest, MeetingRequest, MeetingStatus};
+use crate::onboarding::{PermissionState, SetupStatus};
+use crate::text_input::{
+    Changed as TextChanged, Dismissed as TextDismissed, Navigate as TextNavigate,
+    Submitted as TextSubmitted, TextInput,
+};
+use crate::transcription_models::{
+    ModelDefinition, TranscriptionModelId, TranscriptionSelection, definition, language_name,
+};
 
 const WINDOW_WIDTH: f32 = 1040.0;
 const WINDOW_HEIGHT: f32 = 700.0;
@@ -36,12 +58,27 @@ const MUTED: u32 = 0x858585;
 const FAINT: u32 = 0x626262;
 const NEGATIVE: u32 = 0xc98f89;
 
+actions!(
+    hex,
+    [
+        CloseWindow,
+        CheckForUpdates,
+        HideApplication,
+        MinimizeWindow,
+        QuitApplication,
+        ShowSettings,
+        ToggleFullscreen,
+    ]
+);
+
 /// Opens the app shell, or focuses and refreshes an existing shell window.
 pub fn open_or_focus(
     app_window: &Rc<RefCell<Option<WindowHandle<AppWindow>>>>,
     event_path: PathBuf,
     commands: CommandConfig,
     meeting_requests: SyncSender<MeetingRequest>,
+    indicator: DictationIndicatorSender,
+    recognition_start: Option<SyncSender<()>>,
     cx: &mut App,
 ) -> gpui::Result<WindowHandle<AppWindow>> {
     if let Some(handle) = app_window.borrow().as_ref().copied()
@@ -49,6 +86,8 @@ pub fn open_or_focus(
             .update(cx, |this, window, cx| {
                 this.event_path = event_path.clone();
                 this.meeting_requests = meeting_requests.clone();
+                this.indicator = indicator.clone();
+                this.recognition_start = recognition_start.clone();
                 this.refresh(cx);
                 window.activate_window();
             })
@@ -58,6 +97,59 @@ pub fn open_or_focus(
         return Ok(handle);
     }
 
+    open_new(
+        app_window,
+        event_path,
+        commands,
+        meeting_requests,
+        indicator,
+        recognition_start,
+        None,
+        cx,
+    )
+}
+
+pub fn open_preview(
+    app_window: &Rc<RefCell<Option<WindowHandle<AppWindow>>>>,
+    event_path: PathBuf,
+    commands: CommandConfig,
+    meeting_requests: SyncSender<MeetingRequest>,
+    indicator: DictationIndicatorSender,
+    preview: AppWindowPreview,
+    cx: &mut App,
+) -> gpui::Result<WindowHandle<AppWindow>> {
+    if let Some(handle) = app_window.borrow().as_ref().copied()
+        && handle
+            .update(cx, |_, window, _| window.activate_window())
+            .is_ok()
+    {
+        cx.activate(true);
+        return Ok(handle);
+    }
+    open_new(
+        app_window,
+        event_path,
+        commands,
+        meeting_requests,
+        indicator,
+        None,
+        Some(preview),
+        cx,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn open_new(
+    app_window: &Rc<RefCell<Option<WindowHandle<AppWindow>>>>,
+    event_path: PathBuf,
+    commands: CommandConfig,
+    meeting_requests: SyncSender<MeetingRequest>,
+    indicator: DictationIndicatorSender,
+    recognition_start: Option<SyncSender<()>>,
+    preview: Option<AppWindowPreview>,
+    cx: &mut App,
+) -> gpui::Result<WindowHandle<AppWindow>> {
+    let preview_mode = preview.is_some();
     let bounds = Bounds::centered(None, size(px(WINDOW_WIDTH), px(WINDOW_HEIGHT)), cx);
     let handle = cx.open_window(
         WindowOptions {
@@ -67,39 +159,130 @@ pub fn open_or_focus(
                 appears_transparent: true,
                 ..Default::default()
             }),
+            is_resizable: !preview_mode,
             is_minimizable: true,
             window_min_size: Some(size(px(MINIMUM_WIDTH), px(MINIMUM_HEIGHT))),
+            tabbing_identifier: preview_mode.then(|| "hex-preview".into()),
             ..Default::default()
         },
-        |_, cx| cx.new(|cx| AppWindow::new(event_path, commands, meeting_requests, cx)),
+        |window, cx| {
+            cx.new(|cx| {
+                AppWindow::new(
+                    event_path,
+                    commands,
+                    meeting_requests,
+                    indicator,
+                    recognition_start,
+                    preview,
+                    window,
+                    cx,
+                )
+            })
+        },
     )?;
     *app_window.borrow_mut() = Some(handle);
     cx.activate(true);
     Ok(handle)
 }
 
-#[derive(Clone, Copy, Eq, PartialEq)]
-enum Pane {
+#[derive(Clone, Copy)]
+pub enum PreviewPane {
+    HudLab,
     Meetings,
     Commands,
     Activity,
+    Modes,
+    Replacements,
     Settings,
 }
 
+#[derive(Clone, Copy)]
+pub enum PreviewModelState {
+    Actual,
+    Installed,
+    Missing,
+    Downloading,
+    Error,
+}
+
+#[derive(Clone)]
+pub struct AppWindowPreview {
+    pub pane: PreviewPane,
+    pub transcription_picker: Option<(String, PreviewModelState)>,
+    pub onboarding: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum Pane {
+    HudLab,
+    Meetings,
+    Commands,
+    #[cfg_attr(not(debug_assertions), allow(dead_code))]
+    Activity,
+    Modes,
+    Replacements,
+    Settings,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum HudDemoState {
+    Recording,
+    Transcribing,
+    Processing,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum HudControl {
+    LineCount,
+    Curvature,
+    Speed,
+    Sharpness,
+    Glow,
+    Depth,
+    LightAngle,
+}
+
 impl Pane {
-    const ALL: [Self; 4] = [
-        Self::Meetings,
-        Self::Commands,
-        Self::Activity,
+    const DEVELOPER: [Self; 7] = [
         Self::Settings,
+        Self::Modes,
+        Self::Replacements,
+        Self::HudLab,
+        Self::Commands,
+        Self::Meetings,
+        Self::Activity,
     ];
+    const PRODUCTION: [Self; 3] = [Self::Settings, Self::Modes, Self::Replacements];
+
+    fn all(developer_features: bool) -> &'static [Self] {
+        if developer_features {
+            &Self::DEVELOPER
+        } else {
+            &Self::PRODUCTION
+        }
+    }
 
     fn label(self) -> &'static str {
         match self {
+            Self::HudLab => "HUD Lab",
             Self::Meetings => "Meetings",
             Self::Commands => "Commands",
             Self::Activity => "Activity",
+            Self::Modes => "Modes",
+            Self::Replacements => "Replacements",
             Self::Settings => "Settings",
+        }
+    }
+
+    fn from_preview(pane: PreviewPane) -> Self {
+        match pane {
+            PreviewPane::HudLab => Self::HudLab,
+            PreviewPane::Meetings => Self::Meetings,
+            PreviewPane::Commands => Self::Commands,
+            PreviewPane::Activity => Self::Activity,
+            PreviewPane::Modes => Self::Modes,
+            PreviewPane::Replacements => Self::Replacements,
+            PreviewPane::Settings => Self::Settings,
         }
     }
 }
@@ -114,16 +297,16 @@ struct CatalogCommand {
     id: &'static str,
 }
 
-#[derive(Clone, Copy, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 enum ContextFilter {
     All,
     Global,
-    Application(&'static str),
-    Browser(&'static str),
+    Application(String),
+    Browser(String),
 }
 
 impl ContextFilter {
-    fn label(self) -> &'static str {
+    fn label(&self) -> &str {
         match self {
             Self::All => "All",
             Self::Global => "Global",
@@ -137,6 +320,7 @@ impl ContextFilter {
 struct TranscriptLine {
     source: String,
     text: String,
+    pause_before_ms: Option<u64>,
 }
 
 #[derive(Clone)]
@@ -151,6 +335,80 @@ struct ToggleSpring {
     velocity: f32,
     target: f32,
     last_frame: Instant,
+}
+
+struct ProcessingInput {
+    entity: Entity<TextInput>,
+    _subscriptions: Vec<Subscription>,
+}
+
+struct ModeInputs {
+    name: ProcessingInput,
+    browser_hosts: ProcessingInput,
+    prompt: ProcessingInput,
+    model: ProcessingInput,
+    deadline: ProcessingInput,
+    processing_toggle: ToggleSpring,
+}
+
+struct ProcessingInputs {
+    default_mode: ModeInputs,
+    modes: Vec<ModeInputs>,
+}
+
+struct ReplacementInputs {
+    matched_phrase: ProcessingInput,
+    output: ProcessingInput,
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum ModeSelection {
+    Default,
+    Custom(usize),
+}
+
+enum ModelCatalogState {
+    Loading,
+    Loaded(ModelCatalog),
+    Failed(String),
+}
+
+struct ModelPresentation {
+    name: String,
+    provider: String,
+    key: String,
+    is_default: bool,
+}
+
+enum ApplicationCatalogState {
+    Loading,
+    Loaded(Vec<InstalledApplication>),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum HotkeyKind {
+    Dictation,
+    Edit,
+}
+
+enum HotkeyCaptureState {
+    Idle,
+    Listening {
+        kind: HotkeyKind,
+        modifiers: HotkeyModifiers,
+        message: Option<&'static str>,
+        started_at: Instant,
+    },
+    Saved {
+        kind: HotkeyKind,
+        saved_at: Instant,
+    },
+}
+
+impl HotkeyCaptureState {
+    fn is_listening(&self) -> bool {
+        matches!(self, Self::Listening { .. })
+    }
 }
 
 impl ToggleSpring {
@@ -198,15 +456,66 @@ impl ToggleSpring {
     fn is_settled(&self) -> bool {
         (self.position - self.target).abs() < 0.001 && self.velocity.abs() < 0.01
     }
+
+    fn enabled(&self) -> bool {
+        self.target >= 0.5
+    }
 }
 
 /// Root GPUI entity for the production app shell.
 pub struct AppWindow {
+    preview: bool,
     pane: Pane,
     event_path: PathBuf,
     meeting_requests: SyncSender<MeetingRequest>,
+    indicator: DictationIndicatorSender,
+    hud_tuning: HudTuning,
+    hud_demo: HudDemoState,
+    hud_queued: usize,
+    hud_dragging: Option<HudControl>,
+    hud_copied: bool,
+    recognition_start: Option<SyncSender<()>>,
+    setup_status: SetupStatus,
+    setup_visible: bool,
     settings: AppSettings,
-    sound_toggle: ToggleSpring,
+    microphone_devices: Vec<String>,
+    microphone_picker_open: bool,
+    microphone_picker_error: Option<String>,
+    launch_at_login_status: LoginItemStatus,
+    launch_at_login_error: Option<String>,
+    launch_at_login_toggle: ToggleSpring,
+    prevent_sleep_toggle: ToggleSpring,
+    double_tap_toggle: ToggleSpring,
+    dock_icon_toggle: ToggleSpring,
+    replacement_inputs: Vec<ReplacementInputs>,
+    transcription_hints: ProcessingInput,
+    transcription_picker_language: Option<String>,
+    transcription_picker_error: Option<String>,
+    transcription_downloading: Option<TranscriptionModelId>,
+    transcription_download_receiver: Option<Receiver<Result<TranscriptionSelection, String>>>,
+    transcription_download_cancel: Option<Arc<AtomicBool>>,
+    transcription_download_progress: Option<Arc<AtomicU64>>,
+    transcription_downloaded_bytes: u64,
+    transcription_preview_installed: Option<bool>,
+    processing_inputs: ProcessingInputs,
+    selected_mode: ModeSelection,
+    model_catalog: ModelCatalogState,
+    model_catalog_receiver: Option<Receiver<Result<ModelCatalog, String>>>,
+    application_catalog: ApplicationCatalogState,
+    application_catalog_receiver: Option<Receiver<Vec<InstalledApplication>>>,
+    application_search: ProcessingInput,
+    application_picker_open: bool,
+    application_picker_error: Option<String>,
+    application_picker_highlight: usize,
+    model_picker_highlight: usize,
+    mode_delete_armed: bool,
+    settings_save_generation: u64,
+    settings_dirty: bool,
+    hotkey_capture: HotkeyCaptureState,
+    hotkey_capture_animation: ToggleSpring,
+    window_focus: FocusHandle,
+    hotkey_focus: FocusHandle,
+    _hotkey_blur_subscription: Subscription,
     meetings: Vec<MeetingManifest>,
     meetings_error: Option<String>,
     meeting_runtime_error: Option<String>,
@@ -227,10 +536,15 @@ pub struct AppWindow {
 }
 
 impl AppWindow {
+    #[allow(clippy::too_many_arguments)]
     fn new(
         event_path: PathBuf,
         commands: CommandConfig,
         meeting_requests: SyncSender<MeetingRequest>,
+        indicator: DictationIndicatorSender,
+        recognition_start: Option<SyncSender<()>>,
+        preview: Option<AppWindowPreview>,
+        native_window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
         cx.spawn(async move |window, cx| {
@@ -238,10 +552,24 @@ impl AppWindow {
                 Timer::after(Duration::from_millis(500)).await;
                 if window
                     .update(cx, |window, cx| {
-                        if window.meeting_refresh_started_ms.is_some()
-                            || active_meeting(&window.meetings).is_some()
+                        let model_catalog_changed = window.poll_model_catalog();
+                        let application_catalog_changed = window.poll_application_catalog();
+                        let transcription_changed = window.poll_transcription_download(cx);
+                        let setup_changed = window.poll_setup();
+                        let login_item_changed = window.poll_login_item();
+                        if crate::DEVELOPER_FEATURES_ENABLED
+                            && (window.meeting_refresh_started_ms.is_some()
+                                || meeting::active(&window.meetings).is_some())
                         {
                             window.reload_meetings();
+                            cx.notify();
+                        }
+                        if model_catalog_changed
+                            || application_catalog_changed
+                            || transcription_changed
+                            || setup_changed
+                            || login_item_changed
+                        {
                             cx.notify();
                         }
                     })
@@ -252,9 +580,63 @@ impl AppWindow {
             }
         })
         .detach();
-        let settings = AppSettings::load().unwrap_or_else(|error| {
-            tracing::error!(%error, "could not load app settings");
-            AppSettings::default()
+        let preview_mode = preview.is_some();
+        let settings = if let Some(preview) = &preview {
+            let mut settings = AppSettings::default();
+            if let Some((language, _)) = &preview.transcription_picker
+                && let Some(choice) = crate::transcription_models::choices(language).first()
+            {
+                settings.transcription.model = choice.model.id;
+                settings.transcription.language = language.clone();
+            }
+            settings
+        } else {
+            AppSettings::load().unwrap_or_else(|error| {
+                tracing::error!(%error, "could not load app settings");
+                AppSettings::default()
+            })
+        };
+        let replacement_inputs = settings
+            .text_replacements
+            .iter()
+            .map(|replacement| Self::replacement_inputs(replacement, cx))
+            .collect();
+        let transcription_hints =
+            Self::transcription_hints_input(&settings.transcription.recognition_hints, cx);
+        let processing_inputs = Self::processing_inputs(&settings, cx);
+        let (model_catalog, model_catalog_receiver) = if preview_mode {
+            (
+                ModelCatalogState::Loaded(ModelCatalog {
+                    models: Vec::new(),
+                    default_key: None,
+                    default_name: None,
+                }),
+                None,
+            )
+        } else {
+            let (sender, receiver) = sync_channel(1);
+            thread::spawn(move || {
+                let result = crate::dictation_processor::load_model_catalog()
+                    .map_err(|error| error.to_string());
+                let _ = sender.send(result);
+            });
+            (ModelCatalogState::Loading, Some(receiver))
+        };
+        let (application_catalog, application_catalog_receiver) = if preview_mode {
+            (ApplicationCatalogState::Loaded(Vec::new()), None)
+        } else {
+            let (sender, receiver) = sync_channel(1);
+            thread::spawn(move || {
+                let _ = sender.send(crate::application_catalog::discover());
+            });
+            (ApplicationCatalogState::Loading, Some(receiver))
+        };
+        let application_search = Self::application_search_input(cx);
+        let window_focus = cx.focus_handle();
+        window_focus.focus(native_window);
+        let hotkey_focus = cx.focus_handle();
+        let hotkey_blur_subscription = cx.on_blur(&hotkey_focus, native_window, |this, _, cx| {
+            this.cancel_hotkey_capture(cx)
         });
         let commands = commands
             .catalog()
@@ -268,11 +650,111 @@ impl AppWindow {
                 id: command.id,
             })
             .collect();
+        let preview_picker = preview
+            .as_ref()
+            .and_then(|preview| preview.transcription_picker.as_ref());
+        let preview_model_state = preview_picker.map(|(_, state)| *state);
+        let preview_downloading = preview_picker.and_then(|(language, state)| {
+            matches!(state, PreviewModelState::Downloading)
+                .then(|| crate::transcription_models::choices(language)[0].model.id)
+        });
+        let setup_status = if preview.as_ref().is_some_and(|preview| preview.onboarding) {
+            SetupStatus {
+                microphone: PermissionState::NeedsRequest,
+                input_monitoring: PermissionState::NeedsRequest,
+                accessibility: PermissionState::NeedsRequest,
+                command_model: false,
+                transcription_model: false,
+            }
+        } else {
+            crate::onboarding::status(&settings.transcription)
+        };
+        let setup_visible = preview.as_ref().is_some_and(|preview| preview.onboarding)
+            || !preview_mode && !setup_status.ready();
+        let microphone_devices = crate::audio::input_device_names().unwrap_or_else(|error| {
+            tracing::warn!(%error, "could not list microphones for settings");
+            Vec::new()
+        });
+        let (launch_at_login_status, launch_at_login_error) = if preview_mode {
+            (LoginItemStatus::Disabled, None)
+        } else {
+            match crate::login_item::status() {
+                Ok(status) => (status, None),
+                Err(error) => (LoginItemStatus::Disabled, Some(error.to_string())),
+            }
+        };
         let mut window = Self {
-            pane: Pane::Settings,
+            preview: preview_mode,
+            pane: preview
+                .as_ref()
+                .map_or(Pane::Modes, |preview| Pane::from_preview(preview.pane)),
             event_path,
             meeting_requests,
-            sound_toggle: ToggleSpring::new(settings.sound_effects),
+            indicator,
+            hud_tuning: HudTuning {
+                style: 0.0,
+                ..HudTuning::default()
+            },
+            hud_demo: HudDemoState::Transcribing,
+            hud_queued: 1,
+            hud_dragging: None,
+            hud_copied: false,
+            recognition_start,
+            setup_status,
+            setup_visible,
+            microphone_devices,
+            microphone_picker_open: false,
+            microphone_picker_error: None,
+            launch_at_login_status,
+            launch_at_login_error,
+            launch_at_login_toggle: ToggleSpring::new(
+                launch_at_login_status == LoginItemStatus::Enabled,
+            ),
+            prevent_sleep_toggle: ToggleSpring::new(settings.prevent_system_sleep),
+            double_tap_toggle: ToggleSpring::new(settings.double_tap_lock),
+            dock_icon_toggle: ToggleSpring::new(settings.show_dock_icon),
+            replacement_inputs,
+            transcription_hints,
+            transcription_picker_language: preview_picker.map(|(language, _)| language.clone()),
+            transcription_picker_error: matches!(
+                preview_model_state,
+                Some(PreviewModelState::Error)
+            )
+            .then(|| "Preview download failed while verifying the model checksum.".into()),
+            transcription_downloading: preview_downloading,
+            transcription_download_receiver: None,
+            transcription_download_cancel: None,
+            transcription_download_progress: None,
+            transcription_downloaded_bytes: preview_downloading
+                .map_or(0, |model| definition(model).bytes * 37 / 100),
+            transcription_preview_installed: match preview_model_state {
+                Some(PreviewModelState::Installed) => Some(true),
+                Some(
+                    PreviewModelState::Missing
+                    | PreviewModelState::Downloading
+                    | PreviewModelState::Error,
+                ) => Some(false),
+                Some(PreviewModelState::Actual) | None => None,
+            },
+            processing_inputs,
+            selected_mode: ModeSelection::Default,
+            model_catalog,
+            model_catalog_receiver,
+            application_catalog,
+            application_catalog_receiver,
+            application_search,
+            application_picker_open: false,
+            application_picker_error: None,
+            application_picker_highlight: 0,
+            model_picker_highlight: 0,
+            mode_delete_armed: false,
+            settings_save_generation: 0,
+            settings_dirty: false,
+            hotkey_capture: HotkeyCaptureState::Idle,
+            hotkey_capture_animation: ToggleSpring::new(false),
+            window_focus,
+            hotkey_focus,
+            _hotkey_blur_subscription: hotkey_blur_subscription,
             settings,
             meetings: Vec::new(),
             meetings_error: None,
@@ -292,20 +774,231 @@ impl AppWindow {
             events_error: None,
             selected_event: None,
         };
-        window.reload_meetings();
-        if active_meeting(&window.meetings).is_some() {
-            window.pane = Pane::Meetings;
+        if !window.preview {
+            if crate::DEVELOPER_FEATURES_ENABLED {
+                window.reload_meetings();
+                if meeting::active(&window.meetings).is_some() {
+                    window.pane = Pane::Meetings;
+                }
+            }
+            window.reload_events();
         }
-        window.reload_events();
+        if window.pane == Pane::HudLab {
+            window.apply_hud_lab();
+        }
         window
     }
 
     /// Refreshes disk-backed meeting and activity data while retaining valid
     /// selections. This is also called whenever an existing shell is reopened.
     pub fn refresh(&mut self, cx: &mut Context<Self>) {
-        self.reload_meetings();
-        self.reload_events();
+        if !self.preview {
+            if crate::DEVELOPER_FEATURES_ENABLED {
+                self.reload_meetings();
+            }
+            self.reload_events();
+        }
         cx.notify();
+    }
+
+    fn poll_model_catalog(&mut self) -> bool {
+        let Some(receiver) = &self.model_catalog_receiver else {
+            return false;
+        };
+        let Ok(result) = receiver.try_recv() else {
+            return false;
+        };
+        self.model_catalog = match result {
+            Ok(catalog) => ModelCatalogState::Loaded(catalog),
+            Err(error) => ModelCatalogState::Failed(error),
+        };
+        self.model_catalog_receiver = None;
+        true
+    }
+
+    fn poll_application_catalog(&mut self) -> bool {
+        let Some(receiver) = &self.application_catalog_receiver else {
+            return false;
+        };
+        let Ok(result) = receiver.try_recv() else {
+            return false;
+        };
+        let mut applications = result;
+        if let ApplicationCatalogState::Loaded(existing) = &self.application_catalog {
+            for application in existing.iter().cloned() {
+                crate::application_catalog::insert(&mut applications, application);
+            }
+        }
+        self.application_catalog = ApplicationCatalogState::Loaded(applications);
+        self.application_catalog_receiver = None;
+        true
+    }
+
+    fn poll_transcription_download(&mut self, _cx: &mut Context<Self>) -> bool {
+        let mut changed = false;
+        if let Some(progress) = &self.transcription_download_progress {
+            let downloaded_bytes = progress.load(Ordering::Relaxed);
+            if downloaded_bytes != self.transcription_downloaded_bytes {
+                self.transcription_downloaded_bytes = downloaded_bytes;
+                changed = true;
+            }
+        }
+        let Some(receiver) = &self.transcription_download_receiver else {
+            return changed;
+        };
+        let Ok(result) = receiver.try_recv() else {
+            return changed;
+        };
+        self.transcription_download_receiver = None;
+        self.transcription_download_cancel = None;
+        self.transcription_download_progress = None;
+        self.transcription_downloaded_bytes = 0;
+        self.transcription_downloading = None;
+        match result {
+            Ok(selection) => self.apply_transcription_selection(selection),
+            Err(error) => self.transcription_picker_error = Some(error),
+        }
+        true
+    }
+
+    fn poll_setup(&mut self) -> bool {
+        if !self.setup_visible && self.recognition_start.is_none() {
+            return false;
+        }
+        let mut changed = false;
+        if self.preview {
+            return changed;
+        }
+        let status = crate::onboarding::status(&self.settings.transcription);
+        if status != self.setup_status {
+            self.setup_status = status;
+            changed = true;
+        }
+        if self.setup_status.ready() {
+            if let Some(start) = self.recognition_start.take() {
+                let _ = start.try_send(());
+            }
+            if self.setup_visible {
+                self.setup_visible = false;
+                changed = true;
+            }
+        }
+        changed
+    }
+
+    fn poll_login_item(&mut self) -> bool {
+        if self.preview {
+            return false;
+        }
+        let Ok(status) = crate::login_item::status() else {
+            return false;
+        };
+        if status == self.launch_at_login_status {
+            return false;
+        }
+        self.launch_at_login_status = status;
+        self.launch_at_login_toggle
+            .set_enabled(status == LoginItemStatus::Enabled);
+        if status == LoginItemStatus::Enabled {
+            self.launch_at_login_error = None;
+        }
+        true
+    }
+
+    fn apply_transcription_selection(&mut self, selection: TranscriptionSelection) {
+        if self.preview {
+            self.settings.transcription = selection;
+            self.transcription_picker_language = None;
+            self.transcription_picker_error = None;
+            return;
+        }
+        let previous = std::mem::replace(&mut self.settings.transcription, selection);
+        match self.settings.save() {
+            Ok(()) => {
+                self.transcription_picker_language = None;
+                self.transcription_picker_error = None;
+            }
+            Err(error) => {
+                self.settings.transcription = previous;
+                self.transcription_picker_error = Some(error.to_string());
+            }
+        }
+    }
+
+    fn choose_transcription_model(
+        &mut self,
+        model: &'static ModelDefinition,
+        language: String,
+        cx: &mut Context<Self>,
+    ) {
+        self.cancel_transcription_download();
+        let selection = TranscriptionSelection {
+            model: model.id,
+            language,
+            recognition_hints: if model.supports_recognition_hints {
+                self.transcription_hints.entity.read(cx).text().to_string()
+            } else {
+                String::new()
+            },
+        };
+        let install_command_model = self.setup_visible
+            && crate::DEVELOPER_FEATURES_ENABLED
+            && !crate::moonshine::model_installed();
+        self.transcription_picker_error = None;
+        if self.preview {
+            self.apply_transcription_selection(selection);
+            return;
+        }
+        if transcription_selection_is_active(
+            &self.settings.transcription,
+            model,
+            &selection.language,
+            crate::transcription_models::is_installed(model),
+        ) && !install_command_model
+        {
+            self.transcription_picker_language = None;
+            return;
+        }
+        let (sender, receiver) = sync_channel(1);
+        let canceled = Arc::new(AtomicBool::new(false));
+        let progress = Arc::new(AtomicU64::new(0));
+        self.transcription_downloading = Some(model.id);
+        self.transcription_download_receiver = Some(receiver);
+        self.transcription_download_cancel = Some(canceled.clone());
+        self.transcription_download_progress = Some(progress.clone());
+        self.transcription_downloaded_bytes = 0;
+        thread::spawn(move || {
+            let result = (|| {
+                if install_command_model {
+                    crate::moonshine::install_model()?;
+                }
+                crate::transcription_models::download_with_progress(model, &canceled, &progress)
+                    .and_then(|_| {
+                        if canceled.load(Ordering::Relaxed) {
+                            return Err(color_eyre::eyre::eyre!("model activation canceled"));
+                        }
+                        crate::parakeet::Parakeet::load_selection(&selection).map(drop)
+                    })
+                    .map(|_| selection)
+            })()
+            .map_err(|error| error.to_string());
+            let _ = sender.send(result);
+        });
+    }
+
+    fn cancel_transcription_download(&mut self) {
+        if let Some(canceled) = self.transcription_download_cancel.take() {
+            canceled.store(true, Ordering::Relaxed);
+        }
+        self.transcription_downloading = None;
+        self.transcription_download_receiver = None;
+        self.transcription_download_progress = None;
+        self.transcription_downloaded_bytes = 0;
+    }
+
+    fn transcription_model_installed(&self, model: &ModelDefinition) -> bool {
+        self.transcription_preview_installed
+            .unwrap_or_else(|| crate::transcription_models::is_installed(model))
     }
 
     pub fn meeting_starting(&mut self, cx: &mut Context<Self>) {
@@ -356,14 +1049,14 @@ impl AppWindow {
     fn reload_meetings(&mut self) {
         match meeting::list() {
             Ok(meetings) => {
-                let previous_active = active_meeting(&self.meetings).map(|meeting| &meeting.id);
-                let next_active = active_meeting(&meetings).map(|meeting| meeting.id.clone());
+                let previous_active = meeting::active(&self.meetings).map(|meeting| &meeting.id);
+                let next_active = meeting::active(&meetings).map(|meeting| meeting.id.clone());
                 if next_active.as_deref() != previous_active.map(String::as_str)
                     && next_active.is_some()
                 {
                     self.selected_meeting = next_active;
                 }
-                if active_meeting(&meetings).is_none()
+                if meeting::active(&meetings).is_none()
                     && (previous_active.is_some()
                         || self.meeting_refresh_started_ms.is_some_and(|started| {
                             meetings.iter().any(|meeting| {
@@ -380,7 +1073,7 @@ impl AppWindow {
                     self.meeting_refresh_started_ms = None;
                 }
                 self.meetings = meetings;
-                if active_meeting(&self.meetings)
+                if meeting::active(&self.meetings)
                     .is_none_or(|meeting| meeting.status == MeetingStatus::Transcribing)
                 {
                     self.meeting_stop_pending = false;
@@ -429,15 +1122,23 @@ impl AppWindow {
         });
         self.meeting_transcript = match self.meeting_transcript_reader.read(&id) {
             Ok(entries) => MeetingTranscript::Loaded(
-                entries
+                meeting::coalesce_transcript(entries)
                     .into_iter()
-                    .map(|entry| TranscriptLine {
-                        source: format!(
-                            "{} {}",
-                            format_duration(entry.start_ms),
-                            entry.source.label()
-                        ),
-                        text: entry.text,
+                    .scan(None, |previous_end, entry| {
+                        let pause_before_ms = previous_end
+                            .map(|end| entry.start_ms.saturating_sub(end))
+                            .filter(|pause| *pause >= 8_000);
+                        *previous_end =
+                            Some(previous_end.map_or(entry.end_ms, |end| end.max(entry.end_ms)));
+                        Some(TranscriptLine {
+                            source: format!(
+                                "{} {}",
+                                meeting::format_duration(entry.start_ms),
+                                entry.source.label()
+                            ),
+                            text: entry.text,
+                            pause_before_ms,
+                        })
                     })
                     .collect(),
             ),
@@ -477,31 +1178,36 @@ impl AppWindow {
     }
 
     fn render_navigation(&mut self, cx: &mut Context<Self>) -> AnyElement {
-        let items = Pane::ALL.into_iter().enumerate().map(|(index, pane)| {
-            let selected = self.pane == pane;
-            div()
-                .id(("app-nav", index))
-                .h(px(36.0))
-                .px_3()
-                .flex()
-                .items_center()
-                .rounded_sm()
-                .text_sm()
-                .text_color(if selected { rgb(TEXT) } else { rgb(MUTED) })
-                .when(selected, |item| item.bg(rgb(SURFACE_SELECTED)))
-                .cursor_pointer()
-                .hover(|item| item.bg(rgb(SURFACE_HOVER)).text_color(rgb(TEXT_SOFT)))
-                .child(pane.label())
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    this.pane = pane;
-                    match pane {
-                        Pane::Meetings => this.reload_meetings(),
-                        Pane::Commands | Pane::Activity => this.reload_events(),
-                        Pane::Settings => {}
-                    }
-                    cx.notify();
-                }))
-        });
+        let items = Pane::all(crate::DEVELOPER_FEATURES_ENABLED)
+            .iter()
+            .copied()
+            .enumerate()
+            .map(|(index, pane)| {
+                let selected = self.pane == pane;
+                div()
+                    .id(("app-nav", index))
+                    .h(px(36.0))
+                    .px_3()
+                    .flex()
+                    .items_center()
+                    .rounded_sm()
+                    .text_sm()
+                    .text_color(if selected { rgb(TEXT) } else { rgb(MUTED) })
+                    .when(selected, |item| item.bg(rgb(SURFACE_SELECTED)))
+                    .cursor_pointer()
+                    .hover(|item| item.bg(rgb(SURFACE_HOVER)).text_color(rgb(TEXT_SOFT)))
+                    .child(pane.label())
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.pane = pane;
+                        match pane {
+                            Pane::HudLab => this.apply_hud_lab(),
+                            Pane::Meetings => this.reload_meetings(),
+                            Pane::Commands | Pane::Activity => this.reload_events(),
+                            Pane::Modes | Pane::Replacements | Pane::Settings => {}
+                        }
+                        cx.notify();
+                    }))
+            });
 
         div()
             .w(px(SIDEBAR_WIDTH))
@@ -516,8 +1222,846 @@ impl AppWindow {
             .into_any_element()
     }
 
+    fn render_hotkey_control(
+        &mut self,
+        kind: HotkeyKind,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        if matches!(
+            self.hotkey_capture,
+            HotkeyCaptureState::Saved { saved_at, .. }
+                if saved_at.elapsed() >= Duration::from_millis(700)
+        ) {
+            self.hotkey_capture = HotkeyCaptureState::Idle;
+            self.hotkey_capture_animation.set_enabled(false);
+        }
+        let intensity = self.hotkey_capture_animation.render_position(window);
+        let capture_active = !matches!(self.hotkey_capture, HotkeyCaptureState::Idle);
+        let this_capture = matches!(
+            self.hotkey_capture,
+            HotkeyCaptureState::Listening { kind: active, .. }
+                | HotkeyCaptureState::Saved { kind: active, .. }
+                if active == kind
+        );
+        let control_intensity = if this_capture { intensity } else { 0.0 };
+        let capture_color = if matches!(
+            self.hotkey_capture,
+            HotkeyCaptureState::Saved { kind: active, .. } if active == kind
+        ) {
+            rgb(0x1b2420)
+        } else {
+            rgb(0x251c1b)
+        };
+        let pulse = match &self.hotkey_capture {
+            HotkeyCaptureState::Listening {
+                kind: active,
+                started_at,
+                ..
+            } if *active == kind => {
+                window.request_animation_frame();
+                (started_at.elapsed().as_secs_f32() * 4.5).sin() * 0.5 + 0.5
+            }
+            HotkeyCaptureState::Saved { kind: active, .. } if *active == kind => {
+                window.request_animation_frame();
+                1.0
+            }
+            HotkeyCaptureState::Idle
+            | HotkeyCaptureState::Listening { .. }
+            | HotkeyCaptureState::Saved { .. } => 0.0,
+        };
+        let binding = match kind {
+            HotkeyKind::Dictation => &self.settings.dictation_hotkey,
+            HotkeyKind::Edit => &self.settings.edit_hotkey,
+        };
+        let content = match &self.hotkey_capture {
+            HotkeyCaptureState::Listening {
+                kind: active,
+                modifiers,
+                message,
+                ..
+            } if *active == kind => {
+                let label = message.unwrap_or(if modifiers.is_empty() {
+                    "Press shortcut"
+                } else {
+                    "Release or add key"
+                });
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .child(
+                        div()
+                            .size(px(5.0 + pulse * 3.0))
+                            .rounded_full()
+                            .bg(rgb(NEGATIVE))
+                            .opacity(0.6 + pulse * 0.4),
+                    )
+                    .when(!modifiers.is_empty() && message.is_none(), |content| {
+                        content.child(hotkey_keycaps(
+                            HotkeyBinding {
+                                modifiers: *modifiers,
+                                key: None,
+                            }
+                            .keycaps(),
+                            0.85,
+                        ))
+                    })
+                    .child(
+                        div()
+                            .text_size(px(11.0))
+                            .text_color(rgb(TEXT_SOFT))
+                            .child(label),
+                    )
+                    .into_any_element()
+            }
+            HotkeyCaptureState::Saved { kind: active, .. } if *active == kind => div()
+                .flex()
+                .items_center()
+                .gap_2()
+                .child(
+                    div()
+                        .text_size(px(10.0))
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .text_color(rgb(TEXT_SOFT))
+                        .child("Saved"),
+                )
+                .child(hotkey_keycaps(binding.keycaps(), 1.0))
+                .into_any_element(),
+            HotkeyCaptureState::Idle
+            | HotkeyCaptureState::Listening { .. }
+            | HotkeyCaptureState::Saved { .. } => hotkey_keycaps(binding.keycaps(), 1.0),
+        };
+        div()
+            .id(match kind {
+                HotkeyKind::Dictation => "dictation-hotkey-control",
+                HotkeyKind::Edit => "edit-hotkey-control",
+            })
+            .track_focus(&self.hotkey_focus)
+            .w(px(210.0))
+            .h(px(36.0))
+            .px_3()
+            .flex()
+            .items_center()
+            .justify_center()
+            .rounded_sm()
+            .border_1()
+            .border_color(mix_color(
+                rgb(LINE),
+                rgb(TEXT_SOFT),
+                control_intensity * 0.55,
+            ))
+            .bg(mix_color(
+                rgb(SURFACE),
+                capture_color,
+                control_intensity * (0.55 + pulse * 0.15),
+            ))
+            .cursor_pointer()
+            .when(!capture_active, |control| {
+                control.hover(|control| control.bg(rgb(SURFACE_HOVER)))
+            })
+            .child(content)
+            .on_click(cx.listener(move |this, _, window, cx| {
+                if this.hotkey_capture.is_listening() && this_capture {
+                    this.cancel_hotkey_capture(cx);
+                } else {
+                    this.begin_hotkey_capture(kind, window, cx);
+                }
+            }))
+            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                this.capture_hotkey_key(event, cx);
+            }))
+            .on_modifiers_changed(cx.listener(|this, event: &ModifiersChangedEvent, _, cx| {
+                this.capture_hotkey_modifiers(event, cx);
+            }))
+            .into_any_element()
+    }
+
+    fn begin_hotkey_capture(
+        &mut self,
+        kind: HotkeyKind,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        crate::app_settings::set_hotkey_capture_active(true);
+        self.hotkey_capture = HotkeyCaptureState::Listening {
+            kind,
+            modifiers: HotkeyModifiers::default(),
+            message: None,
+            started_at: Instant::now(),
+        };
+        self.hotkey_capture_animation.set_enabled(true);
+        self.hotkey_focus.focus(window);
+        cx.notify();
+    }
+
+    fn cancel_hotkey_capture(&mut self, cx: &mut Context<Self>) {
+        if !matches!(self.hotkey_capture, HotkeyCaptureState::Idle) {
+            crate::app_settings::set_hotkey_capture_active(false);
+            self.hotkey_capture = HotkeyCaptureState::Idle;
+            self.hotkey_capture_animation.set_enabled(false);
+            cx.notify();
+        }
+    }
+
+    fn capture_hotkey_key(&mut self, event: &KeyDownEvent, cx: &mut Context<Self>) {
+        if !self.hotkey_capture.is_listening() {
+            return;
+        }
+        cx.stop_propagation();
+        if event.is_held {
+            return;
+        }
+        if event.keystroke.key == "escape" {
+            self.cancel_hotkey_capture(cx);
+            return;
+        }
+        let modifiers = hotkey_modifiers(event.keystroke.modifiers);
+        let key = match hotkey_key(&event.keystroke.key) {
+            Ok(key) => key,
+            Err(message) => {
+                self.set_hotkey_capture_message(message, cx);
+                return;
+            }
+        };
+        if modifiers.is_empty() && !is_function_key(&key.label) {
+            self.set_hotkey_capture_message("Add a modifier", cx);
+            return;
+        }
+        self.save_hotkey_binding(
+            HotkeyBinding {
+                modifiers,
+                key: Some(key),
+            },
+            cx,
+        );
+    }
+
+    fn capture_hotkey_modifiers(&mut self, event: &ModifiersChangedEvent, cx: &mut Context<Self>) {
+        let current = hotkey_modifiers(event.modifiers);
+        let released = {
+            let HotkeyCaptureState::Listening {
+                modifiers, message, ..
+            } = &mut self.hotkey_capture
+            else {
+                return;
+            };
+            if !current.is_empty() {
+                if current.count() >= modifiers.count() {
+                    *modifiers = current;
+                    *message = None;
+                }
+                cx.notify();
+                None
+            } else if message.is_some() {
+                *modifiers = HotkeyModifiers::default();
+                *message = None;
+                cx.notify();
+                None
+            } else {
+                (!modifiers.is_empty()).then_some(*modifiers)
+            }
+        };
+        if let Some(modifiers) = released {
+            self.save_hotkey_binding(
+                HotkeyBinding {
+                    modifiers,
+                    key: None,
+                },
+                cx,
+            );
+        }
+    }
+
+    fn set_hotkey_capture_message(&mut self, next_message: &'static str, cx: &mut Context<Self>) {
+        if let HotkeyCaptureState::Listening { message, .. } = &mut self.hotkey_capture {
+            *message = Some(next_message);
+            cx.notify();
+        }
+    }
+
+    fn save_hotkey_binding(&mut self, binding: HotkeyBinding, cx: &mut Context<Self>) {
+        if binding.is_empty() {
+            self.set_hotkey_capture_message("Press a shortcut", cx);
+            return;
+        }
+        let paste_key_code = crate::keyboard::key_code_for('v').unwrap_or(9);
+        if binding.conflicts_with_paste(paste_key_code) {
+            self.set_hotkey_capture_message("Reserved by paste", cx);
+            return;
+        }
+        let kind = match self.hotkey_capture {
+            HotkeyCaptureState::Listening { kind, .. } => kind,
+            HotkeyCaptureState::Idle | HotkeyCaptureState::Saved { .. } => return,
+        };
+        let conflicts = match kind {
+            HotkeyKind::Dictation => {
+                crate::app_settings::hotkeys_conflict(&binding, &self.settings.edit_hotkey)
+            }
+            HotkeyKind::Edit => {
+                crate::app_settings::hotkeys_conflict(&self.settings.dictation_hotkey, &binding)
+            }
+        };
+        if conflicts {
+            self.set_hotkey_capture_message("Already in use", cx);
+            return;
+        }
+        match kind {
+            HotkeyKind::Dictation => self.settings.dictation_hotkey = binding,
+            HotkeyKind::Edit => self.settings.edit_hotkey = binding,
+        }
+        self.save_settings(cx);
+        crate::app_settings::set_hotkey_capture_active(false);
+        self.hotkey_capture = HotkeyCaptureState::Saved {
+            kind,
+            saved_at: Instant::now(),
+        };
+        cx.notify();
+    }
+
+    fn render_replacements(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        let replacement_rows = self
+            .replacement_inputs
+            .iter()
+            .enumerate()
+            .map(|(index, inputs)| {
+                div()
+                    .id(("text-replacement", index))
+                    .w_full()
+                    .py_3()
+                    .flex()
+                    .items_end()
+                    .gap_3()
+                    .border_b_1()
+                    .border_color(rgb(LINE))
+                    .child(settings_control(
+                        "When HEX hears",
+                        "",
+                        inputs.matched_phrase.entity.clone(),
+                    ))
+                    .child(settings_control(
+                        "Write as",
+                        "",
+                        inputs.output.entity.clone(),
+                    ))
+                    .child(
+                        compact_button("Remove")
+                            .id(("remove-text-replacement", index))
+                            .h(px(36.0))
+                            .flex_none()
+                            .text_size(px(11.0))
+                            .text_color(rgb(MUTED))
+                            .hover(|button| {
+                                button.bg(rgb(SURFACE_HOVER)).text_color(rgb(TEXT_SOFT))
+                            })
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.replacement_inputs.remove(index);
+                                this.settings.text_replacements.remove(index);
+                                this.save_settings(cx);
+                            })),
+                    )
+                    .into_any_element()
+            })
+            .collect::<Vec<_>>();
+
+        div()
+            .size_full()
+            .flex()
+            .flex_col()
+            .child(pane_header("Replacements", None))
+            .child(
+                div()
+                    .id("replacements-scroll")
+                    .flex_1()
+                    .overflow_y_scroll()
+                    .px_8()
+                    .py_7()
+                    .child(
+                        div()
+                            .max_w(px(680.0))
+                            .child(
+                                div()
+                                    .pb_3()
+                                    .text_size(px(12.0))
+                                    .line_height(px(18.0))
+                                    .text_color(rgb(MUTED))
+                                    .child(
+                                        "Correct words or phrases in every dictation before Mode processing. Matching ignores capitalization.",
+                                    ),
+                            )
+                            .children(replacement_rows)
+                            .child(
+                                compact_button("Add replacement")
+                                    .id("add-text-replacement")
+                                    .mt_3()
+                                    .h(px(32.0))
+                                    .bg(rgb(SURFACE_SELECTED))
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .hover(|button| {
+                                        button.bg(rgb(SURFACE_HOVER)).text_color(rgb(TEXT))
+                                    })
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        let replacement = TextReplacement::default();
+                                        let inputs = Self::replacement_inputs(&replacement, cx);
+                                        let focus = inputs.matched_phrase.entity.focus_handle(cx);
+                                        this.replacement_inputs.push(inputs);
+                                        this.settings.text_replacements.push(replacement);
+                                        this.save_settings(cx);
+                                        focus.focus(window);
+                                    })),
+                            ),
+                    ),
+            )
+            .into_any_element()
+    }
+
+    fn render_transcription_picker(
+        &mut self,
+        selected_language: &str,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let downloading = self.transcription_downloading;
+        let language_rows = crate::transcription_models::LANGUAGES
+            .iter()
+            .enumerate()
+            .map(|(index, (code, name))| {
+                let selected = *code == selected_language;
+                let code = (*code).to_string();
+                div()
+                    .id(("transcription-language", index))
+                    .h(px(34.0))
+                    .px_3()
+                    .flex()
+                    .items_center()
+                    .rounded_sm()
+                    .text_size(px(12.0))
+                    .text_color(if selected { rgb(TEXT) } else { rgb(MUTED) })
+                    .when(selected, |row| row.bg(rgb(SURFACE_SELECTED)))
+                    .cursor_pointer()
+                    .hover(|row| row.bg(rgb(SURFACE_HOVER)).text_color(rgb(TEXT_SOFT)))
+                    .child(*name)
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        cx.stop_propagation();
+                        if this.transcription_picker_language.as_deref() != Some(&code) {
+                            this.cancel_transcription_download();
+                            this.transcription_picker_language = Some(code.clone());
+                            this.transcription_picker_error = None;
+                            cx.notify();
+                        }
+                    }))
+            });
+        let model_cards = crate::transcription_models::choices(selected_language)
+            .into_iter()
+            .enumerate()
+            .map(|(index, choice)| {
+                let model = choice.model;
+                let installed = self.transcription_model_installed(model);
+                let is_downloading = downloading == Some(model.id);
+                let in_use = transcription_selection_is_active(
+                    &self.settings.transcription,
+                    model,
+                    selected_language,
+                    installed,
+                );
+                let language = selected_language.to_string();
+                let progress = if is_downloading {
+                    (self.transcription_downloaded_bytes as f32 / model.bytes as f32)
+                        .clamp(0.0, 1.0)
+                } else {
+                    0.0
+                };
+                let state_label = if is_downloading {
+                    if installed {
+                        "Activating…".to_string()
+                    } else {
+                        format!("Downloading {:.0}%", progress * 100.0)
+                    }
+                } else if in_use {
+                    "Active".to_string()
+                } else {
+                    choice.recommendation.label().to_string()
+                };
+                let metadata = if model.coverage == language_name(selected_language) {
+                    format!("{} · {}", model.quality_context, model.timestamps)
+                } else {
+                    format!(
+                        "{} · {} · {}",
+                        model.coverage, model.quality_context, model.timestamps
+                    )
+                };
+                let action = if is_downloading {
+                    "Cancel"
+                } else if in_use {
+                    ""
+                } else if installed {
+                    "Installed"
+                } else {
+                    "Download"
+                };
+                div()
+                    .id(("transcription-model", index))
+                    .w_full()
+                    .p_4()
+                    .mb_3()
+                    .rounded_sm()
+                    .border_1()
+                    .border_color(if in_use { rgb(TEXT_SOFT) } else { rgb(LINE) })
+                    .bg(rgb(SURFACE))
+                    .cursor_pointer()
+                    .hover(|card| card.bg(rgb(SURFACE_HOVER)))
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .justify_between()
+                            .child(
+                                div()
+                                    .text_size(px(14.0))
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .child(model.name),
+                            )
+                            .child(
+                                div()
+                                    .px_2()
+                                    .py_1()
+                                    .rounded_sm()
+                                    .bg(rgb(SURFACE_SELECTED))
+                                    .text_size(px(10.0))
+                                    .text_color(rgb(TEXT_SOFT))
+                                    .child(state_label),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .pt_3()
+                            .flex()
+                            .gap_2()
+                            .child(model_metric(
+                                model.realtime_context.to_uppercase(),
+                                model.realtime,
+                            ))
+                            .child(model_metric("SIZE", model.size_label()))
+                            .child(model_metric("ERROR RATE · LOWER IS BETTER", model.quality)),
+                    )
+                    .when(is_downloading && !installed, |card| {
+                        card.child(
+                            div().pt_3().child(
+                                div()
+                                    .h(px(3.0))
+                                    .w_full()
+                                    .rounded_sm()
+                                    .bg(rgb(CANVAS))
+                                    .child(
+                                        div()
+                                            .h_full()
+                                            .w(relative(progress))
+                                            .rounded_sm()
+                                            .bg(rgb(TEXT_SOFT)),
+                                    ),
+                            ),
+                        )
+                    })
+                    .child(
+                        div()
+                            .pt_3()
+                            .flex()
+                            .items_center()
+                            .justify_between()
+                            .text_size(px(10.0))
+                            .text_color(rgb(FAINT))
+                            .child(metadata)
+                            .child(
+                                div()
+                                    .when(is_downloading, |status| {
+                                        status
+                                            .text_color(rgb(TEXT_SOFT))
+                                            .font_weight(FontWeight::SEMIBOLD)
+                                    })
+                                    .child(action),
+                            ),
+                    )
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        cx.stop_propagation();
+                        if this.transcription_downloading == Some(model.id) {
+                            this.cancel_transcription_download();
+                        } else {
+                            this.choose_transcription_model(model, language.clone(), cx);
+                        }
+                        cx.notify();
+                    }))
+            });
+        div()
+            .id("transcription-picker-backdrop")
+            .absolute()
+            .top_0()
+            .left_0()
+            .size_full()
+            .flex()
+            .items_center()
+            .justify_center()
+            .bg(rgba(0x000000bb))
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.transcription_picker_language = None;
+                this.transcription_picker_error = None;
+                cx.notify();
+            }))
+            .child(
+                div()
+                    .id("transcription-picker")
+                    .w(px(780.0))
+                    .h(px(520.0))
+                    .flex()
+                    .flex_col()
+                    .rounded_lg()
+                    .border_1()
+                    .border_color(rgb(LINE))
+                    .bg(rgb(CANVAS))
+                    .on_click(|_, _, cx| cx.stop_propagation())
+                    .child(
+                        div()
+                            .px_6()
+                            .py_5()
+                            .border_b_1()
+                            .border_color(rgb(LINE))
+                            .child(
+                                div()
+                                    .text_size(px(18.0))
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .child("Choose local transcription"),
+                            )
+                            .child(
+                                div()
+                                    .pt_1()
+                                    .text_size(px(12.0))
+                                    .text_color(rgb(MUTED))
+                                    .child("Select what you speak; HEX recommends the best supported models."),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .flex()
+                            .overflow_hidden()
+                            .child(
+                                div()
+                                    .id("transcription-language-list")
+                                    .w(px(220.0))
+                                    .h_full()
+                                    .p_4()
+                                    .overflow_y_scroll()
+                                    .border_r_1()
+                                    .border_color(rgb(LINE))
+                                    .children(language_rows),
+                            )
+                            .child(
+                                div()
+                                    .id("transcription-model-list")
+                                    .flex_1()
+                                    .h_full()
+                                    .p_5()
+                                    .overflow_y_scroll()
+                                    .children(model_cards)
+                                    .when_some(self.transcription_picker_error.clone(), |list, error| {
+                                        list.child(error_message("Model could not be installed.", error))
+                                    }),
+                            ),
+                    ),
+            )
+            .into_any_element()
+    }
+
+    fn render_microphone_picker(&self, cx: &mut Context<Self>) -> AnyElement {
+        let choices = std::iter::once(None)
+            .chain(self.microphone_devices.iter().cloned().map(Some))
+            .collect::<Vec<_>>();
+        div()
+            .mt_2()
+            .mb_3()
+            .p_2()
+            .rounded_sm()
+            .border_1()
+            .border_color(rgb(LINE))
+            .bg(rgb(SURFACE))
+            .children(choices.into_iter().enumerate().map(|(index, device)| {
+                let selected = self.settings.microphone == device;
+                let label = device.clone().unwrap_or_else(|| "Automatic".into());
+                div()
+                    .id(("microphone-choice", index))
+                    .w_full()
+                    .h(px(34.0))
+                    .px_3()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .rounded_sm()
+                    .text_size(px(12.0))
+                    .text_color(if selected { rgb(TEXT) } else { rgb(TEXT_SOFT) })
+                    .when(selected, |row| row.bg(rgb(SURFACE_SELECTED)))
+                    .cursor_pointer()
+                    .hover(|row| row.bg(rgb(SURFACE_HOVER)))
+                    .child(label)
+                    .when(selected, |row| {
+                        row.child(div().text_color(rgb(MUTED)).child("Selected"))
+                    })
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.settings.microphone = device.clone();
+                        this.microphone_picker_open = false;
+                        this.microphone_picker_error = None;
+                        this.save_settings(cx);
+                    }))
+            }))
+            .when_some(self.microphone_picker_error.clone(), |picker, error| {
+                picker.child(
+                    div()
+                        .px_3()
+                        .pt_2()
+                        .text_size(px(11.0))
+                        .text_color(rgb(NEGATIVE))
+                        .child(error),
+                )
+            })
+            .into_any_element()
+    }
+
+    fn set_launch_at_login(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        if self.preview {
+            self.launch_at_login_status = if enabled {
+                LoginItemStatus::Enabled
+            } else {
+                LoginItemStatus::Disabled
+            };
+            self.launch_at_login_toggle.set_enabled(enabled);
+            cx.notify();
+            return;
+        }
+        match crate::login_item::set_enabled(enabled) {
+            Ok(status) => {
+                self.launch_at_login_status = status;
+                self.launch_at_login_error = None;
+                self.launch_at_login_toggle
+                    .set_enabled(status == LoginItemStatus::Enabled);
+            }
+            Err(error) => {
+                self.launch_at_login_error = Some(error.to_string());
+                if let Ok(status) = crate::login_item::status() {
+                    self.launch_at_login_status = status;
+                    self.launch_at_login_toggle
+                        .set_enabled(status == LoginItemStatus::Enabled);
+                }
+            }
+        }
+        cx.notify();
+    }
+
     fn render_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        let toggle_position = self.sound_toggle.render_position(window);
+        let hotkey_control = self.render_hotkey_control(HotkeyKind::Dictation, window, cx);
+        let edit_hotkey_control = self.render_hotkey_control(HotkeyKind::Edit, window, cx);
+        let transcription_model = definition(self.settings.transcription.model);
+        let transcription_label = format!(
+            "{} · {}",
+            language_name(&self.settings.transcription.language),
+            transcription_model.name
+        );
+        let transcription_control = compact_button(transcription_label)
+            .id("transcription-model-setting")
+            .h(px(36.0))
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.transcription_picker_language =
+                    Some(this.settings.transcription.language.clone());
+                this.transcription_picker_error = None;
+                cx.notify();
+            }));
+        let prevent_sleep_position = self.prevent_sleep_toggle.render_position(window);
+        let double_tap_position = self.double_tap_toggle.render_position(window);
+        let dock_icon_position = self.dock_icon_toggle.render_position(window);
+        let launch_at_login_position = self.launch_at_login_toggle.render_position(window);
+        let microphone_label = self
+            .settings
+            .microphone
+            .clone()
+            .unwrap_or_else(|| "Automatic".into());
+        let microphone_picker = self
+            .microphone_picker_open
+            .then(|| self.render_microphone_picker(cx));
+        let sound_volume = div().flex().items_center().gap_1().children(
+            [
+                ("Off", 0.0_f32),
+                ("25%", 0.25),
+                ("50%", 0.5),
+                ("75%", 0.75),
+                ("100%", 1.0),
+            ]
+            .into_iter()
+            .enumerate()
+            .map(|(index, (label, volume))| {
+                let selected = if volume == 0.0 {
+                    !self.settings.sound_effects
+                } else {
+                    self.settings.sound_effects
+                        && (self.settings.sound_effect_volume - volume).abs() < 0.01
+                };
+                div()
+                    .id(("sound-volume", index))
+                    .h(px(30.0))
+                    .px_2()
+                    .flex()
+                    .items_center()
+                    .rounded_sm()
+                    .text_size(px(11.0))
+                    .text_color(if selected { rgb(TEXT) } else { rgb(MUTED) })
+                    .when(selected, |button| button.bg(rgb(SURFACE_SELECTED)))
+                    .cursor_pointer()
+                    .hover(|button| button.bg(rgb(SURFACE_HOVER)).text_color(rgb(TEXT_SOFT)))
+                    .child(label)
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.settings.sound_effects = volume > 0.0;
+                        if volume > 0.0 {
+                            this.settings.sound_effect_volume = volume;
+                        }
+                        this.save_settings(cx);
+                        if volume > 0.0 {
+                            crate::feedback::play(crate::feedback::Tone::DictationStart);
+                        }
+                    }))
+            }),
+        );
+        let launch_at_login_control =
+            if self.launch_at_login_status == LoginItemStatus::RequiresApproval {
+                compact_button("Open Settings")
+                    .id("launch-at-login-approval")
+                    .on_click(|_, _, _| crate::login_item::open_settings())
+                    .into_any_element()
+            } else {
+                toggle(launch_at_login_position)
+            };
+        let audio_behavior = div().flex().items_center().gap_1().children(
+            RecordingAudioBehavior::ALL
+                .into_iter()
+                .enumerate()
+                .map(|(index, behavior)| {
+                    let selected = self.settings.recording_audio_behavior == behavior;
+                    div()
+                        .id(("recording-audio-behavior", index))
+                        .h(px(30.0))
+                        .px_3()
+                        .flex()
+                        .items_center()
+                        .rounded_sm()
+                        .text_size(px(12.0))
+                        .text_color(if selected { rgb(TEXT) } else { rgb(MUTED) })
+                        .when(selected, |button| button.bg(rgb(SURFACE_SELECTED)))
+                        .cursor_pointer()
+                        .hover(|button| button.bg(rgb(SURFACE_HOVER)).text_color(rgb(TEXT_SOFT)))
+                        .child(behavior.label())
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            if this.settings.recording_audio_behavior == behavior {
+                                return;
+                            }
+                            this.settings.recording_audio_behavior = behavior;
+                            this.save_settings(cx);
+                        }))
+                }),
+        );
         div()
             .size_full()
             .flex()
@@ -531,55 +2075,1640 @@ impl AppWindow {
                     .px_8()
                     .py_7()
                     .child(
-                        div().max_w(px(680.0)).child(
-                            div()
-                                .id("sound-effects-setting")
-                                .w_full()
-                                .py_5()
-                                .flex()
-                                .items_center()
-                                .justify_between()
-                                .border_b_1()
-                                .border_color(rgb(LINE))
-                                .cursor_pointer()
-                                .child(
+                        div()
+                            .max_w(px(680.0))
+                            .child(settings_section_label("Dictation"))
+                            .child(settings_row(
+                                "Local transcription",
+                                "Choose a language, then HEX recommends models for speed and accuracy.",
+                                transcription_control,
+                            ))
+                            .child(settings_row(
+                                "Microphone",
+                                "Choose an input, or let HEX use its preferred available microphone.",
+                                compact_button(microphone_label)
+                                    .id("microphone-setting")
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.microphone_picker_open =
+                                            !this.microphone_picker_open;
+                                        if this.microphone_picker_open {
+                                            match crate::audio::input_device_names() {
+                                                Ok(devices) => {
+                                                    this.microphone_devices = devices;
+                                                    this.microphone_picker_error = None;
+                                                }
+                                                Err(error) => {
+                                                    this.microphone_picker_error =
+                                                        Some(error.to_string());
+                                                }
+                                            }
+                                        }
+                                        cx.notify();
+                                    })),
+                            ))
+                            .children(microphone_picker)
+                            .when(transcription_model.supports_recognition_hints, |settings| {
+                                settings.child(settings_row(
+                                    "Recognition hints",
+                                    "Softly prime Whisper with names and terms; Replacements still guarantee final spelling.",
                                     div()
-                                        .flex()
-                                        .flex_col()
-                                        .gap_1()
-                                        .child(
-                                            div()
-                                                .text_sm()
-                                                .font_weight(FontWeight::SEMIBOLD)
-                                                .child("Sound effects"),
-                                        )
-                                        .child(
-                                            div().text_size(px(12.0)).text_color(rgb(MUTED)).child(
-                                                "Play tones for modes, cancellation, and errors.",
-                                            ),
-                                        ),
+                                        .w(px(320.0))
+                                        .h(px(76.0))
+                                        .child(self.transcription_hints.entity.clone()),
+                                ))
+                            })
+                            .child(
+                                settings_row(
+                                    "Dictation shortcut",
+                                    "Hold to dictate, then release to transcribe.",
+                                    hotkey_control,
                                 )
-                                .child(toggle(toggle_position))
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.settings.sound_effects = !this.settings.sound_effects;
-                                    this.sound_toggle.set_enabled(this.settings.sound_effects);
-                                    crate::feedback::set_enabled(this.settings.sound_effects);
-                                    if let Err(error) = this.settings.save() {
-                                        tracing::error!(%error, "could not save app settings");
-                                    }
-                                    cx.notify();
-                                })),
-                        ),
+                                .id("dictation-hotkey-setting"),
+                            )
+                            .child(
+                                settings_row(
+                                    "Edit selection shortcut",
+                                    "Select text, then hold and describe the change you want.",
+                                    edit_hotkey_control,
+                                )
+                                .id("edit-hotkey-setting"),
+                            )
+                            .child(
+                                settings_row(
+                                        "While dictating",
+                                        "Control other audio once a shortcut hold becomes intentional.",
+                                        audio_behavior,
+                                    )
+                                    .id("recording-audio-setting"),
+                            )
+                            .child(
+                                settings_row(
+                                    "Prevent system sleep",
+                                    if crate::DEVELOPER_FEATURES_ENABLED {
+                                        "Keep the Mac awake during dictation and meeting recording."
+                                    } else {
+                                        "Keep the Mac awake while recording dictation."
+                                    },
+                                    toggle(prevent_sleep_position),
+                                )
+                                    .id("prevent-sleep-setting")
+                                    .cursor_pointer()
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.settings.prevent_system_sleep =
+                                            !this.settings.prevent_system_sleep;
+                                        this.prevent_sleep_toggle
+                                            .set_enabled(this.settings.prevent_system_sleep);
+                                        this.save_settings(cx);
+                                    })),
+                            )
+                            .child(
+                                settings_row(
+                                    "Double-tap to lock",
+                                    "Double-tap the shortcut for hands-free dictation; press it again to finish.",
+                                    toggle(double_tap_position),
+                                )
+                                    .id("double-tap-setting")
+                                    .cursor_pointer()
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.settings.double_tap_lock =
+                                            !this.settings.double_tap_lock;
+                                        this.double_tap_toggle
+                                            .set_enabled(this.settings.double_tap_lock);
+                                        this.save_settings(cx);
+                                    })),
+                            )
+                            .child(settings_section_label("Application"))
+                            .child(settings_row(
+                                "HEX",
+                                if crate::DEVELOPER_FEATURES_ENABLED {
+                                    "Local voice commands, dictation, and meeting transcription."
+                                } else {
+                                    "Private local dictation for your Mac."
+                                },
+                                div()
+                                    .text_size(px(12.0))
+                                    .text_color(rgb(MUTED))
+                                    .child(format!("Version {}", env!("CARGO_PKG_VERSION"))),
+                            ))
+                            .child(settings_row(
+                                "Software updates",
+                                "HEX downloads signed updates automatically and installs them safely in the background.",
+                                compact_button("Check now")
+                                    .id("check-for-updates-setting")
+                                    .on_click(|_, _, cx| cx.dispatch_action(&CheckForUpdates)),
+                            ))
+                            .child(
+                                settings_row(
+                                    "Launch at login",
+                                    "Start HEX automatically when you sign in to your Mac.",
+                                    launch_at_login_control,
+                                )
+                                    .id("launch-at-login-setting")
+                                    .when(
+                                        self.launch_at_login_status
+                                            != LoginItemStatus::RequiresApproval,
+                                        |row| {
+                                            row.cursor_pointer().on_click(cx.listener(
+                                                |this, _, _, cx| {
+                                                    let enabled = this.launch_at_login_status
+                                                        != LoginItemStatus::Enabled;
+                                                    this.set_launch_at_login(enabled, cx);
+                                                },
+                                            ))
+                                        },
+                                    ),
+                            )
+                            .when_some(self.launch_at_login_error.clone(), |settings, error| {
+                                settings.child(
+                                    div()
+                                        .py_2()
+                                        .text_size(px(11.0))
+                                        .text_color(rgb(NEGATIVE))
+                                        .child(error),
+                                )
+                            })
+                            .child(
+                                settings_row(
+                                    "Show Dock icon",
+                                    "Keep HEX visible in the Dock while it is running.",
+                                    toggle(dock_icon_position),
+                                )
+                                    .id("dock-icon-setting")
+                                    .cursor_pointer()
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.settings.show_dock_icon =
+                                            !this.settings.show_dock_icon;
+                                        this.dock_icon_toggle
+                                            .set_enabled(this.settings.show_dock_icon);
+                                        crate::app_settings::set_dock_icon_visible(
+                                            this.settings.show_dock_icon,
+                                        );
+                                        this.save_settings(cx);
+                                    })),
+                            )
+                            .child(
+                                settings_row(
+                                    "Sound volume",
+                                    "Set the volume of recording, cancellation, and error tones.",
+                                    sound_volume,
+                                )
+                                    .id("sound-effects-setting")
+                            ),
                     ),
             )
             .into_any_element()
+    }
+
+    fn render_setup(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        let status = self.setup_status;
+        let microphone = match status.microphone {
+            PermissionState::Ready => setup_ready_badge(),
+            PermissionState::NeedsRequest => compact_button("Allow")
+                .id("setup-microphone")
+                .bg(rgb(SURFACE_SELECTED))
+                .on_click(cx.listener(|_this, _, _, cx| {
+                    crate::onboarding::request_microphone();
+                    cx.notify();
+                }))
+                .into_any_element(),
+            PermissionState::NeedsSettings => compact_button("Open Settings")
+                .id("setup-microphone")
+                .bg(rgb(SURFACE_SELECTED))
+                .on_click(cx.listener(|_this, _, _, cx| {
+                    crate::onboarding::open_permission_settings("microphone");
+                    cx.notify();
+                }))
+                .into_any_element(),
+        };
+        let input_monitoring = if status.input_monitoring == PermissionState::Ready {
+            setup_ready_badge()
+        } else {
+            compact_button("Open Settings")
+                .id("setup-input-monitoring")
+                .bg(rgb(SURFACE_SELECTED))
+                .on_click(cx.listener(|_this, _, _, cx| {
+                    crate::onboarding::request_input_monitoring();
+                    crate::onboarding::open_permission_settings("input");
+                    cx.notify();
+                }))
+                .into_any_element()
+        };
+        let accessibility = if status.accessibility == PermissionState::Ready {
+            setup_ready_badge()
+        } else {
+            compact_button("Open Settings")
+                .id("setup-accessibility")
+                .bg(rgb(SURFACE_SELECTED))
+                .on_click(cx.listener(|_this, _, _, cx| {
+                    crate::onboarding::request_accessibility();
+                    crate::onboarding::open_permission_settings("accessibility");
+                    cx.notify();
+                }))
+                .into_any_element()
+        };
+        let models_ready = status.command_model && status.transcription_model;
+        let models = if models_ready {
+            setup_ready_badge()
+        } else {
+            compact_button("Choose model")
+                .id("setup-models")
+                .bg(rgb(TEXT))
+                .text_color(rgb(CANVAS))
+                .font_weight(FontWeight::SEMIBOLD)
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.transcription_picker_language =
+                        Some(this.settings.transcription.language.clone());
+                    this.transcription_picker_error = None;
+                    cx.notify();
+                }))
+                .into_any_element()
+        };
+
+        div()
+            .id("setup-backdrop")
+            .absolute()
+            .top_0()
+            .left_0()
+            .size_full()
+            .flex()
+            .items_center()
+            .justify_center()
+            .bg(rgba(0x000000dd))
+            .child(
+                div()
+                    .id("setup")
+                    .w(px(640.0))
+                    .rounded_lg()
+                    .border_1()
+                    .border_color(rgb(LINE))
+                    .bg(rgb(CANVAS))
+                    .child(
+                        div()
+                            .px_7()
+                            .pt_7()
+                            .pb_5()
+                            .child(
+                                div()
+                                    .text_size(px(22.0))
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .child("Set up HEX"),
+                            )
+                            .child(
+                                div()
+                                    .pt_2()
+                                    .text_size(px(12.0))
+                                    .line_height(px(19.0))
+                                    .text_color(rgb(MUTED))
+                                    .child(if crate::DEVELOPER_FEATURES_ENABLED {
+                                        "Everything stays on this Mac. HEX starts listening after the required permissions and local models are ready."
+                                    } else {
+                                        "Everything stays on this Mac. HEX is ready once permissions and your local dictation model are set up."
+                                    }),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .mx_7()
+                            .border_t_1()
+                            .border_color(rgb(LINE))
+                            .child(setup_row(
+                                "Microphone",
+                                if crate::DEVELOPER_FEATURES_ENABLED {
+                                    "Hear commands and dictation."
+                                } else {
+                                    "Record dictation while you hold the shortcut."
+                                },
+                                microphone,
+                            ))
+                            .child(setup_row(
+                                "Input Monitoring",
+                                "Recognize the dictation shortcut anywhere.",
+                                input_monitoring,
+                            ))
+                            .child(setup_row(
+                                "Accessibility",
+                                if crate::DEVELOPER_FEATURES_ENABLED {
+                                    "Paste text and run keyboard commands."
+                                } else {
+                                    "Paste completed dictation into the foreground app."
+                                },
+                                accessibility,
+                            ))
+                            .child(setup_row(
+                                if crate::DEVELOPER_FEATURES_ENABLED {
+                                    "Local speech models"
+                                } else {
+                                    "Local dictation model"
+                                },
+                                if crate::DEVELOPER_FEATURES_ENABLED {
+                                    "Command recognition and the selected dictation model."
+                                } else {
+                                    "The selected model transcribes speech entirely on this Mac."
+                                },
+                                models,
+                            )),
+                    )
+                    .when(crate::DEVELOPER_FEATURES_ENABLED, |setup| {
+                        setup.child(
+                            div()
+                                .px_7()
+                                .py_5()
+                                .text_size(px(10.0))
+                                .line_height(px(16.0))
+                                .text_color(rgb(FAINT))
+                                .child("Meeting recording requests Screen & System Audio Recording separately when you use it."),
+                        )
+                    }),
+            )
+            .into_any_element()
+    }
+
+    fn save_settings(&mut self, cx: &mut Context<Self>) {
+        self.settings_save_generation = self.settings_save_generation.wrapping_add(1);
+        if self.preview {
+            self.settings_dirty = false;
+            cx.notify();
+            return;
+        }
+        if let Err(error) = self.settings.save() {
+            tracing::error!(%error, "could not save app settings");
+        } else {
+            self.settings_dirty = false;
+        }
+        cx.notify();
+    }
+
+    fn processing_input(
+        placeholder: &'static str,
+        initial: &str,
+        cx: &mut Context<Self>,
+    ) -> ProcessingInput {
+        let entity = cx.new(|cx| TextInput::new(cx, placeholder, initial));
+        Self::synchronized_processing_input(entity, cx)
+    }
+
+    fn replacement_inputs(
+        replacement: &TextReplacement,
+        cx: &mut Context<Self>,
+    ) -> ReplacementInputs {
+        let matched_phrase =
+            cx.new(|cx| TextInput::new(cx, "e.g. open code", &replacement.matched_phrase));
+        let output = cx.new(|cx| TextInput::new(cx, "e.g. OpenCode", &replacement.output));
+        let matched_subscription = cx.subscribe(&matched_phrase, |this, _, _: &TextChanged, cx| {
+            this.sync_text_replacements(cx)
+        });
+        let output_subscription = cx.subscribe(&output, |this, _, _: &TextChanged, cx| {
+            this.sync_text_replacements(cx)
+        });
+        ReplacementInputs {
+            matched_phrase: ProcessingInput {
+                entity: matched_phrase,
+                _subscriptions: vec![matched_subscription],
+            },
+            output: ProcessingInput {
+                entity: output,
+                _subscriptions: vec![output_subscription],
+            },
+        }
+    }
+
+    fn transcription_hints_input(initial: &str, cx: &mut Context<Self>) -> ProcessingInput {
+        let entity = cx.new(|cx| {
+            TextInput::multiline(
+                cx,
+                "Names and terms Whisper should expect, e.g. OpenCode, Effect...",
+                initial,
+            )
+        });
+        let subscription = cx.subscribe(&entity, |this, _, _: &TextChanged, cx| {
+            this.settings.transcription.recognition_hints =
+                this.transcription_hints.entity.read(cx).text().to_string();
+            this.schedule_settings_save(cx);
+        });
+        ProcessingInput {
+            entity,
+            _subscriptions: vec![subscription],
+        }
+    }
+
+    fn sync_text_replacements(&mut self, cx: &mut Context<Self>) {
+        for (inputs, replacement) in self
+            .replacement_inputs
+            .iter()
+            .zip(&mut self.settings.text_replacements)
+        {
+            replacement.matched_phrase = inputs.matched_phrase.entity.read(cx).text().to_string();
+            replacement.output = inputs.output.entity.read(cx).text().to_string();
+        }
+        self.schedule_settings_save(cx);
+    }
+
+    fn synchronized_processing_input(
+        entity: Entity<TextInput>,
+        cx: &mut Context<Self>,
+    ) -> ProcessingInput {
+        let subscription = cx.subscribe(&entity, |this, _, _: &TextChanged, cx| {
+            this.sync_processing_settings(cx)
+        });
+        ProcessingInput {
+            entity,
+            _subscriptions: vec![subscription],
+        }
+    }
+
+    fn model_input(initial: &str, cx: &mut Context<Self>) -> ProcessingInput {
+        let entity = cx.new(|cx| TextInput::picker(cx, "Search available models", initial));
+        let changed = cx.subscribe(&entity, |this, _, _: &TextChanged, cx| {
+            this.model_picker_highlight = 0;
+            cx.notify();
+        });
+        let navigate = cx.subscribe(&entity, |this, _, event: &TextNavigate, cx| {
+            let count = this.model_choice_keys(cx).len();
+            if count > 0 {
+                this.model_picker_highlight =
+                    advance_highlight(this.model_picker_highlight, event.0, count);
+                cx.notify();
+            }
+        });
+        let submitted = cx.subscribe(&entity, |this, _, _: &TextSubmitted, cx| {
+            if let Some(model) = this
+                .model_choice_keys(cx)
+                .get(this.model_picker_highlight)
+                .cloned()
+            {
+                this.select_mode_model(this.selected_mode, model, cx);
+            }
+        });
+        ProcessingInput {
+            entity,
+            _subscriptions: vec![changed, navigate, submitted],
+        }
+    }
+
+    fn application_search_input(cx: &mut Context<Self>) -> ProcessingInput {
+        let entity = cx.new(|cx| TextInput::picker(cx, "Search applications", ""));
+        let changed = cx.subscribe(&entity, |this, _, _: &TextChanged, cx| {
+            this.application_picker_highlight = 0;
+            cx.notify();
+        });
+        let navigate = cx.subscribe(&entity, |this, _, event: &TextNavigate, cx| {
+            let count = this.application_choice_names(cx).len();
+            if count > 0 {
+                this.application_picker_highlight =
+                    advance_highlight(this.application_picker_highlight, event.0, count);
+                cx.notify();
+            }
+        });
+        let submitted = cx.subscribe(&entity, |this, _, _: &TextSubmitted, cx| {
+            if let Some(name) = this
+                .application_choice_names(cx)
+                .get(this.application_picker_highlight)
+                .cloned()
+            {
+                this.add_mode_application(this.selected_mode, name, cx);
+            }
+        });
+        let dismissed = cx.subscribe(&entity, |this, _, _: &TextDismissed, cx| {
+            this.application_picker_open = false;
+            this.application_picker_highlight = 0;
+            this.application_search
+                .entity
+                .update(cx, |input, cx| input.set_text("", cx));
+            cx.notify();
+        });
+        ProcessingInput {
+            entity,
+            _subscriptions: vec![changed, navigate, submitted, dismissed],
+        }
+    }
+
+    fn multiline_processing_input(
+        placeholder: &'static str,
+        initial: &str,
+        cx: &mut Context<Self>,
+    ) -> ProcessingInput {
+        let entity = cx.new(|cx| TextInput::multiline(cx, placeholder, initial));
+        Self::synchronized_processing_input(entity, cx)
+    }
+
+    fn mode_inputs(mode: &DictationMode, cx: &mut Context<Self>) -> ModeInputs {
+        let processing = &mode.post_processing;
+        ModeInputs {
+            name: Self::processing_input("Mode name", &mode.name, cx),
+            browser_hosts: Self::processing_input(
+                "github.com, x.com",
+                &mode.browser_hosts.join(", "),
+                cx,
+            ),
+            prompt: Self::multiline_processing_input(
+                "Describe how OpenCode should rewrite your dictation...",
+                &processing.prompt,
+                cx,
+            ),
+            model: Self::model_input(processing.model.as_deref().unwrap_or_default(), cx),
+            deadline: Self::processing_input("30", &processing.deadline_seconds.to_string(), cx),
+            processing_toggle: ToggleSpring::new(processing.enabled),
+        }
+    }
+
+    fn processing_inputs(settings: &AppSettings, cx: &mut Context<Self>) -> ProcessingInputs {
+        let processing = &settings.dictation_processing;
+        ProcessingInputs {
+            default_mode: Self::mode_inputs(&processing.default_mode, cx),
+            modes: processing
+                .modes
+                .iter()
+                .map(|mode| Self::mode_inputs(mode, cx))
+                .collect(),
+        }
+    }
+
+    fn sync_processing_settings(&mut self, cx: &mut Context<Self>) {
+        apply_mode_inputs(
+            &self.processing_inputs.default_mode,
+            &mut self.settings.dictation_processing.default_mode,
+            true,
+            cx,
+        );
+        for (inputs, mode) in self
+            .processing_inputs
+            .modes
+            .iter()
+            .zip(&mut self.settings.dictation_processing.modes)
+        {
+            apply_mode_inputs(inputs, mode, false, cx);
+        }
+        self.schedule_settings_save(cx);
+    }
+
+    fn schedule_settings_save(&mut self, cx: &mut Context<Self>) {
+        self.settings_dirty = true;
+        self.settings_save_generation = self.settings_save_generation.wrapping_add(1);
+        let generation = self.settings_save_generation;
+        cx.spawn(async move |window, cx| {
+            Timer::after(Duration::from_millis(250)).await;
+            let _ = window.update(cx, |window, cx| {
+                if window.settings_save_generation == generation {
+                    window.save_settings(cx);
+                }
+            });
+        })
+        .detach();
+    }
+
+    fn render_modes(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        let compact = window.viewport_size().width < px(980.0);
+        let add = div()
+            .id("add-dictation-mode")
+            .h(px(30.0))
+            .px_3()
+            .flex()
+            .items_center()
+            .rounded_sm()
+            .bg(rgb(SURFACE_SELECTED))
+            .text_size(px(12.0))
+            .font_weight(FontWeight::SEMIBOLD)
+            .text_color(rgb(TEXT_SOFT))
+            .cursor_pointer()
+            .hover(|button| button.bg(rgb(SURFACE_HOVER)).text_color(rgb(TEXT)))
+            .child("Add mode")
+            .on_click(cx.listener(|this, _, window, cx| {
+                let mode = DictationMode {
+                    name: format!("Mode {}", this.processing_inputs.modes.len() + 1),
+                    ..Default::default()
+                };
+                this.processing_inputs
+                    .modes
+                    .push(Self::mode_inputs(&mode, cx));
+                this.settings.dictation_processing.modes.push(mode);
+                let selection =
+                    ModeSelection::Custom(this.processing_inputs.modes.len().saturating_sub(1));
+                this.select_mode(selection, window, cx);
+                this.sync_processing_settings(cx);
+            }));
+        let default_selected = self.selected_mode == ModeSelection::Default;
+        let default_mode = &self.settings.dictation_processing.default_mode;
+        let mut rows = vec![
+            mode_row(
+                "Default",
+                "Used when no activation rule matches.",
+                default_selected,
+                &[],
+                default_mode.post_processing.enabled,
+                &self.application_catalog,
+            )
+            .id("default-dictation-mode")
+            .on_click(cx.listener(|this, _, window, cx| {
+                this.select_mode(ModeSelection::Default, window, cx);
+            }))
+            .into_any_element(),
+        ];
+        rows.extend(
+            self.processing_inputs
+                .modes
+                .iter()
+                .enumerate()
+                .map(|(index, inputs)| {
+                    let name = input_text(&inputs.name, cx);
+                    let hosts = input_text(&inputs.browser_hosts, cx);
+                    let mode = &self.settings.dictation_processing.modes[index];
+                    let summary = match (mode.applications.len(), hosts.is_empty()) {
+                        (0, true) => "No activation rules".into(),
+                        (0, false) => hosts,
+                        (1, true) => "1 application".into(),
+                        (count, true) => format!("{count} applications"),
+                        (1, false) => format!("1 application · {hosts}"),
+                        (count, false) => format!("{count} applications · {hosts}"),
+                    };
+                    let selected = self.selected_mode == ModeSelection::Custom(index);
+                    mode_row(
+                        name,
+                        summary,
+                        selected,
+                        &mode.applications,
+                        mode.post_processing.enabled,
+                        &self.application_catalog,
+                    )
+                    .id(("dictation-mode", index))
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.select_mode(ModeSelection::Custom(index), window, cx);
+                    }))
+                    .into_any_element()
+                })
+                .collect::<Vec<_>>(),
+        );
+        let detail = self.render_mode_detail(window, cx);
+        div()
+            .size_full()
+            .flex()
+            .flex_col()
+            .child(pane_header("Modes", Some(add.into_any_element())))
+            .child(
+                div()
+                    .flex_1()
+                    .overflow_hidden()
+                    .flex()
+                    .child(
+                        div()
+                            .id("modes-list")
+                            .w(if compact { px(244.0) } else { px(280.0) })
+                            .h_full()
+                            .flex_none()
+                            .overflow_y_scroll()
+                            .border_r_1()
+                            .border_color(rgb(LINE))
+                            .children(rows),
+                    )
+                    .child(detail),
+            )
+            .into_any_element()
+    }
+
+    fn render_mode_detail(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        let compact = window.viewport_size().width < px(980.0);
+        let selection = self.selected_mode;
+        let is_default = selection == ModeSelection::Default;
+        let (name, browser_hosts, prompt, model, deadline, processing_position) = {
+            let inputs = self.selected_mode_inputs_mut();
+            (
+                inputs.name.entity.clone(),
+                inputs.browser_hosts.entity.clone(),
+                inputs.prompt.entity.clone(),
+                inputs.model.entity.clone(),
+                inputs.deadline.entity.clone(),
+                inputs.processing_toggle.render_position(window),
+            )
+        };
+        let processing_enabled = self.selected_mode_settings().post_processing.enabled;
+        let name_control = if is_default {
+            div()
+                .flex()
+                .flex_col()
+                .gap_1()
+                .child(
+                    div()
+                        .text_size(px(18.0))
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .child("Default mode"),
+                )
+                .child(
+                    div()
+                        .text_size(px(11.0))
+                        .text_color(rgb(MUTED))
+                        .child("Used whenever no application or website rule matches."),
+                )
+                .into_any_element()
+        } else {
+            settings_input("Mode name", "Shown in processing activity", name)
+        };
+        let remove =
+            (!is_default).then(|| {
+                if self.mode_delete_armed {
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap_1()
+                        .child(compact_button("Cancel").id("cancel-remove-mode").on_click(
+                            cx.listener(|this, _, _, cx| {
+                                this.mode_delete_armed = false;
+                                cx.notify();
+                            }),
+                        ))
+                        .child(
+                            compact_button("Confirm delete")
+                                .id("confirm-remove-mode")
+                                .text_color(rgb(NEGATIVE))
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    let ModeSelection::Custom(index) = this.selected_mode else {
+                                        return;
+                                    };
+                                    if index < this.processing_inputs.modes.len() {
+                                        this.processing_inputs.modes.remove(index);
+                                        this.settings.dictation_processing.modes.remove(index);
+                                        this.selected_mode = ModeSelection::Default;
+                                        this.mode_delete_armed = false;
+                                        this.save_settings(cx);
+                                    }
+                                })),
+                        )
+                        .into_any_element()
+                } else {
+                    compact_button("Delete mode")
+                        .id("remove-selected-mode")
+                        .text_color(rgb(NEGATIVE))
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.mode_delete_armed = true;
+                            cx.notify();
+                        }))
+                        .into_any_element()
+                }
+            });
+        let application_picker =
+            (!is_default).then(|| self.render_application_picker(selection, cx));
+        let activation = (!is_default).then(|| {
+            div()
+                .child(mode_section_heading(
+                    "Auto-activation",
+                    "Use this mode when the foreground app or browser host matches. Browser hosts take precedence.",
+                ))
+                .child(
+                    div()
+                        .pt_4()
+                        .flex()
+                        .flex_col()
+                        .gap_3()
+                        .when_some(application_picker, |fields, picker| fields.child(picker))
+                        .child(settings_input(
+                            "Browser hosts",
+                            "Domains such as reddit.com or github.com",
+                            browser_hosts,
+                        )),
+                )
+        });
+        div()
+            .id("mode-detail")
+            .flex_1()
+            .h_full()
+            .overflow_y_scroll()
+            .px(if compact { px(20.0) } else { px(28.0) })
+            .py_6()
+            .child(
+                div()
+                    .max_w(px(700.0))
+                    .child(
+                        div()
+                            .flex()
+                            .items_start()
+                            .justify_between()
+                            .gap_4()
+                            .child(name_control)
+                            .when_some(remove, |header, remove| header.child(remove)),
+                    )
+                    .when_some(activation, |detail, activation| {
+                        detail.child(div().mt_7().child(activation))
+                    })
+                    .child(
+                        div()
+                            .mt_7()
+                            .child(mode_section_heading(
+                                "AI processing",
+                                "Optional OpenCode rewriting with raw-transcript fallback.",
+                            ))
+                            .child(
+                                settings_row(
+                                    "Post-process with OpenCode",
+                                    "When off, this mode pastes the local Parakeet transcript directly.",
+                                    toggle(processing_position),
+                                )
+                                .id("mode-processing-toggle")
+                                .cursor_pointer()
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    let enabled = !this
+                                        .selected_mode_settings()
+                                        .post_processing
+                                        .enabled;
+                                    this.selected_mode_inputs_mut()
+                                        .processing_toggle
+                                        .set_enabled(enabled);
+                                    this.selected_mode_settings_mut().post_processing.enabled =
+                                        enabled;
+                                    this.save_settings(cx);
+                                })),
+                            )
+                            .when(processing_enabled, |section| {
+                                section.child(self.render_mode_processing(
+                                    selection,
+                                    prompt,
+                                    model,
+                                    deadline,
+                                    window,
+                                    cx,
+                                ))
+                            }),
+                    ),
+            )
+            .into_any_element()
+    }
+
+    fn render_application_picker(
+        &self,
+        selection: ModeSelection,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let selected = self.mode_settings(selection).applications.clone();
+        let selected_rows = selected.iter().enumerate().map(|(index, name)| {
+            let application = self.application_named(name);
+            let name = name.clone();
+            div()
+                .id(("selected-application", index))
+                .h(px(34.0))
+                .pl_1()
+                .pr_2()
+                .flex()
+                .items_center()
+                .gap_2()
+                .rounded_sm()
+                .bg(rgb(SURFACE_SELECTED))
+                .border_1()
+                .border_color(rgb(LINE))
+                .child(application_icon(application, Some(name.as_str()), 26.0))
+                .child(
+                    div()
+                        .text_size(px(12.0))
+                        .text_color(rgb(TEXT_SOFT))
+                        .child(name.clone()),
+                )
+                .child(
+                    div()
+                        .id(("remove-selected-application", index))
+                        .size(px(22.0))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .rounded_sm()
+                        .text_size(px(14.0))
+                        .text_color(rgb(FAINT))
+                        .cursor_pointer()
+                        .hover(|button| button.bg(rgb(SURFACE_HOVER)).text_color(rgb(TEXT_SOFT)))
+                        .child("×")
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.remove_mode_application(selection, &name, cx);
+                        })),
+                )
+        });
+        let query = self
+            .application_search
+            .entity
+            .read(cx)
+            .text()
+            .trim()
+            .to_lowercase();
+        let available = if self.application_picker_open {
+            self.application_choices(selection, cx)
+        } else {
+            Vec::new()
+        };
+        let no_matches = available.is_empty();
+        let available_rows =
+            available
+                .into_iter()
+                .cloned()
+                .enumerate()
+                .map(|(index, application)| {
+                    let name = application.name.clone();
+                    let location = application
+                        .path
+                        .parent()
+                        .map_or_else(String::new, |path| path.display().to_string());
+                    div()
+                        .id(("available-application", index))
+                        .w_full()
+                        .px_2()
+                        .py_2()
+                        .flex()
+                        .items_center()
+                        .gap_3()
+                        .border_b_1()
+                        .border_color(rgb(LINE))
+                        .when(index == self.application_picker_highlight, |row| {
+                            row.bg(rgb(SURFACE_SELECTED))
+                        })
+                        .cursor_pointer()
+                        .hover(|row| row.bg(rgb(SURFACE_HOVER)))
+                        .child(application_icon(Some(&application), Some(&name), 30.0))
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w(px(0.0))
+                                .flex()
+                                .flex_col()
+                                .gap_1()
+                                .child(
+                                    div()
+                                        .text_size(px(12.0))
+                                        .font_weight(FontWeight::SEMIBOLD)
+                                        .text_color(rgb(TEXT_SOFT))
+                                        .child(name.clone()),
+                                )
+                                .child(
+                                    div()
+                                        .text_size(px(10.0))
+                                        .text_color(rgb(FAINT))
+                                        .overflow_hidden()
+                                        .child(location),
+                                ),
+                        )
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(move |this, _, _, cx| {
+                                this.add_mode_application(selection, name.clone(), cx);
+                            }),
+                        )
+                });
+        let picker_status = match &self.application_catalog {
+            ApplicationCatalogState::Loading => Some("Finding applications on this Mac...".into()),
+            ApplicationCatalogState::Loaded(applications) if applications.is_empty() => {
+                Some("No applications found.".into())
+            }
+            ApplicationCatalogState::Loaded(_) if no_matches && !query.is_empty() => {
+                Some(format!("No applications match \"{query}\"."))
+            }
+            _ => None,
+        };
+        let tray = self.application_picker_open.then(|| {
+            div()
+                .mt_2()
+                .p_2()
+                .rounded_sm()
+                .border_1()
+                .border_color(rgb(LINE))
+                .bg(rgb(SURFACE))
+                .child(self.application_search.entity.clone())
+                .when_some(picker_status, |tray, status| {
+                    tray.child(
+                        div()
+                            .px_2()
+                            .py_3()
+                            .text_size(px(11.0))
+                            .text_color(rgb(MUTED))
+                            .child(status),
+                    )
+                })
+                .child(
+                    div()
+                        .id("application-picker-results")
+                        .max_h(px(300.0))
+                        .overflow_y_scroll()
+                        .children(available_rows),
+                )
+                .child(
+                    div()
+                        .pt_2()
+                        .flex()
+                        .items_center()
+                        .justify_between()
+                        .child(
+                            div()
+                                .id("choose-application-bundle")
+                                .h(px(28.0))
+                                .px_2()
+                                .flex()
+                                .items_center()
+                                .rounded_sm()
+                                .text_size(px(11.0))
+                                .text_color(rgb(TEXT_SOFT))
+                                .cursor_pointer()
+                                .hover(|button| button.bg(rgb(SURFACE_HOVER)))
+                                .child("Choose from Finder...")
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.choose_application(selection, cx);
+                                })),
+                        )
+                        .child(
+                            div()
+                                .id("close-application-picker")
+                                .h(px(28.0))
+                                .px_2()
+                                .flex()
+                                .items_center()
+                                .rounded_sm()
+                                .text_size(px(11.0))
+                                .text_color(rgb(MUTED))
+                                .cursor_pointer()
+                                .hover(|button| button.bg(rgb(SURFACE_HOVER)))
+                                .child("Done")
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    this.application_picker_open = false;
+                                    this.application_picker_highlight = 0;
+                                    this.application_search
+                                        .entity
+                                        .update(cx, |input, cx| input.set_text("", cx));
+                                    window.blur();
+                                    cx.notify();
+                                })),
+                        ),
+                )
+        });
+        div()
+            .flex()
+            .flex_col()
+            .gap_2()
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .gap_2()
+                    .child(
+                        div()
+                            .text_size(px(11.0))
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .text_color(rgb(TEXT_SOFT))
+                            .child("Applications"),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(10.0))
+                            .text_color(rgb(FAINT))
+                            .child("Switches automatically when an app is frontmost"),
+                    ),
+            )
+            .child(
+                div()
+                    .min_h(px(46.0))
+                    .p_1()
+                    .flex()
+                    .flex_wrap()
+                    .items_center()
+                    .gap_1()
+                    .rounded_sm()
+                    .border_1()
+                    .border_color(rgb(LINE))
+                    .bg(rgb(SURFACE))
+                    .when(selected.is_empty(), |field| {
+                        field.child(
+                            div()
+                                .px_2()
+                                .text_size(px(12.0))
+                                .text_color(rgb(MUTED))
+                                .child("No applications yet"),
+                        )
+                    })
+                    .children(selected_rows)
+                    .child(
+                        div()
+                            .id("open-application-picker")
+                            .h(px(34.0))
+                            .px_2()
+                            .flex()
+                            .items_center()
+                            .rounded_sm()
+                            .text_size(px(12.0))
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .text_color(rgb(TEXT_SOFT))
+                            .cursor_pointer()
+                            .hover(|button| button.bg(rgb(SURFACE_HOVER)).text_color(rgb(TEXT)))
+                            .child(if self.application_picker_open {
+                                "Add another..."
+                            } else {
+                                "+ Add application"
+                            })
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.application_picker_highlight = 0;
+                                this.application_picker_open = true;
+                                this.application_picker_error = None;
+                                this.application_search
+                                    .entity
+                                    .update(cx, |input, cx| input.set_text("", cx));
+                                this.application_search
+                                    .entity
+                                    .focus_handle(cx)
+                                    .focus(window);
+                                cx.notify();
+                            })),
+                    ),
+            )
+            .when_some(self.application_picker_error.clone(), |picker, error| {
+                picker.child(
+                    div()
+                        .text_size(px(10.0))
+                        .text_color(rgb(NEGATIVE))
+                        .child(error),
+                )
+            })
+            .when_some(tray, |picker, tray| picker.child(tray))
+            .into_any_element()
+    }
+
+    fn application_named(&self, name: &str) -> Option<&InstalledApplication> {
+        let ApplicationCatalogState::Loaded(applications) = &self.application_catalog else {
+            return None;
+        };
+        applications
+            .iter()
+            .find(|application| application.name == name)
+    }
+
+    fn application_choice_names(&self, cx: &App) -> Vec<String> {
+        self.application_choices(self.selected_mode, cx)
+            .into_iter()
+            .map(|application| application.name.clone())
+            .collect()
+    }
+
+    fn application_choices<'a>(
+        &'a self,
+        selection: ModeSelection,
+        cx: &App,
+    ) -> Vec<&'a InstalledApplication> {
+        let ApplicationCatalogState::Loaded(applications) = &self.application_catalog else {
+            return Vec::new();
+        };
+        let selected = &self.mode_settings(selection).applications;
+        let query = self
+            .application_search
+            .entity
+            .read(cx)
+            .text()
+            .trim()
+            .to_lowercase();
+        applications
+            .iter()
+            .filter(|application| {
+                !selected.contains(&application.name)
+                    && (query.is_empty()
+                        || application.name.to_lowercase().contains(&query)
+                        || application
+                            .bundle_id
+                            .as_deref()
+                            .is_some_and(|bundle| bundle.to_lowercase().contains(&query)))
+            })
+            .take(10)
+            .collect()
+    }
+
+    fn add_mode_application(
+        &mut self,
+        selection: ModeSelection,
+        name: String,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(conflict) = self
+            .settings
+            .dictation_processing
+            .modes
+            .iter()
+            .enumerate()
+            .find(|(index, mode)| {
+                selection != ModeSelection::Custom(*index) && mode.applications.contains(&name)
+            })
+            .map(|(_, mode)| mode.name.clone())
+        {
+            self.application_picker_error = Some(format!(
+                "{name} already activates {conflict}. Remove it there before reassigning it."
+            ));
+            cx.notify();
+            return;
+        }
+        let applications = &mut self.mode_settings_mut(selection).applications;
+        if !applications.contains(&name) {
+            applications.push(name);
+            applications.sort_by_key(|name| name.to_lowercase());
+            self.application_picker_highlight = 0;
+            self.application_search
+                .entity
+                .update(cx, |input, cx| input.set_text("", cx));
+            self.application_picker_error = None;
+            self.save_settings(cx);
+        }
+    }
+
+    fn remove_mode_application(
+        &mut self,
+        selection: ModeSelection,
+        name: &str,
+        cx: &mut Context<Self>,
+    ) {
+        self.mode_settings_mut(selection)
+            .applications
+            .retain(|application| application != name);
+        self.save_settings(cx);
+    }
+
+    fn choose_application(&mut self, selection: ModeSelection, cx: &mut Context<Self>) {
+        let receiver = cx.prompt_for_paths(PathPromptOptions {
+            files: true,
+            directories: false,
+            multiple: false,
+            prompt: Some("Add Application".into()),
+        });
+        cx.spawn(async move |window, cx| {
+            let path = match receiver.await {
+                Ok(Ok(Some(paths))) => paths.into_iter().next(),
+                Ok(Ok(None)) => None,
+                Ok(Err(error)) => {
+                    let _ = window.update(cx, |window, cx| {
+                        window.application_picker_error = Some(error.to_string());
+                        cx.notify();
+                    });
+                    return;
+                }
+                Err(error) => {
+                    let _ = window.update(cx, |window, cx| {
+                        window.application_picker_error = Some(error.to_string());
+                        cx.notify();
+                    });
+                    return;
+                }
+            };
+            let Some(path) = path else {
+                return;
+            };
+            let result = cx
+                .background_executor()
+                .spawn(async move { crate::application_catalog::metadata(&path) })
+                .await;
+            let _ = window.update(cx, |window, cx| match result {
+                Ok(application) => {
+                    let name = application.name.clone();
+                    match &mut window.application_catalog {
+                        ApplicationCatalogState::Loading => {
+                            window.application_catalog =
+                                ApplicationCatalogState::Loaded(vec![application]);
+                        }
+                        ApplicationCatalogState::Loaded(applications) => {
+                            crate::application_catalog::insert(applications, application);
+                        }
+                    }
+                    window.application_picker_error = None;
+                    window.add_mode_application(selection, name, cx);
+                }
+                Err(error) => {
+                    window.application_picker_error = Some(error.to_string());
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+    }
+
+    fn render_mode_processing(
+        &self,
+        selection: ModeSelection,
+        prompt: Entity<TextInput>,
+        model: Entity<TextInput>,
+        deadline: Entity<TextInput>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let compact = window.viewport_size().width < px(980.0);
+        let focused = model.read(cx).is_focused(window);
+        let selected_model = self
+            .selected_mode_settings()
+            .post_processing
+            .model
+            .as_deref();
+        let selected_model_text = selected_model.unwrap_or_default();
+        if !focused && model.read(cx).text() != selected_model_text {
+            model.update(cx, |input, cx| input.set_text(selected_model_text, cx));
+        }
+        let query = model.read(cx).text().trim().to_lowercase();
+        let selected_variant = self
+            .selected_mode_settings()
+            .post_processing
+            .variant
+            .as_deref();
+        let presentation = model_presentation(&self.model_catalog, selected_model);
+        let (catalog_status, default_label, matches, variants) = match &self.model_catalog {
+            ModelCatalogState::Loading => (
+                "Loading models from OpenCode...".into(),
+                None,
+                Vec::new(),
+                Vec::new(),
+            ),
+            ModelCatalogState::Failed(error) => (
+                format!("OpenCode models unavailable: {error}"),
+                None,
+                Vec::new(),
+                Vec::new(),
+            ),
+            ModelCatalogState::Loaded(catalog) => {
+                let choice_keys = if focused {
+                    filtered_model_keys(catalog, &query)
+                } else {
+                    Vec::new()
+                };
+                let matches = choice_keys
+                    .iter()
+                    .filter_map(Option::as_deref)
+                    .filter_map(|key| catalog.models.iter().find(|choice| choice.key == key))
+                    .cloned()
+                    .collect();
+                let variants = selected_model
+                    .and_then(|key| catalog.models.iter().find(|choice| choice.key == key))
+                    .map_or_else(Vec::new, |choice| choice.variants.clone());
+                let default_label = choice_keys
+                    .first()
+                    .is_some_and(Option::is_none)
+                    .then(|| {
+                        catalog
+                            .default_name
+                            .as_ref()
+                            .map(|name| match &catalog.default_key {
+                                Some(key) => format!("OpenCode default: {name} ({key})"),
+                                None => format!("OpenCode default: {name}"),
+                            })
+                    })
+                    .flatten();
+                (
+                    format!("{} available models", catalog.models.len()),
+                    default_label,
+                    matches,
+                    variants,
+                )
+            }
+        };
+        let suggestions =
+            (focused && (!matches.is_empty() || default_label.is_some())).then(|| {
+                div()
+                    .mt_1()
+                    .rounded_sm()
+                    .border_1()
+                    .border_color(rgb(LINE))
+                    .bg(rgb(SURFACE))
+                    .when_some(default_label.clone(), |list, label| {
+                        list.child(
+                            model_choice_row(
+                                "Use OpenCode default",
+                                label,
+                                self.model_picker_highlight == 0,
+                            )
+                            .id("opencode-default")
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(move |this, _, window, cx| {
+                                    this.select_mode_model(selection, None, cx);
+                                    window.blur();
+                                }),
+                            ),
+                        )
+                    })
+                    .children(matches.into_iter().enumerate().map(|(index, choice)| {
+                        let key = choice.key.clone();
+                        let row_index = index + usize::from(default_label.is_some());
+                        model_choice_row(
+                            choice.name,
+                            choice.key,
+                            self.model_picker_highlight == row_index,
+                        )
+                        .id(("model-choice", index))
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(move |this, _, window, cx| {
+                                this.select_mode_model(selection, Some(key.clone()), cx);
+                                window.blur();
+                            }),
+                        )
+                    }))
+            });
+        let variant_buttons = variants.into_iter().enumerate().map(|(index, variant)| {
+            let selected = selected_variant == Some(variant.as_str());
+            let value = variant.clone();
+            div()
+                .id(("model-variant", index))
+                .h(px(28.0))
+                .px_3()
+                .flex()
+                .items_center()
+                .rounded_sm()
+                .text_size(px(11.0))
+                .text_color(if selected { rgb(TEXT) } else { rgb(MUTED) })
+                .when(selected, |button| button.bg(rgb(SURFACE_SELECTED)))
+                .cursor_pointer()
+                .hover(|button| button.bg(rgb(SURFACE_HOVER)).text_color(rgb(TEXT_SOFT)))
+                .child(variant)
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.mode_settings_mut(selection).post_processing.variant = Some(value.clone());
+                    this.save_settings(cx);
+                }))
+        });
+        let model_control =
+            if let Some(presentation) = presentation.filter(|_| !focused) {
+                let model_input = model.clone();
+                div()
+                    .id("selected-model")
+                    .h(px(54.0))
+                    .px_3()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .gap_3()
+                    .rounded_sm()
+                    .border_1()
+                    .border_color(rgb(LINE))
+                    .bg(rgb(SURFACE))
+                    .cursor_pointer()
+                    .hover(|control| control.bg(rgb(SURFACE_HOVER)))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w(px(0.0))
+                            .flex()
+                            .flex_col()
+                            .gap_1()
+                            .child(
+                                div()
+                                    .text_size(px(13.0))
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .text_color(rgb(TEXT))
+                                    .child(presentation.name),
+                            )
+                            .child(div().text_size(px(10.0)).text_color(rgb(FAINT)).child(
+                                format!("{} · {}", presentation.provider, presentation.key),
+                            )),
+                    )
+                    .when(presentation.is_default, |control| {
+                        control.child(
+                            div()
+                                .flex_none()
+                                .text_size(px(9.0))
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .text_color(rgb(MUTED))
+                                .child("DEFAULT"),
+                        )
+                    })
+                    .on_click(cx.listener(move |_, _, window, cx| {
+                        model_input.focus_handle(cx).focus(window);
+                        cx.notify();
+                    }))
+                    .into_any_element()
+            } else {
+                model.clone().into_any_element()
+            };
+        div()
+            .pt_5()
+            .flex()
+            .flex_col()
+            .gap_5()
+            .child(settings_input(
+                "Instructions",
+                "Tell OpenCode exactly how to transform the dictated text.",
+                prompt,
+            ))
+            .child(
+                div()
+                    .flex()
+                    .when(compact, |fields| fields.flex_col())
+                    .gap_3()
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w(px(0.0))
+                            .child(settings_control("Model", &catalog_status, model_control))
+                            .when_some(suggestions, |field, suggestions| field.child(suggestions)),
+                    )
+                    .child(
+                        div()
+                            .when(!compact, |field| field.w(px(150.0)).flex_none())
+                            .when(compact, |field| field.w_full())
+                            .child(settings_input("Deadline", "Seconds", deadline)),
+                    ),
+            )
+            .when(!variant_buttons.len().eq(&0), |processing| {
+                processing.child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap_2()
+                        .child(
+                            div()
+                                .text_size(px(11.0))
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .text_color(rgb(TEXT_SOFT))
+                                .child("Variant"),
+                        )
+                        .child(div().flex().flex_wrap().gap_1().children(variant_buttons)),
+                )
+            })
+            .into_any_element()
+    }
+
+    fn model_choice_keys(&self, cx: &App) -> Vec<Option<String>> {
+        let ModelCatalogState::Loaded(catalog) = &self.model_catalog else {
+            return Vec::new();
+        };
+        let query = self
+            .selected_mode_inputs()
+            .model
+            .entity
+            .read(cx)
+            .text()
+            .trim()
+            .to_lowercase();
+        filtered_model_keys(catalog, &query)
+    }
+
+    fn select_mode_model(
+        &mut self,
+        selection: ModeSelection,
+        model: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
+        let text = model.clone().unwrap_or_default();
+        self.mode_inputs_mut(selection)
+            .model
+            .entity
+            .update(cx, |input, cx| input.set_text(text, cx));
+        let processing = &mut self.mode_settings_mut(selection).post_processing;
+        processing.model = model;
+        processing.variant = None;
+        self.save_settings(cx);
+    }
+
+    fn selected_mode_inputs_mut(&mut self) -> &mut ModeInputs {
+        self.mode_inputs_mut(self.selected_mode)
+    }
+
+    fn select_mode(
+        &mut self,
+        selection: ModeSelection,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.selected_mode = selection;
+        self.application_picker_open = false;
+        self.application_picker_error = None;
+        self.application_picker_highlight = 0;
+        self.model_picker_highlight = 0;
+        self.mode_delete_armed = false;
+        self.application_search
+            .entity
+            .update(cx, |input, cx| input.set_text("", cx));
+        window.blur();
+        cx.notify();
+    }
+
+    fn selected_mode_inputs(&self) -> &ModeInputs {
+        match self.selected_mode {
+            ModeSelection::Default => &self.processing_inputs.default_mode,
+            ModeSelection::Custom(index) => &self.processing_inputs.modes[index],
+        }
+    }
+
+    fn mode_inputs_mut(&mut self, selection: ModeSelection) -> &mut ModeInputs {
+        match selection {
+            ModeSelection::Default => &mut self.processing_inputs.default_mode,
+            ModeSelection::Custom(index) => &mut self.processing_inputs.modes[index],
+        }
+    }
+
+    fn selected_mode_settings(&self) -> &DictationMode {
+        self.mode_settings(self.selected_mode)
+    }
+
+    fn selected_mode_settings_mut(&mut self) -> &mut DictationMode {
+        self.mode_settings_mut(self.selected_mode)
+    }
+
+    fn mode_settings(&self, selection: ModeSelection) -> &DictationMode {
+        match selection {
+            ModeSelection::Default => &self.settings.dictation_processing.default_mode,
+            ModeSelection::Custom(index) => &self.settings.dictation_processing.modes[index],
+        }
+    }
+
+    fn mode_settings_mut(&mut self, selection: ModeSelection) -> &mut DictationMode {
+        match selection {
+            ModeSelection::Default => &mut self.settings.dictation_processing.default_mode,
+            ModeSelection::Custom(index) => &mut self.settings.dictation_processing.modes[index],
+        }
     }
 
     fn render_meetings(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let action = if self.meeting_stop_pending {
             meeting_progress_action("Finalizing...")
         } else {
-            match active_meeting(&self.meetings).map(|meeting| meeting.status) {
+            match meeting::active(&self.meetings).map(|meeting| meeting.status) {
                 Some(MeetingStatus::Starting) => meeting_progress_action("Starting..."),
                 Some(MeetingStatus::Recording) => div()
                     .id("stop-meeting")
@@ -642,7 +3771,7 @@ impl AppWindow {
                 let id = meeting.id.clone();
                 let selected = self.selected_meeting.as_deref() == Some(id.as_str());
                 let title = meeting.title.clone();
-                let duration = format_duration(meeting_duration(meeting));
+                let duration = meeting::format_duration(meeting_duration(meeting));
                 let status = meeting_status(meeting.status);
                 div()
                     .id(("meeting", index))
@@ -796,27 +3925,46 @@ impl AppWindow {
                 .children(lines.iter().enumerate().map(|(index, line)| {
                     div()
                         .id(("transcript-line", index))
-                        .py_3()
                         .flex()
-                        .items_start()
-                        .gap_4()
-                        .border_b_1()
-                        .border_color(rgb(LINE))
+                        .flex_col()
+                        .when_some(line.pause_before_ms, |row, pause| {
+                            row.child(
+                                div()
+                                    .py_3()
+                                    .flex()
+                                    .items_center()
+                                    .gap_3()
+                                    .text_size(px(10.0))
+                                    .text_color(rgb(FAINT))
+                                    .child(div().h(px(1.0)).flex_1().bg(rgb(LINE)))
+                                    .child(format!("{} pause", meeting::format_duration(pause)))
+                                    .child(div().h(px(1.0)).flex_1().bg(rgb(LINE))),
+                            )
+                        })
                         .child(
                             div()
-                                .w(px(116.0))
-                                .flex_none()
-                                .text_size(px(11.0))
-                                .text_color(rgb(MUTED))
-                                .child(line.source.clone()),
-                        )
-                        .child(
-                            div()
-                                .flex_1()
-                                .text_size(px(13.0))
-                                .line_height(px(20.0))
-                                .text_color(rgb(TEXT_SOFT))
-                                .child(line.text.clone()),
+                                .py_4()
+                                .flex()
+                                .items_start()
+                                .gap_4()
+                                .border_b_1()
+                                .border_color(rgb(LINE))
+                                .child(
+                                    div()
+                                        .w(px(116.0))
+                                        .flex_none()
+                                        .text_size(px(11.0))
+                                        .text_color(rgb(MUTED))
+                                        .child(line.source.clone()),
+                                )
+                                .child(
+                                    div()
+                                        .flex_1()
+                                        .text_size(px(13.0))
+                                        .line_height(px(20.0))
+                                        .text_color(rgb(TEXT_SOFT))
+                                        .child(line.text.clone()),
+                                ),
                         )
                 }))
                 .into_any_element(),
@@ -877,7 +4025,7 @@ impl AppWindow {
                                             meeting_status(meeting.status)
                                         },
                                     )
-                                    .child(format_duration(meeting_duration(&meeting))),
+                                    .child(meeting::format_duration(meeting_duration(&meeting))),
                             )
                             .when_some(meeting.error.clone(), |header, error| {
                                 header.child(
@@ -949,9 +4097,9 @@ impl AppWindow {
                 .when(selected, |item| item.bg(rgb(SURFACE_SELECTED)))
                 .cursor_pointer()
                 .hover(|item| item.bg(rgb(SURFACE_HOVER)).text_color(rgb(TEXT_SOFT)))
-                .child(filter.label())
+                .child(filter.label().to_string())
                 .on_click(cx.listener(move |this, _, _, cx| {
-                    this.command_filter = filter;
+                    this.command_filter = filter.clone();
                     this.selected_command = None;
                     cx.notify();
                 }))
@@ -1006,7 +4154,7 @@ impl AppWindow {
                                     .text_size(px(11.0))
                                     .text_color(rgb(MUTED))
                                     .child(command.description)
-                                    .child(command_scope(command.scope)),
+                                    .child(command_scope(&command.scope)),
                             )
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 this.selected_command = Some(command.id);
@@ -1112,7 +4260,7 @@ impl AppWindow {
                 div()
                     .pt_6()
                     .child(detail_row("Task", command.task))
-                    .child(detail_row("Context", command_scope(command.scope)))
+                    .child(detail_row("Context", command_scope(&command.scope)))
                     .child(detail_row("Command ID", command.id))
                     .child(detail_row("Aliases", aliases)),
             )
@@ -1120,15 +4268,17 @@ impl AppWindow {
     }
 
     fn command_is_visible(&self, command: &CatalogCommand) -> bool {
-        match self.command_filter {
+        match &self.command_filter {
             ContextFilter::All => true,
             ContextFilter::Global => {
                 matches!(command.scope, CommandScope::Sleeping | CommandScope::Global)
             }
             ContextFilter::Application(application) => {
-                command.scope == CommandScope::Application(application)
+                matches!(&command.scope, CommandScope::Application(scope) if scope == application)
             }
-            ContextFilter::Browser(host) => command.scope == CommandScope::Browser(host),
+            ContextFilter::Browser(host) => {
+                matches!(&command.scope, CommandScope::Browser(scope) if scope == host)
+            }
         }
     }
 
@@ -1136,16 +4286,18 @@ impl AppWindow {
         let mut filters = vec![ContextFilter::All, ContextFilter::Global];
         let (application, browser_host) = self.current_context();
         for command in &self.commands {
-            let filter = match command.scope {
-                CommandScope::Application(scope) if application.as_deref() == Some(scope) => {
-                    Some(ContextFilter::Application(scope))
+            let filter = match &command.scope {
+                CommandScope::Application(scope)
+                    if application.as_deref() == Some(scope.as_str()) =>
+                {
+                    Some(ContextFilter::Application(scope.clone()))
                 }
                 CommandScope::Browser(scope)
                     if browser_host.as_deref().is_some_and(|host| {
-                        host == scope || host.strip_prefix("www.") == Some(scope)
+                        host == scope || host.strip_prefix("www.") == Some(scope.as_str())
                     }) =>
                 {
-                    Some(ContextFilter::Browser(scope))
+                    Some(ContextFilter::Browser(scope.clone()))
                 }
                 _ => None,
             };
@@ -1320,24 +4472,435 @@ impl AppWindow {
             )
             .into_any_element()
     }
+    fn apply_hud_lab(&self) {
+        self.indicator
+            .send(DictationIndicatorEvent::Configure(self.hud_tuning));
+        self.indicator.send(DictationIndicatorEvent::Reset);
+        match self.hud_demo {
+            HudDemoState::Recording => {
+                for job_id in 0..self.hud_queued as u64 {
+                    self.indicator
+                        .send(DictationIndicatorEvent::Submitted { job_id });
+                    self.indicator
+                        .send(DictationIndicatorEvent::Transcribing { job_id });
+                }
+                self.indicator.send(DictationIndicatorEvent::Started);
+                self.indicator.send(DictationIndicatorEvent::Meter {
+                    average: 0.08,
+                    peak: 0.42,
+                });
+            }
+            HudDemoState::Transcribing | HudDemoState::Processing => {
+                self.indicator
+                    .send(DictationIndicatorEvent::Submitted { job_id: 0 });
+                self.indicator.send(match self.hud_demo {
+                    HudDemoState::Transcribing => {
+                        DictationIndicatorEvent::Transcribing { job_id: 0 }
+                    }
+                    HudDemoState::Processing => DictationIndicatorEvent::Processing { job_id: 0 },
+                    HudDemoState::Recording => unreachable!(),
+                });
+                for job_id in 1..=self.hud_queued as u64 {
+                    self.indicator
+                        .send(DictationIndicatorEvent::Submitted { job_id });
+                    self.indicator
+                        .send(DictationIndicatorEvent::Transcribing { job_id });
+                }
+            }
+        }
+    }
+
+    fn hud_control_value(&self, control: HudControl) -> f32 {
+        match control {
+            HudControl::LineCount => (self.hud_tuning.line_count - 1.0) / 5.0,
+            HudControl::Curvature => self.hud_tuning.curvature,
+            HudControl::Speed => self.hud_tuning.speed / 2.5,
+            HudControl::Sharpness => self.hud_tuning.sharpness,
+            HudControl::Glow => self.hud_tuning.glow,
+            HudControl::Depth => self.hud_tuning.depth,
+            HudControl::LightAngle => self.hud_tuning.light_angle,
+        }
+        .clamp(0.0, 1.0)
+    }
+
+    fn set_hud_control(&mut self, control: HudControl, value: f32, cx: &mut Context<Self>) {
+        let value = value.clamp(0.0, 1.0);
+        match control {
+            HudControl::LineCount => self.hud_tuning.line_count = (1.0 + value * 5.0).round(),
+            HudControl::Curvature => self.hud_tuning.curvature = value,
+            HudControl::Speed => self.hud_tuning.speed = value * 2.5,
+            HudControl::Sharpness => self.hud_tuning.sharpness = value,
+            HudControl::Glow => self.hud_tuning.glow = value,
+            HudControl::Depth => self.hud_tuning.depth = value,
+            HudControl::LightAngle => self.hud_tuning.light_angle = value,
+        }
+        self.hud_copied = false;
+        self.indicator
+            .send(DictationIndicatorEvent::Configure(self.hud_tuning));
+        cx.notify();
+    }
+
+    fn update_hud_from_pointer(
+        &mut self,
+        control: HudControl,
+        pointer_x: f32,
+        cx: &mut Context<Self>,
+    ) {
+        const SLIDER_LEFT: f32 = SIDEBAR_WIDTH + 24.0;
+        const SLIDER_WIDTH: f32 = 360.0;
+        self.set_hud_control(control, (pointer_x - SLIDER_LEFT) / SLIDER_WIDTH, cx);
+    }
+
+    fn select_hud_style(&mut self, style: usize, cx: &mut Context<Self>) {
+        self.hud_tuning = match style {
+            0 => HudTuning {
+                style: 0.0,
+                line_count: 3.0,
+                curvature: 0.5,
+                speed: 1.0,
+                sharpness: 0.58,
+                glow: 0.34,
+                depth: 0.72,
+                light_angle: 0.35,
+            },
+            1 => HudTuning {
+                style: 1.0,
+                line_count: 3.0,
+                curvature: 0.56,
+                speed: 0.82,
+                sharpness: 0.68,
+                glow: 0.24,
+                depth: 0.68,
+                light_angle: 0.35,
+            },
+            _ => HudTuning {
+                style: 2.0,
+                line_count: 3.0,
+                curvature: 0.7,
+                speed: 0.9,
+                sharpness: 0.64,
+                glow: 0.28,
+                depth: 0.74,
+                light_angle: 0.35,
+            },
+        };
+        self.hud_copied = false;
+        self.apply_hud_lab();
+        cx.notify();
+    }
+
+    fn hud_preset(&self) -> String {
+        format!(
+            "hud-v1 style={} lines={:.0} curvature={:.2} speed={:.2} sharpness={:.2} glow={:.2} depth={:.2} light={:.2}",
+            self.hud_tuning.style as usize,
+            self.hud_tuning.line_count,
+            self.hud_tuning.curvature,
+            self.hud_tuning.speed,
+            self.hud_tuning.sharpness,
+            self.hud_tuning.glow,
+            self.hud_tuning.depth,
+            self.hud_tuning.light_angle,
+        )
+    }
+
+    fn render_hud_slider(
+        &self,
+        control: HudControl,
+        label: &'static str,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let value = self.hud_control_value(control);
+        let display = match control {
+            HudControl::LineCount => format!("{:.0}", self.hud_tuning.line_count),
+            HudControl::Speed => format!("{:.2}x", self.hud_tuning.speed),
+            HudControl::LightAngle => format!("{:.0}°", self.hud_tuning.light_angle * 360.0),
+            _ => format!("{:.2}", value),
+        };
+        div()
+            .w(px(360.0))
+            .flex()
+            .flex_col()
+            .gap_2()
+            .child(
+                div()
+                    .flex()
+                    .justify_between()
+                    .text_size(px(12.0))
+                    .child(label)
+                    .child(div().text_color(rgb(MUTED)).child(display)),
+            )
+            .child(
+                div()
+                    .id(("hud-slider", control as usize))
+                    .relative()
+                    .w_full()
+                    .h(px(18.0))
+                    .cursor_pointer()
+                    .child(
+                        div()
+                            .absolute()
+                            .left_0()
+                            .right_0()
+                            .top(px(7.0))
+                            .h(px(4.0))
+                            .rounded_full()
+                            .bg(rgb(0x303030)),
+                    )
+                    .child(
+                        div()
+                            .absolute()
+                            .left_0()
+                            .top(px(7.0))
+                            .w(relative(value))
+                            .h(px(4.0))
+                            .rounded_full()
+                            .bg(rgb(0x6f7fff)),
+                    )
+                    .child(
+                        div()
+                            .absolute()
+                            .left(relative(value))
+                            .top(px(2.0))
+                            .ml(px(-7.0))
+                            .size(px(14.0))
+                            .rounded_full()
+                            .border_2()
+                            .border_color(rgb(0xe8e8e8))
+                            .bg(rgb(0x333333)),
+                    )
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, event: &MouseDownEvent, _, cx| {
+                            this.hud_dragging = Some(control);
+                            this.update_hud_from_pointer(control, f32::from(event.position.x), cx);
+                        }),
+                    )
+                    .on_mouse_move(cx.listener(move |this, event: &MouseMoveEvent, _, cx| {
+                        if event.dragging() && this.hud_dragging == Some(control) {
+                            this.update_hud_from_pointer(control, f32::from(event.position.x), cx);
+                        }
+                    })),
+            )
+            .into_any_element()
+    }
+
+    fn render_hud_lab(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        let styles = [
+            (
+                "A",
+                "Original shine",
+                "The original broad sweep with pixel-correct smoothing.",
+            ),
+            (
+                "B",
+                "Wrapped shine",
+                "The same sweep rolls around the sphere in longitude.",
+            ),
+            (
+                "C",
+                "Curved shine",
+                "A familiar sweep that bows with the sphere surface.",
+            ),
+        ];
+        let style_cards =
+            styles
+                .into_iter()
+                .enumerate()
+                .map(|(index, (key, name, description))| {
+                    let selected = self.hud_tuning.style as usize == index;
+                    div()
+                        .id(("hud-style", index))
+                        .w(px(190.0))
+                        .p_3()
+                        .flex()
+                        .flex_col()
+                        .gap_1()
+                        .rounded_md()
+                        .border_1()
+                        .border_color(rgb(if selected { 0x697cff } else { LINE }))
+                        .bg(rgb(if selected { 0x1c2030 } else { SURFACE }))
+                        .cursor_pointer()
+                        .hover(|card| card.bg(rgb(SURFACE_HOVER)))
+                        .child(
+                            div()
+                                .text_size(px(10.0))
+                                .text_color(rgb(0x8390ff))
+                                .child(key),
+                        )
+                        .child(
+                            div()
+                                .text_size(px(12.0))
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .child(name),
+                        )
+                        .child(
+                            div()
+                                .text_size(px(10.0))
+                                .text_color(rgb(MUTED))
+                                .child(description),
+                        )
+                        .on_click(
+                            cx.listener(move |this, _, _, cx| this.select_hud_style(index, cx)),
+                        )
+                });
+        let state_button = |state, label: &'static str, index: usize| {
+            compact_button(label)
+                .id(("hud-state", index))
+                .when(self.hud_demo == state, |button| {
+                    button.bg(rgb(SURFACE_SELECTED)).text_color(rgb(TEXT))
+                })
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.hud_demo = state;
+                    this.apply_hud_lab();
+                    cx.notify();
+                }))
+        };
+        let queue_buttons = (0..=3).map(|count| {
+            compact_button(count.to_string())
+                .id(("hud-queue", count))
+                .when(self.hud_queued == count, |button| {
+                    button.bg(rgb(SURFACE_SELECTED)).text_color(rgb(TEXT))
+                })
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.hud_queued = count;
+                    this.apply_hud_lab();
+                    cx.notify();
+                }))
+        });
+        let preset = self.hud_preset();
+        let copied = self.hud_copied;
+
+        div()
+            .size_full()
+            .flex()
+            .flex_col()
+            .on_mouse_up(
+                MouseButton::Left,
+                cx.listener(|this, _, _, _| {
+                    this.hud_dragging = None;
+                }),
+            )
+            .child(pane_header(
+                "HUD Lab",
+                Some(
+                    compact_button(if copied { "Copied" } else { "Copy preset" })
+                        .id("copy-hud-preset")
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                                let _ = clipboard.set_text(this.hud_preset());
+                                this.hud_copied = true;
+                                cx.notify();
+                            }
+                        }))
+                        .into_any_element(),
+                ),
+            ))
+            .child(
+                div()
+                    .id("hud-lab-scroll")
+                    .flex_1()
+                    .overflow_y_scroll()
+                    .p_6()
+                    .flex()
+                    .flex_col()
+                    .gap_6()
+                    .child(
+                        div()
+                            .flex()
+                            .gap_2()
+                            .children([
+                                state_button(HudDemoState::Recording, "Recording", 0),
+                                state_button(HudDemoState::Transcribing, "Transcribing", 1),
+                                state_button(HudDemoState::Processing, "Processing", 2),
+                            ])
+                            .child(div().w_4())
+                            .child(
+                                div()
+                                    .text_size(px(11.0))
+                                    .text_color(rgb(MUTED))
+                                    .child("Queued"),
+                            )
+                            .children(queue_buttons),
+                    )
+                    .child(div().flex().gap_3().children(style_cards))
+                    .child(
+                        div()
+                            .flex()
+                            .child(div().flex().flex_col().gap_4().children([
+                                self.render_hud_slider(HudControl::LineCount, "Line count", cx),
+                                self.render_hud_slider(HudControl::Curvature, "Curvature", cx),
+                                self.render_hud_slider(HudControl::Speed, "Speed", cx),
+                                self.render_hud_slider(HudControl::Sharpness, "Sharpness", cx),
+                                self.render_hud_slider(HudControl::Glow, "Line glow", cx),
+                                self.render_hud_slider(HudControl::Depth, "Sphere depth", cx),
+                                self.render_hud_slider(HudControl::LightAngle, "Light angle", cx),
+                            ])),
+                    )
+                    .child(
+                        div()
+                            .p_3()
+                            .rounded_md()
+                            .border_1()
+                            .border_color(rgb(LINE))
+                            .bg(rgb(0x0d0d0d))
+                            .font_family("SF Mono")
+                            .text_size(px(10.0))
+                            .text_color(rgb(TEXT_SOFT))
+                            .child(preset),
+                    ),
+            )
+            .into_any_element()
+    }
+}
+
+impl Drop for AppWindow {
+    fn drop(&mut self) {
+        if !self.preview
+            && self.settings_dirty
+            && let Err(error) = self.settings.save()
+        {
+            tracing::error!(%error, "could not flush app settings while closing window");
+        }
+        crate::app_settings::set_hotkey_capture_active(false);
+    }
 }
 
 impl Render for AppWindow {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let content = match self.pane {
+            Pane::HudLab => self.render_hud_lab(cx),
             Pane::Meetings => self.render_meetings(cx),
             Pane::Commands => self.render_commands(cx),
             Pane::Activity => self.render_activity(cx),
+            Pane::Modes => self.render_modes(window, cx),
+            Pane::Replacements => self.render_replacements(cx),
             Pane::Settings => self.render_settings(window, cx),
         };
+        let transcription_picker = self
+            .transcription_picker_language
+            .clone()
+            .map(|language| self.render_transcription_picker(&language, cx));
+        let setup = self.setup_visible.then(|| self.render_setup(cx));
         div()
+            .track_focus(&self.window_focus)
+            .on_action(|_: &CloseWindow, window, _| window.remove_window())
+            .on_action(|_: &MinimizeWindow, window, _| window.minimize_window())
+            .on_action(|_: &ToggleFullscreen, window, _| window.toggle_fullscreen())
+            .on_action(cx.listener(|this, _: &ShowSettings, window, cx| {
+                this.pane = Pane::Settings;
+                window.activate_window();
+                cx.notify();
+            }))
             .size_full()
+            .relative()
             .overflow_hidden()
             .flex()
             .bg(rgb(CANVAS))
             .text_color(rgb(TEXT))
             .child(self.render_navigation(cx))
             .child(div().flex_1().h_full().overflow_hidden().child(content))
+            .children(setup)
+            .children(transcription_picker)
     }
 }
 
@@ -1391,7 +4954,578 @@ fn toggle(position: f32) -> AnyElement {
         .into_any_element()
 }
 
+fn settings_section_label(label: &'static str) -> AnyElement {
+    div()
+        .pt_6()
+        .pb_2()
+        .text_size(px(11.0))
+        .font_weight(FontWeight::SEMIBOLD)
+        .text_color(rgb(FAINT))
+        .child(label)
+        .into_any_element()
+}
+
+fn settings_copy(title: &'static str, description: &'static str) -> AnyElement {
+    div()
+        .flex()
+        .flex_col()
+        .gap_1()
+        .child(
+            div()
+                .text_sm()
+                .font_weight(FontWeight::SEMIBOLD)
+                .child(title),
+        )
+        .child(
+            div()
+                .text_size(px(12.0))
+                .text_color(rgb(MUTED))
+                .child(description),
+        )
+        .into_any_element()
+}
+
+fn mode_section_heading(title: &'static str, description: &'static str) -> AnyElement {
+    div()
+        .flex()
+        .flex_col()
+        .gap_1()
+        .child(
+            div()
+                .text_size(px(13.0))
+                .font_weight(FontWeight::SEMIBOLD)
+                .child(title),
+        )
+        .child(
+            div()
+                .text_size(px(11.0))
+                .text_color(rgb(MUTED))
+                .child(description),
+        )
+        .into_any_element()
+}
+
+fn model_metric(label: impl IntoElement, value: impl IntoElement) -> Div {
+    div()
+        .flex_1()
+        .h(px(54.0))
+        .px_3()
+        .py_2()
+        .rounded_sm()
+        .bg(rgb(CANVAS))
+        .child(div().text_size(px(9.0)).text_color(rgb(FAINT)).child(label))
+        .child(
+            div()
+                .pt_1()
+                .text_size(px(14.0))
+                .font_weight(FontWeight::SEMIBOLD)
+                .text_color(rgb(TEXT))
+                .child(value),
+        )
+}
+
+fn compact_button(label: impl IntoElement) -> Div {
+    div()
+        .h(px(30.0))
+        .px_3()
+        .flex()
+        .items_center()
+        .rounded_sm()
+        .text_size(px(12.0))
+        .text_color(rgb(TEXT_SOFT))
+        .cursor_pointer()
+        .hover(|button| button.bg(rgb(SURFACE_HOVER)))
+        .child(label)
+}
+
+fn advance_highlight(current: usize, direction: i32, count: usize) -> usize {
+    if direction < 0 {
+        current.saturating_sub(1)
+    } else {
+        (current + 1).min(count - 1)
+    }
+}
+
+fn mode_row(
+    title: impl Into<String>,
+    subtitle: impl Into<String>,
+    selected: bool,
+    applications: &[String],
+    processing_enabled: bool,
+    catalog: &ApplicationCatalogState,
+) -> Div {
+    let title = title.into();
+    let subtitle = subtitle.into();
+    div()
+        .w_full()
+        .px_4()
+        .py_3()
+        .flex()
+        .items_center()
+        .gap_3()
+        .border_b_1()
+        .border_color(rgb(LINE))
+        .when(selected, |row| row.bg(rgb(SURFACE_SELECTED)))
+        .cursor_pointer()
+        .hover(|row| row.bg(rgb(SURFACE_HOVER)))
+        .when(!applications.is_empty(), |row| {
+            row.child(application_icon_stack(applications, catalog))
+        })
+        .child(
+            div()
+                .flex_1()
+                .min_w(px(0.0))
+                .flex()
+                .flex_col()
+                .gap_1()
+                .child(
+                    div()
+                        .text_size(px(12.0))
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .text_color(rgb(TEXT))
+                        .overflow_hidden()
+                        .child(title),
+                )
+                .child(
+                    div()
+                        .text_size(px(10.0))
+                        .text_color(rgb(FAINT))
+                        .overflow_hidden()
+                        .child(subtitle),
+                ),
+        )
+        .when(processing_enabled, |row| row.child(opencode_mark()))
+}
+
+fn application_icon_stack(names: &[String], catalog: &ApplicationCatalogState) -> AnyElement {
+    let visible = names.len().min(3);
+    let mut stack = div()
+        .w(px(30.0 + 12.0 * visible.saturating_sub(1) as f32))
+        .flex_none()
+        .flex();
+    for (index, name) in names.iter().take(visible).enumerate() {
+        let application = match catalog {
+            ApplicationCatalogState::Loaded(applications) => applications
+                .iter()
+                .find(|application| &application.name == name),
+            _ => None,
+        };
+        stack = stack.child(
+            div()
+                .ml(if index == 0 { px(0.0) } else { px(-6.0) })
+                .p(px(1.0))
+                .rounded(px(7.0))
+                .bg(rgb(SURFACE_SELECTED))
+                .child(application_icon(application, Some(name), 26.0)),
+        );
+    }
+    if names.len() > visible {
+        stack = stack.child(
+            div()
+                .ml(px(-6.0))
+                .size(px(28.0))
+                .flex()
+                .items_center()
+                .justify_center()
+                .rounded(px(7.0))
+                .bg(rgb(0x303030))
+                .border_1()
+                .border_color(rgb(LINE))
+                .text_size(px(9.0))
+                .font_weight(FontWeight::SEMIBOLD)
+                .text_color(rgb(TEXT_SOFT))
+                .child(format!("+{}", names.len() - visible)),
+        );
+    }
+    stack.into_any_element()
+}
+
+fn application_icon(
+    application: Option<&InstalledApplication>,
+    fallback_name: Option<&str>,
+    size: f32,
+) -> AnyElement {
+    if let Some(icon) = application.and_then(|application| application.icon.as_ref()) {
+        return img(icon.clone())
+            .size(px(size))
+            .rounded(px(size * 0.22))
+            .into_any_element();
+    }
+    let initial = fallback_name
+        .and_then(|name| name.chars().find(|character| character.is_alphanumeric()))
+        .map(|character| character.to_uppercase().to_string())
+        .unwrap_or_else(|| "?".into());
+    div()
+        .size(px(size))
+        .flex()
+        .items_center()
+        .justify_center()
+        .rounded(px(size * 0.22))
+        .bg(rgb(0x343434))
+        .text_size(px(size * 0.42))
+        .font_weight(FontWeight::SEMIBOLD)
+        .text_color(rgb(TEXT_SOFT))
+        .child(initial)
+        .into_any_element()
+}
+
+fn opencode_mark() -> AnyElement {
+    div()
+        .w(px(18.0))
+        .h(px(16.0))
+        .flex_none()
+        .flex()
+        .items_center()
+        .justify_center()
+        .text_size(px(8.0))
+        .font_weight(FontWeight::BOLD)
+        .text_color(rgb(TEXT_SOFT))
+        .child("OC")
+        .into_any_element()
+}
+
+fn filtered_model_keys(catalog: &ModelCatalog, query: &str) -> Vec<Option<String>> {
+    let mut choices = Vec::new();
+    if query.is_empty() && catalog.default_name.is_some() {
+        choices.push(None);
+    }
+    choices.extend(
+        catalog
+            .models
+            .iter()
+            .filter(|choice| {
+                query.is_empty()
+                    || choice.key.to_lowercase().contains(query)
+                    || choice.name.to_lowercase().contains(query)
+                    || choice.provider.to_lowercase().contains(query)
+            })
+            .take(8)
+            .map(|choice| Some(choice.key.clone())),
+    );
+    choices
+}
+
+fn model_presentation(
+    catalog: &ModelCatalogState,
+    selected_key: Option<&str>,
+) -> Option<ModelPresentation> {
+    let ModelCatalogState::Loaded(catalog) = catalog else {
+        return selected_key.map(fallback_model_presentation);
+    };
+    let is_default = selected_key.is_none();
+    let key = selected_key.or(catalog.default_key.as_deref())?;
+    let choice = catalog.models.iter().find(|choice| choice.key == key);
+    let name = choice
+        .map(|choice| choice.name.clone())
+        .or_else(|| is_default.then(|| catalog.default_name.clone()).flatten())
+        .unwrap_or_else(|| model_id(key).to_owned());
+    let provider = choice
+        .map(|choice| provider_label(&choice.provider))
+        .unwrap_or_else(|| {
+            provider_label(key.split_once('/').map_or(key, |(provider, _)| provider))
+        });
+    Some(ModelPresentation {
+        name,
+        provider,
+        key: key.to_owned(),
+        is_default,
+    })
+}
+
+fn fallback_model_presentation(key: &str) -> ModelPresentation {
+    let provider = key.split_once('/').map_or(key, |(provider, _)| provider);
+    ModelPresentation {
+        name: model_id(key).to_owned(),
+        provider: provider_label(provider),
+        key: key.to_owned(),
+        is_default: false,
+    }
+}
+
+fn model_id(key: &str) -> &str {
+    key.split_once('/').map_or(key, |(_, model)| model)
+}
+
+fn provider_label(provider: &str) -> String {
+    if provider.eq_ignore_ascii_case("opencode") {
+        return "OpenCode".into();
+    }
+    provider
+        .split(['-', '_'])
+        .filter(|part| !part.is_empty())
+        .map(|part| {
+            let mut characters = part.chars();
+            characters.next().map_or_else(String::new, |first| {
+                first.to_uppercase().chain(characters).collect()
+            })
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn model_choice_row(
+    title: impl Into<String>,
+    subtitle: impl Into<String>,
+    highlighted: bool,
+) -> Div {
+    div()
+        .w_full()
+        .px_3()
+        .py_2()
+        .flex()
+        .items_center()
+        .justify_between()
+        .gap_3()
+        .border_b_1()
+        .border_color(rgb(LINE))
+        .when(highlighted, |row| row.bg(rgb(SURFACE_SELECTED)))
+        .cursor_pointer()
+        .hover(|row| row.bg(rgb(SURFACE_HOVER)))
+        .child(
+            div()
+                .text_size(px(12.0))
+                .text_color(rgb(TEXT_SOFT))
+                .child(title.into()),
+        )
+        .child(
+            div()
+                .text_size(px(10.0))
+                .text_color(rgb(FAINT))
+                .child(subtitle.into()),
+        )
+}
+
+fn settings_input(
+    label: &'static str,
+    description: impl Into<String>,
+    input: Entity<TextInput>,
+) -> AnyElement {
+    settings_control(label, description, input)
+}
+
+fn settings_control(
+    label: &'static str,
+    description: impl Into<String>,
+    control: impl IntoElement,
+) -> AnyElement {
+    div()
+        .flex_1()
+        .min_w(px(0.0))
+        .flex()
+        .flex_col()
+        .gap_2()
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .justify_between()
+                .gap_2()
+                .child(
+                    div()
+                        .text_size(px(11.0))
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .text_color(rgb(TEXT_SOFT))
+                        .child(label),
+                )
+                .child(
+                    div()
+                        .text_size(px(10.0))
+                        .text_color(rgb(FAINT))
+                        .child(description.into()),
+                ),
+        )
+        .child(control)
+        .into_any_element()
+}
+
+fn input_text(input: &ProcessingInput, cx: &App) -> String {
+    input.entity.read(cx).text().trim().to_string()
+}
+
+fn browser_hosts(value: &str) -> Vec<String> {
+    let mut hosts: Vec<_> = value
+        .split(',')
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .filter_map(|value| {
+            let candidate = if value.contains("://") {
+                value.to_owned()
+            } else {
+                format!("https://{value}")
+            };
+            url::Url::parse(&candidate)
+                .ok()?
+                .host_str()
+                .map(|host| host.strip_prefix("www.").unwrap_or(host).to_lowercase())
+        })
+        .collect();
+    hosts.sort();
+    hosts.dedup();
+    hosts
+}
+
+fn apply_mode_inputs(inputs: &ModeInputs, mode: &mut DictationMode, is_default: bool, cx: &App) {
+    mode.name = if is_default {
+        "Default".into()
+    } else {
+        input_text(&inputs.name, cx)
+    };
+    mode.browser_hosts = if is_default {
+        Vec::new()
+    } else {
+        browser_hosts(&input_text(&inputs.browser_hosts, cx))
+    };
+    mode.post_processing.enabled = inputs.processing_toggle.enabled();
+    mode.post_processing.prompt = input_text(&inputs.prompt, cx);
+    mode.post_processing.deadline_seconds = input_text(&inputs.deadline, cx)
+        .parse::<u64>()
+        .unwrap_or(mode.post_processing.deadline_seconds)
+        .max(1);
+}
+
+fn settings_row(title: &'static str, description: &'static str, control: impl IntoElement) -> Div {
+    div()
+        .w_full()
+        .py_5()
+        .flex()
+        .items_center()
+        .justify_between()
+        .border_b_1()
+        .border_color(rgb(LINE))
+        .child(settings_copy(title, description))
+        .child(control)
+}
+
+fn setup_row(title: &'static str, description: &'static str, control: AnyElement) -> Div {
+    div()
+        .w_full()
+        .h(px(70.0))
+        .flex()
+        .items_center()
+        .justify_between()
+        .border_b_1()
+        .border_color(rgb(LINE))
+        .child(settings_copy(title, description))
+        .child(control)
+}
+
+fn setup_ready_badge() -> AnyElement {
+    div()
+        .h(px(28.0))
+        .px_3()
+        .flex()
+        .items_center()
+        .rounded_sm()
+        .bg(rgb(0x17231a))
+        .text_size(px(11.0))
+        .font_weight(FontWeight::SEMIBOLD)
+        .text_color(rgb(0x91bd99))
+        .child("Ready")
+        .into_any_element()
+}
+
+fn hotkey_modifiers(modifiers: GpuiModifiers) -> HotkeyModifiers {
+    HotkeyModifiers {
+        control: modifiers.control,
+        option: modifiers.alt,
+        shift: modifiers.shift,
+        command: modifiers.platform,
+    }
+}
+
+fn hotkey_key(key: &str) -> std::result::Result<HotkeyKey, &'static str> {
+    let special = match key {
+        "space" => Some((49, "Space")),
+        "tab" => Some((48, "Tab")),
+        "enter" => Some((36, "Return")),
+        "backspace" => Some((51, "Delete")),
+        "up" => Some((126, "Up")),
+        "down" => Some((125, "Down")),
+        "left" => Some((123, "Left")),
+        "right" => Some((124, "Right")),
+        "pageup" => Some((116, "Page Up")),
+        "pagedown" => Some((121, "Page Down")),
+        "home" => Some((115, "Home")),
+        "end" => Some((119, "End")),
+        "delete" => Some((117, "Forward Delete")),
+        "insert" => Some((114, "Help")),
+        "f1" => Some((122, "F1")),
+        "f2" => Some((120, "F2")),
+        "f3" => Some((99, "F3")),
+        "f4" => Some((118, "F4")),
+        "f5" => Some((96, "F5")),
+        "f6" => Some((97, "F6")),
+        "f7" => Some((98, "F7")),
+        "f8" => Some((100, "F8")),
+        "f9" => Some((101, "F9")),
+        "f10" => Some((109, "F10")),
+        "f11" => Some((103, "F11")),
+        "f12" => Some((111, "F12")),
+        "f13" => Some((105, "F13")),
+        "f14" => Some((107, "F14")),
+        "f15" => Some((113, "F15")),
+        "f16" => Some((106, "F16")),
+        "f17" => Some((64, "F17")),
+        "f18" => Some((79, "F18")),
+        "f19" => Some((80, "F19")),
+        "f20" => Some((90, "F20")),
+        _ => None,
+    };
+    if let Some((code, label)) = special {
+        return Ok(HotkeyKey {
+            code,
+            label: label.into(),
+        });
+    }
+    let mut characters = key.chars();
+    let Some(character) = characters.next() else {
+        return Err("Unsupported key");
+    };
+    if characters.next().is_some() {
+        return Err("Unsupported key");
+    }
+    let code = crate::keyboard::key_code_for(character).map_err(|_| "Unsupported key")?;
+    Ok(HotkeyKey {
+        code,
+        label: character.to_uppercase().collect(),
+    })
+}
+
+fn is_function_key(label: &str) -> bool {
+    label
+        .strip_prefix('F')
+        .and_then(|number| number.parse::<u8>().ok())
+        .is_some_and(|number| (1..=20).contains(&number))
+}
+
+fn hotkey_keycaps(parts: Vec<String>, opacity: f32) -> AnyElement {
+    div()
+        .flex()
+        .items_center()
+        .gap_1()
+        .opacity(opacity)
+        .children(parts.into_iter().map(|part| {
+            div()
+                .min_w(px(24.0))
+                .h(px(24.0))
+                .px_2()
+                .flex()
+                .items_center()
+                .justify_center()
+                .rounded_sm()
+                .bg(rgb(SURFACE_SELECTED))
+                .border_1()
+                .border_color(rgb(LINE))
+                .text_size(px(11.0))
+                .font_weight(FontWeight::SEMIBOLD)
+                .text_color(rgb(TEXT))
+                .child(part)
+        }))
+        .into_any_element()
+}
+
 fn mix_color(from: Rgba, to: Rgba, position: f32) -> Rgba {
+    let position = position.clamp(0.0, 1.0);
     Rgba {
         r: from.r + (to.r - from.r) * position,
         g: from.g + (to.g - from.g) * position,
@@ -1487,11 +5621,11 @@ fn command_task(command: &CommandInfo) -> &'static str {
     }
 }
 
-fn command_scope(scope: CommandScope) -> &'static str {
+fn command_scope(scope: &CommandScope) -> String {
     match scope {
-        CommandScope::Sleeping | CommandScope::Global => "Global",
-        CommandScope::Application(application) => application,
-        CommandScope::Browser(host) => host,
+        CommandScope::Sleeping | CommandScope::Global => "Global".into(),
+        CommandScope::Application(application) => application.clone(),
+        CommandScope::Browser(host) => host.clone(),
     }
 }
 
@@ -1520,15 +5654,6 @@ fn meeting_progress_action(label: &'static str) -> AnyElement {
         .into_any_element()
 }
 
-fn active_meeting(meetings: &[MeetingManifest]) -> Option<&MeetingManifest> {
-    meetings.iter().find(|meeting| {
-        matches!(
-            meeting.status,
-            MeetingStatus::Starting | MeetingStatus::Recording | MeetingStatus::Transcribing
-        )
-    })
-}
-
 fn log_meeting_request_error(error: TrySendError<MeetingRequest>) {
     match error {
         TrySendError::Full(_) => tracing::warn!("meeting controller is busy"),
@@ -1549,18 +5674,6 @@ fn meeting_duration(meeting: &MeetingManifest) -> u64 {
                 .map_or(0, |ended| ended.saturating_sub(meeting.created_at_ms))
         }
     })
-}
-
-fn format_duration(milliseconds: u64) -> String {
-    let seconds = milliseconds / 1_000;
-    format!("{:02}:{:02}", seconds / 60, seconds % 60)
-}
-
-fn now_ms() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64
 }
 
 struct RecentEvents {
@@ -1682,16 +5795,43 @@ fn event_summary(event: &VoiceEvent) -> String {
                 CommandOutcome::Failed(error) => format!("Could not run {command}: {error}"),
             }
         }
-        VoiceEvent::Dictation { phase, text, .. } => match phase {
-            DictationPhase::Started => "Dictation started".into(),
-            DictationPhase::Discarded => "A brief dictation was discarded".into(),
-            DictationPhase::Cancelled => "Dictation was cancelled".into(),
-            DictationPhase::Transcribing => "Dictation is being transcribed".into(),
-            DictationPhase::Pasted => text_or("Dictation was pasted", text),
-            DictationPhase::Logged => text_or("Captain's Log was saved", text),
-            DictationPhase::Repasted => text_or("The last dictation was pasted again", text),
-            DictationPhase::Failed(error) => format!("Dictation failed: {error}"),
-        },
+        VoiceEvent::Dictation {
+            phase,
+            text,
+            processing,
+            ..
+        } => {
+            let description = match phase {
+                DictationPhase::Started => "Dictation started".into(),
+                DictationPhase::Discarded => "A brief dictation was discarded".into(),
+                DictationPhase::Cancelled => "Dictation was cancelled".into(),
+                DictationPhase::Transcribing => "Dictation is being transcribed".into(),
+                DictationPhase::Pasted => text_or("Dictation was pasted", text),
+                DictationPhase::Edited => text_or("Selected text was edited", text),
+                DictationPhase::Logged => text_or("Captain's Log was saved", text),
+                DictationPhase::Repasted => text_or("The last dictation was pasted again", text),
+                DictationPhase::MeetingPasted => text_or("New meeting transcript was pasted", text),
+                DictationPhase::Failed(error) => format!("Dictation failed: {error}"),
+            };
+            processing
+                .as_ref()
+                .map_or(description.clone(), |processing| {
+                    processing.fallback.as_ref().map_or_else(
+                        || {
+                            format!(
+                                "{description} · {} profile · {} ms",
+                                processing.profile, processing.latency_ms
+                            )
+                        },
+                        |error| {
+                            format!(
+                                "{description} · {} profile fell back to raw after {} ms: {}",
+                                processing.profile, processing.latency_ms, error
+                            )
+                        },
+                    )
+                })
+        }
         VoiceEvent::Context {
             application,
             browser_url,
@@ -1712,9 +5852,26 @@ fn text_or(prefix: &str, text: &str) -> String {
     }
 }
 
+fn transcription_selection_is_active(
+    selection: &TranscriptionSelection,
+    model: &ModelDefinition,
+    language: &str,
+    installed: bool,
+) -> bool {
+    installed && selection.model == model.id && selection.language == language
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn production_navigation_only_exposes_dictation_features() {
+        assert_eq!(
+            Pane::all(false),
+            &[Pane::Settings, Pane::Modes, Pane::Replacements]
+        );
+    }
 
     #[test]
     fn toggle_spring_is_frame_rate_independent_and_settles() {
@@ -1768,5 +5925,62 @@ mod tests {
             (Some("Brave Browser".into()), Some("meet.google.com".into()))
         );
         fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn browser_hosts_are_canonicalized_and_deduplicated() {
+        assert_eq!(
+            browser_hosts(" https://www.Reddit.com/r/rust, , reddit.com, github.com/path"),
+            ["github.com", "reddit.com"]
+        );
+    }
+
+    #[test]
+    fn picker_arrows_stop_at_the_ends() {
+        assert_eq!(advance_highlight(0, -1, 4), 0);
+        assert_eq!(advance_highlight(2, 1, 4), 3);
+        assert_eq!(advance_highlight(3, 1, 4), 3);
+    }
+
+    #[test]
+    fn selected_transcription_model_is_not_active_until_installed() {
+        let selection = TranscriptionSelection::default();
+        let model = definition(selection.model);
+
+        assert!(!transcription_selection_is_active(
+            &selection,
+            model,
+            &selection.language,
+            false
+        ));
+        assert!(transcription_selection_is_active(
+            &selection,
+            model,
+            &selection.language,
+            true
+        ));
+    }
+
+    #[test]
+    fn selected_model_presents_provider_name_and_resolved_key() {
+        let catalog = ModelCatalogState::Loaded(ModelCatalog {
+            models: vec![crate::dictation_processor::ModelChoice {
+                key: "opencode/gpt-5.6-terra".into(),
+                name: "GPT 5.6 Terra".into(),
+                provider: "opencode".into(),
+                variants: Vec::new(),
+            }],
+            default_key: Some("opencode/gpt-5.6-terra".into()),
+            default_name: Some("GPT 5.6 Terra".into()),
+        });
+
+        let selected = model_presentation(&catalog, Some("opencode/gpt-5.6-terra")).unwrap();
+        assert_eq!(selected.name, "GPT 5.6 Terra");
+        assert_eq!(selected.provider, "OpenCode");
+        assert_eq!(selected.key, "opencode/gpt-5.6-terra");
+        assert!(!selected.is_default);
+
+        let default = model_presentation(&catalog, None).unwrap();
+        assert!(default.is_default);
     }
 }

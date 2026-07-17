@@ -200,6 +200,8 @@ mod tests {
             application: Some(application.into()),
             browser_url: url.map(|url| Url::parse(url).unwrap()),
             window_title: Some(title.into()),
+            selected_text: None,
+            input_revision: None,
         }
     }
 

@@ -18,6 +18,20 @@ impl AudioInput {
     pub fn open(device_queries: &[&str]) -> Result<Self> {
         let host = cpal::default_host();
         let device = find_device(&host, device_queries)?;
+        Self::open_device(device)
+    }
+
+    pub fn open_named(name: &str) -> Result<Self> {
+        let host = cpal::default_host();
+        let device = host
+            .input_devices()
+            .wrap_err("could not enumerate input devices")?
+            .find(|device| device.to_string() == name)
+            .ok_or_else(|| eyre!("microphone is unavailable: {name}"))?;
+        Self::open_device(device)
+    }
+
+    fn open_device(device: Device) -> Result<Self> {
         let device_name = device.to_string();
         let supported = device
             .default_input_config()
@@ -57,6 +71,18 @@ impl AudioInput {
     pub fn take_dropped_chunks(&self) -> u64 {
         self.dropped_chunks.swap(0, Ordering::Relaxed)
     }
+}
+
+pub fn input_device_names() -> Result<Vec<String>> {
+    let host = cpal::default_host();
+    let mut names = host
+        .input_devices()
+        .wrap_err("could not enumerate input devices")?
+        .map(|device| device.to_string())
+        .collect::<Vec<_>>();
+    names.sort_by_key(|name| name.to_lowercase());
+    names.dedup();
+    Ok(names)
 }
 
 fn find_device(host: &cpal::Host, queries: &[&str]) -> Result<Device> {

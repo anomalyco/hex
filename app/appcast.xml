@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
+  <channel>
+    <title>HEX Updates</title>
+    <link>https://pub-089d681d41754031a4aefa7017d8c2fb.r2.dev/</link>
+    <description>Signed automatic updates for HEX.</description>
+    <language>en</language>
+  </channel>
+</rss>
