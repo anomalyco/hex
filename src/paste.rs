@@ -73,6 +73,8 @@ type CfArrayRef = *const c_void;
 type CfDataRef = *const c_void;
 
 const CF_STRING_ENCODING_UTF8: u32 = 0x0800_0100;
+const BAD_PASTEBOARD_FLAVOR: i32 = -25133;
+const DUPLICATE_PASTEBOARD_FLAVOR: i32 = -25134;
 
 #[link(name = "ApplicationServices", kind = "framework")]
 unsafe extern "C" {
@@ -269,31 +271,34 @@ fn capture_clipboard(clipboard: &NSPasteboard) -> Result<ClipboardSnapshot> {
                 if flavor.is_null() {
                     return Err(eyre!("clipboard format was unavailable"));
                 }
+                let data_type = cf_string(flavor)?;
                 let mut flags = 0;
                 check_status(
                     unsafe { PasteboardGetItemFlavorFlags(pasteboard.0, item, flavor, &mut flags) },
                     "inspect clipboard format",
                 )?;
                 let mut data = ptr::null();
-                check_status(
-                    unsafe { PasteboardCopyItemFlavorData(pasteboard.0, item, flavor, &mut data) },
-                    "preserve clipboard format",
-                )?;
+                let status =
+                    unsafe { PasteboardCopyItemFlavorData(pasteboard.0, item, flavor, &mut data) };
+                if status == BAD_PASTEBOARD_FLAVOR {
+                    tracing::debug!(%data_type, "skipping unavailable clipboard format");
+                    return Ok(None);
+                }
+                check_status(status, "preserve clipboard format")?;
                 if data.is_null() {
                     return Err(eyre!("clipboard format data was unavailable"));
                 }
-                let data_type = cf_string(flavor);
                 let bytes = cf_data(data);
                 unsafe { CFRelease(data) };
-                Ok(ClipboardFlavor {
-                    data_type: data_type?,
+                Ok(Some(ClipboardFlavor {
+                    data_type,
                     data: bytes?,
                     flags: flags & 0x0f,
-                })
+                }))
             })
             .collect::<Result<Vec<_>>>();
         unsafe { CFRelease(flavors) };
-        items.push(result?);
+        items.push(result?.into_iter().flatten().collect());
     }
     Ok(ClipboardSnapshot { items })
 }
@@ -336,6 +341,10 @@ fn restore_clipboard(clipboard: &NSPasteboard, snapshot: &ClipboardSnapshot) -> 
             unsafe {
                 CFRelease(data);
                 CFRelease(data_type);
+            }
+            if status == DUPLICATE_PASTEBOARD_FLAVOR {
+                tracing::debug!(data_type = %flavor.data_type, "skipping synthesized clipboard format");
+                continue;
             }
             check_status(status, "restore clipboard format")?;
         }
