@@ -88,11 +88,8 @@ pub fn voice_control() -> CommandConfig {
     voice_control_for(crate::DEVELOPER_FEATURES_ENABLED)
 }
 
-fn voice_control_for(developer_features: bool) -> CommandConfig {
-    if !developer_features {
-        return CommandConfig::new();
-    }
-    CommandConfig::new()
+fn voice_control_for(meetings_enabled: bool) -> CommandConfig {
+    let commands = CommandConfig::new()
         .wake_with(["voice control", "wake up", "start voice control"])
         .sleep_with(["go to sleep", "stop voice control"])
         .command(
@@ -136,22 +133,28 @@ fn voice_control_for(developer_features: bool) -> CommandConfig {
             Command::new("captains-log.start", "Record a journal entry")
                 .phrases(CAPTAINS_LOG_START_PHRASES.iter().copied())
                 .action(|()| Action::StartCaptainsLog),
-        )
-        .command(
-            Command::new("meeting.start", "Start meeting recording")
-                .phrases([
-                    "start meeting",
-                    "start a meeting",
-                    "record meeting",
-                    "record this meeting",
-                ])
-                .action(|()| Action::StartMeeting),
-        )
-        .command(
-            Command::new("meeting.stop", "Stop meeting recording")
-                .phrases(["stop meeting", "stop the meeting", "stop recording"])
-                .action(|()| Action::StopMeeting),
-        )
+        );
+    let commands = if meetings_enabled {
+        commands
+            .command(
+                Command::new("meeting.start", "Start meeting recording")
+                    .phrases([
+                        "start meeting",
+                        "start a meeting",
+                        "record meeting",
+                        "record this meeting",
+                    ])
+                    .action(|()| Action::StartMeeting),
+            )
+            .command(
+                Command::new("meeting.stop", "Stop meeting recording")
+                    .phrases(["stop meeting", "stop the meeting", "stop recording"])
+                    .action(|()| Action::StopMeeting),
+            )
+    } else {
+        commands
+    };
+    commands
         .command(
             Command::new("shortcut.command-number", "Use keyboard shortcut")
                 .spoken(("command", Digit))
@@ -296,15 +299,22 @@ mod tests {
     use super::*;
 
     #[test]
-    fn production_configuration_is_dictation_only() {
-        assert!(voice_control_for(false).catalog().is_empty());
+    fn production_configuration_excludes_meeting_commands() {
+        let catalog = voice_control_for(false).catalog();
+
+        assert!(!catalog.is_empty());
+        assert!(
+            !catalog
+                .iter()
+                .any(|command| command.id.starts_with("meeting."))
+        );
     }
     use crate::commands::{Decision, Mode};
     use crate::context::ContextSnapshot;
 
     #[test]
     fn meeting_recording_can_be_controlled_by_voice() {
-        let commands = voice_control();
+        let commands = voice_control_for(true);
         let context = ContextSnapshot::default();
 
         assert!(matches!(

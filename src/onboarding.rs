@@ -40,7 +40,8 @@ pub fn status(selection: &TranscriptionSelection) -> SetupStatus {
         microphone: microphone_state(),
         input_monitoring: settings(CGPreflightListenEventAccess()),
         accessibility: settings(CGPreflightPostEventAccess()),
-        command_model: !crate::DEVELOPER_FEATURES_ENABLED || crate::moonshine::model_installed(),
+        command_model: !crate::app_settings::commands_enabled()
+            || crate::moonshine::model_installed(),
         transcription_model,
     }
 }

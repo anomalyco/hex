@@ -252,7 +252,12 @@ impl Pane {
         Self::Meetings,
         Self::Activity,
     ];
-    const PRODUCTION: [Self; 3] = [Self::Settings, Self::Modes, Self::Replacements];
+    const PRODUCTION: [Self; 4] = [
+        Self::Settings,
+        Self::Modes,
+        Self::Replacements,
+        Self::Commands,
+    ];
 
     fn all(developer_features: bool) -> &'static [Self] {
         if developer_features {
@@ -484,6 +489,7 @@ pub struct AppWindow {
     launch_at_login_status: LoginItemStatus,
     launch_at_login_error: Option<String>,
     launch_at_login_toggle: ToggleSpring,
+    commands_toggle: ToggleSpring,
     prevent_sleep_toggle: ToggleSpring,
     double_tap_toggle: ToggleSpring,
     dock_icon_toggle: ToggleSpring,
@@ -710,6 +716,7 @@ impl AppWindow {
             launch_at_login_toggle: ToggleSpring::new(
                 launch_at_login_status == LoginItemStatus::Enabled,
             ),
+            commands_toggle: ToggleSpring::new(settings.commands_enabled),
             prevent_sleep_toggle: ToggleSpring::new(settings.prevent_system_sleep),
             double_tap_toggle: ToggleSpring::new(settings.double_tap_lock),
             dock_icon_toggle: ToggleSpring::new(settings.show_dock_icon),
@@ -942,7 +949,7 @@ impl AppWindow {
             },
         };
         let install_command_model = self.setup_visible
-            && crate::DEVELOPER_FEATURES_ENABLED
+            && self.settings.commands_enabled
             && !crate::moonshine::model_installed();
         self.transcription_picker_error = None;
         if self.preview {
@@ -2180,8 +2187,8 @@ impl AppWindow {
                             .child(settings_section_label("Application"))
                             .child(settings_row(
                                 "HEX",
-                                if crate::DEVELOPER_FEATURES_ENABLED {
-                                    "Local voice commands, dictation, and meeting transcription."
+                                if self.settings.commands_enabled {
+                                    "Local voice commands and private dictation."
                                 } else {
                                     "Private local dictation for your Mac."
                                 },
@@ -2359,7 +2366,7 @@ impl AppWindow {
                                     .text_size(px(12.0))
                                     .line_height(px(19.0))
                                     .text_color(rgb(MUTED))
-                                    .child(if crate::DEVELOPER_FEATURES_ENABLED {
+                                    .child(if self.settings.commands_enabled {
                                         "Everything stays on this Mac. HEX starts listening after the required permissions and local models are ready."
                                     } else {
                                         "Everything stays on this Mac. HEX is ready once permissions and your local dictation model are set up."
@@ -2373,7 +2380,7 @@ impl AppWindow {
                             .border_color(rgb(LINE))
                             .child(setup_row(
                                 "Microphone",
-                                if crate::DEVELOPER_FEATURES_ENABLED {
+                                if self.settings.commands_enabled {
                                     "Hear commands and dictation."
                                 } else {
                                     "Record dictation while you hold the shortcut."
@@ -2387,7 +2394,7 @@ impl AppWindow {
                             ))
                             .child(setup_row(
                                 "Accessibility",
-                                if crate::DEVELOPER_FEATURES_ENABLED {
+                                if self.settings.commands_enabled {
                                     "Paste text and run keyboard commands."
                                 } else {
                                     "Paste completed dictation into the foreground app."
@@ -2395,12 +2402,12 @@ impl AppWindow {
                                 accessibility,
                             ))
                             .child(setup_row(
-                                if crate::DEVELOPER_FEATURES_ENABLED {
+                                if self.settings.commands_enabled {
                                     "Local speech models"
                                 } else {
                                     "Local dictation model"
                                 },
-                                if crate::DEVELOPER_FEATURES_ENABLED {
+                                if self.settings.commands_enabled {
                                     "Command recognition and the selected dictation model."
                                 } else {
                                     "The selected model transcribes speech entirely on this Mac."
@@ -4077,7 +4084,29 @@ impl AppWindow {
             .into_any_element()
     }
 
-    fn render_commands(&mut self, cx: &mut Context<Self>) -> AnyElement {
+    fn render_commands(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        let commands_position = self.commands_toggle.render_position(window);
+        let commands_control = div()
+            .id("commands-enabled")
+            .flex()
+            .items_center()
+            .gap_3()
+            .cursor_pointer()
+            .child(div().text_size(px(11.0)).text_color(rgb(MUTED)).child(
+                if self.settings.commands_enabled {
+                    "Enabled"
+                } else {
+                    "Off"
+                },
+            ))
+            .child(toggle(commands_position))
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.settings.commands_enabled = !this.settings.commands_enabled;
+                this.commands_toggle
+                    .set_enabled(this.settings.commands_enabled);
+                this.save_settings(cx);
+            }))
+            .into_any_element();
         let context_label = self.current_context_label();
         let filters = self.context_filters();
         if !filters.contains(&self.command_filter) {
@@ -4182,7 +4211,7 @@ impl AppWindow {
             .size_full()
             .flex()
             .flex_col()
-            .child(pane_header("Commands", None))
+            .child(pane_header("Commands", Some(commands_control)))
             .child(
                 div()
                     .h(px(47.0))
@@ -4870,7 +4899,7 @@ impl Render for AppWindow {
         let content = match self.pane {
             Pane::HudLab => self.render_hud_lab(cx),
             Pane::Meetings => self.render_meetings(cx),
-            Pane::Commands => self.render_commands(cx),
+            Pane::Commands => self.render_commands(window, cx),
             Pane::Activity => self.render_activity(cx),
             Pane::Modes => self.render_modes(window, cx),
             Pane::Replacements => self.render_replacements(cx),
@@ -5866,10 +5895,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn production_navigation_only_exposes_dictation_features() {
+    fn production_navigation_keeps_commands_available_as_an_opt_in() {
         assert_eq!(
             Pane::all(false),
-            &[Pane::Settings, Pane::Modes, Pane::Replacements]
+            &[
+                Pane::Settings,
+                Pane::Modes,
+                Pane::Replacements,
+                Pane::Commands,
+            ]
         );
     }
 

@@ -3,9 +3,8 @@
 HEX ships the coworker product loop: configurable hold-to-talk local dictation,
 explicit selected-text voice editing, optional context-aware OpenCode
 post-processing, a Metal HUD, bounded paste workers, settings, and a signed GPUI
-app bundle. Streaming commands and meetings remain implemented developer
-prototypes, but are intentionally absent from distributed builds until their
-product surfaces are redesigned.
+app bundle. Streaming commands are a disabled-by-default experimental opt-in;
+meetings remain a developer prototype until their product surface is redesigned.
 
 ## Validate The Coworker Release
 

@@ -13,6 +13,7 @@ use crate::transcription_models::TranscriptionSelection;
 static RECORDING_AUDIO_BEHAVIOR: AtomicU8 = AtomicU8::new(0);
 static PREVENT_SYSTEM_SLEEP: AtomicBool = AtomicBool::new(true);
 static DOUBLE_TAP_LOCK: AtomicBool = AtomicBool::new(true);
+static COMMANDS_ENABLED: AtomicBool = AtomicBool::new(false);
 static DICTATION_HOTKEY: AtomicU64 = AtomicU64::new(1 << 19);
 static EDIT_HOTKEY: AtomicU64 = AtomicU64::new((1 << 19) | (1 << 20));
 static HOTKEY_CAPTURE_ACTIVE: AtomicBool = AtomicBool::new(false);
@@ -294,6 +295,7 @@ impl RecordingAudioBehavior {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(default)]
 pub struct AppSettings {
+    pub commands_enabled: bool,
     pub sound_effects: bool,
     pub sound_effect_volume: f32,
     pub microphone: Option<String>,
@@ -323,6 +325,7 @@ where
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
+            commands_enabled: false,
             sound_effects: true,
             sound_effect_volume: 0.5,
             microphone: None,
@@ -373,6 +376,7 @@ impl AppSettings {
     }
 
     fn apply_runtime(&self) {
+        COMMANDS_ENABLED.store(self.commands_enabled, Ordering::Release);
         crate::feedback::set_enabled(self.sound_effects);
         crate::feedback::set_volume(self.sound_effect_volume.clamp(0.0, 1.0));
         RECORDING_AUDIO_BEHAVIOR.store(self.recording_audio_behavior.encoded(), Ordering::Relaxed);
@@ -464,6 +468,10 @@ pub fn recording_audio_behavior() -> RecordingAudioBehavior {
     RecordingAudioBehavior::decode(RECORDING_AUDIO_BEHAVIOR.load(Ordering::Relaxed))
 }
 
+pub fn commands_enabled() -> bool {
+    COMMANDS_ENABLED.load(Ordering::Acquire)
+}
+
 pub fn prevent_system_sleep() -> bool {
     PREVENT_SYSTEM_SLEEP.load(Ordering::Relaxed)
 }
@@ -530,6 +538,7 @@ mod tests {
     #[test]
     fn missing_fields_receive_defaults() {
         let settings: AppSettings = serde_json::from_str("{}").unwrap();
+        assert!(!settings.commands_enabled);
         assert!(settings.sound_effects);
         assert_eq!(settings.sound_effect_volume, 0.5);
         assert_eq!(settings.microphone, None);

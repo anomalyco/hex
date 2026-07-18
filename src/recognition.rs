@@ -1,6 +1,6 @@
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{RecvTimeoutError, SyncSender, TrySendError};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, SyncSender, TryRecvError, TrySendError};
 use std::time::{Duration, Instant};
 
 use color_eyre::Result;
@@ -55,9 +55,11 @@ pub fn listen(
     let (mut microphone_revision, microphone) = crate::app_settings::microphone_selection();
     let mut input = open_audio_input(device_override, microphone.as_deref())?;
     feedback::preload()?;
-    let mut recognizer = crate::DEVELOPER_FEATURES_ENABLED
+    let mut commands_enabled = crate::app_settings::commands_enabled();
+    let mut recognizer = commands_enabled
         .then(|| Moonshine::load(project_root))
         .transpose()?;
+    let mut command_loader = None;
     let mut events = EventLog::create(event_path)?;
     let input_monitor = InputMonitor::start()?;
     let context_monitor = ContextMonitor::start();
@@ -85,7 +87,7 @@ pub fn listen(
     dictation.enable_recording_environment(RecordingEnvironmentController::start());
     let dictation_worker = DictationWorker::start(input_monitor.activity.clone());
     let (mut transcription_revision, _) = crate::app_settings::transcription_selection();
-    let action_executor = crate::DEVELOPER_FEATURES_ENABLED.then(ActionExecutor::start);
+    let mut action_executor = commands_enabled.then(ActionExecutor::start);
 
     events.emit(&VoiceEvent::SessionStarted {
         timestamp_ms: now_ms(),
@@ -120,7 +122,7 @@ pub fn listen(
         mode,
         &input.device_name,
     )?;
-    if crate::DEVELOPER_FEATURES_ENABLED {
+    if commands_enabled {
         tracing::info!(device = %input.device_name, "voice recognition started");
     } else {
         tracing::info!(device = %input.device_name, "dictation listener started");
@@ -152,6 +154,40 @@ pub fn listen(
         if let Some(action_executor) = &action_executor {
             while let Some(outcome) = action_executor.try_recv() {
                 handle_action_outcome(outcome, &mut events)?;
+            }
+        }
+        let next_commands_enabled = crate::app_settings::commands_enabled();
+        if next_commands_enabled != commands_enabled {
+            commands_enabled = next_commands_enabled;
+            mode = Mode::Listening;
+            if commands_enabled {
+                command_loader = Some(load_command_recognizer(project_root.to_path_buf()));
+                tracing::info!("voice commands enabled; loading command model");
+            } else {
+                command_loader = None;
+                recognizer = None;
+                action_executor = None;
+                tracing::info!("voice commands disabled");
+            }
+        }
+        if let Some(loader) = &command_loader {
+            match loader.try_recv() {
+                Ok(Ok(loaded)) if commands_enabled => {
+                    recognizer = Some(loaded);
+                    action_executor = Some(ActionExecutor::start());
+                    command_loader = None;
+                    tracing::info!("voice command model loaded");
+                }
+                Ok(Ok(_)) => command_loader = None,
+                Ok(Err(error)) => {
+                    command_loader = None;
+                    tracing::error!(%error, "could not enable voice commands");
+                }
+                Err(TryRecvError::Empty) => {}
+                Err(TryRecvError::Disconnected) => {
+                    command_loader = None;
+                    tracing::error!("voice command model loader stopped");
+                }
             }
         }
         hotkey.set_double_tap_enabled(crate::app_settings::double_tap_lock());
@@ -551,6 +587,19 @@ pub fn listen(
         indicator.send(DictationIndicatorEvent::Discarded);
     }
     Ok(())
+}
+
+fn load_command_recognizer(
+    project_root: std::path::PathBuf,
+) -> Receiver<Result<Moonshine, String>> {
+    let (sender, receiver) = mpsc::sync_channel(1);
+    std::thread::spawn(move || {
+        let result = crate::moonshine::install_model()
+            .and_then(|_| Moonshine::load(&project_root))
+            .map_err(|error| error.to_string());
+        let _ = sender.send(result);
+    });
+    receiver
 }
 
 fn open_audio_input(device_override: Option<&str>, selected: Option<&str>) -> Result<AudioInput> {

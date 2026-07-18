@@ -7,9 +7,10 @@ Rust and keep consequential behavior explicit. Command definitions and preferred
 devices remain compiled Rust until a second real consumer justifies a data or
 plugin seam; user-facing runtime settings persist in Application Support.
 
-The distributed release is hotkey-dictation-only. `DEVELOPER_FEATURES_ENABLED`
-keeps voice commands, Moonshine command recognition, meetings, and their UI/CLI
-surfaces available in debug builds without exposing them to coworkers.
+The distributed release starts in hotkey-dictation-only mode. Voice commands and
+their catalog remain available as a persisted opt-in that defaults off.
+`DEVELOPER_FEATURES_ENABLED` keeps meetings and their UI/CLI surfaces available
+only in debug builds.
 
 ## Architecture
 
@@ -42,19 +43,19 @@ surfaces available in debug builds without exposing them to coworkers.
 - `config`: compiled commands, preferred input devices, and dictation profiles.
 - `context`: foreground application and browser context capture. Browser host is
   the domain concept; Brave AppleScript is only the first adapter.
-- `app_settings`: persisted settings and live runtime projection for hotkeys,
-  microphone and transcription selection, recording behavior, processing,
-  sound volume, sleep prevention, and Dock policy.
+- `app_settings`: persisted settings and live runtime projection for commands,
+  hotkeys, microphone and transcription selection, recording behavior,
+  processing, sound volume, sleep prevention, and Dock policy.
 - `login_item`: the native `SMAppService.mainAppService` adapter. macOS owns
   registration state; it is deliberately not duplicated in `settings.json`.
 - `app_paths`: the Application Support owner for runtime logs and shared state.
 - `onboarding`: required permission health, selected dictation-model
-  installation, the release startup gate, and developer command-model setup.
+  installation, the release startup gate, and opt-in command-model setup.
 - `sparkle`: packaged-app-only Sparkle lifecycle and manual update checks.
 - `events`: append-only NDJSON observations; `dashboard` and the GPUI Activity
   pane are read-only projections.
-- `app_window`: the production Settings, Modes, and Replacements shell plus
-  developer-only Meetings, Commands, and Activity panes.
+- `app_window`: the production Settings, Modes, Replacements, and opt-in
+  Commands shell plus developer-only Meetings and Activity panes.
 - `dictation_indicator`: the click-through Metal/GPUI capture and processing HUD.
 - `meeting`: explicit ScreenCaptureKit capture, owner-only WAV and transcript
   artifacts, final local-model publication, and recovery.
@@ -74,10 +75,12 @@ CoreAudio formats, AppleScript details, or event serialization.
 
 ## Invariants
 
-- Distributed builds start dictation-ready without loading Moonshine or a
-  command executor. Debug builds start command recognition in listening mode.
+- Every build starts dictation-ready without loading Moonshine or a command
+  executor unless the persisted command opt-in is enabled. Enabling commands
+  loads Moonshine off the audio-consumption loop; disabling them unloads the
+  recognizer and executor.
 - On a new Mac, release dictation starts only after Microphone, Input Monitoring,
-  Accessibility, and the selected dictation model are ready. Debug command
+  Accessibility, and the selected dictation model are ready. Opt-in command
   recognition additionally requires Moonshine.
 - Among recognized voice commands, sleeping mode accepts only standalone wake
   phrases. Dictation and explicit paste shortcuts remain available.
@@ -90,8 +93,8 @@ CoreAudio formats, AppleScript details, or event serialization.
   60-second limit finalizes automatically.
 - When enabled, a second shortcut tap within 300 ms locks dictation. Press the
   shortcut again to finish or Escape to cancel.
-- In developer builds, every dictation or paste hotkey action resets Moonshine
-  so shortcut audio cannot leak into a later command.
+- When commands are enabled, every dictation or paste hotkey action resets
+  Moonshine so shortcut audio cannot leak into a later command.
 - Recording audio behavior begins only after the intentional-hold threshold.
   Ordinary shortcut chords must not mute output or pause media.
 - Dictation remains available while command recognition sleeps.

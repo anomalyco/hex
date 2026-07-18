@@ -1,8 +1,8 @@
 # HEX
 
 HEX is a private local dictation app for macOS, built in Rust with strict-Metal
-transcription. Experimental voice commands and meetings remain available only
-in development builds.
+transcription. Experimental voice commands are available as an opt-in, while
+meetings remain available only in development builds.
 
 ## Try It
 
@@ -23,12 +23,13 @@ The current coworker build is available from the stable download URL:
 Open the DMG and drag HEX into Applications. The download is Apple-silicon-only
 and requires macOS 15 or newer.
 
-The distributed app starts hotkey dictation without command recognition or
-meeting detection. Debug builds retain those unfinished features for development.
-Start the developer listener with:
+The distributed app starts with command recognition and meeting detection off.
+Open **Commands** in the sidebar to enable experimental voice commands; the
+setting persists and applies without restarting HEX. Meetings remain limited to
+debug builds. Start the complete developer app with:
 
 ```sh
-cargo run -- listen
+cargo run -- app
 ```
 
 The listener prefers `Universal Audio Thunderbolt`, falls back to
@@ -129,10 +130,11 @@ HEX_RELEASE_NOTES=release-notes/2.0.1.md \
 ./scripts/release-app.sh publish
 ```
 
-## Developer Features
+## Experimental Commands
 
-The following command-recognition and meeting workflows are compiled into debug
-builds only. They are not present in the signed coworker release.
+The command catalog is visible in every build, but recognition is disabled by
+default. Enable it from the **Commands** pane. The first enablement installs the
+checksum-pinned local Moonshine model in the background.
 
 For hands-free dictation, say `dictate start`, speak, then say `dictate stop` to
 transcribe and paste or `dictate send` to paste and press Enter. Say
