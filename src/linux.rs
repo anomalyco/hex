@@ -24,7 +24,11 @@ struct Cli {
 #[derive(Subcommand)]
 enum Command {
     /// Open the Linux X11 transcription shell.
-    App,
+    App {
+        /// Start with only the tray icon visible.
+        #[arg(long)]
+        hidden: bool,
+    },
     /// Listen to the microphone and print local transcripts until interrupted.
     Listen {
         /// Select an input device by a case-insensitive name fragment.
@@ -84,8 +88,11 @@ pub fn run(shutdown: &'static AtomicBool) -> Result<()> {
 
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let event_path = log_dir.join("live.ndjson");
-    match Cli::parse().command.unwrap_or(Command::App) {
-        Command::App => crate::linux_app::open(event_path),
+    match Cli::parse()
+        .command
+        .unwrap_or(Command::App { hidden: false })
+    {
+        Command::App { hidden } => crate::linux_app::open(event_path, hidden),
         Command::Listen { device } => {
             let _instance = crate::instance::acquire("listener")?;
             listen(&root, &event_path, device.as_deref(), shutdown)
