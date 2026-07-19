@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+  <defs>
+    <radialGradient id="glow" cx="50%" cy="48%" r="58%">
+      <stop offset="0" stop-color="#20242c" stop-opacity="0.72"/>
+      <stop offset="1" stop-color="#08090a" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="1200" height="630" fill="#08090a"/>
+  <rect width="1200" height="630" fill="url(#glow)"/>
+
+  <g transform="translate(72 62)" fill="none" stroke="#f2f2ef" stroke-linecap="round" stroke-linejoin="round" stroke-width="3.6">
+    <path d="M18 0 36 10.5v21L18 42 0 31.5v-21Z"/>
+    <path d="M18 8 29 14.4v11.2L18 32 7 25.6V14.4Z"/>
+    <path d="m18 14.5 5.2 3v6L18 26.5l-5.2-3v-6Z" fill="#f2f2ef" stroke="none"/>
+  </g>
+  <text x="130" y="94" fill="#f2f2ef" font-family="Inter, Helvetica, Arial, sans-serif" font-size="24" font-weight="650" letter-spacing="5">HEX</text>
+
+  <text x="72" y="326" fill="#f3f3f0" font-family="Inter, Helvetica, Arial, sans-serif" font-size="88" font-weight="520" letter-spacing="-5">Speak. It appears.</text>
+  <text x="76" y="385" fill="#9b9da3" font-family="Inter, Helvetica, Arial, sans-serif" font-size="28" font-weight="400">Private, local voice dictation for Mac and Linux.</text>
+  <text x="76" y="558" fill="#656970" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="19" letter-spacing="1.5">hex.kitlangton.dev</text>
+</svg>

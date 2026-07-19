@@ -49,7 +49,7 @@ a {
   display: grid;
   min-height: 100vh;
   min-height: 100dvh;
-  grid-template-rows: auto 1fr auto;
+  grid-template-rows: auto 1fr;
   overflow-x: clip;
   background:
     radial-gradient(circle at 50% 42%, rgba(87, 95, 112, 0.08), transparent 32rem),
@@ -66,8 +66,7 @@ a {
   pointer-events: none;
 }
 
-.header,
-.footer {
+.header {
   display: flex;
   width: 100%;
   max-width: 88rem;
@@ -113,9 +112,7 @@ a {
   stroke: none;
 }
 
-.header__note,
-.requirements,
-.footer {
+.requirements {
   color: #777b82;
   font-size: 0.75rem;
   letter-spacing: 0.02em;
@@ -221,25 +218,7 @@ a.download:hover {
   font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
 }
 
-.footer {
-  align-items: center;
-  justify-content: center;
-  gap: 0.65rem;
-  padding-bottom: clamp(1.5rem, 4vh, 2.75rem);
-}
-
-.footer__dot {
-  width: 0.18rem;
-  aspect-ratio: 1;
-  border-radius: 50%;
-  background: #555961;
-}
-
 @media (max-width: 39rem) {
-  .header__note {
-    display: none;
-  }
-
   .hero {
     gap: 1.65rem;
     padding-top: 2.5rem;
@@ -256,14 +235,6 @@ a.download:hover {
     min-height: 3.5rem;
   }
 
-  .footer {
-    flex-direction: column;
-    gap: 0.35rem;
-  }
-
-  .footer__dot {
-    display: none;
-  }
 }
 
 @media (max-height: 46rem) and (min-width: 40rem) {

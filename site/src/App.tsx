@@ -3,11 +3,6 @@ import * as m from "motion/react-m"
 const DOWNLOAD_URL =
   "https://pub-089d681d41754031a4aefa7017d8c2fb.r2.dev/releases/HEX-latest-arm64.dmg"
 
-const reveal = {
-  hidden: { opacity: 0, y: 12 },
-  visible: { opacity: 1, y: 0 },
-}
-
 function HexMark() {
   return (
     <svg aria-hidden="true" viewBox="0 0 64 64" className="wordmark__icon">
@@ -38,35 +33,29 @@ export default function App() {
   const isLinux = /\bLinux\b/i.test(navigator.userAgent) && !/\bAndroid\b/i.test(navigator.userAgent)
 
   return (
-    <main className="page">
-      <m.header
-        className="header"
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        transition={{ duration: 0.5 }}
-      >
+    <m.main
+      className="page"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ duration: 0.35, ease: "easeOut" }}
+    >
+      <header className="header">
         <a className="wordmark" href="/" aria-label="HEX home">
           <HexMark />
           <span>HEX</span>
         </a>
-        <span className="header__note">Local voice dictation</span>
-      </m.header>
+      </header>
 
-      <m.section
-        className="hero"
-        initial="hidden"
-        animate="visible"
-        transition={{ staggerChildren: 0.09, delayChildren: 0.08 }}
-      >
-        <m.div className="hero__copy" variants={reveal} transition={{ duration: 0.55 }}>
+      <section className="hero">
+        <div className="hero__copy">
           <h1>Speak. It appears.</h1>
           <p>
             Private, local dictation for {isLinux ? "Linux." : "Mac."} Hold Option, say what you mean,
             and HEX pastes it where you are.
           </p>
-        </m.div>
+        </div>
 
-        <m.div className="hero__action" variants={reveal} transition={{ duration: 0.55 }}>
+        <div className="hero__action">
           {isLinux ? (
             <div className="download download--disabled" role="status">
               <LinuxMark />
@@ -88,19 +77,8 @@ export default function App() {
           <p className="requirements">
             {isLinux ? "x86_64  ·  Arch Linux beta" : "Apple silicon  ·  macOS 15+"}
           </p>
-        </m.div>
-      </m.section>
-
-      <m.footer
-        className="footer"
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        transition={{ duration: 0.6, delay: 0.45 }}
-      >
-        <span>On-device transcription</span>
-        <span className="footer__dot" aria-hidden="true" />
-        <span>Signed automatic updates</span>
-      </m.footer>
-    </main>
+        </div>
+      </section>
+    </m.main>
   )
 }
