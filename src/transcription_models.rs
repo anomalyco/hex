@@ -461,7 +461,7 @@ pub fn download_with_progress(
             }
         }
     }
-    let mut child = Command::new("curl")
+    let mut child = Command::new("/usr/bin/curl")
         .args([
             "--fail",
             "--location",

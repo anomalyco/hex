@@ -1,105 +1,50 @@
 mod app_paths;
-#[cfg(target_os = "macos")]
 mod app_settings;
-#[cfg(target_os = "macos")]
 mod app_window;
-#[cfg(target_os = "macos")]
 mod application_catalog;
-#[cfg_attr(target_os = "linux", allow(dead_code))]
 mod audio;
-#[cfg(target_os = "macos")]
 mod command_grammar;
-#[cfg(target_os = "macos")]
 mod commands;
-#[cfg(target_os = "macos")]
 mod config;
-#[cfg(target_os = "macos")]
 mod context;
-#[cfg(all(debug_assertions, target_os = "macos"))]
+#[cfg(debug_assertions)]
 mod dashboard;
-#[cfg_attr(target_os = "linux", allow(dead_code))]
 mod dictation;
-#[cfg(target_os = "macos")]
 mod dictation_indicator;
-#[cfg(target_os = "macos")]
 pub mod dictation_processor;
-#[cfg_attr(target_os = "linux", allow(dead_code))]
 mod events;
-#[cfg(target_os = "macos")]
 mod feedback;
 mod instance;
-#[cfg(target_os = "macos")]
 mod keyboard;
-#[cfg(target_os = "linux")]
-mod linux;
-#[cfg(target_os = "linux")]
-mod linux_app;
-#[cfg(target_os = "linux")]
-mod linux_dictation;
-#[cfg(target_os = "linux")]
-mod linux_input;
-#[cfg(target_os = "linux")]
-mod linux_paste;
-#[cfg(target_os = "linux")]
-mod linux_settings;
-#[cfg(target_os = "linux")]
-mod linux_transcriber;
-#[cfg(target_os = "macos")]
 mod login_item;
-#[cfg(target_os = "macos")]
 mod meeting;
-#[cfg(target_os = "macos")]
 mod meeting_detection;
-#[cfg(target_os = "macos")]
 mod meeting_watcher;
-#[cfg(target_os = "macos")]
 mod microphone_activity;
-#[cfg_attr(target_os = "linux", allow(dead_code))]
 mod moonshine;
-#[cfg(target_os = "macos")]
 mod onboarding;
-#[cfg(target_os = "macos")]
 mod parakeet;
-#[cfg(target_os = "macos")]
 mod paste;
-#[cfg(target_os = "macos")]
 mod recognition;
-#[cfg(target_os = "macos")]
 mod recording_environment;
-#[cfg(target_os = "macos")]
 mod selected_text;
-#[cfg(target_os = "macos")]
 mod sparkle;
-#[cfg(target_os = "macos")]
 mod suppression;
-#[cfg(target_os = "macos")]
 mod text_input;
-#[cfg(target_os = "macos")]
 mod text_replacements;
-#[cfg(target_os = "macos")]
 mod transcription_benchmark;
-#[cfg_attr(target_os = "linux", allow(dead_code))]
 mod transcription_models;
 
-#[cfg(target_os = "macos")]
 use std::fs::{self, OpenOptions};
-#[cfg(target_os = "macos")]
 use std::path::PathBuf;
-#[cfg(target_os = "macos")]
 use std::sync::Mutex;
-use std::sync::atomic::AtomicBool;
-#[cfg(target_os = "macos")]
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicBool, Ordering};
 
-#[cfg(target_os = "macos")]
 use clap::{Parser, Subcommand, ValueEnum};
 use color_eyre::Result;
-#[cfg(target_os = "macos")]
 use color_eyre::eyre::eyre;
-#[cfg(target_os = "macos")]
 use tracing_subscriber::fmt::writer::MakeWriterExt;
 
-#[cfg(target_os = "macos")]
 #[derive(Parser)]
 #[command(version, about = "Local, observable voice control")]
 struct Cli {
@@ -108,10 +53,8 @@ struct Cli {
 }
 
 static SHUTDOWN: AtomicBool = AtomicBool::new(false);
-#[cfg(target_os = "macos")]
 pub(crate) const DEVELOPER_FEATURES_ENABLED: bool = cfg!(debug_assertions);
 
-#[cfg(target_os = "macos")]
 #[derive(Subcommand)]
 enum Command {
     /// Run the GPUI desktop app with local dictation.
@@ -170,14 +113,12 @@ enum Command {
     },
 }
 
-#[cfg(target_os = "macos")]
 #[derive(Clone, Copy, ValueEnum)]
 enum TranscriptionBenchmarkBackend {
     Onnx,
     TranscribeCpp,
 }
 
-#[cfg(target_os = "macos")]
 #[derive(Clone, Copy, ValueEnum)]
 enum AppPreviewTarget {
     DictationHud,
@@ -192,7 +133,6 @@ enum AppPreviewTarget {
     TranscriptionPicker,
 }
 
-#[cfg(target_os = "macos")]
 #[derive(Clone, Copy, ValueEnum)]
 enum AppPreviewModelState {
     Actual,
@@ -203,7 +143,6 @@ enum AppPreviewModelState {
 }
 
 #[cfg(debug_assertions)]
-#[cfg(target_os = "macos")]
 #[derive(Subcommand)]
 enum MeetingCommand {
     /// Record microphone and system audio until Ctrl-C.
@@ -226,7 +165,6 @@ enum MeetingCommand {
     Probe,
 }
 
-#[cfg(target_os = "macos")]
 fn main() -> Result<()> {
     color_eyre::install()?;
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -393,9 +331,4 @@ fn main() -> Result<()> {
             transcription_benchmark::run(&manifest, warmups, runs, backend)
         }
     }
-}
-
-#[cfg(target_os = "linux")]
-fn main() -> Result<()> {
-    linux::run(&SHUTDOWN)
 }

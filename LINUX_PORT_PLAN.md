@@ -1,16 +1,5 @@
 # Linux Port Plan
 
-## Active Implementation Target
-
-- Arch Linux rolling on x86_64.
-- i3 on X11 with PipeWire and WirePlumber.
-- Native Arch package and the X11 complete desktop contract.
-- Full parity delivered sequentially: dictation, commands and context, manual
-  meetings, automatic offers, packaging, then remaining UI hardening.
-- Automatic insertion is required; no privileged helper is required for X11.
-- The default dictation shortcut is `Alt+Space`, with persisted rebinding in
-  the Linux settings UI. Shortcut conflicts must be reported visibly.
-
 ## Purpose
 
 Port HEX to Linux without weakening the existing macOS product or replacing its

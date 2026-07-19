@@ -8,6 +8,7 @@ onnx-benchmark = ["dep:transcribe-rs"]
 
 [dependencies]
 arboard = { version = "3.6.1", default-features = false }
+block2 = "0.6.2"
 clap = { version = "4.6.1", features = ["derive"] }
 color-eyre = "0.6.5"
 cpal = "0.18.1"
@@ -32,7 +33,6 @@ unicode-segmentation = "1.13.3"
 url = "2.5.8"
 
 [target.'cfg(target_os = "macos")'.dependencies]
-block2 = "0.6.2"
 core-graphics-types = "0.1.3"
 core-video = "0.4.3"
 gpui = { version = "0.2.2", default-features = false, features = ["font-kit"] }
@@ -45,11 +45,3 @@ objc2-quartz-core = { version = "0.3.2", features = ["CALayer"] }
 objc2-service-management = { version = "0.3.2", features = ["SMAppService"] }
 raw-window-handle = "0.6.2"
 screencapturekit = { version = "=8.0.0", features = ["macos_15_0"] }
-
-[target.'cfg(target_os = "linux")'.dependencies]
-gpui = { version = "0.2.2", default-features = false, features = ["font-kit", "x11"] }
-gtk = "0.18.2"
-tray-icon = { version = "0.24.1", default-features = false, features = ["gtk"] }
-transcribe-cpp = { version = "=0.1.3", features = ["vulkan"] }
-x11-clipboard = "0.9.3"
-x11rb = { version = "0.13.2", features = ["xtest"] }
