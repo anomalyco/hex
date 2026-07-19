@@ -8,12 +8,12 @@ const reveal = {
   visible: { opacity: 1, y: 0 },
 }
 
-const voiceBars = [0.42, 0.7, 1, 0.58, 0.34]
-
 function HexMark() {
   return (
-    <svg aria-hidden="true" viewBox="0 0 28 28" className="wordmark__icon">
-      <path d="M6 5v18M22 5v18M6 14h16" />
+    <svg aria-hidden="true" viewBox="0 0 64 64" className="wordmark__icon">
+      <path d="M32 4 57 18.5v27L32 60 7 45.5v-27Z" />
+      <path d="M32 15 48 24.25v15.5L32 49l-16-9.25v-15.5Z" />
+      <path className="wordmark__core" d="m32 24 7.5 4.25v8.5L32 41l-7.5-4.25v-8.5Z" />
     </svg>
   )
 }
@@ -26,42 +26,17 @@ function AppleMark() {
   )
 }
 
-function VoiceOrb() {
+function LinuxMark() {
   return (
-    <m.div
-      className="orb"
-      variants={reveal}
-      transition={{ duration: 0.7, ease: [0.16, 1, 0.3, 1] }}
-    >
-      <m.div
-        className="orb__halo"
-        animate={{ opacity: [0.28, 0.48, 0.28], scale: [0.98, 1.025, 0.98] }}
-        transition={{ duration: 5.5, repeat: Infinity, ease: "easeInOut" }}
-      />
-      <div className="orb__shell">
-        <div className="orb__light" />
-        <div className="orb__core">
-          <div className="wave" aria-hidden="true">
-            {voiceBars.map((height, index) => (
-              <m.span
-                key={height}
-                animate={{ scaleY: [height, Math.min(1, height + 0.28), height] }}
-                transition={{
-                  duration: 2.4,
-                  delay: index * 0.13,
-                  repeat: Infinity,
-                  ease: "easeInOut",
-                }}
-              />
-            ))}
-          </div>
-        </div>
-      </div>
-    </m.div>
+    <svg aria-hidden="true" viewBox="0 0 24 24" className="download__linux">
+      <path d="M5 5.5h14v13H5zM8 9l2.5 2.5L8 14M12.5 14H16" />
+    </svg>
   )
 }
 
 export default function App() {
+  const isLinux = /\bLinux\b/i.test(navigator.userAgent) && !/\bAndroid\b/i.test(navigator.userAgent)
+
   return (
     <main className="page">
       <m.header
@@ -83,28 +58,36 @@ export default function App() {
         animate="visible"
         transition={{ staggerChildren: 0.09, delayChildren: 0.08 }}
       >
-        <VoiceOrb />
-
         <m.div className="hero__copy" variants={reveal} transition={{ duration: 0.55 }}>
           <h1>Speak. It appears.</h1>
           <p>
-            Private, local dictation for Mac. Hold Option, say what you mean,
+            Private, local dictation for {isLinux ? "Linux." : "Mac."} Hold Option, say what you mean,
             and HEX pastes it where you are.
           </p>
         </m.div>
 
         <m.div className="hero__action" variants={reveal} transition={{ duration: 0.55 }}>
-          <m.a
-            className="download"
-            href={DOWNLOAD_URL}
-            whileHover={{ y: -1 }}
-            whileTap={{ scale: 0.985 }}
-          >
-            <AppleMark />
-            <span>Download for Mac</span>
-            <span className="download__arrow" aria-hidden="true">&#8595;</span>
-          </m.a>
-          <p className="requirements">Apple silicon&nbsp;&nbsp;&middot;&nbsp;&nbsp;macOS 15+</p>
+          {isLinux ? (
+            <div className="download download--disabled" role="status">
+              <LinuxMark />
+              <span>Linux download coming soon</span>
+              <span className="download__arrow" aria-hidden="true">&#8943;</span>
+            </div>
+          ) : (
+            <m.a
+              className="download"
+              href={DOWNLOAD_URL}
+              whileHover={{ y: -1 }}
+              whileTap={{ scale: 0.985 }}
+            >
+              <AppleMark />
+              <span>Download for Mac</span>
+              <span className="download__arrow" aria-hidden="true">&#8595;</span>
+            </m.a>
+          )}
+          <p className="requirements">
+            {isLinux ? "x86_64  ·  Arch Linux beta" : "Apple silicon  ·  macOS 15+"}
+          </p>
         </m.div>
       </m.section>
 
