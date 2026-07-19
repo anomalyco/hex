@@ -3,6 +3,90 @@ import Foundation
 import Speech
 
 @available(iOS 26.0, *)
+private actor AppleSpeechAssetReservations {
+    static let shared = AppleSpeechAssetReservations()
+
+    private enum State {
+        case acquiring(Int, Task<Void, Error>, Int)
+        case reserved(Int)
+        case releasing(Int, Task<Void, Never>)
+    }
+
+    private var generation = 0
+    private var states: [String: State] = [:]
+
+    func acquire(_ locale: Locale) async throws {
+        let key = locale.identifier(.bcp47)
+        while true {
+            switch states[key] {
+            case nil:
+                generation += 1
+                let currentGeneration = generation
+                let acquisition = Task {
+                    _ = try await AssetInventory.reserve(locale: locale)
+                }
+                states[key] = .acquiring(currentGeneration, acquisition, 1)
+                try await finishAcquisition(acquisition, generation: currentGeneration, key: key)
+                return
+            case .reserved(let references):
+                states[key] = .reserved(references + 1)
+                return
+            case .acquiring(let currentGeneration, let acquisition, let references):
+                states[key] = .acquiring(currentGeneration, acquisition, references + 1)
+                try await finishAcquisition(acquisition, generation: currentGeneration, key: key)
+                return
+            case .releasing(let currentGeneration, let release):
+                await release.value
+                if case .releasing(let generation, _) = states[key],
+                   generation == currentGeneration {
+                    states[key] = nil
+                }
+            }
+        }
+    }
+
+    private func finishAcquisition(
+        _ acquisition: Task<Void, Error>,
+        generation currentGeneration: Int,
+        key: String
+    ) async throws {
+        do {
+            try await acquisition.value
+            if case .acquiring(let generation, _, let references) = states[key],
+               generation == currentGeneration {
+                states[key] = .reserved(references)
+            }
+        } catch {
+            if case .acquiring(let generation, _, _) = states[key],
+               generation == currentGeneration {
+                states[key] = nil
+            }
+            throw error
+        }
+    }
+
+    func release(_ locale: Locale) async {
+        let key = locale.identifier(.bcp47)
+        guard case .reserved(let references) = states[key] else { return }
+        if references > 1 {
+            states[key] = .reserved(references - 1)
+        } else {
+            generation += 1
+            let currentGeneration = generation
+            let release = Task {
+                _ = await AssetInventory.release(reservedLocale: locale)
+            }
+            states[key] = .releasing(currentGeneration, release)
+            await release.value
+            if case .releasing(let generation, _) = states[key],
+               generation == currentGeneration {
+                states[key] = nil
+            }
+        }
+    }
+}
+
+@available(iOS 26.0, *)
 actor AppleSpeechTranscriber: LocalTranscribing {
     enum TranscriberError: LocalizedError {
         case authorizationDenied
@@ -28,6 +112,7 @@ actor AppleSpeechTranscriber: LocalTranscribing {
     private var preparedAnalyzer: SpeechAnalyzer?
     private var preparedTranscriber: SpeechTranscriber?
     private var locale: Locale?
+    private var reservedLocale: Locale?
 
     var languageName: String {
         Self.displayName(for: locale ?? requestedLocale)
@@ -63,7 +148,7 @@ actor AppleSpeechTranscriber: LocalTranscribing {
     func prepare(
         progressHandler: @escaping @Sendable (ModelPreparationProgress) -> Void
     ) async throws {
-        guard preparedAnalyzer == nil else { return }
+        guard locale == nil else { return }
         guard await Self.requestAuthorization() == .authorized else {
             throw TranscriberError.authorizationDenied
         }
@@ -73,49 +158,57 @@ actor AppleSpeechTranscriber: LocalTranscribing {
             throw TranscriberError.unavailable
         }
 
-        let transcriber = SpeechTranscriber(locale: locale, preset: .transcription)
-        let status = await AssetInventory.status(forModules: [transcriber])
+        try await AppleSpeechAssetReservations.shared.acquire(locale)
+        reservedLocale = locale
+        do {
+            let transcriber = SpeechTranscriber(locale: locale, preset: .transcription)
+            let status = await AssetInventory.status(forModules: [transcriber])
 
-        if status != .installed,
-           let request = try await AssetInventory.assetInstallationRequest(
-               supporting: [transcriber]
-           ) {
-            let progress = request.progress
-            let monitor = Task {
-                while !Task.isCancelled && !progress.isFinished {
-                    progressHandler(
-                        ModelPreparationProgress(
-                            fractionCompleted: min(0.85, progress.fractionCompleted * 0.85),
-                            detail: "Downloading Apple \(Self.displayName(for: locale)) speech"
+            if status != .installed,
+               let request = try await AssetInventory.assetInstallationRequest(
+                   supporting: [transcriber]
+               ) {
+                let progress = request.progress
+                let monitor = Task {
+                    while !Task.isCancelled && !progress.isFinished {
+                        progressHandler(
+                            ModelPreparationProgress(
+                                fractionCompleted: min(0.85, progress.fractionCompleted * 0.85),
+                                detail: "Downloading Apple \(Self.displayName(for: locale)) speech"
+                            )
                         )
-                    )
-                    try? await Task.sleep(for: .milliseconds(100))
+                        try? await Task.sleep(for: .milliseconds(100))
+                    }
                 }
+                defer { monitor.cancel() }
+                try await request.downloadAndInstall()
             }
-            defer { monitor.cancel() }
-            try await request.downloadAndInstall()
+            guard await AssetInventory.status(forModules: [transcriber]) == .installed else {
+                throw TranscriberError.unavailable
+            }
+            progressHandler(
+                ModelPreparationProgress(
+                    fractionCompleted: 0.9,
+                    detail: "Preheating Apple Speech"
+                )
+            )
+
+            let analyzer = makeAnalyzer(transcriber: transcriber)
+            try await analyzer.prepareToAnalyze(in: nil)
+
+            self.locale = locale
+            preparedTranscriber = transcriber
+            preparedAnalyzer = analyzer
+            progressHandler(
+                ModelPreparationProgress(
+                    fractionCompleted: 1,
+                    detail: "Apple Speech ready"
+                )
+            )
+        } catch {
+            await releaseAssets()
+            throw error
         }
-
-        _ = try? await AssetInventory.reserve(locale: locale)
-        progressHandler(
-            ModelPreparationProgress(
-                fractionCompleted: 0.9,
-                detail: "Preheating Apple Speech"
-            )
-        )
-
-        let analyzer = makeAnalyzer(transcriber: transcriber)
-        try await analyzer.prepareToAnalyze(in: nil)
-
-        self.locale = locale
-        preparedTranscriber = transcriber
-        preparedAnalyzer = analyzer
-        progressHandler(
-            ModelPreparationProgress(
-                fractionCompleted: 1,
-                detail: "Apple Speech ready"
-            )
-        )
     }
 
     func transcribe(_ audioURL: URL) async throws -> String {
@@ -156,9 +249,22 @@ actor AppleSpeechTranscriber: LocalTranscribing {
             modules: [transcriber],
             options: SpeechAnalyzer.Options(
                 priority: .userInitiated,
-                modelRetention: .processLifetime
+                modelRetention: .lingering
             )
         )
+    }
+
+    deinit {
+        guard let reservedLocale else { return }
+        Task {
+            await AppleSpeechAssetReservations.shared.release(reservedLocale)
+        }
+    }
+
+    private func releaseAssets() async {
+        guard let reservedLocale else { return }
+        self.reservedLocale = nil
+        await AppleSpeechAssetReservations.shared.release(reservedLocale)
     }
 
     private static func requestAuthorization() async -> SFSpeechRecognizerAuthorizationStatus {

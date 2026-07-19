@@ -365,15 +365,10 @@ pub fn language_name(code: &str) -> &str {
         .unwrap_or(code)
 }
 
-pub fn choices(language: &str) -> Vec<ModelChoice> {
-    #[cfg(target_os = "macos")]
-    let apple_speech_supported = crate::apple_speech::AppleSpeech::is_supported(language);
-    #[cfg(not(target_os = "macos"))]
-    let apple_speech_supported = false;
-    choices_for_runtime(language, apple_speech_supported)
-}
-
-fn choices_for_runtime(language: &str, apple_speech_supported: bool) -> Vec<ModelChoice> {
+pub(crate) fn choices_for_runtime(
+    language: &str,
+    apple_speech_supported: bool,
+) -> Vec<ModelChoice> {
     let choice = |id, recommendation| ModelChoice {
         model: definition(id),
         recommendation,

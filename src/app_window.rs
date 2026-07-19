@@ -37,7 +37,7 @@ use crate::text_input::{
 };
 use crate::transcription_models::{
     ModelDefinition, ModelRuntime, TranscriptionModelId, TranscriptionSelection, definition,
-    language_name,
+    language_name, validate,
 };
 
 const WINDOW_WIDTH: f32 = 1040.0;
@@ -45,6 +45,7 @@ const WINDOW_HEIGHT: f32 = 700.0;
 const MINIMUM_WIDTH: f32 = 860.0;
 const MINIMUM_HEIGHT: f32 = 560.0;
 const OPENCODE_INSTALL_RETRY_INTERVAL: Duration = Duration::from_secs(5);
+const APPLE_SPEECH_RETRY_INTERVAL: Duration = Duration::from_secs(5);
 const SIDEBAR_WIDTH: f32 = 170.0;
 const ACTIVITY_LIMIT: usize = 100;
 const OPENCODE_BETA_DOCS_URL: &str = "https://v2.opencode.ai/";
@@ -345,6 +346,31 @@ struct ToggleSpring {
     last_frame: Instant,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct AppleSpeechCapability {
+    language: String,
+    supported: Option<bool>,
+    ready: Option<bool>,
+}
+
+fn start_apple_speech_capability_load(language: String) -> Receiver<AppleSpeechCapability> {
+    let (sender, receiver) = sync_channel(1);
+    thread::spawn(move || {
+        let supported = crate::apple_speech::AppleSpeech::support_status(&language);
+        let ready = match supported {
+            Some(true) => crate::apple_speech::AppleSpeech::readiness_status(&language),
+            Some(false) => Some(false),
+            None => None,
+        };
+        let _ = sender.send(AppleSpeechCapability {
+            language,
+            supported,
+            ready,
+        });
+    });
+    receiver
+}
+
 struct ProcessingInput {
     entity: Entity<TextInput>,
     _subscriptions: Vec<Subscription>,
@@ -523,6 +549,10 @@ pub struct AppWindow {
     transcription_download_progress: Option<Arc<AtomicU64>>,
     transcription_downloaded_bytes: u64,
     transcription_preview_installed: Option<bool>,
+    apple_speech_capability: Option<AppleSpeechCapability>,
+    apple_speech_capability_loading: Option<String>,
+    apple_speech_capability_receiver: Option<Receiver<AppleSpeechCapability>>,
+    apple_speech_capability_retry_at: Instant,
     processing_inputs: ProcessingInputs,
     selected_mode: ModeSelection,
     model_catalog: ModelCatalogState,
@@ -582,7 +612,9 @@ impl AppWindow {
                         let model_catalog_changed = window.poll_model_catalog();
                         window.retry_model_catalog();
                         let application_catalog_changed = window.poll_application_catalog();
-                        let transcription_changed = window.poll_transcription_download(cx);
+                        window.retry_apple_speech_capability();
+                        let apple_speech_changed = window.poll_apple_speech_capability();
+                        let transcription_changed = window.poll_transcription_download();
                         let setup_changed = window.poll_setup();
                         let login_item_changed = window.poll_login_item();
                         if crate::DEVELOPER_FEATURES_ENABLED
@@ -594,6 +626,7 @@ impl AppWindow {
                         }
                         if model_catalog_changed
                             || application_catalog_changed
+                            || apple_speech_changed
                             || transcription_changed
                             || setup_changed
                             || login_item_changed
@@ -609,10 +642,15 @@ impl AppWindow {
         })
         .detach();
         let preview_mode = preview.is_some();
+        let preview_choices = |language: &str| {
+            let apple_speech_supported =
+                crate::apple_speech::AppleSpeech::support_status(language).unwrap_or(false);
+            crate::transcription_models::choices_for_runtime(language, apple_speech_supported)
+        };
         let settings = if let Some(preview) = &preview {
             let mut settings = AppSettings::default();
             if let Some((language, _)) = &preview.transcription_picker
-                && let Some(choice) = crate::transcription_models::choices(language).first()
+                && let Some(choice) = preview_choices(language).first()
             {
                 settings.transcription.model = choice.model.id;
                 settings.transcription.language = language.clone();
@@ -678,8 +716,12 @@ impl AppWindow {
         let preview_model_state = preview_picker.map(|(_, state)| *state);
         let preview_downloading = preview_picker.and_then(|(language, state)| {
             matches!(state, PreviewModelState::Downloading)
-                .then(|| crate::transcription_models::choices(language)[0].model.id)
+                .then(|| preview_choices(language)[0].model.id)
         });
+        let selected_model = validate(&settings.transcription).ok();
+        let selected_apple_language = selected_model
+            .filter(|model| matches!(model.runtime, ModelRuntime::AppleSpeech))
+            .map(|_| settings.transcription.language.clone());
         let setup_status = if preview.as_ref().is_some_and(|preview| preview.onboarding) {
             SetupStatus {
                 microphone: PermissionState::NeedsRequest,
@@ -689,7 +731,25 @@ impl AppWindow {
                 transcription_model: false,
             }
         } else {
-            crate::onboarding::status(&settings.transcription)
+            crate::onboarding::status_with_transcription_model(selected_model.is_some_and(
+                |model| {
+                    !matches!(model.runtime, ModelRuntime::AppleSpeech)
+                        && crate::transcription_models::is_installed(
+                            model,
+                            &settings.transcription.language,
+                        )
+                },
+            ))
+        };
+        let (apple_speech_capability_loading, apple_speech_capability_receiver) = if preview_mode {
+            (None, None)
+        } else if let Some(language) = selected_apple_language {
+            (
+                Some(language.clone()),
+                Some(start_apple_speech_capability_load(language)),
+            )
+        } else {
+            (None, None)
         };
         let setup_visible = preview.as_ref().is_some_and(|preview| preview.onboarding)
             || !preview_mode && !setup_status.ready();
@@ -760,6 +820,10 @@ impl AppWindow {
                 ) => Some(false),
                 Some(PreviewModelState::Actual) | None => None,
             },
+            apple_speech_capability: None,
+            apple_speech_capability_loading,
+            apple_speech_capability_receiver,
+            apple_speech_capability_retry_at: Instant::now(),
             processing_inputs,
             selected_mode: ModeSelection::Default,
             model_catalog,
@@ -867,7 +931,63 @@ impl AppWindow {
         true
     }
 
-    fn poll_transcription_download(&mut self, _cx: &mut Context<Self>) -> bool {
+    fn ensure_apple_speech_capability(&mut self, language: &str) {
+        let unresolved = self
+            .apple_speech_capability
+            .as_ref()
+            .is_some_and(|capability| {
+                capability.language == language
+                    && (capability.supported.is_none() || capability.ready.is_none())
+            });
+        if self.preview
+            || self
+                .apple_speech_capability
+                .as_ref()
+                .is_some_and(|capability| capability.language == language && !unresolved)
+            || self.apple_speech_capability_loading.as_deref() == Some(language)
+            || unresolved && Instant::now() < self.apple_speech_capability_retry_at
+        {
+            return;
+        }
+        let language = language.to_string();
+        if self
+            .apple_speech_capability
+            .as_ref()
+            .is_some_and(|capability| capability.language != language)
+        {
+            self.apple_speech_capability = None;
+        }
+        self.apple_speech_capability_loading = Some(language.clone());
+        self.apple_speech_capability_receiver = Some(start_apple_speech_capability_load(language));
+    }
+
+    fn poll_apple_speech_capability(&mut self) -> bool {
+        let Some(receiver) = &self.apple_speech_capability_receiver else {
+            return false;
+        };
+        let Ok(capability) = receiver.try_recv() else {
+            return false;
+        };
+        self.apple_speech_capability = Some(capability);
+        self.apple_speech_capability_retry_at = Instant::now() + APPLE_SPEECH_RETRY_INTERVAL;
+        self.apple_speech_capability_loading = None;
+        self.apple_speech_capability_receiver = None;
+        true
+    }
+
+    fn retry_apple_speech_capability(&mut self) {
+        let Some(language) = self
+            .apple_speech_capability
+            .as_ref()
+            .filter(|capability| capability.supported.is_none() || capability.ready.is_none())
+            .map(|capability| capability.language.clone())
+        else {
+            return;
+        };
+        self.ensure_apple_speech_capability(&language);
+    }
+
+    fn poll_transcription_download(&mut self) -> bool {
         let mut changed = false;
         if let Some(progress) = &self.transcription_download_progress {
             let downloaded_bytes = progress.load(Ordering::Relaxed);
@@ -902,7 +1022,22 @@ impl AppWindow {
         if self.preview {
             return changed;
         }
-        let status = crate::onboarding::status(&self.settings.transcription);
+        let transcription_model = validate(&self.settings.transcription).is_ok_and(|model| {
+            if matches!(model.runtime, ModelRuntime::AppleSpeech) {
+                self.apple_speech_capability
+                    .as_ref()
+                    .is_some_and(|capability| {
+                        capability.language == self.settings.transcription.language
+                            && capability.ready == Some(true)
+                    })
+            } else {
+                crate::transcription_models::is_installed(
+                    model,
+                    &self.settings.transcription.language,
+                )
+            }
+        });
+        let status = crate::onboarding::status_with_transcription_model(transcription_model);
         if status != self.setup_status {
             self.setup_status = status;
             changed = true;
@@ -939,6 +1074,16 @@ impl AppWindow {
     }
 
     fn apply_transcription_selection(&mut self, selection: TranscriptionSelection) {
+        if matches!(
+            definition(selection.model).runtime,
+            ModelRuntime::AppleSpeech
+        ) {
+            self.apple_speech_capability = Some(AppleSpeechCapability {
+                language: selection.language.clone(),
+                supported: Some(true),
+                ready: Some(true),
+            });
+        }
         if self.preview {
             self.settings.transcription = selection;
             self.transcription_picker_language = None;
@@ -986,7 +1131,7 @@ impl AppWindow {
             &self.settings.transcription,
             model,
             &selection.language,
-            crate::transcription_models::is_installed(model, &selection.language),
+            self.transcription_model_installed(model, &selection.language),
         ) && !install_command_model
         {
             self.transcription_picker_language = None;
@@ -1032,8 +1177,17 @@ impl AppWindow {
     }
 
     fn transcription_model_installed(&self, model: &ModelDefinition, language: &str) -> bool {
-        self.transcription_preview_installed
-            .unwrap_or_else(|| crate::transcription_models::is_installed(model, language))
+        self.transcription_preview_installed.unwrap_or_else(|| {
+            if matches!(model.runtime, ModelRuntime::AppleSpeech) {
+                self.apple_speech_capability
+                    .as_ref()
+                    .is_some_and(|capability| {
+                        capability.language == language && capability.ready == Some(true)
+                    })
+            } else {
+                crate::transcription_models::is_installed(model, language)
+            }
+        })
     }
 
     pub fn meeting_starting(&mut self, cx: &mut Context<Self>) {
@@ -1655,6 +1809,7 @@ impl AppWindow {
         selected_language: &str,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        self.ensure_apple_speech_capability(selected_language);
         let downloading = self.transcription_downloading;
         let language_rows = crate::transcription_models::LANGUAGES
             .iter()
@@ -1685,7 +1840,17 @@ impl AppWindow {
                         }
                     }))
             });
-        let model_cards = crate::transcription_models::choices(selected_language)
+        let apple_speech_supported =
+            self.apple_speech_capability
+                .as_ref()
+                .is_some_and(|capability| {
+                    capability.language == selected_language && capability.supported == Some(true)
+                });
+        let model_choices = crate::transcription_models::choices_for_runtime(
+            selected_language,
+            apple_speech_supported,
+        );
+        let model_cards = model_choices
             .into_iter()
             .enumerate()
             .map(|(index, choice)| {

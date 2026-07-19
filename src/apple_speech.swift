@@ -14,34 +14,159 @@ private struct BridgeTranscript: Codable {
 }
 
 @available(macOS 26.0, *)
+private actor AppleSpeechAssetReservations {
+    static let shared = AppleSpeechAssetReservations()
+
+    private enum State {
+        case acquiring(Int, Task<Void, Error>, Int)
+        case reserved(Int)
+        case releasing(Int, Task<Void, Never>)
+    }
+
+    private var generation = 0
+    private var states: [String: State] = [:]
+
+    func acquire(_ locale: Locale) async throws {
+        let key = locale.identifier(.bcp47)
+        while true {
+            switch states[key] {
+            case nil:
+                generation += 1
+                let currentGeneration = generation
+                let acquisition = Task {
+                    _ = try await AssetInventory.reserve(locale: locale)
+                }
+                states[key] = .acquiring(currentGeneration, acquisition, 1)
+                try await finishAcquisition(acquisition, generation: currentGeneration, key: key)
+                return
+            case .reserved(let references):
+                states[key] = .reserved(references + 1)
+                return
+            case .acquiring(let currentGeneration, let acquisition, let references):
+                states[key] = .acquiring(currentGeneration, acquisition, references + 1)
+                try await finishAcquisition(acquisition, generation: currentGeneration, key: key)
+                return
+            case .releasing(let currentGeneration, let release):
+                await release.value
+                if case .releasing(let generation, _) = states[key],
+                   generation == currentGeneration {
+                    states[key] = nil
+                }
+            }
+        }
+    }
+
+    private func finishAcquisition(
+        _ acquisition: Task<Void, Error>,
+        generation currentGeneration: Int,
+        key: String
+    ) async throws {
+        do {
+            try await acquisition.value
+            if case .acquiring(let generation, _, let references) = states[key],
+               generation == currentGeneration {
+                states[key] = .reserved(references)
+            }
+        } catch {
+            if case .acquiring(let generation, _, _) = states[key],
+               generation == currentGeneration {
+                states[key] = nil
+            }
+            throw error
+        }
+    }
+
+    func release(_ locale: Locale) async {
+        let key = locale.identifier(.bcp47)
+        guard case .reserved(let references) = states[key] else { return }
+        if references > 1 {
+            states[key] = .reserved(references - 1)
+        } else {
+            generation += 1
+            let currentGeneration = generation
+            let release = Task {
+                _ = await AssetInventory.release(reservedLocale: locale)
+            }
+            states[key] = .releasing(currentGeneration, release)
+            await release.value
+            if case .releasing(let generation, _) = states[key],
+               generation == currentGeneration {
+                states[key] = nil
+            }
+        }
+    }
+}
+
+@available(macOS 26.0, *)
 private actor AppleSpeechSession {
     let locale: Locale
     private var prepared: (SpeechTranscriber, SpeechAnalyzer)?
+    private var localeReserved = false
+    private var releaseWhenIdle = false
+    private var transcriptionActive = false
 
     init(locale: Locale) {
         self.locale = locale
     }
 
     func prepare() async throws {
-        let transcriber = SpeechTranscriber(locale: locale, preset: .transcription)
-        let status = await AssetInventory.status(forModules: [transcriber])
-        if status != .installed,
-           let request = try await AssetInventory.assetInstallationRequest(
-               supporting: [transcriber]
-           ) {
-            try await request.downloadAndInstall()
-        }
-        guard await AssetInventory.status(forModules: [transcriber]) == .installed else {
-            throw BridgeError("Apple Speech assets are not installed for \(locale.identifier).")
-        }
-        _ = try await AssetInventory.reserve(locale: locale)
+        try await AppleSpeechAssetReservations.shared.acquire(locale)
+        localeReserved = true
 
-        let analyzer = makeAnalyzer(transcriber)
-        try await analyzer.prepareToAnalyze(in: Self.audioFormat)
-        prepared = (transcriber, analyzer)
+        do {
+            let transcriber = SpeechTranscriber(locale: locale, preset: .transcription)
+            let status = await AssetInventory.status(forModules: [transcriber])
+            if status != .installed,
+               let request = try await AssetInventory.assetInstallationRequest(
+                   supporting: [transcriber]
+               ) {
+                try await request.downloadAndInstall()
+            }
+            guard await AssetInventory.status(forModules: [transcriber]) == .installed else {
+                throw BridgeError("Apple Speech assets are not installed for \(locale.identifier).")
+            }
+            let analyzer = makeAnalyzer(transcriber)
+            try await analyzer.prepareToAnalyze(in: Self.audioFormat)
+            prepared = (transcriber, analyzer)
+        } catch {
+            await releaseAssets()
+            throw error
+        }
     }
 
     func transcribe(samples: [Float]) async throws -> BridgeTranscript {
+        guard !transcriptionActive else {
+            throw BridgeError("Apple Speech is still canceling the previous transcription.")
+        }
+        transcriptionActive = true
+        do {
+            let transcript = try await performTranscription(samples: samples)
+            await finishTranscription()
+            return transcript
+        } catch {
+            await finishTranscription()
+            throw error
+        }
+    }
+
+    func releaseAssets() async {
+        prepared = nil
+        if transcriptionActive {
+            releaseWhenIdle = true
+            return
+        }
+        await releaseReservedLocale()
+    }
+
+    deinit {
+        guard localeReserved else { return }
+        let locale = locale
+        Task {
+            await AppleSpeechAssetReservations.shared.release(locale)
+        }
+    }
+
+    private func performTranscription(samples: [Float]) async throws -> BridgeTranscript {
         let transcriber: SpeechTranscriber
         let analyzer: SpeechAnalyzer
         if let prepared {
@@ -70,7 +195,49 @@ private actor AppleSpeechSession {
             continuation.yield(AnalyzerInput(buffer: buffer))
             continuation.finish()
         }
-        async let analyzed = analyzer.analyzeSequence(input)
+        let results = Task {
+            try await Self.collectTranscript(from: transcriber)
+        }
+
+        return try await withTaskCancellationHandler {
+            do {
+                if let lastSampleTime = try await analyzer.analyzeSequence(input) {
+                    try await analyzer.finalizeAndFinish(through: lastSampleTime)
+                } else {
+                    await analyzer.cancelAndFinishNow()
+                }
+                return try await results.value
+            } catch {
+                results.cancel()
+                await analyzer.cancelAndFinishNow()
+                _ = try? await results.value
+                throw error
+            }
+        } onCancel: {
+            results.cancel()
+            Task {
+                await analyzer.cancelAndFinishNow()
+            }
+        }
+    }
+
+    private func finishTranscription() async {
+        transcriptionActive = false
+        if releaseWhenIdle {
+            releaseWhenIdle = false
+            await releaseReservedLocale()
+        }
+    }
+
+    private func releaseReservedLocale() async {
+        guard localeReserved else { return }
+        localeReserved = false
+        await AppleSpeechAssetReservations.shared.release(locale)
+    }
+
+    private static func collectTranscript(
+        from transcriber: SpeechTranscriber
+    ) async throws -> BridgeTranscript {
         var text = AttributedString()
         var segments: [BridgeSegment] = []
         for try await result in transcriber.results where result.isFinal {
@@ -89,7 +256,6 @@ private actor AppleSpeechSession {
                 )
             }
         }
-        _ = try await analyzed
         let finalText = String(text.characters)
             .trimmingCharacters(in: .whitespacesAndNewlines)
         guard !finalText.isEmpty else {
@@ -103,7 +269,7 @@ private actor AppleSpeechSession {
             modules: [transcriber],
             options: SpeechAnalyzer.Options(
                 priority: .userInitiated,
-                modelRetention: .processLifetime
+                modelRetention: .lingering
             )
         )
     }
@@ -140,11 +306,13 @@ private final class BlockingResult<Value: Sendable>: @unchecked Sendable {
 }
 
 private func blocking<Value: Sendable>(
+    timeout: TimeInterval,
+    operationName: String,
     _ operation: @escaping @Sendable () async throws -> Value
 ) -> Result<Value, Error> {
     let semaphore = DispatchSemaphore(value: 0)
     let result = BlockingResult<Value>()
-    Task.detached {
+    let task = Task.detached {
         do {
             result.store(.success(try await operation()))
         } catch {
@@ -152,9 +320,17 @@ private func blocking<Value: Sendable>(
         }
         semaphore.signal()
     }
-    semaphore.wait()
+    guard semaphore.wait(timeout: .now() + timeout) == .success else {
+        task.cancel()
+        return .failure(BridgeError("\(operationName) timed out."))
+    }
     return result.take()
 }
+
+private let capabilityTimeout: TimeInterval = 5
+private let preparationTimeout: TimeInterval = 15 * 60
+private let transcriptionTimeout: TimeInterval = 2 * 60
+private let releaseTimeout: TimeInterval = 5
 
 private func locale(_ identifier: UnsafePointer<CChar>?) -> Locale? {
     guard let identifier else { return nil }
@@ -187,9 +363,13 @@ public func hexAppleSpeechSupported(_ identifier: UnsafePointer<CChar>?) -> Int3
           let requested = locale(identifier) else {
         return 0
     }
-    return blocking {
+    let result = blocking(timeout: capabilityTimeout, operationName: "Apple Speech capability check") {
         await SpeechTranscriber.supportedLocale(equivalentTo: requested) != nil
-    }.getOr(false) ? 1 : 0
+    }
+    return switch result {
+    case .success(let supported): supported ? 1 : 0
+    case .failure: -1
+    }
 }
 
 @_cdecl("hex_apple_speech_ready")
@@ -200,13 +380,17 @@ public func hexAppleSpeechReady(_ identifier: UnsafePointer<CChar>?) -> Int32 {
           let requested = locale(identifier) else {
         return 0
     }
-    return blocking {
+    let result = blocking(timeout: capabilityTimeout, operationName: "Apple Speech readiness check") {
         guard let supported = await SpeechTranscriber.supportedLocale(
             equivalentTo: requested
         ) else { return false }
         let transcriber = SpeechTranscriber(locale: supported, preset: .transcription)
         return await AssetInventory.status(forModules: [transcriber]) == .installed
-    }.getOr(false) ? 1 : 0
+    }
+    return switch result {
+    case .success(let ready): ready ? 1 : 0
+    case .failure: -1
+    }
 }
 
 @_cdecl("hex_apple_speech_prepare")
@@ -220,7 +404,10 @@ public func hexAppleSpeechPrepare(
         writeError(BridgeError("Apple Speech requires macOS 26."), to: error)
         return nil
     }
-    let result: Result<AppleSpeechSession, Error> = blocking {
+    let result: Result<AppleSpeechSession, Error> = blocking(
+        timeout: preparationTimeout,
+        operationName: "Apple Speech preparation"
+    ) {
         guard await authorization() == .authorized else {
             throw BridgeError("Speech Recognition access is required to use Apple Speech.")
         }
@@ -255,7 +442,10 @@ public func hexAppleSpeechTranscribe(
     }
     let session = Unmanaged<AppleSpeechSession>.fromOpaque(opaque).takeUnretainedValue()
     let audio = Array(UnsafeBufferPointer(start: samples, count: count))
-    let result: Result<BridgeTranscript, Error> = blocking {
+    let result: Result<BridgeTranscript, Error> = blocking(
+        timeout: transcriptionTimeout,
+        operationName: "Apple Speech transcription"
+    ) {
         try await session.transcribe(samples: audio)
     }
     switch result {
@@ -276,6 +466,10 @@ public func hexAppleSpeechTranscribe(
 @_cdecl("hex_apple_speech_release")
 public func hexAppleSpeechRelease(_ opaque: UnsafeMutableRawPointer?) {
     guard #available(macOS 26.0, *), let opaque else { return }
+    let session = Unmanaged<AppleSpeechSession>.fromOpaque(opaque).takeUnretainedValue()
+    _ = blocking(timeout: releaseTimeout, operationName: "Apple Speech cleanup") {
+        await session.releaseAssets()
+    }
     Unmanaged<AppleSpeechSession>.fromOpaque(opaque).release()
 }
 

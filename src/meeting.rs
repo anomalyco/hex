@@ -792,14 +792,18 @@ fn transcribe_track(
             continue;
         }
         let chunk_start_ms = chunk_index as u64 * 30_000 + source_offset_ms;
-        let result = model.transcribe_segments(chunk)?;
+        let chunk_duration_ms = chunk.len() as u64 * 1_000 / u64::from(SAMPLE_RATE);
+        let samples = model.prepare_samples(chunk.to_vec());
+        let result = model.transcribe_segments(&samples)?;
         if !result.segments.is_empty() {
             transcript.extend(result.segments.into_iter().filter_map(|segment| {
                 let text = segment.text.trim().to_string();
-                (!text.is_empty()).then(|| TranscriptEntry {
+                let start_ms = (segment.start_ms.max(0) as u64).min(chunk_duration_ms);
+                let end_ms = (segment.end_ms.max(0) as u64).min(chunk_duration_ms);
+                (!text.is_empty() && end_ms > start_ms).then(|| TranscriptEntry {
                     source,
-                    start_ms: chunk_start_ms + segment.start_ms.max(0) as u64,
-                    end_ms: chunk_start_ms + segment.end_ms.max(0) as u64,
+                    start_ms: chunk_start_ms + start_ms,
+                    end_ms: chunk_start_ms + end_ms,
                     text,
                 })
             }));

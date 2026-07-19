@@ -36,6 +36,10 @@ impl SetupStatus {
 pub fn status(selection: &TranscriptionSelection) -> SetupStatus {
     let transcription_model = crate::transcription_models::validate(selection)
         .is_ok_and(|model| crate::transcription_models::is_installed(model, &selection.language));
+    status_with_transcription_model(transcription_model)
+}
+
+pub fn status_with_transcription_model(transcription_model: bool) -> SetupStatus {
     SetupStatus {
         microphone: microphone_state(),
         input_monitoring: settings(CGPreflightListenEventAccess()),

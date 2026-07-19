@@ -18,6 +18,8 @@ pub struct TranscriptSegment {
     pub text: String,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Transcript {
     pub text: String,
     pub segments: Vec<TranscriptSegment>,
@@ -75,5 +77,23 @@ impl Transcriber {
             }),
             Self::AppleSpeech(model) => model.transcribe(samples),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Transcript;
+
+    #[test]
+    fn apple_bridge_transcript_uses_the_canonical_wire_shape() {
+        let transcript: Transcript = serde_json::from_str(
+            r#"{"text":"hello","segments":[{"startMs":10,"endMs":40,"text":"hello"}]}"#,
+        )
+        .unwrap();
+
+        assert_eq!(transcript.text, "hello");
+        assert_eq!(transcript.segments.len(), 1);
+        assert_eq!(transcript.segments[0].start_ms, 10);
+        assert_eq!(transcript.segments[0].end_ms, 40);
     }
 }

@@ -40,7 +40,10 @@ struct KeyboardSnapshot: Codable, Equatable {
     )
 
     var isAvailable: Bool {
-        let now = Date().timeIntervalSince1970
+        isAvailable(at: Date().timeIntervalSince1970)
+    }
+
+    func isAvailable(at now: TimeInterval) -> Bool {
         return expiresAt > now && now - heartbeat < 3
     }
 }

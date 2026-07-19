@@ -66,6 +66,8 @@ targets:
         PRODUCT_NAME: HEX
     scheme:
       gatherCoverageData: false
+      testTargets:
+        - HEXMobileTests
   HEXKeyboard:
     type: app-extension
     platform: iOS
@@ -97,3 +99,14 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.kitlangton.hex.mobile.keyboard
         PRODUCT_NAME: HEXKeyboard
         SKIP_INSTALL: YES
+  HEXMobileTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - HEXMobileTests
+      - HEXShared
+    settings:
+      base:
+        CODE_SIGN_STYLE: Automatic
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: com.kitlangton.hex.mobile.tests
