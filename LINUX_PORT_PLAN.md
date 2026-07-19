@@ -4,7 +4,8 @@
 
 - Arch Linux rolling on x86_64.
 - i3 on X11 with PipeWire and WirePlumber.
-- Native Arch package and the X11 complete desktop contract.
+- User-local signed direct install for the beta and the X11 complete desktop
+  contract; add a native Arch package as a separate package-managed channel.
 - Full parity delivered sequentially: dictation, commands and context, manual
   meetings, automatic offers, packaging, then remaining UI hardening.
 - Automatic insertion is required; no privileged helper is required for X11.
@@ -62,7 +63,7 @@ The first Linux release should target:
 
 - One named distro and desktop environment.
 - One CPU architecture.
-- A native host package rather than Flatpak.
+- A user-local direct install rather than Flatpak for the beta.
 - PipeWire/WirePlumber for meetings.
 - CPAL over the desktop's ALSA compatibility path for the command microphone.
 - A key-containing Linux dictation chord, not bare Alt.
@@ -371,6 +372,7 @@ Required automated checks:
 - `cargo fmt --check`
 - `cargo clippy --all-targets --all-features -- -D warnings`
 - Pure unit tests on macOS and Linux.
+- Signed Linux feed verification, artifact integrity, and atomic activation.
 - Linux compile checks for every supported backend feature set.
 - Fixture transcription for Moonshine, Parakeet, and meeting replay.
 - Artifact and transcript recovery tests shared across platforms.
@@ -401,7 +403,7 @@ Required real-desktop smoke matrix:
 | Native model artifact or ABI failure | Medium | Phase 0 fixture spikes before architecture work |
 | PipeWire metadata differs by package format | Medium | Build identity rules from observed application fixtures |
 | GPUI popup/HUD behavior differs by compositor | Medium | Ship shell first; defer exact overlay parity |
-| Packaging multiplies native dependencies | Medium | One distro and native host package first |
+| Packaging multiplies native dependencies | Medium | One distro and direct-install channel first |
 
 ## Definition Of A Successful Migration
 
@@ -424,7 +426,7 @@ Record these decisions at the top of the implementation issue or pull request:
 - Target distro and version.
 - Desktop environment and compositor.
 - CPU architecture.
-- Native package format.
+- Distribution and update channel.
 - X11 complete, Wayland basic, or Wayland appliance contract.
 - Whether meeting recording is required in the first release.
 - Whether automatic insertion is mandatory.

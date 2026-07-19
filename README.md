@@ -1,10 +1,10 @@
 # HEX
 
-HEX is a private local dictation app for macOS, built in Rust with strict-Metal
-transcription. Experimental voice commands are available as an opt-in, while
-meetings remain available only in development builds.
+HEX is a private local dictation app for macOS and Linux X11, built in Rust.
+Experimental voice commands are available as a macOS opt-in, while meetings
+remain available only in development builds.
 
-## Linux X11 Preview
+## Linux X11 Beta
 
 Linux currently supports the GPUI shell, configurable global hold/release
 dictation, Parakeet transcription through Vulkan with CPU fallback, X11
@@ -15,6 +15,10 @@ controls, meetings, and packaging remain in progress.
 On x86_64 Linux with ALSA or PipeWire's ALSA compatibility layer:
 
 ```sh
+sudo pacman -S --needed base-devel rustup alsa-lib curl gtk3 libxkbcommon \
+  libxkbcommon-x11 libx11 libxcb openblas vulkan-headers vulkan-icd-loader \
+  shaderc spirv-headers clang cmake pkgconf
+rustup default stable
 ./scripts/setup.sh
 cargo run -- model install
 cargo run -- model check
@@ -50,6 +54,25 @@ HEX_INSTALL_DIR="$HOME/dev/bin" ./scripts/install-linux.sh
 
 The autostart entry launches `hex app --hidden`, which starts dictation at login
 without opening the settings window.
+
+Direct Linux installs check the signed stable feed at startup and every 24 hours.
+HEX downloads and verifies newer x86_64 builds in the background, switches the
+user-local installation atomically, and offers to restart. Development builds
+and package-manager-owned installations are never replaced.
+
+Prepare and publish a Linux update from the supported x86_64 Linux release host:
+
+```sh
+sudo pacman -S --needed jq openssl xxd
+2password run \
+  --env "HEX_LINUX_SIGNING_KEY=op://Anomaly/HEX Linux Update Signing Key/credential" \
+  -- ./scripts/release-linux.sh prepare
+
+./scripts/release-linux.sh publish
+```
+
+The content-addressed binary is uploaded before `linux-update.json`, so the
+signed feed never points at a missing artifact or mutable binary URL.
 
 Select a microphone with a case-insensitive device-name fragment:
 

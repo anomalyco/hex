@@ -31,6 +31,7 @@ impl AudioInput {
         Self::open_device(device)
     }
 
+    #[cfg(target_os = "linux")]
     pub fn open_matching(query: &str) -> Result<Self> {
         let host = cpal::default_host();
         let device = host

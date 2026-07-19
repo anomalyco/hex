@@ -15,7 +15,7 @@ use crate::events::{EventLog, TranscriptPhase, VoiceEvent, VoiceState, now_ms};
 use crate::moonshine::Moonshine;
 
 #[derive(Parser)]
-#[command(version, about = "Local, observable voice recognition (Linux preview)")]
+#[command(version, about = "Local, observable voice recognition (Linux beta)")]
 struct Cli {
     #[command(subcommand)]
     command: Option<Command>,

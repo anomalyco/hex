@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use color_eyre::Result;
 use gpui::{
@@ -17,9 +17,11 @@ use x11rb::connection::Connection;
 use x11rb::protocol::xproto::ConnectionExt;
 
 use crate::events::{TranscriptPhase, VoiceEvent, VoiceState};
+use crate::linux_updater::InstalledUpdate;
 
 const WINDOW_WIDTH: f32 = 760.0;
 const WINDOW_HEIGHT: f32 = 560.0;
+const UPDATE_INTERVAL: Duration = Duration::from_secs(24 * 60 * 60);
 
 type ListenerResult = std::result::Result<(), String>;
 
@@ -59,6 +61,9 @@ struct LinuxApp {
     error: Option<String>,
     settings: crate::linux_settings::LinuxSettings,
     capturing_hotkey: bool,
+    update_receiver: Option<Receiver<Result<Option<InstalledUpdate>, String>>>,
+    update_ready: Option<InstalledUpdate>,
+    update_checked_at: Instant,
 }
 
 pub fn open(event_path: PathBuf, start_hidden: bool) -> Result<()> {
@@ -80,6 +85,7 @@ pub fn open(event_path: PathBuf, start_hidden: bool) -> Result<()> {
             Some(format!("Could not load Linux settings: {error:#}")),
         ),
     };
+    let update_receiver = crate::linux_updater::managed_install().then(start_update_check);
     Application::new().run(move |cx: &mut App| {
         let bounds = Bounds::centered(None, size(px(WINDOW_WIDTH), px(WINDOW_HEIGHT)), cx);
         let window = cx
@@ -106,6 +112,9 @@ pub fn open(event_path: PathBuf, start_hidden: bool) -> Result<()> {
                         error: settings_error.clone(),
                         settings: settings.clone(),
                         capturing_hotkey: false,
+                        update_receiver,
+                        update_ready: None,
+                        update_checked_at: Instant::now(),
                     })
                 },
             )
@@ -370,6 +379,31 @@ impl LinuxApp {
     }
 
     fn refresh(&mut self) {
+        if self.update_receiver.is_none()
+            && self.update_ready.is_none()
+            && self.update_checked_at.elapsed() >= UPDATE_INTERVAL
+        {
+            self.update_receiver = Some(start_update_check());
+            self.update_checked_at = Instant::now();
+        }
+        let update_result =
+            self.update_receiver
+                .as_ref()
+                .and_then(|receiver| match receiver.try_recv() {
+                    Ok(result) => Some(result),
+                    Err(TryRecvError::Disconnected) => {
+                        Some(Err("update worker stopped unexpectedly".into()))
+                    }
+                    Err(TryRecvError::Empty) => None,
+                });
+        if let Some(result) = update_result {
+            self.update_receiver = None;
+            match result {
+                Ok(update) => self.update_ready = update,
+                Err(error) => tracing::warn!(%error, "Linux update check failed"),
+            }
+        }
+
         if let Some(receiver) = &self.listener_result {
             match receiver.try_recv() {
                 Ok(Ok(())) => {
@@ -489,6 +523,15 @@ impl LinuxApp {
     }
 }
 
+fn start_update_check() -> Receiver<Result<Option<InstalledUpdate>, String>> {
+    let (sender, receiver) = mpsc::sync_channel(1);
+    std::thread::spawn(move || {
+        let result = crate::linux_updater::install_latest().map_err(|error| format!("{error:#}"));
+        let _ = sender.send(result);
+    });
+    receiver
+}
+
 impl Drop for LinuxApp {
     fn drop(&mut self) {
         if let Some(stop) = self
@@ -520,6 +563,7 @@ impl Render for LinuxApp {
         } else {
             "Start listening"
         };
+        let update = self.update_ready.clone();
         let transcript_rows = self
             .transcripts
             .iter()
@@ -563,7 +607,7 @@ impl Render for LinuxApp {
                             .text_size(px(11.0))
                             .font_weight(FontWeight::SEMIBOLD)
                             .text_color(rgb(0x76818b))
-                            .child("LINUX / X11 PREVIEW"),
+                            .child("LINUX / X11 BETA"),
                     )
                     .child(
                         div()
@@ -695,10 +739,53 @@ impl Render for LinuxApp {
                     .child(
                         div()
                             .mt_auto()
-                            .text_size(px(11.0))
-                            .line_height(px(17.0))
-                            .text_color(rgb(0x68727b))
-                            .child(shortcut_help),
+                            .when_some(update, |panel, update| {
+                                let action = update.clone();
+                                panel
+                                    .child(
+                                        div()
+                                            .text_size(px(11.0))
+                                            .text_color(rgb(0xd9ff68))
+                                            .child("Update ready"),
+                                    )
+                                    .child(
+                                        div()
+                                            .id("restart-update")
+                                            .mt_2()
+                                            .h(px(30.0))
+                                            .flex()
+                                            .items_center()
+                                            .justify_center()
+                                            .rounded_md()
+                                            .cursor_pointer()
+                                            .bg(rgb(0x252b20))
+                                            .text_size(px(11.0))
+                                            .font_weight(FontWeight::SEMIBOLD)
+                                            .child("Restart")
+                                            .on_click(cx.listener(move |this, _, _, cx| {
+                                                match crate::linux_updater::relaunch(&action) {
+                                                    Ok(()) => {
+                                                        this.stop();
+                                                        cx.quit();
+                                                    }
+                                                    Err(error) => {
+                                                        this.error = Some(format!(
+                                                            "Could not restart HEX: {error:#}"
+                                                        ));
+                                                        cx.notify();
+                                                    }
+                                                }
+                                            })),
+                                    )
+                                    .child(div().h(px(16.0)))
+                            })
+                            .child(
+                                div()
+                                    .text_size(px(11.0))
+                                    .line_height(px(17.0))
+                                    .text_color(rgb(0x68727b))
+                                    .child(shortcut_help),
+                            ),
                     ),
             )
             .child(

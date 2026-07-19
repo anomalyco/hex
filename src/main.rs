@@ -44,6 +44,8 @@ mod linux_paste;
 mod linux_settings;
 #[cfg(target_os = "linux")]
 mod linux_transcriber;
+#[cfg(target_os = "linux")]
+mod linux_updater;
 #[cfg(target_os = "macos")]
 mod login_item;
 #[cfg(target_os = "macos")]

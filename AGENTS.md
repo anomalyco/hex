@@ -2,10 +2,11 @@
 
 ## Purpose
 
-Build HEX as a local, observable macOS voice appliance. Keep the engine native
-Rust and keep consequential behavior explicit. Command definitions and preferred
-devices remain compiled Rust until a second real consumer justifies a data or
-plugin seam; user-facing runtime settings persist in Application Support.
+Build HEX as a local, observable macOS voice appliance with an explicit Linux
+X11 beta contract. Keep the engine native Rust and keep consequential behavior
+explicit. Command definitions and preferred devices remain compiled Rust until
+a second real consumer justifies a data or plugin seam; user-facing runtime
+settings persist in Application Support.
 
 The distributed release starts in hotkey-dictation-only mode. Voice commands and
 their catalog remain available as a persisted opt-in that defaults off.
@@ -52,6 +53,8 @@ only in debug builds.
 - `onboarding`: required permission health, selected dictation-model
   installation, the release startup gate, and opt-in command-model setup.
 - `sparkle`: packaged-app-only Sparkle lifecycle and manual update checks.
+- `linux_updater`: signed direct-install updates, bounded downloads, atomic
+  version activation, and restart handoff for user-local Linux installs.
 - `events`: append-only NDJSON observations; `dashboard` and the GPUI Activity
   pane are read-only projections.
 - `app_window`: the production Settings, Modes, Replacements, and opt-in
@@ -158,6 +161,10 @@ CoreAudio formats, AppleScript details, or event serialization.
   boundaries, steal focus, or block controls in the foreground application.
 - Public app updates are Developer ID signed, notarized, stapled, EdDSA signed,
   published artifact-first/feed-last, and installed through Sparkle.
+- Linux direct-install updates accept only a strictly newer signed stable
+  x86_64 manifest, verify exact size and SHA-256 from a content-addressed
+  artifact, and atomically switch the user-local `current` version. Never
+  overwrite development, root, or package-manager-owned binaries.
 
 ## Development
 
@@ -201,6 +208,13 @@ Verify both registration and unregistration with `sfltool dumpbtm`, and restore
 the user's original login-item state after the test. Do not add release test
 hooks or persist a second launch-at-login flag.
 
+Linux releases are prepared and published separately on the supported x86_64
+Linux host. Inject the Ed25519 private PEM as `HEX_LINUX_SIGNING_KEY`, run
+`scripts/release-linux.sh prepare`, validate the artifact, then run
+`scripts/release-linux.sh publish`. The script refuses a key that does not match
+the public key compiled into HEX, refuses a non-monotonic stable release, and
+publishes the signed feed last.
+
 Use `termctrl` to verify TUI changes at both wide and narrow dimensions. The
 dashboard keys are `1` for commands, `2` for the activity log, `3` for meetings,
 Tab to cycle, and `q`/Escape to quit.
@@ -224,6 +238,8 @@ seam once there are two real adapters or a current test requires substitution.
 
 ## Current Gaps
 
+- Validate a genuine signed Linux update between two released versions on the
+  target Arch/i3 machine, including restart and retained-version rollback.
 - Verify onboarding and model installation from a clean macOS account before
   broadly sharing the coworker download; the signed Sparkle update path is live.
 - Finish validated legacy import and a persistent permission-health surface.
@@ -241,5 +257,5 @@ seam once there are two real adapters or a current test requires substitution.
 - Diagnose command-audio drops and Slack Huddle detection with runtime evidence.
 - Add edge tests for shutdown during capture, final-transcription failure, and
   voice-triggered meeting start/stop.
-- Do not add Linux or plugin seams until implementing a concrete second adapter.
-  Follow `LINUX_PORT_PLAN.md` once a target distro and desktop contract exist.
+- Do not generalize the concrete macOS and Linux X11 adapters into hypothetical
+  platform or plugin seams. Follow `LINUX_PORT_PLAN.md` for the selected target.
