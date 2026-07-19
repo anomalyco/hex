@@ -3,6 +3,12 @@ use std::process::Command;
 
 fn main() {
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("macos") {
+        if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("linux") {
+            // transcribe-cpp's static manifest records OpenBLAS as an absolute
+            // link argument, which Cargo does not propagate through the -sys
+            // crate to this final binary.
+            println!("cargo:rustc-link-lib=dylib=openblas");
+        }
         return;
     }
     let output = Command::new("xcode-select")

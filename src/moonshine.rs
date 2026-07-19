@@ -158,7 +158,7 @@ pub fn install_model() -> Result<PathBuf> {
 
 fn model_path() -> Result<PathBuf> {
     Ok(dirs::cache_dir()
-        .ok_or_else(|| eyre!("macOS cache directory is unavailable"))?
+        .ok_or_else(|| eyre!("cache directory is unavailable"))?
         .join("moonshine_voice/download.moonshine.ai/model/medium-streaming-en/quantized"))
 }
 
@@ -533,10 +533,16 @@ unsafe fn free_streams(
 }
 
 fn find_library(project_root: &Path) -> Result<PathBuf> {
+    #[cfg(target_os = "macos")]
+    const LIBRARY_NAME: &str = "libmoonshine.dylib";
+    #[cfg(target_os = "linux")]
+    const LIBRARY_NAME: &str = "libmoonshine.so";
+
+    #[cfg(target_os = "macos")]
     if let Ok(executable) = std::env::current_exe()
         && let Some(contents) = executable.parent().and_then(Path::parent)
     {
-        let bundled = contents.join("Frameworks/libmoonshine.dylib");
+        let bundled = contents.join("Frameworks").join(LIBRARY_NAME);
         if bundled.exists() {
             return Ok(bundled);
         }
@@ -547,7 +553,8 @@ fn find_library(project_root: &Path) -> Result<PathBuf> {
     {
         let candidate = python?
             .path()
-            .join("site-packages/moonshine_voice/libmoonshine.dylib");
+            .join("site-packages/moonshine_voice")
+            .join(LIBRARY_NAME);
         if candidate.exists() {
             return Ok(candidate);
         }
