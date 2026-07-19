@@ -3,6 +3,7 @@ use std::time::{Duration, Instant};
 
 use rubato::{FftFixedIn, Resampler};
 
+#[cfg(target_os = "macos")]
 use crate::recording_environment::{RecordingEnvironmentController, RecordingEnvironmentSession};
 
 const RING_BUFFER_DURATION: Duration = Duration::from_secs(1);
@@ -206,6 +207,7 @@ pub struct DictationCapture {
     sample_rate: u32,
     ring: VecDeque<f32>,
     recording: Option<Recording>,
+    #[cfg(target_os = "macos")]
     recording_environment: Option<RecordingEnvironmentController>,
 }
 
@@ -216,9 +218,11 @@ struct Recording {
     source_rate: u32,
     input_buffer: Vec<f32>,
     resampler: Option<FftFixedIn<f32>>,
+    #[cfg(target_os = "macos")]
     environment: RecordingEnvironmentState,
 }
 
+#[cfg(target_os = "macos")]
 enum RecordingEnvironmentState {
     Disabled,
     Pending(RecordingEnvironmentController),
@@ -227,6 +231,7 @@ enum RecordingEnvironmentState {
     },
 }
 
+#[cfg(target_os = "macos")]
 impl RecordingEnvironmentState {
     fn activate(&mut self) {
         if let Self::Pending(controller) = self {
@@ -261,10 +266,12 @@ impl Recording {
             source_rate,
             input_buffer: Vec::with_capacity(Self::CHUNK_SIZE),
             resampler,
+            #[cfg(target_os = "macos")]
             environment: RecordingEnvironmentState::Disabled,
         }
     }
 
+    #[cfg(target_os = "macos")]
     fn with_environment(mut self, environment: RecordingEnvironmentState) -> Self {
         self.environment = environment;
         self
@@ -339,10 +346,12 @@ impl DictationCapture {
             sample_rate,
             ring: VecDeque::with_capacity(samples_for(RING_BUFFER_DURATION, sample_rate)),
             recording: None,
+            #[cfg(target_os = "macos")]
             recording_environment: None,
         }
     }
 
+    #[cfg(target_os = "macos")]
     pub fn enable_recording_environment(&mut self, controller: RecordingEnvironmentController) {
         self.recording_environment = Some(controller);
     }
@@ -374,6 +383,7 @@ impl DictationCapture {
     }
 
     fn start_with_pre_roll(&mut self, now: Instant, duration: Duration, intentional: bool) {
+        #[cfg(target_os = "macos")]
         let environment = match &self.recording_environment {
             Some(controller) if intentional => RecordingEnvironmentState::Active {
                 _session: controller.begin(),
@@ -381,8 +391,14 @@ impl DictationCapture {
             Some(controller) => RecordingEnvironmentState::Pending(controller.clone()),
             None => RecordingEnvironmentState::Disabled,
         };
+        #[cfg(not(target_os = "macos"))]
+        let _ = intentional;
         let pre_roll = samples_for(duration, self.sample_rate).min(self.ring.len());
-        let mut recording = Recording::new(now, self.sample_rate).with_environment(environment);
+        let recording = Recording::new(now, self.sample_rate);
+        #[cfg(target_os = "macos")]
+        let mut recording = recording.with_environment(environment);
+        #[cfg(not(target_os = "macos"))]
+        let mut recording = recording;
         let skip = self.ring.len() - pre_roll;
         let (front, back) = self.ring.as_slices();
         if skip < front.len() {
@@ -396,6 +412,7 @@ impl DictationCapture {
 
     pub fn push(&mut self, samples: &[f32]) {
         if let Some(recording) = &mut self.recording {
+            #[cfg(target_os = "macos")]
             if recording.started_at.elapsed() >= MINIMUM_HOLD_DURATION {
                 recording.environment.activate();
             }

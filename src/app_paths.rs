@@ -7,7 +7,7 @@ pub fn support_dir() -> Result<PathBuf> {
         return Ok(path.into());
     }
     Ok(dirs::data_dir()
-        .ok_or_else(|| eyre!("macOS application support directory is unavailable"))?
+        .ok_or_else(|| eyre!("application data directory is unavailable"))?
         .join("voice-control"))
 }
 

@@ -4,6 +4,60 @@ HEX is a private local dictation app for macOS, built in Rust with strict-Metal
 transcription. Experimental voice commands are available as an opt-in, while
 meetings remain available only in development builds.
 
+## Linux X11 Preview
+
+Linux currently supports the GPUI shell, configurable global hold/release
+dictation, Parakeet transcription through Vulkan with CPU fallback, X11
+clipboard insertion, Escape cancellation, double-tap lock, and NDJSON
+diagnostics. Voice commands, application context, recording-environment
+controls, meetings, and packaging remain in progress.
+
+On x86_64 Linux with ALSA or PipeWire's ALSA compatibility layer:
+
+```sh
+./scripts/setup.sh
+cargo run -- model install
+cargo run -- model check
+cargo run -- devices
+cargo run -- app
+```
+
+The X11 shell starts the dictation service and displays completed transcripts.
+When the desktop provides a StatusNotifier tray host, closing the window hides
+it while dictation continues; the tray can show the window, start or stop
+listening, or quit HEX. Without a tray host, close exits normally instead of
+leaving an unreachable background process. The window advertises the standard
+EWMH dialog type so compliant tiling window managers can float it.
+Hold the configured shortcut, `Alt+Space` by default, and release it to
+transcribe and paste. Click the shortcut in the UI while stopped to replace it.
+Press it twice within 300 ms to lock recording, press it again to finish, or
+press Escape to cancel.
+
+`cargo run -- dictate` runs the same global dictation service without the UI.
+`cargo run -- listen` remains available for continuous Moonshine transcription.
+
+Install the release binary, desktop launcher, and standard XDG autostart entry:
+
+```sh
+./scripts/install-linux.sh
+```
+
+Override the standard `~/.local/bin` destination when needed:
+
+```sh
+HEX_INSTALL_DIR="$HOME/dev/bin" ./scripts/install-linux.sh
+```
+
+The autostart entry launches `hex app --hidden`, which starts dictation at login
+without opening the settings window.
+
+Select a microphone with a case-insensitive device-name fragment:
+
+```sh
+cargo run -- dictate --device "Revelator IO 44"
+cargo run -- status --lines 20
+```
+
 ## Try It
 
 Install and launch the signed GPUI desktop app with:
