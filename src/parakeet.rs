@@ -24,6 +24,7 @@ use crate::paste::Paster;
 use crate::suppression::InputActivity;
 #[cfg(test)]
 use crate::text_replacements::ReplacementSet;
+use crate::transcription::Transcriber;
 use crate::transcription_models::{TranscriptionSelection, model_path, validate};
 
 pub struct Parakeet {
@@ -387,10 +388,10 @@ impl DictationWorker {
         let inference_output = output_jobs.clone();
         let inference_worker = thread::spawn(move || {
             prioritize_inference_thread();
-            let mut parakeet = match Parakeet::load() {
-                Ok(parakeet) => {
+            let mut transcriber = match Transcriber::load() {
+                Ok(transcriber) => {
                     tracing::info!("transcription model loaded");
-                    Some(parakeet)
+                    Some(transcriber)
                 }
                 Err(error) => {
                     let _ = inference_events.send(WorkerEvent::ModelFailed(error.to_string()));
@@ -400,14 +401,14 @@ impl DictationWorker {
             while let Ok(command) = inference_receiver.recv() {
                 let job = match command {
                     InferenceCommand::Reload(selection) => {
-                        if parakeet
+                        if transcriber
                             .as_ref()
                             .is_some_and(|model| model.matches_selection(&selection))
                         {
                             continue;
                         }
-                        match Parakeet::load_selection(&selection) {
-                            Ok(model) => parakeet = Some(model),
+                        match Transcriber::load_selection(&selection) {
+                            Ok(model) => transcriber = Some(model),
                             Err(error) => {
                                 let _ = inference_events
                                     .send(WorkerEvent::ModelFailed(error.to_string()));
@@ -425,12 +426,12 @@ impl DictationWorker {
                     job_id: job.job_id,
                     stage: DictationJobStage::Transcribing,
                 });
-                if !parakeet
+                if !transcriber
                     .as_ref()
                     .is_some_and(|model| model.matches_selection(&job.selection))
                 {
-                    match Parakeet::load_selection(&job.selection) {
-                        Ok(model) => parakeet = Some(model),
+                    match Transcriber::load_selection(&job.selection) {
+                        Ok(model) => transcriber = Some(model),
                         Err(error) => {
                             let _ = inference_output.send(OutputJob::Completed {
                                 job_id: job.job_id,
@@ -442,7 +443,7 @@ impl DictationWorker {
                         }
                     }
                 }
-                let Some(parakeet) = &mut parakeet else {
+                let Some(transcriber) = &mut transcriber else {
                     let _ = inference_output.send(OutputJob::Completed {
                         job_id: job.job_id,
                         control: job.control,
@@ -455,10 +456,10 @@ impl DictationWorker {
                 let queue_ms = total_started.elapsed().as_millis();
                 let audio_ms = job.clip.duration_ms();
                 let prepare_started = Instant::now();
-                let samples = job.clip.into_parakeet_samples();
+                let samples = transcriber.prepare_samples(job.clip.into_transcription_samples());
                 let prepare_ms = prepare_started.elapsed().as_millis();
                 let inference_started = Instant::now();
-                let result = parakeet
+                let result = transcriber
                     .transcribe(&samples)
                     .map(|text| {
                         let corrected = prepare_transcript(&text, job.target);
@@ -930,6 +931,7 @@ pub(crate) fn default_model_path() -> Result<std::path::PathBuf> {
 }
 
 impl Parakeet {
+    #[cfg(test)]
     pub fn load() -> Result<Self> {
         let (_, selection) = crate::app_settings::transcription_selection();
         Self::load_selection(&selection)
@@ -937,7 +939,7 @@ impl Parakeet {
 
     pub fn load_selection(selection: &TranscriptionSelection) -> Result<Self> {
         let definition = validate(selection)?;
-        if !crate::transcription_models::is_installed(definition) {
+        if !crate::transcription_models::is_installed(definition, &selection.language) {
             return Err(eyre!("{} is not installed", definition.name));
         }
         let path = model_path(definition)?;
@@ -995,12 +997,19 @@ impl Parakeet {
         let definition = selection.map(validate).transpose()?;
         if let Some(definition) = definition {
             let architecture = model.arch();
-            if architecture != definition.architecture || variant != definition.variant {
+            let crate::transcription_models::ModelRuntime::Gguf(artifact) = definition.runtime
+            else {
+                return Err(eyre!(
+                    "{} is not a GGUF transcription model",
+                    definition.name
+                ));
+            };
+            if architecture != artifact.architecture || variant != artifact.variant {
                 return Err(eyre!(
                     "{} contains {architecture}/{variant}, expected {}/{}",
                     model_path.display(),
-                    definition.architecture,
-                    definition.variant
+                    artifact.architecture,
+                    artifact.variant
                 ));
             }
         }
@@ -1075,7 +1084,7 @@ impl Parakeet {
         &self.name
     }
 
-    fn matches_selection(&self, selection: &TranscriptionSelection) -> bool {
+    pub(crate) fn matches_selection(&self, selection: &TranscriptionSelection) -> bool {
         self.selection.as_ref() == Some(selection)
     }
 

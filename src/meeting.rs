@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::dictation::resample_for_parakeet;
 use crate::events::now_ms;
-use crate::parakeet::Parakeet;
+use crate::transcription::Transcriber;
 
 const SAMPLE_RATE: u32 = 16_000;
 const TRANSCRIPTION_CHUNK: usize = SAMPLE_RATE as usize * 30;
@@ -189,7 +189,10 @@ pub fn record(
     let _sleep_prevention = crate::recording_environment::prevent_sleep();
     let (_, transcription_selection) = crate::app_settings::transcription_selection();
     let transcription_model = crate::transcription_models::validate(&transcription_selection)?;
-    if !crate::transcription_models::is_installed(transcription_model) {
+    if !crate::transcription_models::is_installed(
+        transcription_model,
+        &transcription_selection.language,
+    ) {
         return Err(eyre!("{} is not installed", transcription_model.name));
     }
     let created_at_ms = now_ms();
@@ -724,7 +727,7 @@ fn transcribe(
     .flatten()
     .min()
     .unwrap_or(0);
-    let mut model = Parakeet::load_selection(selection)?;
+    let mut model = Transcriber::load_selection(selection)?;
     let mut transcript = Vec::new();
     transcribe_track(
         &mut model,
@@ -772,7 +775,7 @@ fn transcribe(
 }
 
 fn transcribe_track(
-    model: &mut Parakeet,
+    model: &mut Transcriber,
     path: PathBuf,
     source: MeetingSource,
     source_offset_us: u64,
@@ -795,8 +798,8 @@ fn transcribe_track(
                 let text = segment.text.trim().to_string();
                 (!text.is_empty()).then(|| TranscriptEntry {
                     source,
-                    start_ms: chunk_start_ms + segment.t0_ms.max(0) as u64,
-                    end_ms: chunk_start_ms + segment.t1_ms.max(0) as u64,
+                    start_ms: chunk_start_ms + segment.start_ms.max(0) as u64,
+                    end_ms: chunk_start_ms + segment.end_ms.max(0) as u64,
                     text,
                 })
             }));

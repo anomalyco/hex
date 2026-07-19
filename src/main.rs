@@ -4,6 +4,8 @@ mod app_settings;
 #[cfg(target_os = "macos")]
 mod app_window;
 #[cfg(target_os = "macos")]
+mod apple_speech;
+#[cfg(target_os = "macos")]
 mod application_catalog;
 #[cfg_attr(target_os = "linux", allow(dead_code))]
 mod audio;
@@ -78,6 +80,8 @@ mod suppression;
 mod text_input;
 #[cfg(target_os = "macos")]
 mod text_replacements;
+#[cfg(target_os = "macos")]
+mod transcription;
 #[cfg(target_os = "macos")]
 mod transcription_benchmark;
 #[cfg_attr(target_os = "linux", allow(dead_code))]

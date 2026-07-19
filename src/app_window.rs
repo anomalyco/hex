@@ -36,7 +36,8 @@ use crate::text_input::{
     Submitted as TextSubmitted, TextInput,
 };
 use crate::transcription_models::{
-    ModelDefinition, TranscriptionModelId, TranscriptionSelection, definition, language_name,
+    ModelDefinition, ModelRuntime, TranscriptionModelId, TranscriptionSelection, definition,
+    language_name,
 };
 
 const WINDOW_WIDTH: f32 = 1040.0;
@@ -748,7 +749,8 @@ impl AppWindow {
             transcription_download_cancel: None,
             transcription_download_progress: None,
             transcription_downloaded_bytes: preview_downloading
-                .map_or(0, |model| definition(model).bytes * 37 / 100),
+                .and_then(|model| definition(model).download_bytes())
+                .map_or(0, |bytes| bytes * 37 / 100),
             transcription_preview_installed: match preview_model_state {
                 Some(PreviewModelState::Installed) => Some(true),
                 Some(
@@ -984,7 +986,7 @@ impl AppWindow {
             &self.settings.transcription,
             model,
             &selection.language,
-            crate::transcription_models::is_installed(model),
+            crate::transcription_models::is_installed(model, &selection.language),
         ) && !install_command_model
         {
             self.transcription_picker_language = None;
@@ -1003,14 +1005,16 @@ impl AppWindow {
                 if install_command_model {
                     crate::moonshine::install_model()?;
                 }
-                crate::transcription_models::download_with_progress(model, &canceled, &progress)
-                    .and_then(|_| {
-                        if canceled.load(Ordering::Relaxed) {
-                            return Err(color_eyre::eyre::eyre!("model activation canceled"));
-                        }
-                        crate::parakeet::Parakeet::load_selection(&selection).map(drop)
-                    })
-                    .map(|_| selection)
+                if matches!(model.runtime, ModelRuntime::Gguf(_)) {
+                    crate::transcription_models::download_with_progress(
+                        model, &canceled, &progress,
+                    )?;
+                }
+                if canceled.load(Ordering::Relaxed) {
+                    return Err(color_eyre::eyre::eyre!("model activation canceled"));
+                }
+                crate::transcription::Transcriber::load_selection(&selection).map(drop)?;
+                Ok(selection)
             })()
             .map_err(|error| error.to_string());
             let _ = sender.send(result);
@@ -1027,9 +1031,9 @@ impl AppWindow {
         self.transcription_downloaded_bytes = 0;
     }
 
-    fn transcription_model_installed(&self, model: &ModelDefinition) -> bool {
+    fn transcription_model_installed(&self, model: &ModelDefinition, language: &str) -> bool {
         self.transcription_preview_installed
-            .unwrap_or_else(|| crate::transcription_models::is_installed(model))
+            .unwrap_or_else(|| crate::transcription_models::is_installed(model, language))
     }
 
     pub fn meeting_starting(&mut self, cx: &mut Context<Self>) {
@@ -1686,7 +1690,7 @@ impl AppWindow {
             .enumerate()
             .map(|(index, choice)| {
                 let model = choice.model;
-                let installed = self.transcription_model_installed(model);
+                let installed = self.transcription_model_installed(model, selected_language);
                 let is_downloading = downloading == Some(model.id);
                 let in_use = transcription_selection_is_active(
                     &self.settings.transcription,
@@ -1696,13 +1700,16 @@ impl AppWindow {
                 );
                 let language = selected_language.to_string();
                 let progress = if is_downloading {
-                    (self.transcription_downloaded_bytes as f32 / model.bytes as f32)
-                        .clamp(0.0, 1.0)
+                    model.download_bytes().map_or(0.0, |bytes| {
+                        (self.transcription_downloaded_bytes as f32 / bytes as f32).clamp(0.0, 1.0)
+                    })
                 } else {
                     0.0
                 };
                 let state_label = if is_downloading {
-                    if installed {
+                    if matches!(model.runtime, ModelRuntime::AppleSpeech) {
+                        "Preparing…".to_string()
+                    } else if installed {
                         "Activating…".to_string()
                     } else {
                         format!("Downloading {:.0}%", progress * 100.0)
@@ -1726,6 +1733,8 @@ impl AppWindow {
                     ""
                 } else if installed {
                     "Installed"
+                } else if matches!(model.runtime, ModelRuntime::AppleSpeech) {
+                    "Use"
                 } else {
                     "Download"
                 };
@@ -1774,24 +1783,29 @@ impl AppWindow {
                             .child(model_metric("SIZE", model.size_label()))
                             .child(model_metric("ERROR RATE · LOWER IS BETTER", model.quality)),
                     )
-                    .when(is_downloading && !installed, |card| {
-                        card.child(
-                            div().pt_3().child(
-                                div()
-                                    .h(px(3.0))
-                                    .w_full()
-                                    .rounded_sm()
-                                    .bg(rgb(CANVAS))
-                                    .child(
-                                        div()
-                                            .h_full()
-                                            .w(relative(progress))
-                                            .rounded_sm()
-                                            .bg(rgb(TEXT_SOFT)),
-                                    ),
-                            ),
-                        )
-                    })
+                    .when(
+                        is_downloading
+                            && !installed
+                            && matches!(model.runtime, ModelRuntime::Gguf(_)),
+                        |card| {
+                            card.child(
+                                div().pt_3().child(
+                                    div()
+                                        .h(px(3.0))
+                                        .w_full()
+                                        .rounded_sm()
+                                        .bg(rgb(CANVAS))
+                                        .child(
+                                            div()
+                                                .h_full()
+                                                .w(relative(progress))
+                                                .rounded_sm()
+                                                .bg(rgb(TEXT_SOFT)),
+                                        ),
+                                ),
+                            )
+                        },
+                    )
                     .child(
                         div()
                             .pt_3()
@@ -2928,32 +2942,27 @@ impl AppWindow {
                             .child(
                                 settings_row(
                                     "Post-process with OpenCode",
-                                    "When off, this mode pastes the local Parakeet transcript directly.",
+                                    "When off, this mode pastes the local transcript directly.",
                                     toggle(processing_position),
                                 )
                                 .id("mode-processing-toggle")
                                 .cursor_pointer()
-                                .on_click(cx.listener(move |this, _, _, cx| {
-                                    let enabled = !this
-                                        .selected_mode_settings()
-                                        .post_processing
-                                        .enabled;
-                                    this.selected_mode_inputs_mut()
-                                        .processing_toggle
-                                        .set_enabled(enabled);
-                                    this.selected_mode_settings_mut().post_processing.enabled =
-                                        enabled;
-                                    this.save_settings(cx);
-                                })),
+                                .on_click(cx.listener(
+                                    move |this, _, _, cx| {
+                                        let enabled =
+                                            !this.selected_mode_settings().post_processing.enabled;
+                                        this.selected_mode_inputs_mut()
+                                            .processing_toggle
+                                            .set_enabled(enabled);
+                                        this.selected_mode_settings_mut().post_processing.enabled =
+                                            enabled;
+                                        this.save_settings(cx);
+                                    },
+                                )),
                             )
                             .when(processing_enabled, |section| {
                                 section.child(self.render_mode_processing(
-                                    selection,
-                                    prompt,
-                                    model,
-                                    deadline,
-                                    window,
-                                    cx,
+                                    selection, prompt, model, deadline, window, cx,
                                 ))
                             }),
                     ),

@@ -181,10 +181,15 @@ impl DictationClip {
         self.samples.len() as u64 * 1_000 / u64::from(PARAKEET_SAMPLE_RATE)
     }
 
+    #[cfg(any(test, target_os = "linux"))]
     pub fn into_parakeet_samples(self) -> Vec<f32> {
         let mut samples = self.samples;
         pad_for_parakeet(&mut samples);
         samples
+    }
+
+    pub fn into_transcription_samples(self) -> Vec<f32> {
+        self.samples
     }
 }
 

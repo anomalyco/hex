@@ -113,7 +113,7 @@ pub fn run(shutdown: &'static AtomicBool) -> Result<()> {
                 let model = crate::linux_transcriber::default_model();
                 println!(
                     "{}\t{}\t{}",
-                    if crate::transcription_models::is_installed(model) {
+                    if crate::transcription_models::is_installed(model, "en") {
                         "installed"
                     } else {
                         "missing"

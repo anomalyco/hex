@@ -95,7 +95,7 @@ impl LinuxTranscriber {
         transcribe_cpp::init_backends_default()
             .wrap_err("could not initialize transcription backends")?;
         let definition = validate(selection)?;
-        if !crate::transcription_models::is_installed(definition) {
+        if !crate::transcription_models::is_installed(definition, &selection.language) {
             return Err(eyre!(
                 "{} is not installed; run `cargo run -- model install`",
                 definition.name
@@ -113,12 +113,18 @@ impl LinuxTranscriber {
         let device = model.device()?;
         let variant = model.variant();
         let architecture = model.arch();
-        if architecture != definition.architecture || variant != definition.variant {
+        let crate::transcription_models::ModelRuntime::Gguf(artifact) = definition.runtime else {
+            return Err(eyre!(
+                "{} is not a GGUF transcription model",
+                definition.name
+            ));
+        };
+        if architecture != artifact.architecture || variant != artifact.variant {
             return Err(eyre!(
                 "{} contains {architecture}/{variant}, expected {}/{}",
                 path.display(),
-                definition.architecture,
-                definition.variant
+                artifact.architecture,
+                artifact.variant
             ));
         }
         let capabilities = model.capabilities();

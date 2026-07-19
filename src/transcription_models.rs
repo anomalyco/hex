@@ -21,6 +21,7 @@ pub enum TranscriptionModelId {
     Qwen3Asr06B,
     SenseVoiceSmall,
     CohereTranscribe,
+    AppleSpeech,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -47,6 +48,7 @@ pub enum Recommendation {
     Fastest,
     MostAccurate,
     RecognitionHints,
+    BuiltIn,
 }
 
 impl Recommendation {
@@ -56,6 +58,7 @@ impl Recommendation {
             Self::Fastest => "Fastest",
             Self::MostAccurate => "Most accurate",
             Self::RecognitionHints => "Recognition hints",
+            Self::BuiltIn => "Built in",
         }
     }
 }
@@ -75,6 +78,19 @@ pub struct ModelDefinition {
     pub quality_context: &'static str,
     pub coverage: &'static str,
     pub timestamps: &'static str,
+    pub runtime: ModelRuntime,
+    pub languages: &'static [&'static str],
+    pub accepts_language_hint: bool,
+    pub supports_recognition_hints: bool,
+}
+
+#[derive(Clone, Copy)]
+pub enum ModelRuntime {
+    Gguf(&'static GgufArtifact),
+    AppleSpeech,
+}
+
+pub struct GgufArtifact {
     pub filename: &'static str,
     pub revision: &'static str,
     pub repository: &'static str,
@@ -82,17 +98,17 @@ pub struct ModelDefinition {
     pub sha256: &'static str,
     pub architecture: &'static str,
     pub variant: &'static str,
-    pub languages: &'static [&'static str],
-    pub accepts_language_hint: bool,
-    pub supports_recognition_hints: bool,
 }
 
 impl ModelDefinition {
-    pub fn download_url(&self) -> String {
-        format!(
+    fn download_url(&self) -> Result<String> {
+        let ModelRuntime::Gguf(artifact) = self.runtime else {
+            bail!("{} is managed by macOS and has no GGUF artifact", self.name);
+        };
+        Ok(format!(
             "https://huggingface.co/{}/resolve/{}/{}",
-            self.repository, self.revision, self.filename
-        )
+            artifact.repository, artifact.revision, artifact.filename
+        ))
     }
 
     pub fn supports_language(&self, language: &str) -> bool {
@@ -108,10 +124,19 @@ impl ModelDefinition {
     }
 
     pub fn size_label(&self) -> String {
-        if self.bytes >= 1_000_000_000 {
-            format!("{:.1} GB", self.bytes as f64 / 1_000_000_000.0)
-        } else {
-            format!("{} MB", self.bytes / 1_000_000)
+        match self.runtime {
+            ModelRuntime::AppleSpeech => "Managed".into(),
+            ModelRuntime::Gguf(artifact) if artifact.bytes >= 1_000_000_000 => {
+                format!("{:.1} GB", artifact.bytes as f64 / 1_000_000_000.0)
+            }
+            ModelRuntime::Gguf(artifact) => format!("{} MB", artifact.bytes / 1_000_000),
+        }
+    }
+
+    pub const fn download_bytes(&self) -> Option<u64> {
+        match self.runtime {
+            ModelRuntime::Gguf(artifact) => Some(artifact.bytes),
+            ModelRuntime::AppleSpeech => None,
         }
     }
 }
@@ -128,6 +153,61 @@ const COHERE_LANGUAGES: &[&str] = &[
     "en", "fr", "de", "es", "it", "pt", "nl", "pl", "el", "ar", "ja", "zh", "vi", "ko",
 ];
 
+const PARAKEET_V2_ARTIFACT: GgufArtifact = GgufArtifact {
+    filename: "parakeet-tdt-0.6b-v2-Q8_0.gguf",
+    revision: "07cee0616125a08ef619729bb47f40ef747e4bc4",
+    repository: "handy-computer/parakeet-tdt-0.6b-v2-gguf",
+    bytes: 729_574_912,
+    sha256: "f0d0e99cebb6d3b83f1f7069b82b5d3c2e39a54545b0da039cb4bafd9c4e5caa",
+    architecture: "parakeet",
+    variant: "tdt-0.6b-v2",
+};
+const PARAKEET_V3_ARTIFACT: GgufArtifact = GgufArtifact {
+    filename: "parakeet-tdt-0.6b-v3-Q8_0.gguf",
+    revision: "85ac09ea12fc4b1112fa76810059364bc6adc9de",
+    repository: "handy-computer/parakeet-tdt-0.6b-v3-gguf",
+    bytes: 739_508_576,
+    sha256: "5859f77944efcd8eafa23a6350731960b2b55b2203df51f319665c807d802cc7",
+    architecture: "parakeet",
+    variant: "tdt-0.6b-v3",
+};
+const WHISPER_ARTIFACT: GgufArtifact = GgufArtifact {
+    filename: "whisper-large-v3-turbo-Q8_0.gguf",
+    revision: "d222c9f621c1128299248f2ded4d8a1820519780",
+    repository: "handy-computer/whisper-large-v3-turbo-gguf",
+    bytes: 886_381_824,
+    sha256: "d5e65f2b0828802ae2c231673d31982cebe3a778c95d9494a9f3efee6bd17448",
+    architecture: "whisper",
+    variant: "whisper-large-v3-turbo",
+};
+const QWEN_ARTIFACT: GgufArtifact = GgufArtifact {
+    filename: "Qwen3-ASR-0.6B-Q8_0.gguf",
+    revision: "e4e16599b900eb0cb36e524514756bb92eb092b7",
+    repository: "handy-computer/Qwen3-ASR-0.6B-gguf",
+    bytes: 850_423_456,
+    sha256: "f081b2d5e23bd669d92cc331d722a8a0681943b8e6f34b48996fd5c319b5acd8",
+    architecture: "qwen3_asr",
+    variant: "qwen3-asr-0.6b",
+};
+const SENSEVOICE_ARTIFACT: GgufArtifact = GgufArtifact {
+    filename: "SenseVoiceSmall-Q8_0.gguf",
+    revision: "4a08b8e900b38a977e32eb08d5d0697d6e72ba04",
+    repository: "handy-computer/SenseVoiceSmall-gguf",
+    bytes: 252_684_608,
+    sha256: "6c759ee4c9748c9b3f7a5a60ca74f0f7e685fb9d45d1378fce7cfd62f59adf29",
+    architecture: "sensevoice",
+    variant: "sensevoice-small",
+};
+const COHERE_ARTIFACT: GgufArtifact = GgufArtifact {
+    filename: "cohere-transcribe-03-2026-Q8_0.gguf",
+    revision: "dfa4adebb64f3076b7b6b90b721275cc069cb421",
+    repository: "handy-computer/cohere-transcribe-03-2026-gguf",
+    bytes: 2_410_655_232,
+    sha256: "931916663432fd895423a4291a8400221802b288967ca2d435fc5e3141c9e71e",
+    architecture: "cohere_asr",
+    variant: "cohere-transcribe-03-2026",
+};
+
 pub const MODELS: &[ModelDefinition] = &[
     ModelDefinition {
         id: TranscriptionModelId::ParakeetV2,
@@ -138,13 +218,7 @@ pub const MODELS: &[ModelDefinition] = &[
         quality_context: "English benchmark",
         coverage: "English",
         timestamps: "Token timestamps",
-        filename: "parakeet-tdt-0.6b-v2-Q8_0.gguf",
-        revision: "07cee0616125a08ef619729bb47f40ef747e4bc4",
-        repository: "handy-computer/parakeet-tdt-0.6b-v2-gguf",
-        bytes: 729_574_912,
-        sha256: "f0d0e99cebb6d3b83f1f7069b82b5d3c2e39a54545b0da039cb4bafd9c4e5caa",
-        architecture: "parakeet",
-        variant: "tdt-0.6b-v2",
+        runtime: ModelRuntime::Gguf(&PARAKEET_V2_ARTIFACT),
         languages: &["en"],
         accepts_language_hint: true,
         supports_recognition_hints: false,
@@ -158,13 +232,7 @@ pub const MODELS: &[ModelDefinition] = &[
         quality_context: "English benchmark",
         coverage: "25 languages",
         timestamps: "Token timestamps",
-        filename: "parakeet-tdt-0.6b-v3-Q8_0.gguf",
-        revision: "85ac09ea12fc4b1112fa76810059364bc6adc9de",
-        repository: "handy-computer/parakeet-tdt-0.6b-v3-gguf",
-        bytes: 739_508_576,
-        sha256: "5859f77944efcd8eafa23a6350731960b2b55b2203df51f319665c807d802cc7",
-        architecture: "parakeet",
-        variant: "tdt-0.6b-v3",
+        runtime: ModelRuntime::Gguf(&PARAKEET_V3_ARTIFACT),
         languages: PARAKEET_V3_LANGUAGES,
         accepts_language_hint: true,
         supports_recognition_hints: false,
@@ -178,13 +246,7 @@ pub const MODELS: &[ModelDefinition] = &[
         quality_context: "English benchmark",
         coverage: "100 languages",
         timestamps: "Segment timestamps",
-        filename: "whisper-large-v3-turbo-Q8_0.gguf",
-        revision: "d222c9f621c1128299248f2ded4d8a1820519780",
-        repository: "handy-computer/whisper-large-v3-turbo-gguf",
-        bytes: 886_381_824,
-        sha256: "d5e65f2b0828802ae2c231673d31982cebe3a778c95d9494a9f3efee6bd17448",
-        architecture: "whisper",
-        variant: "whisper-large-v3-turbo",
+        runtime: ModelRuntime::Gguf(&WHISPER_ARTIFACT),
         languages: &["*"],
         accepts_language_hint: true,
         supports_recognition_hints: true,
@@ -198,13 +260,7 @@ pub const MODELS: &[ModelDefinition] = &[
         quality_context: "Mandarin benchmark",
         coverage: "30 languages",
         timestamps: "No timestamps",
-        filename: "Qwen3-ASR-0.6B-Q8_0.gguf",
-        revision: "e4e16599b900eb0cb36e524514756bb92eb092b7",
-        repository: "handy-computer/Qwen3-ASR-0.6B-gguf",
-        bytes: 850_423_456,
-        sha256: "f081b2d5e23bd669d92cc331d722a8a0681943b8e6f34b48996fd5c319b5acd8",
-        architecture: "qwen3_asr",
-        variant: "qwen3-asr-0.6b",
+        runtime: ModelRuntime::Gguf(&QWEN_ARTIFACT),
         languages: QWEN_LANGUAGES,
         accepts_language_hint: false,
         supports_recognition_hints: false,
@@ -218,13 +274,7 @@ pub const MODELS: &[ModelDefinition] = &[
         quality_context: "Mandarin benchmark",
         coverage: "5 languages",
         timestamps: "No timestamps",
-        filename: "SenseVoiceSmall-Q8_0.gguf",
-        revision: "4a08b8e900b38a977e32eb08d5d0697d6e72ba04",
-        repository: "handy-computer/SenseVoiceSmall-gguf",
-        bytes: 252_684_608,
-        sha256: "6c759ee4c9748c9b3f7a5a60ca74f0f7e685fb9d45d1378fce7cfd62f59adf29",
-        architecture: "sensevoice",
-        variant: "sensevoice-small",
+        runtime: ModelRuntime::Gguf(&SENSEVOICE_ARTIFACT),
         languages: &["zh", "yue", "en", "ja", "ko"],
         accepts_language_hint: true,
         supports_recognition_hints: false,
@@ -238,14 +288,22 @@ pub const MODELS: &[ModelDefinition] = &[
         quality_context: "English benchmark",
         coverage: "14 languages",
         timestamps: "No timestamps",
-        filename: "cohere-transcribe-03-2026-Q8_0.gguf",
-        revision: "dfa4adebb64f3076b7b6b90b721275cc069cb421",
-        repository: "handy-computer/cohere-transcribe-03-2026-gguf",
-        bytes: 2_410_655_232,
-        sha256: "931916663432fd895423a4291a8400221802b288967ca2d435fc5e3141c9e71e",
-        architecture: "cohere_asr",
-        variant: "cohere-transcribe-03-2026",
+        runtime: ModelRuntime::Gguf(&COHERE_ARTIFACT),
         languages: COHERE_LANGUAGES,
+        accepts_language_hint: true,
+        supports_recognition_hints: false,
+    },
+    ModelDefinition {
+        id: TranscriptionModelId::AppleSpeech,
+        name: "Apple Speech",
+        realtime: "On device",
+        realtime_context: "macOS 26",
+        quality: "System",
+        quality_context: "Apple managed",
+        coverage: "System locales",
+        timestamps: "Segment timestamps",
+        runtime: ModelRuntime::AppleSpeech,
+        languages: &["*"],
         accepts_language_hint: true,
         supports_recognition_hints: false,
     },
@@ -308,11 +366,19 @@ pub fn language_name(code: &str) -> &str {
 }
 
 pub fn choices(language: &str) -> Vec<ModelChoice> {
+    #[cfg(target_os = "macos")]
+    let apple_speech_supported = crate::apple_speech::AppleSpeech::is_supported(language);
+    #[cfg(not(target_os = "macos"))]
+    let apple_speech_supported = false;
+    choices_for_runtime(language, apple_speech_supported)
+}
+
+fn choices_for_runtime(language: &str, apple_speech_supported: bool) -> Vec<ModelChoice> {
     let choice = |id, recommendation| ModelChoice {
         model: definition(id),
         recommendation,
     };
-    match language {
+    let mut choices = match language {
         "en" => vec![
             choice(
                 TranscriptionModelId::ParakeetV2,
@@ -365,7 +431,14 @@ pub fn choices(language: &str) -> Vec<ModelChoice> {
             TranscriptionModelId::WhisperLargeV3Turbo,
             Recommendation::Recommended,
         )],
+    };
+    if apple_speech_supported {
+        choices.push(choice(
+            TranscriptionModelId::AppleSpeech,
+            Recommendation::BuiltIn,
+        ));
     }
+    choices
 }
 
 pub fn validate(selection: &TranscriptionSelection) -> Result<&'static ModelDefinition> {
@@ -394,13 +467,22 @@ pub fn models_dir() -> Result<PathBuf> {
 }
 
 pub fn model_path(model: &ModelDefinition) -> Result<PathBuf> {
-    Ok(models_dir()?.join(model.filename))
+    let ModelRuntime::Gguf(artifact) = model.runtime else {
+        bail!("{} is managed by macOS and has no model path", model.name);
+    };
+    Ok(models_dir()?.join(artifact.filename))
 }
 
-pub fn is_installed(model: &ModelDefinition) -> bool {
-    model_path(model)
-        .and_then(|path| Ok(fs::metadata(path)?.len() == model.bytes))
-        .unwrap_or(false)
+pub fn is_installed(model: &ModelDefinition, language: &str) -> bool {
+    match model.runtime {
+        ModelRuntime::Gguf(artifact) => model_path(model)
+            .and_then(|path| Ok(fs::metadata(path)?.len() == artifact.bytes))
+            .unwrap_or(false),
+        #[cfg(target_os = "macos")]
+        ModelRuntime::AppleSpeech => crate::apple_speech::AppleSpeech::is_ready(language),
+        #[cfg(not(target_os = "macos"))]
+        ModelRuntime::AppleSpeech => false,
+    }
 }
 
 pub fn download_with_progress(
@@ -408,6 +490,9 @@ pub fn download_with_progress(
     canceled: &AtomicBool,
     downloaded_bytes: &AtomicU64,
 ) -> Result<PathBuf> {
+    let ModelRuntime::Gguf(artifact) = model.runtime else {
+        bail!("{} is installed and managed by macOS", model.name);
+    };
     check_canceled(canceled)?;
     let directory = models_dir()?;
     fs::create_dir_all(&directory)?;
@@ -423,11 +508,11 @@ pub fn download_with_progress(
         }
     }
     check_canceled(canceled)?;
-    let destination = directory.join(model.filename);
+    let destination = directory.join(artifact.filename);
     if destination.exists() {
         match verify_file_with_cancel(&destination, model, canceled) {
             Ok(()) => {
-                downloaded_bytes.store(model.bytes, Ordering::Relaxed);
+                downloaded_bytes.store(artifact.bytes, Ordering::Relaxed);
                 return Ok(destination);
             }
             Err(error) => {
@@ -437,20 +522,20 @@ pub fn download_with_progress(
         }
     }
     let partial = destination.with_extension("gguf.partial");
-    if fs::metadata(&partial).is_ok_and(|metadata| metadata.len() > model.bytes) {
+    if fs::metadata(&partial).is_ok_and(|metadata| metadata.len() > artifact.bytes) {
         fs::remove_file(&partial)?;
     }
     downloaded_bytes.store(
         fs::metadata(&partial).map_or(0, |metadata| metadata.len()),
         Ordering::Relaxed,
     );
-    if fs::metadata(&partial).is_ok_and(|metadata| metadata.len() == model.bytes) {
+    if fs::metadata(&partial).is_ok_and(|metadata| metadata.len() == artifact.bytes) {
         match verify_file_with_cancel(&partial, model, canceled) {
             Ok(()) => {
                 File::open(&partial)?.sync_all()?;
                 fs::rename(&partial, &destination)?;
                 File::open(&directory)?.sync_all()?;
-                downloaded_bytes.store(model.bytes, Ordering::Relaxed);
+                downloaded_bytes.store(artifact.bytes, Ordering::Relaxed);
                 return Ok(destination);
             }
             Err(error) if canceled.load(Ordering::Relaxed) => return Err(error),
@@ -474,7 +559,7 @@ pub fn download_with_progress(
             "--output",
         ])
         .arg(&partial)
-        .arg(model.download_url())
+        .arg(model.download_url()?)
         .stderr(Stdio::piped())
         .spawn()
         .wrap_err("could not start model download")?;
@@ -510,7 +595,7 @@ pub fn download_with_progress(
     File::open(&partial)?.sync_all()?;
     fs::rename(&partial, &destination)?;
     File::open(&directory)?.sync_all()?;
-    downloaded_bytes.store(model.bytes, Ordering::Relaxed);
+    downloaded_bytes.store(artifact.bytes, Ordering::Relaxed);
     Ok(destination)
 }
 
@@ -531,13 +616,16 @@ fn verify_file_with_cancel(
     model: &ModelDefinition,
     canceled: &AtomicBool,
 ) -> Result<()> {
+    let ModelRuntime::Gguf(artifact) = model.runtime else {
+        bail!("{} has no artifact to verify", model.name);
+    };
     let metadata = fs::metadata(path)?;
-    if metadata.len() != model.bytes {
+    if metadata.len() != artifact.bytes {
         bail!(
             "downloaded {} bytes for {}, expected {}",
             metadata.len(),
             model.name,
-            model.bytes
+            artifact.bytes
         );
     }
     let mut file = File::open(path)?;
@@ -556,7 +644,7 @@ fn verify_file_with_cancel(
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect::<String>();
-    if actual != model.sha256 {
+    if actual != artifact.sha256 {
         bail!("checksum mismatch for {}", model.name);
     }
     Ok(())
@@ -572,14 +660,31 @@ mod tests {
 
     #[test]
     fn recommendations_are_language_specific() {
-        let english = choices("en");
+        let english = choices_for_runtime("en", false);
         assert_eq!(english[0].model.id, TranscriptionModelId::ParakeetV2);
         assert_eq!(english[0].recommendation, Recommendation::Recommended);
         assert_eq!(english[1].model.id, TranscriptionModelId::CohereTranscribe);
         assert_eq!(english[1].recommendation, Recommendation::MostAccurate);
-        let mandarin = choices("zh");
+        let mandarin = choices_for_runtime("zh", false);
         assert_eq!(mandarin[0].model.id, TranscriptionModelId::Qwen3Asr06B);
         assert_eq!(mandarin[1].model.id, TranscriptionModelId::SenseVoiceSmall);
+    }
+
+    #[test]
+    fn apple_speech_is_only_offered_when_the_runtime_supports_the_locale() {
+        assert!(
+            choices_for_runtime("en", false)
+                .iter()
+                .all(|choice| choice.model.id != TranscriptionModelId::AppleSpeech)
+        );
+        assert_eq!(
+            choices_for_runtime("en", true).last().unwrap().model.id,
+            TranscriptionModelId::AppleSpeech
+        );
+        let apple_speech = definition(TranscriptionModelId::AppleSpeech);
+        assert!(matches!(apple_speech.runtime, ModelRuntime::AppleSpeech));
+        assert_eq!(apple_speech.download_bytes(), None);
+        assert!(model_path(apple_speech).is_err());
     }
 
     #[test]
@@ -608,6 +713,15 @@ mod tests {
 
     #[test]
     fn artifact_verification_checks_size_and_checksum() {
+        const FIXTURE_ARTIFACT: GgufArtifact = GgufArtifact {
+            filename: "fixture.gguf",
+            revision: "fixture",
+            repository: "fixture",
+            bytes: 5,
+            sha256: "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+            architecture: "fixture",
+            variant: "fixture",
+        };
         let model = ModelDefinition {
             id: TranscriptionModelId::ParakeetV2,
             name: "fixture",
@@ -617,13 +731,7 @@ mod tests {
             quality_context: "fixture",
             coverage: "fixture",
             timestamps: "fixture",
-            filename: "fixture.gguf",
-            revision: "fixture",
-            repository: "fixture",
-            bytes: 5,
-            sha256: "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
-            architecture: "fixture",
-            variant: "fixture",
+            runtime: ModelRuntime::Gguf(&FIXTURE_ARTIFACT),
             languages: &["en"],
             accepts_language_hint: false,
             supports_recognition_hints: false,
