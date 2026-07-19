@@ -45,6 +45,7 @@ const MINIMUM_WIDTH: f32 = 860.0;
 const MINIMUM_HEIGHT: f32 = 560.0;
 const SIDEBAR_WIDTH: f32 = 170.0;
 const ACTIVITY_LIMIT: usize = 100;
+const OPENCODE_BETA_DOCS_URL: &str = "https://v2.opencode.ai/";
 
 const CANVAS: u32 = 0x111111;
 const SIDEBAR: u32 = 0x0e0e0e;
@@ -375,7 +376,24 @@ enum ModeSelection {
 enum ModelCatalogState {
     Loading,
     Loaded(ModelCatalog),
+    Missing,
     Failed(String),
+}
+
+fn start_model_catalog_load() -> Receiver<ModelCatalogState> {
+    let (sender, receiver) = sync_channel(1);
+    thread::spawn(move || {
+        let state = if crate::dictation_processor::opencode_installed() {
+            match crate::dictation_processor::load_model_catalog() {
+                Ok(catalog) => ModelCatalogState::Loaded(catalog),
+                Err(error) => ModelCatalogState::Failed(error.to_string()),
+            }
+        } else {
+            ModelCatalogState::Missing
+        };
+        let _ = sender.send(state);
+    });
+    receiver
 }
 
 struct ModelPresentation {
@@ -506,7 +524,7 @@ pub struct AppWindow {
     processing_inputs: ProcessingInputs,
     selected_mode: ModeSelection,
     model_catalog: ModelCatalogState,
-    model_catalog_receiver: Option<Receiver<Result<ModelCatalog, String>>>,
+    model_catalog_receiver: Option<Receiver<ModelCatalogState>>,
     application_catalog: ApplicationCatalogState,
     application_catalog_receiver: Option<Receiver<Vec<InstalledApplication>>>,
     application_search: ProcessingInput,
@@ -559,6 +577,7 @@ impl AppWindow {
                 if window
                     .update(cx, |window, cx| {
                         let model_catalog_changed = window.poll_model_catalog();
+                        let opencode_changed = window.retry_model_catalog();
                         let application_catalog_changed = window.poll_application_catalog();
                         let transcription_changed = window.poll_transcription_download(cx);
                         let setup_changed = window.poll_setup();
@@ -571,6 +590,7 @@ impl AppWindow {
                             cx.notify();
                         }
                         if model_catalog_changed
+                            || opencode_changed
                             || application_catalog_changed
                             || transcription_changed
                             || setup_changed
@@ -620,13 +640,7 @@ impl AppWindow {
                 None,
             )
         } else {
-            let (sender, receiver) = sync_channel(1);
-            thread::spawn(move || {
-                let result = crate::dictation_processor::load_model_catalog()
-                    .map_err(|error| error.to_string());
-                let _ = sender.send(result);
-            });
-            (ModelCatalogState::Loading, Some(receiver))
+            (ModelCatalogState::Loading, Some(start_model_catalog_load()))
         };
         let (application_catalog, application_catalog_receiver) = if preview_mode {
             (ApplicationCatalogState::Loaded(Vec::new()), None)
@@ -815,11 +829,19 @@ impl AppWindow {
         let Ok(result) = receiver.try_recv() else {
             return false;
         };
-        self.model_catalog = match result {
-            Ok(catalog) => ModelCatalogState::Loaded(catalog),
-            Err(error) => ModelCatalogState::Failed(error),
-        };
+        self.model_catalog = result;
         self.model_catalog_receiver = None;
+        true
+    }
+
+    fn retry_model_catalog(&mut self) -> bool {
+        if !matches!(&self.model_catalog, ModelCatalogState::Missing)
+            || !crate::dictation_processor::opencode_installed()
+        {
+            return false;
+        }
+        self.model_catalog = ModelCatalogState::Loading;
+        self.model_catalog_receiver = Some(start_model_catalog_load());
         true
     }
 
@@ -3407,8 +3429,11 @@ impl AppWindow {
             .as_deref();
         let presentation = model_presentation(&self.model_catalog, selected_model);
         let (catalog_status, default_label, matches, variants) = match &self.model_catalog {
-            ModelCatalogState::Loading => (
-                "Loading models from OpenCode...".into(),
+            ModelCatalogState::Loading => {
+                ("Loading OpenCode...".into(), None, Vec::new(), Vec::new())
+            }
+            ModelCatalogState::Missing => (
+                "OpenCode beta required".into(),
                 None,
                 Vec::new(),
                 Vec::new(),
@@ -3592,6 +3617,16 @@ impl AppWindow {
                             .flex_1()
                             .min_w(px(0.0))
                             .child(settings_control("Model", &catalog_status, model_control))
+                            .when(
+                                matches!(&self.model_catalog, ModelCatalogState::Missing),
+                                |field| {
+                                    field.child(
+                                        compact_button("Install OpenCode")
+                                            .id("install-opencode-beta")
+                                            .on_click(|_, _, _| open_opencode_beta_docs()),
+                                    )
+                                },
+                            )
                             .when_some(suggestions, |field, suggestions| field.child(suggestions)),
                     )
                     .child(
@@ -5065,6 +5100,15 @@ fn compact_button(label: impl IntoElement) -> Div {
         .cursor_pointer()
         .hover(|button| button.bg(rgb(SURFACE_HOVER)))
         .child(label)
+}
+
+fn open_opencode_beta_docs() {
+    if let Err(error) = ProcessCommand::new("/usr/bin/open")
+        .arg(OPENCODE_BETA_DOCS_URL)
+        .spawn()
+    {
+        tracing::error!(%error, "could not open the OpenCode beta documentation");
+    }
 }
 
 fn advance_highlight(current: usize, direction: i32, count: usize) -> usize {

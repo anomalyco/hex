@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 use std::io::Read;
+use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 use std::process::{Command, ExitStatus, Stdio};
 use std::sync::OnceLock;
@@ -332,6 +333,21 @@ pub fn load_model_catalog() -> Result<ModelCatalog> {
     Ok(catalog)
 }
 
+pub fn opencode_installed() -> bool {
+    let executable = opencode_executable();
+    if executable.components().count() > 1 {
+        return is_executable(&executable);
+    }
+    std::env::var_os("PATH").is_some_and(|path| {
+        std::env::split_paths(&path).any(|directory| is_executable(&directory.join(&executable)))
+    })
+}
+
+fn is_executable(path: &std::path::Path) -> bool {
+    path.metadata()
+        .is_ok_and(|metadata| metadata.is_file() && metadata.permissions().mode() & 0o111 != 0)
+}
+
 fn opencode_api<T: for<'de> Deserialize<'de>>(path: &str) -> Result<T> {
     let mut command = Command::new(opencode_executable());
     command.args(["api", "get", path]).stdin(Stdio::null());
@@ -471,7 +487,13 @@ fn run_command(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .wrap_err_with(|| format!("could not start opencode2 for {operation}"))?;
+        .map_err(|error| {
+            if error.kind() == std::io::ErrorKind::NotFound {
+                eyre!("opencode2 is not installed")
+            } else {
+                eyre!("could not start opencode2 for {operation}: {error}")
+            }
+        })?;
     let stdout = child.stdout.take().expect("opencode2 stdout must be piped");
     let stderr = child.stderr.take().expect("opencode2 stderr must be piped");
     let stdout = thread::spawn(move || read_output(stdout));
