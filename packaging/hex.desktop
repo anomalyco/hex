@@ -2,7 +2,7 @@
 Type=Application
 Name=HEX
 Comment=Private local voice dictation
-Exec=hex app
+Exec=@HEX_BIN@ app
 Icon=audio-input-microphone
 Terminal=false
 Categories=Utility;Accessibility;

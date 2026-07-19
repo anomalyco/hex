@@ -42,6 +42,12 @@ Install the release binary, desktop launcher, and standard XDG autostart entry:
 ./scripts/install-linux.sh
 ```
 
+Override the standard `~/.local/bin` destination when needed:
+
+```sh
+HEX_INSTALL_DIR="$HOME/dev/bin" ./scripts/install-linux.sh
+```
+
 The autostart entry launches `hex app --hidden`, which starts dictation at login
 without opening the settings window.
 
