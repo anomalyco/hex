@@ -5,6 +5,9 @@ explicit selected-text voice editing, optional context-aware OpenCode
 post-processing, a Metal HUD, bounded paste workers, settings, and a signed GPUI
 app bundle. Streaming commands are a disabled-by-default experimental opt-in;
 meetings remain a developer prototype until their product surface is redesigned.
+An x86_64 Arch/i3 X11 beta now provides hotkey dictation, automatic paste, a
+GPUI shell, and signed user-local updates; it does not yet include commands,
+meetings, native Wayland support, or a package-manager channel.
 
 ## Validate The Coworker Release
 
@@ -34,6 +37,18 @@ Import useful original-Hex preferences once from the preferred Application
 Support file. Validate each field, ignore malformed and unknown values, and
 record completion. The legacy files disagree about launch-at-login, so migration
 must ask or defer rather than guess.
+
+## Validate The Linux X11 Beta
+
+Run a genuine signed update between two published versions on the target
+Arch/i3 machine. Verify exact artifact validation, atomic activation, restart,
+and retained-version rollback. Smoke-test installation, model download, the CLI
+microphone override, hotkey rebinding, locked capture, cancellation, automatic
+paste, tray behavior, autostart, and startup without a tray host.
+
+Keep app-managed updates limited to the user-local direct-install layout. A
+future Arch package must leave updates to the package manager. Add commands,
+context, meetings, or Wayland only as explicit later capability slices.
 
 ## Harden The Real-Time Boundary
 
@@ -102,8 +117,7 @@ Keep commands and profiles in compiled Rust until a second real consumer needs a
 configuration format. Do not add a plugin or agent framework around the current
 deep modules.
 
-Do not add abstract platform seams before a concrete Linux implementation. If
-Linux work begins, introduce adapters only where PipeWire capture, input
-monitoring, keyboard output, foreground context, or action execution requires a
-real alternative. Follow the phased scope, capability contracts, and exit
-criteria in [`LINUX_PORT_PLAN.md`](LINUX_PORT_PLAN.md).
+Do not generalize the concrete macOS and Linux X11 adapters into a platform
+framework. Add seams only when a second implemented adapter requires one.
+Follow the remaining capability contracts and exit criteria in
+[`LINUX_PORT_PLAN.md`](LINUX_PORT_PLAN.md).

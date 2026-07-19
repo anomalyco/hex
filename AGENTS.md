@@ -26,7 +26,9 @@ only in debug builds.
 - `recording_environment`: serialized RAII ownership of idle-sleep prevention,
   output muting, and supported media-player pause/resume behavior.
 - `dictation_processor`: context-selected, deadline-bounded OpenCode rewrite
-  profiles with raw-transcript fallback.
+  profiles with raw-transcript fallback. The macOS app discovers the `opencode2`
+  beta executable, links missing installs to `https://v2.opencode.ai/`, and uses
+  `opencode2 api get` to discover or start its managed service.
 - `parakeet`: the strict-Metal `transcribe.cpp` adapter plus bounded inference,
   processing, ordered output, paste, last-result, and meeting-delta workers.
 - `transcription_models`: the compiled model catalog, language recommendations,
@@ -132,6 +134,9 @@ CoreAudio formats, AppleScript details, or event serialization.
 - Post-processing is optional and best-effort. Empty, failed, or timed-out
   processing falls back to the raw local transcript. It applies to Paste and
   Send, not Captain's Log or meetings.
+- OpenCode availability checks stay off the UI thread. A missing beta install is
+  retried at a coarse interval so installing `opencode2` while Settings is open
+  refreshes the model catalog without restarting HEX.
 - Ordinary resolver commands execute only from completed Moonshine lines.
   Voice-delimited activation and stable control phrases are deliberate exceptions.
 - Contextual commands enter the candidate set only when their predicate matches.
@@ -186,6 +191,20 @@ cargo test
 cargo clippy --all-targets --all-features -- -D warnings
 git diff --check
 ```
+
+The supported Linux beta and release host use x86_64 Arch Linux. Install its
+native build dependencies with:
+
+```sh
+sudo pacman -S --needed base-devel git rustup alsa-lib curl gtk3 libxkbcommon \
+  libxkbcommon-x11 libx11 libxcb openblas vulkan-headers vulkan-icd-loader \
+  shaderc spirv-headers clang cmake pkgconf
+rustup default stable
+```
+
+For a source install, run `scripts/install-linux.sh`, then `hex model install`.
+The installer owns the user-local version layout, desktop entry, and autostart
+entry; only that managed layout participates in automatic updates.
 
 The automatic microphone setting prefers Universal Audio Thunderbolt, then
 Studio Display Microphone, then the macOS default. A saved microphone takes

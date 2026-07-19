@@ -1,5 +1,23 @@
 # Linux Port Plan
 
+## Current Status
+
+The first Linux beta slice is implemented for x86_64 Arch Linux on i3/X11. It
+includes the GPUI settings shell, configurable global hotkey dictation,
+Parakeet transcription through Vulkan with CPU fallback, X11 clipboard
+insertion, Escape cancellation, double-tap lock, a CLI microphone override,
+tray and autostart integration, diagnostics, and signed user-local automatic
+updates.
+
+The remaining release validation is a genuine signed update between two
+published versions on the target Arch/i3 machine, including restart and
+retained-version rollback. Voice commands and application context, meetings,
+native Wayland support, a package-manager channel, and broader UI parity remain
+future slices.
+
+The phases below retain the architectural sequence and acceptance criteria for
+the remaining port. Early phases describe work that has already landed.
+
 ## Active Implementation Target
 
 - Arch Linux rolling on x86_64.
@@ -19,9 +37,9 @@ deep modules with a generic platform framework. The speech, command, dictation,
 worker, event, transcript, and meeting-artifact cores remain shared. Linux work
 adds concrete adapters only where the current implementation reaches macOS.
 
-This is an execution plan, not a commitment to generic Linux support. Before
-desktop integration begins, select one real distro, desktop environment,
-compositor, CPU architecture, and feature contract.
+This is an execution plan, not a commitment to generic Linux support. The
+selected beta contract is Arch Linux rolling, i3/X11, x86_64, and a user-local
+direct install.
 
 ## Recommended Product Sequence
 
@@ -33,9 +51,7 @@ compositor, CPU architecture, and feature contract.
 5. Add automatic meeting offers only after manual capture is reliable.
 6. Treat X11 and Wayland as different capability sets.
 
-If no real target has been selected, use native x86_64 Linux with
-PipeWire/WirePlumber and X11 as the reference complete desktop slice. Do not
-claim native Wayland support from an XWayland implementation.
+Do not claim native Wayland support from an XWayland implementation.
 
 ## Effort Envelope
 
@@ -419,16 +435,11 @@ The migration is successful when:
 - The supported Linux contract passes its real-desktop smoke matrix.
 - Unsupported environments fail with actionable capability diagnostics.
 
-## Decisions Required Before Phase 0
+## Recorded Beta Decisions
 
-Record these decisions at the top of the implementation issue or pull request:
-
-- Target distro and version.
-- Desktop environment and compositor.
-- CPU architecture.
-- Distribution and update channel.
-- X11 complete, Wayland basic, or Wayland appliance contract.
-- Whether meeting recording is required in the first release.
-- Whether automatic insertion is mandatory.
-- Whether a key-containing Linux shortcut is acceptable.
-- Whether a privileged helper is acceptable.
+- Target Arch Linux rolling on x86_64 with i3/X11.
+- Ship through a signed user-local direct-install channel; a future native Arch
+  package must disable app-managed updates.
+- Require automatic insertion and a key-containing `Alt+Space` shortcut.
+- Exclude meetings and native Wayland support from the first beta.
+- Do not install a privileged helper for the X11 contract.
