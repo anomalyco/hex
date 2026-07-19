@@ -31,6 +31,21 @@ impl AudioInput {
         Self::open_device(device)
     }
 
+    pub fn open_matching(query: &str) -> Result<Self> {
+        let host = cpal::default_host();
+        let device = host
+            .input_devices()
+            .wrap_err("could not enumerate input devices")?
+            .find(|device| {
+                device
+                    .to_string()
+                    .to_lowercase()
+                    .contains(&query.to_lowercase())
+            })
+            .ok_or_else(|| eyre!("microphone is unavailable: {query}"))?;
+        Self::open_device(device)
+    }
+
     fn open_device(device: Device) -> Result<Self> {
         let device_name = device.to_string();
         let supported = device
