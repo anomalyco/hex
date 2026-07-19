@@ -22,9 +22,7 @@ const PUBLIC_KEY: [u8; 32] = [
 ];
 
 #[derive(Clone)]
-pub struct InstalledUpdate {
-    pub executable: PathBuf,
-}
+pub struct InstalledUpdate(PathBuf);
 
 #[derive(Deserialize)]
 struct SignedFeed {
@@ -87,15 +85,13 @@ pub fn install_latest() -> Result<Option<InstalledUpdate>> {
         .open(updates.join("update.lock"))?;
     lock.try_lock_exclusive()
         .wrap_err("another Linux update is already in progress")?;
-    let feed_path = updates.join(format!("linux-update-{}.partial", std::process::id()));
-    download(update_url(), &feed_path, MAX_FEED_BYTES)?;
+    let feed_path = updates.join("linux-update.json.partial");
+    download(UPDATE_URL, &feed_path, MAX_FEED_BYTES)?;
     let feed = read_bounded(&feed_path, MAX_FEED_BYTES)?;
     let _ = fs::remove_file(&feed_path);
     let manifest = verify_feed(&feed, &PUBLIC_KEY)?;
-    validate_manifest(&manifest)?;
+    let available = validate_manifest(&manifest)?;
     let installed = Version::parse(env!("CARGO_PKG_VERSION"))?;
-    let available = Version::parse(&manifest.version)
-        .wrap_err("Linux update manifest contains an invalid version")?;
     if available < installed {
         bail!("Linux update feed attempted a downgrade");
     }
@@ -104,11 +100,7 @@ pub fn install_latest() -> Result<Option<InstalledUpdate>> {
     }
 
     let artifact_url = format!("{RELEASE_ORIGIN}{}", manifest.artifact);
-    let partial = updates.join(format!(
-        "{}-{}.download",
-        manifest.version,
-        std::process::id()
-    ));
+    let partial = updates.join("update.download");
     download(&artifact_url, &partial, manifest.bytes)?;
     let activation = (|| {
         verify_artifact(&partial, &manifest)?;
@@ -119,10 +111,10 @@ pub fn install_latest() -> Result<Option<InstalledUpdate>> {
         let _ = fs::remove_file(&partial);
     }
     let executable = activation?;
-    Ok(Some(InstalledUpdate { executable }))
+    Ok(Some(InstalledUpdate(executable)))
 }
 
-fn validate_manifest(manifest: &Manifest) -> Result<()> {
+fn validate_manifest(manifest: &Manifest) -> Result<Version> {
     if manifest.schema_version != 1 {
         bail!(
             "unsupported Linux update schema {}",
@@ -135,7 +127,6 @@ fn validate_manifest(manifest: &Manifest) -> Result<()> {
     if manifest.target != "x86_64-unknown-linux-gnu" {
         bail!("Linux update targets the wrong platform");
     }
-    validate_artifact_name(&manifest.artifact)?;
     if manifest.bytes == 0 || manifest.bytes > MAX_ARTIFACT_BYTES {
         bail!("Linux update artifact has an invalid size");
     }
@@ -147,16 +138,15 @@ fn validate_manifest(manifest: &Manifest) -> Result<()> {
     {
         bail!("Linux update artifact has an invalid checksum");
     }
-    if manifest.artifact != format!("HEX-{}-{}-x86_64-linux", manifest.version, manifest.sha256) {
+    let version = Version::parse(&manifest.version)
+        .wrap_err("Linux update manifest contains an invalid version")?;
+    if !version.pre.is_empty() {
+        bail!("stable Linux updates cannot be prereleases");
+    }
+    if manifest.artifact != format!("HEX-{version}-{}-x86_64-linux", manifest.sha256) {
         bail!("Linux update artifact is not content-addressed");
     }
-    Version::parse(&manifest.version)
-        .wrap_err("Linux update manifest contains an invalid version")?
-        .pre
-        .is_empty()
-        .then_some(())
-        .ok_or_else(|| eyre!("stable Linux updates cannot be prereleases"))?;
-    Ok(())
+    Ok(version)
 }
 
 pub fn relaunch(update: &InstalledUpdate) -> Result<()> {
@@ -168,17 +158,13 @@ pub fn relaunch(update: &InstalledUpdate) -> Result<()> {
             "hex-restart",
             &pid,
         ])
-        .arg(&update.executable)
+        .arg(&update.0)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
         .wrap_err("could not schedule the updated HEX version")?;
     Ok(())
-}
-
-fn update_url() -> &'static str {
-    option_env!("HEX_LINUX_UPDATE_URL").unwrap_or(UPDATE_URL)
 }
 
 fn verify_feed(bytes: &[u8], public_key: &[u8; 32]) -> Result<Manifest> {
@@ -194,18 +180,6 @@ fn verify_feed(bytes: &[u8], public_key: &[u8; 32]) -> Result<Manifest> {
     key.verify_strict(&payload, &signature)
         .wrap_err("Linux update signature verification failed")?;
     serde_json::from_slice(&payload).wrap_err("invalid signed Linux update manifest")
-}
-
-fn validate_artifact_name(name: &str) -> Result<()> {
-    if name.is_empty()
-        || name.contains("..")
-        || name
-            .bytes()
-            .any(|byte| !byte.is_ascii_alphanumeric() && !matches!(byte, b'-' | b'_' | b'.'))
-    {
-        bail!("Linux update artifact name is invalid");
-    }
-    Ok(())
 }
 
 fn safe_owned_directory(path: &Path, user: u32) -> bool {
@@ -338,7 +312,7 @@ fn activate(support: &Path, version: &str, partial: &Path) -> Result<PathBuf> {
     fs::set_permissions(&versions, fs::Permissions::from_mode(0o700))?;
     fs::set_permissions(&version_dir, fs::Permissions::from_mode(0o700))?;
     let executable = version_dir.join("hex");
-    let staged = version_dir.join(format!(".hex-{}.partial", std::process::id()));
+    let staged = version_dir.join(".hex.partial");
     let _ = fs::remove_file(&staged);
     fs::rename(partial, &staged)?;
     fs::set_permissions(&staged, fs::Permissions::from_mode(0o755))?;
@@ -350,7 +324,7 @@ fn activate(support: &Path, version: &str, partial: &Path) -> Result<PathBuf> {
     let previous = fs::read_link(&current)
         .ok()
         .and_then(|path| path.file_name().map(|name| name.to_owned()));
-    let next = support.join(format!(".current-{}.partial", std::process::id()));
+    let next = support.join(".current.partial");
     let _ = fs::remove_file(&next);
     symlink(Path::new("versions").join(version), &next)?;
     fs::rename(&next, &current)?;
@@ -407,14 +381,6 @@ mod tests {
     }
 
     #[test]
-    fn artifact_names_cannot_escape_the_release_origin() {
-        for name in ["../hex", "dir/hex", "https:hex", "hex?old", ""] {
-            assert!(validate_artifact_name(name).is_err(), "accepted {name:?}");
-        }
-        assert!(validate_artifact_name("HEX-2.1.0-x86_64-linux").is_ok());
-    }
-
-    #[test]
     fn manifest_rejects_the_wrong_channel_target_and_checksum() {
         let valid = Manifest {
             schema_version: 1,
@@ -430,6 +396,18 @@ mod tests {
             validate_manifest(&Manifest {
                 channel: "nightly".into(),
                 ..valid
+            })
+            .is_err()
+        );
+        assert!(
+            validate_manifest(&Manifest {
+                schema_version: 1,
+                channel: "stable".into(),
+                target: "x86_64-unknown-linux-gnu".into(),
+                version: "2.1.0".into(),
+                artifact: "../hex".into(),
+                bytes: 3,
+                sha256: "a".repeat(64),
             })
             .is_err()
         );

@@ -61,9 +61,14 @@ struct LinuxApp {
     error: Option<String>,
     settings: crate::linux_settings::LinuxSettings,
     capturing_hotkey: bool,
-    update_receiver: Option<Receiver<Result<Option<InstalledUpdate>, String>>>,
-    update_ready: Option<InstalledUpdate>,
-    update_checked_at: Instant,
+    update: UpdateState,
+}
+
+enum UpdateState {
+    Unmanaged,
+    Checking(Receiver<Result<Option<InstalledUpdate>, String>>),
+    Waiting(Instant),
+    Ready(InstalledUpdate),
 }
 
 pub fn open(event_path: PathBuf, start_hidden: bool) -> Result<()> {
@@ -85,7 +90,11 @@ pub fn open(event_path: PathBuf, start_hidden: bool) -> Result<()> {
             Some(format!("Could not load Linux settings: {error:#}")),
         ),
     };
-    let update_receiver = crate::linux_updater::managed_install().then(start_update_check);
+    let update = if crate::linux_updater::managed_install() {
+        UpdateState::Checking(start_update_check())
+    } else {
+        UpdateState::Unmanaged
+    };
     Application::new().run(move |cx: &mut App| {
         let bounds = Bounds::centered(None, size(px(WINDOW_WIDTH), px(WINDOW_HEIGHT)), cx);
         let window = cx
@@ -112,9 +121,7 @@ pub fn open(event_path: PathBuf, start_hidden: bool) -> Result<()> {
                         error: settings_error.clone(),
                         settings: settings.clone(),
                         capturing_hotkey: false,
-                        update_receiver,
-                        update_ready: None,
-                        update_checked_at: Instant::now(),
+                        update,
                     })
                 },
             )
@@ -379,29 +386,28 @@ impl LinuxApp {
     }
 
     fn refresh(&mut self) {
-        if self.update_receiver.is_none()
-            && self.update_ready.is_none()
-            && self.update_checked_at.elapsed() >= UPDATE_INTERVAL
-        {
-            self.update_receiver = Some(start_update_check());
-            self.update_checked_at = Instant::now();
+        if matches!(&self.update, UpdateState::Waiting(at) if Instant::now() >= *at) {
+            self.update = UpdateState::Checking(start_update_check());
         }
-        let update_result =
-            self.update_receiver
-                .as_ref()
-                .and_then(|receiver| match receiver.try_recv() {
-                    Ok(result) => Some(result),
-                    Err(TryRecvError::Disconnected) => {
-                        Some(Err("update worker stopped unexpectedly".into()))
-                    }
-                    Err(TryRecvError::Empty) => None,
-                });
+        let update_result = match &self.update {
+            UpdateState::Checking(receiver) => match receiver.try_recv() {
+                Ok(result) => Some(result),
+                Err(TryRecvError::Disconnected) => {
+                    Some(Err("update worker stopped unexpectedly".into()))
+                }
+                Err(TryRecvError::Empty) => None,
+            },
+            _ => None,
+        };
         if let Some(result) = update_result {
-            self.update_receiver = None;
-            match result {
-                Ok(update) => self.update_ready = update,
-                Err(error) => tracing::warn!(%error, "Linux update check failed"),
-            }
+            self.update = match result {
+                Ok(Some(executable)) => UpdateState::Ready(executable),
+                Ok(None) => UpdateState::Waiting(Instant::now() + UPDATE_INTERVAL),
+                Err(error) => {
+                    tracing::warn!(%error, "Linux update check failed");
+                    UpdateState::Waiting(Instant::now() + UPDATE_INTERVAL)
+                }
+            };
         }
 
         if let Some(receiver) = &self.listener_result {
@@ -563,7 +569,10 @@ impl Render for LinuxApp {
         } else {
             "Start listening"
         };
-        let update = self.update_ready.clone();
+        let update = match &self.update {
+            UpdateState::Ready(executable) => Some(executable.clone()),
+            _ => None,
+        };
         let transcript_rows = self
             .transcripts
             .iter()

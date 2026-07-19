@@ -43,6 +43,7 @@ const WINDOW_WIDTH: f32 = 1040.0;
 const WINDOW_HEIGHT: f32 = 700.0;
 const MINIMUM_WIDTH: f32 = 860.0;
 const MINIMUM_HEIGHT: f32 = 560.0;
+const OPENCODE_INSTALL_RETRY_INTERVAL: Duration = Duration::from_secs(5);
 const SIDEBAR_WIDTH: f32 = 170.0;
 const ACTIVITY_LIMIT: usize = 100;
 const OPENCODE_BETA_DOCS_URL: &str = "https://v2.opencode.ai/";
@@ -525,6 +526,7 @@ pub struct AppWindow {
     selected_mode: ModeSelection,
     model_catalog: ModelCatalogState,
     model_catalog_receiver: Option<Receiver<ModelCatalogState>>,
+    model_catalog_retry_at: Instant,
     application_catalog: ApplicationCatalogState,
     application_catalog_receiver: Option<Receiver<Vec<InstalledApplication>>>,
     application_search: ProcessingInput,
@@ -577,7 +579,7 @@ impl AppWindow {
                 if window
                     .update(cx, |window, cx| {
                         let model_catalog_changed = window.poll_model_catalog();
-                        let opencode_changed = window.retry_model_catalog();
+                        window.retry_model_catalog();
                         let application_catalog_changed = window.poll_application_catalog();
                         let transcription_changed = window.poll_transcription_download(cx);
                         let setup_changed = window.poll_setup();
@@ -590,7 +592,6 @@ impl AppWindow {
                             cx.notify();
                         }
                         if model_catalog_changed
-                            || opencode_changed
                             || application_catalog_changed
                             || transcription_changed
                             || setup_changed
@@ -761,6 +762,7 @@ impl AppWindow {
             selected_mode: ModeSelection::Default,
             model_catalog,
             model_catalog_receiver,
+            model_catalog_retry_at: Instant::now() + OPENCODE_INSTALL_RETRY_INTERVAL,
             application_catalog,
             application_catalog_receiver,
             application_search,
@@ -834,15 +836,15 @@ impl AppWindow {
         true
     }
 
-    fn retry_model_catalog(&mut self) -> bool {
+    fn retry_model_catalog(&mut self) {
         if !matches!(&self.model_catalog, ModelCatalogState::Missing)
-            || !crate::dictation_processor::opencode_installed()
+            || self.model_catalog_receiver.is_some()
+            || Instant::now() < self.model_catalog_retry_at
         {
-            return false;
+            return;
         }
-        self.model_catalog = ModelCatalogState::Loading;
+        self.model_catalog_retry_at = Instant::now() + OPENCODE_INSTALL_RETRY_INTERVAL;
         self.model_catalog_receiver = Some(start_model_catalog_load());
-        true
     }
 
     fn poll_application_catalog(&mut self) -> bool {
@@ -5103,9 +5105,8 @@ fn compact_button(label: impl IntoElement) -> Div {
 }
 
 fn open_opencode_beta_docs() {
-    if let Err(error) = ProcessCommand::new("/usr/bin/open")
-        .arg(OPENCODE_BETA_DOCS_URL)
-        .spawn()
+    if let Err(error) =
+        crate::commands::execute(crate::commands::Action::OpenUrl(OPENCODE_BETA_DOCS_URL))
     {
         tracing::error!(%error, "could not open the OpenCode beta documentation");
     }
