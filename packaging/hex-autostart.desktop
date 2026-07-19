@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=HEX
+Comment=Private local voice dictation
+Exec=hex app --hidden
+Icon=audio-input-microphone
+Terminal=false
+X-GNOME-Autostart-enabled=true

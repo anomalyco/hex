@@ -36,6 +36,15 @@ press Escape to cancel.
 `cargo run -- dictate` runs the same global dictation service without the UI.
 `cargo run -- listen` remains available for continuous Moonshine transcription.
 
+Install the release binary, desktop launcher, and standard XDG autostart entry:
+
+```sh
+./scripts/install-linux.sh
+```
+
+The autostart entry launches `hex app --hidden`, which starts dictation at login
+without opening the settings window.
+
 Select a microphone with a case-insensitive device-name fragment:
 
 ```sh

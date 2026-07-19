@@ -61,7 +61,7 @@ struct LinuxApp {
     capturing_hotkey: bool,
 }
 
-pub fn open(event_path: PathBuf) -> Result<()> {
+pub fn open(event_path: PathBuf, start_hidden: bool) -> Result<()> {
     let listener_stop = Arc::new(Mutex::new(None));
     let quit_stop = listener_stop.clone();
     let (tray_sender, tray_commands) = mpsc::channel();
@@ -111,6 +111,7 @@ pub fn open(event_path: PathBuf) -> Result<()> {
             )
             .expect("could not open the HEX X11 window");
         let app = window.update(cx, |_, _, cx| cx.entity()).unwrap();
+        let x11_window = find_hex_window().ok();
         app.update(cx, |app, cx| {
             app.start();
             cx.notify();
@@ -131,7 +132,9 @@ pub fn open(event_path: PathBuf) -> Result<()> {
                 while let Ok(command) = tray_commands.try_recv() {
                     match command {
                         TrayCommand::Show => {
-                            set_hex_window_mapped(true);
+                            if let Some(window) = x11_window {
+                                set_x11_window_mapped(window, true);
+                            }
                             let _ = tray_window.update(cx, |_, window, _| {
                                 window.activate_window();
                             });
@@ -171,7 +174,9 @@ pub fn open(event_path: PathBuf) -> Result<()> {
             .update(cx, |_, window, cx| {
                 if close_to_tray {
                     window.on_window_should_close(cx, move |_, _| {
-                        set_hex_window_mapped(false);
+                        if let Some(window) = x11_window {
+                            set_x11_window_mapped(window, false);
+                        }
                         false
                     });
                 }
@@ -179,6 +184,9 @@ pub fn open(event_path: PathBuf) -> Result<()> {
             })
             .ok();
         cx.activate(true);
+        if start_hidden && let Some(window) = x11_window {
+            set_x11_window_mapped(window, false);
+        }
         cx.on_app_quit(move |_| {
             if let Some(stop) = quit_stop
                 .lock()
@@ -197,44 +205,48 @@ pub fn open(event_path: PathBuf) -> Result<()> {
     Ok(())
 }
 
-fn set_hex_window_mapped(mapped: bool) {
-    let result = (|| -> color_eyre::Result<()> {
-        let (connection, screen) = x11rb::rust_connection::RustConnection::connect(None)?;
-        let root = connection.setup().roots[screen].root;
-        let client_list = connection
-            .intern_atom(false, b"_NET_CLIENT_LIST")?
-            .reply()?
-            .atom;
-        let clients = connection
+fn find_hex_window() -> color_eyre::Result<u32> {
+    let (connection, screen) = x11rb::rust_connection::RustConnection::connect(None)?;
+    let root = connection.setup().roots[screen].root;
+    let client_list = connection
+        .intern_atom(false, b"_NET_CLIENT_LIST")?
+        .reply()?
+        .atom;
+    let clients = connection
+        .get_property(
+            false,
+            root,
+            client_list,
+            x11rb::protocol::xproto::AtomEnum::WINDOW,
+            0,
+            u32::MAX,
+        )?
+        .reply()?;
+    let windows = clients.value32().into_iter().flatten();
+    let mut hex_window = None;
+    for window in windows {
+        let title = connection
             .get_property(
                 false,
-                root,
-                client_list,
-                x11rb::protocol::xproto::AtomEnum::WINDOW,
+                window,
+                x11rb::protocol::xproto::AtomEnum::WM_NAME,
+                x11rb::protocol::xproto::AtomEnum::STRING,
                 0,
-                u32::MAX,
+                64,
             )?
-            .reply()?;
-        let windows = clients.value32().into_iter().flatten();
-        let mut hex_window = None;
-        for window in windows {
-            let title = connection
-                .get_property(
-                    false,
-                    window,
-                    x11rb::protocol::xproto::AtomEnum::WM_NAME,
-                    x11rb::protocol::xproto::AtomEnum::STRING,
-                    0,
-                    64,
-                )?
-                .reply()?
-                .value;
-            if title == b"HEX" {
-                hex_window = Some(window);
-                break;
-            }
+            .reply()?
+            .value;
+        if title == b"HEX" {
+            hex_window = Some(window);
+            break;
         }
-        let window = hex_window.ok_or_else(|| color_eyre::eyre::eyre!("HEX window not found"))?;
+    }
+    hex_window.ok_or_else(|| color_eyre::eyre::eyre!("HEX window not found"))
+}
+
+fn set_x11_window_mapped(window: u32, mapped: bool) {
+    let result = (|| -> color_eyre::Result<()> {
+        let (connection, _) = x11rb::rust_connection::RustConnection::connect(None)?;
         if mapped {
             connection.map_window(window)?.check()?;
         } else {
