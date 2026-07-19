@@ -6,3 +6,5 @@
 /.wrangler
 __pycache__/
 *.py[cod]
+/ios/*DerivedData
+/ios/HEXMobile.xcodeproj
