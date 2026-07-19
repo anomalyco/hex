@@ -363,10 +363,9 @@ fn activate(support: &Path, version: &str, partial: &Path) -> Result<PathBuf> {
             && name
                 .to_str()
                 .is_some_and(|name| Version::parse(name).is_ok())
+            && let Err(error) = fs::remove_dir_all(entry.path())
         {
-            if let Err(error) = fs::remove_dir_all(entry.path()) {
-                tracing::warn!(%error, path = %entry.path().display(), "could not prune old HEX version");
-            }
+            tracing::warn!(%error, path = %entry.path().display(), "could not prune old HEX version");
         }
     }
     Ok(current.join("hex"))
