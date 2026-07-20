@@ -20,6 +20,41 @@ struct KeyboardCommand: Codable, Equatable {
     let jobID: String
 }
 
+enum KeyboardLaunchRequest: Equatable {
+    case startSession
+    case startRecording(jobID: String)
+
+    init?(url: URL) {
+        guard url.scheme == "hex-dictation", url.host == "keyboard" else { return nil }
+
+        switch url.path {
+        case "/start":
+            self = .startSession
+        case "/record":
+            guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+                  let jobID = components.queryItems?.first(where: { $0.name == "job" })?.value,
+                  !jobID.isEmpty else { return nil }
+            self = .startRecording(jobID: jobID)
+        default:
+            return nil
+        }
+    }
+
+    var url: URL {
+        switch self {
+        case .startSession:
+            return URL(string: "hex-dictation://keyboard/start")!
+        case .startRecording(let jobID):
+            var components = URLComponents()
+            components.scheme = "hex-dictation"
+            components.host = "keyboard"
+            components.path = "/record"
+            components.queryItems = [URLQueryItem(name: "job", value: jobID)]
+            return components.url!
+        }
+    }
+}
+
 struct KeyboardSnapshot: Codable, Equatable {
     let state: KeyboardDictationState
     let heartbeat: TimeInterval

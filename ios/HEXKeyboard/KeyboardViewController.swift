@@ -198,7 +198,7 @@ final class KeyboardViewController: UIInputViewController {
                 title: "Open HEX",
                 image: "arrow.up.forward.app.fill",
                 enabled: true,
-                opensApp: true
+                launchRequest: .startSession
             )
             return
         }
@@ -210,11 +210,13 @@ final class KeyboardViewController: UIInputViewController {
             } else {
                 detailLabel.text = "Open HEX to prepare on-device speech"
             }
+            let jobID = requestedJobID ?? UUID().uuidString
+            requestedJobID = jobID
             setPrimaryButton(
                 title: "Open HEX",
                 image: "arrow.up.forward.app.fill",
                 enabled: true,
-                opensApp: true
+                launchRequest: .startRecording(jobID: jobID)
             )
             return
         }
@@ -243,7 +245,7 @@ final class KeyboardViewController: UIInputViewController {
                 title: "Open HEX",
                 image: "arrow.up.forward.app.fill",
                 enabled: true,
-                opensApp: true
+                launchRequest: .startSession
             )
         }
     }
@@ -253,15 +255,13 @@ final class KeyboardViewController: UIInputViewController {
         image: String?,
         enabled: Bool,
         recording: Bool = false,
-        opensApp: Bool = false
+        launchRequest: KeyboardLaunchRequest? = nil
     ) {
         primaryActionModel.title = title
         primaryActionModel.image = image ?? ""
         primaryActionModel.enabled = enabled
         primaryActionModel.recording = recording
-        primaryActionModel.destination = opensApp
-            ? URL(string: "hex-dictation://keyboard/start")
-            : nil
+        primaryActionModel.destination = launchRequest?.url
     }
 
     @objc private func performPrimaryAction() {

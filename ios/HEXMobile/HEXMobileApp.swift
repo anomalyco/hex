@@ -13,11 +13,14 @@ struct HEXMobileApp: App {
                 openedFromKeyboard: openedFromKeyboard
             )
                 .onOpenURL { url in
-                    guard url.scheme == "hex-dictation",
-                          url.host == "keyboard",
-                          url.path == "/start" else { return }
+                    guard let request = KeyboardLaunchRequest(url: url) else { return }
                     openedFromKeyboard = true
-                    dictation.startKeyboardSessionFromKeyboard()
+                    switch request {
+                    case .startSession:
+                        dictation.startKeyboardSessionFromKeyboard()
+                    case .startRecording(let jobID):
+                        dictation.startKeyboardRecordingFromKeyboard(jobID: jobID)
+                    }
                 }
                 .onChange(of: scenePhase) { _, phase in
                     if phase == .background {

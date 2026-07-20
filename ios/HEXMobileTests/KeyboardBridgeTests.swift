@@ -28,6 +28,24 @@ final class KeyboardBridgeTests: XCTestCase {
         )
     }
 
+    func testKeyboardRecordingLaunchRoundTripsItsJob() {
+        let request = KeyboardLaunchRequest.startRecording(jobID: "job with spaces")
+
+        XCTAssertEqual(KeyboardLaunchRequest(url: request.url), request)
+    }
+
+    func testKeyboardSessionLaunchDoesNotRequestRecording() {
+        let request = KeyboardLaunchRequest.startSession
+
+        XCTAssertEqual(KeyboardLaunchRequest(url: request.url), request)
+    }
+
+    func testKeyboardRecordingLaunchRequiresAJob() {
+        let url = URL(string: "hex-dictation://keyboard/record")!
+
+        XCTAssertNil(KeyboardLaunchRequest(url: url))
+    }
+
     private func snapshot(heartbeat: TimeInterval, expiresAt: TimeInterval) -> KeyboardSnapshot {
         KeyboardSnapshot(
             state: .ready,

@@ -254,7 +254,13 @@ struct ContentView: View {
 
     @ViewBuilder
     private var handoffSymbol: some View {
-        if dictation.keyboardSessionEnabled {
+        if dictation.isRecording {
+            Image(systemName: "mic.fill")
+                .font(.system(size: 24, weight: .bold))
+                .foregroundStyle(.white)
+                .frame(width: 64, height: 64)
+                .background(Color(hex: 0xA43B40), in: Circle())
+        } else if dictation.keyboardSessionEnabled {
             Image(systemName: "checkmark")
                 .font(.system(size: 24, weight: .bold))
                 .foregroundStyle(.black)
@@ -356,6 +362,9 @@ struct ContentView: View {
     }
 
     private var handoffTitle: String {
+        if dictation.isRecording {
+            return "HEX is listening"
+        }
         if dictation.keyboardSessionEnabled {
             return "HEX is ready"
         }
@@ -371,6 +380,9 @@ struct ContentView: View {
     }
 
     private var handoffDetail: String {
+        if dictation.isRecording {
+            return "Swipe back and speak, then tap Stop and insert in the keyboard."
+        }
         if dictation.keyboardSessionEnabled {
             return "Start near the bottom-left corner to return to the app you were using."
         }

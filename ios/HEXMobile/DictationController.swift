@@ -36,11 +36,13 @@ final class DictationController: NSObject, AVAudioRecorderDelegate {
     private var recordingURL: URL?
     private var sessionTapInstalled = false
     private var lastKeyboardCommandID: String?
+    private var lastKeyboardRecordingRequestJobID: String?
     private var activeKeyboardJobID: String?
     private var keyboardResultID: String?
     private var keyboardResult: String?
     private var keyboardMessage: String?
     private var keyboardSessionRequested = false
+    private var keyboardRecordingRequestedJobID: String?
     private var keyboardSessionExpiresAt: TimeInterval = 0
 
     private(set) var phase = Phase.modelRequired
@@ -117,7 +119,10 @@ final class DictationController: NSObject, AVAudioRecorderDelegate {
     }
 
     func startKeyboardSessionFromKeyboard() {
-        guard !keyboardSessionEnabled else { return }
+        if keyboardSessionEnabled {
+            startRequestedKeyboardRecording()
+            return
+        }
         keyboardSessionRequested = true
 
         switch phase {
@@ -128,6 +133,16 @@ final class DictationController: NSObject, AVAudioRecorderDelegate {
         case .preparingModel, .requestingPermission, .recording, .transcribing:
             break
         }
+    }
+
+    func startKeyboardRecordingFromKeyboard(jobID: String) {
+        guard !jobID.isEmpty,
+              jobID != lastKeyboardRecordingRequestJobID,
+              activeKeyboardJobID == nil,
+              keyboardRecordingRequestedJobID == nil else { return }
+        lastKeyboardRecordingRequestJobID = jobID
+        keyboardRecordingRequestedJobID = jobID
+        startKeyboardSessionFromKeyboard()
     }
 
     private func prepareModel() {
@@ -172,12 +187,20 @@ final class DictationController: NSObject, AVAudioRecorderDelegate {
     }
 
     private func startRecording(keyboardJobID: String? = nil) {
+        if let keyboardJobID {
+            guard activeKeyboardJobID == nil else { return }
+            activeKeyboardJobID = keyboardJobID
+            keyboardResultID = nil
+            keyboardResult = nil
+            keyboardMessage = nil
+        }
         phase = .requestingPermission
         copied = false
 
         Task {
             let granted = await requestMicrophonePermission()
             guard granted else {
+                activeKeyboardJobID = nil
                 phase = .failed("Microphone access is required to record dictation. Enable it in Settings and try again.")
                 return
             }
@@ -185,7 +208,6 @@ final class DictationController: NSObject, AVAudioRecorderDelegate {
             do {
                 stopSessionAudio()
                 try beginCapture()
-                activeKeyboardJobID = keyboardJobID
                 phase = .recording
                 startMetering()
             } catch {
@@ -217,6 +239,7 @@ final class DictationController: NSObject, AVAudioRecorderDelegate {
                 keyboardSessionRemaining = Self.keyboardSessionDuration
                 phase = .ready
                 startKeyboardSessionLoop()
+                startRequestedKeyboardRecording()
             } catch {
                 stopSessionAudio()
                 phase = .failed(error.localizedDescription)
@@ -240,6 +263,7 @@ final class DictationController: NSObject, AVAudioRecorderDelegate {
         keyboardResultID = nil
         keyboardResult = nil
         keyboardMessage = nil
+        keyboardRecordingRequestedJobID = nil
         stopSessionAudio()
         try? AVAudioSession.sharedInstance().setActive(
             false,
@@ -276,9 +300,6 @@ final class DictationController: NSObject, AVAudioRecorderDelegate {
         switch command.kind {
         case .start:
             guard phase == .ready, activeKeyboardJobID == nil else { return }
-            keyboardResultID = nil
-            keyboardResult = nil
-            keyboardMessage = nil
             startRecording(keyboardJobID: command.jobID)
         case .stop:
             guard phase == .recording, activeKeyboardJobID == command.jobID else { return }
@@ -290,6 +311,12 @@ final class DictationController: NSObject, AVAudioRecorderDelegate {
             keyboardMessage = "Dictation cancelled"
             phase = .ready
         }
+    }
+
+    private func startRequestedKeyboardRecording() {
+        guard phase == .ready, let jobID = keyboardRecordingRequestedJobID else { return }
+        keyboardRecordingRequestedJobID = nil
+        startRecording(keyboardJobID: jobID)
     }
 
     private func publishKeyboardSnapshot() {
