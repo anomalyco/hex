@@ -21,7 +21,7 @@ only in debug builds.
 - `suppression`: the bounded macOS event tap, shortcut suppression, and the
   configurable dictation-hotkey state machine.
 - `keyboard`: active-layout key resolution and balanced synthetic shortcuts.
-- `dictation`: warm pre-roll, bounded capture, duration limits, and 16 kHz
+- `dictation`: warm pre-roll, growable capture, and 16 kHz
   local-transcription resampling.
 - `recording_environment`: serialized RAII ownership of idle-sleep prevention,
   output muting, and supported media-player pause/resume behavior.
@@ -94,8 +94,8 @@ CoreAudio formats, AppleScript details, or event serialization.
   modifier-plus-key, and standalone function-key bindings. Capturing a new
   binding suspends global matching.
 - Hold the shortcut to dictate and release to transcribe. Captures shorter than
-  300 ms discard, 450 ms of warm pre-roll protects speech onset, and the
-  60-second limit finalizes automatically.
+  300 ms discard and 450 ms of warm pre-roll protects speech onset. Capture has
+  no automatic duration limit; release, explicit stop, or Escape ends it.
 - When enabled, a second shortcut tap within 300 ms locks dictation. Press the
   shortcut again to finish or Escape to cancel.
 - When commands are enabled, every dictation or paste hotkey action resets
@@ -118,7 +118,10 @@ CoreAudio formats, AppleScript details, or event serialization.
   replacement must succeed before the old stream is dropped. If the persisted
   device is unavailable at startup, log the failure and fall back through the
   compiled preferred-device order to the macOS default. An explicit CLI
-  `--device` remains authoritative for that listener process.
+  `--device` remains authoritative for that listener process. A runtime stream
+  failure cancels an incomplete capture, discards stale chunks, and retries the
+  same selection with bounded backoff; it must not require a settings change or
+  process restart.
 - Feedback volume is persisted from zero through one; zero disables tones.
   Volume changes apply immediately and preview one recording-start tone.
 - Launch at Login uses `SMAppService` for the signed main app. Treat both

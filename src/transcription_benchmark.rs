@@ -9,7 +9,7 @@ use hound::{SampleFormat, WavReader};
 use serde::Deserialize;
 use serde_json::json;
 
-use crate::dictation::{MAXIMUM_DICTATION_DURATION, pad_for_parakeet, resample_for_parakeet};
+use crate::dictation::{pad_for_parakeet, resample_for_parakeet};
 use crate::parakeet::Parakeet;
 
 pub enum Backend {
@@ -322,7 +322,6 @@ fn load_clip(root: &Path, definition: ClipDefinition) -> Result<Clip> {
         .map(|frame| frame.iter().sum::<f32>() / channels as f32)
         .collect::<Vec<_>>();
     let audio_ms = mono.len() as f64 * 1_000.0 / f64::from(spec.sample_rate);
-    validate_audio_duration(&path, audio_ms)?;
     let mut samples = resample_for_parakeet(&mono, spec.sample_rate);
     pad_for_parakeet(&mut samples);
     Ok(Clip {
@@ -331,17 +330,6 @@ fn load_clip(root: &Path, definition: ClipDefinition) -> Result<Clip> {
         samples,
         audio_ms,
     })
-}
-
-fn validate_audio_duration(path: &Path, audio_ms: f64) -> Result<()> {
-    if audio_ms > MAXIMUM_DICTATION_DURATION.as_secs_f64() * 1_000.0 {
-        bail!(
-            "{} exceeds the {} second dictation limit",
-            path.display(),
-            MAXIMUM_DICTATION_DURATION.as_secs()
-        );
-    }
-    Ok(())
 }
 
 fn elapsed_ms(started: Instant) -> f64 {
@@ -485,12 +473,5 @@ mod tests {
         assert_eq!(clip.samples.len(), 24_000);
         assert_eq!(&clip.samples[..2], &[0.0, 0.5]);
         fs::remove_dir_all(directory).unwrap();
-    }
-
-    #[test]
-    fn clips_cannot_exceed_the_production_dictation_limit() {
-        let path = Path::new("long.wav");
-        assert!(validate_audio_duration(path, 60_000.0).is_ok());
-        assert!(validate_audio_duration(path, 60_000.1).is_err());
     }
 }

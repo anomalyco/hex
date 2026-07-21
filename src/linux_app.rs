@@ -1,4 +1,3 @@
-use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, TryRecvError};
@@ -16,7 +15,7 @@ use tray_icon::{Icon, MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEv
 use x11rb::connection::Connection;
 use x11rb::protocol::xproto::ConnectionExt;
 
-use crate::events::{TranscriptPhase, VoiceEvent, VoiceState};
+use crate::events::{EventReader, TranscriptPhase, VoiceEvent, VoiceState};
 use crate::linux_updater::InstalledUpdate;
 
 const WINDOW_WIDTH: f32 = 760.0;
@@ -52,6 +51,7 @@ impl TrayRuntime {
 
 struct LinuxApp {
     event_path: PathBuf,
+    event_reader: EventReader,
     listener_stop: Arc<Mutex<Option<Arc<AtomicBool>>>>,
     listener_result: Option<Receiver<ListenerResult>>,
     listener_worker: Option<JoinHandle<()>>,
@@ -112,6 +112,7 @@ pub fn open(event_path: PathBuf, start_hidden: bool) -> Result<()> {
                 |_, cx| {
                     cx.new(|_| LinuxApp {
                         event_path: event_path.clone(),
+                        event_reader: EventReader::open(&event_path),
                         listener_stop: listener_stop.clone(),
                         listener_result: None,
                         listener_worker: None,
@@ -441,31 +442,28 @@ impl LinuxApp {
             }
         }
 
-        let Ok(contents) = fs::read_to_string(&self.event_path) else {
+        if let Err(error) = self.event_reader.refresh() {
+            tracing::warn!(%error, path = %self.event_reader.path().display(), "could not refresh activity");
             return;
-        };
+        }
         let mut status = None;
         let mut device = None;
         let mut transcripts = Vec::new();
-        for event in contents
-            .lines()
-            .filter_map(|line| serde_json::from_str::<VoiceEvent>(line).ok())
-        {
+        for event in self.event_reader.events() {
             match event {
-                VoiceEvent::SessionStarted { .. } => transcripts.clear(),
                 VoiceEvent::State {
                     state,
                     device: next_device,
                     ..
                 } => {
-                    status = Some(state_label(state));
-                    device = Some(next_device);
+                    status = Some(state_label(*state));
+                    device = Some(next_device.clone());
                 }
                 VoiceEvent::Transcript {
                     phase: TranscriptPhase::Completed,
                     text,
                     ..
-                } if !text.trim().is_empty() => transcripts.push(text),
+                } if !text.trim().is_empty() => transcripts.push(text.clone()),
                 _ => {}
             }
         }

@@ -1,0 +1,213 @@
+# HEX Local Transcription Service and SDK
+
+**Status:** Service discovery, model preparation, and bounded host-audio
+transcription are implemented. The TypeScript package remains to be built.
+
+## Product Boundary
+
+HEX Service owns local transcription models and inference. Host applications
+own recording.
+
+```text
+Host application                         HEX Service
+----------------                         -----------
+microphone permission                    service discovery and authentication
+device selection                         model download and verification
+capture start/stop                       strict-Metal load and prewarm
+levels and waveform        WAV/PCM       resampling and inference
+capture UX                 ---------->   final raw transcript
+```
+
+This gives macOS permission to the application the user intentionally used. An
+OpenCode Desktop microphone button prompts for OpenCode microphone access, not
+HEX access. HEX Service has no microphone entitlement and never captures audio.
+
+## Decisions
+
+| Decision | Reason |
+|---|---|
+| Host owns microphone capture | Correct TCC identity, intuitive permission prompt, no shared permission broker. |
+| Service owns models and inference | One verified model installation and one warm runtime can serve many apps. |
+| Completed audio goes over localhost | Simple final-only contract; no partial transcripts or bidirectional session protocol. |
+| Model preparation is explicit | A transcription call never hides a large network download. |
+| Installed-but-cold models may reload automatically | Warmth is transient and can change because of another client or memory pressure. |
+| No product duration limit | Hotkey capture and service transcription end explicitly; operational resource exhaustion remains a typed failure. |
+| Raw transcripts only | The host owns meaning, rewriting, and insertion. |
+| Node/Electron main or preload only | Browsers and renderers cannot read owner-only discovery state or bootstrap a native process. |
+
+## Service Distribution
+
+The SDK discovers an authenticated service on `127.0.0.1`. A future npm package
+ships the signed, notarized service artifact in optional architecture-specific
+packages. The SDK verifies and demand-launches it from versioned Application
+Support storage without an npm install script, administrator access, login-item
+approval, Dock icon, or foreground window.
+
+Because the service does not capture audio, it does not need microphone TCC
+identity. Full HEX.app remains responsible for its own global-hotkey capture and
+can submit completed audio to the same transcription runtime later.
+
+## Discovery and Authentication
+
+The service binds `127.0.0.1:0` and atomically writes an owner-only discovery
+file through `app_paths`:
+
+```json
+{
+  "port": 49731,
+  "token": "hex_a1b2c3...",
+  "apiVersion": "1",
+  "pid": 12345
+}
+```
+
+Every request requires `Authorization: Bearer <token>`. The server deliberately
+sends no CORS headers. A malformed or incorrect credential returns an empty
+`401` response. The discovery file is removed on clean shutdown and replaced
+when PID and port checks prove an older file stale.
+
+## Wire Protocol V1
+
+```text
+GET  /health
+GET  /capabilities
+GET  /models
+POST /models/{id}/prepare     SSE preparation progress, then ok or error
+POST /transcriptions          audio/wav body, final transcript response
+```
+
+`POST /transcriptions` accepts completed PCM WAV audio. The service reads
+request bodies incrementally, validates the declared format and resource use
+before allocation and inference, downmixes and resamples internally, and does
+not persist audio. V1 accepts 8 kHz through 192 kHz audio with one through eight
+channels and a 64 MiB upload and normalized-audio memory budget.
+
+There is no public duration limit. One upload owns the audio-memory admission
+slot until its queued or active inference releases the clip. Absolute header
+and upload deadlines, byte and normalized-sample budgets, and typed resource
+refusal prevent a defective local client from exhausting the process. A socket
+abort or service shutdown cancels queued work and suppresses a result; native
+inference may finish internally when it cannot be interrupted safely.
+
+### Health
+
+```typescript
+export interface Health {
+  version: string;
+  apiVersion: "1";
+}
+
+export interface Capabilities {
+  audioFormats: readonly ["audio/wav"];
+  partialTranscripts: false;
+  serviceCapture: false;
+}
+```
+
+### Models
+
+```typescript
+export type ModelId =
+  | "parakeet_v2"
+  | "parakeet_v3"
+  | "whisper_large_v3_turbo"
+  | "qwen3_asr06_b"
+  | "sense_voice_small"
+  | "cohere_transcribe"
+  | "apple_speech";
+
+export interface ModelInfo {
+  id: ModelId;
+  name: string;
+  selected: boolean;
+  installed: boolean;
+  verified: boolean;
+  managed: boolean;
+  downloadBytes: number | null;
+  languages: readonly string[];
+}
+
+export type ModelProgress =
+  | { type: "downloading"; downloadedBytes: number; totalBytes: number }
+  | { type: "verifying" }
+  | { type: "loading" };
+```
+
+Preparing means download, checksum verification, strict-Metal load, and
+prewarm. It does not select the model or change full HEX.app settings. The
+service serializes preparation and preserves the existing artifact and warm
+runtime when a replacement fails.
+
+### TypeScript Surface
+
+```typescript
+export function connect(): Promise<ConnectResult>;
+
+export type ConnectResult =
+  | { status: "connected"; client: HexClient }
+  | { status: "not-running"; launch: () => Promise<HexClient> }
+  | { status: "not-installed"; prepareService: () => Promise<HexClient> }
+  | { status: "incompatible"; serviceVersion: string; requiredRange: string };
+
+export interface HexClient {
+  health(): Promise<Health>;
+  capabilities(): Promise<Capabilities>;
+  models: {
+    list(): Promise<ModelInfo[]>;
+    prepare(
+      id: ModelId,
+      options?: { onProgress?: (progress: ModelProgress) => void; signal?: AbortSignal },
+    ): Promise<void>;
+  };
+  transcribe(request: TranscriptionRequest): Promise<TranscriptionResult>;
+  close(): void;
+}
+
+export interface AudioClip {
+  /** PCM WAV bytes. */
+  data: ArrayBuffer;
+  contentType: "audio/wav";
+}
+
+export interface TranscriptionRequest {
+  audio: AudioClip;
+  model: ModelId;
+  language?: string;
+  signal?: AbortSignal;
+}
+
+export interface TranscriptionResult {
+  transcript: string;
+  durationMs: number;
+}
+```
+
+The common host flow is explicit about preparation:
+
+```typescript
+await client.models.prepare("parakeet_v2", { onProgress });
+
+// The host records, meters, and encodes the clip.
+const result = await client.transcribe({
+  audio: { data: wav, contentType: "audio/wav" },
+  model: "parakeet_v2",
+  signal,
+});
+
+input.insert(result.transcript);
+```
+
+`transcribe()` never downloads a model. It returns `model-not-ready` when the
+artifact has not been prepared. It may transparently reload an installed but
+cold model because model residency is transient.
+
+## Non-Goals V1
+
+- No service-owned microphone capture, levels, hotkeys, paste, or clipboard.
+- No partial transcripts.
+- No compressed audio codecs.
+- No OpenCode rewrite profiles.
+- No non-localhost access.
+- No ordinary browser bootstrap.
+- No long-form segmentation, speaker turns, resumability, or search until a
+  real consumer requires them.

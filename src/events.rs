@@ -1,7 +1,12 @@
 use std::fs::{self, File, OpenOptions};
-use std::io::{self, BufWriter, Write};
-use std::path::Path;
+use std::io::{self, BufWriter, Read, Seek, SeekFrom, Write};
+#[cfg(unix)]
+use std::os::unix::fs::MetadataExt;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
+
+use std::collections::VecDeque;
 
 use serde::{Deserialize, Serialize};
 
@@ -43,6 +48,48 @@ pub enum VoiceEvent {
         application: Option<String>,
         browser_url: Option<String>,
     },
+    ApiServerStarted {
+        timestamp_ms: u64,
+        port: u16,
+    },
+    ApiServerStopped {
+        timestamp_ms: u64,
+    },
+    ApiAuthFailed {
+        timestamp_ms: u64,
+        method: String,
+        path: String,
+    },
+}
+
+impl VoiceEvent {
+    pub fn timestamp_ms(&self) -> u64 {
+        match self {
+            Self::SessionStarted { timestamp_ms }
+            | Self::State { timestamp_ms, .. }
+            | Self::Transcript { timestamp_ms, .. }
+            | Self::Command { timestamp_ms, .. }
+            | Self::Dictation { timestamp_ms, .. }
+            | Self::Context { timestamp_ms, .. }
+            | Self::ApiServerStarted { timestamp_ms, .. }
+            | Self::ApiServerStopped { timestamp_ms }
+            | Self::ApiAuthFailed { timestamp_ms, .. } => *timestamp_ms,
+        }
+    }
+
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Self::SessionStarted { .. } => "session_started",
+            Self::State { .. } => "state",
+            Self::Transcript { .. } => "transcript",
+            Self::Command { .. } => "command",
+            Self::Dictation { .. } => "dictation",
+            Self::Context { .. } => "context",
+            Self::ApiServerStarted { .. } => "api_server_started",
+            Self::ApiServerStopped { .. } => "api_server_stopped",
+            Self::ApiAuthFailed { .. } => "api_auth_failed",
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -97,9 +144,22 @@ pub enum TranscriptPhase {
     Completed,
 }
 
+#[derive(Clone)]
 pub struct EventLog {
-    writer: BufWriter<File>,
+    writer: Arc<Mutex<BufWriter<File>>>,
 }
+
+pub struct EventReader {
+    path: PathBuf,
+    offset: u64,
+    pending: Vec<u8>,
+    events: VecDeque<VoiceEvent>,
+    current_context: Option<(Option<String>, Option<String>)>,
+    #[cfg(unix)]
+    file_id: Option<(u64, u64)>,
+}
+
+const EVENT_RETENTION: usize = 1_024;
 
 impl EventLog {
     pub fn create(path: &Path) -> io::Result<Self> {
@@ -108,17 +168,22 @@ impl EventLog {
         }
         let file = OpenOptions::new().create(true).append(true).open(path)?;
         Ok(Self {
-            writer: BufWriter::new(file),
+            writer: Arc::new(Mutex::new(BufWriter::new(file))),
         })
     }
 
-    pub fn emit(&mut self, event: &VoiceEvent) -> io::Result<()> {
-        serde_json::to_writer(&mut self.writer, event)?;
-        self.writer.write_all(b"\n")?;
-        self.writer.flush()
+    pub fn emit(&self, event: &VoiceEvent) -> io::Result<()> {
+        let mut record = serde_json::to_vec(event)?;
+        record.push(b'\n');
+        let mut writer = self
+            .writer
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        writer.write_all(&record)?;
+        writer.flush()
     }
 
-    pub fn dictation(&mut self, phase: DictationPhase, text: impl Into<String>) -> io::Result<()> {
+    pub fn dictation(&self, phase: DictationPhase, text: impl Into<String>) -> io::Result<()> {
         self.emit(&VoiceEvent::Dictation {
             timestamp_ms: now_ms(),
             phase,
@@ -128,7 +193,7 @@ impl EventLog {
     }
 
     pub fn processed_dictation(
-        &mut self,
+        &self,
         phase: DictationPhase,
         text: impl Into<String>,
         processing: Option<DictationProcessing>,
@@ -139,6 +204,116 @@ impl EventLog {
             text: text.into(),
             processing,
         })
+    }
+}
+
+impl EventReader {
+    pub fn open(path: impl Into<PathBuf>) -> Self {
+        Self {
+            path: path.into(),
+            offset: 0,
+            pending: Vec::new(),
+            events: VecDeque::new(),
+            current_context: None,
+            #[cfg(unix)]
+            file_id: None,
+        }
+    }
+
+    pub fn refresh(&mut self) -> io::Result<()> {
+        let metadata = match fs::metadata(&self.path) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                self.reset();
+                return Ok(());
+            }
+            Err(error) => return Err(error),
+        };
+        #[cfg(unix)]
+        {
+            let file_id = (metadata.dev(), metadata.ino());
+            if self.file_id.is_some_and(|current| current != file_id) {
+                self.reset();
+            }
+            self.file_id = Some(file_id);
+        }
+        if metadata.len() < self.offset {
+            self.reset();
+        }
+        let mut file = File::open(&self.path)?;
+        file.seek(SeekFrom::Start(self.offset))?;
+        let mut appended = Vec::new();
+        file.read_to_end(&mut appended)?;
+        self.offset += appended.len() as u64;
+        self.pending.extend_from_slice(&appended);
+
+        let Some(complete) = self
+            .pending
+            .iter()
+            .rposition(|byte| *byte == b'\n')
+            .map(|position| position + 1)
+        else {
+            return Ok(());
+        };
+        let records: Vec<_> = self.pending.drain(..complete).collect();
+        for line in records.split(|byte| *byte == b'\n') {
+            let line = line.strip_suffix(b"\r").unwrap_or(line);
+            if line.is_empty() {
+                continue;
+            }
+            let Ok(event) = serde_json::from_slice(line) else {
+                continue;
+            };
+            self.push(event);
+        }
+        Ok(())
+    }
+
+    #[cfg(any(test, target_os = "linux", all(debug_assertions, target_os = "macos")))]
+    pub fn events(&self) -> &VecDeque<VoiceEvent> {
+        &self.events
+    }
+
+    pub fn recent(&self, limit: usize) -> Vec<VoiceEvent> {
+        self.events.iter().rev().take(limit).cloned().collect()
+    }
+
+    pub fn current_context(&self) -> Option<&(Option<String>, Option<String>)> {
+        self.current_context.as_ref()
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    fn push(&mut self, event: VoiceEvent) {
+        if matches!(event, VoiceEvent::SessionStarted { .. }) {
+            self.events.clear();
+            self.current_context = None;
+        }
+        if let VoiceEvent::Context {
+            application,
+            browser_url,
+            ..
+        } = &event
+        {
+            self.current_context = Some((application.clone(), browser_url.clone()));
+        }
+        self.events.push_back(event);
+        while self.events.len() > EVENT_RETENTION {
+            self.events.pop_front();
+        }
+    }
+
+    fn reset(&mut self) {
+        self.offset = 0;
+        self.pending.clear();
+        self.events.clear();
+        self.current_context = None;
+        #[cfg(unix)]
+        {
+            self.file_id = None;
+        }
     }
 }
 
@@ -221,6 +396,49 @@ mod tests {
         EventLog::create(&path).unwrap().emit(&event).unwrap();
 
         assert_eq!(fs::read_to_string(&path).unwrap().lines().count(), 2);
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn reader_tails_complete_records_and_resets_at_session_boundaries() {
+        let path = std::env::temp_dir().join(format!(
+            "voice-control-event-reader-{}-{}.ndjson",
+            std::process::id(),
+            now_ms()
+        ));
+        let mut reader = EventReader::open(&path);
+        fs::write(
+            &path,
+            concat!(
+                "{\"kind\":\"context\",\"timestamp_ms\":1,\"application\":\"Zed\",\"browser_url\":null}\n",
+                "{\"kind\":\"state\",\"timestamp_ms\":2,\"state\":\"listening\",\"device\":\"Test\"}"
+            ),
+        )
+        .unwrap();
+
+        reader.refresh().unwrap();
+        assert_eq!(reader.events().len(), 1);
+        assert_eq!(
+            reader.current_context().cloned(),
+            Some((Some("Zed".into()), None))
+        );
+
+        let mut file = OpenOptions::new().append(true).open(&path).unwrap();
+        writeln!(file).unwrap();
+        writeln!(file, "{{\"kind\":\"session_started\",\"timestamp_ms\":3}}",).unwrap();
+        writeln!(
+            file,
+            "{{\"kind\":\"state\",\"timestamp_ms\":4,\"state\":\"dictating\",\"device\":\"Test\"}}"
+        )
+        .unwrap();
+
+        reader.refresh().unwrap();
+        assert_eq!(reader.events().len(), 2);
+        assert!(matches!(
+            reader.events().front(),
+            Some(VoiceEvent::SessionStarted { timestamp_ms: 3 })
+        ));
+        assert_eq!(reader.current_context(), None);
         fs::remove_file(path).unwrap();
     }
 }

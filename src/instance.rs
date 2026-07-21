@@ -20,7 +20,7 @@ pub fn acquire(name: &str) -> Result<InstanceLock> {
         .wrap_err_with(|| format!("could not open runtime lock {}", path.display()))?;
     file.try_lock_exclusive().map_err(|error| {
         eyre!(
-            "another Voice Control listener is already running ({}): {error}",
+            "another {name} runtime is already running ({}): {error}",
             path.display()
         )
     })?;

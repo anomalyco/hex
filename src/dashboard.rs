@@ -1,5 +1,4 @@
 use std::collections::VecDeque;
-use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -13,7 +12,9 @@ use ratatui::widgets::{Block, Borders, List, ListItem, Paragraph, Wrap};
 
 use crate::commands::{CommandConfig, CommandScope, Mode};
 use crate::context::ContextSnapshot;
-use crate::events::{CommandOutcome, DictationPhase, TranscriptPhase, VoiceEvent, VoiceState};
+use crate::events::{
+    CommandOutcome, DictationPhase, EventReader, TranscriptPhase, VoiceEvent, VoiceState,
+};
 use crate::meeting::{self, MeetingManifest, MeetingStatus};
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -42,14 +43,15 @@ fn run_loop(
 ) -> io::Result<()> {
     let mut view = View::Commands;
     let mut selected_meeting = 0;
+    let mut events = EventReader::open(&path);
     loop {
-        let events = read_events(&path);
+        events.refresh()?;
         let meetings = meeting::list().unwrap_or_default();
         selected_meeting = selected_meeting.min(meetings.len().saturating_sub(1));
         terminal.draw(|frame| {
             draw(
                 frame,
-                &events,
+                events.events(),
                 &commands,
                 view,
                 &path,
@@ -84,21 +86,6 @@ fn run_loop(
     }
 }
 
-fn read_events(path: &PathBuf) -> VecDeque<VoiceEvent> {
-    let mut events: VecDeque<_> = fs::read_to_string(path)
-        .unwrap_or_default()
-        .lines()
-        .filter_map(|line| serde_json::from_str(line).ok())
-        .collect();
-    if let Some(start) = events
-        .iter()
-        .rposition(|event| matches!(event, VoiceEvent::SessionStarted { .. }))
-    {
-        events.drain(..start);
-    }
-    events
-}
-
 fn draw(
     frame: &mut ratatui::Frame,
     events: &VecDeque<VoiceEvent>,
@@ -123,7 +110,10 @@ fn draw(
         | VoiceEvent::Transcript { .. }
         | VoiceEvent::Command { .. }
         | VoiceEvent::Dictation { .. }
-        | VoiceEvent::Context { .. } => None,
+        | VoiceEvent::Context { .. }
+        | VoiceEvent::ApiServerStarted { .. }
+        | VoiceEvent::ApiServerStopped { .. }
+        | VoiceEvent::ApiAuthFailed { .. } => None,
     });
     let (state, device) = state.unwrap_or((VoiceState::Stopping, "waiting for listener"));
     let (state_label, state_color) = match state {
@@ -143,8 +133,11 @@ fn draw(
         VoiceEvent::SessionStarted { .. }
         | VoiceEvent::State { .. }
         | VoiceEvent::Command { .. }
-        | VoiceEvent::Dictation { .. } => None,
-        VoiceEvent::Context { .. } => None,
+        | VoiceEvent::Dictation { .. }
+        | VoiceEvent::Context { .. }
+        | VoiceEvent::ApiServerStarted { .. }
+        | VoiceEvent::ApiServerStopped { .. }
+        | VoiceEvent::ApiAuthFailed { .. } => None,
     });
     let latest_action = events.iter().rev().find_map(|event| match event {
         VoiceEvent::Command {
@@ -438,7 +431,10 @@ fn draw_activity(
             VoiceEvent::SessionStarted { .. }
             | VoiceEvent::State { .. }
             | VoiceEvent::Transcript { .. }
-            | VoiceEvent::Context { .. } => None,
+            | VoiceEvent::Context { .. }
+            | VoiceEvent::ApiServerStarted { .. }
+            | VoiceEvent::ApiServerStopped { .. }
+            | VoiceEvent::ApiAuthFailed { .. } => None,
         })
         .rev()
         .take(area.height.saturating_sub(2) as usize)

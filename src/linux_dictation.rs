@@ -1,13 +1,13 @@
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{self, RecvTimeoutError, SyncSender, TrySendError};
+use std::sync::mpsc::{self, SyncSender, TrySendError};
 use std::thread;
 use std::time::{Duration, Instant};
 
 use color_eyre::Result;
 use color_eyre::eyre::eyre;
 
-use crate::audio::AudioInput;
+use crate::audio::{AudioInput, AudioInputEvent};
 use crate::dictation::{DictationCapture, Finish};
 use crate::events::{DictationPhase, EventLog, TranscriptPhase, VoiceEvent, VoiceState, now_ms};
 use crate::linux_input::{HotkeyEvent, X11HotkeyMonitor};
@@ -153,26 +153,15 @@ pub fn run(event_path: &Path, device: Option<&str>, shutdown: &AtomicBool) -> Re
             )?;
         }
 
-        let chunk = match input.chunks.recv_timeout(UPDATE_INTERVAL) {
-            Ok(chunk) => chunk,
-            Err(RecvTimeoutError::Timeout) => continue,
-            Err(RecvTimeoutError::Disconnected) => return Err(eyre!("microphone stream stopped")),
+        let chunk = match input.recv_timeout(UPDATE_INTERVAL) {
+            AudioInputEvent::Chunk(chunk) => chunk,
+            AudioInputEvent::Timeout => continue,
+            AudioInputEvent::StreamFailed(error) => {
+                return Err(eyre!("microphone stream stopped: {error}"));
+            }
         };
         if recording {
             capture.push(&chunk);
-            if capture.is_full() {
-                recording = false;
-                submit_capture(&mut capture, &jobs, &mut events, &mut pending)?;
-                emit_state(
-                    &mut events,
-                    if pending > 0 {
-                        VoiceState::Transcribing
-                    } else {
-                        VoiceState::Listening
-                    },
-                    &input.device_name,
-                )?;
-            }
         } else {
             capture.keep_warm(&chunk);
         }

@@ -8529,6 +8529,7 @@ dependencies = [
  "dirs 6.0.0",
  "ed25519-dalek",
  "fs2",
+ "getrandom 0.3.4",
  "gpui",
  "gtk",
  "hound",

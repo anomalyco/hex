@@ -3,14 +3,13 @@ use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::RecvTimeoutError;
 use std::time::{Duration, Instant};
 
 use clap::{Parser, Subcommand};
 use color_eyre::Result;
 use tracing_subscriber::fmt::writer::MakeWriterExt;
 
-use crate::audio::AudioInput;
+use crate::audio::{AudioInput, AudioInputEvent};
 use crate::events::{EventLog, TranscriptPhase, VoiceEvent, VoiceState, now_ms};
 use crate::moonshine::Moonshine;
 
@@ -181,11 +180,13 @@ pub(crate) fn listen(
             last_drop_report = Instant::now();
         }
 
-        let chunk = match input.chunks.recv_timeout(Duration::from_millis(100)) {
-            Ok(chunk) => chunk,
-            Err(RecvTimeoutError::Timeout) => continue,
-            Err(RecvTimeoutError::Disconnected) => {
-                return Err(color_eyre::eyre::eyre!("microphone stream stopped"));
+        let chunk = match input.recv_timeout(Duration::from_millis(100)) {
+            AudioInputEvent::Chunk(chunk) => chunk,
+            AudioInputEvent::Timeout => continue,
+            AudioInputEvent::StreamFailed(error) => {
+                return Err(color_eyre::eyre::eyre!(
+                    "microphone stream stopped: {error}"
+                ));
             }
         };
         recognizer.add_audio(&chunk, input.sample_rate)?;

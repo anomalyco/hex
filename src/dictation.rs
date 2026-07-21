@@ -10,7 +10,6 @@ const RING_BUFFER_DURATION: Duration = Duration::from_secs(1);
 const PRE_ROLL_DURATION: Duration = Duration::from_millis(450);
 pub const MINIMUM_HOLD_DURATION: Duration = Duration::from_millis(300);
 const MINIMUM_PARAKEET_DURATION: Duration = Duration::from_millis(1500);
-pub(crate) const MAXIMUM_DICTATION_DURATION: Duration = Duration::from_secs(60);
 const INITIAL_RECORDING_CAPACITY: Duration = Duration::from_secs(10);
 const PARAKEET_SAMPLE_RATE: u32 = 16_000;
 
@@ -203,9 +202,14 @@ pub(crate) fn pad_for_parakeet(samples: &mut Vec<f32>) {
 }
 
 pub fn resample_for_parakeet(samples: &[f32], source_rate: u32) -> Vec<f32> {
-    let mut recording = Recording::new(Instant::now(), source_rate);
+    try_resample_for_parakeet(samples, source_rate)
+        .expect("microphone sample rate must be resampleable")
+}
+
+pub fn try_resample_for_parakeet(samples: &[f32], source_rate: u32) -> Result<Vec<f32>, String> {
+    let mut recording = Recording::try_new(Instant::now(), source_rate)?;
     recording.push(samples);
-    recording.finish()
+    Ok(recording.finish())
 }
 
 pub struct DictationCapture {
@@ -251,17 +255,23 @@ impl Recording {
     const CHUNK_SIZE: usize = 1024;
 
     fn new(started_at: Instant, source_rate: u32) -> Self {
-        let resampler = (source_rate != PARAKEET_SAMPLE_RATE).then(|| {
-            FftFixedIn::new(
-                source_rate as usize,
-                PARAKEET_SAMPLE_RATE as usize,
-                Self::CHUNK_SIZE,
-                1,
-                1,
-            )
-            .expect("microphone sample rate must be resampleable")
-        });
-        Self {
+        Self::try_new(started_at, source_rate).expect("microphone sample rate must be resampleable")
+    }
+
+    fn try_new(started_at: Instant, source_rate: u32) -> Result<Self, String> {
+        let resampler = (source_rate != PARAKEET_SAMPLE_RATE)
+            .then(|| {
+                FftFixedIn::new(
+                    source_rate as usize,
+                    PARAKEET_SAMPLE_RATE as usize,
+                    Self::CHUNK_SIZE,
+                    1,
+                    1,
+                )
+                .map_err(|error| error.to_string())
+            })
+            .transpose()?;
+        Ok(Self {
             started_at,
             samples: Vec::with_capacity(samples_for(
                 INITIAL_RECORDING_CAPACITY,
@@ -273,7 +283,7 @@ impl Recording {
             resampler,
             #[cfg(target_os = "macos")]
             environment: RecordingEnvironmentState::Disabled,
-        }
+        })
     }
 
     #[cfg(target_os = "macos")]
@@ -283,10 +293,6 @@ impl Recording {
     }
 
     fn push(&mut self, mut samples: &[f32]) {
-        let capacity = samples_for(MAXIMUM_DICTATION_DURATION, self.source_rate);
-        samples = &samples[..samples
-            .len()
-            .min(capacity.saturating_sub(self.source_samples))];
         self.source_samples += samples.len();
         let Some(resampler) = &mut self.resampler else {
             self.samples.extend_from_slice(samples);
@@ -338,10 +344,6 @@ impl Recording {
             self.samples.truncate(expected_samples);
         }
         self.samples
-    }
-
-    fn is_full(&self) -> bool {
-        self.source_samples >= samples_for(MAXIMUM_DICTATION_DURATION, self.source_rate)
     }
 }
 
@@ -429,10 +431,6 @@ impl DictationCapture {
         self.recording = None;
     }
 
-    pub fn is_full(&self) -> bool {
-        self.recording.as_ref().is_some_and(Recording::is_full)
-    }
-
     pub fn finish(&mut self, now: Instant) -> Finish {
         let Some(recording) = self.recording.take() else {
             return Finish::Discard;
@@ -508,6 +506,19 @@ mod tests {
         let samples = clip.into_parakeet_samples();
         assert_eq!(samples[0], 0.5);
         assert!(!samples.contains(&0.25));
+    }
+
+    #[test]
+    fn capture_continues_past_sixty_seconds_until_explicitly_finished() {
+        let mut capture = DictationCapture::new(16_000);
+        let start = Instant::now();
+        capture.start(start);
+        capture.push(&vec![0.5; 61 * 16_000]);
+
+        let Finish::Transcribe(clip) = capture.finish(start + Duration::from_secs(61)) else {
+            panic!("expected transcription")
+        };
+        assert_eq!(clip.duration_ms(), 61_000);
     }
 
     #[test]

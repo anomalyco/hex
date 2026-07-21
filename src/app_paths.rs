@@ -14,3 +14,7 @@ pub fn support_dir() -> Result<PathBuf> {
 pub fn logs_dir() -> Result<PathBuf> {
     Ok(support_dir()?.join("logs"))
 }
+
+pub fn local_api_discovery_file() -> Result<PathBuf> {
+    Ok(support_dir()?.join("local-api.json"))
+}

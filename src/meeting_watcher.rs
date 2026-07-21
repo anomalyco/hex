@@ -63,12 +63,16 @@ struct MeetingUi {
 }
 
 struct RuntimeWorkers {
+    local_api: Option<crate::local_api::LocalApi>,
     recognition: Option<thread::JoinHandle<()>>,
     controller: thread::JoinHandle<()>,
 }
 
 impl RuntimeWorkers {
-    fn join(self) -> Result<()> {
+    fn join(mut self) -> Result<()> {
+        if let Some(mut local_api) = self.local_api.take() {
+            local_api.shutdown();
+        }
         if let Some(worker) = self.recognition {
             worker
                 .join()
@@ -128,6 +132,14 @@ fn run_with_shell_preview(
     let app_event_path = listener
         .as_ref()
         .map(|listener| listener.event_path.clone());
+    let event_log = app_event_path
+        .as_ref()
+        .map(|path| crate::events::EventLog::create(path))
+        .transpose()?;
+    let local_api = event_log
+        .as_ref()
+        .map(|events| crate::local_api::LocalApi::start(events.clone()))
+        .transpose()?;
     let meeting_project_root = listener
         .as_ref()
         .map(|listener| listener.project_root.clone())
@@ -215,6 +227,7 @@ fn run_with_shell_preview(
         (None, None)
     };
     let recognition_worker = listener.map(|listener| {
+        let recognition_events = event_log.clone().expect("listener event log must exist");
         let failure_indicator = indicator_sender.clone();
         let recognition_indicator = indicator_sender.clone();
         let meeting_requests =
@@ -235,7 +248,7 @@ fn run_with_shell_preview(
             }
             if let Err(error) = recognition::listen(
                 &listener.project_root,
-                &listener.event_path,
+                recognition_events,
                 listener.device.as_deref(),
                 config::voice_control(),
                 shutdown,
@@ -248,6 +261,7 @@ fn run_with_shell_preview(
         })
     });
     let runtime_workers = Rc::new(RefCell::new(Some(RuntimeWorkers {
+        local_api,
         recognition: recognition_worker,
         controller: controller_worker,
     })));

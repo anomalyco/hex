@@ -211,7 +211,8 @@ Linux Control and Alt; compile platform-appropriate actions explicitly.
 
 **Exit criteria**
 
-- Hold, release, lock, cancel, and maximum-duration behavior match macOS.
+- Hold, release, lock, and cancel behavior match macOS; capture has no automatic
+  duration limit.
 - The registered chord does not leak into the foreground application.
 - Paste and Send work in at least a browser, terminal, editor, and Electron app.
 - Clipboard restoration does not overwrite an external clipboard change.

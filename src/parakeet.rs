@@ -24,7 +24,7 @@ use crate::paste::Paster;
 use crate::suppression::InputActivity;
 #[cfg(test)]
 use crate::text_replacements::ReplacementSet;
-use crate::transcription::Transcriber;
+use crate::transcription::WarmTranscriber;
 use crate::transcription_models::{TranscriptionSelection, model_path, validate};
 
 pub struct Parakeet {
@@ -388,31 +388,22 @@ impl DictationWorker {
         let inference_output = output_jobs.clone();
         let inference_worker = thread::spawn(move || {
             prioritize_inference_thread();
-            let mut transcriber = match Transcriber::load() {
+            let mut transcriber = match WarmTranscriber::load() {
                 Ok(transcriber) => {
                     tracing::info!("transcription model loaded");
-                    Some(transcriber)
+                    transcriber
                 }
                 Err(error) => {
                     let _ = inference_events.send(WorkerEvent::ModelFailed(error.to_string()));
-                    None
+                    WarmTranscriber::default()
                 }
             };
             while let Ok(command) = inference_receiver.recv() {
                 let job = match command {
                     InferenceCommand::Reload(selection) => {
-                        if transcriber
-                            .as_ref()
-                            .is_some_and(|model| model.matches_selection(&selection))
-                        {
-                            continue;
-                        }
-                        match Transcriber::load_selection(&selection) {
-                            Ok(model) => transcriber = Some(model),
-                            Err(error) => {
-                                let _ = inference_events
-                                    .send(WorkerEvent::ModelFailed(error.to_string()));
-                            }
+                        if let Err(error) = transcriber.activate(&selection) {
+                            let _ =
+                                inference_events.send(WorkerEvent::ModelFailed(error.to_string()));
                         }
                         continue;
                     }
@@ -426,31 +417,17 @@ impl DictationWorker {
                     job_id: job.job_id,
                     stage: DictationJobStage::Transcribing,
                 });
-                if !transcriber
-                    .as_ref()
-                    .is_some_and(|model| model.matches_selection(&job.selection))
-                {
-                    match Transcriber::load_selection(&job.selection) {
-                        Ok(model) => transcriber = Some(model),
-                        Err(error) => {
-                            let _ = inference_output.send(OutputJob::Completed {
-                                job_id: job.job_id,
-                                control: job.control,
-                                target: job.target,
-                                result: Box::new(Err(error.to_string())),
-                            });
-                            continue;
-                        }
+                let transcriber = match transcriber.activate(&job.selection) {
+                    Ok(transcriber) => transcriber,
+                    Err(error) => {
+                        let _ = inference_output.send(OutputJob::Completed {
+                            job_id: job.job_id,
+                            control: job.control,
+                            target: job.target,
+                            result: Box::new(Err(error.to_string())),
+                        });
+                        continue;
                     }
-                }
-                let Some(transcriber) = &mut transcriber else {
-                    let _ = inference_output.send(OutputJob::Completed {
-                        job_id: job.job_id,
-                        control: job.control,
-                        target: job.target,
-                        result: Box::new(Err("transcription is unavailable".into())),
-                    });
-                    continue;
                 };
                 let total_started = job.submitted_at;
                 let queue_ms = total_started.elapsed().as_millis();
@@ -661,7 +638,7 @@ fn join_worker(worker: Option<thread::JoinHandle<()>>, name: &str) {
 }
 
 #[cfg(target_os = "macos")]
-fn prioritize_inference_thread() {
+pub(crate) fn prioritize_inference_thread() {
     const QOS_CLASS_USER_INITIATED: u32 = 0x19;
     unsafe extern "C" {
         fn pthread_set_qos_class_self_np(qos_class: u32, relative_priority: i32) -> i32;
@@ -677,7 +654,7 @@ fn prioritize_inference_thread() {
 }
 
 #[cfg(not(target_os = "macos"))]
-fn prioritize_inference_thread() {}
+pub(crate) fn prioritize_inference_thread() {}
 
 fn queue_error(error: TrySendError<impl Sized>) -> &'static str {
     match error {

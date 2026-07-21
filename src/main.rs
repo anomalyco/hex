@@ -49,6 +49,8 @@ mod linux_transcriber;
 #[cfg(target_os = "linux")]
 mod linux_updater;
 #[cfg(target_os = "macos")]
+mod local_api;
+#[cfg(target_os = "macos")]
 mod login_item;
 #[cfg(target_os = "macos")]
 mod meeting;
@@ -86,6 +88,8 @@ mod transcription;
 mod transcription_benchmark;
 #[cfg_attr(target_os = "linux", allow(dead_code))]
 mod transcription_models;
+#[cfg(target_os = "macos")]
+mod transcription_service;
 
 #[cfg(target_os = "macos")]
 use std::fs::{self, OpenOptions};
@@ -147,6 +151,9 @@ enum Command {
         #[arg(long)]
         device: Option<String>,
     },
+    /// Run the headless local API service.
+    #[command(hide = true)]
+    Service,
     #[cfg(debug_assertions)]
     /// Show the developer recognition dashboard.
     Status,
@@ -256,12 +263,18 @@ fn main() -> Result<()> {
         .ok()
         .and_then(|path| path.file_stem().map(|name| name == "voice-control-watch"))
         .unwrap_or(false);
+    let bundled_service = std::env::current_exe()
+        .ok()
+        .and_then(|path| path.file_stem().map(|name| name == "hex-service"))
+        .unwrap_or(false);
     let command = cli.command.unwrap_or({
         if bundled_watcher {
             Command::App {
                 device: None,
                 preview_dictation: false,
             }
+        } else if bundled_service {
+            Command::Service
         } else {
             Command::Listen { device: None }
         }
@@ -329,15 +342,25 @@ fn main() -> Result<()> {
         Command::Listen { device } => {
             let _instance = instance::acquire("listener")?;
             app_settings::AppSettings::load()?;
+            let events = events::EventLog::create(&event_path)?;
             recognition::listen(
                 &root,
-                &event_path,
+                events,
                 device.as_deref(),
                 config::voice_control(),
                 &SHUTDOWN,
                 None,
                 None,
             )
+        }
+        Command::Service => {
+            app_settings::AppSettings::load()?;
+            let events = events::EventLog::create(&event_path)?;
+            let _local_api = local_api::LocalApi::start(events)?;
+            while !SHUTDOWN.load(Ordering::Relaxed) {
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+            Ok(())
         }
         #[cfg(debug_assertions)]
         Command::Status => dashboard::run(event_path, config::voice_control()),

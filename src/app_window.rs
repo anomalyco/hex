@@ -1,6 +1,5 @@
 use std::cell::RefCell;
-use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::Command as ProcessCommand;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -26,7 +25,7 @@ use crate::commands::{CommandConfig, CommandInfo, CommandScope};
 use crate::dictation_indicator::{DictationIndicatorEvent, DictationIndicatorSender, HudTuning};
 use crate::dictation_processor::ModelCatalog;
 use crate::events::{
-    CommandOutcome, DictationPhase, TranscriptPhase, VoiceEvent, VoiceState, now_ms,
+    CommandOutcome, DictationPhase, EventReader, TranscriptPhase, VoiceEvent, VoiceState, now_ms,
 };
 use crate::login_item::LoginItemStatus;
 use crate::meeting::{self, MeetingManifest, MeetingRequest, MeetingStatus};
@@ -88,7 +87,9 @@ pub fn open_or_focus(
     if let Some(handle) = app_window.borrow().as_ref().copied()
         && handle
             .update(cx, |this, window, cx| {
-                this.event_path = event_path.clone();
+                if this.event_reader.path() != event_path {
+                    this.event_reader = EventReader::open(event_path.clone());
+                }
                 this.meeting_requests = meeting_requests.clone();
                 this.indicator = indicator.clone();
                 this.recognition_start = recognition_start.clone();
@@ -517,7 +518,7 @@ impl ToggleSpring {
 pub struct AppWindow {
     preview: bool,
     pane: Pane,
-    event_path: PathBuf,
+    event_reader: EventReader,
     meeting_requests: SyncSender<MeetingRequest>,
     indicator: DictationIndicatorSender,
     hud_tuning: HudTuning,
@@ -770,7 +771,7 @@ impl AppWindow {
             pane: preview
                 .as_ref()
                 .map_or(Pane::Modes, |preview| Pane::from_preview(preview.pane)),
-            event_path,
+            event_reader: EventReader::open(event_path),
             meeting_requests,
             indicator,
             hud_tuning: HudTuning {
@@ -1348,10 +1349,10 @@ impl AppWindow {
             .selected_event
             .and_then(|index| self.events.get(index))
             .and_then(|event| serde_json::to_string(event).ok());
-        match read_recent_events(&self.event_path) {
-            Ok(recent) => {
-                self.events = recent.events;
-                self.current_context = recent.current_context;
+        match self.event_reader.refresh() {
+            Ok(()) => {
+                self.events = self.event_reader.recent(ACTIVITY_LIMIT);
+                self.current_context = activity_context(&self.event_reader);
                 self.events_error = None;
                 self.selected_event = selected.and_then(|selected| {
                     self.events.iter().position(|event| {
@@ -1360,8 +1361,8 @@ impl AppWindow {
                 });
             }
             Err(error) => {
-                tracing::error!(%error, path = %self.event_path.display(), "could not read activity");
-                self.events_error = Some(error);
+                tracing::error!(%error, path = %self.event_reader.path().display(), "could not read activity");
+                self.events_error = Some(error.to_string());
             }
         }
     }
@@ -4589,7 +4590,7 @@ impl AppWindow {
             .map(|(index, event)| {
                 let selected = self.selected_event == Some(index);
                 let summary = event_summary(event);
-                let age = event_age(event_timestamp(event));
+                let age = event_age(event.timestamp_ms());
                 let boundary = matches!(event, VoiceEvent::SessionStarted { .. });
                 div()
                     .id(("activity-event", index))
@@ -4688,10 +4689,10 @@ impl AppWindow {
             .child(
                 div()
                     .pt_6()
-                    .child(detail_row("Event", event_kind(event)))
+                    .child(detail_row("Event", event.kind()))
                     .child(detail_row(
                         "Timestamp",
-                        format!("{} ms", event_timestamp(event)),
+                        format!("{} ms", event.timestamp_ms()),
                     )),
             )
             .child(
@@ -5924,66 +5925,19 @@ fn meeting_duration(meeting: &MeetingManifest) -> u64 {
     })
 }
 
-struct RecentEvents {
-    events: Vec<VoiceEvent>,
-    current_context: (Option<String>, Option<String>),
-}
-
-fn read_recent_events(path: &Path) -> Result<RecentEvents, String> {
-    let contents = match fs::read_to_string(path) {
-        Ok(contents) => contents,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            return Ok(RecentEvents {
-                events: Vec::new(),
-                current_context: (None, None),
-            });
-        }
-        Err(error) => return Err(error.to_string()),
-    };
-    let mut events = Vec::with_capacity(ACTIVITY_LIMIT);
-    let mut current_context = None;
-    for event in contents
-        .lines()
-        .rev()
-        .filter_map(|line| serde_json::from_str(line).ok())
-    {
-        if current_context.is_none()
-            && let VoiceEvent::Context {
-                application,
-                browser_url,
-                ..
-            } = &event
-        {
-            current_context = Some((
+fn activity_context(reader: &EventReader) -> (Option<String>, Option<String>) {
+    reader
+        .current_context()
+        .map(|(application, browser_url)| {
+            (
                 application.clone(),
                 browser_url
                     .as_deref()
                     .and_then(|url| url::Url::parse(url).ok())
                     .and_then(|url| url.host_str().map(str::to_owned)),
-            ));
-        }
-        if events.len() < ACTIVITY_LIMIT {
-            events.push(event);
-        }
-        if events.len() == ACTIVITY_LIMIT && current_context.is_some() {
-            break;
-        }
-    }
-    Ok(RecentEvents {
-        events,
-        current_context: current_context.unwrap_or_default(),
-    })
-}
-
-fn event_timestamp(event: &VoiceEvent) -> u64 {
-    match event {
-        VoiceEvent::SessionStarted { timestamp_ms }
-        | VoiceEvent::State { timestamp_ms, .. }
-        | VoiceEvent::Transcript { timestamp_ms, .. }
-        | VoiceEvent::Command { timestamp_ms, .. }
-        | VoiceEvent::Dictation { timestamp_ms, .. }
-        | VoiceEvent::Context { timestamp_ms, .. } => *timestamp_ms,
-    }
+            )
+        })
+        .unwrap_or_default()
 }
 
 fn event_age(timestamp_ms: u64) -> String {
@@ -5993,17 +5947,6 @@ fn event_age(timestamp_ms: u64) -> String {
         60..=3_599 => format!("{}m ago", seconds / 60),
         3_600..=86_399 => format!("{}h ago", seconds / 3_600),
         _ => format!("{}d ago", seconds / 86_400),
-    }
-}
-
-fn event_kind(event: &VoiceEvent) -> &'static str {
-    match event {
-        VoiceEvent::SessionStarted { .. } => "session_started",
-        VoiceEvent::State { .. } => "state",
-        VoiceEvent::Transcript { .. } => "transcript",
-        VoiceEvent::Command { .. } => "command",
-        VoiceEvent::Dictation { .. } => "dictation",
-        VoiceEvent::Context { .. } => "context",
     }
 }
 
@@ -6089,6 +6032,13 @@ fn event_summary(event: &VoiceEvent) -> String {
             (Some(application), None) => format!("Context changed to {application}"),
             _ => "Foreground context became unavailable".into(),
         },
+        VoiceEvent::ApiServerStarted { port, .. } => {
+            format!("Local API started on port {port}")
+        }
+        VoiceEvent::ApiServerStopped { .. } => "Local API stopped".into(),
+        VoiceEvent::ApiAuthFailed { method, path, .. } => {
+            format!("Rejected unauthenticated {method} {path}")
+        }
     }
 }
 
@@ -6111,6 +6061,8 @@ fn transcription_selection_is_active(
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+
     use super::*;
 
     #[test]
@@ -6170,11 +6122,12 @@ mod tests {
         }));
         fs::write(&path, lines.join("\n")).unwrap();
 
-        let recent = read_recent_events(&path).unwrap();
+        let mut reader = EventReader::open(&path);
+        reader.refresh().unwrap();
 
-        assert_eq!(recent.events.len(), ACTIVITY_LIMIT);
+        assert_eq!(reader.recent(ACTIVITY_LIMIT).len(), ACTIVITY_LIMIT);
         assert_eq!(
-            recent.current_context,
+            activity_context(&reader),
             (Some("Brave Browser".into()), Some("meet.google.com".into()))
         );
         fs::remove_file(path).unwrap();

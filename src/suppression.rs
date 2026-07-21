@@ -610,15 +610,6 @@ impl DictationHotkey {
         was_recording.then_some(HotkeyAction::Cancel)
     }
 
-    pub fn finish_at_limit(&mut self, option_down: bool) {
-        self.state = if option_down {
-            State::Dirty
-        } else {
-            State::Idle
-        };
-        self.last_release_at = None;
-    }
-
     pub fn process(&mut self, event: InputEvent, now: Instant) -> Option<HotkeyAction> {
         let fresh_key_down = match event {
             InputEvent::Key { code, down, .. } => {
@@ -757,10 +748,6 @@ impl DictationHotkey {
             }
             _ => None,
         }
-    }
-
-    pub fn trigger_is_physically_down(&self) -> bool {
-        trigger_is_physically_down(self.binding, false)
     }
 
     fn trigger_pressed(&self, event: InputEvent, fresh_key_down: bool) -> bool {
@@ -1049,44 +1036,6 @@ mod tests {
             Some(HotkeyAction::Finish)
         );
         assert!(!hotkey.is_recording());
-    }
-
-    #[test]
-    fn maximum_duration_releases_a_locked_hotkey() {
-        let now = Instant::now();
-        let mut hotkey = test_hotkey(false, now);
-
-        hotkey.process(InputEvent::Flags(OPTION_KEY_MASK), now);
-        hotkey.process(InputEvent::Flags(NO_FLAGS), now + Duration::from_millis(80));
-        hotkey.process(
-            InputEvent::Flags(OPTION_KEY_MASK),
-            now + Duration::from_millis(180),
-        );
-        hotkey.process(
-            InputEvent::Flags(NO_FLAGS),
-            now + Duration::from_millis(260),
-        );
-        assert!(hotkey.is_recording());
-
-        hotkey.finish_at_limit(false);
-
-        assert!(!hotkey.is_recording());
-        assert_eq!(
-            hotkey.process(
-                InputEvent::Flags(OPTION_KEY_MASK),
-                now + Duration::from_secs(61)
-            ),
-            Some(HotkeyAction::Start)
-        );
-
-        hotkey.finish_at_limit(true);
-        assert!(!hotkey.is_recording());
-        assert!(hotkey.suppresses_recognition());
-        assert_eq!(
-            hotkey.process(InputEvent::Flags(NO_FLAGS), now + Duration::from_secs(62)),
-            None
-        );
-        assert!(!hotkey.suppresses_recognition());
     }
 
     #[test]

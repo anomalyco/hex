@@ -2,9 +2,10 @@ use std::fs::{self, File};
 use std::io::{ErrorKind, Read};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::str::FromStr;
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, UNIX_EPOCH};
 
 use color_eyre::eyre::{Result, WrapErr, bail};
 use fs2::FileExt;
@@ -22,6 +23,67 @@ pub enum TranscriptionModelId {
     SenseVoiceSmall,
     CohereTranscribe,
     AppleSpeech,
+}
+
+impl TranscriptionModelId {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::ParakeetV2 => "parakeet_v2",
+            Self::ParakeetV3 => "parakeet_v3",
+            Self::WhisperLargeV3Turbo => "whisper_large_v3_turbo",
+            Self::Qwen3Asr06B => "qwen3_asr06_b",
+            Self::SenseVoiceSmall => "sense_voice_small",
+            Self::CohereTranscribe => "cohere_transcribe",
+            Self::AppleSpeech => "apple_speech",
+        }
+    }
+}
+
+impl FromStr for TranscriptionModelId {
+    type Err = color_eyre::Report;
+
+    fn from_str(value: &str) -> Result<Self> {
+        match value {
+            "parakeet_v2" => Ok(Self::ParakeetV2),
+            "parakeet_v3" => Ok(Self::ParakeetV3),
+            "whisper_large_v3_turbo" => Ok(Self::WhisperLargeV3Turbo),
+            "qwen3_asr06_b" => Ok(Self::Qwen3Asr06B),
+            "sense_voice_small" => Ok(Self::SenseVoiceSmall),
+            "cohere_transcribe" => Ok(Self::CohereTranscribe),
+            "apple_speech" => Ok(Self::AppleSpeech),
+            _ => bail!("unknown transcription model: {value}"),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(u8)]
+pub enum ModelPreparationStage {
+    Downloading,
+    Verifying,
+    Loading,
+}
+
+impl ModelPreparationStage {
+    pub fn store(self, stage: &AtomicU8) {
+        stage.store(self as u8, Ordering::Release);
+    }
+
+    pub fn load(stage: &AtomicU8) -> Self {
+        match stage.load(Ordering::Acquire) {
+            value if value == Self::Downloading as u8 => Self::Downloading,
+            value if value == Self::Verifying as u8 => Self::Verifying,
+            value if value == Self::Loading as u8 => Self::Loading,
+            value => panic!("invalid model preparation stage {value}"),
+        }
+    }
+}
+
+#[derive(Deserialize, Serialize)]
+struct VerificationReceipt {
+    bytes: u64,
+    sha256: String,
+    modified_ns: u64,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -480,14 +542,54 @@ pub fn is_installed(model: &ModelDefinition, language: &str) -> bool {
     }
 }
 
+pub fn is_verified(model: &ModelDefinition) -> bool {
+    let Ok(path) = model_path(model) else {
+        return false;
+    };
+    verification_receipt_matches(&path, model)
+}
+
+fn verification_receipt_matches(path: &Path, model: &ModelDefinition) -> bool {
+    let ModelRuntime::Gguf(artifact) = model.runtime else {
+        return false;
+    };
+    let Ok(metadata) = fs::metadata(path) else {
+        return false;
+    };
+    let Ok(receipt) = fs::read(verification_receipt_path(path))
+        .and_then(|data| serde_json::from_slice::<VerificationReceipt>(&data).map_err(Into::into))
+    else {
+        return false;
+    };
+    metadata.len() == artifact.bytes
+        && receipt.bytes == artifact.bytes
+        && receipt.sha256 == artifact.sha256
+        && modified_ns(&metadata).is_some_and(|modified| modified == receipt.modified_ns)
+}
+
 pub fn download_with_progress(
     model: &ModelDefinition,
     canceled: &AtomicBool,
     downloaded_bytes: &AtomicU64,
 ) -> Result<PathBuf> {
+    download_with_stage_progress(
+        model,
+        canceled,
+        downloaded_bytes,
+        &AtomicU8::new(ModelPreparationStage::Downloading as u8),
+    )
+}
+
+pub fn download_with_stage_progress(
+    model: &ModelDefinition,
+    canceled: &AtomicBool,
+    downloaded_bytes: &AtomicU64,
+    stage: &AtomicU8,
+) -> Result<PathBuf> {
     let ModelRuntime::Gguf(artifact) = model.runtime else {
         bail!("{} is installed and managed by macOS", model.name);
     };
+    ModelPreparationStage::Downloading.store(stage);
     check_canceled(canceled)?;
     let directory = models_dir()?;
     fs::create_dir_all(&directory)?;
@@ -505,14 +607,20 @@ pub fn download_with_progress(
     check_canceled(canceled)?;
     let destination = directory.join(artifact.filename);
     if destination.exists() {
+        if is_verified(model) {
+            downloaded_bytes.store(artifact.bytes, Ordering::Relaxed);
+            return Ok(destination);
+        }
+        ModelPreparationStage::Verifying.store(stage);
         match verify_file_with_cancel(&destination, model, canceled) {
             Ok(()) => {
+                write_verification_receipt(&destination, model)?;
                 downloaded_bytes.store(artifact.bytes, Ordering::Relaxed);
                 return Ok(destination);
             }
+            Err(error) if canceled.load(Ordering::Relaxed) => return Err(error),
             Err(error) => {
-                tracing::warn!(%error, path = %destination.display(), "replacing invalid transcription model");
-                fs::remove_file(&destination)?;
+                tracing::warn!(%error, path = %destination.display(), "will replace invalid transcription model after verifying its replacement");
             }
         }
     }
@@ -525,11 +633,13 @@ pub fn download_with_progress(
         Ordering::Relaxed,
     );
     if fs::metadata(&partial).is_ok_and(|metadata| metadata.len() == artifact.bytes) {
+        ModelPreparationStage::Verifying.store(stage);
         match verify_file_with_cancel(&partial, model, canceled) {
             Ok(()) => {
                 File::open(&partial)?.sync_all()?;
                 fs::rename(&partial, &destination)?;
                 File::open(&directory)?.sync_all()?;
+                write_verification_receipt(&destination, model)?;
                 downloaded_bytes.store(artifact.bytes, Ordering::Relaxed);
                 return Ok(destination);
             }
@@ -541,12 +651,19 @@ pub fn download_with_progress(
             }
         }
     }
+    ModelPreparationStage::Downloading.store(stage);
     let mut child = Command::new("curl")
         .args([
             "--fail",
             "--location",
             "--retry",
             "3",
+            "--connect-timeout",
+            "15",
+            "--speed-limit",
+            "1024",
+            "--speed-time",
+            "60",
             "--continue-at",
             "-",
             "--silent",
@@ -581,6 +698,7 @@ pub fn download_with_progress(
         bail!("model download failed with {status}: {}", stderr.trim());
     }
     check_canceled(canceled)?;
+    ModelPreparationStage::Verifying.store(stage);
     if let Err(error) = verify_file_with_cancel(&partial, model, canceled) {
         if !canceled.load(Ordering::Relaxed) {
             let _ = fs::remove_file(&partial);
@@ -590,8 +708,48 @@ pub fn download_with_progress(
     File::open(&partial)?.sync_all()?;
     fs::rename(&partial, &destination)?;
     File::open(&directory)?.sync_all()?;
+    write_verification_receipt(&destination, model)?;
     downloaded_bytes.store(artifact.bytes, Ordering::Relaxed);
     Ok(destination)
+}
+
+fn verification_receipt_path(model_path: &Path) -> PathBuf {
+    model_path.with_extension("gguf.verified.json")
+}
+
+fn modified_ns(metadata: &fs::Metadata) -> Option<u64> {
+    metadata
+        .modified()
+        .ok()?
+        .duration_since(UNIX_EPOCH)
+        .ok()?
+        .as_nanos()
+        .try_into()
+        .ok()
+}
+
+fn write_verification_receipt(path: &Path, model: &ModelDefinition) -> Result<()> {
+    let ModelRuntime::Gguf(artifact) = model.runtime else {
+        bail!("{} has no artifact verification receipt", model.name);
+    };
+    let metadata = fs::metadata(path)?;
+    let receipt = VerificationReceipt {
+        bytes: artifact.bytes,
+        sha256: artifact.sha256.into(),
+        modified_ns: modified_ns(&metadata)
+            .ok_or_else(|| color_eyre::eyre::eyre!("model modification time is unavailable"))?,
+    };
+    let destination = verification_receipt_path(path);
+    let temporary = destination.with_extension("json.tmp");
+    fs::write(&temporary, serde_json::to_vec(&receipt)?)?;
+    File::open(&temporary)?.sync_all()?;
+    fs::rename(temporary, destination)?;
+    File::open(
+        path.parent()
+            .ok_or_else(|| color_eyre::eyre::eyre!("model path has no parent"))?,
+    )?
+    .sync_all()?;
+    Ok(())
 }
 
 fn check_canceled(canceled: &AtomicBool) -> Result<()> {
@@ -663,6 +821,27 @@ mod tests {
         let mandarin = choices_for_runtime("zh", false);
         assert_eq!(mandarin[0].model.id, TranscriptionModelId::Qwen3Asr06B);
         assert_eq!(mandarin[1].model.id, TranscriptionModelId::SenseVoiceSmall);
+    }
+
+    #[test]
+    fn model_ids_have_explicit_stable_wire_names() {
+        for (id, name) in [
+            (TranscriptionModelId::ParakeetV2, "parakeet_v2"),
+            (TranscriptionModelId::ParakeetV3, "parakeet_v3"),
+            (
+                TranscriptionModelId::WhisperLargeV3Turbo,
+                "whisper_large_v3_turbo",
+            ),
+            (TranscriptionModelId::Qwen3Asr06B, "qwen3_asr06_b"),
+            (TranscriptionModelId::SenseVoiceSmall, "sense_voice_small"),
+            (TranscriptionModelId::CohereTranscribe, "cohere_transcribe"),
+            (TranscriptionModelId::AppleSpeech, "apple_speech"),
+        ] {
+            assert_eq!(id.as_str(), name);
+            assert_eq!(name.parse::<TranscriptionModelId>().unwrap(), id);
+            assert_eq!(serde_json::to_value(id).unwrap(), name);
+        }
+        assert!("unknown".parse::<TranscriptionModelId>().is_err());
     }
 
     #[test]
@@ -740,6 +919,46 @@ mod tests {
         assert!(verify_file(&path, &model).is_ok());
         fs::write(&path, b"world").unwrap();
         assert!(verify_file(&path, &model).is_err());
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn verification_receipt_is_invalidated_when_the_artifact_changes() {
+        const FIXTURE_ARTIFACT: GgufArtifact = GgufArtifact {
+            filename: "fixture.gguf",
+            revision: "fixture",
+            repository: "fixture",
+            bytes: 5,
+            sha256: "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+            architecture: "fixture",
+            variant: "fixture",
+        };
+        let model = ModelDefinition {
+            id: TranscriptionModelId::ParakeetV2,
+            name: "fixture",
+            realtime: "fixture",
+            realtime_context: "fixture",
+            quality: "fixture",
+            quality_context: "fixture",
+            coverage: "fixture",
+            timestamps: "fixture",
+            runtime: ModelRuntime::Gguf(&FIXTURE_ARTIFACT),
+            languages: &["en"],
+            accepts_language_hint: false,
+            supports_recognition_hints: false,
+        };
+        let path = std::env::temp_dir().join(format!(
+            "hex-model-receipt-{}-{}",
+            std::process::id(),
+            NEXT_TEMP_FILE.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::write(&path, b"hello").unwrap();
+        write_verification_receipt(&path, &model).unwrap();
+        assert!(verification_receipt_matches(&path, &model));
+        thread::sleep(Duration::from_millis(2));
+        fs::write(&path, b"world").unwrap();
+        assert!(!verification_receipt_matches(&path, &model));
+        let _ = fs::remove_file(verification_receipt_path(&path));
         let _ = fs::remove_file(path);
     }
 

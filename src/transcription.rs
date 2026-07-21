@@ -10,6 +10,11 @@ pub enum Transcriber {
     AppleSpeech(AppleSpeech),
 }
 
+#[derive(Default)]
+pub struct WarmTranscriber {
+    active: Option<Transcriber>,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TranscriptSegment {
@@ -77,6 +82,29 @@ impl Transcriber {
             }),
             Self::AppleSpeech(model) => model.transcribe(samples),
         }
+    }
+}
+
+impl WarmTranscriber {
+    pub fn load() -> Result<Self> {
+        Ok(Self {
+            active: Some(Transcriber::load()?),
+        })
+    }
+
+    pub fn activate(&mut self, selection: &TranscriptionSelection) -> Result<&mut Transcriber> {
+        if !self
+            .active
+            .as_ref()
+            .is_some_and(|model| model.matches_selection(selection))
+        {
+            let candidate = Transcriber::load_selection(selection)?;
+            self.active = Some(candidate);
+        }
+        Ok(self
+            .active
+            .as_mut()
+            .expect("activated transcriber must be available"))
     }
 }
 
