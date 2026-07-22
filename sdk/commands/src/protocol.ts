@@ -1,4 +1,4 @@
-import type { HandlerContext, NativeAction } from "./model.js"
+import type { DictationProtocolConfig, HandlerContext, NativeAction } from "./model.js"
 
 export interface RegistrationCommand {
   readonly id: string
@@ -14,6 +14,7 @@ export interface RegistrationCommand {
 export interface Registration {
   readonly type: "registration"
   readonly protocolVersion: 1
+  readonly dictation?: DictationProtocolConfig
   readonly commands: readonly RegistrationCommand[]
 }
 

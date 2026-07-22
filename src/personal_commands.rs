@@ -14,6 +14,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::commands::{Action, ActionOutcome, CommandConfig, ConfiguredCommand, ContextPredicate};
 use crate::context::ContextSnapshot;
+use crate::dictation::DictationProtocol;
 use crate::keyboard::{Key, Modifiers};
 
 const MAX_FRAME_BYTES: usize = 256 * 1024;
@@ -45,8 +46,19 @@ const MAX_STATUS_ERROR_BYTES: usize = 4096;
 pub struct StatusSnapshot {
     pub active_generation: Option<u64>,
     pub catalog: Vec<StatusCommand>,
+    #[serde(default)]
+    pub dictation: Option<StatusDictationProtocol>,
     pub host_state: HostState,
     pub last_reload_error: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StatusDictationProtocol {
+    pub start: Vec<String>,
+    pub stop: Vec<String>,
+    pub send: Vec<String>,
+    pub cancel: Vec<String>,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -94,6 +106,7 @@ impl Default for StatusSnapshot {
         Self {
             active_generation: None,
             catalog: Vec::new(),
+            dictation: None,
             host_state: HostState::NotConfigured,
             last_reload_error: None,
         }
@@ -182,6 +195,15 @@ fn validate_status(status: &StatusSnapshot) -> Result<()> {
             }
         }
     }
+    if let Some(dictation) = &status.dictation {
+        DictationProtocol::try_new(
+            dictation.start.clone(),
+            dictation.stop.clone(),
+            dictation.send.clone(),
+            dictation.cancel.clone(),
+        )
+        .map_err(|error| eyre!(error))?;
+    }
     Ok(())
 }
 
@@ -247,12 +269,27 @@ fn copy_directory(source: &Path, destination: &Path, overwrite: bool) -> Result<
 }
 
 pub struct PersonalCommands {
-    active: Arc<RwLock<Arc<CommandConfig>>>,
+    active: Arc<RwLock<Arc<RuntimeSnapshot>>>,
     requests: SyncSender<Request>,
     outcomes: Receiver<ActionOutcome>,
     stop: Arc<AtomicBool>,
     worker: Option<thread::JoinHandle<()>>,
     worker_done: Receiver<()>,
+}
+
+#[derive(Clone)]
+pub struct RuntimeSnapshot {
+    pub commands: CommandConfig,
+    pub dictation: Arc<DictationProtocol>,
+}
+
+impl RuntimeSnapshot {
+    pub fn native(commands: CommandConfig) -> Self {
+        Self {
+            commands,
+            dictation: Arc::new(DictationProtocol::default()),
+        }
+    }
 }
 
 struct Invocation {
@@ -318,6 +355,7 @@ struct ToolJob {
 enum HostOutput {
     Registration {
         protocol_version: u8,
+        dictation: Option<RegistrationDictationProtocol>,
         commands: Vec<RegistrationCommand>,
     },
     ToolCall {
@@ -329,6 +367,26 @@ enum HostOutput {
         invocation_id: String,
         result: WireResult,
     },
+}
+
+#[derive(Clone, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct RegistrationDictationProtocol {
+    start: Vec<String>,
+    stop: Vec<String>,
+    send: Vec<String>,
+    cancel: Vec<String>,
+}
+
+impl From<&RegistrationDictationProtocol> for StatusDictationProtocol {
+    fn from(protocol: &RegistrationDictationProtocol) -> Self {
+        Self {
+            start: protocol.start.clone(),
+            stop: protocol.stop.clone(),
+            send: protocol.send.clone(),
+            cancel: protocol.cancel.clone(),
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -485,7 +543,7 @@ impl RestartBackoff {
 
 impl PersonalCommands {
     pub fn start(base: CommandConfig) -> Option<Self> {
-        let active = Arc::new(RwLock::new(Arc::new(base.clone())));
+        let active = Arc::new(RwLock::new(Arc::new(RuntimeSnapshot::native(base.clone()))));
         let (request_sender, requests) = mpsc::sync_channel(32);
         let (outcome_sender, outcomes) = mpsc::sync_channel(64);
         let stop = Arc::new(AtomicBool::new(false));
@@ -509,7 +567,7 @@ impl PersonalCommands {
         })
     }
 
-    pub fn snapshot(&self) -> Arc<CommandConfig> {
+    pub fn snapshot(&self) -> Arc<RuntimeSnapshot> {
         self.active
             .read()
             .expect("command registry poisoned")
@@ -559,7 +617,7 @@ impl Drop for PersonalCommands {
 
 fn run_worker(
     base: CommandConfig,
-    active: Arc<RwLock<Arc<CommandConfig>>>,
+    active: Arc<RwLock<Arc<RuntimeSnapshot>>>,
     requests: Receiver<Request>,
     outcomes: SyncSender<ActionOutcome>,
     stop: Arc<AtomicBool>,
@@ -789,7 +847,7 @@ fn run_worker(
 #[allow(clippy::too_many_arguments)]
 fn reload(
     base: &CommandConfig,
-    active: &RwLock<Arc<CommandConfig>>,
+    active: &RwLock<Arc<RuntimeSnapshot>>,
     event_sender: &SyncSender<HostEvent>,
     workspace: &Path,
     config: &Path,
@@ -808,10 +866,11 @@ fn reload(
         bun,
         host_entrypoint,
     ) {
-        Ok((host, commands, catalog)) => {
-            *active.write().expect("command registry poisoned") = Arc::new(commands);
+        Ok((host, runtime, catalog, dictation)) => {
+            *active.write().expect("command registry poisoned") = Arc::new(runtime);
             status.active_generation = Some(*generation);
             status.catalog = catalog;
+            status.dictation = dictation;
             status.host_state = HostState::Active;
             status.last_reload_error = None;
             persist_status(status);
@@ -841,7 +900,12 @@ fn start_candidate(
     config: &Path,
     bun: &Path,
     host_entrypoint: &Path,
-) -> Result<(HostProcess, CommandConfig, Vec<StatusCommand>)> {
+) -> Result<(
+    HostProcess,
+    RuntimeSnapshot,
+    Vec<StatusCommand>,
+    Option<StatusDictationProtocol>,
+)> {
     let mut child = Command::new(bun)
         .arg(host_entrypoint)
         .arg(config)
@@ -873,18 +937,25 @@ fn start_candidate(
                 event_generation,
                 HostOutput::Registration {
                     protocol_version,
+                    dictation,
                     commands,
                 },
             )) if event_generation == generation => {
                 let catalog = status_catalog(&commands);
-                let compiled =
-                    match compile_registration(base, generation, protocol_version, commands) {
-                        Ok(compiled) => compiled,
-                        Err(error) => {
-                            kill_and_wait(&mut child);
-                            return Err(error);
-                        }
-                    };
+                let status_dictation = dictation.as_ref().map(StatusDictationProtocol::from);
+                let compiled = match compile_registration(
+                    base,
+                    generation,
+                    protocol_version,
+                    dictation,
+                    commands,
+                ) {
+                    Ok(compiled) => compiled,
+                    Err(error) => {
+                        kill_and_wait(&mut child);
+                        return Err(error);
+                    }
+                };
                 let active_sender = event_sender.clone();
                 thread::spawn(move || {
                     while let Ok(event) = candidate_events.recv() {
@@ -903,6 +974,7 @@ fn start_candidate(
                     },
                     compiled,
                     catalog,
+                    status_dictation,
                 ));
             }
             Ok(HostEvent::Closed(event_generation, error)) if event_generation == generation => {
@@ -1160,8 +1232,9 @@ fn compile_registration(
     base: &CommandConfig,
     generation: u64,
     protocol_version: u8,
+    dictation: Option<RegistrationDictationProtocol>,
     commands: Vec<RegistrationCommand>,
-) -> Result<CommandConfig> {
+) -> Result<RuntimeSnapshot> {
     if protocol_version != 1 {
         return Err(eyre!(
             "unsupported personal command protocol version {protocol_version}"
@@ -1216,7 +1289,23 @@ fn compile_registration(
         )?;
         compiled.try_command(configured)?;
     }
-    Ok(compiled)
+    let dictation = match dictation {
+        Some(dictation) => DictationProtocol::try_new(
+            dictation.start,
+            dictation.stop,
+            dictation.send,
+            dictation.cancel,
+        )
+        .map_err(|error| eyre!(error))?,
+        None => DictationProtocol::default(),
+    };
+    compiled.validate_protocol_identity("dictation.start", dictation.start_phrases(), true)?;
+    let controls = dictation.control_phrases().cloned().collect::<Vec<_>>();
+    compiled.validate_protocol_identity("dictation.control", &controls, false)?;
+    Ok(RuntimeSnapshot {
+        commands: compiled,
+        dictation: Arc::new(dictation),
+    })
 }
 
 impl NativeAction {
@@ -1659,15 +1748,17 @@ mod tests {
         let HostOutput::Registration {
             protocol_version,
             commands,
+            ..
         } = registration
         else {
             panic!("expected registration")
         };
         let compiled =
-            compile_registration(&CommandConfig::new(), 7, protocol_version, commands).unwrap();
+            compile_registration(&CommandConfig::new(), 7, protocol_version, None, commands)
+                .unwrap();
 
         assert!(matches!(
-            compiled.resolve(Mode::Listening, "open example", &ContextSnapshot::default()),
+            compiled.commands.resolve(Mode::Listening, "open example", &ContextSnapshot::default()),
             Decision::Execute { action: Action::OpenUrl(url), .. } if url == "https://example.com"
         ));
         let slack = ContextSnapshot {
@@ -1675,7 +1766,9 @@ mod tests {
             ..ContextSnapshot::default()
         };
         assert!(matches!(
-            compiled.resolve(Mode::Listening, "do work", &slack),
+            compiled
+                .commands
+                .resolve(Mode::Listening, "do work", &slack),
             Decision::Execute {
                 id: "handled",
                 action: Action::InvokeHandler { generation: 7 },
@@ -1683,6 +1776,7 @@ mod tests {
         ));
         assert_eq!(
             compiled
+                .commands
                 .catalog()
                 .into_iter()
                 .find(|command| command.id == "handled")
@@ -1691,6 +1785,7 @@ mod tests {
         );
         assert_eq!(
             compiled
+                .commands
                 .catalog()
                 .into_iter()
                 .find(|command| command.id == "native")
@@ -1716,7 +1811,7 @@ mod tests {
         )
         .unwrap();
 
-        assert!(compile_registration(&base, 1, 1, vec![command]).is_err());
+        assert!(compile_registration(&base, 1, 1, None, vec![command]).is_err());
         assert!(matches!(
             base.resolve(
                 Mode::Listening,
@@ -1725,6 +1820,62 @@ mod tests {
             ),
             Decision::Execute { id: "base", .. }
         ));
+    }
+
+    #[test]
+    fn configured_dictation_protocol_replaces_defaults_and_omission_falls_back() {
+        let configured = compile_registration(
+            &CommandConfig::new(),
+            1,
+            1,
+            Some(RegistrationDictationProtocol {
+                start: vec!["begin note".into()],
+                stop: vec!["finish note".into()],
+                send: vec!["send note".into()],
+                cancel: vec!["discard note".into()],
+            }),
+            vec![],
+        )
+        .unwrap();
+        assert!(
+            configured
+                .dictation
+                .start_prefix("Begin note, hello")
+                .is_some()
+        );
+        assert!(
+            configured
+                .dictation
+                .start_prefix("Dictate start, hello")
+                .is_none()
+        );
+
+        let fallback = compile_registration(&CommandConfig::new(), 1, 1, None, vec![]).unwrap();
+        assert!(
+            fallback
+                .dictation
+                .start_prefix("Dictate start, hello")
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn dictation_protocol_collisions_reject_the_whole_registration() {
+        let command: RegistrationCommand = serde_json::from_str(
+            r#"{"id":"personal","phrases":["begin note now"],"execution":{"type":"handler"}}"#,
+        )
+        .unwrap();
+        let protocol = RegistrationDictationProtocol {
+            start: vec!["begin note".into()],
+            stop: vec!["finish note".into()],
+            send: vec!["send note".into()],
+            cancel: vec!["discard note".into()],
+        };
+
+        assert!(
+            compile_registration(&CommandConfig::new(), 1, 1, Some(protocol), vec![command])
+                .is_err()
+        );
     }
 
     #[test]
@@ -1738,7 +1889,7 @@ mod tests {
             r#"{"id":"personal","phrases":["go to sleep"],"execution":{"type":"handler"}}"#,
         ] {
             let command = serde_json::from_str(input).unwrap();
-            assert!(compile_registration(&base, 1, 1, vec![command]).is_err());
+            assert!(compile_registration(&base, 1, 1, None, vec![command]).is_err());
         }
     }
 
@@ -1748,7 +1899,7 @@ mod tests {
             r#"{"id":"bad","phrases":["bad"],"when":{"browserHost":"https://x.com/path"},"execution":{"type":"handler"}}"#,
         )
         .unwrap();
-        assert!(compile_registration(&CommandConfig::new(), 1, 1, vec![command]).is_err());
+        assert!(compile_registration(&CommandConfig::new(), 1, 1, None, vec![command]).is_err());
 
         let context = ContextSnapshot {
             application: Some("Brave Browser".into()),
@@ -1969,6 +2120,12 @@ mod tests {
                 },
                 execution: StatusExecution::Native,
             }],
+            dictation: Some(StatusDictationProtocol {
+                start: vec!["begin note".into()],
+                stop: vec!["finish note".into()],
+                send: vec!["send note".into()],
+                cancel: vec!["discard note".into()],
+            }),
             host_state: HostState::Active,
             last_reload_error: None,
         };

@@ -28,12 +28,19 @@ describe("command model", () => {
       home: { phrases: ["open home"] as const, action: openUrl("https://example.com") },
     }
     const config = defineHexConfig({
+      dictation: {
+        start: ["begin note"],
+        stop: ["finish note"],
+        send: ["send note"],
+        cancel: ["discard note"],
+      },
       commands: {
         ...navigation,
         slack: { phrases: ["open slack"], run: openApplication("Slack") },
       },
     })
     expect(Object.keys(config.commands)).toEqual(["home", "slack"])
+    expect(config.dictation.send).toEqual(["send note"])
   })
 
   it("contextually types Promise handlers through the shared config model", () => {

@@ -255,6 +255,43 @@ impl CommandConfig {
         Ok(())
     }
 
+    pub fn validate_protocol_identity(
+        &self,
+        id: &str,
+        phrases: &[String],
+        streaming_prefix: bool,
+    ) -> Result<(), CommandError> {
+        self.validate_personal_identity(id, phrases)?;
+        let protocol = ConfiguredCommand::protocol_literal(id, phrases.iter().cloned())?;
+        for existing in &self.commands {
+            let conflicts = if streaming_prefix {
+                existing.conflicts_at_prefix(&protocol)
+            } else {
+                existing.conflicts_with(&protocol)
+            };
+            if conflicts {
+                return Err(CommandError::OverlappingPatterns {
+                    first: existing.id().into(),
+                    second: id.into(),
+                });
+            }
+        }
+        if streaming_prefix {
+            for phrase in phrases {
+                let phrase = normalize(phrase);
+                let words = phrase.split_whitespace().collect::<Vec<_>>();
+                for reserved in self.wake_phrases.iter().chain(&self.sleep_phrases) {
+                    let reserved = normalize(reserved);
+                    let reserved_words = reserved.split_whitespace().collect::<Vec<_>>();
+                    if words.starts_with(&reserved_words) || reserved_words.starts_with(&words) {
+                        return Err(CommandError::ReservedPhrase { phrase });
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
     pub fn resolve<'a>(
         &'a self,
         mode: Mode,

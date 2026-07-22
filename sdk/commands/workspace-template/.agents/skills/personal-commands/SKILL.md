@@ -1,5 +1,26 @@
 # Custom Commands
 
+Replace the native voice-dictation protocol declaratively when desired:
+
+```ts
+import { defineHexConfig } from "@hex/commands"
+
+export default defineHexConfig({
+  dictation: {
+    start: ["begin note"],
+    stop: ["finish note"],
+    send: ["send note"],
+    cancel: ["discard note"],
+  },
+  commands: {},
+})
+```
+
+`start` is a streaming utterance prefix while HEX is listening. The other
+controls are streaming suffixes only during an active voice capture. This block
+replaces the native phrases exactly and does not define command handlers. If it
+is omitted, HEX uses its built-in protocol.
+
 Use a handler with the provided `hex` capabilities for ordinary commands:
 
 ```ts

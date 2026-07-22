@@ -10,8 +10,8 @@ use crate::audio::{RecoveringAudioInput, RecoveringAudioInputEvent};
 use crate::commands::{Action, ActionExecutor, ActionOutcome, CommandConfig, Decision, Mode};
 use crate::context::{ContextMonitor, ContextSnapshot};
 use crate::dictation::{
-    ControlStability, DictationCapture, DictationControl, Finish, MINIMUM_HOLD_DURATION,
-    dictation_control_suffix, dictation_start_prefix,
+    ControlStability, DictationCapture, DictationControl, DictationProtocol, Finish,
+    MINIMUM_HOLD_DURATION,
 };
 use crate::dictation_indicator::{DictationIndicatorEvent, DictationIndicatorSender};
 use crate::events::{
@@ -45,6 +45,9 @@ pub fn listen(
     meeting_requests: Option<SyncSender<MeetingRequest>>,
 ) -> Result<()> {
     let commands = Arc::new(commands);
+    let native_runtime = Arc::new(crate::personal_commands::RuntimeSnapshot::native(
+        commands.as_ref().clone(),
+    ));
     shutdown.store(false, Ordering::Relaxed);
     let (microphone_revision, microphone) = crate::app_settings::microphone_selection();
     let mut input =
@@ -73,7 +76,7 @@ pub fn listen(
     let mut edit_context = None;
     let mut edit_pending_since = None;
     let mut mode = Mode::Listening;
-    let mut voice_capture = false;
+    let mut voice_protocol: Option<Arc<DictationProtocol>> = None;
     let mut control_stability = ControlStability::default();
     let mut last_update = Instant::now();
     let recording_environment = RecordingEnvironmentController::start();
@@ -195,7 +198,7 @@ pub fn listen(
         }
         let hotkey_capture_active = crate::app_settings::hotkey_capture_active();
         let hotkey_capture_suspended = hotkey_capture_active || input.is_recovering();
-        if hotkey_capture_suspended && !voice_capture {
+        if hotkey_capture_suspended && voice_protocol.is_none() {
             edit_pending_since = None;
             let normal_action = hotkey.suspend();
             let edit_action = edit_hotkey.suspend();
@@ -218,8 +221,8 @@ pub fn listen(
             if hotkey_capture_suspended {
                 continue;
             }
-            if voice_capture && input_event.is_escape_down() {
-                voice_capture = false;
+            if voice_protocol.is_some() && input_event.is_escape_down() {
+                voice_protocol = None;
                 control_stability.reset();
                 reset_recognizer(&mut recognizer)?;
                 dictation.cancel();
@@ -247,10 +250,10 @@ pub fn listen(
             }
             if let Some(action) = hotkey.process(input_event, Instant::now()) {
                 if matches!(action, HotkeyAction::PasteLast | HotkeyAction::PasteMeeting) {
-                    voice_capture = false;
+                    voice_protocol = None;
                     control_stability.reset();
                 }
-                if !voice_capture {
+                if voice_protocol.is_none() {
                     handle_hotkey_action(
                         action,
                         &mut recognizer,
@@ -265,7 +268,7 @@ pub fn listen(
                 }
             }
             if let Some(action) = edit_hotkey.process(input_event, Instant::now())
-                && !voice_capture
+                && voice_protocol.is_none()
             {
                 if matches!(action, HotkeyAction::Start) {
                     edit_pending_since = Some(Instant::now());
@@ -324,7 +327,7 @@ pub fn listen(
         let missed_input_event = input_monitor.take_missed_event();
         if !hotkey_capture_active
             && let Some(action) = hotkey.reconcile(missed_input_event)
-            && !voice_capture
+            && voice_protocol.is_none()
         {
             tracing::warn!("recovered a missed dictation hotkey release");
             handle_hotkey_action(
@@ -341,7 +344,7 @@ pub fn listen(
         }
         if !hotkey_capture_active
             && let Some(action) = edit_hotkey.reconcile(missed_input_event)
-            && !voice_capture
+            && voice_protocol.is_none()
             && edit_pending_since.take().is_none()
         {
             tracing::warn!("recovered a missed voice edit hotkey release");
@@ -369,23 +372,24 @@ pub fn listen(
         input_monitor.set_escape_cancels(
             hotkey.is_recording()
                 || edit_hotkey.is_recording()
-                || voice_capture
+                || voice_protocol.is_some()
                 || dictation_worker.pending_count() > 0,
         );
         if received_worker_event {
             emit_engine_state(
                 &mut events,
-                hotkey.is_recording() || edit_hotkey.is_recording() || voice_capture,
+                hotkey.is_recording() || edit_hotkey.is_recording() || voice_protocol.is_some(),
                 &dictation_worker,
                 mode,
                 input.device_name(),
             )?;
         }
 
-        let capture_idle = !hotkey.is_recording() && !edit_hotkey.is_recording() && !voice_capture;
+        let capture_idle =
+            !hotkey.is_recording() && !edit_hotkey.is_recording() && voice_protocol.is_none();
         let audio_event = input.recv_timeout(Duration::from_millis(20), capture_idle);
         match audio_event {
-            RecoveringAudioInputEvent::Chunk(samples) if voice_capture => {
+            RecoveringAudioInputEvent::Chunk(samples) if voice_protocol.is_some() => {
                 if let Some(indicator) = &indicator {
                     indicator.meter(&samples);
                 }
@@ -422,8 +426,8 @@ pub fn listen(
             }
             RecoveringAudioInputEvent::Interrupted => {
                 let was_recording =
-                    hotkey.is_recording() || edit_hotkey.is_recording() || voice_capture;
-                voice_capture = false;
+                    hotkey.is_recording() || edit_hotkey.is_recording() || voice_protocol.is_some();
+                voice_protocol = None;
                 control_stability.reset();
                 edit_context = None;
                 edit_pending_since = None;
@@ -461,10 +465,20 @@ pub fn listen(
             && let Some(action_executor) = &action_executor
         {
             for update in recognizer.update()? {
+                let active_runtime = personal_commands
+                    .as_ref()
+                    .map_or_else(|| native_runtime.clone(), |runtime| runtime.snapshot());
                 let is_completed = matches!(update.phase, TranscriptPhase::Completed);
-                if mode == Mode::Listening && !voice_capture && voice_capture_start(&update.text) {
+                if mode == Mode::Listening
+                    && voice_protocol.is_none()
+                    && active_runtime
+                        .dictation
+                        .start_prefix(&update.text)
+                        .is_some()
+                {
                     start_voice_capture(
-                        &mut voice_capture,
+                        &mut voice_protocol,
+                        active_runtime.dictation.clone(),
                         &mut control_stability,
                         recognizer,
                         &mut dictation,
@@ -482,15 +496,17 @@ pub fn listen(
                     })?;
                     break;
                 }
-                if voice_capture {
-                    let control =
-                        dictation_control_suffix(&update.text).map(|(control, _)| control);
+                if let Some(protocol) = &voice_protocol {
+                    let control = protocol
+                        .control_suffix(&update.text)
+                        .map(|(control, _)| control);
                     if let Some(control) = control_stability.observe(control, is_completed) {
-                        voice_capture = false;
+                        let protocol = voice_protocol.take().expect("voice protocol is active");
                         recognizer.reset_stream()?;
                         handle_voice_dictation_control(
                             control,
                             &update.text,
+                            protocol,
                             &mut dictation,
                             &dictation_worker,
                             mode,
@@ -510,13 +526,11 @@ pub fn listen(
                     text: update.text.clone(),
                 })?;
                 if is_completed {
-                    let active_commands = personal_commands
-                        .as_ref()
-                        .map_or_else(|| commands.clone(), |runtime| runtime.snapshot());
                     handle_command(
-                        &active_commands,
+                        &active_runtime.commands,
                         &mut mode,
-                        &mut voice_capture,
+                        &mut voice_protocol,
+                        active_runtime.dictation.clone(),
                         &mut control_stability,
                         recognizer,
                         &mut dictation,
@@ -560,13 +574,10 @@ fn load_command_recognizer(
     receiver
 }
 
-fn voice_capture_start(heard: &str) -> bool {
-    dictation_start_prefix(heard).is_some()
-}
-
 #[allow(clippy::too_many_arguments)]
 fn start_voice_capture(
-    voice_capture: &mut bool,
+    voice_protocol: &mut Option<Arc<DictationProtocol>>,
+    protocol: Arc<DictationProtocol>,
     control_stability: &mut ControlStability,
     recognizer: &mut Moonshine,
     dictation: &mut DictationCapture,
@@ -577,7 +588,7 @@ fn start_voice_capture(
 ) -> Result<()> {
     recognizer.reset_stream()?;
     dictation.start_voice(Instant::now());
-    *voice_capture = true;
+    *voice_protocol = Some(protocol);
     control_stability.reset();
     feedback::play(Tone::DictationStart);
     events.dictation(DictationPhase::Started, "")?;
@@ -616,6 +627,7 @@ fn handle_hotkey_action(
                 dictation,
                 worker,
                 TranscriptionTarget::Paste,
+                None,
                 context,
                 device,
                 events,
@@ -730,6 +742,7 @@ fn handle_edit_hotkey_action(
                 dictation,
                 worker,
                 TranscriptionTarget::Edit,
+                None,
                 &context,
                 device,
                 events,
@@ -774,7 +787,8 @@ fn reset_recognizer(recognizer: &mut Option<Moonshine>) -> Result<()> {
 fn handle_command(
     commands: &CommandConfig,
     mode: &mut Mode,
-    voice_capture: &mut bool,
+    voice_protocol: &mut Option<Arc<DictationProtocol>>,
+    active_protocol: Arc<DictationProtocol>,
     control_stability: &mut ControlStability,
     recognizer: &mut Moonshine,
     dictation: &mut DictationCapture,
@@ -811,7 +825,8 @@ fn handle_command(
             action: Action::StartDictation,
         } => {
             start_voice_capture(
-                voice_capture,
+                voice_protocol,
+                active_protocol,
                 control_stability,
                 recognizer,
                 dictation,
@@ -937,10 +952,12 @@ fn emit_engine_state(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn finish_dictation(
     capture: &mut DictationCapture,
     worker: &DictationWorker,
     target: TranscriptionTarget,
+    protocol: Option<Arc<DictationProtocol>>,
     context: &ContextSnapshot,
     device: &str,
     events: &mut EventLog,
@@ -960,7 +977,7 @@ fn finish_dictation(
         device: device.into(),
     })?;
     events.dictation(DictationPhase::Transcribing, "")?;
-    match worker.transcribe(clip, target, context.clone()) {
+    match worker.transcribe(clip, target, protocol, context.clone()) {
         Ok(job_id) => {
             if let Some(indicator) = indicator {
                 indicator.send(DictationIndicatorEvent::Submitted {
@@ -984,6 +1001,7 @@ fn finish_dictation(
 fn handle_voice_dictation_control(
     control: DictationControl,
     heard: &str,
+    protocol: Arc<DictationProtocol>,
     dictation: &mut DictationCapture,
     worker: &DictationWorker,
     mode: Mode,
@@ -1005,7 +1023,14 @@ fn handle_voice_dictation_control(
                 DictationControl::Cancel => unreachable!(),
             };
             let finish = finish_dictation(
-                dictation, worker, target, context, device, events, indicator,
+                dictation,
+                worker,
+                target,
+                Some(protocol),
+                context,
+                device,
+                events,
+                indicator,
             )?;
             emit_engine_state(events, false, worker, mode, device)?;
             events.emit(&VoiceEvent::Command {

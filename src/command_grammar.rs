@@ -445,6 +445,22 @@ impl ConfiguredCommand {
         })
     }
 
+    pub(crate) fn protocol_literal(
+        id: impl Into<String>,
+        phrases: impl IntoIterator<Item = impl Into<String>>,
+    ) -> Result<Self, CommandError> {
+        let mut command = Self::personal_literal(
+            id,
+            "Voice dictation protocol",
+            phrases,
+            ContextSelector::Always,
+            Action::StartDictation,
+            None,
+        )?;
+        command.protected = true;
+        Ok(command)
+    }
+
     pub(crate) fn id(&self) -> &str {
         &self.id
     }
@@ -460,6 +476,15 @@ impl ConfiguredCommand {
                     .iter()
                     .any(|right| patterns_overlap(left, right))
             })
+    }
+
+    pub(crate) fn conflicts_at_prefix(&self, other: &Self) -> bool {
+        self.patterns.iter().any(|left| {
+            other
+                .patterns
+                .iter()
+                .any(|right| signatures_prefix_overlap(&left.signatures, &right.signatures))
+        })
     }
 
     pub(crate) fn specificity(&self) -> u8 {
@@ -505,6 +530,16 @@ fn signatures_overlap(left: &[Vec<PatternToken>], right: &[Vec<PatternToken>]) -
                     .iter()
                     .zip(right)
                     .all(|(left, right)| left.overlaps(right))
+        })
+    })
+}
+
+fn signatures_prefix_overlap(left: &[Vec<PatternToken>], right: &[Vec<PatternToken>]) -> bool {
+    left.iter().any(|left| {
+        right.iter().any(|right| {
+            left.iter()
+                .zip(right)
+                .all(|(left, right)| left.overlaps(right))
         })
     })
 }

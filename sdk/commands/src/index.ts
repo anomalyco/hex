@@ -10,6 +10,7 @@ export {
 export type {
   CommandDefinition,
   CommandMetadata,
+  DictationProtocolConfig,
   Handler,
   HandlerArguments,
   HandlerContext,

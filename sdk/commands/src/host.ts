@@ -22,6 +22,7 @@ import type { HostInput, HostOutput, Registration, RegistrationCommand } from ".
 
 const MAX_COMMANDS = 512
 const MAX_PHRASES_PER_COMMAND = 16
+const MAX_PROTOCOL_PHRASES = 16
 const MAX_REGISTRATION_BYTES = 256 * 1024
 const MAX_FRAME_BYTES = 64 * 1024
 const MAX_ID_BYTES = 128
@@ -140,6 +141,26 @@ export const prepareConfig = (value: unknown): PreparedConfig => {
   if (entries.length > MAX_COMMANDS) throw new Error(`A config may register at most ${MAX_COMMANDS} commands`)
 
   const handlers = new Map<string, HostHandler>()
+  const rawDictation = config?.dictation
+  let dictation: Registration["dictation"]
+  if (rawDictation !== undefined) {
+    const candidate = record(rawDictation)
+    if (candidate === undefined) throw new Error("dictation must be an object")
+    const validatePhrases = (control: "start" | "stop" | "send" | "cancel"): readonly string[] => {
+      const phrases = candidate[control]
+      if (!Array.isArray(phrases) || phrases.length === 0 || phrases.length > MAX_PROTOCOL_PHRASES) {
+        throw new Error(`dictation.${control} must contain 1 through ${MAX_PROTOCOL_PHRASES} phrases`)
+      }
+      return phrases.map((phrase, index) =>
+        boundedString(phrase, `dictation.${control}[${index}]`, 256))
+    }
+    dictation = {
+      start: validatePhrases("start") as [string, ...string[]],
+      stop: validatePhrases("stop") as [string, ...string[]],
+      send: validatePhrases("send") as [string, ...string[]],
+      cancel: validatePhrases("cancel") as [string, ...string[]],
+    }
+  }
   const registrationCommands = entries.map(([rawId, rawDefinition]): RegistrationCommand => {
     const id = boundedString(rawId, "command id", MAX_ID_BYTES)
     const definition = record(rawDefinition)
@@ -197,6 +218,7 @@ export const prepareConfig = (value: unknown): PreparedConfig => {
   const registration: Registration = {
     type: "registration",
     protocolVersion: PROTOCOL_VERSION,
+    ...(dictation === undefined ? {} : { dictation }),
     commands: registrationCommands,
   }
   if (utf8Length(JSON.stringify(registration)) > MAX_REGISTRATION_BYTES) {

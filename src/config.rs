@@ -2,7 +2,6 @@ use std::sync::{OnceLock, RwLock};
 
 use crate::app_settings::DictationProcessingSettings;
 use crate::commands::{Action, Command, CommandConfig, ConfiguredCommand, Count, Digit, Direction};
-use crate::dictation::DICTATION_START_PHRASES;
 use crate::dictation_processor::{Profile, Profiles};
 use crate::keyboard::{Key, Modifiers};
 
@@ -89,13 +88,7 @@ pub fn voice_control() -> CommandConfig {
 fn voice_control_for(meetings_enabled: bool) -> CommandConfig {
     let commands = CommandConfig::new()
         .wake_with(["voice control", "wake up", "start voice control"])
-        .sleep_with(["go to sleep", "stop voice control"])
-        .command(
-            Command::new("dictation.start", "Start voice dictation")
-                .phrases(DICTATION_START_PHRASES.iter().copied())
-                .protected()
-                .action(|()| Action::StartDictation),
-        );
+        .sleep_with(["go to sleep", "stop voice control"]);
     let commands = if meetings_enabled {
         commands
             .command(

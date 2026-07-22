@@ -49,6 +49,7 @@ export {
 }
 export type {
   CommandMetadata,
+  DictationProtocolConfig,
   HandlerContext,
   HexConfig,
   Modifier,

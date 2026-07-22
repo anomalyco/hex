@@ -1,4 +1,4 @@
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::time::{Duration, Instant};
 
 use rubato::{FftFixedIn, Resampler};
@@ -13,7 +13,171 @@ const MINIMUM_PARAKEET_DURATION: Duration = Duration::from_millis(1500);
 const INITIAL_RECORDING_CAPACITY: Duration = Duration::from_secs(10);
 const PARAKEET_SAMPLE_RATE: u32 = 16_000;
 
-pub const DICTATION_START_PHRASES: &[&str] = &["dictate start", "start dictating"];
+use crate::command_grammar::normalize;
+
+const MAX_PROTOCOL_PHRASES: usize = 16;
+const MAX_PROTOCOL_PHRASE_BYTES: usize = 256;
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DictationProtocol {
+    start: Vec<String>,
+    stop: Vec<String>,
+    send: Vec<String>,
+    cancel: Vec<String>,
+}
+
+impl Default for DictationProtocol {
+    fn default() -> Self {
+        Self {
+            start: [
+                "dictate start",
+                "dictates start",
+                "dictate starts",
+                "dictates starts",
+                "start dictating",
+            ]
+            .map(Into::into)
+            .into(),
+            stop: ["dictate stop", "dictates stop"].map(Into::into).into(),
+            send: [
+                "dictate send",
+                "dictates send",
+                "dictate end",
+                "dictates end",
+                "dictate and",
+                "dictates and",
+            ]
+            .map(Into::into)
+            .into(),
+            cancel: ["dictate cancel", "dictates cancel"].map(Into::into).into(),
+        }
+    }
+}
+
+impl DictationProtocol {
+    pub fn try_new(
+        start: Vec<String>,
+        stop: Vec<String>,
+        send: Vec<String>,
+        cancel: Vec<String>,
+    ) -> Result<Self, String> {
+        let protocol = Self {
+            start,
+            stop,
+            send,
+            cancel,
+        };
+        let groups = [
+            ("start", protocol.start.as_slice()),
+            ("stop", protocol.stop.as_slice()),
+            ("send", protocol.send.as_slice()),
+            ("cancel", protocol.cancel.as_slice()),
+        ];
+        let mut normalized = HashMap::<String, &str>::new();
+        for (name, phrases) in groups {
+            if phrases.is_empty() || phrases.len() > MAX_PROTOCOL_PHRASES {
+                return Err(format!(
+                    "dictation.{name} must contain 1 through {MAX_PROTOCOL_PHRASES} phrases"
+                ));
+            }
+            for phrase in phrases {
+                if phrase.len() > MAX_PROTOCOL_PHRASE_BYTES {
+                    return Err(format!(
+                        "dictation.{name} phrases must be at most {MAX_PROTOCOL_PHRASE_BYTES} bytes"
+                    ));
+                }
+                let phrase = normalize(phrase);
+                if phrase.is_empty() {
+                    return Err(format!("dictation.{name} phrases must not be empty"));
+                }
+                if let Some(existing) = normalized.insert(phrase.clone(), name) {
+                    return Err(format!(
+                        "dictation.{name} phrase overlaps dictation.{existing}: {phrase}"
+                    ));
+                }
+            }
+        }
+        validate_boundary_overlaps("start", &protocol.start, Boundary::Prefix)?;
+        let suffixes = protocol
+            .stop
+            .iter()
+            .chain(&protocol.send)
+            .chain(&protocol.cancel)
+            .cloned()
+            .collect::<Vec<_>>();
+        validate_boundary_overlaps("control", &suffixes, Boundary::Suffix)?;
+        Ok(protocol)
+    }
+
+    pub fn start_phrases(&self) -> &[String] {
+        &self.start
+    }
+
+    pub fn control_phrases(&self) -> impl Iterator<Item = &String> {
+        self.stop.iter().chain(&self.send).chain(&self.cancel)
+    }
+
+    pub fn start_prefix(&self, text: &str) -> Option<usize> {
+        control_prefix(text, &self.start)
+    }
+
+    pub fn control_suffix(&self, text: &str) -> Option<(DictationControl, usize)> {
+        for (phrases, control) in [
+            (&self.cancel, DictationControl::Cancel),
+            (&self.stop, DictationControl::Stop),
+            (&self.send, DictationControl::Send),
+        ] {
+            if let Some(prefix_end) = control_suffix(text, phrases) {
+                return Some((control, prefix_end));
+            }
+        }
+        None
+    }
+
+    pub fn strip(&self, text: &str) -> String {
+        let mut text = text.trim();
+        while let Some((_, prefix_end)) = self.control_suffix(text) {
+            text = trim_control_end(&text[..prefix_end]);
+        }
+        if let Some(prefix_end) = self.start_prefix(text) {
+            text = trim_control_start(&text[prefix_end..]);
+        }
+        text.to_string()
+    }
+}
+
+#[derive(Clone, Copy)]
+enum Boundary {
+    Prefix,
+    Suffix,
+}
+
+fn validate_boundary_overlaps(
+    name: &str,
+    phrases: &[String],
+    boundary: Boundary,
+) -> Result<(), String> {
+    let normalized = phrases
+        .iter()
+        .map(|phrase| normalize(phrase))
+        .collect::<Vec<_>>();
+    for (index, left) in normalized.iter().enumerate() {
+        let left = left.split_whitespace().collect::<Vec<_>>();
+        for right in &normalized[index + 1..] {
+            let right = right.split_whitespace().collect::<Vec<_>>();
+            let overlaps = match boundary {
+                Boundary::Prefix => left.starts_with(&right) || right.starts_with(&left),
+                Boundary::Suffix => left.ends_with(&right) || right.ends_with(&left),
+            };
+            if overlaps {
+                return Err(format!(
+                    "dictation {name} phrases overlap at their streaming boundary"
+                ));
+            }
+        }
+    }
+    Ok(())
+}
 
 pub enum Finish {
     Discard,
@@ -54,64 +218,31 @@ impl ControlStability {
     }
 }
 
-pub fn dictation_control_suffix(text: &str) -> Option<(DictationControl, usize)> {
+fn control_suffix(text: &str, suffixes: &[String]) -> Option<usize> {
     let text = text
         .trim_end()
         .trim_end_matches(|character: char| character.is_ascii_punctuation())
         .trim_end();
     let lowercase = text.to_ascii_lowercase();
-    for (suffix, control) in [
-        ("dictate cancel", DictationControl::Cancel),
-        ("dictates cancel", DictationControl::Cancel),
-        ("dictate stop", DictationControl::Stop),
-        ("dictates stop", DictationControl::Stop),
-        ("dictate send", DictationControl::Send),
-        ("dictates send", DictationControl::Send),
-        ("dictate end", DictationControl::Send),
-        ("dictates end", DictationControl::Send),
-        ("dictate and", DictationControl::Send),
-        ("dictates and", DictationControl::Send),
-    ] {
-        if let Some(prefix) = lowercase.strip_suffix(suffix)
+    for suffix in suffixes {
+        let suffix = suffix.trim().to_ascii_lowercase();
+        if let Some(prefix) = lowercase.strip_suffix(&suffix)
             && (prefix.is_empty()
                 || prefix.ends_with(char::is_whitespace)
                 || prefix.ends_with(|character: char| character.is_ascii_punctuation()))
         {
-            return Some((control, prefix.len()));
+            return Some(prefix.len());
         }
     }
     None
 }
 
-pub fn dictation_start_prefix(text: &str) -> Option<usize> {
-    control_prefix(
-        text,
-        &[
-            "dictate start",
-            "dictates start",
-            "dictate starts",
-            "dictates starts",
-            "start dictating",
-        ],
-    )
-}
-
-pub fn strip_dictation_protocol(text: &str) -> String {
-    let mut text = text.trim();
-    while let Some((_, prefix_end)) = dictation_control_suffix(text) {
-        text = trim_control_end(&text[..prefix_end]);
-    }
-    if let Some(prefix_end) = dictation_start_prefix(text) {
-        text = trim_control_start(&text[prefix_end..]);
-    }
-    text.to_string()
-}
-
-fn control_prefix(text: &str, prefixes: &[&str]) -> Option<usize> {
+fn control_prefix(text: &str, prefixes: &[String]) -> Option<usize> {
     let text = text.trim_start();
     let lowercase = text.to_ascii_lowercase();
     prefixes.iter().find_map(|prefix| {
-        lowercase.strip_prefix(prefix).and_then(|remainder| {
+        let prefix = prefix.trim().to_ascii_lowercase();
+        lowercase.strip_prefix(&prefix).and_then(|remainder| {
             (remainder.is_empty()
                 || remainder.starts_with(char::is_whitespace)
                 || remainder.starts_with(|character: char| character.is_ascii_punctuation()))
@@ -502,34 +633,82 @@ mod tests {
 
     #[test]
     fn finds_resilient_controls_at_the_end_of_an_utterance() {
+        let protocol = DictationProtocol::default();
         assert!(matches!(
-            dictation_control_suffix("How are we doing? Dictates stop."),
+            protocol.control_suffix("How are we doing? Dictates stop."),
             Some((DictationControl::Stop, _))
         ));
         assert!(matches!(
-            dictation_control_suffix("That's okay. Dictates send."),
+            protocol.control_suffix("That's okay. Dictates send."),
             Some((DictationControl::Send, _))
         ));
         assert!(matches!(
-            dictation_control_suffix("Dictates end."),
+            protocol.control_suffix("Dictates end."),
             Some((DictationControl::Send, 0))
         ));
-        assert!(dictation_control_suffix("Please dictate this sentence").is_none());
+        assert!(
+            protocol
+                .control_suffix("Please dictate this sentence")
+                .is_none()
+        );
     }
 
     #[test]
     fn finds_dictation_start_at_the_beginning_of_an_utterance() {
-        assert_eq!(dictation_start_prefix("Dictate start."), Some(13));
-        assert!(dictation_start_prefix("Dictate start as you can see").is_some());
-        assert!(dictation_start_prefix("Dictates start, testing").is_some());
-        assert!(dictation_start_prefix("Okay, dictate start").is_none());
+        let protocol = DictationProtocol::default();
+        assert_eq!(protocol.start_prefix("Dictate start."), Some(13));
+        assert!(
+            protocol
+                .start_prefix("Dictate start as you can see")
+                .is_some()
+        );
+        assert!(protocol.start_prefix("Dictates start, testing").is_some());
+        assert!(protocol.start_prefix("Okay, dictate start").is_none());
     }
 
     #[test]
     fn strips_voice_protocols_from_transcripts() {
         assert_eq!(
-            strip_dictation_protocol("Dictate start, this should keep the message. Dictates stop."),
+            DictationProtocol::default()
+                .strip("Dictate start, this should keep the message. Dictates stop."),
             "this should keep the message"
+        );
+    }
+
+    #[test]
+    fn configured_protocol_is_exact_and_rejects_streaming_ambiguity() {
+        let protocol = DictationProtocol::try_new(
+            vec!["begin note".into()],
+            vec!["finish note".into()],
+            vec!["send note".into()],
+            vec!["discard note".into()],
+        )
+        .unwrap();
+        assert!(protocol.start_prefix("Begin note, hello").is_some());
+        assert!(protocol.start_prefix("Dictate start, hello").is_none());
+        assert!(matches!(
+            protocol.control_suffix("hello, finish note"),
+            Some((DictationControl::Stop, _))
+        ));
+        assert!(protocol.control_suffix("hello, dictates stop").is_none());
+
+        assert!(
+            DictationProtocol::try_new(
+                vec!["begin".into(), "begin note".into()],
+                vec!["finish".into()],
+                vec!["send".into()],
+                vec!["cancel".into()],
+            )
+            .is_err()
+        );
+        assert!(
+            DictationProtocol::try_new(
+                vec!["begin".into()],
+                vec!["note".into()],
+                vec!["finish note".into()],
+                vec!["cancel".into()],
+            )
+            .is_err()
         );
     }
 

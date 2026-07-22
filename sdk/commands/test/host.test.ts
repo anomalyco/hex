@@ -13,6 +13,12 @@ async function* messages(lines: readonly unknown[]): AsyncGenerator<string> {
 describe("command host", () => {
   it("emits a bounded serializable registration without handlers", () => {
     const prepared = prepareConfig({
+      dictation: {
+        start: ["begin note"],
+        stop: ["finish note"],
+        send: ["send note"],
+        cancel: ["discard note"],
+      },
       commands: {
         native: { phrases: ["open example"], action: openUrl("https://example.com") },
         handled: { phrases: ["do work"], group: "Work", run: () => undefined },
@@ -21,6 +27,12 @@ describe("command host", () => {
     expect(prepared.registration).toEqual({
       type: "registration",
       protocolVersion: 1,
+      dictation: {
+        start: ["begin note"],
+        stop: ["finish note"],
+        send: ["send note"],
+        cancel: ["discard note"],
+      },
       commands: [
         {
           id: "native",
@@ -142,6 +154,17 @@ describe("command host", () => {
     expect(() => prepareConfig({
       commands: { bad: { phrases: ["bad"], action: { type: "press", key: "x", modifiers: ["meta"] } } },
     })).toThrow("unsupported modifier")
+  })
+
+  it("bounds every dictation protocol phrase list", () => {
+    expect(() => prepareConfig({
+      dictation: { start: [], stop: ["stop"], send: ["send"], cancel: ["cancel"] },
+      commands: {},
+    })).toThrow("dictation.start must contain")
+    expect(() => prepareConfig({
+      dictation: { start: ["start"], stop: ["stop"], send: ["send"], cancel: [""] },
+      commands: {},
+    })).toThrow("dictation.cancel[0] must be a non-empty string")
   })
 
   it("waits for vanilla tool calls even when the handler forgets await", async () => {

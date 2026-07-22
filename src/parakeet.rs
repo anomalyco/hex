@@ -14,7 +14,7 @@ use transcribe_cpp::{
 };
 
 use crate::context::ContextSnapshot;
-use crate::dictation::{DictationClip, pad_for_parakeet, strip_dictation_protocol};
+use crate::dictation::{DictationClip, DictationProtocol, pad_for_parakeet};
 use crate::dictation_processor::ProcessingObservation;
 use crate::meeting::{self, TranscriptEntry, TranscriptPublication};
 use crate::paste::Paster;
@@ -89,6 +89,7 @@ struct InferenceJob {
     submitted_at: Instant,
     clip: DictationClip,
     target: TranscriptionTarget,
+    protocol: Option<Arc<DictationProtocol>>,
     context: ContextSnapshot,
     selection: TranscriptionSelection,
 }
@@ -441,7 +442,7 @@ impl DictationWorker {
                 let result = transcriber
                     .transcribe(&samples)
                     .map(|text| {
-                        let corrected = prepare_transcript(&text, job.target);
+                        let corrected = prepare_transcript(&text, job.protocol.as_deref());
                         tracing::debug!(
                             raw_transcript = text,
                             corrected_transcript = corrected,
@@ -524,6 +525,7 @@ impl DictationWorker {
         &self,
         clip: DictationClip,
         target: TranscriptionTarget,
+        protocol: Option<Arc<DictationProtocol>>,
         context: ContextSnapshot,
     ) -> Result<DictationJobId, &'static str> {
         let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
@@ -542,6 +544,7 @@ impl DictationWorker {
                 submitted_at: Instant::now(),
                 clip,
                 target,
+                protocol,
                 context,
                 selection,
             })))
@@ -818,26 +821,22 @@ fn validate_edit_identity(
     Ok(())
 }
 
-fn prepare_transcript(text: &str, target: TranscriptionTarget) -> String {
-    let stripped = strip_transcript_protocol(text, target);
+fn prepare_transcript(text: &str, protocol: Option<&DictationProtocol>) -> String {
+    let stripped = strip_transcript_protocol(text, protocol);
     crate::text_replacements::replace(&stripped)
 }
 
 #[cfg(test)]
 fn prepare_transcript_with(
     text: &str,
-    target: TranscriptionTarget,
+    protocol: Option<&DictationProtocol>,
     replacements: &ReplacementSet,
 ) -> String {
-    replacements.replace(&strip_transcript_protocol(text, target))
+    replacements.replace(&strip_transcript_protocol(text, protocol))
 }
 
-fn strip_transcript_protocol(text: &str, target: TranscriptionTarget) -> String {
-    match target {
-        TranscriptionTarget::Paste | TranscriptionTarget::Send | TranscriptionTarget::Edit => {
-            strip_dictation_protocol(text)
-        }
-    }
+fn strip_transcript_protocol(text: &str, protocol: Option<&DictationProtocol>) -> String {
+    protocol.map_or_else(|| text.trim().to_string(), |protocol| protocol.strip(text))
 }
 
 #[derive(Default)]
@@ -1135,13 +1134,33 @@ mod tests {
             },
         ]);
 
+        let protocol = DictationProtocol::default();
         let corrected = prepare_transcript_with(
             "Dictate start, use open code and alpha. Dictate stop.",
-            TranscriptionTarget::Paste,
+            Some(&protocol),
             &replacements,
         );
 
         assert_eq!(corrected, "use OpenCode and beta");
+        assert_eq!(
+            prepare_transcript_with("Dictate start, alpha. Dictate stop.", None, &replacements),
+            "Dictate start, beta. Dictate stop."
+        );
+        let custom_protocol = DictationProtocol::try_new(
+            vec!["begin note".into()],
+            vec!["finish note".into()],
+            vec!["send note".into()],
+            vec!["discard note".into()],
+        )
+        .unwrap();
+        assert_eq!(
+            prepare_transcript_with(
+                "Begin note, alpha. Finish note.",
+                Some(&custom_protocol),
+                &replacements,
+            ),
+            "beta"
+        );
         assert_eq!(replacements.replace("beta"), "gamma");
         assert_eq!(replacements.replace("Use OPEN CODE."), "Use OpenCode.");
     }

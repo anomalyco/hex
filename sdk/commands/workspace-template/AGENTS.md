@@ -9,6 +9,13 @@ keeps the previous registry if evaluation or validation fails.
 - Import Effect APIs, `Hex`, and `defineHexConfig` from `@hex/commands/effect`.
 - Command keys are stable IDs. Phrases must not overlap another command at the
   same context specificity or any protected native phrase.
+- `dictation` declaratively replaces the native streaming protocol. `start`
+  phrases match only at the beginning while listening; `stop`, `send`, and
+  `cancel` match only at the end while voice dictation is active. These are not
+  handlers and are unavailable as ordinary commands.
+- Keep at least one phrase in every dictation control. Invalid or overlapping
+  protocol changes are rejected together with command changes, preserving the
+  last valid native snapshot.
 - `when` accepts exactly one of `application` or `browserHost`.
 - Capabilities are `openUrl`, `openApplication`, `openPath`, `press`, and
   `typeText`.

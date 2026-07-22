@@ -207,25 +207,29 @@ changing configuration semantics or native recognition.
 
 ## Configurable Dictation Phrases
 
-Custom aliases for dictation activation and controls are desirable but are not
-ordinary personal commands. Activation is recognized from streaming prefixes;
-stop, send, and cancel are recognized from stable streaming suffixes. Their
-aliases must be registered as native grammar data and matched in Rust.
-
-A future config surface may resemble:
+Dictation activation and controls are declarative native protocol configuration,
+not ordinary commands or handlers. Activation is recognized from streaming
+prefixes; stop, send, and cancel are recognized from stable streaming suffixes.
+The TypeScript host registers phrase data, while Rust retains capture-state and
+audio ownership.
 
 ```ts
 export default defineHexConfig({
   dictation: {
-    start: ["dictate"],
-    stop: ["over"],
-    send: ["send it"],
-    cancel: ["scratch that"],
+    start: ["say"],
+    stop: ["say paste", "say stop"],
+    send: ["say send"],
+    cancel: ["say cancel", "never mind"],
   },
 })
 ```
 
-Exact words and whether aliases replace or extend built-in controls remain open.
+A valid configured protocol replaces the native phrases exactly. Omitting the
+section, running without Bun, or failing before the first valid activation uses
+the native defaults. Reloads swap commands and protocol phrases atomically, and
+an accepted voice capture pins its protocol through transcription so a later
+reload cannot change its controls or stripping behavior. Hotkey and voice-edit
+captures do not strip voice-protocol phrases.
 
 ## Deferred Typed Captures
 

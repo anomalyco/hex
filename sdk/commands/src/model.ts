@@ -73,12 +73,20 @@ export interface CommandMetadata {
     | { readonly browserHost: string; readonly application?: never }
 }
 
+export interface DictationProtocolConfig {
+  readonly start: readonly [string, ...string[]]
+  readonly stop: readonly [string, ...string[]]
+  readonly send: readonly [string, ...string[]]
+  readonly cancel: readonly [string, ...string[]]
+}
+
 export type CommandDefinitionFor<Run> = CommandMetadata & (
   | { readonly action: NativeAction; readonly run?: never }
   | { readonly action?: never; readonly run: NativeAction | Run }
 )
 
 export interface HexConfigFor<Definition extends CommandMetadata> {
+  readonly dictation?: DictationProtocolConfig
   readonly commands: Readonly<Record<string, Definition>>
 }
 
