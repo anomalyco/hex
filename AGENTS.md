@@ -94,8 +94,9 @@ CoreAudio formats, AppleScript details, or event serialization.
   modifier-plus-key, and standalone function-key bindings. Capturing a new
   binding suspends global matching.
 - Hold the shortcut to dictate and release to transcribe. Captures shorter than
-  300 ms discard and 450 ms of warm pre-roll protects speech onset. Capture has
-  no automatic duration limit; release, explicit stop, or Escape ends it.
+  300 ms discard. A 450 ms hotkey pre-roll and one-second voice-trigger pre-roll
+  protect speech onset. Capture has no automatic duration limit; release,
+  explicit stop, or Escape ends it.
 - When enabled, a second shortcut tap within 300 ms locks dictation. Press the
   shortcut again to finish or Escape to cancel.
 - When commands are enabled, every dictation or paste hotkey action resets
