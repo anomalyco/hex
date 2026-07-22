@@ -4418,145 +4418,70 @@ impl AppWindow {
     }
 
     fn render_commands(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        let commands_position = self.commands_toggle.render_position(window);
-        let commands_control = div()
-            .id("commands-enabled")
-            .flex()
-            .items_center()
-            .gap_3()
-            .cursor_pointer()
-            .child(div().text_size(px(11.0)).text_color(rgb(MUTED)).child(
-                if self.settings.commands_enabled {
-                    "Enabled"
-                } else {
-                    "Off"
-                },
-            ))
-            .child(toggle(commands_position))
-            .on_click(cx.listener(|this, _, _, cx| {
-                this.settings.commands_enabled = !this.settings.commands_enabled;
-                this.commands_toggle
-                    .set_enabled(this.settings.commands_enabled);
-                this.save_settings(cx);
-            }))
-            .into_any_element();
         let config_path = self.personal_workspace.join("hex.config.ts");
         let workspace_state = personal_workspace_state(
             !self.preview && config_path.is_file(),
             self.personal_workspace_receiver.is_some(),
             &self.personal_commands_status,
         );
-        let status_label = match workspace_state {
-            PersonalWorkspaceState::Missing => "Not configured",
-            PersonalWorkspaceState::Creating => "Creating workspace...",
-            PersonalWorkspaceState::Ready => match self.personal_commands_status.host_state {
-                HostState::Active => "Active",
-                HostState::Starting => "Starting host...",
-                HostState::Stopped => "Host stopped",
-                HostState::NotConfigured => "Waiting for commands",
-                HostState::Unavailable => "Host unavailable",
-            },
-            PersonalWorkspaceState::Error => "Needs attention",
-        };
-        let command_count = self.personal_commands_status.catalog.len();
-        let command_count_label = if command_count == 1 {
-            "1 command".into()
-        } else {
-            format!("{command_count} commands")
-        };
         let last_error = self
             .personal_workspace_error
             .clone()
             .or_else(|| self.personal_commands_status.last_reload_error.clone());
         let open_config = config_path.clone();
-        let open_folder = self.personal_workspace.clone();
-        let copied_path = config_path.display().to_string();
-        let personal_panel = div()
-            .px_4()
-            .py_3()
-            .border_b_1()
-            .border_color(rgb(LINE))
-            .bg(rgb(SURFACE))
+        let config_control = match workspace_state {
+            PersonalWorkspaceState::Missing => compact_button("Create Config")
+                .id("personal-commands-create")
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.provision_personal_workspace();
+                    cx.notify();
+                }))
+                .into_any_element(),
+            PersonalWorkspaceState::Creating => div()
+                .h(px(30.0))
+                .px_3()
+                .flex()
+                .items_center()
+                .text_size(px(12.0))
+                .text_color(rgb(MUTED))
+                .child("Creating Config...")
+                .into_any_element(),
+            PersonalWorkspaceState::Ready | PersonalWorkspaceState::Error => {
+                compact_button("Edit Config")
+                    .id("personal-commands-open-config")
+                    .on_click(move |_, _, _| open_path(&open_config))
+                    .into_any_element()
+            }
+        };
+        let commands_position = self.commands_toggle.render_position(window);
+        let commands_control = div()
             .flex()
-            .flex_col()
+            .items_center()
             .gap_2()
+            .child(config_control)
             .child(
                 div()
+                    .id("commands-enabled")
                     .flex()
                     .items_center()
-                    .justify_between()
-                    .gap_4()
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap_3()
-                            .child(
-                                div()
-                                    .text_size(px(12.0))
-                                    .font_weight(FontWeight::SEMIBOLD)
-                                    .child("Personal Commands"),
-                            )
-                            .child(
-                                div()
-                                    .text_size(px(11.0))
-                                    .text_color(rgb(MUTED))
-                                    .child(format!("{status_label} · {command_count_label}")),
-                            ),
-                    )
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap_1()
-                            .child(
-                                compact_button(
-                                    if workspace_state == PersonalWorkspaceState::Creating {
-                                        "Working..."
-                                    } else if workspace_state == PersonalWorkspaceState::Missing {
-                                        "Create Config"
-                                    } else {
-                                        "Refresh Config"
-                                    },
-                                )
-                                .id("personal-commands-create")
-                                .on_click(cx.listener(
-                                    |this, _, _, cx| {
-                                        this.provision_personal_workspace();
-                                        cx.notify();
-                                    },
-                                )),
-                            )
-                            .child(
-                                compact_button("Open Config")
-                                    .id("personal-commands-open-config")
-                                    .on_click(move |_, _, _| open_path(&open_config)),
-                            )
-                            .child(
-                                compact_button("Open Folder")
-                                    .id("personal-commands-open-folder")
-                                    .on_click(move |_, _, _| open_path(&open_folder)),
-                            )
-                            .child(
-                                compact_button("Copy Path")
-                                    .id("personal-commands-copy-path")
-                                    .on_click(move |_, _, _| {
-                                        if let Ok(mut clipboard) = arboard::Clipboard::new() {
-                                            let _ = clipboard.set_text(copied_path.clone());
-                                        }
-                                    }),
-                            ),
-                    ),
+                    .gap_3()
+                    .cursor_pointer()
+                    .child(div().text_size(px(11.0)).text_color(rgb(MUTED)).child(
+                        if self.settings.commands_enabled {
+                            "Enabled"
+                        } else {
+                            "Off"
+                        },
+                    ))
+                    .child(toggle(commands_position))
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.settings.commands_enabled = !this.settings.commands_enabled;
+                        this.commands_toggle
+                            .set_enabled(this.settings.commands_enabled);
+                        this.save_settings(cx);
+                    })),
             )
-            .when_some(last_error, |panel, error| {
-                panel.child(
-                    div()
-                        .text_size(px(11.0))
-                        .line_height(px(16.0))
-                        .text_color(rgb(NEGATIVE))
-                        .child(error),
-                )
-            });
+            .into_any_element();
         let context_label = self.current_context_label();
         let filters = self.context_filters();
         if !filters.contains(&self.command_filter) {
@@ -4664,7 +4589,19 @@ impl AppWindow {
             .flex()
             .flex_col()
             .child(pane_header("Commands", Some(commands_control)))
-            .child(personal_panel)
+            .when_some(last_error, |page, error| {
+                page.child(
+                    div()
+                        .px_4()
+                        .py_2()
+                        .border_b_1()
+                        .border_color(rgb(LINE))
+                        .text_size(px(11.0))
+                        .line_height(px(16.0))
+                        .text_color(rgb(NEGATIVE))
+                        .child(error),
+                )
+            })
             .child(
                 div()
                     .h(px(47.0))
