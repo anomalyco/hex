@@ -129,13 +129,19 @@ describe("command host", () => {
     expect(output.filter((frame) => frame.type === "invocationResult")).toHaveLength(2)
   })
 
-  it("rejects malformed and oversized registrations", () => {
+  it("validates native actions from both execution fields", () => {
     expect(() => prepareConfig({ commands: { bad: { phrases: [], run: () => undefined } } })).toThrow(
       "phrases must contain",
     )
     expect(() => prepareConfig({
       commands: { bad: { phrases: ["bad"], action: { type: "press", key: "x", repeat: 101 } } },
     })).toThrow("repeat must be")
+    expect(() => prepareConfig({
+      commands: { bad: { phrases: ["bad"], run: { type: "openUrl", url: "file:///tmp/example" } } },
+    })).toThrow("must use http or https")
+    expect(() => prepareConfig({
+      commands: { bad: { phrases: ["bad"], action: { type: "press", key: "x", modifiers: ["meta"] } } },
+    })).toThrow("unsupported modifier")
   })
 
   it("waits for vanilla tool calls even when the handler forgets await", async () => {

@@ -35,4 +35,17 @@ describe("command model", () => {
     })
     expect(Object.keys(config.commands)).toEqual(["home", "slack"])
   })
+
+  it("contextually types Promise handlers through the shared config model", () => {
+    const config = defineHexConfig({
+      commands: {
+        contextual: {
+          phrases: ["show context"],
+          run: ({ hex, context }) => hex.typeText(context.browserHost ?? "none"),
+        },
+      },
+    })
+
+    expect(config.commands.contextual.phrases).toEqual(["show context"])
+  })
 })

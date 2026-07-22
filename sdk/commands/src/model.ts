@@ -27,8 +27,6 @@ export const openApplication = (application: string): NativeAction =>
 
 export const openPath = (path: string): NativeAction => Object.freeze({ type: "openPath", path })
 
-export function press(key: string): NativeAction
-export function press(options: PressOptions): NativeAction
 export function press(input: string | PressOptions): NativeAction {
   return typeof input === "string"
     ? Object.freeze({ type: "press", key: input })
@@ -42,13 +40,15 @@ export function press(input: string | PressOptions): NativeAction {
 
 export const typeText = (text: string): NativeAction => Object.freeze({ type: "typeText", text })
 
-export interface PromiseHex {
-  readonly openUrl: (url: string) => Promise<void>
-  readonly openApplication: (application: string) => Promise<void>
-  readonly openPath: (path: string) => Promise<void>
-  readonly press: (input: string | PressOptions) => Promise<void>
-  readonly typeText: (text: string) => Promise<void>
+export interface HexCapabilities<Result> {
+  readonly openUrl: (url: string) => Result
+  readonly openApplication: (application: string) => Result
+  readonly openPath: (path: string) => Result
+  readonly press: (input: string | PressOptions) => Result
+  readonly typeText: (text: string) => Result
 }
+
+export interface PromiseHex extends HexCapabilities<Promise<void>> {}
 
 export interface HandlerArguments {
   readonly hex: PromiseHex
@@ -73,31 +73,17 @@ export interface CommandMetadata {
     | { readonly browserHost: string; readonly application?: never }
 }
 
-export type CommandDefinition = CommandMetadata & (
+export type CommandDefinitionFor<Run> = CommandMetadata & (
   | { readonly action: NativeAction; readonly run?: never }
-  | { readonly action?: never; readonly run: NativeAction | Handler }
+  | { readonly action?: never; readonly run: NativeAction | Run }
 )
 
-export interface HexConfig {
-  readonly commands: Readonly<Record<string, CommandDefinition>>
+export interface HexConfigFor<Definition extends CommandMetadata> {
+  readonly commands: Readonly<Record<string, Definition>>
 }
+
+export type CommandDefinition = CommandDefinitionFor<Handler>
+
+export interface HexConfig extends HexConfigFor<CommandDefinition> {}
 
 export const defineHexConfig = <const Config extends HexConfig>(config: Config): Config => config
-
-export const isNativeAction = (value: unknown): value is NativeAction => {
-  if (typeof value !== "object" || value === null || !("type" in value)) return false
-  switch (value.type) {
-    case "openUrl":
-      return "url" in value && typeof value.url === "string"
-    case "openApplication":
-      return "application" in value && typeof value.application === "string"
-    case "openPath":
-      return "path" in value && typeof value.path === "string"
-    case "press":
-      return "key" in value && typeof value.key === "string"
-    case "typeText":
-      return "text" in value && typeof value.text === "string"
-    default:
-      return false
-  }
-}

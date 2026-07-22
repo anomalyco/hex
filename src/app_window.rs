@@ -30,6 +30,7 @@ use crate::events::{
 use crate::login_item::LoginItemStatus;
 use crate::meeting::{self, MeetingManifest, MeetingRequest, MeetingStatus};
 use crate::onboarding::{PermissionState, SetupStatus};
+use crate::personal_commands::{HostState, StatusContext, StatusExecution, StatusSnapshot};
 use crate::text_input::{
     Changed as TextChanged, Dismissed as TextDismissed, Navigate as TextNavigate,
     Submitted as TextSubmitted, TextInput,
@@ -305,6 +306,40 @@ struct CatalogCommand {
     aliases: Vec<String>,
     description: String,
     id: String,
+    source: CommandSource,
+    execution: Option<StatusExecution>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum CommandSource {
+    Compiled,
+    Personal,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum PersonalWorkspaceState {
+    Missing,
+    Creating,
+    Ready,
+    Error,
+}
+
+fn personal_workspace_state(
+    config_exists: bool,
+    creating: bool,
+    status: &StatusSnapshot,
+) -> PersonalWorkspaceState {
+    if creating {
+        PersonalWorkspaceState::Creating
+    } else if config_exists {
+        if status.host_state == HostState::Unavailable && status.active_generation.is_none() {
+            PersonalWorkspaceState::Error
+        } else {
+            PersonalWorkspaceState::Ready
+        }
+    } else {
+        PersonalWorkspaceState::Missing
+    }
 }
 
 #[derive(Clone, Eq, PartialEq)]
@@ -584,7 +619,12 @@ pub struct AppWindow {
     meeting_transcript_id: Option<String>,
     meeting_transcript_reader: meeting::TranscriptReader,
     meeting_transcript_scroll: ScrollHandle,
+    compiled_commands: Vec<CatalogCommand>,
     commands: Vec<CatalogCommand>,
+    personal_commands_status: StatusSnapshot,
+    personal_workspace: PathBuf,
+    personal_workspace_receiver: Option<Receiver<Result<PathBuf, String>>>,
+    personal_workspace_error: Option<String>,
     command_filter: ContextFilter,
     selected_command: Option<String>,
     events: Vec<VoiceEvent>,
@@ -618,6 +658,8 @@ impl AppWindow {
                         let transcription_changed = window.poll_transcription_download();
                         let setup_changed = window.poll_setup();
                         let login_item_changed = window.poll_login_item();
+                        let personal_commands_changed = window.poll_personal_commands();
+                        let personal_workspace_changed = window.poll_personal_workspace();
                         if crate::DEVELOPER_FEATURES_ENABLED
                             && (window.meeting_refresh_started_ms.is_some()
                                 || meeting::active(&window.meetings).is_some())
@@ -631,6 +673,8 @@ impl AppWindow {
                             || transcription_changed
                             || setup_changed
                             || login_item_changed
+                            || personal_commands_changed
+                            || personal_workspace_changed
                         {
                             cx.notify();
                         }
@@ -699,7 +743,7 @@ impl AppWindow {
         let hotkey_blur_subscription = cx.on_blur(&hotkey_focus, native_window, |this, _, cx| {
             this.cancel_hotkey_capture(cx)
         });
-        let commands = commands
+        let compiled_commands = commands
             .catalog()
             .into_iter()
             .map(|command| CatalogCommand {
@@ -709,8 +753,26 @@ impl AppWindow {
                 aliases: command.aliases,
                 description: command.description,
                 id: command.id,
+                source: CommandSource::Compiled,
+                execution: None,
             })
-            .collect();
+            .collect::<Vec<_>>();
+        let personal_workspace = if preview_mode {
+            PathBuf::from("~/.config/hex")
+        } else {
+            crate::app_paths::personal_commands_workspace()
+                .unwrap_or_else(|_| PathBuf::from("~/.config/hex"))
+        };
+        let personal_commands_status = if preview_mode {
+            StatusSnapshot::default()
+        } else {
+            crate::personal_commands::load_status().unwrap_or_else(|error| StatusSnapshot {
+                host_state: HostState::Unavailable,
+                last_reload_error: Some(error.to_string()),
+                ..StatusSnapshot::default()
+            })
+        };
+        let commands = merged_catalog(&compiled_commands, &personal_commands_status);
         let preview_picker = preview
             .as_ref()
             .and_then(|preview| preview.transcription_picker.as_ref());
@@ -856,7 +918,12 @@ impl AppWindow {
             meeting_transcript_id: None,
             meeting_transcript_reader: meeting::TranscriptReader::default(),
             meeting_transcript_scroll: ScrollHandle::new(),
+            compiled_commands,
             commands,
+            personal_commands_status,
+            personal_workspace,
+            personal_workspace_receiver: None,
+            personal_workspace_error: None,
             command_filter: ContextFilter::All,
             selected_command: None,
             events: Vec::new(),
@@ -1072,6 +1139,60 @@ impl AppWindow {
             self.launch_at_login_error = None;
         }
         true
+    }
+
+    fn poll_personal_commands(&mut self) -> bool {
+        if self.preview {
+            return false;
+        }
+        let Ok(status) = crate::personal_commands::load_status() else {
+            return false;
+        };
+        if status == self.personal_commands_status {
+            return false;
+        }
+        self.personal_commands_status = status;
+        self.commands = merged_catalog(&self.compiled_commands, &self.personal_commands_status);
+        if self
+            .selected_command
+            .as_ref()
+            .is_some_and(|id| !self.commands.iter().any(|command| &command.id == id))
+        {
+            self.selected_command = None;
+        }
+        true
+    }
+
+    fn poll_personal_workspace(&mut self) -> bool {
+        let Some(receiver) = &self.personal_workspace_receiver else {
+            return false;
+        };
+        let Ok(result) = receiver.try_recv() else {
+            return false;
+        };
+        self.personal_workspace_receiver = None;
+        match result {
+            Ok(workspace) => {
+                self.personal_workspace = workspace;
+                self.personal_workspace_error = None;
+            }
+            Err(error) => self.personal_workspace_error = Some(error),
+        }
+        true
+    }
+
+    fn provision_personal_workspace(&mut self) {
+        if self.preview || self.personal_workspace_receiver.is_some() {
+            return;
+        }
+        let (sender, receiver) = sync_channel(1);
+        thread::spawn(move || {
+            let result =
+                crate::personal_commands::initialize_workspace().map_err(|error| error.to_string());
+            let _ = sender.send(result);
+        });
+        self.personal_workspace_error = None;
+        self.personal_workspace_receiver = Some(receiver);
     }
 
     fn apply_transcription_selection(&mut self, selection: TranscriptionSelection) {
@@ -4319,6 +4440,119 @@ impl AppWindow {
                 this.save_settings(cx);
             }))
             .into_any_element();
+        let config_path = self.personal_workspace.join("hex.config.ts");
+        let workspace_state = personal_workspace_state(
+            !self.preview && config_path.is_file(),
+            self.personal_workspace_receiver.is_some(),
+            &self.personal_commands_status,
+        );
+        let status_label = match workspace_state {
+            PersonalWorkspaceState::Missing => "Not configured",
+            PersonalWorkspaceState::Creating => "Creating workspace...",
+            PersonalWorkspaceState::Ready => match self.personal_commands_status.host_state {
+                HostState::Active => "Active",
+                HostState::Starting => "Starting host...",
+                HostState::Stopped => "Host stopped",
+                HostState::NotConfigured => "Waiting for commands",
+                HostState::Unavailable => "Host unavailable",
+            },
+            PersonalWorkspaceState::Error => "Needs attention",
+        };
+        let command_count = self.personal_commands_status.catalog.len();
+        let generation = self.personal_commands_status.active_generation.map_or_else(
+            || "No active generation".into(),
+            |generation| format!("Generation {generation}"),
+        );
+        let last_error = self
+            .personal_workspace_error
+            .clone()
+            .or_else(|| self.personal_commands_status.last_reload_error.clone());
+        let open_config = config_path.clone();
+        let open_folder = self.personal_workspace.clone();
+        let copied_path = config_path.display().to_string();
+        let personal_panel = div()
+            .px_4()
+            .py_3()
+            .border_b_1()
+            .border_color(rgb(LINE))
+            .bg(rgb(SURFACE))
+            .flex()
+            .flex_col()
+            .gap_2()
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .gap_4()
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_3()
+                            .child(
+                                div()
+                                    .text_size(px(12.0))
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .child("Personal Commands"),
+                            )
+                            .child(div().text_size(px(11.0)).text_color(rgb(MUTED)).child(
+                                format!("{status_label} · {command_count} commands · {generation}"),
+                            )),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_1()
+                            .child(
+                                compact_button(
+                                    if workspace_state == PersonalWorkspaceState::Creating {
+                                        "Working..."
+                                    } else if workspace_state == PersonalWorkspaceState::Missing {
+                                        "Create Config"
+                                    } else {
+                                        "Refresh Config"
+                                    },
+                                )
+                                .id("personal-commands-create")
+                                .on_click(cx.listener(
+                                    |this, _, _, cx| {
+                                        this.provision_personal_workspace();
+                                        cx.notify();
+                                    },
+                                )),
+                            )
+                            .child(
+                                compact_button("Open Config")
+                                    .id("personal-commands-open-config")
+                                    .on_click(move |_, _, _| open_path(&open_config)),
+                            )
+                            .child(
+                                compact_button("Open Folder")
+                                    .id("personal-commands-open-folder")
+                                    .on_click(move |_, _, _| open_path(&open_folder)),
+                            )
+                            .child(
+                                compact_button("Copy Path")
+                                    .id("personal-commands-copy-path")
+                                    .on_click(move |_, _, _| {
+                                        if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                                            let _ = clipboard.set_text(copied_path.clone());
+                                        }
+                                    }),
+                            ),
+                    ),
+            )
+            .when_some(last_error, |panel, error| {
+                panel.child(
+                    div()
+                        .text_size(px(11.0))
+                        .line_height(px(16.0))
+                        .text_color(rgb(NEGATIVE))
+                        .child(error),
+                )
+            });
         let context_label = self.current_context_label();
         let filters = self.context_filters();
         if !filters.contains(&self.command_filter) {
@@ -4426,6 +4660,7 @@ impl AppWindow {
             .flex()
             .flex_col()
             .child(pane_header("Commands", Some(commands_control)))
+            .child(personal_panel)
             .child(
                 div()
                     .h(px(47.0))
@@ -4505,6 +4740,22 @@ impl AppWindow {
                     .pt_6()
                     .child(detail_row("Task", command.task.clone()))
                     .child(detail_row("Context", command_scope(&command.scope)))
+                    .child(detail_row(
+                        "Source",
+                        match command.source {
+                            CommandSource::Compiled => "Built in",
+                            CommandSource::Personal => "Personal",
+                        },
+                    ))
+                    .when_some(command.execution, |detail, execution| {
+                        detail.child(detail_row(
+                            "Execution",
+                            match execution {
+                                StatusExecution::Native => "Native",
+                                StatusExecution::Handler => "TypeScript handler",
+                            },
+                        ))
+                    })
                     .child(detail_row("Command ID", command.id.clone()))
                     .child(detail_row("Aliases", aliases)),
             )
@@ -5877,6 +6128,38 @@ fn command_task(command: &CommandInfo) -> String {
     }
 }
 
+fn merged_catalog(compiled: &[CatalogCommand], personal: &StatusSnapshot) -> Vec<CatalogCommand> {
+    let mut commands = compiled.to_vec();
+    commands.extend(personal.catalog.iter().filter_map(|command| {
+        let (phrase, aliases) = command.phrases.split_first()?;
+        Some(CatalogCommand {
+            task: command.group.clone(),
+            scope: match &command.context {
+                StatusContext::Global => CommandScope::Global,
+                StatusContext::Application { application } => {
+                    CommandScope::Application(application.clone())
+                }
+                StatusContext::BrowserHost { browser_host } => {
+                    CommandScope::Browser(browser_host.clone())
+                }
+            },
+            phrase: phrase.clone(),
+            aliases: aliases.to_vec(),
+            description: command.description.clone(),
+            id: command.id.clone(),
+            source: CommandSource::Personal,
+            execution: Some(command.execution),
+        })
+    }));
+    commands
+}
+
+fn open_path(path: &std::path::Path) {
+    if let Err(error) = ProcessCommand::new("/usr/bin/open").arg(path).spawn() {
+        tracing::error!(%error, path = %path.display(), "could not open personal command path");
+    }
+}
+
 fn command_scope(scope: &CommandScope) -> String {
     match scope {
         CommandScope::Sleeping | CommandScope::Global => "Global".into(),
@@ -6195,5 +6478,73 @@ mod tests {
 
         let default = model_presentation(&catalog, None).unwrap();
         assert!(default.is_default);
+    }
+
+    #[test]
+    fn personal_catalog_uses_explicit_and_default_groups() {
+        let compiled = vec![CatalogCommand {
+            task: "Built in".into(),
+            scope: CommandScope::Global,
+            phrase: "built in".into(),
+            aliases: Vec::new(),
+            description: "Compiled command".into(),
+            id: "compiled".into(),
+            source: CommandSource::Compiled,
+            execution: None,
+        }];
+        let status = StatusSnapshot {
+            catalog: vec![
+                crate::personal_commands::StatusCommand {
+                    id: "default".into(),
+                    phrases: vec!["default personal".into()],
+                    group: "Personal".into(),
+                    description: "Personal command".into(),
+                    context: StatusContext::Global,
+                    execution: StatusExecution::Handler,
+                },
+                crate::personal_commands::StatusCommand {
+                    id: "work".into(),
+                    phrases: vec!["do work".into()],
+                    group: "Work".into(),
+                    description: "Do work".into(),
+                    context: StatusContext::Global,
+                    execution: StatusExecution::Handler,
+                },
+            ],
+            ..StatusSnapshot::default()
+        };
+
+        let merged = merged_catalog(&compiled, &status);
+        assert_eq!(merged[0].task, "Built in");
+        assert_eq!(merged[1].task, "Personal");
+        assert_eq!(merged[2].task, "Work");
+        assert_eq!(merged[1].source, CommandSource::Personal);
+    }
+
+    #[test]
+    fn personal_workspace_states_cover_setup_and_runtime_failures() {
+        let mut status = StatusSnapshot::default();
+        assert_eq!(
+            personal_workspace_state(false, false, &status),
+            PersonalWorkspaceState::Missing
+        );
+        assert_eq!(
+            personal_workspace_state(false, true, &status),
+            PersonalWorkspaceState::Creating
+        );
+        assert_eq!(
+            personal_workspace_state(true, false, &status),
+            PersonalWorkspaceState::Ready
+        );
+        status.host_state = HostState::Unavailable;
+        assert_eq!(
+            personal_workspace_state(true, false, &status),
+            PersonalWorkspaceState::Error
+        );
+        status.active_generation = Some(3);
+        assert_eq!(
+            personal_workspace_state(true, false, &status),
+            PersonalWorkspaceState::Ready
+        );
     }
 }

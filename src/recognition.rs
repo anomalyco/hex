@@ -1,4 +1,5 @@
 use std::path::Path;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, SyncSender, TryRecvError, TrySendError};
 use std::time::{Duration, Instant};
@@ -50,6 +51,7 @@ pub fn listen(
     indicator: Option<DictationIndicatorSender>,
     meeting_requests: Option<SyncSender<MeetingRequest>>,
 ) -> Result<()> {
+    let commands = Arc::new(commands);
     shutdown.store(false, Ordering::Relaxed);
     let (microphone_revision, microphone) = crate::app_settings::microphone_selection();
     let mut input =
@@ -88,7 +90,7 @@ pub fn listen(
     let (mut transcription_revision, _) = crate::app_settings::transcription_selection();
     let mut action_executor = commands_enabled.then(ActionExecutor::start);
     let mut personal_commands = commands_enabled
-        .then(|| crate::personal_commands::PersonalCommands::start(commands.clone()))
+        .then(|| crate::personal_commands::PersonalCommands::start(commands.as_ref().clone()))
         .flatten();
 
     events.emit(&VoiceEvent::SessionStarted {
@@ -159,7 +161,7 @@ pub fn listen(
             if commands_enabled {
                 command_loader = Some(load_command_recognizer(project_root.to_path_buf()));
                 personal_commands =
-                    crate::personal_commands::PersonalCommands::start(commands.clone());
+                    crate::personal_commands::PersonalCommands::start(commands.as_ref().clone());
                 tracing::info!("voice commands enabled; loading command model");
             } else {
                 command_loader = None;
@@ -533,10 +535,9 @@ pub fn listen(
                     text: update.text.clone(),
                 })?;
                 if is_completed {
-                    let active_commands = personal_commands.as_ref().map_or_else(
-                        || std::sync::Arc::new(commands.clone()),
-                        |runtime| runtime.snapshot(),
-                    );
+                    let active_commands = personal_commands
+                        .as_ref()
+                        .map_or_else(|| commands.clone(), |runtime| runtime.snapshot());
                     handle_command(
                         &active_commands,
                         &mut mode,
@@ -884,15 +885,11 @@ fn handle_command(
         }
         Decision::Execute {
             id,
-            action:
-                Action::InvokeHandler {
-                    generation,
-                    command_id,
-                },
+            action: Action::InvokeHandler { generation },
         } => {
             let outcome = personal_commands
                 .ok_or("personal command host is unavailable")
-                .and_then(|runtime| runtime.invoke(generation, command_id, heard, context.clone()));
+                .and_then(|runtime| runtime.invoke(generation, id, heard, context.clone()));
             match outcome {
                 Ok(()) => (Some(id.into()), CommandOutcome::Submitted),
                 Err(error) => {

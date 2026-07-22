@@ -29,7 +29,6 @@ pub enum Action {
     StopMeeting,
     InvokeHandler {
         generation: u64,
-        command_id: String,
     },
     OpenApplication(String),
     OpenUrl(String),

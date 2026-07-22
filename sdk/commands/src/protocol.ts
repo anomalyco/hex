@@ -1,4 +1,4 @@
-import type { NativeAction } from "./model.js"
+import type { HandlerContext, NativeAction } from "./model.js"
 
 export interface RegistrationCommand {
   readonly id: string
@@ -22,12 +22,7 @@ export type HostInput =
     readonly type: "invoke"
     readonly invocationId: string
     readonly commandId: string
-    readonly context: {
-      readonly application?: string
-      readonly browserHost?: string
-      readonly browserUrl?: string
-      readonly windowTitle?: string
-    }
+    readonly context: HandlerContext
   }
   | {
     readonly type: "toolResult"

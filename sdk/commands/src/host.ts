@@ -1,9 +1,8 @@
 import { pathToFileURL } from "node:url"
 import { Cause, Deferred, Effect, Exit, Fiber } from "effect"
 import { Hex, ToolCallError } from "./effect.js"
-import type { HexService } from "./effect.js"
+import type { EffectHandler, HexService } from "./effect.js"
 import {
-  isNativeAction,
   openApplication,
   openPath,
   openUrl,
@@ -13,10 +12,10 @@ import {
 } from "./model.js"
 import type {
   Handler,
-  HandlerContext,
+  HexCapabilities,
   HexConfig,
+  Modifier,
   NativeAction,
-  PressOptions,
   PromiseHex,
 } from "./model.js"
 import type { HostInput, HostOutput, Registration, RegistrationCommand } from "./protocol.js"
@@ -33,6 +32,9 @@ const MAX_PRESS_REPEAT = 100
 const MAX_PENDING_TOOL_CALLS = 1024
 const SHUTDOWN_TIMEOUT_MS = 2_000
 
+type HostHandler = Handler | EffectHandler
+type HostHandlerFunction = Exclude<HostHandler, Effect.Effect<void, unknown, Hex>>
+
 const utf8Length = (value: string): number => Buffer.byteLength(value, "utf8")
 
 const boundedString = (value: unknown, label: string, maxBytes: number): string => {
@@ -47,14 +49,16 @@ const record = (value: unknown): Record<string, unknown> | undefined =>
     ? Object.fromEntries(Object.entries(value))
     : undefined
 
-const isFunction = (value: unknown): value is ((argument: unknown) => unknown) =>
+const isFunction = (value: unknown): value is HostHandlerFunction =>
   typeof value === "function"
 
-const validateAction = (value: unknown, label: string): NativeAction => {
-  if (!isNativeAction(value)) throw new Error(`${label} is not a supported native action`)
-  switch (value.type) {
+// Bound and normalize host input; Rust independently validates every registered action.
+const validateNativeAction = (value: unknown, label: string): NativeAction | undefined => {
+  const action = record(value)
+  switch (action?.type) {
     case "openUrl": {
-      const url = boundedString(value.url, `${label}.url`, MAX_VALUE_BYTES)
+      if (typeof action.url !== "string") return undefined
+      const url = boundedString(action.url, `${label}.url`, MAX_VALUE_BYTES)
       let parsed: URL
       try {
         parsed = new URL(url)
@@ -67,15 +71,21 @@ const validateAction = (value: unknown, label: string): NativeAction => {
       return openUrl(url)
     }
     case "openApplication":
-      return openApplication(boundedString(value.application, `${label}.application`, MAX_VALUE_BYTES))
+      return typeof action.application === "string"
+        ? openApplication(boundedString(action.application, `${label}.application`, MAX_VALUE_BYTES))
+        : undefined
     case "openPath":
-      return openPath(boundedString(value.path, `${label}.path`, MAX_VALUE_BYTES))
+      return typeof action.path === "string"
+        ? openPath(boundedString(action.path, `${label}.path`, MAX_VALUE_BYTES))
+        : undefined
     case "typeText":
-      return typeText(boundedString(value.text, `${label}.text`, MAX_VALUE_BYTES))
+      return typeof action.text === "string"
+        ? typeText(boundedString(action.text, `${label}.text`, MAX_VALUE_BYTES))
+        : undefined
     case "press": {
-      const input = record(value)
-      const key = boundedString(value.key, `${label}.key`, 64)
-      const modifiers = input?.modifiers
+      if (typeof action.key !== "string") return undefined
+      const key = boundedString(action.key, `${label}.key`, 64)
+      const modifiers = action.modifiers
       if (modifiers !== undefined && (
         !Array.isArray(modifiers)
         || modifiers.length > 5
@@ -85,7 +95,7 @@ const validateAction = (value: unknown, label: string): NativeAction => {
           || modifier === "option"
           || modifier === "shift")
       )) throw new Error(`${label}.modifiers contains an unsupported modifier`)
-      const repeat = input?.repeat
+      const repeat = action.repeat
       if (repeat !== undefined && (
         typeof repeat !== "number"
         || !Number.isInteger(repeat)
@@ -98,27 +108,29 @@ const validateAction = (value: unknown, label: string): NativeAction => {
       }
       return press({
         key,
-        ...(modifiers === undefined ? {} : { modifiers }),
+        ...(modifiers === undefined ? {} : { modifiers: modifiers as readonly Modifier[] }),
         ...(repeat === undefined ? {} : { repeat }),
       })
     }
+    default:
+      return undefined
   }
 }
 
-const execution = (candidate: unknown, label: string): RegistrationCommand["execution"] => {
-  return isNativeAction(candidate)
-    ? { type: "native", action: validateAction(candidate, `${label}.action`) }
-    : { type: "handler" }
-}
+const adaptCapabilities = <Result>(
+  dispatch: (action: NativeAction) => Result,
+): HexCapabilities<Result> => ({
+  openUrl: (url) => dispatch(openUrl(url)),
+  openApplication: (application) => dispatch(openApplication(application)),
+  openPath: (path) => dispatch(openPath(path)),
+  press: (input) => dispatch(press(input)),
+  typeText: (text) => dispatch(typeText(text)),
+})
 
 interface PreparedConfig {
   readonly registration: Registration
   readonly handlers: ReadonlyMap<string, HostHandler>
 }
-
-type HostHandler = Handler | Effect.Effect<void, unknown, Hex> | (
-  (arguments_: { readonly hex: PromiseHex; readonly context: HandlerContext }) => unknown
-)
 
 export const prepareConfig = (value: unknown): PreparedConfig => {
   const config = record(value)
@@ -161,11 +173,12 @@ export const prepareConfig = (value: unknown): PreparedConfig => {
     const hasRun = definition.run !== undefined
     if (hasAction === hasRun) throw new Error(`commands.${id} must contain exactly one of action or run`)
     const candidate = hasAction ? definition.action : definition.run
-    if (!isNativeAction(candidate) && !isFunction(candidate) && !Effect.isEffect(candidate)) {
+    const action = validateNativeAction(candidate, `commands.${id}.action`)
+    if (action === undefined && !isFunction(candidate) && !Effect.isEffect(candidate)) {
       throw new Error(`commands.${id} has an unsupported execution value`)
     }
     if (isFunction(candidate)) {
-      handlers.set(id, (arguments_) => candidate(arguments_))
+      handlers.set(id, candidate)
     } else if (Effect.isEffect(candidate)) {
       handlers.set(id, candidate)
     }
@@ -175,7 +188,9 @@ export const prepareConfig = (value: unknown): PreparedConfig => {
       ...(group === undefined ? {} : { group }),
       ...(description === undefined ? {} : { description }),
       ...(validatedWhen === undefined ? {} : { when: validatedWhen }),
-      execution: execution(candidate, `commands.${id}`),
+      execution: action === undefined
+        ? { type: "handler" }
+        : { type: "native", action },
     }
   })
 
@@ -348,11 +363,7 @@ export const runHost = async ({ config, input, write }: HostOptions): Promise<vo
     context: Extract<HostInput, { readonly type: "invoke" }>["context"],
   ): HexService => ({
     context,
-    openUrl: (url) => callTool(invocationId, openUrl(url)),
-    openApplication: (application) => callTool(invocationId, openApplication(application)),
-    openPath: (path) => callTool(invocationId, openPath(path)),
-    press: (input) => callTool(invocationId, typeof input === "string" ? press(input) : press(input)),
-    typeText: (text) => callTool(invocationId, typeText(text)),
+    ...adaptCapabilities((action) => callTool(invocationId, action)),
   })
 
   const makePromiseHex = (invocationId: string, signal: AbortSignal): {
@@ -370,13 +381,7 @@ export const runHost = async ({ config, input, write }: HostOptions): Promise<vo
       return call
     }
     return {
-      hex: {
-        openUrl: (url) => run(openUrl(url)),
-        openApplication: (application) => run(openApplication(application)),
-        openPath: (path) => run(openPath(path)),
-        press: (input: string | PressOptions) => run(typeof input === "string" ? press(input) : press(input)),
-        typeText: (text) => run(typeText(text)),
-      },
+      hex: adaptCapabilities(run),
       awaitCalls: () => Promise.all(calls).then(() => undefined),
     }
   }

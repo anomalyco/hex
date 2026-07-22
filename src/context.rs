@@ -61,9 +61,7 @@ impl ContextSelector {
     pub(crate) fn can_coexist_with(&self, other: &Self) -> bool {
         match (self, other) {
             (Self::Always, _) | (_, Self::Always) => true,
-            (Self::BrowserHost(left), Self::BrowserHost(right)) => {
-                normalize_browser_host(left) == normalize_browser_host(right)
-            }
+            (Self::BrowserHost(left), Self::BrowserHost(right)) => browser_hosts_equal(left, right),
             (Self::Application(left), Self::Application(right)) => left == right,
             (Self::BrowserHost(_), Self::Application(_))
             | (Self::Application(_), Self::BrowserHost(_)) => true,
@@ -171,9 +169,9 @@ impl ContextSnapshot {
         // Brave is the first browser adapter. Command semantics intentionally
         // depend on browser host, not this application name.
         self.application.as_deref() == Some("Brave Browser")
-            && self.browser_host().is_some_and(|current| {
-                normalize_browser_host(current) == normalize_browser_host(host)
-            })
+            && self
+                .browser_host()
+                .is_some_and(|current| browser_hosts_equal(current, host))
     }
 
     pub fn application_is(&self, application: &str) -> bool {
@@ -191,6 +189,11 @@ impl ContextSnapshot {
 
 fn normalize_browser_host(host: &str) -> String {
     host.trim_end_matches('.').to_ascii_lowercase()
+}
+
+fn browser_hosts_equal(left: &str, right: &str) -> bool {
+    left.trim_end_matches('.')
+        .eq_ignore_ascii_case(right.trim_end_matches('.'))
 }
 
 const CAPTURE_SCRIPT: &str = r#"

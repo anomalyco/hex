@@ -26,12 +26,164 @@ const MAX_PHRASES: usize = 16;
 const MAX_REPEAT: u8 = 100;
 const MAX_PENDING_INVOCATIONS: usize = 1024;
 const MAX_PENDING_TOOL_CALLS: usize = 1024;
+const MAX_TOOL_CALLS_PER_INVOCATION: usize = 64;
 const HOST_WRITE_QUEUE: usize = 64;
 const TOOL_QUEUE: usize = 64;
 const TOOL_WORKERS: usize = 2;
 const RETIRE_TIMEOUT: Duration = Duration::from_secs(30);
+const RESTART_BASE_DELAY: Duration = Duration::from_millis(250);
+const RESTART_MAX_DELAY: Duration = Duration::from_secs(8);
+const RESTART_HEALTHY_PERIOD: Duration = Duration::from_secs(30);
+const MAX_AUTOMATIC_RESTARTS: u8 = 5;
 const MAX_WATCH_ENTRIES: usize = 4096;
 const MAX_WATCH_DEPTH: usize = 32;
+const MAX_STATUS_BYTES: usize = 256 * 1024;
+const MAX_STATUS_ERROR_BYTES: usize = 4096;
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StatusSnapshot {
+    pub active_generation: Option<u64>,
+    pub catalog: Vec<StatusCommand>,
+    pub host_state: HostState,
+    pub last_reload_error: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum HostState {
+    NotConfigured,
+    Starting,
+    Active,
+    Unavailable,
+    Stopped,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StatusCommand {
+    pub id: String,
+    pub phrases: Vec<String>,
+    pub group: String,
+    pub description: String,
+    pub context: StatusContext,
+    pub execution: StatusExecution,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum StatusContext {
+    Global,
+    Application { application: String },
+    BrowserHost { browser_host: String },
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum StatusExecution {
+    Native,
+    Handler,
+}
+
+impl Default for StatusSnapshot {
+    fn default() -> Self {
+        Self {
+            active_generation: None,
+            catalog: Vec::new(),
+            host_state: HostState::NotConfigured,
+            last_reload_error: None,
+        }
+    }
+}
+
+pub fn load_status() -> Result<StatusSnapshot> {
+    let path = crate::app_paths::personal_commands_status_file()?;
+    load_status_at(&path)
+}
+
+fn load_status_at(path: &Path) -> Result<StatusSnapshot> {
+    let bytes = match fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(StatusSnapshot::default());
+        }
+        Err(error) => return Err(error.into()),
+    };
+    if bytes.len() > MAX_STATUS_BYTES {
+        return Err(eyre!(
+            "personal command status exceeds {MAX_STATUS_BYTES} bytes"
+        ));
+    }
+    let status: StatusSnapshot = serde_json::from_slice(&bytes)?;
+    validate_status(&status)?;
+    Ok(status)
+}
+
+fn persist_status(status: &StatusSnapshot) {
+    let result = crate::app_paths::personal_commands_status_file()
+        .and_then(|path| persist_status_at(&path, status));
+    if let Err(error) = result {
+        tracing::warn!(%error, "could not persist personal command status");
+    }
+}
+
+fn persist_status_at(path: &Path, status: &StatusSnapshot) -> Result<()> {
+    validate_status(status)?;
+    let encoded = serde_json::to_vec(status)?;
+    if encoded.len() > MAX_STATUS_BYTES {
+        return Err(eyre!(
+            "personal command status exceeds {MAX_STATUS_BYTES} bytes"
+        ));
+    }
+    let parent = path
+        .parent()
+        .ok_or_else(|| eyre!("personal command status path has no parent"))?;
+    fs::create_dir_all(parent)?;
+    let temporary = path.with_extension(format!("json.{}.tmp", std::process::id()));
+    fs::write(&temporary, encoded)?;
+    fs::rename(temporary, path)?;
+    Ok(())
+}
+
+fn validate_status(status: &StatusSnapshot) -> Result<()> {
+    if status.catalog.len() > MAX_COMMANDS {
+        return Err(eyre!(
+            "personal command status exceeds {MAX_COMMANDS} commands"
+        ));
+    }
+    if status
+        .last_reload_error
+        .as_ref()
+        .is_some_and(|error| error.len() > MAX_STATUS_ERROR_BYTES)
+    {
+        return Err(eyre!("personal command status error is too large"));
+    }
+    for command in &status.catalog {
+        validate_text(&command.id, "status command id", 128)?;
+        validate_text(&command.group, "status command group", 1024)?;
+        validate_text(&command.description, "status command description", 1024)?;
+        if command.phrases.is_empty() || command.phrases.len() > MAX_PHRASES {
+            return Err(eyre!("status command phrases are out of bounds"));
+        }
+        for phrase in &command.phrases {
+            validate_text(phrase, "status command phrase", 256)?;
+        }
+        match &command.context {
+            StatusContext::Global => {}
+            StatusContext::Application { application } => {
+                validate_text(application, "status application context", 256)?;
+            }
+            StatusContext::BrowserHost { browser_host } => {
+                validate_text(browser_host, "status browser context", 253)?;
+            }
+        }
+    }
+    Ok(())
+}
 
 pub fn initialize_workspace() -> Result<PathBuf> {
     let workspace = crate::app_paths::personal_commands_workspace()?;
@@ -139,8 +291,15 @@ struct PendingInvocation {
     command_id: String,
     heard: String,
     context: String,
-    tool_call_ids: HashSet<String>,
+    tool_call_count: usize,
     started: Instant,
+}
+
+#[derive(Default)]
+struct RestartBackoff {
+    failures: u8,
+    retry_at: Option<Instant>,
+    active_since: Option<Instant>,
 }
 
 struct ToolJob {
@@ -185,13 +344,20 @@ struct RegistrationCommand {
 #[derive(Deserialize)]
 #[serde(untagged)]
 enum When {
-    Application {
-        application: String,
-    },
-    BrowserHost {
-        #[serde(rename = "browserHost")]
-        browser_host: String,
-    },
+    Application(ApplicationWhen),
+    BrowserHost(BrowserHostWhen),
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ApplicationWhen {
+    application: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+struct BrowserHostWhen {
+    browser_host: String,
 }
 
 #[derive(Deserialize)]
@@ -281,6 +447,42 @@ const fn one() -> u8 {
     1
 }
 
+impl RestartBackoff {
+    fn reset(&mut self) {
+        *self = Self::default();
+    }
+
+    fn host_started(&mut self, now: Instant) {
+        self.retry_at = None;
+        self.active_since = Some(now);
+    }
+
+    fn host_failed(&mut self, now: Instant) {
+        self.active_since = None;
+        self.failures = self.failures.saturating_add(1);
+        self.retry_at = (self.failures <= MAX_AUTOMATIC_RESTARTS).then(|| {
+            let exponent = u32::from(self.failures.saturating_sub(1));
+            let delay = RESTART_BASE_DELAY
+                .saturating_mul(1_u32 << exponent)
+                .min(RESTART_MAX_DELAY);
+            now + delay
+        });
+    }
+
+    fn ready(&self, now: Instant) -> bool {
+        self.retry_at.is_some_and(|retry_at| now >= retry_at)
+    }
+
+    fn reset_if_healthy(&mut self, now: Instant) {
+        if self
+            .active_since
+            .is_some_and(|started| now.duration_since(started) >= RESTART_HEALTHY_PERIOD)
+        {
+            self.reset();
+        }
+    }
+}
+
 impl PersonalCommands {
     pub fn start(base: CommandConfig) -> Option<Self> {
         let active = Arc::new(RwLock::new(Arc::new(base.clone())));
@@ -362,24 +564,40 @@ fn run_worker(
     outcomes: SyncSender<ActionOutcome>,
     stop: Arc<AtomicBool>,
 ) {
+    let mut status = StatusSnapshot {
+        host_state: HostState::Starting,
+        ..StatusSnapshot::default()
+    };
+    persist_status(&status);
     let workspace = match crate::app_paths::personal_commands_workspace() {
         Ok(workspace) => workspace,
         Err(error) => {
+            status.host_state = HostState::Unavailable;
+            status.last_reload_error = Some(bounded_status_error(&error.to_string()));
+            persist_status(&status);
             tracing::warn!(%error, "personal commands are unavailable");
             return;
         }
     };
     let config = workspace.join("hex.config.ts");
     if !config.is_file() {
+        status.host_state = HostState::NotConfigured;
+        persist_status(&status);
         return;
     }
     let Some(bun) = find_bun() else {
+        status.host_state = HostState::Unavailable;
+        status.last_reload_error = Some("Bun was not found".into());
+        persist_status(&status);
         tracing::warn!("Bun was not found; personal commands are unavailable");
         return;
     };
     let host_entrypoint = match crate::app_paths::personal_commands_host() {
         Ok(path) => path,
         Err(error) => {
+            status.host_state = HostState::Unavailable;
+            status.last_reload_error = Some(bounded_status_error(&error.to_string()));
+            persist_status(&status);
             tracing::warn!(%error, "personal commands are unavailable");
             return;
         }
@@ -395,6 +613,7 @@ fn run_worker(
         .spawn(move || watch_workspace(watcher_workspace, reload_sender, watcher_stop));
     let mut generation = 0;
     let mut hosts = HashMap::new();
+    let mut restart_backoff = RestartBackoff::default();
     if let Some(host) = reload(
         &base,
         &active,
@@ -404,17 +623,20 @@ fn run_worker(
         &bun,
         &host_entrypoint,
         &mut generation,
+        &mut status,
     ) {
+        restart_backoff.host_started(Instant::now());
         hosts.insert(host.generation, host);
     }
     let mut next_invocation = 0_u64;
     let mut pending = HashMap::<String, PendingInvocation>::new();
     let mut pending_tools = HashSet::<(u64, String, String)>::new();
-    let mut restart_requested = false;
 
     while !stop.load(Ordering::Acquire) {
+        restart_backoff.reset_if_healthy(Instant::now());
+        let mut active_host_failed = false;
         while let Ok(event) = events.try_recv() {
-            restart_requested |= handle_host_event(
+            active_host_failed |= handle_host_event(
                 event,
                 &mut hosts,
                 &mut pending,
@@ -423,12 +645,18 @@ fn run_worker(
                 &tool_sender,
             );
         }
-        let reload_requested = restart_requested || reload_requests.try_recv().is_ok();
-        restart_requested = false;
+        if active_host_failed {
+            restart_backoff.host_failed(Instant::now());
+        }
+        let config_reload = reload_requests.try_recv().is_ok();
         let request = requests.recv_timeout(Duration::from_millis(50));
-        let reload_requested = reload_requested || matches!(request, Ok(Request::Reload));
-        if reload_requested
-            && let Some(candidate) = reload(
+        let config_reload = config_reload || matches!(request, Ok(Request::Reload));
+        if config_reload {
+            restart_backoff.reset();
+        }
+        let automatic_restart = !config_reload && restart_backoff.ready(Instant::now());
+        if config_reload || automatic_restart {
+            if let Some(candidate) = reload(
                 &base,
                 &active,
                 &event_sender,
@@ -437,14 +665,19 @@ fn run_worker(
                 &bun,
                 &host_entrypoint,
                 &mut generation,
-            )
-        {
-            for host in hosts.values_mut() {
-                if host.retire_at.is_none() {
-                    host.retire_at = Some(Instant::now() + RETIRE_TIMEOUT);
+                &mut status,
+            ) {
+                let now = Instant::now();
+                for host in hosts.values_mut() {
+                    if host.retire_at.is_none() {
+                        host.retire_at = Some(now + RETIRE_TIMEOUT);
+                    }
                 }
+                restart_backoff.host_started(now);
+                hosts.insert(candidate.generation, candidate);
+            } else if automatic_restart {
+                restart_backoff.host_failed(Instant::now());
             }
-            hosts.insert(candidate.generation, candidate);
         }
         match request {
             Ok(Request::Invoke(invocation)) => {
@@ -486,7 +719,7 @@ fn run_worker(
                 if let Err(error) = host.input.try_send(input) {
                     let reason = writer_queue_error(error);
                     emit_failure(invocation, &outcomes, reason);
-                    restart_requested |= generation_is_active(&hosts, host_generation);
+                    let restart = generation_is_active(&hosts, host_generation);
                     fail_generation(
                         host_generation,
                         &mut hosts,
@@ -495,6 +728,9 @@ fn run_worker(
                         &outcomes,
                         reason,
                     );
+                    if restart {
+                        restart_backoff.host_failed(Instant::now());
+                    }
                 } else {
                     tracing::info!(
                         generation = invocation.generation,
@@ -511,7 +747,7 @@ fn run_worker(
                             command_id: invocation.command_id,
                             heard: invocation.heard,
                             context: invocation.context.label(),
-                            tool_call_ids: HashSet::new(),
+                            tool_call_count: 0,
                             started: Instant::now(),
                         },
                     );
@@ -522,15 +758,17 @@ fn run_worker(
             Ok(Request::Reload) => {}
         }
 
-        let expired = hosts
+        let now = Instant::now();
+        let retired = hosts
             .iter()
             .filter_map(|(generation, host)| {
-                host.retire_at
-                    .is_some_and(|deadline| Instant::now() >= deadline)
-                    .then_some(*generation)
+                let has_pending = pending
+                    .values()
+                    .any(|invocation| invocation.generation == *generation);
+                should_retire(host.retire_at, has_pending, now).then_some(*generation)
             })
             .collect::<Vec<_>>();
-        for generation in expired {
+        for generation in retired {
             fail_generation(
                 generation,
                 &mut hosts,
@@ -544,6 +782,8 @@ fn run_worker(
     for host in hosts.values() {
         let _ = host.input.try_send(HostInput::Shutdown);
     }
+    status.host_state = HostState::Stopped;
+    persist_status(&status);
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -556,6 +796,7 @@ fn reload(
     bun: &Path,
     host_entrypoint: &Path,
     generation: &mut u64,
+    status: &mut StatusSnapshot,
 ) -> Option<HostProcess> {
     *generation += 1;
     match start_candidate(
@@ -567,12 +808,24 @@ fn reload(
         bun,
         host_entrypoint,
     ) {
-        Ok((host, commands)) => {
+        Ok((host, commands, catalog)) => {
             *active.write().expect("command registry poisoned") = Arc::new(commands);
+            status.active_generation = Some(*generation);
+            status.catalog = catalog;
+            status.host_state = HostState::Active;
+            status.last_reload_error = None;
+            persist_status(status);
             tracing::info!(generation, "personal commands activated");
             Some(host)
         }
         Err(error) => {
+            status.host_state = if status.active_generation.is_some() {
+                HostState::Active
+            } else {
+                HostState::Unavailable
+            };
+            status.last_reload_error = Some(bounded_status_error(&error.to_string()));
+            persist_status(status);
             tracing::error!(%error, "personal command reload rejected; preserving active registry");
             None
         }
@@ -588,7 +841,7 @@ fn start_candidate(
     config: &Path,
     bun: &Path,
     host_entrypoint: &Path,
-) -> Result<(HostProcess, CommandConfig)> {
+) -> Result<(HostProcess, CommandConfig, Vec<StatusCommand>)> {
     let mut child = Command::new(bun)
         .arg(host_entrypoint)
         .arg(config)
@@ -623,6 +876,7 @@ fn start_candidate(
                     commands,
                 },
             )) if event_generation == generation => {
+                let catalog = status_catalog(&commands);
                 let compiled =
                     match compile_registration(base, generation, protocol_version, commands) {
                         Ok(compiled) => compiled,
@@ -648,6 +902,7 @@ fn start_candidate(
                         retire_at: None,
                     },
                     compiled,
+                    catalog,
                 ));
             }
             Ok(HostEvent::Closed(event_generation, error)) if event_generation == generation => {
@@ -663,6 +918,34 @@ fn start_candidate(
             }
         }
     }
+}
+
+fn status_catalog(commands: &[RegistrationCommand]) -> Vec<StatusCommand> {
+    commands
+        .iter()
+        .map(|command| StatusCommand {
+            id: command.id.clone(),
+            phrases: command.phrases.clone(),
+            group: command.group.clone().unwrap_or_else(|| "Personal".into()),
+            description: command
+                .description
+                .clone()
+                .unwrap_or_else(|| "Personal command".into()),
+            context: match &command.when {
+                None => StatusContext::Global,
+                Some(When::Application(when)) => StatusContext::Application {
+                    application: when.application.clone(),
+                },
+                Some(When::BrowserHost(when)) => StatusContext::BrowserHost {
+                    browser_host: when.browser_host.clone(),
+                },
+            },
+            execution: match &command.execution {
+                Execution::Native { .. } => StatusExecution::Native,
+                Execution::Handler => StatusExecution::Handler,
+            },
+        })
+        .collect()
 }
 
 fn handle_host_event(
@@ -844,6 +1127,10 @@ fn generation_is_active(hosts: &HashMap<u64, HostProcess>, generation: u64) -> b
         .is_some_and(|host| host.retire_at.is_none())
 }
 
+fn should_retire(retire_at: Option<Instant>, has_pending: bool, now: Instant) -> bool {
+    retire_at.is_some_and(|deadline| !has_pending || now >= deadline)
+}
+
 fn accept_tool_call(
     pending: &mut HashMap<String, PendingInvocation>,
     pending_tools: &mut HashSet<(u64, String, String)>,
@@ -857,11 +1144,16 @@ fn accept_tool_call(
     let Some(invocation) = pending.get_mut(invocation_id) else {
         return false;
     };
-    if invocation.generation != generation || !invocation.tool_call_ids.insert(tool_call_id.into())
+    if invocation.generation != generation
+        || invocation.tool_call_count >= MAX_TOOL_CALLS_PER_INVOCATION
     {
         return false;
     }
-    pending_tools.insert((generation, invocation_id.into(), tool_call_id.into()))
+    if !pending_tools.insert((generation, invocation_id.into(), tool_call_id.into())) {
+        return false;
+    }
+    invocation.tool_call_count += 1;
+    true
 }
 
 fn compile_registration(
@@ -893,22 +1185,19 @@ fn compile_registration(
         base.validate_personal_identity(&command.id, &command.phrases)?;
         let context = match command.when {
             None => ContextPredicate::Always,
-            Some(When::Application { application }) => {
-                validate_text(&application, "application context", 256)?;
-                ContextPredicate::application(application)
+            Some(When::Application(when)) => {
+                validate_text(&when.application, "application context", 256)?;
+                ContextPredicate::application(when.application)
             }
-            Some(When::BrowserHost { browser_host }) => {
-                validate_text(&browser_host, "browser host context", 253)?;
-                validate_browser_host(&browser_host)?;
-                ContextPredicate::browser_host(browser_host)
+            Some(When::BrowserHost(when)) => {
+                validate_text(&when.browser_host, "browser host context", 253)?;
+                validate_browser_host(&when.browser_host)?;
+                ContextPredicate::browser_host(when.browser_host)
             }
         };
         let action = match command.execution {
             Execution::Native { action } => action.into_action()?,
-            Execution::Handler => Action::InvokeHandler {
-                generation,
-                command_id: command.id.clone(),
-            },
+            Execution::Handler => Action::InvokeHandler { generation },
         };
         let description = command
             .description
@@ -1327,6 +1616,18 @@ fn bounded_error(message: &str) -> String {
     message.chars().take(4096).collect()
 }
 
+fn bounded_status_error(message: &str) -> String {
+    let mut end = 0;
+    for (index, character) in message.char_indices() {
+        let next = index + character.len_utf8();
+        if next > MAX_STATUS_ERROR_BYTES {
+            break;
+        }
+        end = next;
+    }
+    message[..end].to_owned()
+}
+
 fn emit_failure(invocation: Invocation, outcomes: &SyncSender<ActionOutcome>, error: &str) {
     let _ = outcomes.send(ActionOutcome {
         id: invocation.command_id,
@@ -1376,9 +1677,9 @@ mod tests {
         assert!(matches!(
             compiled.resolve(Mode::Listening, "do work", &slack),
             Decision::Execute {
-                action: Action::InvokeHandler { generation: 7, command_id },
-                ..
-            } if command_id == "handled"
+                id: "handled",
+                action: Action::InvokeHandler { generation: 7 },
+            }
         ));
         assert_eq!(
             compiled
@@ -1459,7 +1760,16 @@ mod tests {
     }
 
     #[test]
-    fn duplicate_tool_correlations_are_rejected() {
+    fn context_predicates_reject_ambiguous_objects() {
+        let result = serde_json::from_str::<RegistrationCommand>(
+            r#"{"id":"bad","phrases":["bad"],"when":{"application":"Brave Browser","browserHost":"x.com"},"execution":{"type":"handler"}}"#,
+        );
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn tool_calls_are_unique_while_pending_and_cumulatively_bounded() {
         let mut pending = HashMap::from([(
             "1-1".into(),
             PendingInvocation {
@@ -1467,7 +1777,7 @@ mod tests {
                 command_id: "handled".into(),
                 heard: "do work".into(),
                 context: "test".into(),
-                tool_call_ids: HashSet::new(),
+                tool_call_count: 0,
                 started: Instant::now(),
             },
         )]);
@@ -1480,13 +1790,30 @@ mod tests {
             "1-1",
             "tool-1"
         ));
-        tools.clear();
         assert!(!accept_tool_call(
             &mut pending,
             &mut tools,
             1,
             "1-1",
             "tool-1"
+        ));
+        tools.clear();
+        for index in 1..MAX_TOOL_CALLS_PER_INVOCATION {
+            assert!(accept_tool_call(
+                &mut pending,
+                &mut tools,
+                1,
+                "1-1",
+                &format!("tool-{index}")
+            ));
+            tools.clear();
+        }
+        assert!(!accept_tool_call(
+            &mut pending,
+            &mut tools,
+            1,
+            "1-1",
+            "one-too-many"
         ));
         assert!(!accept_tool_call(
             &mut pending,
@@ -1495,6 +1822,45 @@ mod tests {
             "1-1",
             "tool-2"
         ));
+    }
+
+    #[test]
+    fn superseded_hosts_retire_when_idle_or_at_the_deadline() {
+        let now = Instant::now();
+        let deadline = now + RETIRE_TIMEOUT;
+
+        assert!(should_retire(Some(deadline), false, now));
+        assert!(!should_retire(Some(deadline), true, now));
+        assert!(should_retire(Some(deadline), true, deadline));
+        assert!(!should_retire(None, false, deadline));
+    }
+
+    #[test]
+    fn automatic_restarts_back_off_stop_and_reset() {
+        let mut backoff = RestartBackoff::default();
+        let mut now = Instant::now();
+
+        for failure in 1..=MAX_AUTOMATIC_RESTARTS {
+            backoff.host_failed(now);
+            let retry_at = backoff.retry_at.expect("retry should remain in budget");
+            let expected = RESTART_BASE_DELAY
+                .saturating_mul(1_u32 << u32::from(failure - 1))
+                .min(RESTART_MAX_DELAY);
+            assert_eq!(retry_at.duration_since(now), expected);
+            assert!(!backoff.ready(now));
+            assert!(backoff.ready(retry_at));
+            now = retry_at;
+        }
+        backoff.host_failed(now);
+        assert!(backoff.retry_at.is_none());
+
+        backoff.reset();
+        assert_eq!(backoff.failures, 0);
+        backoff.host_failed(now);
+        backoff.host_started(now);
+        backoff.reset_if_healthy(now + RESTART_HEALTHY_PERIOD);
+        assert_eq!(backoff.failures, 0);
+        assert!(backoff.retry_at.is_none());
     }
 
     #[test]
@@ -1581,5 +1947,56 @@ mod tests {
             "// user config\n"
         );
         fs::remove_dir_all(workspace).unwrap();
+    }
+
+    #[test]
+    fn status_snapshot_roundtrips_atomically() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("hex-status-{unique}"));
+        let path = root.join("personal-commands.json");
+        let status = StatusSnapshot {
+            active_generation: Some(4),
+            catalog: vec![StatusCommand {
+                id: "open-example".into(),
+                phrases: vec!["open example".into(), "show example".into()],
+                group: "Web".into(),
+                description: "Open the example site".into(),
+                context: StatusContext::BrowserHost {
+                    browser_host: "example.com".into(),
+                },
+                execution: StatusExecution::Native,
+            }],
+            host_state: HostState::Active,
+            last_reload_error: None,
+        };
+
+        persist_status_at(&path, &status).unwrap();
+        assert_eq!(load_status_at(&path).unwrap(), status);
+        assert!(!path.with_extension("json.tmp").exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn status_snapshot_enforces_catalog_and_error_bounds() {
+        let command = StatusCommand {
+            id: "personal".into(),
+            phrases: vec!["personal phrase".into()],
+            group: "Personal".into(),
+            description: "Personal command".into(),
+            context: StatusContext::Global,
+            execution: StatusExecution::Handler,
+        };
+        let mut status = StatusSnapshot {
+            catalog: vec![command; MAX_COMMANDS + 1],
+            ..StatusSnapshot::default()
+        };
+        assert!(validate_status(&status).is_err());
+
+        status.catalog.clear();
+        status.last_reload_error = Some("x".repeat(MAX_STATUS_ERROR_BYTES + 1));
+        assert!(validate_status(&status).is_err());
     }
 }

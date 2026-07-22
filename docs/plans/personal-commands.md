@@ -1,7 +1,7 @@
 # Personal Commands - Product and Implementation Plan
 
-**Status:** In progress. The registry, supervised host, SDK APIs, and workspace
-provisioning are implemented; Settings integration remains.
+**Status:** MVP implemented. The registry, supervised host, SDK APIs, workspace
+provisioning, persisted runtime status, and Settings integration are complete.
 
 ## Goal
 

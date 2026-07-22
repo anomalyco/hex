@@ -20,6 +20,11 @@ pub fn local_api_discovery_file() -> Result<PathBuf> {
 }
 
 #[cfg(target_os = "macos")]
+pub fn personal_commands_status_file() -> Result<PathBuf> {
+    Ok(support_dir()?.join("personal-commands.json"))
+}
+
+#[cfg(target_os = "macos")]
 pub fn personal_commands_workspace() -> Result<PathBuf> {
     Ok(dirs::home_dir()
         .ok_or_else(|| eyre!("home directory is unavailable"))?
