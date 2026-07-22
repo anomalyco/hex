@@ -136,7 +136,7 @@ CoreAudio formats, AppleScript details, or event serialization.
   share normal queueing and cancellation but never update the last dictation.
 - Post-processing is optional and best-effort. Empty, failed, or timed-out
   processing falls back to the raw local transcript. It applies to Paste and
-  Send, not Captain's Log or meetings.
+  Send, but not meetings.
 - OpenCode availability checks stay off the UI thread. A missing beta install is
   retried at a coarse interval so installing `opencode2` while Settings is open
   refreshes the model catalog without restarting HEX.
