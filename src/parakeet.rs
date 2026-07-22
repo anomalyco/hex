@@ -1,5 +1,4 @@
 use std::collections::{BTreeMap, HashSet};
-use std::process::Command;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::Once;
@@ -15,9 +14,7 @@ use transcribe_cpp::{
 };
 
 use crate::context::ContextSnapshot;
-use crate::dictation::{
-    DictationClip, pad_for_parakeet, strip_captains_log_protocol, strip_dictation_protocol,
-};
+use crate::dictation::{DictationClip, pad_for_parakeet, strip_dictation_protocol};
 use crate::dictation_processor::ProcessingObservation;
 use crate::meeting::{self, TranscriptEntry, TranscriptPublication};
 use crate::paste::Paster;
@@ -84,7 +81,6 @@ pub enum TranscriptionTarget {
     Paste,
     Send,
     Edit,
-    CaptainsLog,
 }
 
 struct InferenceJob {
@@ -744,9 +740,6 @@ fn finish_output(
                             )
                             .map_err(|error| error.to_string())?
                         }
-                        TranscriptionTarget::CaptainsLog => {
-                            append_daily_log(&completed.text).map_err(|error| error.to_string())?
-                        }
                     }
                     if matches!(
                         target,
@@ -844,7 +837,6 @@ fn strip_transcript_protocol(text: &str, target: TranscriptionTarget) -> String 
         TranscriptionTarget::Paste | TranscriptionTarget::Send | TranscriptionTarget::Edit => {
             strip_dictation_protocol(text)
         }
-        TranscriptionTarget::CaptainsLog => strip_captains_log_protocol(text),
     }
 }
 
@@ -898,26 +890,6 @@ fn prepare_meeting_delta(
         .collect::<Vec<_>>()
         .join("\n\n");
     Ok((text, new_entries))
-}
-
-fn append_daily_log(text: &str) -> Result<()> {
-    let executable = std::env::var_os("VOICE_CONTROL_LOG_CLI")
-        .map(Into::into)
-        .or_else(|| dirs::home_dir().map(|home| home.join(".bun/bin/log")))
-        .ok_or_else(|| eyre!("could not resolve the Organizer log CLI"))?;
-    let output = Command::new(&executable)
-        .args(["add", text])
-        .output()
-        .wrap_err_with(|| format!("could not invoke {}", executable.display()))?;
-    if output.status.success() {
-        Ok(())
-    } else {
-        Err(eyre!(
-            "Organizer log CLI exited with {}: {}",
-            output.status,
-            String::from_utf8_lossy(&output.stderr).trim()
-        ))
-    }
 }
 
 pub(crate) fn default_model_path() -> Result<std::path::PathBuf> {

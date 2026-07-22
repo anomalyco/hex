@@ -4459,10 +4459,11 @@ impl AppWindow {
             PersonalWorkspaceState::Error => "Needs attention",
         };
         let command_count = self.personal_commands_status.catalog.len();
-        let generation = self.personal_commands_status.active_generation.map_or_else(
-            || "No active generation".into(),
-            |generation| format!("Generation {generation}"),
-        );
+        let command_count_label = if command_count == 1 {
+            "1 command".into()
+        } else {
+            format!("{command_count} commands")
+        };
         let last_error = self
             .personal_workspace_error
             .clone()
@@ -4496,9 +4497,12 @@ impl AppWindow {
                                     .font_weight(FontWeight::SEMIBOLD)
                                     .child("Personal Commands"),
                             )
-                            .child(div().text_size(px(11.0)).text_color(rgb(MUTED)).child(
-                                format!("{status_label} · {command_count} commands · {generation}"),
-                            )),
+                            .child(
+                                div()
+                                    .text_size(px(11.0))
+                                    .text_color(rgb(MUTED))
+                                    .child(format!("{status_label} · {command_count_label}")),
+                            ),
                     )
                     .child(
                         div()
@@ -6111,7 +6115,7 @@ fn command_task(command: &CommandInfo) -> String {
     }
     if command.id.starts_with("mode.") {
         "Voice control".into()
-    } else if command.id.starts_with("dictation.") || command.id.starts_with("captains-log.") {
+    } else if command.id.starts_with("dictation.") {
         "Dictation".into()
     } else if command.id.starts_with("meeting.") {
         "Meetings".into()
@@ -6289,7 +6293,7 @@ fn event_summary(event: &VoiceEvent) -> String {
                 DictationPhase::Transcribing => "Dictation is being transcribed".into(),
                 DictationPhase::Pasted => text_or("Dictation was pasted", text),
                 DictationPhase::Edited => text_or("Selected text was edited", text),
-                DictationPhase::Logged => text_or("Captain's Log was saved", text),
+                DictationPhase::Logged => text_or("Journal entry was saved", text),
                 DictationPhase::Repasted => text_or("The last dictation was pasted again", text),
                 DictationPhase::MeetingPasted => text_or("New meeting transcript was pasted", text),
                 DictationPhase::Failed(error) => format!("Dictation failed: {error}"),

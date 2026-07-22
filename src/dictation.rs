@@ -14,7 +14,6 @@ const INITIAL_RECORDING_CAPACITY: Duration = Duration::from_secs(10);
 const PARAKEET_SAMPLE_RATE: u32 = 16_000;
 
 pub const DICTATION_START_PHRASES: &[&str] = &["dictate start", "start dictating"];
-pub const CAPTAINS_LOG_START_PHRASES: &[&str] = &["captain's log", "captains log", "captain log"];
 
 pub enum Finish {
     Discard,
@@ -97,34 +96,12 @@ pub fn dictation_start_prefix(text: &str) -> Option<usize> {
     )
 }
 
-pub fn captains_log_start_prefix(text: &str) -> Option<usize> {
-    control_prefix(text, CAPTAINS_LOG_START_PHRASES)
-}
-
-pub fn captains_log_end_suffix(text: &str) -> Option<usize> {
-    control_suffix(
-        text,
-        &["captain's log end", "captains log end", "captain log end"],
-    )
-}
-
 pub fn strip_dictation_protocol(text: &str) -> String {
     let mut text = text.trim();
     while let Some((_, prefix_end)) = dictation_control_suffix(text) {
         text = trim_control_end(&text[..prefix_end]);
     }
     if let Some(prefix_end) = dictation_start_prefix(text) {
-        text = trim_control_start(&text[prefix_end..]);
-    }
-    text.to_string()
-}
-
-pub fn strip_captains_log_protocol(text: &str) -> String {
-    let mut text = text.trim();
-    while let Some(prefix_end) = captains_log_end_suffix(text) {
-        text = trim_control_end(&text[..prefix_end]);
-    }
-    if let Some(prefix_end) = captains_log_start_prefix(text) {
         text = trim_control_start(&text[prefix_end..]);
     }
     text.to_string()
@@ -139,22 +116,6 @@ fn control_prefix(text: &str, prefixes: &[&str]) -> Option<usize> {
                 || remainder.starts_with(char::is_whitespace)
                 || remainder.starts_with(|character: char| character.is_ascii_punctuation()))
             .then_some(text.len() - remainder.len())
-        })
-    })
-}
-
-fn control_suffix(text: &str, suffixes: &[&str]) -> Option<usize> {
-    let text = text
-        .trim_end()
-        .trim_end_matches(|character: char| character.is_ascii_punctuation())
-        .trim_end();
-    let lowercase = text.to_ascii_lowercase();
-    suffixes.iter().find_map(|suffix| {
-        lowercase.strip_suffix(suffix).and_then(|prefix| {
-            (prefix.is_empty()
-                || prefix.ends_with(char::is_whitespace)
-                || prefix.ends_with(|character: char| character.is_ascii_punctuation()))
-            .then_some(prefix.len())
         })
     })
 }
@@ -569,12 +530,6 @@ mod tests {
         assert_eq!(
             strip_dictation_protocol("Dictate start, this should keep the message. Dictates stop."),
             "this should keep the message"
-        );
-        assert_eq!(
-            strip_captains_log_protocol(
-                "Captain's log, architecture review complete. Captain's log end."
-            ),
-            "architecture review complete"
         );
     }
 

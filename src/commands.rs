@@ -24,7 +24,6 @@ pub enum Mode {
 #[derive(Clone, Debug)]
 pub enum Action {
     StartDictation,
-    StartCaptainsLog,
     StartMeeting,
     StopMeeting,
     InvokeHandler {
@@ -346,7 +345,6 @@ pub fn execute(action: Action) -> Result<()> {
     let mut command = ProcessCommand::new("/usr/bin/open");
     match action {
         Action::StartDictation
-        | Action::StartCaptainsLog
         | Action::StartMeeting
         | Action::StopMeeting
         | Action::InvokeHandler { .. } => {

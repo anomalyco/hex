@@ -4,7 +4,7 @@ use crate::app_settings::DictationProcessingSettings;
 use crate::commands::{
     Action, Command, CommandConfig, ConfiguredCommand, ContextPredicate, Count, Digit, Direction,
 };
-use crate::dictation::{CAPTAINS_LOG_START_PHRASES, DICTATION_START_PHRASES};
+use crate::dictation::DICTATION_START_PHRASES;
 use crate::dictation_processor::{Profile, Profiles};
 use crate::keyboard::{Key, Modifiers};
 
@@ -103,18 +103,6 @@ fn voice_control_for(meetings_enabled: bool) -> CommandConfig {
                 .action(|()| Action::OpenApplication("Slack".into())),
         )
         .command(
-            Command::new("website.open.x", "Open website")
-                .phrases([
-                    "go to x",
-                    "go to twitter",
-                    "go to x dot com",
-                    "open x",
-                    "open twitter",
-                    "open x dot com",
-                ])
-                .action(|()| Action::OpenUrl("https://x.com".into())),
-        )
-        .command(
             Command::new("website.open.training", "Open website")
                 .phrases(["go to training", "open training"])
                 .action(|()| Action::OpenUrl("https://hub.kitlangton.dev/training".into())),
@@ -129,12 +117,6 @@ fn voice_control_for(meetings_enabled: bool) -> CommandConfig {
                 .phrases(DICTATION_START_PHRASES.iter().copied())
                 .protected()
                 .action(|()| Action::StartDictation),
-        )
-        .command(
-            Command::new("captains-log.start", "Record a journal entry")
-                .phrases(CAPTAINS_LOG_START_PHRASES.iter().copied())
-                .protected()
-                .action(|()| Action::StartCaptainsLog),
         );
     let commands = if meetings_enabled {
         commands
@@ -315,6 +297,18 @@ mod tests {
     }
     use crate::commands::{Decision, Mode};
     use crate::context::ContextSnapshot;
+
+    #[test]
+    fn captains_log_is_not_a_command() {
+        assert!(matches!(
+            voice_control().resolve(
+                Mode::Listening,
+                "captain's log",
+                &ContextSnapshot::default()
+            ),
+            Decision::Ignore
+        ));
+    }
 
     #[test]
     fn meeting_recording_can_be_controlled_by_voice() {
