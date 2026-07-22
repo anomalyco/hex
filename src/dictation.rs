@@ -220,36 +220,62 @@ impl ControlStability {
 }
 
 fn control_suffix(text: &str, suffixes: &[String]) -> Option<usize> {
-    let text = text
-        .trim_end()
-        .trim_end_matches(|character: char| character.is_ascii_punctuation())
-        .trim_end();
-    let lowercase = text.to_ascii_lowercase();
+    let words = spoken_words(text);
     for suffix in suffixes {
-        let suffix = suffix.trim().to_ascii_lowercase();
-        if let Some(prefix) = lowercase.strip_suffix(&suffix)
-            && (prefix.is_empty()
-                || prefix.ends_with(char::is_whitespace)
-                || prefix.ends_with(|character: char| character.is_ascii_punctuation()))
+        let suffix = spoken_words(suffix);
+        if words.len() >= suffix.len()
+            && words[words.len() - suffix.len()..]
+                .iter()
+                .map(|word| &word.normalized)
+                .eq(suffix.iter().map(|word| &word.normalized))
         {
-            return Some(prefix.len());
+            return Some(words[words.len() - suffix.len()].start);
         }
     }
     None
 }
 
 fn control_prefix(text: &str, prefixes: &[String]) -> Option<usize> {
-    let text = text.trim_start();
-    let lowercase = text.to_ascii_lowercase();
+    let words = spoken_words(text);
     prefixes.iter().find_map(|prefix| {
-        let prefix = prefix.trim().to_ascii_lowercase();
-        lowercase.strip_prefix(&prefix).and_then(|remainder| {
-            (remainder.is_empty()
-                || remainder.starts_with(char::is_whitespace)
-                || remainder.starts_with(|character: char| character.is_ascii_punctuation()))
-            .then_some(text.len() - remainder.len())
-        })
+        let prefix = spoken_words(prefix);
+        (words.len() >= prefix.len()
+            && words[..prefix.len()]
+                .iter()
+                .map(|word| &word.normalized)
+                .eq(prefix.iter().map(|word| &word.normalized)))
+        .then(|| words[prefix.len() - 1].end)
     })
+}
+
+struct SpokenWord {
+    start: usize,
+    end: usize,
+    normalized: String,
+}
+
+fn spoken_words(text: &str) -> Vec<SpokenWord> {
+    let mut words = Vec::new();
+    let mut start = None;
+    for (index, character) in text.char_indices() {
+        if character.is_alphanumeric() || character == '\'' {
+            start.get_or_insert(index);
+        } else if let Some(start) = start.take() {
+            words.push(SpokenWord {
+                start,
+                end: index,
+                normalized: normalize(&text[start..index]),
+            });
+        }
+    }
+    if let Some(start) = start {
+        words.push(SpokenWord {
+            start,
+            end: text.len(),
+            normalized: normalize(&text[start..]),
+        });
+    }
+    words
 }
 
 fn trim_control_start(text: &str) -> &str {
@@ -736,6 +762,36 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn configured_protocol_tolerates_transcription_punctuation() {
+        let protocol = DictationProtocol::try_new(
+            vec!["say".into()],
+            vec!["say paste".into(), "say stop".into()],
+            vec!["say send".into()],
+            vec!["say cancel".into(), "never mind".into()],
+        )
+        .unwrap();
+
+        assert!(matches!(
+            protocol.control_suffix("What are you talking about? Say, stop."),
+            Some((DictationControl::Stop, _))
+        ));
+        assert!(matches!(
+            protocol.control_suffix("Meet me at five; say... send!"),
+            Some((DictationControl::Send, _))
+        ));
+        assert_eq!(
+            protocol.strip("Say, what are you talking about? Say, stop."),
+            "What are you talking about"
+        );
+        assert!(
+            protocol
+                .control_suffix("Say paste and then keep talking")
+                .is_none()
+        );
+        assert!(protocol.control_suffix("Essay stop").is_none());
     }
 
     #[test]
