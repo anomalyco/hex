@@ -141,6 +141,7 @@ impl DictationProtocol {
         }
         if let Some(prefix_end) = self.start_prefix(text) {
             text = trim_control_start(&text[prefix_end..]);
+            return uppercase_initial(text);
         }
         text.to_string()
     }
@@ -261,6 +262,23 @@ fn trim_control_end(text: &str) -> &str {
     text.trim_end_matches(|character: char| {
         character.is_whitespace() || character.is_ascii_punctuation()
     })
+}
+
+fn uppercase_initial(text: &str) -> String {
+    let Some((index, character)) = text
+        .char_indices()
+        .find(|(_, character)| character.is_alphabetic())
+    else {
+        return text.to_string();
+    };
+    if !character.is_lowercase() {
+        return text.to_string();
+    }
+    let mut output = String::with_capacity(text.len());
+    output.push_str(&text[..index]);
+    output.extend(character.to_uppercase());
+    output.push_str(&text[index + character.len_utf8()..]);
+    output
 }
 
 pub struct DictationClip {
@@ -691,6 +709,14 @@ mod tests {
             Some((DictationControl::Stop, _))
         ));
         assert!(protocol.control_suffix("hello, dictates stop").is_none());
+        assert_eq!(
+            protocol.strip("Begin note, what are you talking about? Finish note."),
+            "What are you talking about"
+        );
+        assert_eq!(
+            protocol.strip("what are you talking about"),
+            "what are you talking about"
+        );
 
         assert!(
             DictationProtocol::try_new(
