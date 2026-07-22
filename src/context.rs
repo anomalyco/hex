@@ -62,7 +62,9 @@ impl ContextSelector {
         match (self, other) {
             (Self::Always, _) | (_, Self::Always) => true,
             (Self::BrowserHost(left), Self::BrowserHost(right)) => browser_hosts_equal(left, right),
-            (Self::Application(left), Self::Application(right)) => left == right,
+            (Self::Application(left), Self::Application(right)) => {
+                application_names_equal(left, right)
+            }
             (Self::BrowserHost(_), Self::Application(_))
             | (Self::Application(_), Self::BrowserHost(_)) => true,
         }
@@ -175,7 +177,9 @@ impl ContextSnapshot {
     }
 
     pub fn application_is(&self, application: &str) -> bool {
-        self.application.as_deref() == Some(application)
+        self.application
+            .as_deref()
+            .is_some_and(|current| application_names_equal(current, application))
     }
 
     pub fn label(&self) -> String {
@@ -189,6 +193,10 @@ impl ContextSnapshot {
 
 fn normalize_browser_host(host: &str) -> String {
     host.trim_end_matches('.').to_ascii_lowercase()
+}
+
+fn application_names_equal(left: &str, right: &str) -> bool {
+    left.eq_ignore_ascii_case(right)
 }
 
 fn browser_hosts_equal(left: &str, right: &str) -> bool {
@@ -214,3 +222,18 @@ if frontApp is "Brave Browser" then
 end if
 return frontApp & linefeed & activeUrl & linefeed & windowTitle
 "#;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn application_matching_ignores_process_name_capitalization() {
+        let context = ContextSnapshot {
+            application: Some("zed".into()),
+            ..ContextSnapshot::default()
+        };
+
+        assert!(ContextSelector::application("Zed").matches(&context));
+    }
+}
