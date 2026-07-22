@@ -4,9 +4,9 @@
 
 Build HEX as a local, observable macOS voice appliance with an explicit Linux
 X11 beta contract. Keep the engine native Rust and keep consequential behavior
-explicit. Command definitions and preferred devices remain compiled Rust until
-a second real consumer justifies a data or plugin seam; user-facing runtime
-settings persist in Application Support.
+explicit. Protected commands and typed captures remain compiled Rust; ordinary
+literal commands live in the explicit TypeScript user config. User-facing
+runtime settings persist in Application Support.
 
 The distributed release starts in hotkey-dictation-only mode. Voice commands and
 their catalog remain available as a persisted opt-in that defaults off.
