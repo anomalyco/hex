@@ -285,9 +285,9 @@ fn trim_control_start(text: &str) -> &str {
 }
 
 fn trim_control_end(text: &str) -> &str {
-    text.trim_end_matches(|character: char| {
-        character.is_whitespace() || character.is_ascii_punctuation()
-    })
+    text.trim_end()
+        .trim_end_matches([',', ';', ':', '-', '\u{2013}', '\u{2014}'])
+        .trim_end()
 }
 
 fn uppercase_initial(text: &str) -> String {
@@ -784,7 +784,11 @@ mod tests {
         ));
         assert_eq!(
             protocol.strip("Say, what are you talking about? Say, stop."),
-            "What are you talking about"
+            "What are you talking about?"
+        );
+        assert_eq!(
+            protocol.strip("Say, meet me at five, say stop."),
+            "Meet me at five"
         );
         assert!(
             protocol
