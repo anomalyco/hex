@@ -312,6 +312,7 @@ impl<C: 'static> CommandBuilder<C> {
         self
     }
 
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn when(mut self, context: ContextSelector) -> Self {
         self.context = context;
         self

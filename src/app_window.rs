@@ -30,7 +30,7 @@ use crate::events::{
 use crate::login_item::LoginItemStatus;
 use crate::meeting::{self, MeetingManifest, MeetingRequest, MeetingStatus};
 use crate::onboarding::{PermissionState, SetupStatus};
-use crate::personal_commands::{HostState, StatusContext, StatusExecution, StatusSnapshot};
+use crate::personal_commands::{HostState, StatusContext, StatusSnapshot};
 use crate::text_input::{
     Changed as TextChanged, Dismissed as TextDismissed, Navigate as TextNavigate,
     Submitted as TextSubmitted, TextInput,
@@ -306,14 +306,6 @@ struct CatalogCommand {
     aliases: Vec<String>,
     description: String,
     id: String,
-    source: CommandSource,
-    execution: Option<StatusExecution>,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum CommandSource {
-    Compiled,
-    Personal,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -753,8 +745,6 @@ impl AppWindow {
                 aliases: command.aliases,
                 description: command.description,
                 id: command.id,
-                source: CommandSource::Compiled,
-                execution: None,
             })
             .collect::<Vec<_>>();
         let personal_workspace = if preview_mode {
@@ -4681,23 +4671,6 @@ impl AppWindow {
                     .pt_6()
                     .child(detail_row("Task", command.task.clone()))
                     .child(detail_row("Context", command_scope(&command.scope)))
-                    .child(detail_row(
-                        "Source",
-                        match command.source {
-                            CommandSource::Compiled => "Built in",
-                            CommandSource::Personal => "Personal",
-                        },
-                    ))
-                    .when_some(command.execution, |detail, execution| {
-                        detail.child(detail_row(
-                            "Execution",
-                            match execution {
-                                StatusExecution::Native => "Native",
-                                StatusExecution::Handler => "TypeScript handler",
-                            },
-                        ))
-                    })
-                    .child(detail_row("Command ID", command.id.clone()))
                     .child(detail_row("Aliases", aliases)),
             )
             .into_any_element()
@@ -6088,8 +6061,6 @@ fn merged_catalog(compiled: &[CatalogCommand], personal: &StatusSnapshot) -> Vec
             aliases: aliases.to_vec(),
             description: command.description.clone(),
             id: command.id.clone(),
-            source: CommandSource::Personal,
-            execution: Some(command.execution),
         })
     }));
     commands
@@ -6295,6 +6266,7 @@ mod tests {
     use std::fs;
 
     use super::*;
+    use crate::personal_commands::StatusExecution;
 
     #[test]
     fn production_navigation_keeps_commands_available_as_an_opt_in() {
@@ -6422,7 +6394,7 @@ mod tests {
     }
 
     #[test]
-    fn personal_catalog_uses_explicit_and_default_groups() {
+    fn custom_catalog_preserves_groups() {
         let compiled = vec![CatalogCommand {
             task: "Built in".into(),
             scope: CommandScope::Global,
@@ -6430,16 +6402,14 @@ mod tests {
             aliases: Vec::new(),
             description: "Compiled command".into(),
             id: "compiled".into(),
-            source: CommandSource::Compiled,
-            execution: None,
         }];
         let status = StatusSnapshot {
             catalog: vec![
                 crate::personal_commands::StatusCommand {
                     id: "default".into(),
-                    phrases: vec!["default personal".into()],
-                    group: "Personal".into(),
-                    description: "Personal command".into(),
+                    phrases: vec!["default custom".into()],
+                    group: "Other".into(),
+                    description: "Custom command".into(),
                     context: StatusContext::Global,
                     execution: StatusExecution::Handler,
                 },
@@ -6457,9 +6427,8 @@ mod tests {
 
         let merged = merged_catalog(&compiled, &status);
         assert_eq!(merged[0].task, "Built in");
-        assert_eq!(merged[1].task, "Personal");
+        assert_eq!(merged[1].task, "Other");
         assert_eq!(merged[2].task, "Work");
-        assert_eq!(merged[1].source, CommandSource::Personal);
     }
 
     #[test]

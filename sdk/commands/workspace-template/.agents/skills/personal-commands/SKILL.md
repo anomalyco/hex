@@ -1,19 +1,22 @@
-# Personal Commands
+# Custom Commands
 
-Use structured actions when a command needs one fixed native operation:
+Use a handler with the provided `hex` capabilities for ordinary commands:
 
 ```ts
-import { defineHexConfig, openApplication } from "@hex/commands"
+import { defineHexConfig } from "@hex/commands"
 
 export default defineHexConfig({
   commands: {
-    slack: { phrases: ["open slack"], action: openApplication("Slack") },
+    slack: {
+      phrases: ["open slack"],
+      run: ({ hex }) => hex.openApplication("Slack"),
+    },
   },
 })
 ```
 
-Vanilla handlers may issue several calls. HEX waits for all calls started by the
-handler, including calls that were not explicitly awaited:
+Handlers may issue several calls. HEX waits for all calls started by the handler,
+including calls that were not explicitly awaited:
 
 ```ts
 run: ({ hex }) => {

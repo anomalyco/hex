@@ -1,5 +1,5 @@
 {
-  "name": "hex-personal-commands",
+  "name": "hex-commands",
   "private": true,
   "type": "module",
   "scripts": {

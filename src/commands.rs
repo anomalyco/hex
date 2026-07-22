@@ -33,7 +33,6 @@ pub enum Action {
     OpenUrl(String),
     #[allow(dead_code)]
     OpenPath(String),
-    NavigateBrowser(String),
     #[allow(dead_code)]
     TypeText(String),
     Keystroke {
@@ -45,7 +44,6 @@ pub enum Action {
         modifiers: Modifiers,
         count: u8,
     },
-    QuickSwitch(String),
 }
 
 #[derive(Clone)]
@@ -359,9 +357,6 @@ pub fn execute(action: Action) -> Result<()> {
         Action::OpenPath(path) => {
             command.arg(path);
         }
-        Action::NavigateBrowser(url) => {
-            return navigate_brave(&url);
-        }
         Action::TypeText(text) => {
             return crate::keyboard::type_text(&text);
         }
@@ -375,29 +370,8 @@ pub fn execute(action: Action) -> Result<()> {
         } => {
             return crate::keyboard::post_repeated_shortcut(key, modifiers, count);
         }
-        Action::QuickSwitch(query) => {
-            return application_quick_switch(&query);
-        }
     }
     checked_status(&mut command, "macOS open")
-}
-
-fn application_quick_switch(query: &str) -> Result<()> {
-    let script = r#"
-on run argv
-tell application "System Events"
-    keystroke "k" using command down
-    delay 0.15
-    keystroke (item 1 of argv)
-    delay 0.2
-    key code 36
-end tell
-end run
-"#;
-    checked_status(
-        ProcessCommand::new("/usr/bin/osascript").args(["-e", script, "--", query]),
-        "application quick switch",
-    )
 }
 
 fn application_keystroke(key: Key, modifiers: Modifiers) -> Result<()> {
@@ -415,20 +389,6 @@ fn checked_status(command: &mut ProcessCommand, operation: &str) -> Result<()> {
     } else {
         Err(eyre!("{operation} exited with {status}"))
     }
-}
-
-fn navigate_brave(url: &str) -> Result<()> {
-    let script = r#"
-on run argv
-    tell application "Brave Browser"
-        set URL of active tab of front window to item 1 of argv
-    end tell
-end run
-"#;
-    checked_status(
-        ProcessCommand::new("/usr/bin/osascript").args(["-e", script, "--", url]),
-        "Brave navigation",
-    )
 }
 
 fn matches_phrase(heard: &str, phrases: &[String]) -> bool {
@@ -789,7 +749,7 @@ mod tests {
             Command::new("x.chat", "Navigate active tab")
                 .phrases(["go to chat"])
                 .when(ContextPredicate::browser_host("x.com"))
-                .action(|()| Action::NavigateBrowser("https://x.com/messages".into())),
+                .action(|()| Action::OpenUrl("https://x.com/messages".into())),
         );
         assert!(matches!(
             config.resolve(Mode::Listening, "go to chat", &no_context()),
@@ -814,7 +774,10 @@ mod tests {
             Command::new("slack.channel.console", "Open application destination")
                 .phrases(["go to console"])
                 .when(ContextPredicate::application("Slack"))
-                .action(|()| Action::QuickSwitch("console".into())),
+                .action(|()| Action::Keystroke {
+                    key: Key::Character('k'),
+                    modifiers: Modifiers::COMMAND,
+                }),
         );
         assert!(matches!(
             config.resolve(Mode::Listening, "go to console", &no_context()),

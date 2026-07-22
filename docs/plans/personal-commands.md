@@ -7,8 +7,9 @@ provisioning, persisted runtime status, and Settings integration are complete.
 
 Let a user define personal voice commands in a type-safe TypeScript workspace
 without moving HEX's protected recognition and dictation state machines out of
-native Rust. Personal commands are additive. They are not a replacement for the
-compiled system-command registry.
+native Rust. TypeScript owns ordinary literal commands. The compiled registry is
+limited to protected system behavior and typed captures that the TypeScript MVP
+cannot express yet.
 
 The first motivating example is a personal phrase such as `open training` that
 opens a user-specific URL and does not belong in compiled product configuration.
@@ -17,8 +18,8 @@ opens a user-specific URL and does not belong in compiled product configuration.
 
 - Keep wake, sleep, cancellation, dictation lifecycle, and meeting lifecycle as
   protected native commands.
-- Add personal commands as a second registry layer and validate them against the
-  compiled registry before activation.
+- Add custom commands as a second registry layer and validate them against the
+  minimal compiled system registry before activation.
 - Keep protected system phrases reserved regardless of personal-command context.
   Resolve all ordinary compiled and personal commands by context specificity:
   browser host, then application, then global. A more-specific personal command
@@ -53,15 +54,14 @@ opens a user-specific URL and does not belong in compiled product configuration.
   command host and supervision model in Effect; adapt vanilla handlers and
   capabilities into that Effect runtime rather than maintaining two runtimes.
 - Store the user workspace at a stable location, provisionally `~/.config/hex/`.
-- Make the workspace directly accessible from Settings through actions such as
-  Open Config, Open Folder, Open in Editor, Copy Path, Reload, and View Errors.
+- Make the workspace directly accessible from Settings through one Edit Config
+  action and show reload errors only when action is required.
 - Scaffold agent-facing documentation with the workspace, including `AGENTS.md`
   and a versioned personal-command skill.
 - Create the workspace only after explicit user opt-in.
-- Dogfood the feature by manually recreating Kit-specific compiled commands in
-  the personal workspace, then remove those commands from Rust after the
-  personal registry proves reliable. Do not add a one-off migration for
-  user-specific phrases.
+- Dogfood the feature by keeping Kit-specific literal commands in the TypeScript
+  workspace. Keep only protected lifecycle commands and unsupported typed
+  captures in Rust. Do not add a one-off migration for user-specific phrases.
 
 ## MVP Surface
 
@@ -69,7 +69,7 @@ The MVP intentionally excludes variable captures. Commands use one or more
 complete literal phrases.
 
 ```ts
-import { defineHexConfig, openUrl } from "@hex/commands"
+import { defineHexConfig } from "@hex/commands"
 
 import navigation from "./commands/navigation"
 import training from "./commands/training"
@@ -80,7 +80,7 @@ export default defineHexConfig({
     ...training,
     "open-training": {
       phrases: ["open training"],
-      action: openUrl("https://hub.kitlangton.dev/training"),
+      run: ({ hex }) => hex.openUrl("https://hub.kitlangton.dev/training"),
     },
   },
 })
@@ -104,7 +104,7 @@ Personal commands may declare optional presentation metadata:
 ```
 
 `group` is a display label, not part of command identity or resolution. Commands
-without a group appear under `Personal`. Do not infer groups from ID prefixes.
+without a group appear under `Other`. Do not infer groups from ID prefixes.
 
 Context predicates remain a closed native algebra in the MVP: global, exact
 foreground application, and browser host. Browser-host commands are candidates
@@ -302,10 +302,11 @@ failure. Include command ID, config generation, invocation ID, execution kind,
 and bounded failure details. Settings, Activity, and CLI diagnostics should
 project the same events.
 
-The Commands screen should include personal commands grouped by their optional
-explicit `group` metadata. Show canonical phrase, aliases, context, execution
-kind, command ID, and source location when available. A catalog entry may open
-its source file. Group metadata has no behavioral meaning.
+The Commands screen groups commands by their optional explicit `group` metadata
+and shows canonical phrase, aliases, and context. Runtime implementation details
+such as registry source, execution kind, and config generation stay in
+diagnostics rather than the ordinary catalog UI. Group metadata has no
+behavioral meaning.
 
 A visual HUD indication that shows the recognized personal command and its
 running or completed state is a follow-up. Build it from the structured command

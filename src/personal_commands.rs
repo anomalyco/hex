@@ -926,11 +926,11 @@ fn status_catalog(commands: &[RegistrationCommand]) -> Vec<StatusCommand> {
         .map(|command| StatusCommand {
             id: command.id.clone(),
             phrases: command.phrases.clone(),
-            group: command.group.clone().unwrap_or_else(|| "Personal".into()),
+            group: command.group.clone().unwrap_or_else(|| "Other".into()),
             description: command
                 .description
                 .clone()
-                .unwrap_or_else(|| "Personal command".into()),
+                .unwrap_or_else(|| "Custom command".into()),
             context: match &command.when {
                 None => StatusContext::Global,
                 Some(When::Application(when)) => StatusContext::Application {
@@ -1201,7 +1201,7 @@ fn compile_registration(
         };
         let description = command
             .description
-            .unwrap_or_else(|| "Personal command".into());
+            .unwrap_or_else(|| "Custom command".into());
         validate_text(&description, "command description", 1024)?;
         if let Some(group) = &command.group {
             validate_text(group, "command group", 1024)?;
@@ -1212,7 +1212,7 @@ fn compile_registration(
             command.phrases,
             context,
             action,
-            Some(command.group.unwrap_or_else(|| "Personal".into())),
+            Some(command.group.unwrap_or_else(|| "Other".into())),
         )?;
         compiled.try_command(configured)?;
     }
@@ -1695,7 +1695,7 @@ mod tests {
                 .into_iter()
                 .find(|command| command.id == "native")
                 .and_then(|command| command.group),
-            Some("Personal".into())
+            Some("Other".into())
         );
     }
 
@@ -1982,10 +1982,10 @@ mod tests {
     #[test]
     fn status_snapshot_enforces_catalog_and_error_bounds() {
         let command = StatusCommand {
-            id: "personal".into(),
-            phrases: vec!["personal phrase".into()],
-            group: "Personal".into(),
-            description: "Personal command".into(),
+            id: "custom".into(),
+            phrases: vec!["custom phrase".into()],
+            group: "Other".into(),
+            description: "Custom command".into(),
             context: StatusContext::Global,
             execution: StatusExecution::Handler,
         };

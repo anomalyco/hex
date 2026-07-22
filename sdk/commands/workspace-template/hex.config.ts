@@ -1,12 +1,12 @@
-import { defineHexConfig, openUrl } from "@hex/commands"
+import { defineHexConfig } from "@hex/commands"
 
 export default defineHexConfig({
   commands: {
     "open-example": {
       phrases: ["open example"],
-      group: "Personal",
+      group: "Websites",
       description: "Open the example site",
-      action: openUrl("https://example.com"),
+      run: ({ hex }) => hex.openUrl("https://example.com"),
     },
   },
 })
