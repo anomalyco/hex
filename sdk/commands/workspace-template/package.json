@@ -1,0 +1,15 @@
+{
+  "name": "hex-personal-commands",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@hex/commands": "file:.hex-sdk",
+    "effect": "4.0.0-beta.97"
+  },
+  "devDependencies": {
+    "typescript": "7.0.2"
+  }
+}

@@ -1,0 +1,38 @@
+{
+  "name": "@hex/commands",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./effect": {
+      "types": "./dist/effect.d.ts",
+      "import": "./dist/effect.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "bin": {
+    "hex-commands-host": "./dist/bin.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "rm -rf dist && tsc -p tsconfig.build.json",
+    "check": "tsc -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "peerDependencies": {
+    "effect": "4.0.0-beta.97"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.3.0",
+    "effect": "4.0.0-beta.97",
+    "typescript": "^7.0.0",
+    "vitest": "^3.2.4"
+  }
+}

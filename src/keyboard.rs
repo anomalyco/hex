@@ -14,6 +14,8 @@ pub enum Key {
     Left,
     Right,
     Enter,
+    #[allow(dead_code)]
+    Escape,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -87,6 +89,7 @@ unsafe extern "C" {
 unsafe extern "C" {
     fn CGEventCreateKeyboardEvent(source: *mut c_void, key: u16, down: bool) -> EventRef;
     fn CGEventSetFlags(event: EventRef, flags: u64);
+    fn CGEventKeyboardSetUnicodeString(event: EventRef, length: usize, text: *const u16);
     fn CGEventSetIntegerValueField(event: EventRef, field: u32, value: i64);
     fn CGEventPost(tap: u32, event: EventRef);
 }
@@ -149,6 +152,20 @@ pub fn post_enter() -> Result<()> {
     post_shortcut(Key::Enter, Modifiers::NONE)
 }
 
+pub fn type_text(text: &str) -> Result<()> {
+    for character in text.chars() {
+        let mut encoded = [0; 2];
+        let encoded = character.encode_utf16(&mut encoded);
+        let down = KeyboardEvent::new((0, true, 0))?;
+        let up = KeyboardEvent::new((0, false, 0))?;
+        down.set_unicode(encoded);
+        up.set_unicode(encoded);
+        down.post();
+        up.post();
+    }
+    Ok(())
+}
+
 pub fn post_shortcut(key: Key, modifiers: Modifiers) -> Result<()> {
     post_repeated_shortcut(key, modifiers, 1)
 }
@@ -166,6 +183,7 @@ pub fn post_repeated_shortcut(key: Key, modifiers: Modifiers, count: u8) -> Resu
         Key::Left => 123,
         Key::Right => 124,
         Key::Enter => 36,
+        Key::Escape => 53,
     };
     let modifiers = [
         (Modifiers::COMMAND, COMMAND_FLAG, COMMAND_KEY_CODE),
@@ -212,6 +230,11 @@ impl KeyboardEvent {
     fn post(&self) {
         // SAFETY: This value owns a valid CoreGraphics keyboard event.
         unsafe { CGEventPost(HID_EVENT_TAP, self.0) };
+    }
+
+    fn set_unicode(&self, text: &[u16]) {
+        // SAFETY: The event is valid and Quartz copies the provided UTF-16 buffer.
+        unsafe { CGEventKeyboardSetUnicodeString(self.0, text.len(), text.as_ptr()) };
     }
 }
 

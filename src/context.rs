@@ -35,7 +35,7 @@ impl ContextSelector {
     }
 
     pub fn browser_host(host: impl Into<String>) -> Self {
-        Self::BrowserHost(host.into())
+        Self::BrowserHost(normalize_browser_host(&host.into()))
     }
 
     pub fn matches(&self, context: &ContextSnapshot) -> bool {
@@ -48,6 +48,26 @@ impl ContextSelector {
 
     pub fn is_browser(&self) -> bool {
         matches!(self, Self::BrowserHost(_))
+    }
+
+    pub(crate) fn specificity(&self) -> u8 {
+        match self {
+            Self::Always => 0,
+            Self::Application(_) => 1,
+            Self::BrowserHost(_) => 2,
+        }
+    }
+
+    pub(crate) fn can_coexist_with(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Always, _) | (_, Self::Always) => true,
+            (Self::BrowserHost(left), Self::BrowserHost(right)) => {
+                normalize_browser_host(left) == normalize_browser_host(right)
+            }
+            (Self::Application(left), Self::Application(right)) => left == right,
+            (Self::BrowserHost(_), Self::Application(_))
+            | (Self::Application(_), Self::BrowserHost(_)) => true,
+        }
     }
 }
 
@@ -152,7 +172,7 @@ impl ContextSnapshot {
         // depend on browser host, not this application name.
         self.application.as_deref() == Some("Brave Browser")
             && self.browser_host().is_some_and(|current| {
-                current == host || current.strip_prefix("www.") == Some(host)
+                normalize_browser_host(current) == normalize_browser_host(host)
             })
     }
 
@@ -167,6 +187,10 @@ impl ContextSnapshot {
             _ => "unknown context".into(),
         }
     }
+}
+
+fn normalize_browser_host(host: &str) -> String {
+    host.trim_end_matches('.').to_ascii_lowercase()
 }
 
 const CAPTURE_SCRIPT: &str = r#"

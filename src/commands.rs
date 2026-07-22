@@ -1,6 +1,7 @@
 use std::process::{Command as ProcessCommand, Stdio};
 use std::sync::mpsc::{self, Receiver, SyncSender, TrySendError};
 use std::thread;
+use std::{error, fmt};
 
 use color_eyre::eyre::{Result, WrapErr, eyre};
 
@@ -20,15 +21,23 @@ pub enum Mode {
     Listening,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub enum Action {
     StartDictation,
     StartCaptainsLog,
     StartMeeting,
     StopMeeting,
-    OpenApplication(&'static str),
-    OpenUrl(&'static str),
-    NavigateBrowser(&'static str),
+    InvokeHandler {
+        generation: u64,
+        command_id: String,
+    },
+    OpenApplication(String),
+    OpenUrl(String),
+    #[allow(dead_code)]
+    OpenPath(String),
+    NavigateBrowser(String),
+    #[allow(dead_code)]
+    TypeText(String),
     Keystroke {
         key: Key,
         modifiers: Modifiers,
@@ -38,14 +47,61 @@ pub enum Action {
         modifiers: Modifiers,
         count: u8,
     },
-    QuickSwitch(&'static str),
+    QuickSwitch(String),
 }
 
+#[derive(Clone)]
 pub struct CommandConfig {
-    wake_phrases: Vec<&'static str>,
-    sleep_phrases: Vec<&'static str>,
+    wake_phrases: Vec<String>,
+    sleep_phrases: Vec<String>,
     commands: Vec<ConfiguredCommand>,
 }
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum CommandError {
+    DuplicateId {
+        id: String,
+    },
+    #[allow(dead_code)]
+    MissingPhrase {
+        id: String,
+    },
+    #[allow(dead_code)]
+    OverlappingAliases {
+        id: String,
+    },
+    OverlappingPatterns {
+        first: String,
+        second: String,
+    },
+    ReservedId {
+        id: String,
+    },
+    ReservedPhrase {
+        phrase: String,
+    },
+}
+
+impl fmt::Display for CommandError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::DuplicateId { id } => write!(formatter, "duplicate command id: {id}"),
+            Self::MissingPhrase { id } => write!(formatter, "command must have a phrase: {id}"),
+            Self::OverlappingAliases { id } => {
+                write!(formatter, "command aliases overlap: {id}")
+            }
+            Self::OverlappingPatterns { first, second } => {
+                write!(formatter, "command patterns overlap: {first} and {second}")
+            }
+            Self::ReservedId { id } => write!(formatter, "reserved command id: {id}"),
+            Self::ReservedPhrase { phrase } => {
+                write!(formatter, "reserved command phrase: {phrase}")
+            }
+        }
+    }
+}
+
+impl error::Error for CommandError {}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum CommandScope {
@@ -59,26 +115,27 @@ pub struct CommandInfo {
     pub scope: CommandScope,
     pub phrase: String,
     pub aliases: Vec<String>,
-    pub description: &'static str,
-    pub id: &'static str,
+    pub description: String,
+    pub id: String,
+    pub group: Option<String>,
 }
 
-pub enum Decision {
+pub enum Decision<'a> {
     Ignore,
     Wake,
     Sleep,
-    Execute { id: &'static str, action: Action },
+    Execute { id: &'a str, action: Action },
 }
 
 struct ActionRequest {
-    id: &'static str,
+    id: String,
     action: Action,
     heard: String,
     context: String,
 }
 
 pub struct ActionOutcome {
-    pub id: &'static str,
+    pub id: String,
     pub heard: String,
     pub context: String,
     pub result: Result<(), String>,
@@ -111,14 +168,14 @@ impl ActionExecutor {
 
     pub fn submit(
         &self,
-        id: &'static str,
+        id: impl Into<String>,
         action: Action,
         heard: &str,
         context: String,
     ) -> Result<(), &'static str> {
         self.requests
             .try_send(ActionRequest {
-                id,
+                id: id.into(),
                 action,
                 heard: heard.into(),
                 context,
@@ -143,38 +200,71 @@ impl CommandConfig {
         }
     }
 
-    pub fn wake_with(mut self, phrases: impl IntoIterator<Item = &'static str>) -> Self {
-        self.wake_phrases.extend(phrases);
+    pub fn wake_with(mut self, phrases: impl IntoIterator<Item = impl Into<String>>) -> Self {
+        self.wake_phrases
+            .extend(phrases.into_iter().map(Into::into));
         self
     }
 
-    pub fn sleep_with(mut self, phrases: impl IntoIterator<Item = &'static str>) -> Self {
-        self.sleep_phrases.extend(phrases);
+    pub fn sleep_with(mut self, phrases: impl IntoIterator<Item = impl Into<String>>) -> Self {
+        self.sleep_phrases
+            .extend(phrases.into_iter().map(Into::into));
         self
     }
 
     pub fn command(mut self, command: ConfiguredCommand) -> Self {
-        assert!(
-            !self
-                .commands
-                .iter()
-                .any(|existing| existing.id() == command.id()),
-            "duplicate command id: {}",
-            command.id()
-        );
-        for existing in &self.commands {
-            assert!(
-                !existing.overlaps(&command),
-                "command patterns overlap: {} and {}",
-                existing.id(),
-                command.id()
-            );
-        }
-        self.commands.push(command);
+        self.try_command(command)
+            .unwrap_or_else(|error| panic!("{error}"));
         self
     }
 
-    pub fn resolve(&self, mode: Mode, heard: &str, context: &ContextSnapshot) -> Decision {
+    pub fn try_command(&mut self, command: ConfiguredCommand) -> Result<(), CommandError> {
+        if self
+            .commands
+            .iter()
+            .any(|existing| existing.id() == command.id())
+        {
+            return Err(CommandError::DuplicateId {
+                id: command.id().into(),
+            });
+        }
+        for existing in &self.commands {
+            if existing.conflicts_with(&command) {
+                return Err(CommandError::OverlappingPatterns {
+                    first: existing.id().into(),
+                    second: command.id().into(),
+                });
+            }
+        }
+        self.commands.push(command);
+        Ok(())
+    }
+
+    pub fn validate_personal_identity(
+        &self,
+        id: &str,
+        phrases: &[String],
+    ) -> Result<(), CommandError> {
+        if matches!(id, "mode.wake" | "mode.sleep") {
+            return Err(CommandError::ReservedId { id: id.into() });
+        }
+        for phrase in phrases {
+            let phrase = normalize(phrase);
+            if matches_phrase(&phrase, &self.wake_phrases)
+                || matches_phrase(&phrase, &self.sleep_phrases)
+            {
+                return Err(CommandError::ReservedPhrase { phrase });
+            }
+        }
+        Ok(())
+    }
+
+    pub fn resolve<'a>(
+        &'a self,
+        mode: Mode,
+        heard: &str,
+        context: &ContextSnapshot,
+    ) -> Decision<'a> {
         let heard = normalize(heard);
         if mode == Mode::Sleeping {
             return if matches_phrase(&heard, &self.wake_phrases) {
@@ -188,11 +278,16 @@ impl CommandConfig {
         }
 
         let words = heard.split_whitespace().collect::<Vec<_>>();
-        if let Some((command, action)) = self.commands.iter().find_map(|command| {
-            command
-                .match_words(&words, context)
-                .map(|action| (command, action))
-        }) {
+        if let Some((command, action)) = self
+            .commands
+            .iter()
+            .filter_map(|command| {
+                command
+                    .match_words(&words, context)
+                    .map(|action| (command, action))
+            })
+            .max_by_key(|(command, _)| command.specificity())
+        {
             return Decision::Execute {
                 id: command.id(),
                 action,
@@ -207,19 +302,21 @@ impl CommandConfig {
         if let Some((canonical, aliases)) = self.wake_phrases.split_first() {
             commands.push(CommandInfo {
                 scope: CommandScope::Sleeping,
-                phrase: (*canonical).into(),
-                aliases: aliases.iter().map(|phrase| (*phrase).into()).collect(),
-                description: "Wake voice control",
-                id: "mode.wake",
+                phrase: canonical.clone(),
+                aliases: aliases.to_vec(),
+                description: "Wake voice control".into(),
+                id: "mode.wake".into(),
+                group: None,
             });
         }
         if let Some((canonical, aliases)) = self.sleep_phrases.split_first() {
             commands.push(CommandInfo {
                 scope: CommandScope::Global,
-                phrase: (*canonical).into(),
-                aliases: aliases.iter().map(|phrase| (*phrase).into()).collect(),
-                description: "Put voice control to sleep",
-                id: "mode.sleep",
+                phrase: canonical.clone(),
+                aliases: aliases.to_vec(),
+                description: "Put voice control to sleep".into(),
+                id: "mode.sleep".into(),
+                group: None,
             });
         }
         commands.extend(self.commands.iter().map(ConfiguredCommand::catalog));
@@ -252,17 +349,24 @@ pub fn execute(action: Action) -> Result<()> {
         Action::StartDictation
         | Action::StartCaptainsLog
         | Action::StartMeeting
-        | Action::StopMeeting => {
+        | Action::StopMeeting
+        | Action::InvokeHandler { .. } => {
             return Err(eyre!("interactive actions require the HEX app"));
         }
         Action::OpenApplication(application) => {
-            command.args(["-a", application]);
+            command.arg("-a").arg(application);
         }
         Action::OpenUrl(url) => {
             command.arg(url);
         }
+        Action::OpenPath(path) => {
+            command.arg(path);
+        }
         Action::NavigateBrowser(url) => {
-            return navigate_brave(url);
+            return navigate_brave(&url);
+        }
+        Action::TypeText(text) => {
+            return crate::keyboard::type_text(&text);
         }
         Action::Keystroke { key, modifiers } => {
             return application_keystroke(key, modifiers);
@@ -275,7 +379,7 @@ pub fn execute(action: Action) -> Result<()> {
             return crate::keyboard::post_repeated_shortcut(key, modifiers, count);
         }
         Action::QuickSwitch(query) => {
-            return application_quick_switch(query);
+            return application_quick_switch(&query);
         }
     }
     checked_status(&mut command, "macOS open")
@@ -330,7 +434,7 @@ end run
     )
 }
 
-fn matches_phrase(heard: &str, phrases: &[&str]) -> bool {
+fn matches_phrase(heard: &str, phrases: &[String]) -> bool {
     phrases.iter().any(|phrase| normalize(phrase) == heard)
 }
 
@@ -349,7 +453,7 @@ mod tests {
             .command(
                 Command::new("app.open.slack", "Open application")
                     .phrases(["open slack", "launch slack"])
-                    .action(|()| Action::OpenApplication("Slack")),
+                    .action(|()| Action::OpenApplication("Slack".into())),
             )
     }
 
@@ -465,15 +569,155 @@ mod tests {
     }
 
     #[test]
-    fn browser_and_application_scopes_are_conservatively_overlapping() {
+    fn context_coexistence_distinguishes_disjoint_values() {
         assert!(
             ContextPredicate::browser_host("x.com")
-                .overlaps(&ContextPredicate::application("Brave Browser"))
+                .can_coexist_with(&ContextPredicate::application("Brave Browser"))
         );
         assert!(
             !ContextPredicate::browser_host("x.com")
-                .overlaps(&ContextPredicate::browser_host("example.com"))
+                .can_coexist_with(&ContextPredicate::browser_host("example.com"))
         );
+    }
+
+    #[test]
+    fn more_specific_commands_specialize_global_commands() {
+        let config = CommandConfig::new()
+            .command(
+                Command::new("global", "Global")
+                    .phrases(["open it"])
+                    .action(|()| Action::OpenUrl("https://example.com".into())),
+            )
+            .command(
+                Command::new("application", "Application")
+                    .phrases(["open it"])
+                    .when(ContextPredicate::application("Brave Browser"))
+                    .action(|()| Action::TypeText("application".into())),
+            )
+            .command(
+                Command::new("browser", "Browser")
+                    .phrases(["open it"])
+                    .when(ContextPredicate::browser_host("x.com"))
+                    .action(|()| Action::TypeText("browser".into())),
+            );
+        let browser = ContextSnapshot {
+            application: Some("Brave Browser".into()),
+            browser_url: Some(url::Url::parse("https://x.com/home").unwrap()),
+            ..ContextSnapshot::default()
+        };
+
+        assert!(matches!(
+            config.resolve(Mode::Listening, "open it", &browser),
+            Decision::Execute { id: "browser", .. }
+        ));
+        let application = ContextSnapshot {
+            application: Some("Brave Browser".into()),
+            ..ContextSnapshot::default()
+        };
+        assert!(matches!(
+            config.resolve(Mode::Listening, "open it", &application),
+            Decision::Execute {
+                id: "application",
+                ..
+            }
+        ));
+        assert!(matches!(
+            config.resolve(Mode::Listening, "open it", &no_context()),
+            Decision::Execute { id: "global", .. }
+        ));
+    }
+
+    #[test]
+    fn runtime_insertion_rejects_equal_specificity_ambiguity() {
+        let mut config = CommandConfig::new().command(
+            ConfiguredCommand::literal(
+                "first".to_string(),
+                "First".to_string(),
+                vec!["run it".to_string()],
+                ContextPredicate::application("Slack"),
+                Action::TypeText("first".into()),
+            )
+            .unwrap(),
+        );
+        let error = config
+            .try_command(
+                ConfiguredCommand::literal(
+                    "second".to_string(),
+                    "Second".to_string(),
+                    vec!["run it".to_string()],
+                    ContextPredicate::application("Slack"),
+                    Action::TypeText("second".into()),
+                )
+                .unwrap(),
+            )
+            .unwrap_err();
+
+        assert_eq!(
+            error,
+            CommandError::OverlappingPatterns {
+                first: "first".into(),
+                second: "second".into(),
+            }
+        );
+    }
+
+    #[test]
+    fn runtime_literal_constructor_rejects_empty_phrases() {
+        let result = ConfiguredCommand::literal(
+            "empty",
+            "Empty",
+            ["  ...  "],
+            ContextPredicate::Always,
+            Action::TypeText("ignored".into()),
+        );
+
+        assert!(matches!(result, Err(CommandError::MissingPhrase { id }) if id == "empty"));
+    }
+
+    #[test]
+    fn protected_commands_cannot_be_specialized() {
+        let mut config = CommandConfig::new().command(
+            Command::new("protected", "Protected")
+                .phrases(["start dictation"])
+                .protected()
+                .action(|()| Action::StartDictation),
+        );
+
+        let error = config
+            .try_command(
+                ConfiguredCommand::literal(
+                    "personal",
+                    "Personal",
+                    ["start dictation"],
+                    ContextPredicate::application("Slack"),
+                    Action::TypeText("override".into()),
+                )
+                .unwrap(),
+            )
+            .unwrap_err();
+
+        assert!(matches!(error, CommandError::OverlappingPatterns { .. }));
+    }
+
+    #[test]
+    fn dynamic_literal_commands_and_configs_are_cloneable() {
+        let command = ConfiguredCommand::literal(
+            String::from("personal.open"),
+            String::from("Open a personal path"),
+            vec![String::from("open project")],
+            ContextPredicate::Always,
+            Action::OpenPath(String::from("/tmp/project")),
+        )
+        .unwrap();
+        let config = CommandConfig::new().command(command).clone();
+
+        assert!(matches!(
+            config.resolve(Mode::Listening, "open project", &no_context()),
+            Decision::Execute {
+                id: "personal.open",
+                action: Action::OpenPath(path),
+            } if path == "/tmp/project"
+        ));
     }
 
     #[test]
@@ -548,7 +792,7 @@ mod tests {
             Command::new("x.chat", "Navigate active tab")
                 .phrases(["go to chat"])
                 .when(ContextPredicate::browser_host("x.com"))
-                .action(|()| Action::NavigateBrowser("https://x.com/messages")),
+                .action(|()| Action::NavigateBrowser("https://x.com/messages".into())),
         );
         assert!(matches!(
             config.resolve(Mode::Listening, "go to chat", &no_context()),
@@ -573,7 +817,7 @@ mod tests {
             Command::new("slack.channel.console", "Open application destination")
                 .phrases(["go to console"])
                 .when(ContextPredicate::application("Slack"))
-                .action(|()| Action::QuickSwitch("console")),
+                .action(|()| Action::QuickSwitch("console".into())),
         );
         assert!(matches!(
             config.resolve(Mode::Listening, "go to console", &no_context()),
@@ -603,7 +847,7 @@ mod tests {
             .command(
                 Command::new("website.open.training", "Open website")
                     .phrases(["go to training", "open training"])
-                    .action(|()| Action::OpenUrl("https://hub.kitlangton.dev/training")),
+                    .action(|()| Action::OpenUrl("https://hub.kitlangton.dev/training".into())),
             )
             .command(
                 Command::new("slack.threads", "Use application shortcut")

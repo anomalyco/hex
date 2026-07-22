@@ -69,6 +69,8 @@ mod parakeet;
 #[cfg(target_os = "macos")]
 mod paste;
 #[cfg(target_os = "macos")]
+mod personal_commands;
+#[cfg(target_os = "macos")]
 mod recognition;
 #[cfg(target_os = "macos")]
 mod recording_environment;
@@ -151,6 +153,11 @@ enum Command {
         #[arg(long)]
         device: Option<String>,
     },
+    /// Manage the personal command workspace.
+    Commands {
+        #[command(subcommand)]
+        command: CommandsCommand,
+    },
     /// Run the headless local API service.
     #[command(hide = true)]
     Service,
@@ -188,6 +195,13 @@ enum Command {
 enum TranscriptionBenchmarkBackend {
     Onnx,
     TranscribeCpp,
+}
+
+#[cfg(target_os = "macos")]
+#[derive(Subcommand)]
+enum CommandsCommand {
+    /// Create or refresh ~/.config/hex and install its pinned dependencies.
+    Init,
 }
 
 #[cfg(target_os = "macos")]
@@ -360,6 +374,13 @@ fn main() -> Result<()> {
             while !SHUTDOWN.load(Ordering::Relaxed) {
                 std::thread::sleep(std::time::Duration::from_millis(100));
             }
+            Ok(())
+        }
+        Command::Commands {
+            command: CommandsCommand::Init,
+        } => {
+            let workspace = personal_commands::initialize_workspace()?;
+            println!("{}", workspace.display());
             Ok(())
         }
         #[cfg(debug_assertions)]

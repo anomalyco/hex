@@ -299,12 +299,12 @@ impl Pane {
 
 #[derive(Clone)]
 struct CatalogCommand {
-    task: &'static str,
+    task: String,
     scope: CommandScope,
     phrase: String,
     aliases: Vec<String>,
-    description: &'static str,
-    id: &'static str,
+    description: String,
+    id: String,
 }
 
 #[derive(Clone, Eq, PartialEq)]
@@ -586,7 +586,7 @@ pub struct AppWindow {
     meeting_transcript_scroll: ScrollHandle,
     commands: Vec<CatalogCommand>,
     command_filter: ContextFilter,
-    selected_command: Option<&'static str>,
+    selected_command: Option<String>,
     events: Vec<VoiceEvent>,
     current_context: (Option<String>, Option<String>),
     events_error: Option<String>,
@@ -4354,7 +4354,7 @@ impl AppWindow {
             .collect();
         let mut tasks = Vec::new();
         for index in &visible {
-            let task = self.commands[*index].task;
+            let task = self.commands[*index].task.clone();
             if !tasks.contains(&task) {
                 tasks.push(task);
             }
@@ -4368,7 +4368,9 @@ impl AppWindow {
                     .filter(|index| self.commands[*index].task == task)
                     .map(|index| {
                         let command = self.commands[index].clone();
-                        let selected = self.selected_command == Some(command.id);
+                        let command_id = command.id.clone();
+                        let selected =
+                            self.selected_command.as_deref() == Some(command_id.as_str());
                         div()
                             .id(("command", index))
                             .w_full()
@@ -4398,7 +4400,7 @@ impl AppWindow {
                                     .child(command_scope(&command.scope)),
                             )
                             .on_click(cx.listener(move |this, _, _, cx| {
-                                this.selected_command = Some(command.id);
+                                this.selected_command = Some(command_id.clone());
                                 cx.notify();
                             }))
                     });
@@ -4412,7 +4414,7 @@ impl AppWindow {
                             .text_size(px(11.0))
                             .font_weight(FontWeight::SEMIBOLD)
                             .text_color(rgb(FAINT))
-                            .child(task),
+                            .child(task.clone()),
                     )
                     .children(rows)
                     .into_any_element()
@@ -4468,6 +4470,7 @@ impl AppWindow {
     fn render_command_detail(&self) -> AnyElement {
         let Some(command) = self
             .selected_command
+            .as_deref()
             .and_then(|id| self.commands.iter().find(|command| command.id == id))
         else {
             return detail_placeholder("Select a command.");
@@ -4495,14 +4498,14 @@ impl AppWindow {
                     .pt_2()
                     .text_size(px(12.0))
                     .text_color(rgb(MUTED))
-                    .child(command.description),
+                    .child(command.description.clone()),
             )
             .child(
                 div()
                     .pt_6()
-                    .child(detail_row("Task", command.task))
+                    .child(detail_row("Task", command.task.clone()))
                     .child(detail_row("Context", command_scope(&command.scope)))
-                    .child(detail_row("Command ID", command.id))
+                    .child(detail_row("Command ID", command.id.clone()))
                     .child(detail_row("Aliases", aliases)),
             )
             .into_any_element()
@@ -5280,9 +5283,9 @@ fn compact_button(label: impl IntoElement) -> Div {
 }
 
 fn open_opencode_beta_docs() {
-    if let Err(error) =
-        crate::commands::execute(crate::commands::Action::OpenUrl(OPENCODE_BETA_DOCS_URL))
-    {
+    if let Err(error) = crate::commands::execute(crate::commands::Action::OpenUrl(
+        OPENCODE_BETA_DOCS_URL.into(),
+    )) {
         tracing::error!(%error, "could not open the OpenCode beta documentation");
     }
 }
@@ -5851,15 +5854,18 @@ fn detail_row(label: &'static str, value: impl Into<String>) -> AnyElement {
         .into_any_element()
 }
 
-fn command_task(command: &CommandInfo) -> &'static str {
+fn command_task(command: &CommandInfo) -> String {
+    if let Some(group) = &command.group {
+        return group.clone();
+    }
     if command.id.starts_with("mode.") {
-        "Voice control"
+        "Voice control".into()
     } else if command.id.starts_with("dictation.") || command.id.starts_with("captains-log.") {
-        "Dictation"
+        "Dictation".into()
     } else if command.id.starts_with("meeting.") {
-        "Meetings"
+        "Meetings".into()
     } else {
-        match command.description {
+        match command.description.as_str() {
             "Open application" => "Open applications",
             "Open website" => "Open websites",
             "Navigate active tab" => "Browser navigation",
@@ -5867,6 +5873,7 @@ fn command_task(command: &CommandInfo) -> &'static str {
             "Use application shortcut" | "Open application destination" => "Application navigation",
             _ => "Other",
         }
+        .into()
     }
 }
 

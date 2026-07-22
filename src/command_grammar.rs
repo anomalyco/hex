@@ -1,4 +1,6 @@
-use crate::commands::{Action, CommandInfo, CommandScope};
+use std::sync::Arc;
+
+use crate::commands::{Action, CommandError, CommandInfo, CommandScope};
 use crate::context::{ContextSelector, ContextSnapshot};
 use crate::keyboard::Key;
 
@@ -229,14 +231,15 @@ fn literal_pattern(literals: &[&'static str]) -> TypedPattern<()> {
     }
 }
 
-fn literal_phrase(phrase: &'static str) -> TypedPattern<()> {
-    let words = normalize(phrase)
+fn literal_phrase(phrase: impl Into<String>) -> TypedPattern<()> {
+    let phrase = phrase.into();
+    let words = normalize(&phrase)
         .split_whitespace()
         .map(str::to_string)
         .collect::<Vec<_>>();
     let signature = words.iter().cloned().map(PatternToken::Literal).collect();
     TypedPattern {
-        display: phrase.into(),
+        display: phrase,
         signatures: vec![signature],
         parse: Box::new(move |heard| (heard == words).then_some(())),
     }
@@ -260,13 +263,16 @@ fn parse_count(word: &str) -> Option<CapturedCount> {
 }
 
 pub struct Command {
-    id: &'static str,
-    description: &'static str,
+    id: String,
+    description: String,
 }
 
 impl Command {
-    pub fn new(id: &'static str, description: &'static str) -> Self {
-        Self { id, description }
+    pub fn new(id: impl Into<String>, description: impl Into<String>) -> Self {
+        Self {
+            id: id.into(),
+            description: description.into(),
+        }
     }
 
     pub fn spoken<P: PatternSpec>(self, pattern: P) -> CommandBuilder<P::Capture> {
@@ -274,6 +280,7 @@ impl Command {
             id: self.id,
             description: self.description,
             context: ContextSelector::Always,
+            protected: false,
             patterns: vec![pattern.compile()],
         }
     }
@@ -285,15 +292,17 @@ impl Command {
             id: self.id,
             description: self.description,
             context: ContextSelector::Always,
+            protected: false,
             patterns,
         }
     }
 }
 
 pub struct CommandBuilder<C> {
-    id: &'static str,
-    description: &'static str,
+    id: String,
+    description: String,
     context: ContextSelector,
+    protected: bool,
     patterns: Vec<TypedPattern<C>>,
 }
 
@@ -308,6 +317,11 @@ impl<C: 'static> CommandBuilder<C> {
         self
     }
 
+    pub fn protected(mut self) -> Self {
+        self.protected = true;
+        self
+    }
+
     pub fn action(self, action: impl Fn(C) -> Action + Send + Sync + 'static) -> ConfiguredCommand {
         for (index, left) in self.patterns.iter().enumerate() {
             for right in &self.patterns[index + 1..] {
@@ -318,11 +332,13 @@ impl<C: 'static> CommandBuilder<C> {
                 );
             }
         }
-        let action = std::sync::Arc::new(action);
+        let action = Arc::new(action);
         ConfiguredCommand {
             id: self.id,
             description: self.description,
             context: self.context,
+            protected: self.protected,
+            group: None,
             patterns: self
                 .patterns
                 .into_iter()
@@ -331,7 +347,7 @@ impl<C: 'static> CommandBuilder<C> {
                     ErasedPattern {
                         display: pattern.display,
                         signatures: pattern.signatures,
-                        resolve: Box::new(move |words| {
+                        resolve: Arc::new(move |words| {
                             (pattern.parse)(words).map(|capture| (action)(capture))
                         }),
                     }
@@ -345,34 +361,108 @@ fn typed_patterns_overlap<C>(left: &TypedPattern<C>, right: &TypedPattern<C>) ->
     signatures_overlap(&left.signatures, &right.signatures)
 }
 
+#[derive(Clone)]
 struct ErasedPattern {
     display: String,
     signatures: Vec<Vec<PatternToken>>,
-    resolve: Box<ActionResolver>,
+    resolve: Arc<ActionResolver>,
 }
 
 type ActionResolver = dyn Fn(&[&str]) -> Option<Action> + Send + Sync;
 
+#[derive(Clone)]
 pub struct ConfiguredCommand {
-    id: &'static str,
-    description: &'static str,
+    id: String,
+    description: String,
     context: ContextSelector,
+    protected: bool,
+    group: Option<String>,
     patterns: Vec<ErasedPattern>,
 }
 
 impl ConfiguredCommand {
-    pub(crate) fn id(&self) -> &'static str {
-        self.id
+    #[allow(dead_code)]
+    pub fn literal(
+        id: impl Into<String>,
+        description: impl Into<String>,
+        phrases: impl IntoIterator<Item = impl Into<String>>,
+        context: ContextSelector,
+        action: Action,
+    ) -> Result<Self, CommandError> {
+        Self::personal_literal(id, description, phrases, context, action, None)
     }
 
-    pub(crate) fn overlaps(&self, other: &Self) -> bool {
-        self.context.overlaps(&other.context)
+    pub fn personal_literal(
+        id: impl Into<String>,
+        description: impl Into<String>,
+        phrases: impl IntoIterator<Item = impl Into<String>>,
+        context: ContextSelector,
+        action: Action,
+        group: Option<String>,
+    ) -> Result<Self, CommandError> {
+        let id = id.into();
+        let patterns = phrases
+            .into_iter()
+            .map(|phrase| literal_phrase(phrase.into()))
+            .collect::<Vec<_>>();
+        if patterns.is_empty() {
+            return Err(CommandError::MissingPhrase { id });
+        }
+        if patterns
+            .iter()
+            .any(|pattern| pattern.signatures.iter().any(Vec::is_empty))
+        {
+            return Err(CommandError::MissingPhrase { id });
+        }
+        for (index, left) in patterns.iter().enumerate() {
+            for right in &patterns[index + 1..] {
+                if typed_patterns_overlap(left, right) {
+                    return Err(CommandError::OverlappingAliases { id });
+                }
+            }
+        }
+        let action = Arc::new(move |()| action.clone());
+        Ok(Self {
+            id,
+            description: description.into(),
+            context,
+            protected: false,
+            group,
+            patterns: patterns
+                .into_iter()
+                .map(|pattern| {
+                    let action = action.clone();
+                    ErasedPattern {
+                        display: pattern.display,
+                        signatures: pattern.signatures,
+                        resolve: Arc::new(move |words| {
+                            (pattern.parse)(words).map(|capture| (action)(capture))
+                        }),
+                    }
+                })
+                .collect(),
+        })
+    }
+
+    pub(crate) fn id(&self) -> &str {
+        &self.id
+    }
+
+    pub(crate) fn conflicts_with(&self, other: &Self) -> bool {
+        self.context.can_coexist_with(&other.context)
+            && (self.protected
+                || other.protected
+                || self.context.specificity() == other.context.specificity())
             && self.patterns.iter().any(|left| {
                 other
                     .patterns
                     .iter()
                     .any(|right| patterns_overlap(left, right))
             })
+    }
+
+    pub(crate) fn specificity(&self) -> u8 {
+        self.context.specificity()
     }
 
     pub(crate) fn match_words(&self, words: &[&str], context: &ContextSnapshot) -> Option<Action> {
@@ -395,8 +485,9 @@ impl ConfiguredCommand {
             scope: self.context.scope(),
             phrase: phrases.next().expect("command must have a spoken pattern"),
             aliases: phrases.collect(),
-            description: self.description,
-            id: self.id,
+            description: self.description.clone(),
+            id: self.id.clone(),
+            group: self.group.clone(),
         }
     }
 }
@@ -423,16 +514,6 @@ impl ContextSelector {
             Self::Always => CommandScope::Global,
             Self::BrowserHost(host) => CommandScope::Browser(host.clone()),
             Self::Application(application) => CommandScope::Application(application.clone()),
-        }
-    }
-
-    pub(crate) fn overlaps(&self, other: &Self) -> bool {
-        match (self, other) {
-            (Self::Always, _) | (_, Self::Always) => true,
-            (Self::BrowserHost(left), Self::BrowserHost(right))
-            | (Self::Application(left), Self::Application(right)) => left == right,
-            (Self::BrowserHost(_), Self::Application(_))
-            | (Self::Application(_), Self::BrowserHost(_)) => true,
         }
     }
 }

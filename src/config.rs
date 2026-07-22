@@ -95,12 +95,12 @@ fn voice_control_for(meetings_enabled: bool) -> CommandConfig {
         .command(
             Command::new("app.open.brave", "Open application")
                 .phrases(["open brave", "launch brave"])
-                .action(|()| Action::OpenApplication("Brave Browser")),
+                .action(|()| Action::OpenApplication("Brave Browser".into())),
         )
         .command(
             Command::new("app.open.slack", "Open application")
                 .phrases(["open slack", "launch slack"])
-                .action(|()| Action::OpenApplication("Slack")),
+                .action(|()| Action::OpenApplication("Slack".into())),
         )
         .command(
             Command::new("website.open.x", "Open website")
@@ -112,26 +112,28 @@ fn voice_control_for(meetings_enabled: bool) -> CommandConfig {
                     "open twitter",
                     "open x dot com",
                 ])
-                .action(|()| Action::OpenUrl("https://x.com")),
+                .action(|()| Action::OpenUrl("https://x.com".into())),
         )
         .command(
             Command::new("website.open.training", "Open website")
                 .phrases(["go to training", "open training"])
-                .action(|()| Action::OpenUrl("https://hub.kitlangton.dev/training")),
+                .action(|()| Action::OpenUrl("https://hub.kitlangton.dev/training".into())),
         )
         .command(
             Command::new("website.open.meditation", "Open website")
                 .phrases(["go to meditation", "open meditation"])
-                .action(|()| Action::OpenUrl("https://hub.kitlangton.dev/meditation")),
+                .action(|()| Action::OpenUrl("https://hub.kitlangton.dev/meditation".into())),
         )
         .command(
             Command::new("dictation.start", "Start voice dictation")
                 .phrases(DICTATION_START_PHRASES.iter().copied())
+                .protected()
                 .action(|()| Action::StartDictation),
         )
         .command(
             Command::new("captains-log.start", "Record a journal entry")
                 .phrases(CAPTAINS_LOG_START_PHRASES.iter().copied())
+                .protected()
                 .action(|()| Action::StartCaptainsLog),
         );
     let commands = if meetings_enabled {
@@ -144,11 +146,13 @@ fn voice_control_for(meetings_enabled: bool) -> CommandConfig {
                         "record meeting",
                         "record this meeting",
                     ])
+                    .protected()
                     .action(|()| Action::StartMeeting),
             )
             .command(
                 Command::new("meeting.stop", "Stop meeting recording")
                     .phrases(["stop meeting", "stop the meeting", "stop recording"])
+                    .protected()
                     .action(|()| Action::StopMeeting),
             )
     } else {
@@ -183,7 +187,7 @@ fn voice_control_for(meetings_enabled: bool) -> CommandConfig {
                 .spoken(("go", "home"))
                 .spoken(("go", "to", "home"))
                 .when(ContextPredicate::browser_host("x.com"))
-                .action(|()| Action::NavigateBrowser("https://x.com/home")),
+                .action(|()| Action::NavigateBrowser("https://x.com/home".into())),
         )
         .command(shortcut_command(
             "shortcut.home",
@@ -225,13 +229,13 @@ fn voice_control_for(meetings_enabled: bool) -> CommandConfig {
             Command::new("x.notifications", "Navigate active tab")
                 .phrases(["go to notifications", "open notifications"])
                 .when(ContextPredicate::browser_host("x.com"))
-                .action(|()| Action::NavigateBrowser("https://x.com/notifications")),
+                .action(|()| Action::NavigateBrowser("https://x.com/notifications".into())),
         )
         .command(
             Command::new("x.chat", "Navigate active tab")
                 .phrases(["go to chat", "open chat", "go to messages"])
                 .when(ContextPredicate::browser_host("x.com"))
-                .action(|()| Action::NavigateBrowser("https://x.com/messages")),
+                .action(|()| Action::NavigateBrowser("https://x.com/messages".into())),
         )
         .command(
             Command::new("slack.threads", "Use application shortcut")
@@ -264,7 +268,7 @@ fn voice_control_for(meetings_enabled: bool) -> CommandConfig {
             Command::new("slack.channel.console", "Open application destination")
                 .phrases(["go to console", "open console", "go to console channel"])
                 .when(ContextPredicate::application("Slack"))
-                .action(|()| Action::QuickSwitch("console")),
+                .action(|()| Action::QuickSwitch("console".into())),
         )
 }
 

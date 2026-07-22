@@ -87,6 +87,9 @@ pub fn listen(
     let dictation_worker = DictationWorker::start(input_monitor.activity.clone());
     let (mut transcription_revision, _) = crate::app_settings::transcription_selection();
     let mut action_executor = commands_enabled.then(ActionExecutor::start);
+    let mut personal_commands = commands_enabled
+        .then(|| crate::personal_commands::PersonalCommands::start(commands.clone()))
+        .flatten();
 
     events.emit(&VoiceEvent::SessionStarted {
         timestamp_ms: now_ms(),
@@ -144,17 +147,25 @@ pub fn listen(
                 handle_action_outcome(outcome, &mut events)?;
             }
         }
+        if let Some(personal_commands) = &personal_commands {
+            while let Some(outcome) = personal_commands.try_recv() {
+                handle_action_outcome(outcome, &mut events)?;
+            }
+        }
         let next_commands_enabled = crate::app_settings::commands_enabled();
         if next_commands_enabled != commands_enabled {
             commands_enabled = next_commands_enabled;
             mode = Mode::Listening;
             if commands_enabled {
                 command_loader = Some(load_command_recognizer(project_root.to_path_buf()));
+                personal_commands =
+                    crate::personal_commands::PersonalCommands::start(commands.clone());
                 tracing::info!("voice commands enabled; loading command model");
             } else {
                 command_loader = None;
                 recognizer = None;
                 action_executor = None;
+                personal_commands = None;
                 tracing::info!("voice commands disabled");
             }
         }
@@ -522,14 +533,19 @@ pub fn listen(
                     text: update.text.clone(),
                 })?;
                 if is_completed {
+                    let active_commands = personal_commands.as_ref().map_or_else(
+                        || std::sync::Arc::new(commands.clone()),
+                        |runtime| runtime.snapshot(),
+                    );
                     handle_command(
-                        &commands,
+                        &active_commands,
                         &mut mode,
                         &mut voice_capture,
                         &mut control_stability,
                         recognizer,
                         &mut dictation,
                         action_executor,
+                        personal_commands.as_ref(),
                         meeting_requests.as_ref(),
                         &update.text,
                         &context,
@@ -794,6 +810,7 @@ fn handle_command(
     recognizer: &mut Moonshine,
     dictation: &mut DictationCapture,
     action_executor: &ActionExecutor,
+    personal_commands: Option<&crate::personal_commands::PersonalCommands>,
     meeting_requests: Option<&SyncSender<MeetingRequest>>,
     heard: &str,
     context: &ContextSnapshot,
@@ -865,6 +882,25 @@ fn handle_command(
                 }
             }
         }
+        Decision::Execute {
+            id,
+            action:
+                Action::InvokeHandler {
+                    generation,
+                    command_id,
+                },
+        } => {
+            let outcome = personal_commands
+                .ok_or("personal command host is unavailable")
+                .and_then(|runtime| runtime.invoke(generation, command_id, heard, context.clone()));
+            match outcome {
+                Ok(()) => (Some(id.into()), CommandOutcome::Submitted),
+                Err(error) => {
+                    feedback::play(Tone::Error);
+                    (Some(id.into()), CommandOutcome::Failed(error.into()))
+                }
+            }
+        }
         Decision::Execute { id, action } => {
             match action_executor.submit(id, action, heard, context.label()) {
                 Ok(()) => (Some(id.into()), CommandOutcome::Submitted),
@@ -896,7 +932,7 @@ fn handle_action_outcome(outcome: ActionOutcome, events: &mut EventLog) -> Resul
     events.emit(&VoiceEvent::Command {
         timestamp_ms: now_ms(),
         heard: outcome.heard,
-        command: Some(outcome.id.into()),
+        command: Some(outcome.id),
         outcome: command_outcome,
         context: outcome.context,
     })?;
