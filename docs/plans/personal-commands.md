@@ -231,6 +231,15 @@ an accepted voice capture pins its protocol through transcription so a later
 reload cannot change its controls or stripping behavior. Hotkey and voice-edit
 captures do not strip voice-protocol phrases.
 
+When a GGUF model provides word timestamps, voice-delimited Paste and Send first
+align the configured trailing control, cut the PCM at the control's first word,
+and transcribe the content again. This lets the model infer terminal punctuation
+without hearing the control phrase. Models without word alignment, captures
+longer than one model window, and failed alignments use punctuation-tolerant
+textual stripping as a fallback. Explicit local voice fixtures exercise the
+aligned path through `scripts/capture-dictation-fixtures.sh`; fixture audio stays
+untracked in Application Support.
+
 ## Deferred Typed Captures
 
 Variable phrases are a follow-up, not part of the MVP. The intended architecture

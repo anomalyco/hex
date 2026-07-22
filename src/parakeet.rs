@@ -21,7 +21,7 @@ use crate::paste::Paster;
 use crate::suppression::InputActivity;
 #[cfg(test)]
 use crate::text_replacements::ReplacementSet;
-use crate::transcription::WarmTranscriber;
+use crate::transcription::{Transcriber, WarmTranscriber};
 use crate::transcription_models::{TranscriptionSelection, model_path, validate};
 
 pub struct Parakeet {
@@ -33,6 +33,7 @@ pub struct Parakeet {
 }
 
 static TRANSCRIBE_LOGGING: Once = Once::new();
+const TRANSCRIPTION_SAMPLES_PER_MS: usize = 16;
 
 pub enum WorkerEvent {
     ModelFailed(String),
@@ -439,18 +440,22 @@ impl DictationWorker {
                 let samples = transcriber.prepare_samples(job.clip.into_transcription_samples());
                 let prepare_ms = prepare_started.elapsed().as_millis();
                 let inference_started = Instant::now();
-                let result = transcriber
-                    .transcribe(&samples)
-                    .map(|text| {
-                        let corrected = prepare_transcript(&text, job.protocol.as_deref());
-                        tracing::debug!(
-                            raw_transcript = text,
-                            corrected_transcript = corrected,
-                            "prepared local transcript"
-                        );
-                        corrected
-                    })
-                    .map_err(|error| error.to_string());
+                let result = match (transcriber, job.protocol.as_deref()) {
+                    (Transcriber::Gguf(model), Some(protocol)) => {
+                        model.transcribe_voice(&samples, protocol)
+                    }
+                    (transcriber, _) => transcriber.transcribe(&samples),
+                }
+                .map(|text| {
+                    let corrected = prepare_transcript(&text, job.protocol.as_deref());
+                    tracing::debug!(
+                        raw_transcript = text,
+                        corrected_transcript = corrected,
+                        "prepared local transcript"
+                    );
+                    corrected
+                })
+                .map_err(|error| error.to_string());
                 let inference_ms = inference_started.elapsed().as_millis();
                 if job.control.is_cancelled() {
                     let _ = inference_output.send(OutputJob::Cancelled { job_id: job.job_id });
@@ -1031,10 +1036,10 @@ impl Parakeet {
         Ok(Self {
             session,
             options: RunOptions {
-                timestamps: if capabilities.max_timestamp_kind == TimestampKind::None {
-                    TimestampKind::None
-                } else {
-                    TimestampKind::Segment
+                timestamps: match capabilities.max_timestamp_kind {
+                    TimestampKind::Word | TimestampKind::Token => TimestampKind::Word,
+                    TimestampKind::Auto | TimestampKind::Segment => TimestampKind::Segment,
+                    TimestampKind::None => TimestampKind::None,
                 },
                 language,
                 family,
@@ -1073,6 +1078,40 @@ impl Parakeet {
             }
         }
         Ok(text.join(" "))
+    }
+
+    pub fn transcribe_voice(
+        &mut self,
+        samples: &[f32],
+        protocol: &DictationProtocol,
+    ) -> Result<String> {
+        if self
+            .max_audio_samples
+            .is_some_and(|maximum| samples.len() > maximum)
+        {
+            return self.transcribe(samples);
+        }
+        let transcript = self.transcribe_segments(samples)?;
+        let words = transcript
+            .words
+            .iter()
+            .map(|word| word.text.clone())
+            .collect::<Vec<_>>();
+        let Some(control_words) = protocol.control_suffix_word_count(&words) else {
+            return Ok(transcript.text);
+        };
+        let control = &transcript.words[transcript.words.len() - control_words];
+        let cut = (control.t0_ms.max(0) as usize * TRANSCRIPTION_SAMPLES_PER_MS).min(samples.len());
+        if cut == 0 || cut == samples.len() {
+            return Ok(transcript.text);
+        }
+        let mut content = samples[..cut].to_vec();
+        pad_for_parakeet(&mut content);
+        tracing::debug!(
+            control_start_ms = control.t0_ms,
+            "retranscribing voice dictation without control audio"
+        );
+        self.transcribe(&content)
     }
 
     pub fn transcribe_segments(&mut self, samples: &[f32]) -> Result<Transcript> {
@@ -1141,7 +1180,7 @@ mod tests {
             &replacements,
         );
 
-        assert_eq!(corrected, "use OpenCode and beta");
+        assert_eq!(corrected, "Use OpenCode and beta.");
         assert_eq!(
             prepare_transcript_with("Dictate start, alpha. Dictate stop.", None, &replacements),
             "Dictate start, beta. Dictate stop."
@@ -1159,7 +1198,7 @@ mod tests {
                 Some(&custom_protocol),
                 &replacements,
             ),
-            "beta"
+            "beta."
         );
         assert_eq!(replacements.replace("beta"), "gamma");
         assert_eq!(replacements.replace("Use OPEN CODE."), "Use OpenCode.");
@@ -1293,6 +1332,52 @@ mod tests {
         assert_eq!(state.cancel_latest(), Some(DictationJobId(1)));
         assert_eq!(state.cancel_latest(), Some(DictationJobId(0)));
         assert_eq!(state.cancel_latest(), None);
+    }
+
+    #[test]
+    #[ignore = "requires VOICE_CONTROL_DICTATION_FIXTURE_DIR and the installed Parakeet model"]
+    fn dictation_protocol_audio() {
+        let directory =
+            PathBuf::from(std::env::var("VOICE_CONTROL_DICTATION_FIXTURE_DIR").unwrap());
+        let protocol = DictationProtocol::try_new(
+            vec!["say".into()],
+            vec!["say paste".into(), "say stop".into()],
+            vec!["say send".into()],
+            vec!["say cancel".into(), "never mind".into()],
+        )
+        .unwrap();
+        let mut model = Parakeet::load().unwrap();
+        model.options.timestamps = TimestampKind::Word;
+
+        for (name, expected) in [
+            ("period-stop", "I don't understand this."),
+            ("question-stop", "Is this working?"),
+            ("exclamation-send", "Ship it."),
+            ("comma-stop", "Meet me at five."),
+        ] {
+            let mut reader = WavReader::open(directory.join(format!("{name}.wav"))).unwrap();
+            assert_eq!(reader.spec().sample_rate, 16_000);
+            let samples = reader
+                .samples::<f32>()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap();
+            let transcript = model.transcribe_segments(&samples).unwrap();
+            println!("{name}: {:?}", transcript.text);
+            for word in &transcript.words {
+                println!("  {}..{} {:?}", word.t0_ms, word.t1_ms, word.text);
+            }
+            assert_ne!(transcript.timestamp_kind, TimestampKind::None);
+            assert!(
+                protocol.control_suffix(&transcript.text).is_some(),
+                "{name} did not contain a configured control: {:?}",
+                transcript.text
+            );
+
+            let clipped = model.transcribe_voice(&samples, &protocol).unwrap();
+            let prepared = prepare_transcript(&clipped, Some(&protocol));
+            println!("  clipped: {:?} -> {:?}", clipped, prepared);
+            assert_eq!(prepared, expected);
+        }
     }
 
     #[test]

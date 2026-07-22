@@ -117,6 +117,17 @@ impl DictationProtocol {
         self.stop.iter().chain(&self.send).chain(&self.cancel)
     }
 
+    pub fn control_suffix_word_count(&self, words: &[String]) -> Option<usize> {
+        let words = words.iter().map(|word| normalize(word)).collect::<Vec<_>>();
+        self.control_phrases().find_map(|phrase| {
+            let control = spoken_words(phrase)
+                .into_iter()
+                .map(|word| word.normalized)
+                .collect::<Vec<_>>();
+            words.ends_with(&control).then_some(control.len())
+        })
+    }
+
     pub fn start_prefix(&self, text: &str) -> Option<usize> {
         control_prefix(text, &self.start)
     }
@@ -715,7 +726,7 @@ mod tests {
         assert_eq!(
             DictationProtocol::default()
                 .strip("Dictate start, this should keep the message. Dictates stop."),
-            "this should keep the message"
+            "This should keep the message."
         );
     }
 
@@ -737,7 +748,7 @@ mod tests {
         assert!(protocol.control_suffix("hello, dictates stop").is_none());
         assert_eq!(
             protocol.strip("Begin note, what are you talking about? Finish note."),
-            "What are you talking about"
+            "What are you talking about?"
         );
         assert_eq!(
             protocol.strip("what are you talking about"),
@@ -796,6 +807,15 @@ mod tests {
                 .is_none()
         );
         assert!(protocol.control_suffix("Essay stop").is_none());
+        assert_eq!(
+            protocol.control_suffix_word_count(&[
+                "Meet".into(),
+                "me".into(),
+                "Say,".into(),
+                "stop.".into(),
+            ]),
+            Some(2)
+        );
     }
 
     #[test]
