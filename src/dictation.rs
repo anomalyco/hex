@@ -478,7 +478,7 @@ impl DictationCapture {
     }
 
     pub fn start_voice(&mut self, now: Instant) {
-        self.start_with_pre_roll(now, Duration::ZERO, true);
+        self.start_with_pre_roll(now, RING_BUFFER_DURATION, true);
     }
 
     fn start_with_pre_roll(&mut self, now: Instant, duration: Duration, intentional: bool) {
@@ -583,7 +583,7 @@ mod tests {
     }
 
     #[test]
-    fn voice_start_excludes_audio_already_seen_by_recognizer() {
+    fn voice_start_recovers_audio_consumed_while_recognizing_the_trigger() {
         let mut capture = DictationCapture::new(16_000);
         capture.keep_warm(&[0.25; 8_000]);
         capture.keep_warm(&[0.25; 8_000]);
@@ -596,8 +596,8 @@ mod tests {
             panic!("expected transcription")
         };
         let samples = clip.into_parakeet_samples();
-        assert_eq!(samples[0], 0.5);
-        assert!(!samples.contains(&0.25));
+        assert_eq!(samples[0], 0.25);
+        assert!(samples.contains(&0.5));
     }
 
     #[test]
