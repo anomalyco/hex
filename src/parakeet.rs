@@ -134,6 +134,7 @@ struct EditSource {
 }
 
 enum OutputJob {
+    PreparePaste,
     Completed {
         job_id: DictationJobId,
         control: Arc<JobControl>,
@@ -152,6 +153,7 @@ enum OutputJob {
 impl OutputJob {
     fn sequence(&self) -> u64 {
         match self {
+            Self::PreparePaste => u64::MAX,
             Self::Completed { job_id, .. } | Self::Cancelled { job_id } => job_id.0,
             Self::Paste { sequence, .. } => *sequence,
         }
@@ -274,6 +276,10 @@ impl DictationWorker {
             let mut meeting_cursor = MeetingPasteCursor::default();
             let mut ordered = OrderedOutputs::default();
             while let Ok(job) = output_receiver.recv() {
+                if matches!(job, OutputJob::PreparePaste) {
+                    paster.prepare();
+                    continue;
+                }
                 for job in ordered.push(job) {
                     let event =
                         finish_output(job, &mut paster, &mut last_transcript, &mut meeting_cursor);
@@ -551,6 +557,18 @@ impl DictationWorker {
             .map_err(queue_error)
     }
 
+    pub fn prepare_paste(&self) {
+        let state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+        if !state.jobs.is_empty() || state.pending_pastes > 0 {
+            return;
+        }
+        drop(state);
+        let Some(output_jobs) = &self.output_jobs else {
+            return;
+        };
+        let _ = output_jobs.try_send(OutputJob::PreparePaste);
+    }
+
     pub fn reload(&self, selection: TranscriptionSelection) -> Result<(), &'static str> {
         self.inference_jobs
             .as_ref()
@@ -670,6 +688,7 @@ fn finish_output(
     meeting_cursor: &mut MeetingPasteCursor,
 ) -> WorkerEvent {
     match job {
+        OutputJob::PreparePaste => unreachable!("paste preparation bypasses ordered output"),
         OutputJob::Completed {
             job_id,
             control,

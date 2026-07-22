@@ -3,6 +3,7 @@ use std::ptr;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
+use std::time::Instant;
 
 use color_eyre::eyre::{Result, eyre};
 use objc2::rc::Retained;
@@ -23,6 +24,13 @@ pub struct Paster {
     activity: InputActivity,
     continuation: Option<Continuation>,
     clipboard_restore: Arc<Mutex<ClipboardRestore>>,
+    prepared_clipboard: Option<PreparedClipboard>,
+}
+
+struct PreparedClipboard {
+    change_count: isize,
+    snapshot: ClipboardSnapshot,
+    capture_ms: u128,
 }
 
 struct Continuation {
@@ -153,7 +161,30 @@ impl Paster {
             activity,
             continuation: None,
             clipboard_restore: Arc::new(Mutex::new(ClipboardRestore::default())),
+            prepared_clipboard: None,
         })
+    }
+
+    pub fn prepare(&mut self) {
+        if self.prepared_clipboard.is_some() {
+            return;
+        }
+        let _restore = self
+            .clipboard_restore
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let change_count = self.clipboard.changeCount();
+        let started = Instant::now();
+        match capture_clipboard(&self.clipboard) {
+            Ok(snapshot) => {
+                self.prepared_clipboard = Some(PreparedClipboard {
+                    change_count,
+                    snapshot,
+                    capture_ms: started.elapsed().as_millis(),
+                });
+            }
+            Err(error) => tracing::debug!(%error, "eager clipboard capture failed"),
+        }
     }
 
     pub fn paste(&mut self, text: &str) -> Result<()> {
@@ -175,7 +206,24 @@ impl Paster {
             .lock()
             .unwrap_or_else(|error| error.into_inner());
         let previous_change_count = self.clipboard.changeCount();
-        let previous = capture_clipboard(&self.clipboard)?;
+        let prepared = self.prepared_clipboard.take();
+        let previous = if let Some(prepared) = prepared
+            && prepared.change_count == previous_change_count
+        {
+            tracing::debug!(
+                clipboard_capture_ms = prepared.capture_ms,
+                "used eagerly captured clipboard"
+            );
+            prepared.snapshot
+        } else {
+            let started = Instant::now();
+            let snapshot = capture_clipboard(&self.clipboard)?;
+            tracing::debug!(
+                clipboard_capture_ms = started.elapsed().as_millis(),
+                "captured clipboard at paste time"
+            );
+            snapshot
+        };
         if self.clipboard.changeCount() != previous_change_count {
             return Err(eyre!("clipboard changed while HEX was preserving it"));
         }

@@ -618,6 +618,7 @@ fn handle_hotkey_action(
     match action {
         HotkeyAction::Start => {
             dictation.start(Instant::now());
+            worker.prepare_paste();
             feedback::play(Tone::DictationStart);
             events.dictation(DictationPhase::Started, "")?;
             if let Some(indicator) = indicator {
