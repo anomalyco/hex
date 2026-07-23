@@ -24,6 +24,8 @@ mod desktop_activity;
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 mod desktop_host;
 #[cfg(any(target_os = "macos", target_os = "linux"))]
+mod desktop_transcription_picker;
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 mod desktop_ui;
 #[cfg(target_os = "macos")]
 mod developer_control;
@@ -164,6 +166,9 @@ enum Command {
         /// Deterministic model installation state shown by the picker.
         #[arg(long, value_enum, default_value = "actual")]
         model_state: AppPreviewModelState,
+        /// Collapse OpenCode settings in the representative Modes preview.
+        #[arg(long)]
+        collapse_mode_processing: bool,
     },
     /// Listen and transcribe until interrupted.
     Listen {
@@ -409,6 +414,7 @@ fn main() -> Result<()> {
             target,
             language,
             model_state,
+            collapse_mode_processing,
         } => {
             if matches!(target, AppPreviewTarget::DictationHud) {
                 return meeting_watcher::run(&SHUTDOWN, false, None, true);
@@ -446,6 +452,7 @@ fn main() -> Result<()> {
                     transcription_picker: matches!(target, AppPreviewTarget::TranscriptionPicker)
                         .then_some((language, model_state)),
                     onboarding: matches!(target, AppPreviewTarget::Onboarding),
+                    collapse_mode_processing,
                 },
             )
         }

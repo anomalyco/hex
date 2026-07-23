@@ -1,9 +1,9 @@
 # Share The Desktop UI Across macOS And Linux
 
-**Status:** In progress. The shared visual vocabulary is implemented. macOS and
-Linux both render with GPUI, but they still use separate root entities. This
-plan converges them on one product shell while keeping platform behavior in the
-existing macOS and X11 hosts.
+**Status:** In progress. The shared visual vocabulary and transcription picker
+are implemented. macOS and Linux both render with GPUI, but they still use
+separate root entities. This plan converges them on one product shell while
+keeping platform behavior in the existing macOS and X11 hosts.
 
 ## One Product Shell Should Represent The Same Product Concepts
 
@@ -155,12 +155,14 @@ shared root window lands.
 
 ### 3. Normalize Core Settings For Presentation
 
-**In progress.** Shortcut keycaps and the double-tap toggle now use shared GPUI
-presentation. `DesktopSnapshot` now also normalizes shortcut labels, listener
-status, operation errors, update status, and observation metadata. Shortcut
-captures cross the host seam as portable modifier and key values while macOS
-and Linux continue to validate and persist their native binding representations
-independently. Portable microphone and transcription view state still remain.
+**In progress.** Shortcut keycaps, the double-tap toggle, and the complete local
+transcription picker now use shared GPUI presentation. `DesktopSnapshot` now
+also normalizes shortcut labels, listener status, operation errors, update
+status, observation metadata, and transcription selection/preparation state.
+Shortcut captures and model preparation cross the host seam as portable values
+while macOS and Linux continue to validate, prewarm, and persist their native
+runtime selections independently. Portable microphone view state still
+remains.
 
 - Introduce portable view state for shortcut, double-tap lock, microphone, and
   transcription controls.
@@ -187,10 +189,10 @@ remaining render state into one root entity is still outstanding.
 ### 5. Delete The Duplicate Linux Render Tree
 
 **In progress.** The Linux production render now uses the shared navigation,
-pane headers, settings panels and rows, keycaps, toggles, messages, and Activity
-layout at the same default and minimum dimensions as macOS. The superseded
-Linux dashboard implementation is compile-disabled and still needs physical
-deletion when the shared root extraction lands.
+pane headers, settings panels and rows, keycaps, toggles, messages, and exact
+transcription picker at the same default and minimum dimensions as macOS. The
+superseded Linux dashboard implementation has been removed. The remaining
+Linux Settings composition disappears when the shared root extraction lands.
 
 - Remove `LinuxApp::render` and Linux-only visual constants and controls.
 - Retain the Linux lifecycle, tray, X11 window mapping, listener, updater, and

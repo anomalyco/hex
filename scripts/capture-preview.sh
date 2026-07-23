@@ -12,10 +12,16 @@ target=$1
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 
 cd "$root"
-CMAKE=${CMAKE:-/opt/homebrew/lib/python3.10/site-packages/cmake/data/bin/cmake} \
-  cargo build --release
+binary=${HEX_PREVIEW_BINARY:-$root/target/release/voice-control}
+if [ "${HEX_PREVIEW_SKIP_BUILD:-0}" != "1" ]; then
+  CMAKE=${CMAKE:-/opt/homebrew/lib/python3.10/site-packages/cmake/data/bin/cmake} \
+    cargo build --release --bin voice-control
+elif [ ! -x "$binary" ]; then
+  echo "preview binary does not exist: $binary" >&2
+  exit 1
+fi
 
-"$root/target/release/voice-control" preview "$@" &
+"$binary" preview "$@" &
 pid=$!
 cleanup() {
   kill "$pid" 2>/dev/null || true

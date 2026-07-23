@@ -1,5 +1,5 @@
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
@@ -18,11 +18,15 @@ use x11rb::protocol::xproto::ConnectionExt;
 use crate::desktop_activity::DesktopActivity;
 use crate::desktop_host::{
     DesktopAction, DesktopCapabilities, DesktopHost, DesktopListenerSnapshot, DesktopShortcut,
-    DesktopSnapshot, DesktopUpdateStatus,
+    DesktopSnapshot, DesktopTranscriptionSnapshot, DesktopUpdateStatus,
+};
+use crate::desktop_transcription_picker::{
+    TranscriptionPickerDelegate, TranscriptionPickerModel, TranscriptionPickerView,
+    render_transcription_picker,
 };
 use crate::desktop_ui::{
-    LINE, MUTED, NavigationIcon, SIDEBAR_WIDTH, SURFACE, TEXT_SOFT, compact_button,
-    disclosure_button, error_message, hotkey_keycaps, navigation_item, pane_header, settings_panel,
+    LINE, MUTED, NavigationIcon, SIDEBAR_WIDTH, SURFACE, TEXT_SOFT, bounded_pane_header,
+    compact_button, disclosure_button, hotkey_keycaps, navigation_item, settings_panel,
     settings_row, settings_section_label, sidebar_frame, toggle, window_frame,
 };
 use crate::events::EventReader;
@@ -70,10 +74,18 @@ struct LinuxDesktopHost {
     listener_worker: Option<JoinHandle<()>>,
     session_before_start: Option<u64>,
     awaiting_session_start: bool,
+    listen_when_ready: bool,
     status: String,
     error: Option<String>,
     settings_error: Option<String>,
     settings: crate::linux_settings::LinuxSettings,
+    transcription_cancel: Option<Arc<AtomicBool>>,
+    transcription_error: Option<String>,
+    transcription_progress: Option<Arc<AtomicU64>>,
+    transcription_result: Option<
+        Receiver<std::result::Result<crate::transcription_models::TranscriptionSelection, String>>,
+    >,
+    transcription_preparing: Option<crate::transcription_models::TranscriptionModelId>,
     update: UpdateState,
 }
 
@@ -81,29 +93,27 @@ struct LinuxApp {
     host: LinuxDesktopHost,
     pane: LinuxPane,
     capturing_hotkey: bool,
-    model_picker_open: bool,
+    transcription_picker_language: Option<String>,
+    transcription_picker_waiting: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum LinuxPane {
     Settings,
-    Activity,
 }
 
 impl LinuxPane {
-    const ALL: [Self; 2] = [Self::Settings, Self::Activity];
+    const ALL: [Self; 1] = [Self::Settings];
 
     const fn label(self) -> &'static str {
         match self {
             Self::Settings => "Settings",
-            Self::Activity => "Activity",
         }
     }
 
     const fn icon(self) -> NavigationIcon {
         match self {
             Self::Settings => NavigationIcon::Settings,
-            Self::Activity => NavigationIcon::Activity,
         }
     }
 }
@@ -165,7 +175,8 @@ pub fn open(event_path: PathBuf, start_hidden: bool) -> Result<()> {
                         ),
                         pane: LinuxPane::Settings,
                         capturing_hotkey: false,
-                        model_picker_open: false,
+                        transcription_picker_language: None,
+                        transcription_picker_waiting: false,
                     })
                 },
             )
@@ -226,6 +237,19 @@ pub fn open(event_path: PathBuf, start_hidden: bool) -> Result<()> {
                 if app
                     .update(cx, |this, cx| {
                         this.host.refresh();
+                        if this.transcription_picker_waiting {
+                            let transcription = this
+                                .host
+                                .snapshot()
+                                .transcription
+                                .expect("Linux transcription snapshot");
+                            if transcription.preparing.is_none() {
+                                this.transcription_picker_waiting = false;
+                                if transcription.error.is_none() {
+                                    this.transcription_picker_language = None;
+                                }
+                            }
+                        }
                         cx.notify();
                     })
                     .is_err()
@@ -418,16 +442,29 @@ impl LinuxDesktopHost {
             listener_worker: None,
             session_before_start: None,
             awaiting_session_start: false,
+            listen_when_ready: false,
             status: "Ready".into(),
             error: None,
             settings_error: error,
             settings,
+            transcription_cancel: None,
+            transcription_error: None,
+            transcription_progress: None,
+            transcription_result: None,
+            transcription_preparing: None,
             update,
         }
     }
 
     fn start(&mut self) {
+        self.listen_when_ready = true;
         if self.listener_result.is_some() {
+            return;
+        }
+        let model = crate::transcription_models::definition(self.settings.transcription.model);
+        if !crate::transcription_models::is_installed(model, &self.settings.transcription.language)
+        {
+            self.status = "Model required".into();
             return;
         }
         let stop = Arc::new(AtomicBool::new(false));
@@ -452,6 +489,7 @@ impl LinuxDesktopHost {
     }
 
     fn stop(&mut self) {
+        self.listen_when_ready = false;
         if let Some(stop) = self
             .listener_stop
             .lock()
@@ -487,6 +525,51 @@ impl LinuxDesktopHost {
                     UpdateState::Failed(Instant::now() + UPDATE_INTERVAL)
                 }
             };
+        }
+
+        let transcription_result =
+            self.transcription_result
+                .as_ref()
+                .and_then(|receiver| match receiver.try_recv() {
+                    Ok(result) => Some(result),
+                    Err(TryRecvError::Disconnected) => {
+                        Some(Err("model preparation worker stopped unexpectedly".into()))
+                    }
+                    Err(TryRecvError::Empty) => None,
+                });
+        let mut start_listener = false;
+        if let Some(result) = transcription_result {
+            self.transcription_result = None;
+            self.transcription_cancel = None;
+            self.transcription_progress = None;
+            self.transcription_preparing = None;
+            match result {
+                Ok(selection) => {
+                    let mut candidate = self.settings.clone();
+                    candidate.transcription = selection;
+                    match candidate.save() {
+                        Ok(()) => {
+                            self.settings = candidate;
+                            self.transcription_error = None;
+                            self.settings_error = None;
+                            self.status = "Ready".into();
+                            start_listener = self.listen_when_ready;
+                        }
+                        Err(error) => {
+                            self.transcription_error =
+                                Some(format!("Could not save transcription selection: {error:#}"));
+                        }
+                    }
+                }
+                Err(error) => {
+                    if error != "model activation canceled" {
+                        self.transcription_error = Some(error);
+                    }
+                }
+            }
+        }
+        if start_listener {
+            self.start();
         }
 
         if let Some(receiver) = &self.listener_result {
@@ -589,6 +672,62 @@ impl LinuxDesktopHost {
         };
         crate::linux_updater::relaunch(update)
     }
+
+    fn choose_transcription(
+        &mut self,
+        model: crate::transcription_models::TranscriptionModelId,
+        language: String,
+    ) -> Result<()> {
+        if self.is_running() {
+            let error = "Stop listening before changing the transcription model".to_string();
+            self.transcription_error = Some(error.clone());
+            return Err(color_eyre::eyre::eyre!(error));
+        }
+        self.cancel_transcription_preparation();
+        let selection = crate::transcription_models::TranscriptionSelection {
+            model,
+            language,
+            recognition_hints: String::new(),
+        };
+        crate::transcription_models::validate(&selection)?;
+        let definition = crate::transcription_models::definition(model);
+        let canceled = Arc::new(AtomicBool::new(false));
+        let progress = Arc::new(AtomicU64::new(0));
+        let worker_canceled = canceled.clone();
+        let worker_progress = progress.clone();
+        let (sender, receiver) = mpsc::sync_channel(1);
+        std::thread::spawn(move || {
+            let result = (|| {
+                crate::transcription_models::download_with_progress(
+                    definition,
+                    &worker_canceled,
+                    &worker_progress,
+                )?;
+                if worker_canceled.load(Ordering::Relaxed) {
+                    return Err(color_eyre::eyre::eyre!("model activation canceled"));
+                }
+                crate::linux_transcriber::LinuxTranscriber::load(&selection).map(drop)?;
+                Ok(selection)
+            })()
+            .map_err(|error| format!("{error:#}"));
+            let _ = sender.send(result);
+        });
+        self.transcription_cancel = Some(canceled);
+        self.transcription_error = None;
+        self.transcription_preparing = Some(model);
+        self.transcription_progress = Some(progress);
+        self.transcription_result = Some(receiver);
+        Ok(())
+    }
+
+    fn cancel_transcription_preparation(&mut self) {
+        if let Some(canceled) = self.transcription_cancel.take() {
+            canceled.store(true, Ordering::Relaxed);
+        }
+        self.transcription_progress = None;
+        self.transcription_preparing = None;
+        self.transcription_error = None;
+    }
 }
 
 impl LinuxApp {
@@ -666,12 +805,28 @@ impl DesktopHost for LinuxDesktopHost {
             }),
             operation_error: self.error.clone().or_else(|| self.settings_error.clone()),
             observations_path: self.event_path.display().to_string(),
+            transcription: Some(DesktopTranscriptionSnapshot {
+                downloaded_bytes: self
+                    .transcription_progress
+                    .as_ref()
+                    .map_or(0, |progress| progress.load(Ordering::Relaxed)),
+                error: self.transcription_error.clone(),
+                language: self.settings.transcription.language.clone(),
+                model: self.settings.transcription.model,
+                preparing: self.transcription_preparing,
+            }),
             update_status,
         }
     }
 
     fn dispatch(&mut self, action: DesktopAction) -> Result<()> {
         match action {
+            DesktopAction::CancelTranscriptionPreparation => {
+                self.cancel_transcription_preparation();
+            }
+            DesktopAction::ChooseTranscription { language, model } => {
+                self.choose_transcription(model, language)?;
+            }
             DesktopAction::ClearError => self.error = None,
             DesktopAction::RestartIntoUpdate => {
                 if let Err(error) = self.restart_into_update() {
@@ -700,313 +855,18 @@ impl DesktopHost for LinuxDesktopHost {
     }
 }
 
-#[cfg(any())]
-impl Render for LinuxApp {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let snapshot = self.host.snapshot();
-        let running = snapshot
-            .listener
-            .as_ref()
-            .is_some_and(|listener| listener.running);
-        let capabilities = self.host.capabilities();
-        let hotkey_content = if self.capturing_hotkey {
-            div()
-                .text_size(px(11.0))
-                .text_color(rgb(TEXT_SOFT))
-                .child("Press a shortcut...")
-                .into_any_element()
-        } else {
-            hotkey_keycaps(snapshot.dictation_shortcut.clone(), 1.0)
-        };
-        let shortcut_help = format!(
-            "Hold {} to dictate. Release to transcribe and paste; Escape cancels.",
-            snapshot.dictation_shortcut_label
-        );
-        let control = if running {
-            "Stop listening"
-        } else {
-            "Start listening"
-        };
-        let update_ready = snapshot.update_status == DesktopUpdateStatus::ReadyToRestart;
-        let transcript_rows = if capabilities.activity {
-            snapshot
-                .activity
-                .transcripts
-                .iter()
-                .enumerate()
-                .map(|(index, transcript)| {
-                    div()
-                        .id(index)
-                        .py_3()
-                        .border_b_1()
-                        .border_color(rgb(LINE))
-                        .text_size(px(15.0))
-                        .text_color(rgb(TEXT_SOFT))
-                        .child(transcript.clone())
-                })
-                .collect::<Vec<_>>()
-        } else {
-            Vec::new()
-        };
-
-        window_frame()
-            .child(
-                sidebar_frame()
-                    .w(px(230.0))
-                    .flex()
-                    .flex_col()
-                    .p_5()
-                    .child(
-                        div()
-                            .text_size(px(28.0))
-                            .font_weight(FontWeight::BOLD)
-                            .child("HEX"),
-                    )
-                    .child(
-                        div()
-                            .mt_1()
-                            .text_size(px(11.0))
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .text_color(rgb(FAINT))
-                            .child("LINUX / X11 BETA"),
-                    )
-                    .child(
-                        div()
-                            .mt_8()
-                            .text_size(px(11.0))
-                            .text_color(rgb(FAINT))
-                            .child("LISTENER"),
-                    )
-                    .child(
-                        listener_status(
-                            snapshot.listener.as_ref().map_or_else(
-                                || "Unavailable".into(),
-                                |listener| listener.status.clone(),
-                            ),
-                            snapshot
-                                .activity
-                                .device
-                                .clone()
-                                .unwrap_or_else(|| "Default Audio Device".into()),
-                            running,
-                        )
-                        .mt_2(),
-                    )
-                    .child(
-                        div()
-                            .mt_6()
-                            .text_size(px(11.0))
-                            .text_color(rgb(FAINT))
-                            .child("DICTATION SHORTCUT"),
-                    )
-                    .child(
-                        div()
-                            .id("hotkey-capture")
-                            .mt_2()
-                            .h(px(34.0))
-                            .px_3()
-                            .flex()
-                            .items_center()
-                            .rounded_md()
-                            .border_1()
-                            .border_color(if self.capturing_hotkey {
-                                rgb(0xd9ff68)
-                            } else {
-                                rgb(LINE)
-                            })
-                            .bg(rgb(SURFACE))
-                            .text_size(px(12.0))
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .when(running, |row| row.opacity(0.5))
-                            .child(hotkey_content)
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                if !running {
-                                    this.capturing_hotkey = !this.capturing_hotkey;
-                                    let _ = this.host.dispatch(DesktopAction::ClearError);
-                                    cx.notify();
-                                }
-                            })),
-                    )
-                    .child(
-                        div()
-                            .id("double-tap-lock")
-                            .mt_2()
-                            .h(px(30.0))
-                            .px_3()
-                            .flex()
-                            .items_center()
-                            .justify_between()
-                            .rounded_md()
-                            .text_size(px(11.0))
-                            .text_color(rgb(MUTED))
-                            .when(running, |row| row.opacity(0.5))
-                            .child("Double-tap lock")
-                            .child(toggle(if snapshot.double_tap_lock { 1.0 } else { 0.0 }))
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                if !running {
-                                    let enabled = !this.host.snapshot().double_tap_lock;
-                                    if let Err(error) =
-                                        this.host.dispatch(DesktopAction::SetDoubleTapLock(enabled))
-                                    {
-                                        tracing::error!(%error, "could not save double-tap setting");
-                                    }
-                                    cx.notify();
-                                }
-                            })),
-                    )
-                    .child(
-                        div()
-                            .id("listener-control")
-                            .mt_5()
-                            .h(px(38.0))
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .rounded_md()
-                            .bg(if running {
-                                rgb(0x302126)
-                            } else {
-                                rgb(0xd9ff68)
-                            })
-                            .text_color(if running {
-                                rgb(0xffa8b8)
-                            } else {
-                                rgb(0x10130b)
-                            })
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .hover(|style| style.opacity(0.88))
-                            .child(control)
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                if running {
-                                    let _ = this.host.dispatch(DesktopAction::StopListening);
-                                } else {
-                                    let _ = this.host.dispatch(DesktopAction::StartListening);
-                                }
-                                cx.notify();
-                            })),
-                    )
-                    .child(
-                        div()
-                            .mt_auto()
-                            .when(update_ready, |panel| {
-                                panel
-                                    .child(
-                                        div()
-                                            .text_size(px(11.0))
-                                            .text_color(rgb(0xd9ff68))
-                                            .child("Update ready"),
-                                    )
-                                    .child(
-                                        compact_button("Restart")
-                                            .id("restart-update")
-                                            .mt_2()
-                                            .justify_center()
-                                            .bg(rgb(0x252b20))
-                                            .font_weight(FontWeight::SEMIBOLD)
-                                            .on_click(cx.listener(move |this, _, _, cx| {
-                                                match this
-                                                    .host
-                                                    .dispatch(DesktopAction::RestartIntoUpdate)
-                                                {
-                                                    Ok(()) => {
-                                                        let _ = this
-                                                            .host
-                                                            .dispatch(DesktopAction::StopListening);
-                                                        cx.quit();
-                                                    }
-                                                    Err(error) => {
-                                                        tracing::error!(%error, "could not restart HEX");
-                                                        cx.notify();
-                                                    }
-                                                }
-                                            })),
-                                    )
-                                    .child(div().h(px(16.0)))
-                            })
-                            .child(
-                                div()
-                                    .text_size(px(11.0))
-                                    .line_height(px(17.0))
-                                    .text_color(rgb(FAINT))
-                                    .child(shortcut_help),
-                            ),
-                    ),
-            )
-            .child(
-                pane_frame()
-                    .flex_1()
-                    .p_6()
-                    .child(section_label("LOCAL TRANSCRIPT"))
-                    .child(
-                        div()
-                            .mt_2()
-                            .text_size(px(22.0))
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .child("What HEX hears"),
-                    )
-                    .when_some(
-                        snapshot
-                            .operation_error
-                            .clone()
-                            .or_else(|| snapshot.activity.error.clone()),
-                        |panel, error| {
-                            panel.child(
-                                div()
-                                    .mt_4()
-                                    .p_3()
-                                    .rounded_md()
-                                    .bg(rgb(0x2e1d22))
-                                    .text_size(px(12.0))
-                                    .text_color(rgb(NEGATIVE))
-                                    .child(error),
-                            )
-                        },
-                    )
-                    .child(
-                        div()
-                            .mt_5()
-                            .flex_1()
-                            .flex()
-                            .flex_col()
-                            .when(transcript_rows.is_empty(), |list| {
-                                list.child(div().mt_8().text_color(rgb(FAINT)).child(
-                                    "Start listening, then speak. Completed phrases appear here.",
-                                ))
-                            })
-                            .children(transcript_rows),
-                    )
-                    .child(
-                        div()
-                            .pt_3()
-                            .border_t_1()
-                            .border_color(rgb(LINE))
-                            .text_size(px(11.0))
-                            .text_color(rgb(FAINT))
-                            .child(SharedString::from(format!(
-                                "Observations: {}",
-                                snapshot.observations_path
-                            ))),
-                    ),
-            )
-    }
-}
-
 impl LinuxApp {
     fn render_shared_navigation(&mut self, cx: &mut Context<Self>) -> AnyElement {
-        let capabilities = self.host.capabilities();
-        let items = LinuxPane::ALL
-            .into_iter()
-            .filter(|pane| *pane != LinuxPane::Activity || capabilities.activity)
-            .enumerate()
-            .map(|(index, pane)| {
-                navigation_item(pane.icon(), self.pane == pane)
-                    .id(("linux-nav", index))
-                    .child(pane.label())
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.pane = pane;
-                        cx.notify();
-                    }))
-            });
+        debug_assert!(self.host.capabilities().listener_control);
+        let items = LinuxPane::ALL.into_iter().enumerate().map(|(index, pane)| {
+            navigation_item(pane.icon(), self.pane == pane)
+                .id(("linux-nav", index))
+                .child(pane.label())
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.pane = pane;
+                    cx.notify();
+                }))
+        });
         sidebar_frame()
             .w(px(SIDEBAR_WIDTH))
             .px(px(14.0))
@@ -1046,286 +906,264 @@ impl LinuxApp {
             hotkey_keycaps(snapshot.dictation_shortcut.clone(), 1.0)
         };
         let update_ready = snapshot.update_status == DesktopUpdateStatus::ReadyToRestart;
-        let error = snapshot
-            .operation_error
-            .clone()
-            .or_else(|| snapshot.activity.error.clone());
+        let transcription = snapshot
+            .transcription
+            .as_ref()
+            .expect("Linux always exposes local transcription");
+        let transcription_label = format!(
+            "{} · {}",
+            crate::transcription_models::language_name(&transcription.language),
+            crate::transcription_models::definition(transcription.model).name
+        );
 
         div()
-            .h_full()
-            .min_w(px(0.0))
+            .size_full()
             .flex()
             .flex_col()
-            .flex_1()
-            .child(pane_header("Settings", None))
+            .child(bounded_pane_header("Settings", 788.0))
             .child(
-                div().flex_1().px_8().py_6().flex().justify_center().child(
-                    div()
-                        .w_full()
-                        .max_w(px(788.0))
-                        .flex()
-                        .flex_col()
-                        .when_some(error, |content, error| {
-                            content
-                                .child(error_message("HEX could not complete the action.", error))
-                        })
-                        .child(settings_section_label("Dictation"))
-                        .child(
-                            settings_panel()
-                                .child(settings_row(
-                                    "Local transcription",
-                                    "Language and on-device speech model",
-                                    disclosure_button("English · Parakeet v2")
-                                        .id("transcription-model")
-                                        .on_click(cx.listener(|this, _, _, cx| {
-                                            this.model_picker_open = true;
-                                            cx.notify();
-                                        })),
-                                ))
-                                .child(settings_row(
-                                    "Microphone",
-                                    "Automatically chooses the default available input",
-                                    disclosure_button("Automatic"),
-                                ))
+                div()
+                    .id("settings-scroll")
+                    .flex_1()
+                    .overflow_y_scroll()
+                    .px_8()
+                    .pt_1()
+                    .pb_7()
+                    .child(
+                        div().w_full().flex().justify_center().child(
+                            div()
+                                .w_full()
+                                .max_w(px(788.0))
+                                .relative()
+                                .child(settings_section_label("DICTATION"))
                                 .child(
-                                    settings_row(
-                                        "Dictation shortcut",
-                                        "Hold to dictate, then release to transcribe.",
-                                        shortcut,
-                                    )
-                                    .id("hotkey-capture")
-                                    .when(running, |row| row.opacity(0.5))
-                                    .on_click(cx.listener(
-                                        move |this, _, _, cx| {
-                                            if !running {
-                                                this.capturing_hotkey = !this.capturing_hotkey;
-                                                let _ =
-                                                    this.host.dispatch(DesktopAction::ClearError);
-                                                cx.notify();
-                                            }
-                                        },
-                                    )),
-                                ),
-                        )
-                        .child(settings_section_label("Behavior"))
-                        .child(
-                            settings_panel().child(
-                                settings_row(
-                                    "Double-tap to lock",
-                                    "Double-tap the shortcut for hands-free dictation",
-                                    toggle(if snapshot.double_tap_lock { 1.0 } else { 0.0 }),
+                                    settings_panel()
+                                        .child(settings_row(
+                                            "Local transcription",
+                                            "Language and on-device speech model",
+                                            disclosure_button(transcription_label)
+                                                .id("transcription-model-setting")
+                                                .on_click(cx.listener(|this, _, _, cx| {
+                                                    this.transcription_picker_language = Some(
+                                                        this.host
+                                                            .snapshot()
+                                                            .transcription
+                                                            .expect("Linux transcription snapshot")
+                                                            .language,
+                                                    );
+                                                    cx.notify();
+                                                })),
+                                        ))
+                                        .child(settings_row(
+                                            "Microphone",
+                                            "Automatically chooses the preferred available input",
+                                            disclosure_button("Automatic"),
+                                        ))
+                                        .child(
+                                            settings_row(
+                                                "Dictation shortcut",
+                                                "Hold to dictate, release to transcribe",
+                                                shortcut,
+                                            )
+                                            .border_b_0()
+                                            .id("dictation-hotkey-setting")
+                                            .when(running, |row| row.opacity(0.5))
+                                            .on_click(
+                                                cx.listener(move |this, _, _, cx| {
+                                                    if !running {
+                                                        this.capturing_hotkey =
+                                                            !this.capturing_hotkey;
+                                                        let _ = this
+                                                            .host
+                                                            .dispatch(DesktopAction::ClearError);
+                                                        cx.notify();
+                                                    }
+                                                }),
+                                            ),
+                                        ),
                                 )
-                                .id("double-tap-lock")
-                                .when(running, |row| row.opacity(0.5))
-                                .on_click(cx.listener(
-                                    move |this, _, _, cx| {
-                                        if !running {
-                                            let enabled = !this.host.snapshot().double_tap_lock;
-                                            let _ = this
-                                                .host
-                                                .dispatch(DesktopAction::SetDoubleTapLock(enabled));
-                                            cx.notify();
-                                        }
-                                    },
-                                )),
-                            ),
-                        )
-                        .child(settings_section_label("Application"))
-                        .child(
-                            settings_panel()
-                                .child(settings_row(
-                                    "HEX",
-                                    "Linux X11 beta",
-                                    div()
-                                        .text_size(px(12.0))
-                                        .text_color(rgb(MUTED))
-                                        .child(format!("Version {}", env!("CARGO_PKG_VERSION"))),
-                                ))
-                                .when(update_ready, |panel| {
-                                    panel.child(settings_row(
-                                        "Update ready",
-                                        "Restart into the verified Linux release.",
-                                        compact_button("Restart")
-                                            .id("restart-update")
-                                            .border_1()
-                                            .border_color(rgb(LINE))
-                                            .on_click(cx.listener(|this, _, _, cx| {
-                                                if this
-                                                    .host
-                                                    .dispatch(DesktopAction::RestartIntoUpdate)
-                                                    .is_ok()
-                                                {
-                                                    let _ = this
-                                                        .host
-                                                        .dispatch(DesktopAction::StopListening);
-                                                    cx.quit();
-                                                } else {
+                                .child(settings_section_label("BEHAVIOR"))
+                                .child(
+                                    settings_panel().child(
+                                        settings_row(
+                                            "Double-tap to lock",
+                                            "Double-tap the shortcut for hands-free dictation",
+                                            toggle(if snapshot.double_tap_lock {
+                                                1.0
+                                            } else {
+                                                0.0
+                                            }),
+                                        )
+                                        .border_b_0()
+                                        .id("double-tap-setting")
+                                        .when(running, |row| row.opacity(0.5))
+                                        .on_click(
+                                            cx.listener(move |this, _, _, cx| {
+                                                if !running {
+                                                    let enabled =
+                                                        !this.host.snapshot().double_tap_lock;
+                                                    let _ = this.host.dispatch(
+                                                        DesktopAction::SetDoubleTapLock(enabled),
+                                                    );
                                                     cx.notify();
                                                 }
-                                            })),
-                                    ))
-                                }),
-                        ),
-                ),
-            )
-            .into_any_element()
-    }
-
-    fn render_shared_activity(
-        &mut self,
-        snapshot: &DesktopSnapshot,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let refresh = compact_button("Refresh")
-            .id("refresh-activity")
-            .bg(rgb(SURFACE))
-            .on_click(cx.listener(|this, _, _, cx| {
-                this.host.refresh();
-                cx.notify();
-            }))
-            .into_any_element();
-        let rows = snapshot
-            .activity
-            .transcripts
-            .iter()
-            .enumerate()
-            .map(|(index, transcript)| {
-                div()
-                    .id(("activity-transcript", index))
-                    .px_5()
-                    .py_4()
-                    .border_b_1()
-                    .border_color(rgb(LINE))
-                    .text_size(px(13.0))
-                    .text_color(rgb(TEXT_SOFT))
-                    .child(transcript.clone())
-            })
-            .collect::<Vec<_>>();
-        div()
-            .h_full()
-            .min_w(px(0.0))
-            .flex()
-            .flex_col()
-            .flex_1()
-            .child(pane_header("Activity", Some(refresh)))
-            .child(
-                div()
-                    .flex_1()
-                    .flex()
-                    .border_t_1()
-                    .border_color(rgb(LINE))
-                    .child(
-                        div()
-                            .w_1_2()
-                            .h_full()
-                            .border_r_1()
-                            .border_color(rgb(LINE))
-                            .when(rows.is_empty(), |list| {
-                                list.child(
-                                    div()
-                                        .p_6()
-                                        .text_size(px(13.0))
-                                        .text_color(rgb(MUTED))
-                                        .child("No activity yet."),
-                                )
-                            })
-                            .children(rows),
-                    )
-                    .child(
-                        div()
-                            .flex_1()
-                            .h_full()
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .text_size(px(13.0))
-                            .text_color(rgb(MUTED))
-                            .child("Completed dictation appears in the activity list."),
-                    ),
-            )
-            .into_any_element()
-    }
-
-    fn render_model_picker(&mut self, cx: &mut Context<Self>) -> AnyElement {
-        let model = crate::linux_transcriber::default_model();
-        let installed = crate::transcription_models::is_installed(model, "en");
-        div()
-            .absolute()
-            .inset_0()
-            .bg(gpui::rgba(0x000000aa))
-            .flex()
-            .items_center()
-            .justify_center()
-            .child(
-                div()
-                    .w(px(560.0))
-                    .rounded(px(12.0))
-                    .border_1()
-                    .border_color(rgb(LINE))
-                    .bg(rgb(0x151515))
-                    .p_6()
-                    .flex()
-                    .flex_col()
-                    .gap_5()
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .justify_between()
-                            .child(
-                                div()
-                                    .text_size(px(20.0))
-                                    .font_weight(gpui::FontWeight::SEMIBOLD)
-                                    .child("Local transcription"),
-                            )
-                            .child(compact_button("Close").id("close-model-picker").on_click(
-                                cx.listener(|this, _, _, cx| {
-                                    this.model_picker_open = false;
-                                    cx.notify();
-                                }),
-                            )),
-                    )
-                    .child(
-                        div()
-                            .p_4()
-                            .rounded(px(8.0))
-                            .border_1()
-                            .border_color(rgb(0x4b5fff))
-                            .bg(rgb(SURFACE))
-                            .flex()
-                            .items_center()
-                            .justify_between()
-                            .child(
-                                div()
-                                    .flex()
-                                    .flex_col()
-                                    .gap_1()
-                                    .child(
-                                        div()
-                                            .text_size(px(14.0))
-                                            .font_weight(gpui::FontWeight::SEMIBOLD)
-                                            .child("English · Parakeet v2"),
-                                    )
-                                    .child(
-                                        div()
-                                            .text_size(px(11.0))
-                                            .text_color(rgb(MUTED))
-                                            .child(model.size_label()),
+                                            }),
+                                        ),
                                     ),
-                            )
-                            .child(
-                                div()
-                                    .text_size(px(11.0))
-                                    .text_color(rgb(if installed { 0x69d89f } else { 0xd8b069 }))
-                                    .child(if installed {
-                                        "Installed"
-                                    } else {
-                                        "Run `hex model install`"
-                                    }),
-                            ),
+                                )
+                                .child(settings_section_label("APPLICATION"))
+                                .child(
+                                    settings_panel()
+                                        .child(settings_row(
+                                            "HEX",
+                                            "Private local dictation for Linux",
+                                            div().text_size(px(12.0)).text_color(rgb(MUTED)).child(
+                                                format!("Version {}", env!("CARGO_PKG_VERSION")),
+                                            ),
+                                        ))
+                                        .when(update_ready, |panel| {
+                                            panel.child(settings_row(
+                                                "Update ready",
+                                                "Restart into the verified Linux release.",
+                                                compact_button("Restart")
+                                                    .id("restart-update")
+                                                    .border_1()
+                                                    .border_color(rgb(LINE))
+                                                    .on_click(cx.listener(|this, _, _, cx| {
+                                                        if this
+                                                            .host
+                                                            .dispatch(
+                                                                DesktopAction::RestartIntoUpdate,
+                                                            )
+                                                            .is_ok()
+                                                        {
+                                                            let _ = this.host.dispatch(
+                                                                DesktopAction::StopListening,
+                                                            );
+                                                            cx.quit();
+                                                        } else {
+                                                            cx.notify();
+                                                        }
+                                                    })),
+                                            ))
+                                        }),
+                                ),
+                        ),
                     ),
             )
             .into_any_element()
+    }
+
+    fn transcription_picker_view(&self, language: String) -> TranscriptionPickerView {
+        let snapshot = self.host.snapshot();
+        let transcription = snapshot
+            .transcription
+            .expect("Linux always exposes local transcription");
+        let models = crate::transcription_models::choices_for_runtime(&language, false)
+            .into_iter()
+            .map(|choice| {
+                let model = choice.model;
+                let installed = crate::transcription_models::is_installed(model, &language);
+                let downloading = transcription.preparing == Some(model.id);
+                let active = installed
+                    && transcription.model == model.id
+                    && transcription.language == language;
+                let progress = if downloading {
+                    model.download_bytes().map_or(0.0, |bytes| {
+                        (transcription.downloaded_bytes as f32 / bytes as f32).clamp(0.0, 1.0)
+                    })
+                } else {
+                    0.0
+                };
+                let state_label = if downloading {
+                    if installed {
+                        "Loading model".to_string()
+                    } else {
+                        format!("Downloading {:.0}%", progress * 100.0)
+                    }
+                } else if active {
+                    "Active".to_string()
+                } else {
+                    choice.recommendation.label().to_string()
+                };
+                let metadata =
+                    if model.coverage == crate::transcription_models::language_name(&language) {
+                        format!("{} · {}", model.quality_context, model.timestamps)
+                    } else {
+                        format!(
+                            "{} · {} · {}",
+                            model.coverage, model.quality_context, model.timestamps
+                        )
+                    };
+                TranscriptionPickerModel {
+                    action: if downloading {
+                        "Cancel"
+                    } else if active {
+                        ""
+                    } else if installed {
+                        "Installed"
+                    } else {
+                        "Download"
+                    }
+                    .into(),
+                    active,
+                    activation_progress: 0.25,
+                    downloading,
+                    error_rate: model.quality,
+                    id: model.id,
+                    metadata,
+                    name: model.name,
+                    progress,
+                    realtime: model.realtime,
+                    realtime_context: model.realtime_context,
+                    show_download_progress: downloading && !installed,
+                    show_loading_progress: downloading && installed,
+                    size: model.size_label(),
+                    state_label,
+                }
+            })
+            .collect();
+        TranscriptionPickerView {
+            error: transcription.error,
+            language,
+            models,
+        }
+    }
+}
+
+impl TranscriptionPickerDelegate for LinuxApp {
+    fn cancel_transcription_preparation(&mut self) {
+        self.transcription_picker_waiting = false;
+        let _ = self
+            .host
+            .dispatch(DesktopAction::CancelTranscriptionPreparation);
+    }
+
+    fn choose_transcription_model(
+        &mut self,
+        model: crate::transcription_models::TranscriptionModelId,
+        language: String,
+        _cx: &mut Context<Self>,
+    ) {
+        self.transcription_picker_waiting = self
+            .host
+            .dispatch(DesktopAction::ChooseTranscription { language, model })
+            .is_ok();
+    }
+
+    fn dismiss_transcription_picker(&mut self, cx: &mut Context<Self>) {
+        self.transcription_picker_language = None;
+        self.transcription_picker_waiting = false;
+        cx.notify();
+    }
+
+    fn select_transcription_language(&mut self, language: String, cx: &mut Context<Self>) {
+        if self.transcription_picker_language.as_deref() != Some(&language) {
+            self.cancel_transcription_preparation();
+            self.transcription_picker_language = Some(language);
+            self.transcription_picker_waiting = false;
+            cx.notify();
+        }
     }
 }
 
@@ -1334,9 +1172,10 @@ impl Render for LinuxApp {
         let snapshot = self.host.snapshot();
         let content = match self.pane {
             LinuxPane::Settings => self.render_shared_settings(&snapshot, cx),
-            LinuxPane::Activity => self.render_shared_activity(&snapshot, cx),
         };
-        let model_picker = self.model_picker_open.then(|| self.render_model_picker(cx));
+        let model_picker = self.transcription_picker_language.clone().map(|language| {
+            render_transcription_picker(self.transcription_picker_view(language), cx)
+        });
         window_frame()
             .child(self.render_shared_navigation(cx))
             .child(div().flex_1().h_full().overflow_hidden().child(content))

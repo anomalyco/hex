@@ -16,6 +16,7 @@ pub struct LinuxSettings {
     pub platform: String,
     pub dictation_hotkey: LinuxHotkey,
     pub double_tap_lock: bool,
+    pub transcription: crate::transcription_models::TranscriptionSelection,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -35,6 +36,7 @@ impl Default for LinuxSettings {
             platform: "x11".into(),
             dictation_hotkey: LinuxHotkey::default(),
             double_tap_lock: true,
+            transcription: crate::transcription_models::TranscriptionSelection::default(),
         }
     }
 }
@@ -66,11 +68,13 @@ impl LinuxSettings {
             ));
         }
         settings.dictation_hotkey.validate()?;
+        crate::transcription_models::validate(&settings.transcription)?;
         Ok(settings)
     }
 
     pub fn save(&self) -> Result<()> {
         self.dictation_hotkey.validate()?;
+        crate::transcription_models::validate(&self.transcription)?;
         let path = settings_path()?;
         let directory = path.parent().unwrap();
         fs::create_dir_all(directory)?;
@@ -174,5 +178,29 @@ mod tests {
         };
         assert_eq!(binding.label(), "F12");
         assert!(binding.validate().is_ok());
+    }
+
+    #[test]
+    fn settings_without_transcription_keep_the_default_selection() {
+        let settings: LinuxSettings = serde_json::from_str(
+            r#"{
+                "schema_version": 1,
+                "platform": "x11",
+                "dictation_hotkey": {
+                    "control": false,
+                    "alt": true,
+                    "shift": false,
+                    "super_key": false,
+                    "key": "space"
+                },
+                "double_tap_lock": true
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            settings.transcription,
+            crate::transcription_models::TranscriptionSelection::default()
+        );
     }
 }

@@ -65,6 +65,16 @@ fn disclosure_chevron() -> AnyElement {
         .into_any_element()
 }
 
+#[cfg(target_os = "macos")]
+fn plus_icon() -> AnyElement {
+    gpui_symbols::Icon::new("plus")
+        .size(px(9.0))
+        .color(rgb(TEXT_SOFT))
+        .weight(gpui_symbols::SymbolWeight::Semibold)
+        .rendering_mode(gpui_symbols::RenderingMode::Monochrome)
+        .into_any_element()
+}
+
 #[cfg(target_os = "linux")]
 fn disclosure_chevron() -> AnyElement {
     div()
@@ -75,6 +85,19 @@ fn disclosure_chevron() -> AnyElement {
         .text_size(px(10.0))
         .text_color(rgb(MUTED))
         .child("⌄")
+        .into_any_element()
+}
+
+#[cfg(target_os = "linux")]
+fn plus_icon() -> AnyElement {
+    div()
+        .size(px(9.0))
+        .flex()
+        .items_center()
+        .justify_center()
+        .text_size(px(11.0))
+        .text_color(rgb(TEXT_SOFT))
+        .child("+")
         .into_any_element()
 }
 
@@ -105,8 +128,16 @@ pub(crate) const FAINT: u32 = 0x626262;
 pub(crate) const NEGATIVE: u32 = 0xc98f89;
 
 pub(crate) const CONTROL_HEIGHT: f32 = 32.0;
+#[cfg_attr(target_os = "linux", allow(dead_code))]
+pub(crate) const TEXT_INPUT_HEIGHT: f32 = 34.0;
+#[cfg_attr(target_os = "linux", allow(dead_code))]
+pub(crate) const MULTILINE_INPUT_HEIGHT: f32 = 132.0;
+#[cfg_attr(target_os = "linux", allow(dead_code))]
+pub(crate) const COMPACT_MULTILINE_INPUT_HEIGHT: f32 = 76.0;
 pub(crate) const PANEL_RADIUS: f32 = 10.0;
+#[cfg_attr(target_os = "linux", allow(dead_code))]
 pub(crate) const COMPACT_PANEL_HEADER_HEIGHT: f32 = 38.0;
+#[cfg_attr(target_os = "linux", allow(dead_code))]
 pub(crate) const SECTION_GAP: f32 = 8.0;
 
 pub(crate) fn window_frame() -> Div {
@@ -357,6 +388,22 @@ pub(crate) fn compact_button(label: impl IntoElement) -> Div {
         .child(label)
 }
 
+pub(crate) fn plus_label(label: impl IntoElement) -> Div {
+    div()
+        .flex()
+        .items_center()
+        .gap_1()
+        .child(plus_icon())
+        .child(label)
+}
+
+pub(crate) fn compact_add_button(label: impl IntoElement) -> Div {
+    compact_button(plus_label(label))
+        .h(px(28.0))
+        .px_2()
+        .text_size(px(10.0))
+}
+
 pub(crate) fn compact_panel() -> Div {
     div()
         .w_full()
@@ -367,6 +414,7 @@ pub(crate) fn compact_panel() -> Div {
         .overflow_hidden()
 }
 
+#[cfg_attr(target_os = "linux", allow(dead_code))]
 pub(crate) fn compact_panel_header(title: impl IntoElement, action: Option<AnyElement>) -> Div {
     div()
         .h(px(COMPACT_PANEL_HEADER_HEIGHT))
@@ -387,6 +435,7 @@ pub(crate) fn compact_panel_header(title: impl IntoElement, action: Option<AnyEl
         .when_some(action, |header, action| header.child(action))
 }
 
+#[cfg_attr(target_os = "linux", allow(dead_code))]
 pub(crate) fn compact_section_label(label: impl IntoElement) -> Div {
     div()
         .px_1()

@@ -27,12 +27,12 @@ struct JobResult {
 }
 
 pub fn run(event_path: &Path, device: Option<&str>, shutdown: &AtomicBool) -> Result<()> {
-    let transcriber = LinuxTranscriber::load_default()?;
+    let settings = crate::linux_settings::LinuxSettings::load()?;
+    let transcriber = LinuxTranscriber::load(&settings.transcription)?;
     let input = match device {
         Some(name) => AudioInput::open_matching(name)?,
         None => AudioInput::open(&[])?,
     };
-    let settings = crate::linux_settings::LinuxSettings::load()?;
     let hotkey_label = settings.dictation_hotkey.label();
     let hotkey = X11HotkeyMonitor::start(settings.dictation_hotkey, settings.double_tap_lock)?;
     let (jobs, job_receiver) = mpsc::sync_channel::<Job>(2);

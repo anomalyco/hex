@@ -9,10 +9,8 @@ use gpui::{
 };
 use unicode_segmentation::UnicodeSegmentation;
 
-const SURFACE: u32 = 0x171717;
-const LINE: u32 = 0x292929;
-const TEXT: u32 = 0xeeeeee;
-const MUTED: u32 = 0x858585;
+use crate::desktop_ui::{LINE, MULTILINE_INPUT_HEIGHT, MUTED, SURFACE, TEXT, TEXT_INPUT_HEIGHT};
+
 const FOCUS: u32 = 0x5a86c8;
 const SELECTION: u32 = 0x4776b866;
 
@@ -130,6 +128,7 @@ pub struct TextInput {
     mouse_selection: Option<MouseSelection>,
     preferred_x: Option<Pixels>,
     multiline: bool,
+    height: Pixels,
     picker: bool,
     undo_stack: Vec<EditState>,
     redo_stack: Vec<EditState>,
@@ -226,6 +225,17 @@ impl TextInput {
         Self::with_mode(cx, placeholder, initial.as_ref(), true, false)
     }
 
+    pub fn multiline_with_height(
+        cx: &mut Context<Self>,
+        placeholder: impl Into<SharedString>,
+        initial: impl AsRef<str>,
+        height: Pixels,
+    ) -> Self {
+        let mut input = Self::with_mode(cx, placeholder, initial.as_ref(), true, false);
+        input.height = height;
+        input
+    }
+
     fn with_mode(
         cx: &mut Context<Self>,
         placeholder: impl Into<SharedString>,
@@ -250,6 +260,11 @@ impl TextInput {
             mouse_selection: None,
             preferred_x: None,
             multiline,
+            height: px(if multiline {
+                MULTILINE_INPUT_HEIGHT
+            } else {
+                TEXT_INPUT_HEIGHT
+            }),
             picker,
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
@@ -1337,7 +1352,7 @@ impl Render for TextInput {
             .on_mouse_up_out(MouseButton::Left, cx.listener(Self::on_mouse_up))
             .on_mouse_move(cx.listener(Self::on_mouse_move))
             .w_full()
-            .h(if self.multiline { px(132.) } else { px(34.) })
+            .h(self.height)
             .px(px(10.))
             .py(px(7.))
             .overflow_hidden()

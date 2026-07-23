@@ -78,6 +78,8 @@ only in debug builds.
   typed actions implemented by the macOS root and contained Linux adapter.
 - `desktop_ui`: platform-neutral GPUI visual tokens and controls shared by both
   desktop roots.
+- `desktop_transcription_picker`: the single GPUI language/model picker used by
+  both desktop roots over portable model presentation and typed host actions.
 - `app_window`: the production Settings, mode-owned processing, and opt-in
   Commands shell plus developer-only Meetings and Activity panes.
 - `dictation_indicator`: the click-through Metal/GPUI capture and processing HUD.
@@ -222,6 +224,9 @@ cargo run -- app --preview-dictation
 cargo run -- preview onboarding
 cargo run -- preview transcription-picker --language zh --model-state installed
 ./scripts/capture-preview.sh /tmp/hex-preview.png settings
+./scripts/capture-preview.sh /tmp/hex-modes.png modes
+./scripts/capture-preview.sh /tmp/hex-modes-collapsed.png modes --collapse-mode-processing
+HEX_PREVIEW_SKIP_BUILD=1 ./scripts/capture-preview.sh /tmp/hex-modes.png modes
 ./scripts/install-app.sh
 cargo fmt --check
 cargo test
@@ -230,6 +235,20 @@ git diff --check
 ./scripts/test-install-linux-release.sh # x86_64 Linux only
 cd sdk/typescript && bun run check && bun run test && bun run build
 ```
+
+Use `scripts/capture-preview.sh` as the default desktop-UI iteration loop. It
+builds the release binary, launches one isolated deterministic preview, waits
+for that process's `HEX` window, captures only that window, and terminates the
+preview. Targets include `settings`, `modes`, `voice-action`, `commands`,
+`meetings`, `activity`, `onboarding`, `transcription-picker`, `hud-lab`, and
+`dictation-hud`. The Modes preview includes representative activation,
+correction, model-variant, and transformation data so it exercises the complete
+editor. Pass `--collapse-mode-processing` to expose the lower transformation
+and deletion states without scrolling. After a successful build, set
+`HEX_PREVIEW_SKIP_BUILD=1` for repeated
+captures that do not require recompilation; `HEX_PREVIEW_BINARY` can override
+the release binary path. Keep release previews authoritative for production
+navigation because debug builds expose developer-only panes.
 
 The supported Linux beta and release host use x86_64 Arch Linux. Install its
 native build dependencies with:

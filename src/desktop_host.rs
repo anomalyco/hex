@@ -1,8 +1,10 @@
 use color_eyre::Result;
 
 use crate::desktop_activity::DesktopActivity;
+use crate::transcription_models::TranscriptionModelId;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[cfg_attr(target_os = "linux", allow(dead_code))]
 pub(crate) struct DesktopCapabilities {
     pub(crate) activity: bool,
     pub(crate) commands: bool,
@@ -32,6 +34,7 @@ impl DesktopCapabilities {
     }
 
     #[cfg(any(target_os = "linux", test))]
+    #[cfg_attr(target_os = "linux", allow(dead_code))]
     pub(crate) const fn linux_x11() -> Self {
         Self {
             activity: false,
@@ -56,7 +59,17 @@ pub(crate) struct DesktopSnapshot {
     pub(crate) listener: Option<DesktopListenerSnapshot>,
     pub(crate) operation_error: Option<String>,
     pub(crate) observations_path: String,
+    pub(crate) transcription: Option<DesktopTranscriptionSnapshot>,
     pub(crate) update_status: DesktopUpdateStatus,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct DesktopTranscriptionSnapshot {
+    pub(crate) downloaded_bytes: u64,
+    pub(crate) error: Option<String>,
+    pub(crate) language: String,
+    pub(crate) model: TranscriptionModelId,
+    pub(crate) preparing: Option<TranscriptionModelId>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -90,6 +103,11 @@ pub(crate) struct DesktopShortcut {
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(target_os = "macos", allow(dead_code))]
 pub(crate) enum DesktopAction {
+    CancelTranscriptionPreparation,
+    ChooseTranscription {
+        language: String,
+        model: TranscriptionModelId,
+    },
     ClearError,
     RestartIntoUpdate,
     SetDictationShortcut(DesktopShortcut),
@@ -99,6 +117,7 @@ pub(crate) enum DesktopAction {
 }
 
 pub(crate) trait DesktopHost {
+    #[cfg_attr(target_os = "linux", allow(dead_code))]
     fn capabilities(&self) -> DesktopCapabilities;
     fn snapshot(&self) -> DesktopSnapshot;
     fn dispatch(&mut self, action: DesktopAction) -> Result<()>;
@@ -126,6 +145,7 @@ mod tests {
                 listener: None,
                 operation_error: None,
                 observations_path: String::new(),
+                transcription: None,
                 update_status: DesktopUpdateStatus::Unavailable,
             }
         }

@@ -11,9 +11,9 @@ use std::time::{Duration, Instant};
 use gpui::{
     AnyElement, App, Bounds, Context, Div, Entity, FocusHandle, Focusable, FontWeight, IntoElement,
     KeyDownEvent, Modifiers as GpuiModifiers, ModifiersChangedEvent, MouseButton, MouseDownEvent,
-    MouseMoveEvent, PathPromptOptions, Render, ScrollHandle, Subscription, Timer, TitlebarOptions,
-    Window, WindowBounds, WindowHandle, WindowOptions, actions, div, img, prelude::*, px, relative,
-    rgb, rgba, size,
+    MouseMoveEvent, PathPromptOptions, Pixels, Point, Render, ScrollHandle, Subscription, Timer,
+    TitlebarOptions, Window, WindowBounds, WindowHandle, WindowOptions, actions, div, img,
+    prelude::*, px, relative, rgb, rgba, size,
 };
 
 use crate::app_settings::{
@@ -24,24 +24,31 @@ use crate::application_catalog::InstalledApplication;
 use crate::commands::{CommandConfig, CommandInfo, CommandScope};
 use crate::desktop_activity::DesktopActivity;
 use crate::desktop_host::{
-    DesktopAction, DesktopCapabilities, DesktopHost, DesktopSnapshot, DesktopUpdateStatus,
+    DesktopAction, DesktopCapabilities, DesktopHost, DesktopSnapshot, DesktopTranscriptionSnapshot,
+    DesktopUpdateStatus,
+};
+use crate::desktop_transcription_picker::{
+    TranscriptionPickerDelegate, TranscriptionPickerModel, TranscriptionPickerView,
+    render_transcription_picker as render_shared_transcription_picker,
 };
 use crate::desktop_ui::{
-    CANVAS, FAINT, LINE, MUTED, NEGATIVE, NavigationIcon, SIDEBAR_WIDTH, SURFACE, SURFACE_HOVER,
-    SURFACE_SELECTED, TEXT, TEXT_SOFT, bounded_pane_header, compact_button, disclosure_button,
-    empty_message, error_message, hotkey_keycaps, listener_status, mix_color, navigation_item,
-    pane_header, section_label, segmented_control, segmented_item, settings_copy, settings_panel,
-    settings_row, settings_section_label, sidebar_frame, toggle, window_frame,
+    CANVAS, COMPACT_MULTILINE_INPUT_HEIGHT, CONTROL_HEIGHT, FAINT, LINE, MUTED, NEGATIVE,
+    NavigationIcon, SECTION_GAP, SIDEBAR_WIDTH, SURFACE, SURFACE_HOVER, SURFACE_SELECTED, TEXT,
+    TEXT_SOFT, bounded_pane_header, compact_button, compact_panel, compact_panel_header,
+    compact_section_label, disclosure_button, empty_message, error_message, hotkey_keycaps,
+    listener_status, mix_color, navigation_item, pane_header, section_label, segmented_control,
+    segmented_item, settings_copy, settings_panel, settings_row, settings_section_label,
+    sidebar_frame, toggle, window_frame,
 };
 use crate::dictation_indicator::{DictationIndicatorEvent, DictationIndicatorSender, HudTuning};
-use crate::dictation_processor::ModelCatalog;
+use crate::dictation_processor::{ModelCatalog, ModelChoice};
 use crate::events::{
     CommandOutcome, DictationPhase, EventReader, TranscriptPhase, VoiceEvent, VoiceState, now_ms,
 };
 use crate::login_item::LoginItemStatus;
 use crate::meeting::{self, MeetingManifest, MeetingRequest, MeetingStatus};
 use crate::onboarding::{PermissionState, SetupStatus};
-use crate::personal_commands::{HostState, StatusContext, StatusSnapshot};
+use crate::personal_commands::{HostState, StatusContext, StatusSnapshot, StatusTransformation};
 use crate::text_input::{
     Changed as TextChanged, Dismissed as TextDismissed, Navigate as TextNavigate,
     Submitted as TextSubmitted, TextInput,
@@ -216,6 +223,7 @@ pub struct AppWindowPreview {
     pub pane: PreviewPane,
     pub transcription_picker: Option<(String, PreviewModelState)>,
     pub onboarding: bool,
+    pub collapse_mode_processing: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -471,6 +479,44 @@ struct ReplacementInputs {
     output: ProcessingInput,
 }
 
+#[derive(Clone)]
+struct TransformationDrag {
+    selection: ModeSelection,
+    id: String,
+    name: String,
+    position: Point<Pixels>,
+}
+
+impl TransformationDrag {
+    fn at(mut self, position: Point<Pixels>) -> Self {
+        self.position = position;
+        self
+    }
+}
+
+impl Render for TransformationDrag {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .pl(self.position.x - px(90.0))
+            .pt(self.position.y - px(17.0))
+            .child(
+                div()
+                    .w(px(180.0))
+                    .h(px(34.0))
+                    .px_3()
+                    .flex()
+                    .items_center()
+                    .rounded(px(6.0))
+                    .border_1()
+                    .border_color(rgb(0x505050))
+                    .bg(rgb(SURFACE_SELECTED))
+                    .text_size(px(11.0))
+                    .text_color(rgb(TEXT))
+                    .child(self.name.clone()),
+            )
+    }
+}
+
 #[derive(Clone, Copy, Eq, PartialEq)]
 enum ModeSelection {
     Default,
@@ -659,6 +705,7 @@ pub struct AppWindow {
     application_search: ProcessingInput,
     application_picker_open: bool,
     application_picker_error: Option<String>,
+    transformation_picker_open: bool,
     application_picker_highlight: usize,
     model_picker_highlight: usize,
     mode_delete_armed: bool,
@@ -777,6 +824,25 @@ impl AppWindow {
                 settings.transcription.model = choice.model.id;
                 settings.transcription.language = language.clone();
             }
+            if matches!(preview.pane, PreviewPane::Modes | PreviewPane::Replacements) {
+                let mut mode = DictationMode {
+                    name: "Work notes".into(),
+                    applications: vec!["Zed".into()],
+                    browser_hosts: vec!["github.com".into()],
+                    replacements: vec![TextReplacement {
+                        matched_phrase: "open code".into(),
+                        output: "OpenCode".into(),
+                    }],
+                    transformations: vec!["smart-punctuation".into(), "normalize-links".into()],
+                    ..DictationMode::default()
+                };
+                mode.post_processing.enabled = !preview.collapse_mode_processing;
+                mode.post_processing.prompt =
+                    "Tighten prose and preserve technical terminology.".into();
+                mode.post_processing.model = Some("anthropic/claude-sonnet-4".into());
+                mode.post_processing.variant = Some("medium".into());
+                settings.dictation_processing.modes.push(mode);
+            }
             (settings, None)
         } else {
             match AppSettings::load() {
@@ -797,9 +863,14 @@ impl AppWindow {
         let (model_catalog, model_catalog_receiver) = if preview_mode {
             (
                 ModelCatalogState::Loaded(ModelCatalog {
-                    models: Vec::new(),
-                    default_key: None,
-                    default_name: None,
+                    models: vec![ModelChoice {
+                        key: "anthropic/claude-sonnet-4".into(),
+                        name: "Claude Sonnet 4".into(),
+                        provider: "Anthropic".into(),
+                        variants: vec!["low".into(), "medium".into(), "high".into()],
+                    }],
+                    default_key: Some("anthropic/claude-sonnet-4".into()),
+                    default_name: Some("Claude Sonnet 4".into()),
                 }),
                 None,
             )
@@ -837,7 +908,21 @@ impl AppWindow {
                 .unwrap_or_else(|_| PathBuf::from("~/.config/hex"))
         };
         let personal_commands_status = if preview_mode {
-            StatusSnapshot::default()
+            StatusSnapshot {
+                transformations: vec![
+                    StatusTransformation {
+                        id: "smart-punctuation".into(),
+                        name: "Smart punctuation".into(),
+                        description: None,
+                    },
+                    StatusTransformation {
+                        id: "normalize-links".into(),
+                        name: "Normalize links".into(),
+                        description: None,
+                    },
+                ],
+                ..StatusSnapshot::default()
+            }
         } else {
             crate::personal_commands::load_status().unwrap_or_else(|error| StatusSnapshot {
                 host_state: HostState::Unavailable,
@@ -968,7 +1053,13 @@ impl AppWindow {
             apple_speech_capability_retry_at: Instant::now(),
             processing_inputs,
             voice_action_inputs,
-            selected_mode: ModeSelection::Default,
+            selected_mode: if preview.as_ref().is_some_and(|preview| {
+                matches!(preview.pane, PreviewPane::Modes | PreviewPane::Replacements)
+            }) {
+                ModeSelection::Custom(0)
+            } else {
+                ModeSelection::Default
+            },
             model_catalog,
             model_catalog_receiver,
             model_catalog_retry_at: Instant::now() + OPENCODE_INSTALL_RETRY_INTERVAL,
@@ -977,6 +1068,7 @@ impl AppWindow {
             application_search,
             application_picker_open: false,
             application_picker_error: None,
+            transformation_picker_open: false,
             application_picker_highlight: 0,
             model_picker_highlight: 0,
             mode_delete_armed: false,
@@ -2015,6 +2107,7 @@ impl AppWindow {
         selection: ModeSelection,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let replacement_count = self.mode_inputs_for(selection).replacements.len();
         let replacement_rows = self
             .mode_inputs_for(selection)
             .replacements
@@ -2024,28 +2117,36 @@ impl AppWindow {
                 div()
                     .id(("text-replacement", index))
                     .w_full()
-                    .py_3()
+                    .px_3()
+                    .py_2()
                     .flex()
                     .items_end()
-                    .gap_3()
-                    .border_b_1()
-                    .border_color(rgb(LINE))
-                    .child(settings_control(
-                        "When HEX hears",
-                        "",
+                    .gap_2()
+                    .when(index + 1 < replacement_count, |row| {
+                        row.border_b_1().border_color(rgb(LINE))
+                    })
+                    .child(compact_mode_field(
+                        "Transcription",
                         inputs.matched_phrase.entity.clone(),
                     ))
-                    .child(settings_control(
-                        "Write as",
-                        "",
-                        inputs.output.entity.clone(),
-                    ))
                     .child(
-                        compact_button("Remove")
-                            .id(("remove-text-replacement", index))
-                            .h(px(36.0))
-                            .flex_none()
+                        div()
+                            .h(px(34.0))
+                            .flex()
+                            .items_center()
                             .text_size(px(11.0))
+                            .text_color(rgb(FAINT))
+                            .child("→"),
+                    )
+                    .child(compact_mode_field("Output", inputs.output.entity.clone()))
+                    .child(
+                        compact_button("×")
+                            .id(("remove-text-replacement", index))
+                            .size(px(34.0))
+                            .px_0()
+                            .justify_center()
+                            .flex_none()
+                            .text_size(px(14.0))
                             .text_color(rgb(MUTED))
                             .hover(|button| {
                                 button.bg(rgb(SURFACE_HOVER)).text_color(rgb(TEXT_SOFT))
@@ -2060,127 +2161,98 @@ impl AppWindow {
             })
             .collect::<Vec<_>>();
 
-        div()
-            .child(mode_section_heading(
-                "Corrections",
-                "Correct words or phrases in this mode before AI processing. Matching ignores capitalization.",
-            ))
-            .child(div().pt_2().children(replacement_rows))
-            .child(div().flex().child(
-                compact_button("Add correction")
-                    .id("add-mode-replacement")
-                    .mt_3()
-                    .h(px(32.0))
-                    .bg(rgb(SURFACE_SELECTED))
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .hover(|button| button.bg(rgb(SURFACE_HOVER)).text_color(rgb(TEXT)))
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        let replacement = TextReplacement::default();
-                        let inputs = Self::replacement_inputs(&replacement, cx);
-                        let focus = inputs.matched_phrase.entity.focus_handle(cx);
-                        this.mode_inputs_mut(selection).replacements.push(inputs);
-                        this.mode_settings_mut(selection).replacements.push(replacement);
-                        this.save_settings(cx);
-                        focus.focus(window);
-                    })),
-            ))
+        let add = compact_button("Add correction")
+            .id("add-mode-replacement")
+            .h(px(28.0))
+            .text_size(px(10.0))
+            .on_click(cx.listener(move |this, _, window, cx| {
+                let replacement = TextReplacement::default();
+                let inputs = Self::replacement_inputs(&replacement, cx);
+                let focus = inputs.matched_phrase.entity.focus_handle(cx);
+                this.mode_inputs_mut(selection).replacements.push(inputs);
+                this.mode_settings_mut(selection)
+                    .replacements
+                    .push(replacement);
+                this.save_settings(cx);
+                focus.focus(window);
+            }))
+            .into_any_element();
+
+        compact_panel()
+            .child(compact_panel_header("Corrections", Some(add)))
+            .when(replacement_count == 0, |panel| {
+                panel.child(
+                    div()
+                        .px_3()
+                        .py_3()
+                        .text_size(px(11.0))
+                        .text_color(rgb(MUTED))
+                        .child("No corrections in this mode."),
+                )
+            })
+            .children(replacement_rows)
             .into_any_element()
     }
 
-    fn render_transcription_picker(
-        &mut self,
-        selected_language: &str,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
+    fn transcription_picker_view(&mut self, selected_language: &str) -> TranscriptionPickerView {
         self.ensure_apple_speech_capability(selected_language);
-        let downloading = self.transcription_downloading;
-        let language_rows = crate::transcription_models::LANGUAGES
-            .iter()
-            .enumerate()
-            .map(|(index, (code, name))| {
-                let selected = *code == selected_language;
-                let code = (*code).to_string();
-                div()
-                    .id(("transcription-language", index))
-                    .h(px(34.0))
-                    .px_3()
-                    .flex()
-                    .items_center()
-                    .rounded_sm()
-                    .text_size(px(12.0))
-                    .text_color(if selected { rgb(TEXT) } else { rgb(MUTED) })
-                    .when(selected, |row| row.bg(rgb(SURFACE_SELECTED)))
-                    .hover(|row| row.bg(rgb(SURFACE_HOVER)).text_color(rgb(TEXT_SOFT)))
-                    .child(*name)
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        cx.stop_propagation();
-                        if this.transcription_picker_language.as_deref() != Some(&code) {
-                            this.cancel_transcription_download();
-                            this.transcription_picker_language = Some(code.clone());
-                            this.transcription_picker_error = None;
-                            cx.notify();
-                        }
-                    }))
-            });
         let apple_speech_supported =
             self.apple_speech_capability
                 .as_ref()
                 .is_some_and(|capability| {
                     capability.language == selected_language && capability.supported == Some(true)
                 });
-        let model_choices = crate::transcription_models::choices_for_runtime(
+        let models = crate::transcription_models::choices_for_runtime(
             selected_language,
             apple_speech_supported,
-        );
-        let model_cards = model_choices
-            .into_iter()
-            .enumerate()
-            .map(|(index, choice)| {
-                let model = choice.model;
-                let installed = self.transcription_model_installed(model, selected_language);
-                let is_downloading = downloading == Some(model.id);
-                let in_use = transcription_selection_is_active(
-                    &self.settings.transcription,
-                    model,
-                    selected_language,
-                    installed,
-                );
-                let language = selected_language.to_string();
-                let progress = if is_downloading {
-                    model.download_bytes().map_or(0.0, |bytes| {
-                        (self.transcription_downloaded_bytes as f32 / bytes as f32).clamp(0.0, 1.0)
-                    })
-                } else {
-                    0.0
-                };
-                let state_label = if is_downloading {
-                    if matches!(model.runtime, ModelRuntime::AppleSpeech) {
-                        "Preparing…".to_string()
-                    } else if installed {
-                        format!(
-                            "Loading model · {}s",
-                            self.transcription_activation_started
-                                .map_or(0, |started| started.elapsed().as_secs())
-                        )
-                    } else {
-                        format!("Downloading {:.0}%", progress * 100.0)
-                    }
-                } else if in_use {
-                    "Active".to_string()
-                } else {
-                    choice.recommendation.label().to_string()
-                };
-                let metadata = if model.coverage == language_name(selected_language) {
-                    format!("{} · {}", model.quality_context, model.timestamps)
-                } else {
+        )
+        .into_iter()
+        .map(|choice| {
+            let model = choice.model;
+            let installed = self.transcription_model_installed(model, selected_language);
+            let downloading = self.transcription_downloading == Some(model.id);
+            let active = transcription_selection_is_active(
+                &self.settings.transcription,
+                model,
+                selected_language,
+                installed,
+            );
+            let progress = if downloading {
+                model.download_bytes().map_or(0.0, |bytes| {
+                    (self.transcription_downloaded_bytes as f32 / bytes as f32).clamp(0.0, 1.0)
+                })
+            } else {
+                0.0
+            };
+            let state_label = if downloading {
+                if matches!(model.runtime, ModelRuntime::AppleSpeech) {
+                    "Preparing…".to_string()
+                } else if installed {
                     format!(
-                        "{} · {} · {}",
-                        model.coverage, model.quality_context, model.timestamps
+                        "Loading model · {}s",
+                        self.transcription_activation_started
+                            .map_or(0, |started| started.elapsed().as_secs())
                     )
-                };
-                let action = if is_downloading {
+                } else {
+                    format!("Downloading {:.0}%", progress * 100.0)
+                }
+            } else if active {
+                "Active".to_string()
+            } else {
+                choice.recommendation.label().to_string()
+            };
+            let metadata = if model.coverage == language_name(selected_language) {
+                format!("{} · {}", model.quality_context, model.timestamps)
+            } else {
+                format!(
+                    "{} · {} · {}",
+                    model.coverage, model.quality_context, model.timestamps
+                )
+            };
+            TranscriptionPickerModel {
+                action: if downloading {
                     "Cancel"
-                } else if in_use {
+                } else if active {
                     ""
                 } else if installed {
                     "Installed"
@@ -2188,201 +2260,42 @@ impl AppWindow {
                     "Use"
                 } else {
                     "Download"
-                };
-                let activation_progress = self
+                }
+                .into(),
+                active,
+                activation_progress: self
                     .transcription_activation_started
-                    .map_or(0.0, |started| (started.elapsed().as_secs_f32() % 1.6) / 1.6);
-                div()
-                    .id(("transcription-model", index))
-                    .w_full()
-                    .p_4()
-                    .mb_3()
-                    .rounded_sm()
-                    .border_1()
-                    .border_color(if in_use { rgb(TEXT_SOFT) } else { rgb(LINE) })
-                    .bg(rgb(SURFACE))
-                    .hover(|card| card.bg(rgb(SURFACE_HOVER)))
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .justify_between()
-                            .child(
-                                div()
-                                    .text_size(px(14.0))
-                                    .font_weight(FontWeight::SEMIBOLD)
-                                    .child(model.name),
-                            )
-                            .child(
-                                div()
-                                    .px_2()
-                                    .py_1()
-                                    .rounded_sm()
-                                    .bg(rgb(SURFACE_SELECTED))
-                                    .text_size(px(10.0))
-                                    .text_color(rgb(TEXT_SOFT))
-                                    .child(state_label),
-                            ),
-                    )
-                    .child(
-                        div()
-                            .pt_3()
-                            .flex()
-                            .gap_2()
-                            .child(model_metric(
-                                model.realtime_context.to_uppercase(),
-                                model.realtime,
-                            ))
-                            .child(model_metric("SIZE", model.size_label()))
-                            .child(model_metric("ERROR RATE · LOWER IS BETTER", model.quality)),
-                    )
-                    .when(
-                        is_downloading
-                            && !installed
-                            && matches!(model.runtime, ModelRuntime::Gguf(_)),
-                        |card| {
-                            card.child(
-                                div().pt_3().child(
-                                    div()
-                                        .h(px(3.0))
-                                        .w_full()
-                                        .rounded_sm()
-                                        .bg(rgb(CANVAS))
-                                        .child(
-                                            div()
-                                                .h_full()
-                                                .w(relative(progress))
-                                                .rounded_sm()
-                                                .bg(rgb(TEXT_SOFT)),
-                                        ),
-                                ),
-                            )
-                        },
-                    )
-                    .when(is_downloading && installed, |card| {
-                        card.child(
-                            div().pt_3().child(
-                                div()
-                                    .h(px(3.0))
-                                    .w_full()
-                                    .rounded_sm()
-                                    .bg(rgb(CANVAS))
-                                    .child(
-                                        div()
-                                            .ml(relative(activation_progress * 0.75))
-                                            .h_full()
-                                            .w(relative(0.25))
-                                            .rounded_sm()
-                                            .bg(rgb(TEXT_SOFT)),
-                                    ),
-                            ),
-                        )
-                    })
-                    .child(
-                        div()
-                            .pt_3()
-                            .flex()
-                            .items_center()
-                            .justify_between()
-                            .text_size(px(10.0))
-                            .text_color(rgb(FAINT))
-                            .child(metadata)
-                            .child(
-                                div()
-                                    .when(is_downloading, |status| {
-                                        status
-                                            .text_color(rgb(TEXT_SOFT))
-                                            .font_weight(FontWeight::SEMIBOLD)
-                                    })
-                                    .child(action),
-                            ),
-                    )
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        cx.stop_propagation();
-                        if this.transcription_downloading == Some(model.id) {
-                            this.cancel_transcription_download();
-                        } else {
-                            this.choose_transcription_model(model, language.clone(), cx);
-                        }
-                        cx.notify();
-                    }))
-            });
-        div()
-            .id("transcription-picker-backdrop")
-            .absolute()
-            .top_0()
-            .left_0()
-            .size_full()
-            .flex()
-            .items_center()
-            .justify_center()
-            .bg(rgba(0x000000bb))
-            .on_click(cx.listener(|this, _, _, cx| {
-                this.dismiss_transcription_picker(cx);
-            }))
-            .child(
-                div()
-                    .id("transcription-picker")
-                    .w(px(780.0))
-                    .h(px(520.0))
-                    .flex()
-                    .flex_col()
-                    .rounded_lg()
-                    .border_1()
-                    .border_color(rgb(LINE))
-                    .bg(rgb(CANVAS))
-                    .on_click(|_, _, cx| cx.stop_propagation())
-                    .child(
-                        div()
-                            .px_6()
-                            .py_5()
-                            .border_b_1()
-                            .border_color(rgb(LINE))
-                            .child(
-                                div()
-                                    .text_size(px(18.0))
-                                    .font_weight(FontWeight::SEMIBOLD)
-                                    .child("Choose local transcription"),
-                            )
-                            .child(
-                                div()
-                                    .pt_1()
-                                    .text_size(px(12.0))
-                                    .text_color(rgb(MUTED))
-                                    .child("Select what you speak; HEX recommends the best supported models."),
-                            ),
-                    )
-                    .child(
-                        div()
-                            .flex_1()
-                            .flex()
-                            .overflow_hidden()
-                            .child(
-                                div()
-                                    .id("transcription-language-list")
-                                    .w(px(220.0))
-                                    .h_full()
-                                    .p_4()
-                                    .overflow_y_scroll()
-                                    .border_r_1()
-                                    .border_color(rgb(LINE))
-                                    .children(language_rows),
-                            )
-                            .child(
-                                div()
-                                    .id("transcription-model-list")
-                                    .flex_1()
-                                    .h_full()
-                                    .p_5()
-                                    .overflow_y_scroll()
-                                    .children(model_cards)
-                                    .when_some(self.transcription_picker_error.clone(), |list, error| {
-                                        list.child(error_message("Model could not be installed.", error))
-                                    }),
-                            ),
-                    ),
-            )
-            .into_any_element()
+                    .map_or(0.0, |started| (started.elapsed().as_secs_f32() % 1.6) / 1.6),
+                downloading,
+                error_rate: model.quality,
+                id: model.id,
+                metadata,
+                name: model.name,
+                progress,
+                realtime: model.realtime,
+                realtime_context: model.realtime_context,
+                show_download_progress: downloading
+                    && !installed
+                    && matches!(model.runtime, ModelRuntime::Gguf(_)),
+                show_loading_progress: downloading && installed,
+                size: model.size_label(),
+                state_label,
+            }
+        })
+        .collect();
+        TranscriptionPickerView {
+            error: self.transcription_picker_error.clone(),
+            language: selected_language.to_string(),
+            models,
+        }
+    }
+
+    fn render_transcription_picker(
+        &mut self,
+        selected_language: &str,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        render_shared_transcription_picker(self.transcription_picker_view(selected_language), cx)
     }
 
     fn dismiss_transcription_picker(&mut self, cx: &mut Context<Self>) {
@@ -3420,7 +3333,14 @@ impl AppWindow {
         initial: &str,
         cx: &mut Context<Self>,
     ) -> ProcessingInput {
-        let entity = cx.new(|cx| TextInput::multiline(cx, placeholder, initial));
+        let entity = cx.new(|cx| {
+            TextInput::multiline_with_height(
+                cx,
+                placeholder,
+                initial,
+                px(COMPACT_MULTILINE_INPUT_HEIGHT),
+            )
+        });
         Self::synchronized_processing_input(entity, cx)
     }
 
@@ -3525,14 +3445,13 @@ impl AppWindow {
                 this.sync_processing_settings(cx);
             }));
         let default_selected = self.selected_mode == ModeSelection::Default;
-        let default_mode = &self.settings.dictation_processing.default_mode;
         let mut rows = vec![
             mode_row(
                 "Global",
-                "All apps and websites unless another mode matches.",
+                "Fallback for everything",
                 default_selected,
                 &[],
-                default_mode.post_processing.enabled,
+                &[],
                 &self.application_catalog,
             )
             .id("default-dictation-mode")
@@ -3548,23 +3467,14 @@ impl AppWindow {
                 .enumerate()
                 .map(|(index, inputs)| {
                     let name = input_text(&inputs.name, cx);
-                    let hosts = input_text(&inputs.browser_hosts, cx);
                     let mode = &self.settings.dictation_processing.modes[index];
-                    let summary = match (mode.applications.len(), hosts.is_empty()) {
-                        (0, true) => "No activation rules".into(),
-                        (0, false) => hosts,
-                        (1, true) => "1 application".into(),
-                        (count, true) => format!("{count} applications"),
-                        (1, false) => format!("1 application · {hosts}"),
-                        (count, false) => format!("{count} applications · {hosts}"),
-                    };
                     let selected = self.selected_mode == ModeSelection::Custom(index);
                     mode_row(
                         name,
-                        summary,
+                        "No activation rules",
                         selected,
                         &mode.applications,
-                        mode.post_processing.enabled,
+                        &mode.browser_hosts,
                         &self.application_catalog,
                     )
                     .id(("dictation-mode", index))
@@ -3586,16 +3496,24 @@ impl AppWindow {
                     .flex_1()
                     .overflow_hidden()
                     .flex()
+                    .gap_5()
+                    .p_5()
                     .child(
                         div()
                             .id("modes-list")
-                            .w(if compact { px(244.0) } else { px(280.0) })
+                            .w(if compact { px(196.0) } else { px(220.0) })
                             .h_full()
                             .flex_none()
-                            .overflow_y_scroll()
-                            .border_r_1()
-                            .border_color(rgb(LINE))
-                            .children(rows),
+                            .flex()
+                            .flex_col()
+                            .gap_2()
+                            .child(compact_section_label("MODES"))
+                            .child(
+                                compact_panel()
+                                    .id("mode-list-card")
+                                    .overflow_y_scroll()
+                                    .child(div().p_2().flex().flex_col().gap_1().children(rows)),
+                            ),
                     )
                     .child(detail),
             )
@@ -3603,7 +3521,6 @@ impl AppWindow {
     }
 
     fn render_mode_detail(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        let compact = window.viewport_size().width < px(980.0);
         let selection = self.selected_mode;
         let is_default = selection == ModeSelection::Default;
         let (name, browser_hosts, prompt, model, deadline, processing_position) = {
@@ -3620,27 +3537,101 @@ impl AppWindow {
         let processing_enabled = self.selected_mode_settings().post_processing.enabled;
         let corrections = self.render_mode_replacements(selection, cx);
         let transformations = self.render_mode_transformations(selection, cx);
-        let name_control =
-            if is_default {
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap_1()
-                    .child(
-                        div()
-                            .text_size(px(18.0))
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .child("Global mode"),
-                    )
-                    .child(div().text_size(px(11.0)).text_color(rgb(MUTED)).child(
-                        "Used in all apps and websites unless a more specific mode matches.",
-                    ))
-                    .into_any_element()
-            } else {
-                settings_input("Mode name", "Shown in processing activity", name)
-            };
-        let remove =
-            (!is_default).then(|| {
+        let application_picker =
+            (!is_default).then(|| self.render_application_picker(selection, cx));
+        let basics = if is_default {
+            compact_panel()
+                .child(
+                    div()
+                        .min_h(px(64.0))
+                        .px_3()
+                        .py_2()
+                        .flex()
+                        .flex_col()
+                        .justify_center()
+                        .child(settings_copy(
+                            "Global",
+                            "Used unless a more specific mode matches.",
+                        )),
+                )
+                .into_any_element()
+        } else {
+            compact_panel()
+                .child(
+                    div()
+                        .min_h(px(54.0))
+                        .px_3()
+                        .py_2()
+                        .flex()
+                        .items_center()
+                        .justify_between()
+                        .gap_4()
+                        .border_b_1()
+                        .border_color(rgb(LINE))
+                        .child(
+                            div()
+                                .text_size(px(12.0))
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .text_color(rgb(TEXT))
+                                .child("Name"),
+                        )
+                        .child(div().w(px(300.0)).flex_none().child(name)),
+                )
+                .when_some(application_picker, |panel, picker| {
+                    panel.child(div().border_b_1().border_color(rgb(LINE)).child(picker))
+                })
+                .child(
+                    div()
+                        .min_h(px(64.0))
+                        .px_3()
+                        .py_2()
+                        .flex()
+                        .items_center()
+                        .justify_between()
+                        .gap_4()
+                        .child(settings_copy("Web pages", "Switch when a domain is active"))
+                        .child(div().max_w(px(300.0)).flex_1().child(browser_hosts)),
+                )
+                .into_any_element()
+        };
+
+        let processing_toggle = div()
+            .id("mode-processing-toggle")
+            .h(px(28.0))
+            .flex()
+            .items_center()
+            .child(toggle(processing_position))
+            .on_click(cx.listener(move |this, _, _, cx| {
+                let enabled = !this.selected_mode_settings().post_processing.enabled;
+                this.selected_mode_inputs_mut()
+                    .processing_toggle
+                    .set_enabled(enabled);
+                this.selected_mode_settings_mut().post_processing.enabled = enabled;
+                this.save_settings(cx);
+            }))
+            .into_any_element();
+        let processing_settings = processing_enabled.then(|| {
+            self.render_processing_settings(
+                ModelPickerTarget::Mode(selection),
+                Some(prompt),
+                model,
+                deadline,
+                window,
+                cx,
+            )
+        });
+        let processing = compact_panel()
+            .child(compact_panel_header(
+                "OpenCode transformation",
+                Some(processing_toggle),
+            ))
+            .when_some(processing_settings, |panel, settings| {
+                panel.child(div().px_3().pb_3().child(settings))
+            })
+            .into_any_element();
+
+        let remove = (!is_default).then(|| {
+            let action =
                 if self.mode_delete_armed {
                     div()
                         .flex()
@@ -3655,6 +3646,9 @@ impl AppWindow {
                         .child(
                             compact_button("Confirm delete")
                                 .id("confirm-remove-mode")
+                                .border_1()
+                                .border_color(rgb(0x613b3b))
+                                .bg(rgb(0x271b1b))
                                 .text_color(rgb(NEGATIVE))
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     let ModeSelection::Custom(index) = this.selected_mode else {
@@ -3673,98 +3667,56 @@ impl AppWindow {
                 } else {
                     compact_button("Delete mode")
                         .id("remove-selected-mode")
+                        .border_1()
+                        .border_color(rgb(0x613b3b))
+                        .bg(rgb(0x271b1b))
                         .text_color(rgb(NEGATIVE))
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.mode_delete_armed = true;
                             cx.notify();
                         }))
                         .into_any_element()
-                }
-            });
-        let application_picker =
-            (!is_default).then(|| self.render_application_picker(selection, cx));
-        let activation = (!is_default).then(|| {
+                };
             div()
-                .child(mode_section_heading(
-                    "Auto-activation",
-                    "Use this mode when the foreground app or browser host matches. Browser hosts take precedence.",
-                ))
+                .pt_3()
+                .flex()
+                .items_center()
+                .justify_between()
+                .border_t_1()
+                .border_color(rgb(LINE))
                 .child(
                     div()
-                        .pt_4()
-                        .flex()
-                        .flex_col()
-                        .gap_3()
-                        .when_some(application_picker, |fields, picker| fields.child(picker))
-                        .child(settings_input(
-                            "Browser hosts",
-                            "Domains such as reddit.com or github.com",
-                            browser_hosts,
-                        )),
+                        .text_size(px(10.0))
+                        .text_color(rgb(FAINT))
+                        .child("This cannot be undone."),
                 )
+                .child(action)
+                .into_any_element()
         });
+
         div()
             .id("mode-detail")
             .flex_1()
+            .min_w(px(0.0))
             .h_full()
             .overflow_y_scroll()
-            .px(if compact { px(20.0) } else { px(28.0) })
-            .py_6()
             .child(
                 div()
+                    .w_full()
                     .max_w(px(700.0))
-                    .child(
-                        div()
-                            .flex()
-                            .items_start()
-                            .justify_between()
-                            .gap_4()
-                            .child(name_control)
-                            .when_some(remove, |header, remove| header.child(remove)),
-                    )
-                    .when_some(activation, |detail, activation| {
-                        detail.child(div().mt_7().child(activation))
-                    })
-                    .child(div().mt_7().child(corrections))
-                    .child(
-                        div()
-                            .mt_7()
-                            .child(mode_section_heading(
-                                "AI processing",
-                                "Optional OpenCode rewriting with previous-step fallback.",
-                            ))
-                            .child(
-                                settings_row(
-                                    "Post-process with OpenCode",
-                                    "When off, corrections flow directly to custom transformations.",
-                                    toggle(processing_position),
-                                )
-                                .id("mode-processing-toggle")
-                                .on_click(cx.listener(
-                                    move |this, _, _, cx| {
-                                        let enabled =
-                                            !this.selected_mode_settings().post_processing.enabled;
-                                        this.selected_mode_inputs_mut()
-                                            .processing_toggle
-                                            .set_enabled(enabled);
-                                        this.selected_mode_settings_mut().post_processing.enabled =
-                                            enabled;
-                                        this.save_settings(cx);
-                                    },
-                                )),
-                            )
-                            .when(processing_enabled, |section| {
-                                section.child(self.render_processing_settings(
-                                    ModelPickerTarget::Mode(selection),
-                                    Some(prompt),
-                                    model,
-                                    deadline,
-                                    window,
-                                    cx,
-                                ))
-                            })
-                            .child(div().mt_7().child(transformations)),
-                    ),
+                    .flex()
+                    .flex_col()
+                    .gap(px(SECTION_GAP))
+                    .child(compact_section_label("MODE"))
+                    .child(basics)
+                    .child(div().h(px(4.0)))
+                    .child(compact_section_label("TEXT PROCESSING"))
+                    .child(corrections)
+                    .child(processing)
+                    .child(transformations)
+                    .when_some(remove, |detail, remove| {
+                        detail.child(div().pt_1().child(remove))
+                    }),
             )
             .into_any_element()
     }
@@ -3775,108 +3727,210 @@ impl AppWindow {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let selected = self.mode_settings(selection).transformations.clone();
-        let catalog_order = self
+        let catalog = self
             .personal_commands_status
             .transformations
             .iter()
-            .map(|transformation| transformation.id.clone())
+            .map(|transformation| {
+                (
+                    transformation.id.clone(),
+                    transformation.name.clone(),
+                    transformation.description.clone(),
+                )
+            })
             .collect::<Vec<_>>();
-        let rows =
-            self.personal_commands_status
-                .transformations
-                .iter()
-                .enumerate()
-                .map(|(index, transformation)| {
-                    let id = transformation.id.clone();
-                    let catalog_order = catalog_order.clone();
-                    let enabled = selected.contains(&id);
-                    let description = transformation.description.clone().unwrap_or_else(|| {
-                        "Runs after corrections and optional AI rewriting.".into()
-                    });
-                    div()
-                        .id(("mode-transformation", index))
-                        .min_h(px(48.0))
-                        .px_3()
-                        .py_2()
-                        .flex()
-                        .items_center()
-                        .justify_between()
-                        .gap_4()
-                        .border_b_1()
-                        .border_color(rgb(LINE))
-                        .hover(|row| row.bg(rgb(SURFACE_HOVER)))
-                        .child(
-                            div()
-                                .flex_1()
-                                .min_w(px(0.0))
-                                .flex()
-                                .flex_col()
-                                .gap_1()
-                                .child(
+        let selected_rows = selected
+            .iter()
+            .enumerate()
+            .map(|(target_index, id)| {
+                let name = catalog
+                    .iter()
+                    .find(|(candidate, _, _)| candidate == id)
+                    .map_or_else(|| id.clone(), |(_, name, _)| name.clone());
+                let drag = TransformationDrag {
+                    selection,
+                    id: id.clone(),
+                    name: name.clone(),
+                    position: Point::default(),
+                };
+                let dragged_id = id.clone();
+                let drop_id = id.clone();
+                div()
+                    .id(("mode-transformation", target_index))
+                    .h(px(36.0))
+                    .px_2()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .when(target_index + 1 < selected.len(), |row| {
+                        row.border_b_1().border_color(rgb(LINE))
+                    })
+                    .can_drop(move |value, _, _| {
+                        value
+                            .downcast_ref::<TransformationDrag>()
+                            .is_some_and(|drag| drag.selection == selection && drag.id != drop_id)
+                    })
+                    .on_drop(cx.listener(move |this, drag: &TransformationDrag, _, cx| {
+                        if drag.selection != selection {
+                            return;
+                        }
+                        let transformations =
+                            &mut this.mode_settings_mut(selection).transformations;
+                        if !reorder_transformation(transformations, &drag.id, target_index) {
+                            return;
+                        }
+                        this.save_settings(cx);
+                    }))
+                    .child(
+                        div()
+                            .id(("drag-mode-transformation", target_index))
+                            .w(px(20.0))
+                            .h_full()
+                            .flex_none()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .text_size(px(12.0))
+                            .text_color(rgb(FAINT))
+                            .child("⠿")
+                            .on_drag(drag, |drag, position, _, cx| {
+                                cx.new(|_| drag.clone().at(position))
+                            }),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w(px(0.0))
+                            .text_size(px(11.0))
+                            .text_color(rgb(TEXT_SOFT))
+                            .truncate()
+                            .child(name),
+                    )
+                    .child(
+                        compact_button("×")
+                            .id(("remove-mode-transformation", target_index))
+                            .size(px(28.0))
+                            .px_0()
+                            .justify_center()
+                            .text_size(px(14.0))
+                            .text_color(rgb(MUTED))
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.mode_settings_mut(selection)
+                                    .transformations
+                                    .retain(|candidate| candidate != &dragged_id);
+                                this.save_settings(cx);
+                            })),
+                    )
+                    .into_any_element()
+            })
+            .collect::<Vec<_>>();
+
+        let available_rows = catalog
+            .iter()
+            .enumerate()
+            .filter(|(_, (id, _, _))| !selected.contains(id))
+            .map(|(index, (id, name, description))| {
+                let id = id.clone();
+                let description = description.clone();
+                div()
+                    .id(("available-mode-transformation", index))
+                    .min_h(px(40.0))
+                    .px_3()
+                    .py_2()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .gap_3()
+                    .border_t_1()
+                    .border_color(rgb(LINE))
+                    .hover(|row| row.bg(rgb(SURFACE_HOVER)))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w(px(0.0))
+                            .child(
+                                div()
+                                    .text_size(px(11.0))
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .text_color(rgb(TEXT_SOFT))
+                                    .child(name.clone()),
+                            )
+                            .when_some(description, |copy, description| {
+                                copy.child(
                                     div()
-                                        .text_size(px(12.0))
-                                        .font_weight(FontWeight::SEMIBOLD)
-                                        .text_color(rgb(TEXT_SOFT))
-                                        .child(transformation.name.clone()),
-                                )
-                                .child(
-                                    div()
+                                        .pt_1()
                                         .text_size(px(10.0))
                                         .text_color(rgb(FAINT))
                                         .child(description),
-                                ),
-                        )
-                        .child(
-                            div()
-                                .text_size(px(10.0))
-                                .font_weight(FontWeight::BOLD)
-                                .text_color(rgb(if enabled { TEXT } else { MUTED }))
-                                .child(if enabled { "ON" } else { "OFF" }),
-                        )
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            let transformations =
-                                &mut this.mode_settings_mut(selection).transformations;
-                            if let Some(index) =
-                                transformations.iter().position(|existing| existing == &id)
-                            {
-                                transformations.remove(index);
-                            } else {
-                                transformations.push(id.clone());
-                            }
-                            transformations.sort_by_key(|id| {
-                                catalog_order
-                                    .iter()
-                                    .position(|candidate| candidate == id)
-                                    .unwrap_or(usize::MAX)
-                            });
-                            this.save_settings(cx);
-                        }))
-                        .into_any_element()
-                })
-                .collect::<Vec<_>>();
-        let empty = rows.is_empty();
-        div()
-            .child(mode_section_heading(
-                "Custom transformations",
-                "TypeScript finishing steps run in order after optional AI processing.",
-            ))
-            .child(
-                div()
-                    .mt_2()
-                    .rounded_sm()
-                    .border_1()
-                    .border_color(rgb(LINE))
-                    .when(empty, |list| {
+                                )
+                            }),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(10.0))
+                            .text_color(rgb(TEXT_SOFT))
+                            .child("Add"),
+                    )
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.mode_settings_mut(selection)
+                            .transformations
+                            .push(id.clone());
+                        this.save_settings(cx);
+                    }))
+                    .into_any_element()
+            })
+            .collect::<Vec<_>>();
+        let available_empty = available_rows.is_empty();
+        let catalog_empty = catalog.is_empty();
+        let add = (!catalog_empty).then(|| {
+            compact_button(if self.transformation_picker_open {
+                "Done"
+            } else {
+                "Add transformation"
+            })
+            .id("toggle-transformation-picker")
+            .h(px(28.0))
+            .text_size(px(10.0))
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.transformation_picker_open = !this.transformation_picker_open;
+                cx.notify();
+            }))
+            .into_any_element()
+        });
+
+        compact_panel()
+            .child(compact_panel_header("Transformations", add))
+            .when(selected.is_empty(), |panel| {
+                panel.child(
+                    div()
+                        .px_3()
+                        .py_3()
+                        .text_size(px(11.0))
+                        .text_color(rgb(MUTED))
+                        .child(if catalog_empty {
+                            "No transformations are registered in hex.config.ts."
+                        } else {
+                            "No transformations in this mode."
+                        }),
+                )
+            })
+            .children(selected_rows)
+            .when(self.transformation_picker_open && !catalog_empty, |panel| {
+                panel
+                    .when(available_empty, |list| {
                         list.child(
                             div()
-                                .p_3()
-                                .text_size(px(11.0))
+                                .border_t_1()
+                                .border_color(rgb(LINE))
+                                .px_3()
+                                .py_3()
+                                .text_size(px(10.0))
                                 .text_color(rgb(MUTED))
-                                .child("No transformations are registered in hex.config.ts."),
+                                .child("Every registered transformation is already included."),
                         )
                     })
-                    .children(rows),
-            )
+                    .children(available_rows)
+            })
             .into_any_element()
     }
 
@@ -3891,27 +3945,27 @@ impl AppWindow {
             let name = name.clone();
             div()
                 .id(("selected-application", index))
-                .h(px(34.0))
+                .h(px(30.0))
                 .pl_1()
-                .pr_2()
+                .pr_1()
                 .flex()
                 .items_center()
-                .gap_2()
+                .gap_1()
                 .rounded_sm()
                 .bg(rgb(SURFACE_SELECTED))
                 .border_1()
                 .border_color(rgb(LINE))
-                .child(application_icon(application, Some(name.as_str()), 26.0))
+                .child(application_icon(application, Some(name.as_str()), 20.0))
                 .child(
                     div()
-                        .text_size(px(12.0))
+                        .text_size(px(10.0))
                         .text_color(rgb(TEXT_SOFT))
                         .child(name.clone()),
                 )
                 .child(
                     div()
                         .id(("remove-selected-application", index))
-                        .size(px(22.0))
+                        .size(px(18.0))
                         .flex()
                         .items_center()
                         .justify_center()
@@ -4078,80 +4132,60 @@ impl AppWindow {
         div()
             .flex()
             .flex_col()
-            .gap_2()
             .child(
                 div()
+                    .min_h(px(64.0))
+                    .px_3()
+                    .py_2()
                     .flex()
                     .items_center()
                     .justify_between()
-                    .gap_2()
+                    .gap_4()
+                    .child(settings_copy(
+                        "Applications",
+                        "Switch when an app is frontmost",
+                    ))
                     .child(
                         div()
-                            .text_size(px(11.0))
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .text_color(rgb(TEXT_SOFT))
-                            .child("Applications"),
-                    )
-                    .child(
-                        div()
-                            .text_size(px(10.0))
-                            .text_color(rgb(FAINT))
-                            .child("Switches automatically when an app is frontmost"),
-                    ),
-            )
-            .child(
-                div()
-                    .min_h(px(46.0))
-                    .p_1()
-                    .flex()
-                    .flex_wrap()
-                    .items_center()
-                    .gap_1()
-                    .rounded_sm()
-                    .border_1()
-                    .border_color(rgb(LINE))
-                    .bg(rgb(SURFACE))
-                    .when(selected.is_empty(), |field| {
-                        field.child(
-                            div()
-                                .px_2()
-                                .text_size(px(12.0))
-                                .text_color(rgb(MUTED))
-                                .child("No applications yet"),
-                        )
-                    })
-                    .children(selected_rows)
-                    .child(
-                        div()
-                            .id("open-application-picker")
-                            .h(px(34.0))
-                            .px_2()
+                            .max_w(px(300.0))
+                            .min_h(px(CONTROL_HEIGHT))
+                            .flex_1()
+                            .p_1()
                             .flex()
+                            .flex_wrap()
                             .items_center()
-                            .rounded_sm()
-                            .text_size(px(12.0))
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .text_color(rgb(TEXT_SOFT))
-                            .hover(|button| button.bg(rgb(SURFACE_HOVER)).text_color(rgb(TEXT)))
-                            .child(if self.application_picker_open {
-                                "Add another..."
-                            } else {
-                                "+ Add application"
-                            })
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.application_picker_highlight = 0;
-                                this.application_picker_open = true;
-                                this.application_picker_error = None;
-                                this.ensure_application_catalog_load();
-                                this.application_search
-                                    .entity
-                                    .update(cx, |input, cx| input.set_text("", cx));
-                                this.application_search
-                                    .entity
-                                    .focus_handle(cx)
-                                    .focus(window);
-                                cx.notify();
-                            })),
+                            .justify_end()
+                            .gap_1()
+                            .children(selected_rows)
+                            .child(
+                                compact_button(if selected.is_empty() {
+                                    "Add application"
+                                } else {
+                                    "Add…"
+                                })
+                                .id("open-application-picker")
+                                .h(px(30.0))
+                                .text_size(px(10.0))
+                                .border_1()
+                                .border_color(rgb(LINE))
+                                .bg(rgb(CANVAS))
+                                .on_click(cx.listener(
+                                    |this, _, window, cx| {
+                                        this.application_picker_highlight = 0;
+                                        this.application_picker_open = true;
+                                        this.application_picker_error = None;
+                                        this.ensure_application_catalog_load();
+                                        this.application_search
+                                            .entity
+                                            .update(cx, |input, cx| input.set_text("", cx));
+                                        this.application_search
+                                            .entity
+                                            .focus_handle(cx)
+                                            .focus(window);
+                                        cx.notify();
+                                    },
+                                )),
+                            ),
                     ),
             )
             .when_some(self.application_picker_error.clone(), |picker, error| {
@@ -4431,7 +4465,35 @@ impl AppWindow {
                         )
                     }))
             });
-        let variant_buttons = variants.into_iter().enumerate().map(|(index, variant)| {
+        let has_variants = !variants.is_empty();
+        let mut variant_buttons = Vec::with_capacity(variants.len() + 1);
+        if has_variants {
+            variant_buttons.push(
+                div()
+                    .id("model-variant-default")
+                    .h(px(28.0))
+                    .px_3()
+                    .flex()
+                    .items_center()
+                    .rounded_sm()
+                    .text_size(px(11.0))
+                    .text_color(if selected_variant.is_none() {
+                        rgb(TEXT)
+                    } else {
+                        rgb(MUTED)
+                    })
+                    .when(selected_variant.is_none(), |button| {
+                        button.bg(rgb(SURFACE_SELECTED))
+                    })
+                    .hover(|button| button.bg(rgb(SURFACE_HOVER)).text_color(rgb(TEXT_SOFT)))
+                    .child("Default")
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.clear_model_variant(target, cx);
+                    }))
+                    .into_any_element(),
+            );
+        }
+        variant_buttons.extend(variants.into_iter().enumerate().map(|(index, variant)| {
             let selected = selected_variant == Some(variant.as_str());
             let value = variant.clone();
             div()
@@ -4449,7 +4511,8 @@ impl AppWindow {
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.select_model_variant(target, value.clone(), cx);
                 }))
-        });
+                .into_any_element()
+        }));
         let model_control =
             if let Some(presentation) = presentation.filter(|_| !focused) {
                 let model_input = model.clone();
@@ -4507,13 +4570,6 @@ impl AppWindow {
             .flex()
             .flex_col()
             .gap_5()
-            .when_some(prompt, |processing, prompt| {
-                processing.child(settings_input(
-                    "Instructions",
-                    "Tell OpenCode exactly how to transform the dictated text.",
-                    prompt,
-                ))
-            })
             .child(
                 div()
                     .flex()
@@ -4543,7 +4599,7 @@ impl AppWindow {
                             .child(settings_input("Deadline", "Seconds", deadline)),
                     ),
             )
-            .when(!variant_buttons.len().eq(&0), |processing| {
+            .when(has_variants, |processing| {
                 processing.child(
                     div()
                         .flex()
@@ -4554,10 +4610,17 @@ impl AppWindow {
                                 .text_size(px(11.0))
                                 .font_weight(FontWeight::SEMIBOLD)
                                 .text_color(rgb(TEXT_SOFT))
-                                .child("Variant"),
+                                .child("Thinking"),
                         )
                         .child(div().flex().flex_wrap().gap_1().children(variant_buttons)),
                 )
+            })
+            .when_some(prompt, |processing, prompt| {
+                processing.child(settings_input(
+                    "Instructions",
+                    "Tell OpenCode exactly how to transform the dictated text.",
+                    prompt,
+                ))
             })
             .into_any_element()
     }
@@ -4615,6 +4678,18 @@ impl AppWindow {
         self.save_settings(cx);
     }
 
+    fn clear_model_variant(&mut self, target: ModelPickerTarget, cx: &mut Context<Self>) {
+        match target {
+            ModelPickerTarget::Mode(selection) => {
+                self.mode_settings_mut(selection).post_processing.variant = None;
+            }
+            ModelPickerTarget::VoiceAction => {
+                self.settings.voice_action.variant = None;
+            }
+        }
+        self.save_settings(cx);
+    }
+
     fn model_input_for(&self, target: ModelPickerTarget) -> Entity<TextInput> {
         match target {
             ModelPickerTarget::Mode(selection) => {
@@ -4650,6 +4725,7 @@ impl AppWindow {
         self.selected_mode = selection;
         self.application_picker_open = false;
         self.application_picker_error = None;
+        self.transformation_picker_open = false;
         self.application_picker_highlight = 0;
         self.model_picker_highlight = 0;
         self.mode_delete_armed = false;
@@ -5986,6 +6062,34 @@ impl Drop for AppWindow {
     }
 }
 
+impl TranscriptionPickerDelegate for AppWindow {
+    fn cancel_transcription_preparation(&mut self) {
+        self.cancel_transcription_download();
+    }
+
+    fn choose_transcription_model(
+        &mut self,
+        model: TranscriptionModelId,
+        language: String,
+        cx: &mut Context<Self>,
+    ) {
+        AppWindow::choose_transcription_model(self, definition(model), language, cx);
+    }
+
+    fn dismiss_transcription_picker(&mut self, cx: &mut Context<Self>) {
+        AppWindow::dismiss_transcription_picker(self, cx);
+    }
+
+    fn select_transcription_language(&mut self, language: String, cx: &mut Context<Self>) {
+        if self.transcription_picker_language.as_deref() != Some(&language) {
+            self.cancel_transcription_download();
+            self.transcription_picker_language = Some(language);
+            self.transcription_picker_error = None;
+            cx.notify();
+        }
+    }
+}
+
 impl DesktopHost for AppWindow {
     fn capabilities(&self) -> DesktopCapabilities {
         DesktopCapabilities::macos(crate::DEVELOPER_FEATURES_ENABLED)
@@ -6009,12 +6113,27 @@ impl DesktopHost for AppWindow {
             listener: None,
             operation_error: self.settings_load_error.clone(),
             observations_path: self.event_reader.path().display().to_string(),
+            transcription: Some(DesktopTranscriptionSnapshot {
+                downloaded_bytes: self.transcription_downloaded_bytes,
+                error: self.transcription_picker_error.clone(),
+                language: self.settings.transcription.language.clone(),
+                model: self.settings.transcription.model,
+                preparing: self.transcription_downloading,
+            }),
             update_status,
         }
     }
 
     fn dispatch(&mut self, action: DesktopAction) -> color_eyre::Result<()> {
         match action {
+            DesktopAction::CancelTranscriptionPreparation => {
+                self.cancel_transcription_download();
+            }
+            DesktopAction::ChooseTranscription { .. } => {
+                return Err(color_eyre::eyre::eyre!(
+                    "transcription selection requires the desktop window context"
+                ));
+            }
             DesktopAction::ClearError => {}
             DesktopAction::RestartIntoUpdate
             | DesktopAction::StartListening
@@ -6258,25 +6377,6 @@ fn mode_section_heading(title: &'static str, description: &'static str) -> AnyEl
         .into_any_element()
 }
 
-fn model_metric(label: impl IntoElement, value: impl IntoElement) -> Div {
-    div()
-        .flex_1()
-        .h(px(54.0))
-        .px_3()
-        .py_2()
-        .rounded_sm()
-        .bg(rgb(CANVAS))
-        .child(div().text_size(px(9.0)).text_color(rgb(FAINT)).child(label))
-        .child(
-            div()
-                .pt_1()
-                .text_size(px(14.0))
-                .font_weight(FontWeight::SEMIBOLD)
-                .text_color(rgb(TEXT))
-                .child(value),
-        )
-}
-
 fn open_opencode_beta_docs() {
     if let Err(error) = crate::commands::execute(crate::commands::Action::OpenUrl(
         OPENCODE_BETA_DOCS_URL.into(),
@@ -6298,92 +6398,114 @@ fn mode_row(
     subtitle: impl Into<String>,
     selected: bool,
     applications: &[String],
-    processing_enabled: bool,
+    browser_hosts: &[String],
     catalog: &ApplicationCatalogState,
 ) -> Div {
     let title = title.into();
     let subtitle = subtitle.into();
+    let has_activations = !applications.is_empty() || !browser_hosts.is_empty();
     div()
         .w_full()
-        .px_4()
-        .py_3()
+        .min_h(px(52.0))
+        .px_3()
+        .py_2()
         .flex()
-        .items_center()
-        .gap_3()
-        .border_b_1()
-        .border_color(rgb(LINE))
+        .flex_col()
+        .items_start()
+        .justify_center()
+        .gap_1()
+        .rounded(px(6.0))
         .when(selected, |row| row.bg(rgb(SURFACE_SELECTED)))
         .hover(|row| row.bg(rgb(SURFACE_HOVER)))
-        .when(!applications.is_empty(), |row| {
-            row.child(application_icon_stack(applications, catalog))
-        })
         .child(
             div()
-                .flex_1()
-                .min_w(px(0.0))
-                .flex()
-                .flex_col()
-                .gap_1()
-                .child(
-                    div()
-                        .text_size(px(12.0))
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .text_color(rgb(TEXT))
-                        .overflow_hidden()
-                        .child(title),
-                )
-                .child(
-                    div()
-                        .text_size(px(10.0))
-                        .text_color(rgb(FAINT))
-                        .overflow_hidden()
-                        .child(subtitle),
-                ),
+                .w_full()
+                .text_size(px(12.0))
+                .font_weight(FontWeight::SEMIBOLD)
+                .text_color(rgb(TEXT))
+                .truncate()
+                .child(title),
         )
-        .when(processing_enabled, |row| row.child(opencode_mark()))
+        .when(has_activations, |row| {
+            row.child(mode_activation_icons(applications, browser_hosts, catalog))
+        })
+        .when(!has_activations, |row| {
+            row.child(
+                div()
+                    .text_size(px(10.0))
+                    .text_color(rgb(FAINT))
+                    .truncate()
+                    .child(subtitle),
+            )
+        })
 }
 
-fn application_icon_stack(names: &[String], catalog: &ApplicationCatalogState) -> AnyElement {
-    let visible = names.len().min(3);
-    let mut stack = div()
-        .w(px(30.0 + 12.0 * visible.saturating_sub(1) as f32))
-        .flex_none()
-        .flex();
-    for (index, name) in names.iter().take(visible).enumerate() {
+fn mode_activation_icons(
+    applications: &[String],
+    browser_hosts: &[String],
+    catalog: &ApplicationCatalogState,
+) -> AnyElement {
+    let total = applications.len() + browser_hosts.len();
+    let visible = total.min(5);
+    let mut icons = Vec::with_capacity(visible + usize::from(total > visible));
+    for name in applications.iter().take(visible) {
         let application = match catalog {
             ApplicationCatalogState::Loaded(applications) => applications
                 .iter()
                 .find(|application| &application.name == name),
             _ => None,
         };
-        stack = stack.child(
-            div()
-                .ml(if index == 0 { px(0.0) } else { px(-6.0) })
-                .p(px(1.0))
-                .rounded(px(7.0))
-                .bg(rgb(SURFACE_SELECTED))
-                .child(application_icon(application, Some(name), 26.0)),
-        );
+        icons.push(application_icon(application, Some(name), 18.0));
     }
-    if names.len() > visible {
-        stack = stack.child(
+    for host in browser_hosts
+        .iter()
+        .take(visible.saturating_sub(icons.len()))
+    {
+        let initial = host
+            .chars()
+            .find(|character| character.is_alphanumeric())
+            .map(|character| character.to_uppercase().to_string())
+            .unwrap_or_else(|| "?".into());
+        icons.push(
             div()
-                .ml(px(-6.0))
-                .size(px(28.0))
+                .size(px(18.0))
+                .flex_none()
                 .flex()
                 .items_center()
                 .justify_center()
-                .rounded(px(7.0))
-                .bg(rgb(0x303030))
+                .rounded(px(4.0))
                 .border_1()
-                .border_color(rgb(LINE))
-                .text_size(px(9.0))
+                .border_color(rgb(0x444444))
+                .bg(rgb(0xeeeeee))
+                .text_size(px(8.0))
                 .font_weight(FontWeight::SEMIBOLD)
-                .text_color(rgb(TEXT_SOFT))
-                .child(format!("+{}", names.len() - visible)),
+                .text_color(rgb(0x202020))
+                .child(initial)
+                .into_any_element(),
         );
     }
-    stack.into_any_element()
+    if total > visible {
+        icons.push(
+            div()
+                .h(px(18.0))
+                .px_1()
+                .flex()
+                .items_center()
+                .rounded(px(4.0))
+                .bg(rgb(0x303030))
+                .text_size(px(8.0))
+                .text_color(rgb(MUTED))
+                .child(format!("+{}", total - visible))
+                .into_any_element(),
+        );
+    }
+    div()
+        .h(px(18.0))
+        .flex()
+        .items_center()
+        .gap_1()
+        .children(icons)
+        .into_any_element()
 }
 
 fn application_icon(
@@ -6412,21 +6534,6 @@ fn application_icon(
         .font_weight(FontWeight::SEMIBOLD)
         .text_color(rgb(TEXT_SOFT))
         .child(initial)
-        .into_any_element()
-}
-
-fn opencode_mark() -> AnyElement {
-    div()
-        .w(px(18.0))
-        .h(px(16.0))
-        .flex_none()
-        .flex()
-        .items_center()
-        .justify_center()
-        .text_size(px(8.0))
-        .font_weight(FontWeight::BOLD)
-        .text_color(rgb(TEXT_SOFT))
-        .child("OC")
         .into_any_element()
 }
 
@@ -6548,6 +6655,17 @@ fn settings_input(
     settings_control(label, description, input)
 }
 
+fn compact_mode_field(label: &'static str, control: impl IntoElement) -> Div {
+    div()
+        .flex_1()
+        .min_w(px(0.0))
+        .flex()
+        .flex_col()
+        .gap_1()
+        .child(div().text_size(px(9.0)).text_color(rgb(FAINT)).child(label))
+        .child(control)
+}
+
 fn settings_control(
     label: &'static str,
     description: impl Into<String>,
@@ -6607,6 +6725,19 @@ fn browser_hosts(value: &str) -> Vec<String> {
     hosts.sort();
     hosts.dedup();
     hosts
+}
+
+fn reorder_transformation(values: &mut Vec<String>, id: &str, target_index: usize) -> bool {
+    let Some(from) = values.iter().position(|candidate| candidate == id) else {
+        return false;
+    };
+    if from == target_index {
+        return false;
+    }
+    let value = values.remove(from);
+    let target = target_index.min(values.len());
+    values.insert(target, value);
+    true
 }
 
 fn apply_mode_inputs(inputs: &ModeInputs, mode: &mut DictationMode, is_default: bool, cx: &App) {
@@ -7121,6 +7252,25 @@ mod tests {
             browser_hosts(" https://www.Reddit.com/r/rust, , reddit.com, github.com/path"),
             ["github.com", "reddit.com"]
         );
+    }
+
+    #[test]
+    fn transformations_reorder_in_both_directions() {
+        let mut transformations = vec!["one".into(), "two".into(), "three".into()];
+
+        assert!(reorder_transformation(&mut transformations, "one", 2));
+        assert_eq!(transformations, ["two", "three", "one"]);
+        assert!(reorder_transformation(&mut transformations, "one", 0));
+        assert_eq!(transformations, ["one", "two", "three"]);
+    }
+
+    #[test]
+    fn transformation_reorder_ignores_same_position_and_missing_ids() {
+        let mut transformations = vec!["one".into(), "two".into()];
+
+        assert!(!reorder_transformation(&mut transformations, "one", 0));
+        assert!(!reorder_transformation(&mut transformations, "missing", 1));
+        assert_eq!(transformations, ["one", "two"]);
     }
 
     #[test]
