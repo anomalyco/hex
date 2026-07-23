@@ -8,6 +8,10 @@ meetings remain a developer prototype until their product surface is redesigned.
 An x86_64 Arch/i3 X11 beta now provides hotkey dictation, automatic paste, a
 GPUI shell, and signed user-local updates; it does not yet include commands,
 meetings, native Wayland support, or a package-manager channel.
+The authenticated local transcription service now implements discovery,
+direct-child embedding, model preparation, and bounded host-audio transcription;
+Promise and Effect TypeScript wrappers pass fake-helper tests. Signed helper
+packaging, an Electron bridge, and a first real consumer remain.
 
 ## Validate The Coworker Release
 
@@ -67,9 +71,10 @@ locked-capture controls.
 
 ## Make Diagnostics Incremental
 
-Replace repeated full-file parsing in Ratatui and GPUI with a shared bounded tail
-projection. Normal shutdown already emits `Stopping`; add heartbeat or process
-liveness evidence so a crash cannot leave an old `Listening` event looking live.
+Ratatui and GPUI now share a bounded incremental event reader with session and
+partial-write handling. Move observation serialization and flushing off the
+microphone loop, then add heartbeat or process-liveness evidence so a crash
+cannot leave an old `Listening` event looking live.
 
 Add an inspectable audit that separates capture failures, recognition errors,
 sleeping or discarded utterances, context mismatches, resolution misses, queue
@@ -120,4 +125,4 @@ deep modules.
 Do not generalize the concrete macOS and Linux X11 adapters into a platform
 framework. Add seams only when a second implemented adapter requires one.
 Follow the remaining capability contracts and exit criteria in
-[`LINUX_PORT_PLAN.md`](LINUX_PORT_PLAN.md).
+[`docs/plans/linux.md`](docs/plans/linux.md).

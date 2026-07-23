@@ -111,6 +111,7 @@ pub enum DictationPhase {
     Transcribing,
     Pasted,
     Edited,
+    VoiceAction,
     // Retained so activity readers can decode records written by older releases.
     Logged,
     Repasted,

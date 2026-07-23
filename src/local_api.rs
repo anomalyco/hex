@@ -36,7 +36,8 @@ type ModelPreparer =
 pub struct LocalApi {
     shutdown: Arc<AtomicBool>,
     worker: Option<JoinHandle<()>>,
-    discovery: DiscoveryLease,
+    discovery: Option<DiscoveryLease>,
+    document: DiscoveryDocument,
     events: EventLog,
     stop_observed: Arc<AtomicBool>,
     transcription_service: Option<crate::transcription_service::TranscriptionService>,
@@ -51,6 +52,17 @@ struct DiscoveryDocument {
     token: String,
     api_version: String,
     pid: u32,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EmbeddedEndpoint {
+    #[serde(rename = "type")]
+    pub kind: &'static str,
+    pub url: String,
+    pub token: String,
+    pub api_version: String,
+    pub pid: u32,
 }
 
 struct DiscoveryLease {
@@ -116,8 +128,24 @@ impl LocalApi {
         Ok(api)
     }
 
+    pub fn start_embedded(events: EventLog) -> Result<Self> {
+        Self::start_without_discovery(Arc::new(current_health), events)
+    }
+
     fn start_at(discovery_path: PathBuf, health: HealthProvider, events: EventLog) -> Result<Self> {
         prepare_discovery_path(&discovery_path)?;
+        Self::start_bound(Some(discovery_path), health, events)
+    }
+
+    fn start_without_discovery(health: HealthProvider, events: EventLog) -> Result<Self> {
+        Self::start_bound(None, health, events)
+    }
+
+    fn start_bound(
+        discovery_path: Option<PathBuf>,
+        health: HealthProvider,
+        events: EventLog,
+    ) -> Result<Self> {
         let (transcription_service, transcription) =
             crate::transcription_service::TranscriptionService::start()?;
         let listener = TcpListener::bind("127.0.0.1:0").wrap_err("could not bind the local API")?;
@@ -129,17 +157,22 @@ impl LocalApi {
             api_version: API_VERSION.into(),
             pid: std::process::id(),
         };
-        write_discovery(&discovery_path, &document)?;
-        let discovery = DiscoveryLease {
-            path: discovery_path,
-            document: document.clone(),
+        let discovery = if let Some(path) = discovery_path {
+            write_discovery(&path, &document)?;
+            Some(DiscoveryLease {
+                path,
+                document: document.clone(),
+            })
+        } else {
+            None
         };
         let shutdown = Arc::new(AtomicBool::new(false));
         let worker_shutdown = shutdown.clone();
         let worker_events = events.clone();
         let token = document.token.clone();
-        let worker_discovery_path = discovery.path.clone();
-        let worker_discovery_document = discovery.document.clone();
+        let worker_discovery = discovery
+            .as_ref()
+            .map(|lease| (lease.path.clone(), lease.document.clone()));
         let stop_observed = Arc::new(AtomicBool::new(false));
         let worker_stop_observed = stop_observed.clone();
         let unexpected_shutdown = worker_shutdown.clone();
@@ -157,7 +190,9 @@ impl LocalApi {
                     ready,
                 );
                 if !unexpected_shutdown.load(Ordering::Acquire) {
-                    remove_discovery_if_owned(&worker_discovery_path, &worker_discovery_document);
+                    if let Some((path, document)) = worker_discovery {
+                        remove_discovery_if_owned(&path, &document);
+                    }
                     observe_stopped(&worker_events, &worker_stop_observed);
                     tracing::error!("local API stopped unexpectedly");
                 }
@@ -182,6 +217,7 @@ impl LocalApi {
             shutdown,
             worker: Some(worker),
             discovery,
+            document,
             events,
             stop_observed,
             transcription_service: Some(transcription_service),
@@ -190,12 +226,24 @@ impl LocalApi {
         })
     }
 
+    pub fn embedded_endpoint(&self) -> EmbeddedEndpoint {
+        EmbeddedEndpoint {
+            kind: "ready",
+            url: format!("http://127.0.0.1:{}", self.document.port),
+            token: self.document.token.clone(),
+            api_version: self.document.api_version.clone(),
+            pid: self.document.pid,
+        }
+    }
+
     pub fn shutdown(&mut self) {
         if self.stopped {
             return;
         }
         self.stopped = true;
-        self.discovery.remove_if_owned();
+        if let Some(discovery) = &self.discovery {
+            discovery.remove_if_owned();
+        }
         self.shutdown.store(true, Ordering::Release);
         if let Some(worker) = self.worker.take()
             && worker.join().is_err()
@@ -436,10 +484,19 @@ fn handle_request(
                 service_capture: false,
             },
         ),
-        ("GET", "/models") => HttpResponse::json(200, "OK", &model_infos()),
-        ("POST", path) if model_prepare_path(path).is_some() => {
+        ("GET", "/models") => match model_infos(&request.path) {
+            Ok(models) => HttpResponse::json(200, "OK", &models),
+            Err(code) => {
+                HttpResponse::json(400, "Bad Request", &serde_json::json!({ "code": code }))
+            }
+        },
+        ("POST", path) => {
             let Some(id) = model_prepare_path(path) else {
-                unreachable!();
+                return RequestAction::Respond(HttpResponse::json(
+                    404,
+                    "Not Found",
+                    &serde_json::json!({ "code": "not_found" }),
+                ));
             };
             let Ok(id) = id.parse::<crate::transcription_models::TranscriptionModelId>() else {
                 return RequestAction::Respond(HttpResponse::json(
@@ -449,7 +506,7 @@ fn handle_request(
                 ));
             };
             let model = crate::transcription_models::definition(id);
-            let Ok(selection) = installation_selection(model) else {
+            let Ok(selection) = installation_selection(model, &request.path) else {
                 return RequestAction::Respond(HttpResponse::json(
                     400,
                     "Bad Request",
@@ -551,34 +608,41 @@ fn transcription_action(
 fn transcription_selection(
     path: &str,
 ) -> std::result::Result<crate::transcription_models::TranscriptionSelection, &'static str> {
-    let query = path
-        .split_once('?')
-        .map(|(_, query)| query)
-        .unwrap_or_default();
-    let mut model = None;
-    let mut language = None;
-    for (name, value) in url::form_urlencoded::parse(query.as_bytes()) {
-        match name.as_ref() {
-            "model" if model.is_none() => model = value.parse().ok(),
-            "language" if language.is_none() => language = Some(value.into_owned()),
-            "model" | "language" => return Err("invalid-request"),
-            _ => {}
-        }
-    }
-    let model = model.ok_or("unknown-model")?;
-    let (_, selected) = crate::app_settings::transcription_selection();
+    let query = selection_query(path)?;
+    let model = query.model.ok_or("unknown-model")?;
     let selection = crate::transcription_models::TranscriptionSelection {
         model,
-        language: language.unwrap_or_else(|| {
-            if selected.model == model {
-                selected.language
-            } else {
-                "en".into()
-            }
+        language: query.language.unwrap_or_else(|| {
+            crate::transcription_models::TranscriptionSelection::default().language
         }),
         recognition_hints: String::new(),
     };
     crate::transcription_models::validate(&selection).map_err(|_| "unsupported-model")?;
+    Ok(selection)
+}
+
+#[derive(Default)]
+struct SelectionQuery {
+    model: Option<crate::transcription_models::TranscriptionModelId>,
+    language: Option<String>,
+}
+
+fn selection_query(path: &str) -> std::result::Result<SelectionQuery, &'static str> {
+    let query = path
+        .split_once('?')
+        .map(|(_, query)| query)
+        .unwrap_or_default();
+    let mut selection = SelectionQuery::default();
+    for (name, value) in url::form_urlencoded::parse(query.as_bytes()) {
+        match name.as_ref() {
+            "model" if selection.model.is_none() => selection.model = value.parse().ok(),
+            "language" if selection.language.is_none() => {
+                selection.language = Some(value.into_owned());
+            }
+            "model" | "language" => return Err("invalid-request"),
+            _ => {}
+        }
+    }
     Ok(selection)
 }
 
@@ -786,27 +850,27 @@ fn model_prepare_path(path: &str) -> Option<&str> {
     (!id.is_empty() && !id.contains('/')).then_some(id)
 }
 
-fn model_infos() -> Vec<ModelInfo> {
-    let (_, selection) = crate::app_settings::transcription_selection();
-    crate::transcription_models::MODELS
+fn model_infos(path: &str) -> std::result::Result<Vec<ModelInfo>, &'static str> {
+    let language = selection_query(path)?
+        .language
+        .unwrap_or_else(|| crate::transcription_models::TranscriptionSelection::default().language);
+    if !crate::transcription_models::LANGUAGES
+        .iter()
+        .any(|(code, _)| *code == language)
+    {
+        return Err("unsupported-language");
+    }
+    Ok(crate::transcription_models::MODELS
         .iter()
         .map(|model| {
-            let selected = model.id == selection.model;
-            let language = if selected {
-                selection.language.as_str()
-            } else {
-                "en"
-            };
             let managed = matches!(
                 model.runtime,
                 crate::transcription_models::ModelRuntime::AppleSpeech
             );
-            let installed = (!managed || selected)
-                && crate::transcription_models::is_installed(model, language);
+            let installed = crate::transcription_models::is_installed(model, &language);
             ModelInfo {
                 id: model.id.as_str(),
                 name: model.name,
-                selected,
                 installed,
                 verified: managed && installed || crate::transcription_models::is_verified(model),
                 managed,
@@ -814,25 +878,20 @@ fn model_infos() -> Vec<ModelInfo> {
                 languages: model.languages,
             }
         })
-        .collect()
+        .collect())
 }
 
 fn installation_selection(
     model: &crate::transcription_models::ModelDefinition,
+    path: &str,
 ) -> Result<crate::transcription_models::TranscriptionSelection> {
-    let (_, selected) = crate::app_settings::transcription_selection();
-    if selected.model == model.id {
-        return Ok(selected);
-    }
-    if matches!(
-        model.runtime,
-        crate::transcription_models::ModelRuntime::AppleSpeech
-    ) {
-        bail!("Apple Speech can only be prepared for the selected language");
-    }
+    let query = selection_query(path).map_err(|code| eyre!(code))?;
     let selection = crate::transcription_models::TranscriptionSelection {
         model: model.id,
-        ..Default::default()
+        language: query.language.unwrap_or_else(|| {
+            crate::transcription_models::TranscriptionSelection::default().language
+        }),
+        recognition_hints: String::new(),
     };
     crate::transcription_models::validate(&selection)?;
     Ok(selection)
@@ -1120,7 +1179,6 @@ impl Drop for PrepareGuard {
 struct ModelInfo {
     id: &'static str,
     name: &'static str,
-    selected: bool,
     installed: bool,
     verified: bool,
     managed: bool,
@@ -1409,6 +1467,92 @@ mod tests {
         assert_eq!(observations.matches("api_auth_failed").count(), 1);
         assert!(observations.contains("api_server_stopped"));
         assert!(!observations.contains(&document.token));
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn embedded_server_returns_its_endpoint_without_publishing_discovery() {
+        let directory = temp_directory();
+        let event_path = directory.join("events.ndjson");
+        let discovery_path = directory.join("local-api.json");
+        let events = EventLog::create(&event_path).unwrap();
+        let mut api = LocalApi::start_without_discovery(Arc::new(test_health), events).unwrap();
+        let endpoint = api.embedded_endpoint();
+
+        assert_eq!(endpoint.kind, "ready");
+        assert_eq!(
+            endpoint.url,
+            format!("http://127.0.0.1:{}", api.document.port)
+        );
+        assert_eq!(endpoint.token, api.document.token);
+        assert_eq!(endpoint.api_version, API_VERSION);
+        assert_eq!(endpoint.pid, std::process::id());
+        assert!(!discovery_path.exists());
+
+        let health = request(api.document.port, Some(&endpoint.token), "/health");
+        assert!(health.starts_with("HTTP/1.1 200"));
+        api.shutdown();
+        assert!(!discovery_path.exists());
+        assert!(
+            !fs::read_to_string(event_path)
+                .unwrap()
+                .contains(&endpoint.token)
+        );
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn model_preparation_uses_the_host_language_without_app_settings() {
+        let apple = crate::transcription_models::definition(
+            crate::transcription_models::TranscriptionModelId::AppleSpeech,
+        );
+        let selection =
+            installation_selection(apple, "/models/apple_speech/prepare?language=de").unwrap();
+
+        assert_eq!(selection.model, apple.id);
+        assert_eq!(selection.language, "de");
+        assert!(selection.recognition_hints.is_empty());
+        assert!(
+            installation_selection(
+                apple,
+                "/models/apple_speech/prepare?language=en&language=de"
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn embedded_hosts_have_independent_authenticated_endpoints() {
+        let directory = temp_directory();
+        let first_events = EventLog::create(&directory.join("first.ndjson")).unwrap();
+        let second_events = EventLog::create(&directory.join("second.ndjson")).unwrap();
+        let first = LocalApi::start_without_discovery(Arc::new(test_health), first_events).unwrap();
+        let second =
+            LocalApi::start_without_discovery(Arc::new(test_health), second_events).unwrap();
+        let first_endpoint = first.embedded_endpoint();
+        let second_endpoint = second.embedded_endpoint();
+
+        assert_ne!(first.document.port, second.document.port);
+        assert_ne!(first_endpoint.token, second_endpoint.token);
+        assert!(
+            request(first.document.port, Some(&first_endpoint.token), "/health")
+                .starts_with("HTTP/1.1 200")
+        );
+        assert!(
+            request(
+                second.document.port,
+                Some(&second_endpoint.token),
+                "/health"
+            )
+            .starts_with("HTTP/1.1 200")
+        );
+        assert!(
+            request(first.document.port, Some(&second_endpoint.token), "/health")
+                .starts_with("HTTP/1.1 401")
+        );
+
+        drop(first);
+        drop(second);
         fs::remove_dir_all(directory).unwrap();
     }
 

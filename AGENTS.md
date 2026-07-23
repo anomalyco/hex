@@ -15,8 +15,8 @@ only in debug builds.
 
 ## Architecture
 
-- `audio`: `cpal` device enumeration and capture, mono float PCM, and
-  dropped-chunk accounting.
+- `audio`: `cpal` device enumeration and capture, mono float PCM, dropped-chunk
+  accounting, live selection, and bounded stream recovery.
 - `moonshine`: the only Moonshine C adapter and the streaming recognizer.
 - `suppression`: the bounded macOS event tap, shortcut suppression, and the
   configurable dictation-hotkey state machine.
@@ -31,8 +31,16 @@ only in debug builds.
   `opencode2 api get` to discover or start its managed service.
 - `parakeet`: the strict-Metal `transcribe.cpp` adapter plus bounded inference,
   processing, ordered output, paste, last-result, and meeting-delta workers.
+- `transcription`: runtime selection and transactional warm-model activation.
 - `transcription_models`: the compiled model catalog, language recommendations,
   pinned artifact verification, and lazy installation.
+- `transcription_service`: bounded host-audio admission, hostile WAV validation,
+  normalization, cancellation, and warm inference ownership.
+- `local_api`: authenticated loopback discovery or direct-child endpoint
+  handoff, bounded HTTP parsing, model preparation progress, and raw
+  transcription routes.
+- `sdk/typescript`: Promise and Effect v4 host wrappers for direct-child
+  lifecycle, authenticated model preparation, and host-audio transcription.
 - `paste`: clipboard insertion, continuation joins, and generation-safe
   clipboard restoration.
 - `selected_text`: bounded selected-text capture through Accessibility without
@@ -57,8 +65,8 @@ only in debug builds.
 - `sparkle`: packaged-app-only Sparkle lifecycle and manual update checks.
 - `linux_updater`: signed direct-install updates, bounded downloads, atomic
   version activation, and restart handoff for user-local Linux installs.
-- `events`: append-only NDJSON observations; `dashboard` and the GPUI Activity
-  pane are read-only projections.
+- `events`: append-only NDJSON observations and bounded incremental reading;
+  `dashboard` and the GPUI Activity pane are read-only projections.
 - `app_window`: the production Settings, Modes, Replacements, and opt-in
   Commands shell plus developer-only Meetings and Activity panes.
 - `dictation_indicator`: the click-through Metal/GPUI capture and processing HUD.
@@ -91,8 +99,8 @@ CoreAudio formats, AppleScript details, or event serialization.
   phrases. Dictation and explicit paste shortcuts remain available.
 - Unmatched completed speech is ignored and logged.
 - The dictation shortcut defaults to Option but supports modifier-only,
-  modifier-plus-key, and standalone function-key bindings. Capturing a new
-  binding suspends global matching.
+  modifier-plus-key, standalone Globe/Fn, and standalone function-key bindings.
+  Capturing a new binding suspends global matching.
 - Hold the shortcut to dictate and release to transcribe. Captures shorter than
   300 ms discard. A 450 ms hotkey pre-roll and one-second voice-trigger pre-roll
   protect speech onset. Capture has no automatic duration limit; release,
@@ -129,12 +137,13 @@ CoreAudio formats, AppleScript details, or event serialization.
   `NotRegistered` and `NotFound` as disabled before registration, represent
   `RequiresApproval` with a link to Login Items settings, and poll macOS as the
   source of truth instead of persisting a parallel Boolean.
-- Voice edit is an explicit second capture path, defaulting to Option-Command.
-  Snapshot a non-empty selection before recording, use the spoken transcript as
-  an edit instruction, and replace only after the foreground application and
-  exact selection are revalidated. Missing, oversized, changed, or unsupported
-  selections and failed processing must leave the document unchanged. Edit jobs
-  share normal queueing and cancellation but never update the last dictation.
+- Voice Action is an explicit second capture target, defaulting to
+  Option-Command. Promoting an active Option capture preserves all recorded
+  audio. Selected text is optional prompt context; inaccessible or empty
+  selections act as no selection. Use the dedicated OpenCode model and deadline,
+  return only paste-ready text, and paste at the current focus. Failed, empty,
+  cancelled, or timed-out actions paste nothing. Voice Action jobs share normal
+  queueing and cancellation but never update the last dictation.
 - Post-processing is optional and best-effort. Empty, failed, or timed-out
   processing falls back to the raw local transcript. It applies to Paste and
   Send, but not meetings.
@@ -194,6 +203,7 @@ cargo fmt --check
 cargo test
 cargo clippy --all-targets --all-features -- -D warnings
 git diff --check
+cd sdk/typescript && bun run check && bun run test && bun run build
 ```
 
 The supported Linux beta and release host use x86_64 Arch Linux. Install its
@@ -268,9 +278,9 @@ seam once there are two real adapters or a current test requires substitution.
 - Finish validated legacy import and a persistent permission-health surface.
 - Physically smoke-test custom shortcut injection and last-dictation paste in
   release; test the meeting paste shortcut separately in developer builds.
-- Move observation writes off the microphone loop, tail bounded event
-  projections, and distinguish a stale or crashed listener from a normal
-  persisted `Stopping` state.
+- Move observation writes off the microphone loop and distinguish a stale or
+  crashed listener from a normal persisted `Stopping` state. Read-side event
+  projections are already bounded and incremental.
 - Replace System Events foreground polling with
   `NSWorkspace.frontmostApplication`; add a second browser adapter before
   generalizing the context interface further.
@@ -281,4 +291,4 @@ seam once there are two real adapters or a current test requires substitution.
 - Add edge tests for shutdown during capture, final-transcription failure, and
   voice-triggered meeting start/stop.
 - Do not generalize the concrete macOS and Linux X11 adapters into hypothetical
-  platform or plugin seams. Follow `LINUX_PORT_PLAN.md` for the selected target.
+  platform or plugin seams. Follow `docs/plans/linux.md` for the selected target.

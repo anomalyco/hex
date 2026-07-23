@@ -32,17 +32,17 @@ into the foreground app.
 Change the shortcut, microphone, language, transcription model, sound behavior,
 feedback volume, launch-at-login setting, and Dock visibility from HEX settings.
 
-## Edit Selected Text
+## Voice Action
 
-Voice editing is available in HEX 2.0.9 and newer.
+Hold **Option-Command**, describe what you want OpenCode to produce, then
+release. If text is selected, HEX includes it as context; otherwise OpenCode
+generates the requested text. The paste-ready result is inserted at the current
+focus. You can also begin with Option and add Command without restarting the
+recording.
 
-Select text, hold **Option-Command**, describe the change, then release. HEX
-replaces the text only if the same app and exact selection are still active when
-processing finishes.
-
-Voice editing requires the [OpenCode beta](https://v2.opencode.ai/). HEX links to
-the setup guide when OpenCode is missing. OpenCode processing is optional;
-ordinary dictation continues to use local transcription without it.
+Voice Action requires the [OpenCode beta](https://v2.opencode.ai/). Choose its
+dedicated model and deadline in Settings. Failed, empty, cancelled, or timed-out
+actions paste nothing; ordinary dictation continues to use local transcription.
 
 ## Optional Processing
 
@@ -107,3 +107,8 @@ Runtime diagnostics are stored in:
   `XDG_DATA_HOME` when configured
 
 Captured dictation audio is not saved.
+
+## Project Documentation
+
+Architecture, active plans, technical specifications, research, and historical
+prototype material are organized in [`docs/README.md`](docs/README.md).

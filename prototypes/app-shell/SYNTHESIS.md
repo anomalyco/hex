@@ -1,5 +1,8 @@
 # App-Shell Synthesis
 
+**Status:** Archived design synthesis. Source-line references and production
+gaps reflect the prototype period and may no longer match the current code.
+
 ## Recommended Direction
 
 Use Variant A's calm workspace as the shell foundation.

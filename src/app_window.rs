@@ -198,6 +198,7 @@ pub enum PreviewPane {
     Commands,
     Activity,
     Modes,
+    VoiceAction,
     Replacements,
     Settings,
 }
@@ -226,6 +227,7 @@ enum Pane {
     #[cfg_attr(not(debug_assertions), allow(dead_code))]
     Activity,
     Modes,
+    VoiceAction,
     Replacements,
     Settings,
 }
@@ -249,18 +251,20 @@ enum HudControl {
 }
 
 impl Pane {
-    const DEVELOPER: [Self; 7] = [
+    const DEVELOPER: [Self; 8] = [
         Self::Settings,
         Self::Modes,
+        Self::VoiceAction,
         Self::Replacements,
         Self::HudLab,
         Self::Commands,
         Self::Meetings,
         Self::Activity,
     ];
-    const PRODUCTION: [Self; 4] = [
+    const PRODUCTION: [Self; 5] = [
         Self::Settings,
         Self::Modes,
+        Self::VoiceAction,
         Self::Replacements,
         Self::Commands,
     ];
@@ -280,6 +284,7 @@ impl Pane {
             Self::Commands => "Commands",
             Self::Activity => "Activity",
             Self::Modes => "Modes",
+            Self::VoiceAction => "Voice Action",
             Self::Replacements => "Replacements",
             Self::Settings => "Settings",
         }
@@ -292,6 +297,7 @@ impl Pane {
             PreviewPane::Commands => Self::Commands,
             PreviewPane::Activity => Self::Activity,
             PreviewPane::Modes => Self::Modes,
+            PreviewPane::VoiceAction => Self::VoiceAction,
             PreviewPane::Replacements => Self::Replacements,
             PreviewPane::Settings => Self::Settings,
         }
@@ -418,6 +424,12 @@ struct ProcessingInputs {
     modes: Vec<ModeInputs>,
 }
 
+struct VoiceActionInputs {
+    model: ProcessingInput,
+    deadline: ProcessingInput,
+    practice: ProcessingInput,
+}
+
 struct ReplacementInputs {
     matched_phrase: ProcessingInput,
     output: ProcessingInput,
@@ -427,6 +439,12 @@ struct ReplacementInputs {
 enum ModeSelection {
     Default,
     Custom(usize),
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum ModelPickerTarget {
+    Mode(ModeSelection),
+    VoiceAction,
 }
 
 enum ModelCatalogState {
@@ -493,6 +511,10 @@ impl HotkeyCaptureState {
 impl ToggleSpring {
     fn new(enabled: bool) -> Self {
         let position = if enabled { 1.0 } else { 0.0 };
+        Self::at(position)
+    }
+
+    fn at(position: f32) -> Self {
         Self {
             position,
             velocity: 0.0,
@@ -502,7 +524,11 @@ impl ToggleSpring {
     }
 
     fn set_enabled(&mut self, enabled: bool) {
-        self.target = if enabled { 1.0 } else { 0.0 };
+        self.set_target(if enabled { 1.0 } else { 0.0 });
+    }
+
+    fn set_target(&mut self, target: f32) {
+        self.target = target;
         self.last_frame = Instant::now();
     }
 
@@ -567,6 +593,7 @@ pub struct AppWindow {
     prevent_sleep_toggle: ToggleSpring,
     double_tap_toggle: ToggleSpring,
     dock_icon_toggle: ToggleSpring,
+    sound_volume_spring: ToggleSpring,
     replacement_inputs: Vec<ReplacementInputs>,
     transcription_hints: ProcessingInput,
     transcription_picker_language: Option<String>,
@@ -576,12 +603,14 @@ pub struct AppWindow {
     transcription_download_cancel: Option<Arc<AtomicBool>>,
     transcription_download_progress: Option<Arc<AtomicU64>>,
     transcription_downloaded_bytes: u64,
+    transcription_activation_started: Option<Instant>,
     transcription_preview_installed: Option<bool>,
     apple_speech_capability: Option<AppleSpeechCapability>,
     apple_speech_capability_loading: Option<String>,
     apple_speech_capability_receiver: Option<Receiver<AppleSpeechCapability>>,
     apple_speech_capability_retry_at: Instant,
     processing_inputs: ProcessingInputs,
+    voice_action_inputs: VoiceActionInputs,
     selected_mode: ModeSelection,
     model_catalog: ModelCatalogState,
     model_catalog_receiver: Option<Receiver<ModelCatalogState>>,
@@ -707,6 +736,7 @@ impl AppWindow {
         let transcription_hints =
             Self::transcription_hints_input(&settings.transcription.recognition_hints, cx);
         let processing_inputs = Self::processing_inputs(&settings, cx);
+        let voice_action_inputs = Self::voice_action_inputs(&settings, cx);
         let (model_catalog, model_catalog_receiver) = if preview_mode {
             (
                 ModelCatalogState::Loaded(ModelCatalog {
@@ -849,6 +879,7 @@ impl AppWindow {
             prevent_sleep_toggle: ToggleSpring::new(settings.prevent_system_sleep),
             double_tap_toggle: ToggleSpring::new(settings.double_tap_lock),
             dock_icon_toggle: ToggleSpring::new(settings.show_dock_icon),
+            sound_volume_spring: ToggleSpring::at(sound_volume_index(&settings) as f32),
             replacement_inputs,
             transcription_hints,
             transcription_picker_language: preview_picker.map(|(language, _)| language.clone()),
@@ -864,6 +895,7 @@ impl AppWindow {
             transcription_downloaded_bytes: preview_downloading
                 .and_then(|model| definition(model).download_bytes())
                 .map_or(0, |bytes| bytes * 37 / 100),
+            transcription_activation_started: None,
             transcription_preview_installed: match preview_model_state {
                 Some(PreviewModelState::Installed) => Some(true),
                 Some(
@@ -878,6 +910,7 @@ impl AppWindow {
             apple_speech_capability_receiver,
             apple_speech_capability_retry_at: Instant::now(),
             processing_inputs,
+            voice_action_inputs,
             selected_mode: ModeSelection::Default,
             model_catalog,
             model_catalog_receiver,
@@ -1058,13 +1091,14 @@ impl AppWindow {
             return changed;
         };
         let Ok(result) = receiver.try_recv() else {
-            return changed;
+            return self.transcription_activation_started.is_some() || changed;
         };
         self.transcription_download_receiver = None;
         self.transcription_download_cancel = None;
         self.transcription_download_progress = None;
         self.transcription_downloaded_bytes = 0;
         self.transcription_downloading = None;
+        self.transcription_activation_started = None;
         match result {
             Ok(selection) => self.apply_transcription_selection(selection),
             Err(error) => self.transcription_picker_error = Some(error),
@@ -1257,6 +1291,7 @@ impl AppWindow {
         self.transcription_download_cancel = Some(canceled.clone());
         self.transcription_download_progress = Some(progress.clone());
         self.transcription_downloaded_bytes = 0;
+        self.transcription_activation_started = Some(Instant::now());
         thread::spawn(move || {
             let result = (|| {
                 if install_command_model {
@@ -1286,6 +1321,7 @@ impl AppWindow {
         self.transcription_download_receiver = None;
         self.transcription_download_progress = None;
         self.transcription_downloaded_bytes = 0;
+        self.transcription_activation_started = None;
     }
 
     fn transcription_model_installed(&self, model: &ModelDefinition, language: &str) -> bool {
@@ -1504,7 +1540,10 @@ impl AppWindow {
                             Pane::HudLab => this.apply_hud_lab(),
                             Pane::Meetings => this.reload_meetings(),
                             Pane::Commands | Pane::Activity => this.reload_events(),
-                            Pane::Modes | Pane::Replacements | Pane::Settings => {}
+                            Pane::Modes
+                            | Pane::VoiceAction
+                            | Pane::Replacements
+                            | Pane::Settings => {}
                         }
                         cx.notify();
                     }))
@@ -1987,7 +2026,11 @@ impl AppWindow {
                     if matches!(model.runtime, ModelRuntime::AppleSpeech) {
                         "Preparing…".to_string()
                     } else if installed {
-                        "Activating…".to_string()
+                        format!(
+                            "Loading model · {}s",
+                            self.transcription_activation_started
+                                .map_or(0, |started| started.elapsed().as_secs())
+                        )
                     } else {
                         format!("Downloading {:.0}%", progress * 100.0)
                     }
@@ -2015,6 +2058,9 @@ impl AppWindow {
                 } else {
                     "Download"
                 };
+                let activation_progress = self
+                    .transcription_activation_started
+                    .map_or(0.0, |started| (started.elapsed().as_secs_f32() % 1.6) / 1.6);
                 div()
                     .id(("transcription-model", index))
                     .w_full()
@@ -2083,6 +2129,25 @@ impl AppWindow {
                             )
                         },
                     )
+                    .when(is_downloading && installed, |card| {
+                        card.child(
+                            div().pt_3().child(
+                                div()
+                                    .h(px(3.0))
+                                    .w_full()
+                                    .rounded_sm()
+                                    .bg(rgb(CANVAS))
+                                    .child(
+                                        div()
+                                            .ml(relative(activation_progress * 0.75))
+                                            .h_full()
+                                            .w(relative(0.25))
+                                            .rounded_sm()
+                                            .bg(rgb(TEXT_SOFT)),
+                                    ),
+                            ),
+                        )
+                    })
                     .child(
                         div()
                             .pt_3()
@@ -2277,7 +2342,6 @@ impl AppWindow {
 
     fn render_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let hotkey_control = self.render_hotkey_control(HotkeyKind::Dictation, window, cx);
-        let edit_hotkey_control = self.render_hotkey_control(HotkeyKind::Edit, window, cx);
         let transcription_model = definition(self.settings.transcription.model);
         let transcription_label = format!(
             "{} · {}",
@@ -2305,48 +2369,64 @@ impl AppWindow {
         let microphone_picker = self
             .microphone_picker_open
             .then(|| self.render_microphone_picker(cx));
-        let sound_volume = div().flex().items_center().gap_1().children(
-            [
-                ("Off", 0.0_f32),
-                ("25%", 0.25),
-                ("50%", 0.5),
-                ("75%", 0.75),
-                ("100%", 1.0),
-            ]
-            .into_iter()
-            .enumerate()
-            .map(|(index, (label, volume))| {
-                let selected = if volume == 0.0 {
-                    !self.settings.sound_effects
-                } else {
-                    self.settings.sound_effects
-                        && (self.settings.sound_effect_volume - volume).abs() < 0.01
-                };
+        let sound_volume_position = self.sound_volume_spring.render_position(window);
+        let sound_volume = div()
+            .relative()
+            .flex()
+            .items_center()
+            .child(
                 div()
-                    .id(("sound-volume", index))
+                    .absolute()
+                    .left(px(sound_volume_position * 70.0))
+                    .top_0()
+                    .w(px(70.0))
                     .h(px(30.0))
-                    .px_2()
-                    .flex()
-                    .items_center()
                     .rounded_sm()
-                    .text_size(px(11.0))
-                    .text_color(if selected { rgb(TEXT) } else { rgb(MUTED) })
-                    .when(selected, |button| button.bg(rgb(SURFACE_SELECTED)))
-                    .cursor_pointer()
-                    .hover(|button| button.bg(rgb(SURFACE_HOVER)).text_color(rgb(TEXT_SOFT)))
-                    .child(label)
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.settings.sound_effects = volume > 0.0;
-                        if volume > 0.0 {
-                            this.settings.sound_effect_volume = volume;
-                        }
-                        this.save_settings(cx);
-                        if volume > 0.0 {
-                            crate::feedback::play(crate::feedback::Tone::DictationStart);
-                        }
-                    }))
-            }),
-        );
+                    .bg(rgb(SURFACE_SELECTED)),
+            )
+            .children(
+                [
+                    ("Off", 0.0_f32),
+                    ("25%", 0.25),
+                    ("50%", 0.5),
+                    ("75%", 0.75),
+                    ("100%", 1.0),
+                ]
+                .into_iter()
+                .enumerate()
+                .map(|(index, (label, volume))| {
+                    let selected = if volume == 0.0 {
+                        !self.settings.sound_effects
+                    } else {
+                        self.settings.sound_effects
+                            && (self.settings.sound_effect_volume - volume).abs() < 0.01
+                    };
+                    div()
+                        .id(("sound-volume", index))
+                        .h(px(30.0))
+                        .w(px(70.0))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .rounded_sm()
+                        .text_size(px(11.0))
+                        .text_color(if selected { rgb(TEXT) } else { rgb(MUTED) })
+                        .cursor_pointer()
+                        .hover(|button| button.text_color(rgb(TEXT_SOFT)))
+                        .child(label)
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.settings.sound_effects = volume > 0.0;
+                            if volume > 0.0 {
+                                this.settings.sound_effect_volume = volume;
+                            }
+                            this.sound_volume_spring.set_target(index as f32);
+                            this.save_settings(cx);
+                            if volume > 0.0 {
+                                crate::feedback::play(crate::feedback::Tone::DictationStart);
+                            }
+                        }))
+                }),
+            );
         let launch_at_login_control =
             if self.launch_at_login_status == LoginItemStatus::RequiresApproval {
                 compact_button("Open Settings")
@@ -2446,14 +2526,6 @@ impl AppWindow {
                                     hotkey_control,
                                 )
                                 .id("dictation-hotkey-setting"),
-                            )
-                            .child(
-                                settings_row(
-                                    "Edit selection shortcut",
-                                    "Select text, then hold and describe the change you want.",
-                                    edit_hotkey_control,
-                                )
-                                .id("edit-hotkey-setting"),
                             )
                             .child(
                                 settings_row(
@@ -2745,6 +2817,199 @@ impl AppWindow {
             .into_any_element()
     }
 
+    fn render_voice_action(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        let compact = window.viewport_size().width < px(980.0);
+        let hotkey = self.render_hotkey_control(HotkeyKind::Edit, window, cx);
+        let model = self.voice_action_inputs.model.entity.clone();
+        let deadline = self.voice_action_inputs.deadline.entity.clone();
+        let practice = self.voice_action_inputs.practice.entity.clone();
+        let processing = self.render_processing_settings(
+            ModelPickerTarget::VoiceAction,
+            None,
+            model,
+            deadline,
+            window,
+            cx,
+        );
+        div()
+            .size_full()
+            .flex()
+            .flex_col()
+            .child(pane_header("Voice Action", None))
+            .child(
+                div()
+                    .id("voice-action-scroll")
+                    .flex_1()
+                    .overflow_y_scroll()
+                    .px(if compact { px(20.0) } else { px(32.0) })
+                    .py_7()
+                    .child(
+                        div()
+                            .max_w(px(700.0))
+                            .child(
+                                div()
+                                    .text_size(px(18.0))
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .child("Turn an instruction into paste-ready text"),
+                            )
+                            .child(
+                                div()
+                                    .pt_2()
+                                    .max_w(px(590.0))
+                                    .text_size(px(12.0))
+                                    .line_height(px(19.0))
+                                    .text_color(rgb(MUTED))
+                                    .child("Voice Action sends one spoken instruction to OpenCode. It can transform selected text or generate something new."),
+                            )
+                            .child(
+                                div()
+                                    .mt_5()
+                                    .p_2()
+                                    .flex()
+                                    .when(compact, |guide| guide.flex_col())
+                                    .gap_2()
+                                    .rounded_md()
+                                    .border_1()
+                                    .border_color(rgb(LINE))
+                                    .bg(rgb(SURFACE))
+                                    .child(voice_action_step(
+                                        "1",
+                                        "Select text (optional)",
+                                        "A selection becomes context for the instruction.",
+                                    ))
+                                    .child(voice_action_step(
+                                        "2",
+                                        "Hold and speak",
+                                        "Hold the shortcut and describe the exact result you want.",
+                                    ))
+                                    .child(voice_action_step(
+                                        "3",
+                                        "Release to paste",
+                                        "The result is pasted wherever focus is when processing finishes.",
+                                    )),
+                            )
+                            .child(settings_section_label("Try it"))
+                            .child(
+                                div()
+                                    .p_4()
+                                    .rounded_md()
+                                    .border_1()
+                                    .border_color(rgb(LINE))
+                                    .bg(rgb(SURFACE))
+                                    .child(
+                                        div()
+                                            .flex()
+                                            .items_start()
+                                            .justify_between()
+                                            .gap_4()
+                                            .child(
+                                                div()
+                                                    .min_w(px(0.0))
+                                                    .child(
+                                                        div()
+                                                            .text_size(px(12.0))
+                                                            .font_weight(FontWeight::SEMIBOLD)
+                                                            .text_color(rgb(TEXT_SOFT))
+                                                            .child("Practice text"),
+                                                    )
+                                                    .child(
+                                                        div()
+                                                            .pt_1()
+                                                            .text_size(px(10.0))
+                                                            .text_color(rgb(MUTED))
+                                                            .child("Select the sample, then run Voice Action with one of the instructions below."),
+                                                    ),
+                                            )
+                                            .child(
+                                                compact_button("Select text")
+                                                    .id("select-voice-action-sample")
+                                                    .flex_none()
+                                                    .bg(rgb(SURFACE_SELECTED))
+                                                    .on_click(cx.listener(|this, _, window, cx| {
+                                                        let practice = this
+                                                            .voice_action_inputs
+                                                            .practice
+                                                            .entity
+                                                            .clone();
+                                                        practice.update(cx, |input, cx| {
+                                                            input.select_all_text(cx)
+                                                        });
+                                                        practice.focus_handle(cx).focus(window);
+                                                        cx.notify();
+                                                    })),
+                                            ),
+                                    )
+                                    .child(
+                                        div()
+                                            .mt_3()
+                                            .child(practice),
+                                    )
+                                    .child(
+                                        div()
+                                            .pt_3()
+                                            .text_size(px(10.0))
+                                            .font_weight(FontWeight::SEMIBOLD)
+                                            .text_color(rgb(MUTED))
+                                            .child("Try saying"),
+                                    )
+                                    .child(
+                                        div()
+                                            .pt_2()
+                                            .flex()
+                                            .flex_wrap()
+                                            .gap_2()
+                                            .children([
+                                                voice_action_prompt("Make this sound official"),
+                                                voice_action_prompt("Turn this into a three-step policy"),
+                                                voice_action_prompt("Rewrite this like a nature documentary"),
+                                                voice_action_prompt("Make it ominously polite"),
+                                            ]),
+                                    ),
+                            )
+                            .child(settings_section_label("Capture"))
+                            .child(
+                                settings_row(
+                                    "Shortcut",
+                                    "Start directly, or add Command while holding the dictation shortcut.",
+                                    hotkey,
+                                )
+                                .id("voice-action-hotkey-setting"),
+                            )
+                            .child(settings_section_label("Processing"))
+                            .child(mode_section_heading(
+                                "OpenCode model",
+                                "Voice Action has its own model and deadline, independent of dictation Modes.",
+                            ))
+                            .child(processing)
+                            .child(
+                                div()
+                                    .mt_6()
+                                    .p_4()
+                                    .rounded_sm()
+                                    .border_1()
+                                    .border_color(rgb(LINE))
+                                    .bg(rgb(SURFACE))
+                                    .child(
+                                        div()
+                                            .text_size(px(11.0))
+                                            .font_weight(FontWeight::SEMIBOLD)
+                                            .text_color(rgb(TEXT_SOFT))
+                                            .child("Nothing is pasted on failure"),
+                                    )
+                                    .child(
+                                        div()
+                                            .pt_1()
+                                            .text_size(px(11.0))
+                                            .line_height(px(17.0))
+                                            .text_color(rgb(MUTED))
+                                            .child("If OpenCode fails, times out, returns an empty response, or the action is cancelled, HEX leaves the document untouched."),
+                                    ),
+                            ),
+                    ),
+            )
+            .into_any_element()
+    }
+
     fn save_settings(&mut self, cx: &mut Context<Self>) {
         self.settings_save_generation = self.settings_save_generation.wrapping_add(1);
         if self.preview {
@@ -2813,6 +3078,46 @@ impl AppWindow {
         }
     }
 
+    fn voice_action_inputs(settings: &AppSettings, cx: &mut Context<Self>) -> VoiceActionInputs {
+        let model = Self::voice_action_model_input(
+            settings.voice_action.model.as_deref().unwrap_or_default(),
+            cx,
+        );
+        let deadline = cx
+            .new(|cx| TextInput::new(cx, "30", settings.voice_action.deadline_seconds.to_string()));
+        let deadline_subscription = cx.subscribe(&deadline, |this, _, _: &TextChanged, cx| {
+            if let Ok(seconds) = this
+                .voice_action_inputs
+                .deadline
+                .entity
+                .read(cx)
+                .text()
+                .trim()
+                .parse::<u64>()
+            {
+                this.settings.voice_action.deadline_seconds = seconds.max(1);
+                this.schedule_settings_save(cx);
+            }
+        });
+        VoiceActionInputs {
+            model,
+            deadline: ProcessingInput {
+                entity: deadline,
+                _subscriptions: vec![deadline_subscription],
+            },
+            practice: ProcessingInput {
+                entity: cx.new(|cx| {
+                    TextInput::new(
+                        cx,
+                        "Write or paste text to practice with...",
+                        "The moon appointed our office raccoon release manager; every deploy now requires a tiny trumpet solo.",
+                    )
+                }),
+                _subscriptions: Vec::new(),
+            },
+        }
+    }
+
     fn sync_text_replacements(&mut self, cx: &mut Context<Self>) {
         for (inputs, replacement) in self
             .replacement_inputs
@@ -2845,7 +3150,9 @@ impl AppWindow {
             cx.notify();
         });
         let navigate = cx.subscribe(&entity, |this, _, event: &TextNavigate, cx| {
-            let count = this.model_choice_keys(cx).len();
+            let count = this
+                .model_choice_keys(ModelPickerTarget::Mode(this.selected_mode), cx)
+                .len();
             if count > 0 {
                 this.model_picker_highlight =
                     advance_highlight(this.model_picker_highlight, event.0, count);
@@ -2854,11 +3161,42 @@ impl AppWindow {
         });
         let submitted = cx.subscribe(&entity, |this, _, _: &TextSubmitted, cx| {
             if let Some(model) = this
-                .model_choice_keys(cx)
+                .model_choice_keys(ModelPickerTarget::Mode(this.selected_mode), cx)
                 .get(this.model_picker_highlight)
                 .cloned()
             {
-                this.select_mode_model(this.selected_mode, model, cx);
+                this.select_model(ModelPickerTarget::Mode(this.selected_mode), model, cx);
+            }
+        });
+        ProcessingInput {
+            entity,
+            _subscriptions: vec![changed, navigate, submitted],
+        }
+    }
+
+    fn voice_action_model_input(initial: &str, cx: &mut Context<Self>) -> ProcessingInput {
+        let entity = cx.new(|cx| TextInput::picker(cx, "Search available models", initial));
+        let changed = cx.subscribe(&entity, |this, _, _: &TextChanged, cx| {
+            this.model_picker_highlight = 0;
+            cx.notify();
+        });
+        let navigate = cx.subscribe(&entity, |this, _, event: &TextNavigate, cx| {
+            let count = this
+                .model_choice_keys(ModelPickerTarget::VoiceAction, cx)
+                .len();
+            if count > 0 {
+                this.model_picker_highlight =
+                    advance_highlight(this.model_picker_highlight, event.0, count);
+                cx.notify();
+            }
+        });
+        let submitted = cx.subscribe(&entity, |this, _, _: &TextSubmitted, cx| {
+            if let Some(model) = this
+                .model_choice_keys(ModelPickerTarget::VoiceAction, cx)
+                .get(this.model_picker_highlight)
+                .cloned()
+            {
+                this.select_model(ModelPickerTarget::VoiceAction, model, cx);
             }
         });
         ProcessingInput {
@@ -3238,8 +3576,13 @@ impl AppWindow {
                                 )),
                             )
                             .when(processing_enabled, |section| {
-                                section.child(self.render_mode_processing(
-                                    selection, prompt, model, deadline, window, cx,
+                                section.child(self.render_processing_settings(
+                                    ModelPickerTarget::Mode(selection),
+                                    Some(prompt),
+                                    model,
+                                    deadline,
+                                    window,
+                                    cx,
                                 ))
                             }),
                     ),
@@ -3689,10 +4032,10 @@ impl AppWindow {
         .detach();
     }
 
-    fn render_mode_processing(
+    fn render_processing_settings(
         &self,
-        selection: ModeSelection,
-        prompt: Entity<TextInput>,
+        target: ModelPickerTarget,
+        prompt: Option<Entity<TextInput>>,
         model: Entity<TextInput>,
         deadline: Entity<TextInput>,
         window: &mut Window,
@@ -3700,21 +4043,12 @@ impl AppWindow {
     ) -> AnyElement {
         let compact = window.viewport_size().width < px(980.0);
         let focused = model.read(cx).is_focused(window);
-        let selected_model = self
-            .selected_mode_settings()
-            .post_processing
-            .model
-            .as_deref();
+        let (selected_model, selected_variant) = self.model_settings_for(target);
         let selected_model_text = selected_model.unwrap_or_default();
         if !focused && model.read(cx).text() != selected_model_text {
             model.update(cx, |input, cx| input.set_text(selected_model_text, cx));
         }
         let query = model.read(cx).text().trim().to_lowercase();
-        let selected_variant = self
-            .selected_mode_settings()
-            .post_processing
-            .variant
-            .as_deref();
         let presentation = model_presentation(&self.model_catalog, selected_model);
         let (catalog_status, default_label, matches, variants) = match &self.model_catalog {
             ModelCatalogState::Loading => {
@@ -3787,7 +4121,7 @@ impl AppWindow {
                             .on_mouse_down(
                                 MouseButton::Left,
                                 cx.listener(move |this, _, window, cx| {
-                                    this.select_mode_model(selection, None, cx);
+                                    this.select_model(target, None, cx);
                                     window.blur();
                                 }),
                             ),
@@ -3805,7 +4139,7 @@ impl AppWindow {
                         .on_mouse_down(
                             MouseButton::Left,
                             cx.listener(move |this, _, window, cx| {
-                                this.select_mode_model(selection, Some(key.clone()), cx);
+                                this.select_model(target, Some(key.clone()), cx);
                                 window.blur();
                             }),
                         )
@@ -3828,8 +4162,7 @@ impl AppWindow {
                 .hover(|button| button.bg(rgb(SURFACE_HOVER)).text_color(rgb(TEXT_SOFT)))
                 .child(variant)
                 .on_click(cx.listener(move |this, _, _, cx| {
-                    this.mode_settings_mut(selection).post_processing.variant = Some(value.clone());
-                    this.save_settings(cx);
+                    this.select_model_variant(target, value.clone(), cx);
                 }))
         });
         let model_control =
@@ -3890,11 +4223,13 @@ impl AppWindow {
             .flex()
             .flex_col()
             .gap_5()
-            .child(settings_input(
-                "Instructions",
-                "Tell OpenCode exactly how to transform the dictated text.",
-                prompt,
-            ))
+            .when_some(prompt, |processing, prompt| {
+                processing.child(settings_input(
+                    "Instructions",
+                    "Tell OpenCode exactly how to transform the dictated text.",
+                    prompt,
+                ))
+            })
             .child(
                 div()
                     .flex()
@@ -3943,14 +4278,12 @@ impl AppWindow {
             .into_any_element()
     }
 
-    fn model_choice_keys(&self, cx: &App) -> Vec<Option<String>> {
+    fn model_choice_keys(&self, target: ModelPickerTarget, cx: &App) -> Vec<Option<String>> {
         let ModelCatalogState::Loaded(catalog) = &self.model_catalog else {
             return Vec::new();
         };
         let query = self
-            .selected_mode_inputs()
-            .model
-            .entity
+            .model_input_for(target)
             .read(cx)
             .text()
             .trim()
@@ -3958,21 +4291,66 @@ impl AppWindow {
         filtered_model_keys(catalog, &query)
     }
 
-    fn select_mode_model(
+    fn select_model(
         &mut self,
-        selection: ModeSelection,
+        target: ModelPickerTarget,
         model: Option<String>,
         cx: &mut Context<Self>,
     ) {
         let text = model.clone().unwrap_or_default();
-        self.mode_inputs_mut(selection)
-            .model
-            .entity
+        self.model_input_for(target)
             .update(cx, |input, cx| input.set_text(text, cx));
-        let processing = &mut self.mode_settings_mut(selection).post_processing;
-        processing.model = model;
-        processing.variant = None;
+        match target {
+            ModelPickerTarget::Mode(selection) => {
+                let processing = &mut self.mode_settings_mut(selection).post_processing;
+                processing.model = model;
+                processing.variant = None;
+            }
+            ModelPickerTarget::VoiceAction => {
+                self.settings.voice_action.model = model;
+                self.settings.voice_action.variant = None;
+            }
+        }
         self.save_settings(cx);
+    }
+
+    fn select_model_variant(
+        &mut self,
+        target: ModelPickerTarget,
+        variant: String,
+        cx: &mut Context<Self>,
+    ) {
+        match target {
+            ModelPickerTarget::Mode(selection) => {
+                self.mode_settings_mut(selection).post_processing.variant = Some(variant);
+            }
+            ModelPickerTarget::VoiceAction => {
+                self.settings.voice_action.variant = Some(variant);
+            }
+        }
+        self.save_settings(cx);
+    }
+
+    fn model_input_for(&self, target: ModelPickerTarget) -> Entity<TextInput> {
+        match target {
+            ModelPickerTarget::Mode(selection) => {
+                self.mode_inputs_for(selection).model.entity.clone()
+            }
+            ModelPickerTarget::VoiceAction => self.voice_action_inputs.model.entity.clone(),
+        }
+    }
+
+    fn model_settings_for(&self, target: ModelPickerTarget) -> (Option<&str>, Option<&str>) {
+        match target {
+            ModelPickerTarget::Mode(selection) => {
+                let processing = &self.mode_settings(selection).post_processing;
+                (processing.model.as_deref(), processing.variant.as_deref())
+            }
+            ModelPickerTarget::VoiceAction => (
+                self.settings.voice_action.model.as_deref(),
+                self.settings.voice_action.variant.as_deref(),
+            ),
+        }
     }
 
     fn selected_mode_inputs_mut(&mut self) -> &mut ModeInputs {
@@ -3998,17 +4376,17 @@ impl AppWindow {
         cx.notify();
     }
 
-    fn selected_mode_inputs(&self) -> &ModeInputs {
-        match self.selected_mode {
-            ModeSelection::Default => &self.processing_inputs.default_mode,
-            ModeSelection::Custom(index) => &self.processing_inputs.modes[index],
-        }
-    }
-
     fn mode_inputs_mut(&mut self, selection: ModeSelection) -> &mut ModeInputs {
         match selection {
             ModeSelection::Default => &mut self.processing_inputs.default_mode,
             ModeSelection::Custom(index) => &mut self.processing_inputs.modes[index],
+        }
+    }
+
+    fn mode_inputs_for(&self, selection: ModeSelection) -> &ModeInputs {
+        match selection {
+            ModeSelection::Default => &self.processing_inputs.default_mode,
+            ModeSelection::Custom(index) => &self.processing_inputs.modes[index],
         }
     }
 
@@ -5282,6 +5660,7 @@ impl Render for AppWindow {
             Pane::Commands => self.render_commands(window, cx),
             Pane::Activity => self.render_activity(cx),
             Pane::Modes => self.render_modes(window, cx),
+            Pane::VoiceAction => self.render_voice_action(window, cx),
             Pane::Replacements => self.render_replacements(cx),
             Pane::Settings => self.render_settings(window, cx),
         };
@@ -5372,6 +5751,79 @@ fn settings_section_label(label: &'static str) -> AnyElement {
         .text_color(rgb(FAINT))
         .child(label)
         .into_any_element()
+}
+
+fn voice_action_step(number: &'static str, title: &'static str, description: &'static str) -> Div {
+    div()
+        .flex_1()
+        .min_w(px(0.0))
+        .p_3()
+        .flex()
+        .items_start()
+        .gap_3()
+        .child(
+            div()
+                .size(px(24.0))
+                .flex_none()
+                .flex()
+                .items_center()
+                .justify_center()
+                .rounded_full()
+                .bg(rgb(SURFACE_SELECTED))
+                .text_size(px(11.0))
+                .font_weight(FontWeight::SEMIBOLD)
+                .text_color(rgb(TEXT_SOFT))
+                .child(number),
+        )
+        .child(
+            div()
+                .min_w(px(0.0))
+                .flex()
+                .flex_col()
+                .gap_1()
+                .child(
+                    div()
+                        .text_size(px(11.0))
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .text_color(rgb(TEXT_SOFT))
+                        .child(title),
+                )
+                .child(
+                    div()
+                        .text_size(px(10.0))
+                        .line_height(px(15.0))
+                        .text_color(rgb(MUTED))
+                        .child(description),
+                ),
+        )
+}
+
+fn voice_action_prompt(prompt: &'static str) -> Div {
+    div()
+        .h(px(26.0))
+        .px_3()
+        .flex()
+        .items_center()
+        .rounded_full()
+        .bg(rgb(SURFACE_SELECTED))
+        .text_size(px(10.0))
+        .text_color(rgb(MUTED))
+        .child(prompt)
+}
+
+fn sound_volume_index(settings: &AppSettings) -> usize {
+    if !settings.sound_effects {
+        return 0;
+    }
+    [0.25_f32, 0.5, 0.75, 1.0]
+        .iter()
+        .enumerate()
+        .min_by(|(_, left), (_, right)| {
+            (settings.sound_effect_volume - **left)
+                .abs()
+                .total_cmp(&(settings.sound_effect_volume - **right).abs())
+        })
+        .map_or(0, |(index, _)| index + 1)
 }
 
 fn settings_copy(title: &'static str, description: &'static str) -> AnyElement {
@@ -5847,6 +6299,7 @@ fn hotkey_modifiers(modifiers: GpuiModifiers) -> HotkeyModifiers {
         option: modifiers.alt,
         shift: modifiers.shift,
         command: modifiers.platform,
+        function: modifiers.function,
     }
 }
 
@@ -6201,6 +6654,7 @@ fn event_summary(event: &VoiceEvent) -> String {
                 DictationPhase::Transcribing => "Dictation is being transcribed".into(),
                 DictationPhase::Pasted => text_or("Dictation was pasted", text),
                 DictationPhase::Edited => text_or("Selected text was edited", text),
+                DictationPhase::VoiceAction => text_or("Voice Action completed", text),
                 DictationPhase::Logged => text_or("Journal entry was saved", text),
                 DictationPhase::Repasted => text_or("The last dictation was pasted again", text),
                 DictationPhase::MeetingPasted => text_or("New meeting transcript was pasted", text),
@@ -6275,10 +6729,22 @@ mod tests {
             &[
                 Pane::Settings,
                 Pane::Modes,
+                Pane::VoiceAction,
                 Pane::Replacements,
                 Pane::Commands,
             ]
         );
+    }
+
+    #[test]
+    fn hotkey_capture_preserves_the_function_modifier() {
+        let modifiers = hotkey_modifiers(GpuiModifiers {
+            function: true,
+            ..Default::default()
+        });
+
+        assert!(modifiers.function);
+        assert_eq!(modifiers.count(), 1);
     }
 
     #[test]

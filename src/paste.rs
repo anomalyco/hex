@@ -283,10 +283,6 @@ impl Paster {
         self.continuation = None;
         Ok(())
     }
-
-    pub fn activity_revision(&self) -> u64 {
-        self.activity.revision()
-    }
 }
 
 fn capture_clipboard(clipboard: &NSPasteboard) -> Result<ClipboardSnapshot> {

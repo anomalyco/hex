@@ -4,6 +4,7 @@
 /perf/transcription-corpus
 /dist
 /.wrangler
+node_modules/
 __pycache__/
 *.py[cod]
 /ios/*DerivedData

@@ -1,5 +1,9 @@
 # Activity/Debug Data Audit
 
+**Status:** Archived audit. It records the evidence available during app-shell
+prototyping; source-line references and listed gaps are not maintained as the
+production event model changes.
+
 ## Recommendation
 
 Build Activity as a projection over a fixed, bounded window of facts, not as a
@@ -113,7 +117,7 @@ names, or copies of `process.log` into `VoiceEvent`.
 
 ## Projection Rules
 
-**User-facing Activity rows**
+### User-Facing Activity Rows
 
 - One command row per `task_id`: completed `heard` text, matched command id,
   final outcome, and a typed explanation. Show `Submitted` only while pending.
@@ -129,7 +133,7 @@ names, or copies of `process.log` into `VoiceEvent`.
   session; without it, label the prior session "end not recorded" rather than
   inferring a crash.
 
-**Raw inspector facts**
+### Raw Inspector Facts
 
 - All contributing NDJSON records, including `TranscriptPhase::Started` /
   `Updated`, latency, `State` transitions, exact timestamps, device, context URL,

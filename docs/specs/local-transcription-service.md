@@ -1,7 +1,13 @@
 # HEX Local Transcription Service and SDK
 
-**Status:** Service discovery, model preparation, and bounded host-audio
-transcription are implemented. The TypeScript package remains to be built.
+**Status:** Model preparation, bounded host-audio transcription, and a
+direct-child embedded service mode are implemented. Promise and Effect
+TypeScript host wrappers are implemented against a fake helper; signed helper
+packaging and a real consumer remain.
+
+**Authority:** This document defines the current service and future SDK product
+contract. Implementation sequencing lives in
+[`../plans/typescript-sdk.md`](../plans/typescript-sdk.md).
 
 ## Product Boundary
 
@@ -16,6 +22,7 @@ device selection                         model download and verification
 capture start/stop                       strict-Metal load and prewarm
 levels and waveform        WAV/PCM       resampling and inference
 capture UX                 ---------->   final raw transcript
+settings and model choice
 ```
 
 This gives macOS permission to the application the user intentionally used. An
@@ -25,7 +32,7 @@ HEX access. HEX Service has no microphone entitlement and never captures audio.
 ## Decisions
 
 | Decision | Reason |
-|---|---|
+| --- | --- |
 | Host owns microphone capture | Correct TCC identity, intuitive permission prompt, no shared permission broker. |
 | Service owns models and inference | One verified model installation and one warm runtime can serve many apps. |
 | Completed audio goes over localhost | Simple final-only contract; no partial transcripts or bidirectional session protocol. |
@@ -34,37 +41,54 @@ HEX access. HEX Service has no microphone entitlement and never captures audio.
 | No product duration limit | Hotkey capture and service transcription end explicitly; operational resource exhaustion remains a typed failure. |
 | Raw transcripts only | The host owns meaning, rewriting, and insertion. |
 | Node/Electron main or preload only | Browsers and renderers cannot read owner-only discovery state or bootstrap a native process. |
+| Host-spawned helper | The host owns the process, endpoint, and lifetime instead of discovering an independently elected service. |
+| Shared model artifacts, private warm runtime | Hosts reuse verified downloads without coupling their model choice or process lifecycle. |
 
 ## Service Distribution
 
-The SDK discovers an authenticated service on `127.0.0.1`. A future npm package
-ships the signed, notarized service artifact in optional architecture-specific
-packages. The SDK verifies and demand-launches it from versioned Application
-Support storage without an npm install script, administrator access, login-item
-approval, Dock icon, or foreground window.
+The SDK declares signed, notarized helpers as optional architecture-specific
+packages and selects the current platform package automatically. Applications
+call `create()` without locating an executable. On explicit host use, the SDK
+spawns the included helper directly as a child without an npm install script,
+administrator access, login-item approval, Dock icon, or foreground window. The
+host must not launch the helper through Launch Services.
 
 Because the service does not capture audio, it does not need microphone TCC
 identity. Full HEX.app remains responsible for its own global-hotkey capture and
-can submit completed audio to the same transcription runtime later.
+can submit completed audio to its own transcription runtime later.
 
-## Discovery and Authentication
+Verified model artifacts remain shared per user under Application Support.
+Each embedded helper has its own warm model and inference queue. Multiple hosts
+may read the same immutable artifact, but they do not share Metal allocations or
+runtime selection.
 
-The service binds `127.0.0.1:0` and atomically writes an owner-only discovery
-file through `app_paths`:
+## Embedded Startup and Authentication
+
+The host spawns `hex-service service --embedded` with piped stdin and stdout.
+The helper binds `127.0.0.1:0` and writes exactly one JSON line to stdout after
+the authenticated API is ready:
 
 ```json
 {
-  "port": 49731,
+  "type": "ready",
+  "url": "http://127.0.0.1:49731",
   "token": "hex_a1b2c3...",
   "apiVersion": "1",
   "pid": 12345
 }
 ```
 
-Every request requires `Authorization: Bearer <token>`. The server deliberately
-sends no CORS headers. A malformed or incorrect credential returns an empty
-`401` response. The discovery file is removed on clean shutdown and replaced
-when PID and port checks prove an older file stale.
+The host keeps the child's stdin open as its lifetime lease. EOF requests a
+clean shutdown; the helper force-exits after a five-second grace period if
+native work does not return. Embedded mode writes no shared discovery file and
+acquires no global service lock, so two host applications can run independent
+helpers.
+
+Every request requires `Authorization: Bearer <token>`. The token is delivered
+only over the child's stdout pipe. The server deliberately sends no CORS
+headers. A malformed or incorrect credential returns an empty `401` response.
+The standalone HEX application may still publish owner-only discovery for its
+own existing local API; SDK hosts do not use it.
 
 ## Wire Protocol V1
 
@@ -119,7 +143,6 @@ export type ModelId =
 export interface ModelInfo {
   id: ModelId;
   name: string;
-  selected: boolean;
   installed: boolean;
   verified: boolean;
   managed: boolean;
@@ -141,31 +164,34 @@ runtime when a replacement fails.
 ### TypeScript Surface
 
 ```typescript
-export function connect(): Promise<ConnectResult>;
+export function create(options?: CreateOptions): Promise<HexHost>;
 
-export type ConnectResult =
-  | { status: "connected"; client: HexClient }
-  | { status: "not-running"; launch: () => Promise<HexClient> }
-  | { status: "not-installed"; prepareService: () => Promise<HexClient> }
-  | { status: "incompatible"; serviceVersion: string; requiredRange: string };
+export interface HexHost {
+  pid: number;
+  client: HexClient;
+  close(): Promise<void>;
+}
 
 export interface HexClient {
   health(): Promise<Health>;
   capabilities(): Promise<Capabilities>;
   models: {
-    list(): Promise<ModelInfo[]>;
+    list(options?: { language?: string; signal?: AbortSignal }): Promise<ModelInfo[]>;
     prepare(
       id: ModelId,
-      options?: { onProgress?: (progress: ModelProgress) => void; signal?: AbortSignal },
+      options?: {
+        language?: string;
+        onProgress?: (progress: ModelProgress) => void;
+        signal?: AbortSignal;
+      },
     ): Promise<void>;
   };
   transcribe(request: TranscriptionRequest): Promise<TranscriptionResult>;
-  close(): void;
 }
 
 export interface AudioClip {
   /** PCM WAV bytes. */
-  data: ArrayBuffer;
+  data: ArrayBuffer | Uint8Array;
   contentType: "audio/wav";
 }
 
@@ -197,6 +223,11 @@ const result = await client.transcribe({
 input.insert(result.transcript);
 ```
 
+The `@hex-ai/client/effect` entrypoint provides scoped helper acquisition,
+schema-backed typed errors, Effect operations, an Effect `Stream` for model
+preparation progress, and a `Layer` for dependency injection. Closing the scope
+closes the host lease and bounds exact-child termination.
+
 `transcribe()` never downloads a model. It returns `model-not-ready` when the
 artifact has not been prepared. It may transparently reload an installed but
 cold model because model residency is transient.
@@ -209,5 +240,6 @@ cold model because model residency is transient.
 - No OpenCode rewrite profiles.
 - No non-localhost access.
 - No ordinary browser bootstrap.
+- No cross-host warm-runtime sharing or service election.
 - No long-form segmentation, speaker turns, resumability, or search until a
   real consumer requires them.

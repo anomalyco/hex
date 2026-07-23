@@ -1,6 +1,10 @@
-# Voice Control App-Shell Prototype
+# Archived App-Shell Prototype
 
-Throwaway comparison surface for three app-shell directions spanning Meetings,
+**Status:** Historical design input. The production shell has been selected and
+implemented. This prototype remains runnable for comparison, but its supporting
+documents do not define current behavior or active work.
+
+The prototype compares three earlier app-shell directions spanning Meetings,
 Commands, Activity/Debug, and Settings.
 
 ```sh

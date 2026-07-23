@@ -19,6 +19,7 @@ static EDIT_HOTKEY: AtomicU64 = AtomicU64::new((1 << 19) | (1 << 20));
 static HOTKEY_CAPTURE_ACTIVE: AtomicBool = AtomicBool::new(false);
 static TRANSCRIPTION_SELECTION: OnceLock<RwLock<RuntimeTranscriptionSelection>> = OnceLock::new();
 static MICROPHONE_SELECTION: OnceLock<RwLock<RuntimeMicrophoneSelection>> = OnceLock::new();
+static VOICE_ACTION_SETTINGS: OnceLock<RwLock<VoiceActionSettings>> = OnceLock::new();
 
 #[derive(Default)]
 struct RuntimeTranscriptionSelection {
@@ -38,8 +39,9 @@ const SHIFT_KEY_MASK: u64 = 1 << 17;
 const CONTROL_KEY_MASK: u64 = 1 << 18;
 const OPTION_KEY_MASK: u64 = 1 << 19;
 const COMMAND_KEY_MASK: u64 = 1 << 20;
+const FUNCTION_KEY_MASK: u64 = 1 << 23;
 const HOTKEY_MODIFIERS_MASK: u64 =
-    SHIFT_KEY_MASK | CONTROL_KEY_MASK | OPTION_KEY_MASK | COMMAND_KEY_MASK;
+    SHIFT_KEY_MASK | CONTROL_KEY_MASK | OPTION_KEY_MASK | COMMAND_KEY_MASK | FUNCTION_KEY_MASK;
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(default)]
@@ -48,6 +50,7 @@ pub struct HotkeyModifiers {
     pub option: bool,
     pub shift: bool,
     pub command: bool,
+    pub function: bool,
 }
 
 impl HotkeyModifiers {
@@ -57,6 +60,7 @@ impl HotkeyModifiers {
             control: false,
             shift: false,
             command: false,
+            function: false,
         }
     }
 
@@ -66,15 +70,20 @@ impl HotkeyModifiers {
             command: true,
             control: false,
             shift: false,
+            function: false,
         }
     }
 
     pub const fn is_empty(self) -> bool {
-        !self.control && !self.option && !self.shift && !self.command
+        !self.control && !self.option && !self.shift && !self.command && !self.function
     }
 
     pub const fn count(self) -> u8 {
-        self.control as u8 + self.option as u8 + self.shift as u8 + self.command as u8
+        self.control as u8
+            + self.option as u8
+            + self.shift as u8
+            + self.command as u8
+            + self.function as u8
     }
 
     const fn contains(self, required: Self) -> bool {
@@ -82,6 +91,7 @@ impl HotkeyModifiers {
             && (!required.option || self.option)
             && (!required.shift || self.shift)
             && (!required.command || self.command)
+            && (!required.function || self.function)
     }
 
     fn event_flags(self) -> u64 {
@@ -89,10 +99,12 @@ impl HotkeyModifiers {
             | (self.option as u64 * OPTION_KEY_MASK)
             | (self.shift as u64 * SHIFT_KEY_MASK)
             | (self.command as u64 * COMMAND_KEY_MASK)
+            | (self.function as u64 * FUNCTION_KEY_MASK)
     }
 
     fn keycaps(self) -> impl Iterator<Item = &'static str> {
         [
+            (self.function, "fn"),
             (self.control, "⌃"),
             (self.option, "⌥"),
             (self.shift, "⇧"),
@@ -245,6 +257,24 @@ pub struct DictationPostProcessing {
     pub deadline_seconds: u64,
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(default)]
+pub struct VoiceActionSettings {
+    pub model: Option<String>,
+    pub variant: Option<String>,
+    pub deadline_seconds: u64,
+}
+
+impl Default for VoiceActionSettings {
+    fn default() -> Self {
+        Self {
+            model: None,
+            variant: None,
+            deadline_seconds: 30,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(default)]
 pub struct TextReplacement {
@@ -311,6 +341,7 @@ pub struct AppSettings {
     pub show_dock_icon: bool,
     pub transcription: TranscriptionSelection,
     pub dictation_processing: DictationProcessingSettings,
+    pub voice_action: VoiceActionSettings,
     pub text_replacements: Vec<TextReplacement>,
 }
 
@@ -337,6 +368,7 @@ impl Default for AppSettings {
             show_dock_icon: false,
             transcription: TranscriptionSelection::default(),
             dictation_processing: DictationProcessingSettings::default(),
+            voice_action: VoiceActionSettings::default(),
             text_replacements: Vec::new(),
         }
     }
@@ -387,6 +419,10 @@ impl AppSettings {
         set_transcription_selection(&self.transcription);
         set_microphone_selection(self.microphone.as_deref());
         crate::config::update_dictation_profiles(&self.dictation_processing);
+        *VOICE_ACTION_SETTINGS
+            .get_or_init(Default::default)
+            .write()
+            .unwrap_or_else(|error| error.into_inner()) = self.voice_action.clone();
         crate::text_replacements::set_global(&self.text_replacements);
     }
 
@@ -420,7 +456,7 @@ impl AppSettings {
         .flatten()
         .find(|binding| !hotkeys_conflict(&self.dictation_hotkey, binding))
         {
-            tracing::warn!("replaced a conflicting voice edit shortcut");
+            tracing::warn!("replaced a conflicting Voice Action shortcut");
             self.edit_hotkey = binding;
         }
     }
@@ -486,6 +522,14 @@ pub fn dictation_hotkey() -> RuntimeHotkey {
 
 pub fn edit_hotkey() -> RuntimeHotkey {
     decode_hotkey(EDIT_HOTKEY.load(Ordering::Acquire))
+}
+
+pub fn voice_action_settings() -> VoiceActionSettings {
+    VOICE_ACTION_SETTINGS
+        .get_or_init(Default::default)
+        .read()
+        .unwrap_or_else(|error| error.into_inner())
+        .clone()
 }
 
 fn decode_hotkey(encoded: u64) -> RuntimeHotkey {
@@ -559,6 +603,9 @@ mod tests {
                 .post_processing
                 .enabled
         );
+        assert!(settings.voice_action.model.is_none());
+        assert!(settings.voice_action.variant.is_none());
+        assert_eq!(settings.voice_action.deadline_seconds, 30);
         assert!(settings.text_replacements.is_empty());
     }
 
@@ -585,6 +632,25 @@ mod tests {
 
         assert_eq!(decoded.transcription, settings.transcription);
         assert!(crate::transcription_models::validate(&decoded.transcription).is_ok());
+    }
+
+    #[test]
+    fn voice_action_settings_round_trip() {
+        let settings = AppSettings {
+            voice_action: VoiceActionSettings {
+                model: Some("openai/gpt-5.6-sol".into()),
+                variant: Some("fast".into()),
+                deadline_seconds: 12,
+            },
+            ..AppSettings::default()
+        };
+
+        let encoded = serde_json::to_string(&settings).unwrap();
+        let decoded: AppSettings = serde_json::from_str(&encoded).unwrap();
+
+        assert_eq!(decoded.voice_action.model, settings.voice_action.model);
+        assert_eq!(decoded.voice_action.variant, settings.voice_action.variant);
+        assert_eq!(decoded.voice_action.deadline_seconds, 12);
     }
 
     #[test]
@@ -616,6 +682,7 @@ mod tests {
                 option: false,
                 shift: true,
                 command: false,
+                function: true,
             },
             key: Some(HotkeyKey {
                 code: 49,
@@ -626,7 +693,10 @@ mod tests {
 
         let runtime = dictation_hotkey();
 
-        assert_eq!(runtime.modifiers, CONTROL_KEY_MASK | SHIFT_KEY_MASK);
+        assert_eq!(
+            runtime.modifiers,
+            CONTROL_KEY_MASK | SHIFT_KEY_MASK | FUNCTION_KEY_MASK
+        );
         assert_eq!(runtime.key_code, Some(49));
         DICTATION_HOTKEY.store(HotkeyBinding::default().encoded(), Ordering::Release);
     }

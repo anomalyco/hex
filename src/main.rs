@@ -22,6 +22,8 @@ mod dashboard;
 #[cfg_attr(target_os = "linux", allow(dead_code))]
 mod dictation;
 #[cfg(target_os = "macos")]
+mod dictation_diagnostics;
+#[cfg(target_os = "macos")]
 mod dictation_indicator;
 #[cfg(target_os = "macos")]
 pub mod dictation_processor;
@@ -96,6 +98,8 @@ mod transcription_service;
 #[cfg(target_os = "macos")]
 use std::fs::{self, OpenOptions};
 #[cfg(target_os = "macos")]
+use std::io::{Read, Write};
+#[cfg(target_os = "macos")]
 use std::path::PathBuf;
 #[cfg(target_os = "macos")]
 use std::sync::Mutex;
@@ -160,7 +164,11 @@ enum Command {
     },
     /// Run the headless local API service.
     #[command(hide = true)]
-    Service,
+    Service {
+        /// Run as a direct child whose stdin is owned by the host application.
+        #[arg(long)]
+        embedded: bool,
+    },
     #[cfg(debug_assertions)]
     /// Show the developer recognition dashboard.
     Status,
@@ -212,6 +220,7 @@ enum AppPreviewTarget {
     Onboarding,
     Settings,
     Modes,
+    VoiceAction,
     Replacements,
     Commands,
     Meetings,
@@ -273,14 +282,12 @@ fn main() -> Result<()> {
 
     let event_path = log_dir.join("live.ndjson");
     let cli = Cli::parse();
-    let bundled_watcher = std::env::current_exe()
+    let executable_name = std::env::current_exe()
         .ok()
-        .and_then(|path| path.file_stem().map(|name| name == "voice-control-watch"))
-        .unwrap_or(false);
-    let bundled_service = std::env::current_exe()
-        .ok()
-        .and_then(|path| path.file_stem().map(|name| name == "hex-service"))
-        .unwrap_or(false);
+        .and_then(|path| path.file_stem().map(ToOwned::to_owned));
+    let bundled_watcher =
+        executable_name.as_deref() == Some(std::ffi::OsStr::new("voice-control-watch"));
+    let bundled_service = executable_name.as_deref() == Some(std::ffi::OsStr::new("hex-service"));
     let command = cli.command.unwrap_or({
         if bundled_watcher {
             Command::App {
@@ -288,7 +295,7 @@ fn main() -> Result<()> {
                 preview_dictation: false,
             }
         } else if bundled_service {
-            Command::Service
+            Command::Service { embedded: false }
         } else {
             Command::Listen { device: None }
         }
@@ -330,6 +337,7 @@ fn main() -> Result<()> {
                 | AppPreviewTarget::Settings
                 | AppPreviewTarget::TranscriptionPicker => app_window::PreviewPane::Settings,
                 AppPreviewTarget::Modes => app_window::PreviewPane::Modes,
+                AppPreviewTarget::VoiceAction => app_window::PreviewPane::VoiceAction,
                 AppPreviewTarget::Replacements => app_window::PreviewPane::Replacements,
                 AppPreviewTarget::Commands => app_window::PreviewPane::Commands,
                 AppPreviewTarget::Meetings => app_window::PreviewPane::Meetings,
@@ -367,12 +375,61 @@ fn main() -> Result<()> {
                 None,
             )
         }
-        Command::Service => {
-            app_settings::AppSettings::load()?;
-            let events = events::EventLog::create(&event_path)?;
-            let _local_api = local_api::LocalApi::start(events)?;
+        Command::Service { embedded } => {
+            if !embedded {
+                app_settings::AppSettings::load()?;
+            }
+            let service_event_path = if embedded {
+                log_dir.join(format!("embedded-{}.ndjson", std::process::id()))
+            } else {
+                event_path
+            };
+            let events = events::EventLog::create(&service_event_path)?;
+            let local_api = if embedded {
+                let api = local_api::LocalApi::start_embedded(events)?;
+                std::thread::Builder::new()
+                    .name("embedded-host-lease".into())
+                    .spawn(|| {
+                        let mut stdin = std::io::stdin().lock();
+                        let mut buffer = [0_u8; 1];
+                        loop {
+                            match stdin.read(&mut buffer) {
+                                Ok(0) => {
+                                    SHUTDOWN.store(true, Ordering::Release);
+                                    std::thread::sleep(std::time::Duration::from_secs(5));
+                                    tracing::warn!(
+                                        "forcing embedded service shutdown after host lease closed"
+                                    );
+                                    std::process::exit(0);
+                                }
+                                Ok(_) => {}
+                                Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
+                                Err(error) => {
+                                    tracing::warn!(%error, "embedded host lease failed");
+                                    SHUTDOWN.store(true, Ordering::Release);
+                                    break;
+                                }
+                            }
+                        }
+                    })?;
+                let mut stdout = std::io::stdout().lock();
+                serde_json::to_writer(&mut stdout, &api.embedded_endpoint())?;
+                stdout.write_all(b"\n")?;
+                stdout.flush()?;
+                drop(stdout);
+                api
+            } else {
+                local_api::LocalApi::start(events)?
+            };
             while !SHUTDOWN.load(Ordering::Relaxed) {
                 std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+            drop(local_api);
+            if embedded
+                && let Err(error) = fs::remove_file(&service_event_path)
+                && error.kind() != std::io::ErrorKind::NotFound
+            {
+                tracing::warn!(%error, "could not remove embedded service event log");
             }
             Ok(())
         }

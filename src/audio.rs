@@ -41,6 +41,9 @@ pub enum RecoveringAudioInputEvent {
 
 const MICROPHONE_RETRY_INITIAL: Duration = Duration::from_millis(250);
 const MICROPHONE_RETRY_MAX: Duration = Duration::from_secs(5);
+// Moonshine updates can occupy the consumer for hundreds of milliseconds
+// while voice-delimited capture still needs every CoreAudio callback.
+const AUDIO_CHUNK_QUEUE_CAPACITY: usize = 512;
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 enum MicrophoneRecoveryReason {
@@ -149,7 +152,7 @@ impl AudioInput {
         let config: StreamConfig = supported.into();
         let sample_rate = config.sample_rate;
         let channels = usize::from(config.channels);
-        let (sender, chunks) = mpsc::sync_channel(32);
+        let (sender, chunks) = mpsc::sync_channel(AUDIO_CHUNK_QUEUE_CAPACITY);
         let (error_sender, stream_errors) = mpsc::sync_channel(1);
         let dropped_chunks = Arc::new(AtomicU64::new(0));
 

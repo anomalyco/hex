@@ -41,6 +41,7 @@ pub enum DictationIndicatorEvent {
     Configure(HudTuning),
     Started,
     EditingStarted,
+    PromotedToVoiceAction,
     Meter { average: f32, peak: f32 },
     Submitted { job_id: u64 },
     Transcribing { job_id: u64 },
@@ -564,6 +565,9 @@ impl MetalRenderer {
                 self.softness.reset(HIDDEN_SOFTNESS);
                 self.processing.reset(0.0);
                 self.post_processing.reset(0.0);
+            }
+            DictationIndicatorEvent::PromotedToVoiceAction => {
+                self.editing = true;
             }
             DictationIndicatorEvent::Meter { average, peak } => {
                 self.target_average = (average * 7.0).clamp(0.0, 1.0);

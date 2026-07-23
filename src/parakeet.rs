@@ -81,7 +81,7 @@ pub enum PasteKind {
 pub enum TranscriptionTarget {
     Paste,
     Send,
-    Edit,
+    VoiceAction,
 }
 
 struct InferenceJob {
@@ -121,14 +121,6 @@ struct CompletedTranscript {
     prepare_ms: u128,
     inference_ms: u128,
     processing: Option<ProcessingObservation>,
-    edit_source: Option<EditSource>,
-}
-
-struct EditSource {
-    application: Option<String>,
-    window_title: Option<String>,
-    selected_text: String,
-    input_revision: u64,
 }
 
 enum OutputJob {
@@ -322,7 +314,7 @@ impl DictationWorker {
                         continue;
                     }
                     let profiles = crate::config::dictation_profiles();
-                    if matches!(job.target, TranscriptionTarget::Edit)
+                    if matches!(job.target, TranscriptionTarget::VoiceAction)
                         || profiles.processes(&job.context)
                     {
                         let _ = processor_events.send(WorkerEvent::Stage {
@@ -330,10 +322,10 @@ impl DictationWorker {
                             stage: DictationJobStage::Processing,
                         });
                     }
-                    let processed = if matches!(job.target, TranscriptionTarget::Edit) {
-                        profiles.process_edit_cancellable(
+                    let processed = if matches!(job.target, TranscriptionTarget::VoiceAction) {
+                        profiles.process_voice_action_cancellable(
                             &job.text,
-                            job.context.selected_text.as_deref().unwrap_or_default(),
+                            job.context.selected_text.as_deref(),
                             &job.context,
                             &job.control.cancelled,
                         )
@@ -351,19 +343,16 @@ impl DictationWorker {
                     if let Some(observation) = &processed.observation
                         && let Some(error) = &observation.fallback
                     {
-                        tracing::warn!(
-                            profile = observation.profile,
-                            %error,
-                            "dictation post-processing fell back to raw transcript"
-                        );
+                        if matches!(job.target, TranscriptionTarget::VoiceAction) {
+                            tracing::warn!(%error, "voice action processing failed");
+                        } else {
+                            tracing::warn!(
+                                profile = observation.profile,
+                                %error,
+                                "dictation post-processing fell back to raw transcript"
+                            );
+                        }
                     }
-                    let edit_source =
-                        matches!(job.target, TranscriptionTarget::Edit).then(|| EditSource {
-                            application: job.context.application.clone(),
-                            window_title: job.context.window_title.clone(),
-                            selected_text: job.context.selected_text.clone().unwrap_or_default(),
-                            input_revision: job.context.input_revision.unwrap_or(u64::MAX),
-                        });
                     if processor_output
                         .send(OutputJob::Completed {
                             job_id: job.job_id,
@@ -377,7 +366,6 @@ impl DictationWorker {
                                 prepare_ms: job.prepare_ms,
                                 inference_ms: job.inference_ms,
                                 processing: processed.observation,
-                                edit_source,
                             })),
                         })
                         .is_err()
@@ -437,7 +425,9 @@ impl DictationWorker {
                 let queue_ms = total_started.elapsed().as_millis();
                 let audio_ms = job.clip.duration_ms();
                 let prepare_started = Instant::now();
-                let samples = transcriber.prepare_samples(job.clip.into_transcription_samples());
+                let clip_samples = job.clip.into_transcription_samples();
+                crate::dictation_diagnostics::persist(&clip_samples);
+                let samples = transcriber.prepare_samples(clip_samples);
                 let prepare_ms = prepare_started.elapsed().as_millis();
                 let inference_started = Instant::now();
                 let result = match (transcriber, job.protocol.as_deref()) {
@@ -467,7 +457,7 @@ impl DictationWorker {
                             job.target,
                             TranscriptionTarget::Paste
                                 | TranscriptionTarget::Send
-                                | TranscriptionTarget::Edit
+                                | TranscriptionTarget::VoiceAction
                         ) && !text.trim().is_empty() =>
                     {
                         if processor_jobs
@@ -497,7 +487,6 @@ impl DictationWorker {
                             prepare_ms,
                             inference_ms,
                             processing: None,
-                            edit_source: None,
                         });
                         if inference_output
                             .send(OutputJob::Completed {
@@ -705,7 +694,7 @@ fn finish_output(
                 .ok()
                 .and_then(|result| result.processing.clone());
             let result = result.and_then(|completed| {
-                if matches!(target, TranscriptionTarget::Edit)
+                if matches!(target, TranscriptionTarget::VoiceAction)
                     && let Some(error) = completed
                         .processing
                         .as_ref()
@@ -713,17 +702,8 @@ fn finish_output(
                 {
                     return Err(error);
                 }
-                if matches!(target, TranscriptionTarget::Edit) {
-                    validate_edit_destination(
-                        completed
-                            .edit_source
-                            .as_ref()
-                            .ok_or_else(|| "voice edit lost its source selection".to_string())?,
-                        paster.activity_revision(),
-                    )?;
-                }
                 if control.is_cancelled() {
-                    return Err("voice edit was cancelled".into());
+                    return Err("voice action was cancelled".into());
                 }
                 let paste_started = Instant::now();
                 if !completed.text.trim().is_empty() {
@@ -737,17 +717,9 @@ fn finish_output(
                         TranscriptionTarget::Send => paster
                             .paste_and_send(&completed.text)
                             .map_err(|error| error.to_string())?,
-                        TranscriptionTarget::Edit => {
-                            let source = completed.edit_source.as_ref().ok_or_else(|| {
-                                "voice edit lost its source selection".to_string()
-                            })?;
-                            crate::selected_text::replace(
-                                &source.selected_text,
-                                &completed.text,
-                                || paster.activity_revision() == source.input_revision,
-                            )
-                            .map_err(|error| error.to_string())?
-                        }
+                        TranscriptionTarget::VoiceAction => paster
+                            .paste_standalone(&completed.text)
+                            .map_err(|error| error.to_string())?,
                     }
                     if matches!(
                         target,
@@ -797,33 +769,6 @@ fn finish_output(
             WorkerEvent::Pasted { kind, result }
         }
     }
-}
-
-fn validate_edit_destination(source: &EditSource, input_revision: u64) -> Result<(), String> {
-    let context = ContextSnapshot::capture().map_err(|error| error.to_string())?;
-    let selected_text = crate::selected_text::capture().map_err(|error| error.to_string())?;
-    validate_edit_identity(source, &context, &selected_text, input_revision)
-}
-
-fn validate_edit_identity(
-    source: &EditSource,
-    context: &ContextSnapshot,
-    selected_text: &str,
-    input_revision: u64,
-) -> Result<(), String> {
-    if input_revision != source.input_revision {
-        return Err("input changed before voice edit completed".into());
-    }
-    if context.application != source.application {
-        return Err("the foreground application changed before voice edit completed".into());
-    }
-    if context.window_title != source.window_title {
-        return Err("the foreground window changed before voice edit completed".into());
-    }
-    if selected_text != source.selected_text {
-        return Err("the selected text changed before voice edit completed".into());
-    }
-    Ok(())
 }
 
 fn prepare_transcript(text: &str, protocol: Option<&DictationProtocol>) -> String {
@@ -1129,29 +1074,6 @@ mod tests {
 
     use super::*;
 
-    #[test]
-    fn voice_edit_destination_requires_unchanged_input_app_window_and_selection() {
-        let source = EditSource {
-            application: Some("TextEdit".into()),
-            window_title: Some("Draft".into()),
-            selected_text: "original text".into(),
-            input_revision: 7,
-        };
-        let context = ContextSnapshot {
-            application: source.application.clone(),
-            browser_url: None,
-            window_title: source.window_title.clone(),
-            selected_text: None,
-            input_revision: None,
-        };
-
-        assert!(validate_edit_identity(&source, &context, "original text", 7).is_ok());
-        assert!(validate_edit_identity(&source, &context, "original text", 8).is_err());
-        assert!(validate_edit_identity(&source, &context, "other text", 7).is_err());
-        let mut other_window = context.clone();
-        other_window.window_title = Some("Other".into());
-        assert!(validate_edit_identity(&source, &other_window, "original text", 7).is_err());
-    }
     use crate::app_settings::TextReplacement;
     use crate::dictation::resample_for_parakeet;
     use crate::meeting::MeetingSource;

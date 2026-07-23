@@ -161,7 +161,7 @@ pub fn run(event_path: &Path, device: Option<&str>, shutdown: &AtomicBool) -> Re
             }
         };
         if recording {
-            capture.push(&chunk);
+            let _ = capture.push(&chunk, Instant::now());
         } else {
             capture.keep_warm(&chunk);
         }

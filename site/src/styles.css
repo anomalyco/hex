@@ -38,6 +38,10 @@ a {
   font: inherit;
 }
 
+button {
+  color: inherit;
+}
+
 a {
   color: inherit;
   text-decoration: none;
@@ -67,6 +71,8 @@ a {
 }
 
 .header {
+  position: relative;
+  z-index: 1;
   display: flex;
   width: 100%;
   max-width: 88rem;
@@ -92,7 +98,8 @@ a {
 }
 
 .wordmark:focus-visible,
-.download:focus-visible {
+.download:focus-visible,
+.mic-button:focus-visible {
   outline: 2px solid #a9b9ff;
   outline-offset: 4px;
 }
@@ -119,6 +126,8 @@ a {
 }
 
 .hero {
+  position: relative;
+  z-index: 1;
   display: flex;
   align-self: center;
   flex-direction: column;
@@ -137,6 +146,12 @@ a {
   gap: 1rem;
 }
 
+.hero__title {
+  display: flex;
+  align-items: center;
+  gap: clamp(0.85rem, 2vw, 1.35rem);
+}
+
 h1,
 p {
   margin: 0;
@@ -149,6 +164,125 @@ h1 {
   font-weight: 540;
   letter-spacing: -0.055em;
   text-wrap: balance;
+}
+
+.teeth-canvas {
+  position: fixed;
+  z-index: -1;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0.9;
+  pointer-events: none;
+}
+
+.mic-control {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.mic-button {
+  position: relative;
+  display: grid;
+  width: 2.8rem;
+  height: 2.8rem;
+  padding: 0;
+  border: 1px solid #3b3e45;
+  border-radius: 50%;
+  place-items: center;
+  color: #a7aab0;
+  background: rgba(15, 17, 20, 0.72);
+  box-shadow: 0 0.55rem 1.8rem rgba(0, 0, 0, 0.28);
+  cursor: pointer;
+  backdrop-filter: blur(0.7rem);
+}
+
+.mic-button:hover {
+  border-color: #777c87;
+  color: #f3f3f0;
+}
+
+.mic-button:disabled {
+  cursor: wait;
+}
+
+.mic-button--listening {
+  border-color: rgba(243, 243, 240, 0.75);
+  color: #fff;
+  background: rgba(24, 26, 31, 0.8);
+}
+
+.mic-button--listening::before,
+.mic-button--requesting::before {
+  position: absolute;
+  inset: -0.35rem;
+  border: 1px solid rgba(211, 222, 255, 0.45);
+  border-radius: inherit;
+  content: "";
+  animation: mic-breathe 1.8s ease-in-out infinite;
+}
+
+.mic-button--error {
+  border-color: #9d604e;
+  color: #eaa18d;
+}
+
+.mic-button__glyph {
+  position: relative;
+  width: 0.62rem;
+  height: 0.9rem;
+  border: 1.5px solid currentColor;
+  border-radius: 999px;
+}
+
+.mic-button__glyph::before {
+  position: absolute;
+  top: 0.34rem;
+  left: 50%;
+  width: 1rem;
+  height: 0.78rem;
+  border: 1.5px solid currentColor;
+  border-top: 0;
+  border-radius: 0 0 999px 999px;
+  content: "";
+  transform: translateX(-50%);
+}
+
+.mic-button__glyph::after {
+  position: absolute;
+  top: 1.02rem;
+  left: 50%;
+  width: 0.64rem;
+  height: 0.3rem;
+  border-top: 1.5px solid currentColor;
+  border-left: 1.5px solid currentColor;
+  content: "";
+  transform: translateX(-50%);
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+@keyframes mic-breathe {
+  0%,
+  100% {
+    opacity: 0.25;
+    transform: scale(0.96);
+  }
+
+  50% {
+    opacity: 0.8;
+    transform: scale(1.08);
+  }
 }
 
 .hero__copy p {
@@ -231,6 +365,15 @@ a.download:hover {
     line-height: 1.55;
   }
 
+  .hero__title {
+    gap: 0.65rem;
+  }
+
+  .mic-button {
+    width: 3rem;
+    height: 3rem;
+  }
+
   .download {
     min-height: 3.5rem;
   }
@@ -254,5 +397,10 @@ a.download:hover {
   *::before,
   *::after {
     scroll-behavior: auto !important;
+  }
+
+  .mic-button--listening::before,
+  .mic-button--requesting::before {
+    animation: none;
   }
 }

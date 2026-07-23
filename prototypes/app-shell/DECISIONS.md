@@ -1,5 +1,9 @@
 # Prototype Decisions
 
+**Status:** Archived. These decisions were inputs to the production app-shell
+work; use [`../../AGENTS.md`](../../AGENTS.md) and
+[`../../ROADMAP.md`](../../ROADMAP.md) for current requirements.
+
 - Meeting recording always starts explicitly.
 - If meeting-app microphone activity disappears during recording, ask before
   stopping: `Keep Recording` or `Stop & Transcribe`.
@@ -23,5 +27,4 @@
 - Delight is selective. Reserve stronger motion for the dictation HUD, meeting
   state transitions, and occasional meaningful completion moments.
 
-These are prototype inputs, not a production specification. Delete or promote
-this file when a shell direction is selected.
+These are prototype inputs, not a production specification.

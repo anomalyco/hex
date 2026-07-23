@@ -381,6 +381,7 @@ fn send_input(context: &EventTapContext, input: InputEvent) -> bool {
 struct ShortcutSuppression {
     paste_key_pressed: bool,
     dictation_key_pressed: Option<u16>,
+    modifier_shortcut_pressed: bool,
     escape_pressed: bool,
 }
 
@@ -388,6 +389,7 @@ impl ShortcutSuppression {
     fn reset(&mut self) {
         self.paste_key_pressed = false;
         self.dictation_key_pressed = None;
+        self.modifier_shortcut_pressed = false;
         self.escape_pressed = false;
     }
 
@@ -419,6 +421,21 @@ impl ShortcutSuppression {
         paste_enabled: bool,
     ) -> bool {
         match input {
+            InputEvent::Flags(flags)
+                if delivered
+                    && hotkey.key_code.is_none()
+                    && !hotkey.is_empty()
+                    && hotkey.exact_modifiers(flags) =>
+            {
+                self.modifier_shortcut_pressed = true;
+                true
+            }
+            InputEvent::Flags(flags)
+                if self.modifier_shortcut_pressed && !hotkey.required_modifiers_down(flags) =>
+            {
+                self.modifier_shortcut_pressed = false;
+                true
+            }
             InputEvent::Key {
                 code, down: true, ..
             } if paste_enabled && delivered && paste_action(input, paste_key_code).is_some() => {
@@ -795,12 +812,44 @@ mod tests {
 
     const NO_FLAGS: u64 = 0;
     const SHIFT: u64 = 1 << 17;
+    const FUNCTION: u64 = 1 << 23;
 
     fn option_binding() -> RuntimeHotkey {
         RuntimeHotkey {
             modifiers: OPTION_KEY_MASK,
             key_code: None,
         }
+    }
+
+    fn function_binding() -> RuntimeHotkey {
+        RuntimeHotkey {
+            modifiers: FUNCTION,
+            key_code: None,
+        }
+    }
+
+    #[test]
+    fn standalone_function_modifier_starts_and_finishes_dictation() {
+        let now = Instant::now();
+        let mut hotkey = DictationHotkey::with_binding(false, now, 47, true, function_binding());
+
+        assert_eq!(
+            hotkey.process(InputEvent::Flags(FUNCTION), now),
+            Some(HotkeyAction::Start)
+        );
+        assert_eq!(
+            hotkey.process(InputEvent::Flags(NO_FLAGS), now + Duration::from_secs(1)),
+            Some(HotkeyAction::Finish)
+        );
+    }
+
+    #[test]
+    fn standalone_function_modifier_is_suppressed_after_delivery() {
+        let mut suppression = ShortcutSuppression::default();
+
+        assert!(suppression.process(InputEvent::Flags(FUNCTION), 47, function_binding(), true));
+        assert!(suppression.process(InputEvent::Flags(NO_FLAGS), 47, function_binding(), true));
+        assert!(!suppression.modifier_shortcut_pressed);
     }
 
     fn test_hotkey(trigger_down: bool, now: Instant) -> DictationHotkey {

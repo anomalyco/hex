@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use crate::context::{ContextSelector, ContextSnapshot};
 
 const PROTOCOL_PROMPT: &str = "You transform dictated speech into replacement text. Return only the text that should be pasted. Do not add an explanation, label, alternative, or Markdown fence.";
-const EDIT_PROTOCOL_PROMPT: &str = "You edit selected text according to a dictated instruction. Return only the complete replacement text. Preserve meaning, formatting, and details unless the instruction asks you to change them. Do not add an explanation, label, alternative, or Markdown fence.";
+const VOICE_ACTION_PROTOCOL_PROMPT: &str = "You execute a one-off voice instruction. When selected text is provided, transform or use it as instructed. When no text is selected, generate the requested text. Return only the exact paste-ready result without an explanation, label, alternative, or Markdown fence.";
 static MODEL_CATALOG: OnceLock<ModelCatalog> = OnceLock::new();
 
 #[derive(Clone)]
@@ -199,43 +199,48 @@ impl Profiles {
         }
     }
 
-    pub fn process_edit_cancellable(
+    pub fn process_voice_action_cancellable(
         &self,
         instruction: &str,
-        selected_text: &str,
+        selected_text: Option<&str>,
         context: &ContextSnapshot,
         cancelled: &AtomicBool,
     ) -> Processed {
-        let profile = self.select(context);
-        let prompt = edit_prompt(instruction, selected_text, context);
-        let deadline = profile
-            .and_then(|profile| profile.deadline)
-            .unwrap_or(self.deadline);
+        let settings = crate::app_settings::voice_action_settings();
+        let prompt = voice_action_prompt(instruction, selected_text, context);
+        let deadline = Duration::from_secs(settings.deadline_seconds.max(1));
         let started = Instant::now();
-        match generate_cancellable(
-            &prompt,
-            profile.and_then(|profile| profile.model.as_ref()),
-            deadline,
-            cancelled,
-        ) {
+        let model = match settings.model.as_deref() {
+            None => None,
+            Some(key) => {
+                let Some((provider, id)) = key.split_once('/') else {
+                    return voice_action_failure(
+                        started,
+                        "Voice Action model must use provider/model format".into(),
+                    );
+                };
+                Some(Model {
+                    provider: provider.into(),
+                    id: id.into(),
+                    variant: settings.variant.clone(),
+                })
+            }
+        };
+        match generate_cancellable(&prompt, model.as_ref(), deadline, cancelled) {
             Ok(text) if !text.trim().is_empty() => {
                 let latency_ms = started.elapsed().as_millis() as u64;
-                tracing::info!(latency_ms, "selected text editing completed");
+                tracing::info!(latency_ms, "voice action completed");
                 Processed {
-                    text,
+                    text: text.trim().into(),
                     observation: Some(ProcessingObservation {
-                        profile: "Edit selection".into(),
+                        profile: "Voice Action".into(),
                         latency_ms,
                         fallback: None,
                     }),
                 }
             }
-            Ok(_) => edit_fallback(
-                selected_text,
-                started,
-                "processor returned empty text".into(),
-            ),
-            Err(error) => edit_fallback(selected_text, started, error.to_string()),
+            Ok(_) => voice_action_failure(started, "processor returned empty text".into()),
+            Err(error) => voice_action_failure(started, error.to_string()),
         }
     }
 }
@@ -396,21 +401,28 @@ fn prompt(profile: &Profile, transcript: &str, context: &ContextSnapshot) -> Str
     )
 }
 
-fn edit_prompt(instruction: &str, selected_text: &str, context: &ContextSnapshot) -> String {
+fn voice_action_prompt(
+    instruction: &str,
+    selected_text: Option<&str>,
+    context: &ContextSnapshot,
+) -> String {
     let application = context.application.as_deref().unwrap_or("unknown");
     let host = context.browser_host().unwrap_or("none");
+    let selection = selected_text.map_or_else(
+        || "No text was selected. Generate the requested paste-ready text.".into(),
+        |text| format!("Selected text ({} UTF-8 bytes):\n{text}", text.len()),
+    );
     format!(
-        "{EDIT_PROTOCOL_PROMPT}\n\nForeground application: {application}\nBrowser host: {host}\n\nDictated instruction ({} UTF-8 bytes):\n{instruction}\n\nSelected text ({} UTF-8 bytes):\n{selected_text}",
-        instruction.len(),
-        selected_text.len(),
+        "{VOICE_ACTION_PROTOCOL_PROMPT}\n\nForeground application: {application}\nBrowser host: {host}\n\nDictated instruction ({} UTF-8 bytes):\n{instruction}\n\n{selection}",
+        instruction.len()
     )
 }
 
-fn edit_fallback(selected_text: &str, started: Instant, error: String) -> Processed {
+fn voice_action_failure(started: Instant, error: String) -> Processed {
     Processed {
-        text: selected_text.into(),
+        text: String::new(),
         observation: Some(ProcessingObservation {
-            profile: "Edit selection".into(),
+            profile: "Voice Action".into(),
             latency_ms: started.elapsed().as_millis() as u64,
             fallback: Some(error),
         }),
@@ -449,26 +461,66 @@ fn generate_cancellable(
 ) -> Result<String> {
     let request = Request { prompt, model };
     let data = serde_json::to_string(&request)?;
-    let mut command = Command::new(opencode_executable());
-    command
-        .args(["api", "post", "/api/generate", "--data", &data])
-        .stdin(Stdio::null());
-    let output = run_command(command, deadline, "/api/generate", cancelled)?;
-    let status = output.status;
-    let stdout = output.stdout;
-    let stderr = output.stderr;
-    if !status.success() {
-        return Err(eyre!(
-            "opencode2 exited with {status}: {}",
-            String::from_utf8_lossy(&stderr).trim()
-        ));
+    let started = Instant::now();
+    for attempt in 0..2 {
+        let remaining = deadline.saturating_sub(started.elapsed());
+        if remaining.is_zero() {
+            return Err(eyre!(
+                "opencode2 /api/generate exceeded {} seconds",
+                deadline.as_secs()
+            ));
+        }
+        let mut command = Command::new(opencode_executable());
+        command
+            .args(["api", "post", "/api/generate", "--data", &data])
+            .stdin(Stdio::null());
+        let output = run_command(command, remaining, "/api/generate", cancelled)?;
+        let status = output.status;
+        if !status.success() {
+            return Err(eyre!(
+                "opencode2 exited with {status}: {}",
+                String::from_utf8_lossy(&output.stderr).trim()
+            ));
+        }
+        let response: Response = serde_json::from_slice(&output.stdout)
+            .wrap_err("opencode2 returned an invalid generation response")?;
+        match response {
+            Response::Success { data } => return Ok(data.text),
+            Response::Error { message } if attempt == 0 && retryable_generation_error(&message) => {
+                tracing::warn!(%message, "OpenCode model unavailable during startup; retrying");
+                wait_for_generation_retry(started, deadline, cancelled)?;
+            }
+            Response::Error { message } => {
+                return Err(eyre!("OpenCode generation failed: {message}"));
+            }
+        }
     }
-    let response: Response = serde_json::from_slice(&stdout)
-        .wrap_err("opencode2 returned an invalid generation response")?;
-    match response {
-        Response::Success { data } => Ok(data.text),
-        Response::Error { message } => Err(eyre!("OpenCode generation failed: {message}")),
+    unreachable!("generation loop returns on its second attempt")
+}
+
+fn retryable_generation_error(message: &str) -> bool {
+    message.starts_with("Model unavailable:")
+}
+
+fn wait_for_generation_retry(
+    started: Instant,
+    deadline: Duration,
+    cancelled: &AtomicBool,
+) -> Result<()> {
+    let wait_started = Instant::now();
+    while wait_started.elapsed() < Duration::from_millis(1_500) {
+        if cancelled.load(Ordering::Acquire) {
+            return Err(eyre!("opencode2 /api/generate was cancelled"));
+        }
+        if started.elapsed() >= deadline {
+            return Err(eyre!(
+                "opencode2 /api/generate exceeded {} seconds",
+                deadline.as_secs()
+            ));
+        }
+        thread::sleep(Duration::from_millis(20));
     }
+    Ok(())
 }
 
 struct CommandOutput {
@@ -606,10 +658,10 @@ mod tests {
     }
 
     #[test]
-    fn edit_prompt_keeps_the_instruction_separate_from_selected_text() {
-        let prompt = edit_prompt(
+    fn voice_action_prompt_keeps_the_instruction_separate_from_selected_text() {
+        let prompt = voice_action_prompt(
             "Make this concise.",
-            "This is the original selected paragraph.",
+            Some("This is the original selected paragraph."),
             &context("Slack", None),
         );
 
@@ -620,7 +672,16 @@ mod tests {
                 "Selected text (40 UTF-8 bytes):\nThis is the original selected paragraph."
             )
         );
-        assert!(prompt.contains("Return only the complete replacement text"));
+        assert!(prompt.contains("Return only the exact paste-ready result"));
+    }
+
+    #[test]
+    fn voice_action_prompt_supports_generation_without_a_selection() {
+        let prompt =
+            voice_action_prompt("Write a funny release note.", None, &context("Slack", None));
+
+        assert!(prompt.contains("No text was selected"));
+        assert!(prompt.contains("Write a funny release note."));
     }
 
     #[test]
@@ -654,6 +715,27 @@ mod tests {
             Ok(_) => panic!("cancelled command unexpectedly completed"),
             Err(error) => error,
         };
+
+        assert!(error.to_string().contains("was cancelled"));
+        assert!(started.elapsed() < Duration::from_secs(1));
+    }
+
+    #[test]
+    fn only_model_unavailability_is_retried() {
+        assert!(retryable_generation_error(
+            "Model unavailable: openai/gpt-5.6-sol"
+        ));
+        assert!(!retryable_generation_error("Provider request failed"));
+        assert!(!retryable_generation_error("processor returned empty text"));
+    }
+
+    #[test]
+    fn generation_retry_wait_observes_cancellation() {
+        let cancelled = AtomicBool::new(true);
+        let started = Instant::now();
+
+        let error = wait_for_generation_retry(started, Duration::from_secs(30), &cancelled)
+            .expect_err("cancelled retry unexpectedly waited");
 
         assert!(error.to_string().contains("was cancelled"));
         assert!(started.elapsed() < Duration::from_secs(1));

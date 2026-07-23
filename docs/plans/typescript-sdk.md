@@ -1,7 +1,14 @@
 # HEX Local Transcription Service and SDK - Implementation Plan
 
-Companion to `SDK_SPEC.md`. The host application owns microphone capture and
-levels. HEX Service owns model preparation, warm runtime state, and inference.
+**Status:** Active. Service phases 1-3, the signed macOS artifact proof, and the
+direct-child embedded runtime tracer are implemented. Promise and Effect
+TypeScript wrappers now pass fake-helper tests. Signed helper packaging, an
+Electron bridge, release validation, and a real consumer remain.
+
+Companion to
+[`../specs/local-transcription-service.md`](../specs/local-transcription-service.md).
+The host application owns microphone capture and levels. HEX Service owns model
+preparation, warm runtime state, and inference.
 
 ## Invariants
 
@@ -32,7 +39,7 @@ levels. HEX Service owns model preparation, warm runtime state, and inference.
 ## Phase 2 - Model Surface (Implemented)
 
 - Stable explicit model wire IDs.
-- `GET /models` with selected, installed, verified, managed, size, and language
+- `GET /models` with installed, verified, managed, size, and language
   metadata.
 - `POST /models/{id}/prepare` with SSE download, verification, and loading
   progress.
@@ -66,39 +73,57 @@ levels. HEX Service owns model preparation, warm runtime state, and inference.
   conversion, sample-rate conversion, arbitrary duration above 60 seconds,
   queue pressure, cancellation, model-switch failure, and raw transcript output.
 
-## Phase 4 - Frictionless Service Bootstrap
+## Phase 4 - Embedded Helper Bootstrap (In Progress)
 
 - Build the minimal headless service artifact without GPUI, Sparkle, Moonshine,
   microphone entitlement, or App Sandbox.
 - Developer ID sign, notarize, staple, and produce a content-addressed archive.
-- Ship the archive as inert data in optional architecture-specific npm
-  packages; use no `postinstall` script.
-- On explicit host use, acquire a bootstrap lock, verify digest, Team ID,
-  signing identifier, signature, and notarization, then atomically activate a
-  version in Application Support.
-- Demand-launch and reuse a compatible winner with OpenCode-style election.
-- Define compatible-version replacement, rollback, retained versions, and
-  cleanup ownership.
-- Keep full HEX.app and the service from competing for model runtime ownership;
-  migrate full HEX inference to the service only after the external consumer
-  works.
+- Ship the helper as inert data in optional architecture-specific npm packages;
+  use no `postinstall` script.
+- On explicit host use, verify digest, Team ID, signing identity, and
+  notarization, then spawn the helper directly from the host process. Do not
+  launch it through Launch Services.
+- Read the one-line authenticated endpoint handshake from stdout, keep stdin
+  open as the host-lifetime lease, and terminate the exact child on shutdown.
+- Keep verified model artifacts in one shared per-user store. Selection, warm
+  runtime, inference queue, endpoint, and lifecycle remain per host.
+- Define helper replacement and cleanup ownership without introducing service
+  election or a detached daemon.
 
-The current proof builds a 19 MB signed/notarized arm64 `HEX Service.app`
-without microphone entitlement, installs it to versioned Application Support
-storage, registers it with Launch Services, verifies authenticated discovery
-and model listing, and shuts down cleanly.
+The signed artifact proof still builds a 19 MB notarized arm64
+`HEX Service.app` without microphone entitlement. The embedded runtime tracer
+now directly spawns the executable, returns its endpoint over stdout, publishes
+no discovery file, and exits when the host closes stdin. The packaging proof
+must next become a directly spawned helper artifact rather than a
+LaunchServices-owned application.
 
-## Phase 5 - TypeScript SDK
+`@hex-ai/service-darwin-arm64` now defines the first platform package and
+`scripts/prepare-typescript-sdk.sh` inserts the signed/notarized helper from the
+existing release proof. `@hex-ai/client` installs it optionally and resolves it
+automatically; the packages remain private until artifact validation and the
+first consumer are complete.
 
-- Create `sdk/typescript/` using Bun and Vitest; add Changesets when the package
-  becomes publishable.
-- Implement Node/Electron-main discovery, authentication, version negotiation,
-  launch/bootstrap, health, capabilities, model listing/preparation, SSE parsing,
-  audio upload, cancellation, and typed errors.
+## Phase 5 - TypeScript SDK (In Progress)
+
+- `sdk/typescript/` now uses Bun, TypeScript, and Vitest. It remains private;
+  add Changesets when the package becomes publishable.
+- The Promise entrypoint implements direct spawning, bounded handshake parsing,
+  authentication, health, capabilities, model listing/preparation, SSE parsing,
+  audio upload, cancellation, and exact-child shutdown.
+- The `/effect` entrypoint implements scoped acquisition, schema-backed tagged
+  errors, Effect operations, model-progress Streams, and a service Layer using
+  the local Effect v4 API as the source of truth.
+- The client now selects and resolves an automatically installed
+  architecture-specific helper package; an explicit command remains only as an
+  advanced test override.
+- Finish release-time helper identity verification and protocol version
+  negotiation once the signed package artifact is prepared.
 - Provide a narrow Electron preload/main bridge example. The host renderer owns
   `getUserMedia`, recording, levels, and WAV encoding.
-- Test every connect result, model progress ordering, service disappearance,
-  bounded upload failures, abort, and a clean fake-service consumer flow.
+- Fake-helper tests cover successful Promise and Effect flows, progress ordering,
+  scope and idempotent shutdown, invalid handshakes, and early helper exit. Add
+  bounded upload failures, interruption during preparation and inference, and
+  packaged-helper concurrency coverage.
 - Inspect the packed npm artifacts and verify from a clean Electron consumer
   before publication.
 
@@ -125,4 +150,6 @@ git diff --check
 ./scripts/build-service-app.sh
 ./scripts/prepare-service-app.sh
 ./scripts/smoke-service-app.sh
+./scripts/smoke-embedded-service.sh
+cd sdk/typescript && bun run check && bun run test && bun run build
 ```

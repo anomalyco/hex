@@ -1,5 +1,11 @@
 # Transcription Runtime Benchmark
 
+**Status:** Historical benchmark method and provisional M2 Max results. Use the
+commands here to reproduce measurements; do not treat the provisional corpus as
+a current model-selection decision.
+
+Run every command from the repository root.
+
 ## Goal
 
 Compare HEX transcription runtimes on the same M2 Max inputs without changing

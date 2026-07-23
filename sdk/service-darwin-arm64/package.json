@@ -1,0 +1,16 @@
+{
+  "name": "@hex-ai/service-darwin-arm64",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Signed native HEX transcription helper for Apple Silicon macOS",
+  "license": "UNLICENSED",
+  "os": ["darwin"],
+  "cpu": ["arm64"],
+  "files": [
+    "bin/hex-service",
+    "README.md"
+  ],
+  "exports": {
+    "./package.json": "./package.json"
+  }
+}

@@ -12,11 +12,13 @@
     "@fontsource-variable/inter": "^5.3.0",
     "motion": "^12.42.2",
     "react": "^19.2.7",
-    "react-dom": "^19.2.7"
+    "react-dom": "^19.2.7",
+    "three": "^0.185.1"
   },
   "devDependencies": {
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
+    "@types/three": "^0.185.1",
     "@vitejs/plugin-react": "^6.0.3",
     "typescript": "^7.0.2",
     "vite": "^8.1.5"

@@ -369,6 +369,7 @@ pub struct DictationCapture {
 
 struct Recording {
     started_at: Instant,
+    intentional: bool,
     samples: Vec<f32>,
     source_samples: usize,
     source_rate: u32,
@@ -420,6 +421,7 @@ impl Recording {
             .transpose()?;
         Ok(Self {
             started_at,
+            intentional: false,
             samples: Vec::with_capacity(samples_for(
                 INITIAL_RECORDING_CAPACITY,
                 PARAKEET_SAMPLE_RATE,
@@ -528,6 +530,10 @@ impl DictationCapture {
         self.ring.extend(samples);
     }
 
+    pub fn is_recording(&self) -> bool {
+        self.recording.is_some()
+    }
+
     pub fn start(&mut self, now: Instant) {
         self.start_with_pre_roll(now, PRE_ROLL_DURATION, false);
     }
@@ -553,6 +559,7 @@ impl DictationCapture {
         let mut recording = recording.with_environment(environment);
         #[cfg(not(target_os = "macos"))]
         let mut recording = recording;
+        recording.intentional = intentional;
         let skip = self.ring.len() - pre_roll;
         let (front, back) = self.ring.as_slices();
         if skip < front.len() {
@@ -564,14 +571,26 @@ impl DictationCapture {
         self.recording = Some(recording);
     }
 
-    pub fn push(&mut self, samples: &[f32]) {
+    pub fn push(&mut self, samples: &[f32], now: Instant) -> bool {
+        let became_intentional = self.become_intentional(now);
         if let Some(recording) = &mut self.recording {
-            #[cfg(target_os = "macos")]
-            if recording.started_at.elapsed() >= MINIMUM_HOLD_DURATION {
-                recording.environment.activate();
-            }
             recording.push(samples);
         }
+        became_intentional
+    }
+
+    pub fn become_intentional(&mut self, now: Instant) -> bool {
+        let Some(recording) = &mut self.recording else {
+            return false;
+        };
+        let became_intentional = !recording.intentional
+            && now.duration_since(recording.started_at) >= MINIMUM_HOLD_DURATION;
+        recording.intentional |= became_intentional;
+        #[cfg(target_os = "macos")]
+        if became_intentional {
+            recording.environment.activate();
+        }
+        became_intentional
     }
 
     pub fn cancel(&mut self) {
@@ -605,11 +624,33 @@ mod tests {
         let mut capture = DictationCapture::new(16_000);
         let start = Instant::now();
         capture.start(start);
-        capture.push(&vec![0.5; 1_600]);
+        let _ = capture.push(&vec![0.5; 1_600], start + Duration::from_millis(100));
         assert!(matches!(
             capture.finish(start + Duration::from_millis(100)),
             Finish::Discard
         ));
+    }
+
+    #[test]
+    fn modifier_capture_becomes_intentional_only_after_the_hold_threshold() {
+        let mut capture = DictationCapture::new(16_000);
+        let start = Instant::now();
+        capture.start(start);
+
+        assert!(!capture.push(&[0.5; 80], start + Duration::from_millis(299)));
+        assert!(capture.push(&[0.5; 80], start + MINIMUM_HOLD_DURATION));
+        assert!(!capture.push(&[0.5; 80], start + Duration::from_millis(301)));
+    }
+
+    #[test]
+    fn release_can_commit_the_intentional_transition_between_audio_chunks() {
+        let mut capture = DictationCapture::new(16_000);
+        let start = Instant::now();
+        capture.start(start);
+
+        assert!(!capture.push(&[0.5; 80], start + Duration::from_millis(299)));
+        assert!(capture.become_intentional(start + MINIMUM_HOLD_DURATION));
+        assert!(!capture.become_intentional(start + Duration::from_millis(301)));
     }
 
     #[test]
@@ -626,7 +667,7 @@ mod tests {
         capture.keep_warm(&vec![0.25; 16_000]);
         let start = Instant::now();
         capture.start(start);
-        capture.push(&vec![0.5; 8_000]);
+        let _ = capture.push(&vec![0.5; 8_000], start + Duration::from_millis(500));
         let Finish::Transcribe(clip) = capture.finish(start + Duration::from_millis(500)) else {
             panic!("expected transcription")
         };
@@ -645,7 +686,7 @@ mod tests {
         let start = Instant::now();
 
         capture.start_voice(start);
-        capture.push(&[0.5; 8_000]);
+        let _ = capture.push(&[0.5; 8_000], start + Duration::from_millis(500));
 
         let Finish::Transcribe(clip) = capture.finish(start + Duration::from_millis(500)) else {
             panic!("expected transcription")
@@ -660,7 +701,7 @@ mod tests {
         let mut capture = DictationCapture::new(16_000);
         let start = Instant::now();
         capture.start(start);
-        capture.push(&vec![0.5; 61 * 16_000]);
+        let _ = capture.push(&vec![0.5; 61 * 16_000], start + Duration::from_secs(61));
 
         let Finish::Transcribe(clip) = capture.finish(start + Duration::from_secs(61)) else {
             panic!("expected transcription")

@@ -1,0 +1,9 @@
+{
+  "name": "hex-sdk-workspace",
+  "private": true,
+  "workspaces": [
+    "commands",
+    "typescript",
+    "service-*"
+  ]
+}

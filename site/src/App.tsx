@@ -1,4 +1,5 @@
 import * as m from "motion/react-m"
+import ChatteringTeeth from "./ChatteringTeeth"
 
 const DOWNLOAD_URL =
   "https://pub-089d681d41754031a4aefa7017d8c2fb.r2.dev/releases/HEX-latest-arm64.dmg"
@@ -48,7 +49,10 @@ export default function App() {
 
       <section className="hero">
         <div className="hero__copy">
-          <h1>Speak. It appears.</h1>
+          <div className="hero__title">
+            <h1>Speak. It appears.</h1>
+            <ChatteringTeeth />
+          </div>
           <p>
             Private, local dictation for {isLinux ? "Linux." : "Mac."} Hold Option, say what you mean,
             and HEX pastes it where you are.
