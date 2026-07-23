@@ -4,17 +4,44 @@ set -eu
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 mode=${1:-prepare}
 version=${HEX_VERSION:-$(cargo metadata --no-deps --format-version 1 --manifest-path "$root/Cargo.toml" | jq -r '.packages[0].version')}
-build_number=${HEX_BUILD_NUMBER:-}
+build_number=${HEX_BUILD_NUMBER:-$(printf '%s\n' "$version" | awk -F. '{ print ($1 * 10000) + ($2 * 100) + $3 }')}
 notary_profile=${HEX_NOTARY_PROFILE:-AC_PASSWORD}
 bucket=${HEX_RELEASE_BUCKET:-hex-releases}
 base_url=${HEX_RELEASE_BASE_URL:-https://pub-089d681d41754031a4aefa7017d8c2fb.r2.dev}
-release_notes=${HEX_RELEASE_NOTES:-}
+release_notes=${HEX_RELEASE_NOTES:-$root/docs/releases/$version.md}
 dist="$root/dist"
 updates="$dist/updates"
 artifact="HEX-$version-arm64.dmg"
 latest_artifact="HEX-latest-arm64.dmg"
 team_id=${VOICE_CONTROL_TEAM_ID:-QC99C9JE59}
 identity=${VOICE_CONTROL_CODESIGN_IDENTITY:-}
+
+if [ "$mode" != "prepare" ] && [ "$mode" != "publish" ]; then
+  echo "Usage: $0 [prepare|publish]" >&2
+  exit 1
+fi
+if [ -n "$(git -C "$root" status --porcelain)" ]; then
+  echo "Commit or remove all working-tree changes before releasing." >&2
+  exit 1
+fi
+upstream=$(git -C "$root" rev-parse --abbrev-ref '@{upstream}' 2>/dev/null || true)
+if [ -z "$upstream" ] || [ "$(git -C "$root" rev-parse HEAD)" != "$(git -C "$root" rev-parse "$upstream")" ]; then
+  echo "Push the release commit to its upstream branch before releasing." >&2
+  exit 1
+fi
+case "$build_number" in
+  ''|*[!0-9]*)
+    echo "HEX_BUILD_NUMBER must be a positive integer." >&2
+    exit 1
+    ;;
+esac
+published_build=$(curl --fail --silent --show-error "$base_url/appcast.xml" \
+  | sed -n 's:.*<sparkle:version>\([0-9][0-9]*\)</sparkle:version>.*:\1:p' \
+  | head -1)
+if [ -z "$published_build" ] || [ "$build_number" -le "$published_build" ]; then
+  echo "Build $build_number must be newer than published build ${published_build:-unknown}." >&2
+  exit 1
+fi
 
 if [ "$mode" = "publish" ]; then
   if [ ! -f "$dist/$artifact" ] || [ ! -f "$updates/appcast.xml" ]; then
@@ -43,16 +70,8 @@ if [ "$mode" = "publish" ]; then
   echo "$base_url/releases/$artifact"
   exit 0
 fi
-if [ "$mode" != "prepare" ]; then
-  echo "Usage: $0 [prepare|publish]" >&2
-  exit 1
-fi
-if [ -z "$build_number" ]; then
-  echo "Set HEX_BUILD_NUMBER to a monotonically increasing integer." >&2
-  exit 1
-fi
-if [ -z "$release_notes" ] || [ ! -f "$release_notes" ]; then
-  echo "Set HEX_RELEASE_NOTES to a Markdown release-notes file." >&2
+if [ ! -f "$release_notes" ]; then
+  echo "Add release notes at $release_notes or set HEX_RELEASE_NOTES." >&2
   exit 1
 fi
 

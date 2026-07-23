@@ -3,6 +3,7 @@ import ChatteringTeeth from "./ChatteringTeeth"
 
 const DOWNLOAD_URL =
   "https://pub-089d681d41754031a4aefa7017d8c2fb.r2.dev/releases/HEX-latest-arm64.dmg"
+const LINUX_INSTALL_URL = "https://github.com/anomalyco/hex#linux-x11-beta"
 
 function HexMark() {
   return (
@@ -61,11 +62,16 @@ export default function App() {
 
         <div className="hero__action">
           {isLinux ? (
-            <div className="download download--disabled" role="status">
+            <m.a
+              className="download"
+              href={LINUX_INSTALL_URL}
+              whileHover={{ y: -1 }}
+              whileTap={{ scale: 0.985 }}
+            >
               <LinuxMark />
-              <span>Linux download coming soon</span>
-              <span className="download__arrow" aria-hidden="true">&#8943;</span>
-            </div>
+              <span>Linux install guide</span>
+              <span className="download__arrow" aria-hidden="true">&#8599;</span>
+            </m.a>
           ) : (
             <m.a
               className="download"
@@ -79,7 +85,7 @@ export default function App() {
             </m.a>
           )}
           <p className="requirements">
-            {isLinux ? "x86_64  ·  Arch Linux beta" : "Apple silicon  ·  macOS 15+"}
+            {isLinux ? "Source install  ·  x86_64 Arch/X11 beta" : "Apple silicon  ·  macOS 15+"}
           </p>
         </div>
       </section>

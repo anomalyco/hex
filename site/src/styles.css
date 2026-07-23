@@ -336,13 +336,6 @@ a.download:hover {
   stroke-width: 1.7;
 }
 
-.download--disabled {
-  border-color: #292c31;
-  color: #8a8d93;
-  background: #15171a;
-  cursor: default;
-}
-
 .download__arrow {
   color: #686a6e;
   font-size: 1rem;
