@@ -49,6 +49,11 @@ const APPLE_SPEECH_RETRY_INTERVAL: Duration = Duration::from_secs(5);
 const SIDEBAR_WIDTH: f32 = 170.0;
 const ACTIVITY_LIMIT: usize = 100;
 const OPENCODE_BETA_DOCS_URL: &str = "https://v2.opencode.ai/";
+const PERSONAL_COMMANDS_AGENT_INSTRUCTIONS: &str = concat!(
+    include_str!("../sdk/commands/workspace-template/AGENTS.md"),
+    "\n\n",
+    include_str!("../sdk/commands/workspace-template/.agents/skills/personal-commands/SKILL.md"),
+);
 
 const CANVAS: u32 = 0x111111;
 const SIDEBAR: u32 = 0x0e0e0e;
@@ -646,6 +651,7 @@ pub struct AppWindow {
     personal_workspace: PathBuf,
     personal_workspace_receiver: Option<Receiver<Result<PathBuf, String>>>,
     personal_workspace_error: Option<String>,
+    personal_commands_instructions_copied: bool,
     command_filter: ContextFilter,
     selected_command: Option<String>,
     events: Vec<VoiceEvent>,
@@ -947,6 +953,7 @@ impl AppWindow {
             personal_workspace,
             personal_workspace_receiver: None,
             personal_workspace_error: None,
+            personal_commands_instructions_copied: false,
             command_filter: ContextFilter::All,
             selected_command: None,
             events: Vec::new(),
@@ -4821,11 +4828,32 @@ impl AppWindow {
                     .into_any_element()
             }
         };
+        let instructions_copied = self.personal_commands_instructions_copied;
+        let copy_instructions = compact_button(if instructions_copied {
+            "Copied"
+        } else {
+            "Copy agent instructions"
+        })
+        .id("personal-commands-copy-instructions")
+        .on_click(cx.listener(|this, _, _, cx| {
+            match arboard::Clipboard::new()
+                .and_then(|mut clipboard| clipboard.set_text(PERSONAL_COMMANDS_AGENT_INSTRUCTIONS))
+            {
+                Ok(()) => {
+                    this.personal_commands_instructions_copied = true;
+                    cx.notify();
+                }
+                Err(error) => {
+                    tracing::warn!(%error, "could not copy personal command instructions")
+                }
+            }
+        }));
         let commands_position = self.commands_toggle.render_position(window);
         let commands_control = div()
             .flex()
             .items_center()
             .gap_2()
+            .child(copy_instructions)
             .child(config_control)
             .child(
                 div()
