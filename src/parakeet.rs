@@ -27,6 +27,7 @@ use crate::transcription_models::{TranscriptionSelection, model_path, validate};
 pub struct Parakeet {
     session: Session,
     options: RunOptions,
+    voice_timestamps: TimestampKind,
     name: String,
     selection: Option<TranscriptionSelection>,
     max_audio_samples: Option<usize>,
@@ -978,18 +979,16 @@ impl Parakeet {
                     })
                 })
             });
+        let (timestamps, voice_timestamps) = timestamp_kinds(capabilities.max_timestamp_kind);
         Ok(Self {
             session,
             options: RunOptions {
-                timestamps: match capabilities.max_timestamp_kind {
-                    TimestampKind::Word | TimestampKind::Token => TimestampKind::Word,
-                    TimestampKind::Auto | TimestampKind::Segment => TimestampKind::Segment,
-                    TimestampKind::None => TimestampKind::None,
-                },
+                timestamps,
                 language,
                 family,
                 ..Default::default()
             },
+            voice_timestamps,
             name,
             selection: selection.cloned(),
             max_audio_samples: (capabilities.max_audio_ms > 0)
@@ -1036,7 +1035,8 @@ impl Parakeet {
         {
             return self.transcribe(samples);
         }
-        let transcript = self.transcribe_segments(samples)?;
+        let voice_timestamps = self.voice_timestamps;
+        let transcript = self.transcribe_segments_with_timestamps(samples, voice_timestamps)?;
         let words = transcript
             .words
             .iter()
@@ -1064,6 +1064,32 @@ impl Parakeet {
             .run(samples, &self.options)
             .wrap_err("transcription failed")
     }
+
+    fn transcribe_segments_with_timestamps(
+        &mut self,
+        samples: &[f32],
+        timestamps: TimestampKind,
+    ) -> Result<Transcript> {
+        let mut options = self.options.clone();
+        options.timestamps = timestamps;
+        self.session
+            .run(samples, &options)
+            .wrap_err("transcription failed")
+    }
+}
+
+fn timestamp_kinds(maximum: TimestampKind) -> (TimestampKind, TimestampKind) {
+    let ordinary = if maximum == TimestampKind::None {
+        TimestampKind::None
+    } else {
+        TimestampKind::Segment
+    };
+    let voice = match maximum {
+        TimestampKind::Word | TimestampKind::Token => TimestampKind::Word,
+        TimestampKind::Auto | TimestampKind::Segment => TimestampKind::Segment,
+        TimestampKind::None => TimestampKind::None,
+    };
+    (ordinary, voice)
 }
 
 #[cfg(test)]
@@ -1077,6 +1103,26 @@ mod tests {
     use crate::app_settings::TextReplacement;
     use crate::dictation::resample_for_parakeet;
     use crate::meeting::MeetingSource;
+
+    #[test]
+    fn word_timestamps_are_reserved_for_voice_protocols() {
+        assert_eq!(
+            timestamp_kinds(TimestampKind::Word),
+            (TimestampKind::Segment, TimestampKind::Word)
+        );
+        assert_eq!(
+            timestamp_kinds(TimestampKind::Token),
+            (TimestampKind::Segment, TimestampKind::Word)
+        );
+        assert_eq!(
+            timestamp_kinds(TimestampKind::Segment),
+            (TimestampKind::Segment, TimestampKind::Segment)
+        );
+        assert_eq!(
+            timestamp_kinds(TimestampKind::None),
+            (TimestampKind::None, TimestampKind::None)
+        );
+    }
 
     #[test]
     fn replacements_follow_control_stripping_and_stay_corrected_through_fallback() {
