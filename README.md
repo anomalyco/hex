@@ -1,114 +1,120 @@
 # HEX
 
-HEX is a private voice dictation app for macOS and Linux X11. Hold a shortcut,
-speak, and release to transcribe and paste into the app you are using.
+HEX is local-first voice dictation for Apple silicon Macs running macOS 15 or
+newer. Hold a shortcut, speak, and release. HEX transcribes on your Mac and
+pastes the result into the app you are using.
 
-Speech transcription runs locally. Optional OpenCode processing uses the model
-provider configured in OpenCode.
+[Download the latest signed DMG](https://pub-089d681d41754031a4aefa7017d8c2fb.r2.dev/releases/HEX-latest-arm64.dmg)
 
-## Install On macOS
+## Install HEX
 
-HEX requires an Apple silicon Mac running macOS 15 or newer.
-
-1. [Download the latest signed DMG](https://pub-089d681d41754031a4aefa7017d8c2fb.r2.dev/releases/HEX-latest-arm64.dmg).
-2. Open the DMG and drag HEX into Applications.
-3. Launch HEX from Applications.
-4. Follow setup to grant Microphone, Input Monitoring, and Accessibility access
-   and install a transcription model.
+1. Download and open the DMG.
+2. Drag HEX into Applications, then launch it.
+3. Complete setup:
+   - **Microphone** lets HEX record while you dictate.
+   - **Input Monitoring** lets HEX detect its shortcut globally.
+   - **Accessibility** lets HEX paste into the foreground app.
+   - **Transcription model** downloads the speech model that runs locally.
 
 HEX checks for signed updates automatically. Use **HEX > Check for Updates...**
 to check immediately.
 
-## Dictate
+## Dictate Anywhere
 
-Hold **Option**, speak, then release. HEX transcribes your speech and pastes it
-into the foreground app.
+Hold **Option**, speak, then release. HEX transcribes and pastes at the current
+focus.
 
-- Tap and release in under 300 ms to discard the capture.
-- Double-tap Option to lock recording, then press Option again to finish.
+- Double-tap Option to keep recording; press Option again to finish.
 - Press Escape to cancel.
 - Press Option-Shift-V to paste the last completed dictation again.
 
-Change the shortcut, microphone, language, transcription model, sound behavior,
-feedback volume, launch-at-login setting, and Dock visibility from HEX settings.
+Settings let you change the shortcut, microphone, language, local model,
+recording behavior, feedback volume, launch-at-login behavior, and Dock
+visibility. Replacements correct names and preferred spellings before text is
+pasted.
 
-## Voice Action
+## Optional OpenCode Features
 
-Hold **Option-Command**, describe what you want OpenCode to produce, then
-release. If text is selected, HEX includes it as context; otherwise OpenCode
-generates the requested text. The paste-ready result is inserted at the current
-focus. You can also begin with Option and add Command without restarting the
-recording.
+[OpenCode](https://v2.opencode.ai/) is optional. Ordinary dictation does not
+require it.
 
-Voice Action requires the [OpenCode beta](https://v2.opencode.ai/). Choose its
-dedicated model and deadline in Settings. Failed, empty, cancelled, or timed-out
-actions paste nothing; ordinary dictation continues to use local transcription.
+- **Voice Action:** hold **Option-Command** and describe what you want. HEX sends
+  that instruction, selected text when Accessibility makes it available, and
+  the foreground application and Brave website hostname. It pastes the result
+  at the current focus.
+- **Post-processing:** enable OpenCode in Modes to rewrite a transcript before
+  paste. HEX sends the transcript, foreground application, and Brave website
+  hostname to the configured model provider. Modes can target applications and
+  websites in Brave Browser.
 
-## Optional Processing
-
-Enable **Post-process with OpenCode** in Modes to rewrite dictated text before
-it is pasted. You can use the default mode or create modes for particular apps
-and websites. If processing fails or times out, HEX pastes the local transcript
-instead.
+If post-processing fails, HEX pastes the local transcript. A failed Voice Action
+pastes nothing.
 
 ## Experimental Voice Commands
 
-Voice commands are available on macOS but disabled by default. Open
-**Commands** and enable recognition to install the local command model. The
-Commands pane lists the phrases available in the current app or browser.
+Voice commands are available on macOS and disabled by default. Enabling them
+starts continuous local command recognition and requires a separate local
+command model; HEX prompts to install it when needed. Dictation remains
+available while command recognition is off or asleep.
 
-Dictation remains available when command recognition is disabled or asleep.
+The Commands pane lists built-in phrases and filters them by global, application,
+and Brave website context. Advanced users can create
+`~/.config/hex/hex.config.ts` for custom TypeScript commands. Custom commands
+require [Bun](https://bun.sh/); HEX provides an Edit Config action and a prompt
+you can paste into a local coding agent.
 
-## Linux X11 Beta
+Custom command files and dependencies are executable local code with your user
+permissions. Review agent changes and install only dependencies you trust.
 
-The Linux beta targets x86_64 Arch Linux with X11, PipeWire or ALSA, and Vulkan
-libraries; inference can fall back to the CPU. It includes global hotkey
-dictation, automatic paste, shortcut rebinding, a tray app, and signed
-user-local updates. Voice commands, meetings, Wayland, and package-manager
-installation are not yet supported.
+## Privacy And Local Data
 
-Linux currently installs from source and requires access to this repository.
+- Speech transcription and command recognition run locally.
+- HEX does not save dictation audio by default.
+- An explicit `HEX_RETAIN_DICTATION_AUDIO` diagnostic setting can retain a
+  bounded number of owner-only WAV files.
+- Local diagnostic logs can contain transcript text, recognized command speech,
+  foreground application names, and Brave URLs. HEX does not upload these logs.
+- OpenCode features send the data described above to your configured model
+  provider.
+- Model installation and software updates require network access.
 
-Install the build dependencies and Rust toolchain:
-
-```sh
-sudo pacman -S --needed base-devel git rustup alsa-lib curl gtk3 libxkbcommon \
-  libxkbcommon-x11 libx11 libxcb openblas vulkan-headers vulkan-icd-loader \
-  shaderc spirv-headers clang cmake pkgconf
-rustup default stable
-```
-
-Clone and install HEX:
-
-```sh
-git clone https://github.com/anomalyco/hex.git
-cd hex
-./scripts/install-linux.sh
-~/.local/bin/hex model install
-~/.local/bin/hex app
-```
-
-Hold **Alt-Space** and release to transcribe and paste. Double-tap the shortcut
-to lock recording, press it again to finish, or press Escape to cancel. Change
-the shortcut from the HEX window.
-
-The installer adds a desktop launcher and an autostart entry. Installed beta
-builds check for signed updates at startup and every 24 hours.
+Review and redact diagnostics before sharing them.
 
 ## Troubleshooting
 
-If dictation does not start on macOS, open HEX and complete any permission or
-model action shown in setup. Permission changes may require restarting HEX.
+| Symptom | Check |
+| --- | --- |
+| HEX appears to disappear | Reopen it from Applications. The Dock icon is optional. |
+| The shortcut does nothing | Open HEX and verify Microphone and Input Monitoring access. |
+| Recording works but text does not paste | Verify Accessibility access. |
+| Transcription does not start | Confirm that the selected local model is installed. |
+| OpenCode features fail | Verify the separate OpenCode installation and model provider. |
+| Voice commands do not respond | Confirm Commands is enabled and voice control is awake. |
+| Website context does not match | Website-aware modes and commands currently require Brave Browser. |
 
-Runtime diagnostics are stored in:
+Permission changes may require quitting and reopening HEX.
+
+Diagnostics are stored at:
 
 - macOS: `~/Library/Application Support/voice-control/logs/`
-- Linux: `~/.local/share/voice-control/logs/` by default, or under
-  `XDG_DATA_HOME` when configured
+- Linux: `~/.local/share/voice-control/logs/`, or under `XDG_DATA_HOME`
 
-Captured dictation audio is not saved.
+## Linux X11 Beta
 
-## Project Documentation
+The Linux beta targets x86_64 Arch Linux on i3/X11. It supports local hotkey
+dictation, automatic paste, shortcut rebinding, a tray app, and user-local
+updates. It does not support voice commands, meetings, native Wayland, or a
+package-manager install.
 
-Architecture, active plans, technical specifications, research, and historical
-prototype material are organized in [`docs/README.md`](docs/README.md).
+See the [Linux installation guide](docs/linux.md) for the verified user-local
+installer, source-build fallback, requirements, and limitations.
+
+## Contributing
+
+Architecture, development commands, active plans, and historical research are
+indexed in [`docs/README.md`](docs/README.md). Start with
+[`CONTRIBUTING.md`](CONTRIBUTING.md) and [`AGENTS.md`](AGENTS.md) before changing
+the native application. Report vulnerabilities through the process in
+[`SECURITY.md`](SECURITY.md).
+
+HEX is available under the [MIT License](LICENSE).

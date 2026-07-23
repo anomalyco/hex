@@ -5,10 +5,12 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::ptr;
 use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
+use std::time::UNIX_EPOCH;
 
 use color_eyre::eyre::{Result, WrapErr, eyre};
 use fs2::FileExt;
 use libloading::Library;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::events::TranscriptPhase;
@@ -70,6 +72,34 @@ struct ModelComponent {
     sha256: &'static str,
 }
 
+#[derive(Deserialize, Serialize)]
+struct VerificationReceipt {
+    files: Vec<VerifiedFile>,
+}
+
+#[derive(Deserialize, Serialize)]
+struct VerifiedFile {
+    filename: String,
+    bytes: u64,
+    sha256: String,
+    modified_ns: u64,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct MoonshineConfig {
+    pub transcription_interval_ms: u32,
+    pub word_timestamps: bool,
+}
+
+impl Default for MoonshineConfig {
+    fn default() -> Self {
+        Self {
+            transcription_interval_ms: 200,
+            word_timestamps: false,
+        }
+    }
+}
+
 impl ModelComponent {
     const fn new(filename: &'static str, bytes: u64, sha256: &'static str) -> Self {
         Self {
@@ -81,12 +111,7 @@ impl ModelComponent {
 }
 
 pub fn model_installed() -> bool {
-    model_path().is_ok_and(|path| {
-        MODEL_COMPONENTS.iter().all(|component| {
-            fs::metadata(path.join(component.filename))
-                .is_ok_and(|metadata| metadata.len() == component.bytes)
-        })
-    })
+    model_path().is_ok_and(|path| verification_receipt_matches(&path))
 }
 
 pub fn install_model() -> Result<PathBuf> {
@@ -98,6 +123,14 @@ pub fn install_model() -> Result<PathBuf> {
     let lock = File::create(parent.join(".download.lock"))?;
     lock.lock_exclusive()?;
     if model_installed() {
+        return Ok(destination);
+    }
+    if destination.exists()
+        && MODEL_COMPONENTS.iter().all(|component| {
+            verify_component(&destination.join(component.filename), component).is_ok()
+        })
+    {
+        write_verification_receipt(&destination)?;
         return Ok(destination);
     }
 
@@ -150,10 +183,78 @@ pub fn install_model() -> Result<PathBuf> {
     }
     fs::rename(&staging, &destination)?;
     File::open(parent)?.sync_all()?;
+    write_verification_receipt(&destination)?;
     if previous.exists() {
         fs::remove_dir_all(previous)?;
     }
     Ok(destination)
+}
+
+fn verification_receipt_path(model: &Path) -> PathBuf {
+    model.join(".verified.json")
+}
+
+fn modified_ns(metadata: &fs::Metadata) -> Option<u64> {
+    metadata
+        .modified()
+        .ok()?
+        .duration_since(UNIX_EPOCH)
+        .ok()?
+        .as_nanos()
+        .try_into()
+        .ok()
+}
+
+fn verification_receipt_matches(model: &Path) -> bool {
+    let Ok(bytes) = fs::read(verification_receipt_path(model)) else {
+        return false;
+    };
+    let Ok(receipt) = serde_json::from_slice::<VerificationReceipt>(&bytes) else {
+        return false;
+    };
+    receipt.files.len() == MODEL_COMPONENTS.len()
+        && MODEL_COMPONENTS.iter().all(|component| {
+            let Some(file) = receipt
+                .files
+                .iter()
+                .find(|file| file.filename == component.filename)
+            else {
+                return false;
+            };
+            let Ok(metadata) = fs::metadata(model.join(component.filename)) else {
+                return false;
+            };
+            file.bytes == component.bytes
+                && file.sha256 == component.sha256
+                && metadata.len() == component.bytes
+                && modified_ns(&metadata) == Some(file.modified_ns)
+        })
+}
+
+fn write_verification_receipt(model: &Path) -> Result<()> {
+    let files = MODEL_COMPONENTS
+        .iter()
+        .map(|component| {
+            let metadata = fs::metadata(model.join(component.filename))?;
+            Ok(VerifiedFile {
+                filename: component.filename.into(),
+                bytes: component.bytes,
+                sha256: component.sha256.into(),
+                modified_ns: modified_ns(&metadata)
+                    .ok_or_else(|| eyre!("Moonshine model modification time is unavailable"))?,
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let destination = verification_receipt_path(model);
+    let temporary = destination.with_extension("json.tmp");
+    fs::write(
+        &temporary,
+        serde_json::to_vec(&VerificationReceipt { files })?,
+    )?;
+    File::open(&temporary)?.sync_all()?;
+    fs::rename(temporary, destination)?;
+    File::open(model)?.sync_all()?;
+    Ok(())
 }
 
 fn model_path() -> Result<PathBuf> {
@@ -188,6 +289,20 @@ fn verify_component(path: &Path, component: &ModelComponent) -> Result<()> {
 }
 
 #[repr(C)]
+struct MoonshineOption {
+    name: *const c_char,
+    value: *const c_char,
+}
+
+#[repr(C)]
+struct TranscriptWord {
+    text: *const c_char,
+    start: c_float,
+    end: c_float,
+    confidence: c_float,
+}
+
+#[repr(C)]
 struct TranscriptLine {
     text: *const c_char,
     audio_data: *const c_float,
@@ -203,7 +318,7 @@ struct TranscriptLine {
     speaker_spans: *const c_void,
     speaker_span_count: c_ulonglong,
     last_transcription_latency_ms: c_uint,
-    words: *const c_void,
+    words: *const TranscriptWord,
     word_count: c_ulonglong,
 }
 
@@ -213,8 +328,14 @@ struct Transcript {
     line_count: c_ulonglong,
 }
 
-type LoadTranscriber =
-    unsafe extern "C" fn(*const c_char, c_uint, *const c_void, c_ulonglong, c_int) -> c_int;
+type LoadTranscriber = unsafe extern "C" fn(
+    *const c_char,
+    c_uint,
+    *const MoonshineOption,
+    c_ulonglong,
+    c_int,
+) -> c_int;
+type GetVersion = unsafe extern "C" fn() -> c_int;
 type FreeTranscriber = unsafe extern "C" fn(c_int);
 type CreateStream = unsafe extern "C" fn(c_int, c_uint) -> c_int;
 type FreeStream = unsafe extern "C" fn(c_int, c_int) -> c_int;
@@ -226,6 +347,7 @@ type TranscribeStream = unsafe extern "C" fn(c_int, c_int, c_uint, *mut *mut Tra
 type ErrorToString = unsafe extern "C" fn(c_int) -> *const c_char;
 
 struct Functions {
+    get_version: GetVersion,
     free_transcriber: FreeTranscriber,
     create_stream: CreateStream,
     free_stream: FreeStream,
@@ -243,6 +365,17 @@ pub struct RecognitionUpdate {
     pub start_ms: u64,
     pub end_ms: u64,
     pub text: String,
+    #[cfg_attr(not(debug_assertions), allow(dead_code))]
+    pub words: Vec<RecognitionWord>,
+}
+
+#[derive(Clone, Debug)]
+#[cfg_attr(not(debug_assertions), allow(dead_code))]
+pub struct RecognitionWord {
+    pub text: String,
+    pub start_ms: u64,
+    pub end_ms: u64,
+    pub confidence: f32,
 }
 
 pub struct Moonshine {
@@ -256,10 +389,28 @@ pub struct Moonshine {
 
 impl Moonshine {
     pub fn load(project_root: &Path) -> Result<Self> {
-        Self::load_with_streams(project_root, 1)
+        let config = MoonshineConfig::default();
+        let moonshine = Self::load_with_config(project_root, 1, config)?;
+        tracing::info!(
+            moonshine_api_version = HEADER_VERSION,
+            model = "medium-streaming-en-quantized",
+            transcription_interval_ms = config.transcription_interval_ms,
+            word_timestamps = config.word_timestamps,
+            provider = "cpu",
+            "Moonshine command recognizer loaded"
+        );
+        Ok(moonshine)
     }
 
     pub fn load_with_streams(project_root: &Path, stream_count: usize) -> Result<Self> {
+        Self::load_with_config(project_root, stream_count, MoonshineConfig::default())
+    }
+
+    pub fn load_with_config(
+        project_root: &Path,
+        stream_count: usize,
+        config: MoonshineConfig,
+    ) -> Result<Self> {
         if stream_count == 0 {
             return Err(eyre!("Moonshine requires at least one stream"));
         }
@@ -280,6 +431,7 @@ impl Moonshine {
                 .wrap_err_with(|| format!("could not load {}", library_path.display()))?;
             let load: LoadTranscriber = *library.get(b"moonshine_load_transcriber_from_files\0")?;
             let functions = Functions {
+                get_version: *library.get(b"moonshine_get_version\0")?,
                 free_transcriber: *library.get(b"moonshine_free_transcriber\0")?,
                 create_stream: *library.get(b"moonshine_create_stream\0")?,
                 free_stream: *library.get(b"moonshine_free_stream\0")?,
@@ -289,13 +441,47 @@ impl Moonshine {
                 transcribe_stream: *library.get(b"moonshine_transcribe_stream\0")?,
                 error_to_string: *library.get(b"moonshine_error_to_string\0")?,
             };
+            let version = (functions.get_version)();
+            if version != HEADER_VERSION {
+                return Err(eyre!(
+                    "incompatible Moonshine API version: expected {HEADER_VERSION}, loaded {version}"
+                ));
+            }
             let _native = write_native();
             let path = CString::new(model_path.to_string_lossy().as_bytes())?;
+            let option_values = vec![
+                (
+                    "transcription_interval",
+                    format!(
+                        "{:.3}",
+                        f64::from(config.transcription_interval_ms) / 1_000.0
+                    ),
+                ),
+                ("vad_threshold", "0.5".into()),
+                ("vad_window_duration", "0.5".into()),
+                ("vad_look_behind_sample_count", "8192".into()),
+                ("vad_max_segment_duration", "15".into()),
+                ("return_audio_data", "false".into()),
+                ("word_timestamps", config.word_timestamps.to_string()),
+                ("identify_speakers", "false".into()),
+                ("ort_provider", "cpu".into()),
+            ];
+            let option_strings = option_values
+                .into_iter()
+                .map(|(name, value)| Ok((CString::new(name)?, CString::new(value)?)))
+                .collect::<Result<Vec<_>>>()?;
+            let options = option_strings
+                .iter()
+                .map(|(name, value)| MoonshineOption {
+                    name: name.as_ptr(),
+                    value: value.as_ptr(),
+                })
+                .collect::<Vec<_>>();
             let transcriber = load(
                 path.as_ptr(),
                 MEDIUM_STREAMING,
-                ptr::null(),
-                0,
+                options.as_ptr(),
+                options.len() as u64,
                 HEADER_VERSION,
             );
             check_handle(&functions, transcriber, "load transcriber")?;
@@ -434,6 +620,25 @@ impl Moonshine {
                     unsafe { CStr::from_ptr(line.text) }
                         .to_string_lossy()
                         .into_owned()
+                },
+                words: if line.words.is_null() || line.word_count == 0 {
+                    Vec::new()
+                } else {
+                    unsafe { std::slice::from_raw_parts(line.words, line.word_count as usize) }
+                        .iter()
+                        .map(|word| RecognitionWord {
+                            text: if word.text.is_null() {
+                                String::new()
+                            } else {
+                                unsafe { CStr::from_ptr(word.text) }
+                                    .to_string_lossy()
+                                    .into_owned()
+                            },
+                            start_ms: (word.start.max(0.0) * 1_000.0) as u64,
+                            end_ms: (word.end.max(0.0) * 1_000.0) as u64,
+                            confidence: word.confidence,
+                        })
+                        .collect()
                 },
             })
             .collect())
@@ -595,7 +800,57 @@ fn error_message(functions: &Functions, code: c_int) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs::OpenOptions;
     use std::sync::{Arc, Barrier};
+    use std::time::SystemTime;
+
+    #[test]
+    fn native_structs_match_the_moonshine_lp64_abi() {
+        assert_eq!(std::mem::size_of::<MoonshineOption>(), 16);
+        assert_eq!(std::mem::size_of::<TranscriptWord>(), 24);
+        assert_eq!(std::mem::size_of::<TranscriptLine>(), 88);
+        assert_eq!(std::mem::size_of::<Transcript>(), 16);
+    }
+
+    #[test]
+    fn verification_receipt_is_invalidated_when_a_component_changes() {
+        let directory = std::env::temp_dir().join(format!(
+            "hex-moonshine-receipt-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&directory).unwrap();
+        for component in MODEL_COMPONENTS {
+            OpenOptions::new()
+                .create_new(true)
+                .write(true)
+                .open(directory.join(component.filename))
+                .unwrap()
+                .set_len(component.bytes)
+                .unwrap();
+        }
+        write_verification_receipt(&directory).unwrap();
+        assert!(verification_receipt_matches(&directory));
+
+        OpenOptions::new()
+            .write(true)
+            .open(directory.join(MODEL_COMPONENTS[0].filename))
+            .unwrap()
+            .set_len(MODEL_COMPONENTS[0].bytes - 1)
+            .unwrap();
+        assert!(!verification_receipt_matches(&directory));
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    #[ignore = "requires the installed Moonshine model and native library"]
+    fn installed_model_has_a_valid_verification_receipt() {
+        install_model().unwrap();
+        assert!(model_installed());
+    }
 
     #[test]
     #[ignore = "requires the installed Moonshine model and native library"]

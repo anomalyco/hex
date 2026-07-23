@@ -2,10 +2,12 @@
 /.venv
 /logs
 /perf/transcription-corpus
+/perf/moonshine-corpus
 /dist
 /.wrangler
 node_modules/
 __pycache__/
 *.py[cod]
+*.rmeta
 /ios/*DerivedData
 /ios/HEXMobile.xcodeproj

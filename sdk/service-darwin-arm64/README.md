@@ -1,5 +1,8 @@
 # HEX Service for Apple Silicon
 
+> **Status:** Private, unpublished platform artifact for Apple silicon macOS.
+> This checkout does not contain `bin/hex-service`.
+
 Platform artifact consumed automatically by `@hex-ai/client`. Applications do
 not import this package or locate its executable directly.
 

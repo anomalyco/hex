@@ -28,6 +28,12 @@ describe("command model", () => {
       home: { phrases: ["open home"] as const, action: openUrl("https://example.com") },
     }
     const config = defineHexConfig({
+      transformations: {
+        lowercase: {
+          name: "Lowercase",
+          transform: (text) => text.toLowerCase(),
+        },
+      },
       dictation: {
         start: ["begin note"],
         stop: ["finish note"],
@@ -41,6 +47,7 @@ describe("command model", () => {
     })
     expect(Object.keys(config.commands)).toEqual(["home", "slack"])
     expect(config.dictation.send).toEqual(["send note"])
+    expect(config.transformations.lowercase.transform("HELLO")).toBe("hello")
   })
 
   it("contextually types Promise handlers through the shared config model", () => {

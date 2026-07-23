@@ -1,23 +1,123 @@
-use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::mpsc::{self, Receiver, RecvTimeoutError, SyncSender, TrySendError};
+use std::ops::Add;
+#[cfg(target_os = "macos")]
+use std::sync::OnceLock;
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, SyncSender, TryRecvError};
 use std::time::{Duration, Instant};
 
 use color_eyre::eyre::{Result, WrapErr, eyre};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{Device, SampleFormat, Stream, StreamConfig};
 
+#[cfg(target_os = "macos")]
+const AUTOMATIC_INPUT_DEVICE_PREFERENCES: &[&str] = crate::config::INPUT_DEVICES;
+#[cfg(target_os = "linux")]
+const AUTOMATIC_INPUT_DEVICE_PREFERENCES: &[&str] = &[];
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub struct CaptureInstant(u64);
+
+impl CaptureInstant {
+    pub const ZERO: Self = Self(0);
+
+    pub const fn from_nanos(nanos: u64) -> Self {
+        Self(nanos)
+    }
+
+    pub const fn as_nanos(self) -> u64 {
+        self.0
+    }
+
+    #[cfg(target_os = "macos")]
+    pub fn now() -> Self {
+        unsafe extern "C" {
+            fn mach_absolute_time() -> u64;
+        }
+        Self::from_mach_ticks(unsafe { mach_absolute_time() })
+    }
+
+    #[cfg(target_os = "macos")]
+    pub fn from_mach_ticks(ticks: u64) -> Self {
+        let Some((numerator, denominator)) = mach_timebase() else {
+            return Self::ZERO;
+        };
+        Self(scale_mach_ticks(ticks, numerator, denominator))
+    }
+
+    pub fn from_stream(instant: cpal::StreamInstant) -> Self {
+        Self(u64::try_from(instant.as_nanos()).unwrap_or(u64::MAX))
+    }
+
+    pub fn checked_add(self, duration: Duration) -> Option<Self> {
+        let nanos = u64::try_from(duration.as_nanos()).ok()?;
+        self.0.checked_add(nanos).map(Self)
+    }
+
+    pub fn checked_sub(self, duration: Duration) -> Option<Self> {
+        let nanos = u64::try_from(duration.as_nanos()).ok()?;
+        self.0.checked_sub(nanos).map(Self)
+    }
+
+    pub fn checked_duration_since(self, earlier: Self) -> Option<Duration> {
+        self.0.checked_sub(earlier.0).map(Duration::from_nanos)
+    }
+
+    pub fn saturating_duration_since(self, earlier: Self) -> Duration {
+        Duration::from_nanos(self.0.saturating_sub(earlier.0))
+    }
+
+    pub fn duration_since(self, earlier: Self) -> Duration {
+        self.saturating_duration_since(earlier)
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn scale_mach_ticks(ticks: u64, numerator: u32, denominator: u32) -> u64 {
+    let nanos = u128::from(ticks) * u128::from(numerator) / u128::from(denominator);
+    u64::try_from(nanos).unwrap_or(u64::MAX)
+}
+
+#[cfg(target_os = "macos")]
+fn mach_timebase() -> Option<(u32, u32)> {
+    #[repr(C)]
+    struct MachTimebaseInfo {
+        numer: u32,
+        denom: u32,
+    }
+
+    unsafe extern "C" {
+        fn mach_timebase_info(info: *mut MachTimebaseInfo) -> i32;
+    }
+
+    static TIMEBASE: OnceLock<Option<(u32, u32)>> = OnceLock::new();
+    *TIMEBASE.get_or_init(|| {
+        let mut info = MachTimebaseInfo { numer: 0, denom: 0 };
+        let status = unsafe { mach_timebase_info(&mut info) };
+        (status == 0 && info.denom != 0).then_some((info.numer, info.denom))
+    })
+}
+
+impl Add<Duration> for CaptureInstant {
+    type Output = Self;
+
+    fn add(self, duration: Duration) -> Self::Output {
+        self.checked_add(duration)
+            .expect("capture instant overflowed")
+    }
+}
+
 pub struct AudioInput {
     _stream: Stream,
-    chunks: Receiver<Vec<f32>>,
+    chunks: Receiver<(Vec<f32>, CaptureInstant)>,
     pub sample_rate: u32,
     pub device_name: String,
-    dropped_chunks: Arc<AtomicU64>,
     stream_errors: Receiver<String>,
 }
 
 pub enum AudioInputEvent {
-    Chunk(Vec<f32>),
+    Chunk {
+        samples: Vec<f32>,
+        captured_through: CaptureInstant,
+    },
     Timeout,
     StreamFailed(String),
 }
@@ -28,12 +128,14 @@ pub struct RecoveringAudioInput {
     selected_device: Option<String>,
     active_revision: u64,
     recovery: MicrophoneRecovery,
-    dropped_chunks: u64,
-    last_drop_report: Instant,
+    replacement: Option<Receiver<(u64, Result<AudioInput, String>)>>,
 }
 
 pub enum RecoveringAudioInputEvent {
-    Chunk(Vec<f32>),
+    Chunk {
+        samples: Vec<f32>,
+        captured_through: CaptureInstant,
+    },
     Timeout,
     Interrupted,
     Reopened,
@@ -41,9 +143,6 @@ pub enum RecoveringAudioInputEvent {
 
 const MICROPHONE_RETRY_INITIAL: Duration = Duration::from_millis(250);
 const MICROPHONE_RETRY_MAX: Duration = Duration::from_secs(5);
-// Moonshine updates can occupy the consumer for hundreds of milliseconds
-// while voice-delimited capture still needs every CoreAudio callback.
-const AUDIO_CHUNK_QUEUE_CAPACITY: usize = 512;
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 enum MicrophoneRecoveryReason {
@@ -152,35 +251,19 @@ impl AudioInput {
         let config: StreamConfig = supported.into();
         let sample_rate = config.sample_rate;
         let channels = usize::from(config.channels);
-        let (sender, chunks) = mpsc::sync_channel(AUDIO_CHUNK_QUEUE_CAPACITY);
+        let (sender, chunks) = mpsc::channel();
         let (error_sender, stream_errors) = mpsc::sync_channel(1);
-        let dropped_chunks = Arc::new(AtomicU64::new(0));
 
         let stream = match sample_format {
-            SampleFormat::F32 => build_f32_stream(
-                &device,
-                &config,
-                channels,
-                sender,
-                dropped_chunks.clone(),
-                error_sender,
-            )?,
-            SampleFormat::I16 => build_i16_stream(
-                &device,
-                &config,
-                channels,
-                sender,
-                dropped_chunks.clone(),
-                error_sender,
-            )?,
-            SampleFormat::U16 => build_u16_stream(
-                &device,
-                &config,
-                channels,
-                sender,
-                dropped_chunks.clone(),
-                error_sender,
-            )?,
+            SampleFormat::F32 => {
+                build_f32_stream(&device, &config, channels, sender, error_sender)?
+            }
+            SampleFormat::I16 => {
+                build_i16_stream(&device, &config, channels, sender, error_sender)?
+            }
+            SampleFormat::U16 => {
+                build_u16_stream(&device, &config, channels, sender, error_sender)?
+            }
             format => return Err(eyre!("unsupported microphone sample format: {format:?}")),
         };
         stream
@@ -192,13 +275,8 @@ impl AudioInput {
             chunks,
             sample_rate,
             device_name,
-            dropped_chunks,
             stream_errors,
         })
-    }
-
-    pub fn take_dropped_chunks(&self) -> u64 {
-        self.dropped_chunks.swap(0, Ordering::Relaxed)
     }
 
     pub fn recv_timeout(&self, timeout: Duration) -> AudioInputEvent {
@@ -206,9 +284,12 @@ impl AudioInput {
             return AudioInputEvent::StreamFailed(error);
         }
         match self.chunks.recv_timeout(timeout) {
-            Ok(chunk) => match self.stream_errors.try_recv() {
+            Ok((samples, captured_through)) => match self.stream_errors.try_recv() {
                 Ok(error) => AudioInputEvent::StreamFailed(error),
-                Err(_) => AudioInputEvent::Chunk(chunk),
+                Err(_) => AudioInputEvent::Chunk {
+                    samples,
+                    captured_through,
+                },
             },
             Err(RecvTimeoutError::Timeout) => match self.stream_errors.try_recv() {
                 Ok(error) => AudioInputEvent::StreamFailed(error),
@@ -236,11 +317,11 @@ impl RecoveringAudioInput {
                 Ok(input) => input,
                 Err(error) => {
                     tracing::warn!(%error, device, "selected microphone is unavailable; using automatic selection");
-                    AudioInput::open(crate::config::INPUT_DEVICES)?
+                    AudioInput::open(AUTOMATIC_INPUT_DEVICE_PREFERENCES)?
                 }
             }
         } else {
-            AudioInput::open(crate::config::INPUT_DEVICES)?
+            AudioInput::open(AUTOMATIC_INPUT_DEVICE_PREFERENCES)?
         };
         Ok(Self {
             input,
@@ -248,8 +329,7 @@ impl RecoveringAudioInput {
             selected_device: selected_device.map(str::to_owned),
             active_revision: selection_revision,
             recovery: MicrophoneRecovery::default(),
-            dropped_chunks: 0,
-            last_drop_report: Instant::now(),
+            replacement: None,
         })
     }
 
@@ -267,18 +347,26 @@ impl RecoveringAudioInput {
         timeout: Duration,
         capture_idle: bool,
     ) -> RecoveringAudioInputEvent {
-        self.report_dropped_chunks();
         let now = Instant::now();
-        if capture_idle && self.recovery.should_attempt(now) {
-            match self.open_replacement() {
-                Ok(replacement) => {
+        if let Some((opened_revision, result)) = self.poll_replacement() {
+            let target_revision = self
+                .recovery
+                .target_revision
+                .unwrap_or(self.active_revision);
+            if opened_revision != target_revision {
+                self.recovery.next_attempt = Some(now);
+                return RecoveringAudioInputEvent::Timeout;
+            }
+            match result {
+                Ok(replacement) if capture_idle => {
                     self.input = replacement;
-                    if let Some(revision) = self.recovery.target_revision {
-                        self.active_revision = revision;
-                    }
+                    self.active_revision = opened_revision;
                     self.recovery.recovered();
                     tracing::info!(device = %self.input.device_name, "dictation microphone reopened");
                     return RecoveringAudioInputEvent::Reopened;
+                }
+                Ok(_) => {
+                    self.recovery.failed(now);
                 }
                 Err(error) => {
                     self.recovery.failed(now);
@@ -290,12 +378,21 @@ impl RecoveringAudioInput {
                 }
             }
         }
+        if capture_idle && self.recovery.should_attempt(now) && self.replacement.is_none() {
+            self.start_replacement();
+        }
         if self.recovery.blocks_audio() {
             std::thread::sleep(timeout);
             return RecoveringAudioInputEvent::Timeout;
         }
         match self.input.recv_timeout(timeout) {
-            AudioInputEvent::Chunk(samples) => RecoveringAudioInputEvent::Chunk(samples),
+            AudioInputEvent::Chunk {
+                samples,
+                captured_through,
+            } => RecoveringAudioInputEvent::Chunk {
+                samples,
+                captured_through,
+            },
             AudioInputEvent::Timeout => RecoveringAudioInputEvent::Timeout,
             AudioInputEvent::StreamFailed(error) => {
                 tracing::warn!(%error, device = %self.input.device_name, "microphone stream stopped; reopening it");
@@ -303,10 +400,6 @@ impl RecoveringAudioInput {
                 RecoveringAudioInputEvent::Interrupted
             }
         }
-    }
-
-    pub fn is_recovering(&self) -> bool {
-        self.recovery.blocks_audio()
     }
 
     pub fn sample_rate(&self) -> u32 {
@@ -317,30 +410,38 @@ impl RecoveringAudioInput {
         &self.input.device_name
     }
 
-    fn open_replacement(&self) -> Result<AudioInput> {
-        match self
+    fn start_replacement(&mut self) {
+        let revision = self
+            .recovery
+            .target_revision
+            .unwrap_or(self.active_revision);
+        let device = self
             .device_override
-            .as_deref()
-            .or(self.selected_device.as_deref())
-        {
-            Some(device) => AudioInput::open_named(device),
-            None => AudioInput::open(crate::config::INPUT_DEVICES),
-        }
+            .clone()
+            .or_else(|| self.selected_device.clone());
+        let (sender, receiver) = mpsc::sync_channel(1);
+        std::thread::spawn(move || {
+            let result = match device {
+                Some(device) => AudioInput::open_named(&device),
+                None => AudioInput::open(AUTOMATIC_INPUT_DEVICE_PREFERENCES),
+            }
+            .map_err(|error| error.to_string());
+            let _ = sender.send((revision, result));
+        });
+        self.replacement = Some(receiver);
     }
 
-    fn report_dropped_chunks(&mut self) {
-        self.dropped_chunks += self.input.take_dropped_chunks();
-        if self.last_drop_report.elapsed() < Duration::from_secs(1) {
-            return;
-        }
-        if self.dropped_chunks > 0 {
-            tracing::warn!(
-                dropped_audio_chunks = self.dropped_chunks,
-                "microphone chunks were dropped because audio consumption fell behind"
-            );
-            self.dropped_chunks = 0;
-        }
-        self.last_drop_report = Instant::now();
+    fn poll_replacement(&mut self) -> Option<(u64, Result<AudioInput, String>)> {
+        let result = match self.replacement.as_ref()?.try_recv() {
+            Ok(result) => result,
+            Err(TryRecvError::Empty) => return None,
+            Err(TryRecvError::Disconnected) => (
+                self.active_revision,
+                Err("microphone replacement worker stopped".into()),
+            ),
+        };
+        self.replacement = None;
+        Some(result)
     }
 }
 
@@ -386,10 +487,12 @@ fn mono<T>(samples: &[T], channels: usize, convert: impl Fn(&T) -> f32) -> Vec<f
         .collect()
 }
 
-fn send(sender: &SyncSender<Vec<f32>>, dropped_chunks: &AtomicU64, chunk: Vec<f32>) {
-    if matches!(sender.try_send(chunk), Err(TrySendError::Full(_))) {
-        dropped_chunks.fetch_add(1, Ordering::Relaxed);
-    }
+fn send(
+    sender: &Sender<(Vec<f32>, CaptureInstant)>,
+    chunk: Vec<f32>,
+    captured_through: CaptureInstant,
+) {
+    let _ = sender.send((chunk, captured_through));
 }
 
 fn stream_error(sender: &SyncSender<String>, error: cpal::Error) {
@@ -405,18 +508,19 @@ fn build_f32_stream(
     device: &Device,
     config: &StreamConfig,
     channels: usize,
-    sender: SyncSender<Vec<f32>>,
-    dropped_chunks: Arc<AtomicU64>,
+    sender: Sender<(Vec<f32>, CaptureInstant)>,
     error_sender: SyncSender<String>,
 ) -> Result<Stream> {
+    let sample_rate = config.sample_rate;
     device
         .build_input_stream(
             *config,
-            move |data: &[f32], _| {
+            move |data: &[f32], info| {
+                let captured_through = captured_through(info, data.len() / channels, sample_rate);
                 send(
                     &sender,
-                    &dropped_chunks,
                     mono(data, channels, |sample| *sample),
+                    captured_through,
                 )
             },
             move |error| stream_error(&error_sender, error),
@@ -429,18 +533,19 @@ fn build_i16_stream(
     device: &Device,
     config: &StreamConfig,
     channels: usize,
-    sender: SyncSender<Vec<f32>>,
-    dropped_chunks: Arc<AtomicU64>,
+    sender: Sender<(Vec<f32>, CaptureInstant)>,
     error_sender: SyncSender<String>,
 ) -> Result<Stream> {
+    let sample_rate = config.sample_rate;
     device
         .build_input_stream(
             *config,
-            move |data: &[i16], _| {
+            move |data: &[i16], info| {
+                let captured_through = captured_through(info, data.len() / channels, sample_rate);
                 send(
                     &sender,
-                    &dropped_chunks,
                     mono(data, channels, |sample| *sample as f32 / i16::MAX as f32),
+                    captured_through,
                 )
             },
             move |error| stream_error(&error_sender, error),
@@ -453,18 +558,19 @@ fn build_u16_stream(
     device: &Device,
     config: &StreamConfig,
     channels: usize,
-    sender: SyncSender<Vec<f32>>,
-    dropped_chunks: Arc<AtomicU64>,
+    sender: Sender<(Vec<f32>, CaptureInstant)>,
     error_sender: SyncSender<String>,
 ) -> Result<Stream> {
+    let sample_rate = config.sample_rate;
     device
         .build_input_stream(
             *config,
-            move |data: &[u16], _| {
+            move |data: &[u16], info| {
+                let captured_through = captured_through(info, data.len() / channels, sample_rate);
                 send(
                     &sender,
-                    &dropped_chunks,
                     mono(data, channels, |sample| *sample as f32 / 32768.0 - 1.0),
+                    captured_through,
                 )
             },
             move |error| stream_error(&error_sender, error),
@@ -473,9 +579,27 @@ fn build_u16_stream(
         .wrap_err("could not open u16 microphone stream")
 }
 
+fn captured_through(
+    info: &cpal::InputCallbackInfo,
+    frames: usize,
+    sample_rate: u32,
+) -> CaptureInstant {
+    let captured_at = CaptureInstant::from_stream(info.timestamp().capture);
+    let nanos = (frames as u128 * 1_000_000_000 / u128::from(sample_rate)) as u64;
+    let duration = Duration::from_nanos(nanos);
+    captured_at.checked_add(duration).unwrap_or(captured_at)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn mach_event_ticks_are_converted_to_nanoseconds() {
+        assert_eq!(scale_mach_ticks(72_000_000, 125, 3), 3_000_000_000);
+        assert_eq!(scale_mach_ticks(3_000_000_000, 1, 1), 3_000_000_000);
+    }
 
     #[test]
     fn stream_failures_are_visible_to_the_audio_owner() {

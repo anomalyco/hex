@@ -3,7 +3,9 @@ use std::io::{self, BufWriter, Read, Seek, SeekFrom, Write};
 #[cfg(unix)]
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
+use std::sync::mpsc::{self, SyncSender, TrySendError};
 use std::sync::{Arc, Mutex};
+use std::thread::{self, JoinHandle};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use std::collections::VecDeque;
@@ -148,7 +150,18 @@ pub enum TranscriptPhase {
 
 #[derive(Clone)]
 pub struct EventLog {
-    writer: Arc<Mutex<BufWriter<File>>>,
+    inner: Arc<EventLogInner>,
+}
+
+struct EventLogInner {
+    sender: Option<SyncSender<WriterMessage>>,
+    error: Arc<Mutex<Option<(io::ErrorKind, String)>>>,
+    worker: Option<JoinHandle<()>>,
+}
+
+enum WriterMessage {
+    Event(VoiceEvent),
+    Flush(mpsc::SyncSender<Option<(io::ErrorKind, String)>>),
 }
 
 pub struct EventReader {
@@ -162,6 +175,7 @@ pub struct EventReader {
 }
 
 const EVENT_RETENTION: usize = 1_024;
+const EVENT_WRITER_CAPACITY: usize = 1_024;
 
 impl EventLog {
     pub fn create(path: &Path) -> io::Result<Self> {
@@ -169,20 +183,72 @@ impl EventLog {
             fs::create_dir_all(parent)?;
         }
         let file = OpenOptions::new().create(true).append(true).open(path)?;
+        let (sender, receiver) = mpsc::sync_channel(EVENT_WRITER_CAPACITY);
+        let error = Arc::new(Mutex::new(None));
+        let worker_error = error.clone();
+        let worker = thread::Builder::new()
+            .name("event-writer".into())
+            .spawn(move || run_event_writer(BufWriter::new(file), receiver, worker_error))?;
         Ok(Self {
-            writer: Arc::new(Mutex::new(BufWriter::new(file))),
+            inner: Arc::new(EventLogInner {
+                sender: Some(sender),
+                error,
+                worker: Some(worker),
+            }),
         })
     }
 
     pub fn emit(&self, event: &VoiceEvent) -> io::Result<()> {
-        let mut record = serde_json::to_vec(event)?;
-        record.push(b'\n');
-        let mut writer = self
-            .writer
+        self.check_error()?;
+        let sender = self
+            .inner
+            .sender
+            .as_ref()
+            .ok_or_else(|| io::Error::new(io::ErrorKind::BrokenPipe, "event writer stopped"))?;
+        match sender.try_send(WriterMessage::Event(event.clone())) {
+            Ok(()) => Ok(()),
+            Err(TrySendError::Full(WriterMessage::Event(event))) if event.is_replaceable() => {
+                Ok(())
+            }
+            Err(TrySendError::Full(message)) => sender
+                .send(message)
+                .map_err(|_| self.writer_stopped_error()),
+            Err(TrySendError::Disconnected(_)) => Err(self.writer_stopped_error()),
+        }
+    }
+
+    pub fn flush(&self) -> io::Result<()> {
+        self.check_error()?;
+        let (reply, flushed) = mpsc::sync_channel(0);
+        self.inner
+            .sender
+            .as_ref()
+            .ok_or_else(|| self.writer_stopped_error())?
+            .send(WriterMessage::Flush(reply))
+            .map_err(|_| self.writer_stopped_error())?;
+        match flushed.recv().map_err(|_| self.writer_stopped_error())? {
+            Some((kind, message)) => Err(io::Error::new(kind, message)),
+            None => Ok(()),
+        }
+    }
+
+    fn check_error(&self) -> io::Result<()> {
+        match self
+            .inner
+            .error
             .lock()
-            .unwrap_or_else(|error| error.into_inner());
-        writer.write_all(&record)?;
-        writer.flush()
+            .unwrap_or_else(|error| error.into_inner())
+            .as_ref()
+        {
+            Some((kind, message)) => Err(io::Error::new(*kind, message.clone())),
+            None => Ok(()),
+        }
+    }
+
+    fn writer_stopped_error(&self) -> io::Error {
+        self.check_error()
+            .err()
+            .unwrap_or_else(|| io::Error::new(io::ErrorKind::BrokenPipe, "event writer stopped"))
     }
 
     pub fn dictation(&self, phase: DictationPhase, text: impl Into<String>) -> io::Result<()> {
@@ -207,6 +273,65 @@ impl EventLog {
             processing,
         })
     }
+}
+
+impl VoiceEvent {
+    fn is_replaceable(&self) -> bool {
+        matches!(
+            self,
+            Self::Transcript {
+                phase: TranscriptPhase::Started | TranscriptPhase::Updated,
+                ..
+            } | Self::Context { .. }
+        )
+    }
+}
+
+impl Drop for EventLogInner {
+    fn drop(&mut self) {
+        self.sender.take();
+        if let Some(worker) = self.worker.take() {
+            let _ = worker.join();
+        }
+    }
+}
+
+fn run_event_writer(
+    mut writer: BufWriter<File>,
+    receiver: mpsc::Receiver<WriterMessage>,
+    error: Arc<Mutex<Option<(io::ErrorKind, String)>>>,
+) {
+    while let Ok(message) = receiver.recv() {
+        match message {
+            WriterMessage::Event(event) => {
+                let result = serde_json::to_writer(&mut writer, &event)
+                    .map_err(io::Error::other)
+                    .and_then(|()| writer.write_all(b"\n"))
+                    .and_then(|()| writer.flush());
+                if let Err(write_error) = result {
+                    *error.lock().unwrap_or_else(|error| error.into_inner()) =
+                        Some((write_error.kind(), write_error.to_string()));
+                    break;
+                }
+            }
+            WriterMessage::Flush(reply) => {
+                let failure = writer
+                    .flush()
+                    .err()
+                    .map(|write_error| (write_error.kind(), write_error.to_string()));
+                if let Some(failure) = &failure {
+                    *error.lock().unwrap_or_else(|error| error.into_inner()) =
+                        Some(failure.clone());
+                }
+                let failed = failure.is_some();
+                let _ = reply.send(failure);
+                if failed {
+                    break;
+                }
+            }
+        }
+    }
+    let _ = writer.flush();
 }
 
 impl EventReader {
@@ -271,7 +396,6 @@ impl EventReader {
         Ok(())
     }
 
-    #[cfg(any(test, target_os = "linux", all(debug_assertions, target_os = "macos")))]
     pub fn events(&self) -> &VecDeque<VoiceEvent> {
         &self.events
     }

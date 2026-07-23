@@ -3,6 +3,7 @@ use std::sync::Arc;
 use crate::commands::{Action, CommandError, CommandInfo, CommandScope};
 use crate::context::{ContextSelector, ContextSnapshot};
 use crate::keyboard::Key;
+use crate::spoken_text::normalize;
 
 #[derive(Clone, Copy, Debug)]
 pub struct Digit;
@@ -552,25 +553,4 @@ impl ContextSelector {
             Self::Application(application) => CommandScope::Application(application.clone()),
         }
     }
-}
-
-pub(crate) fn normalize(text: &str) -> String {
-    text.trim()
-        .trim_matches(|character: char| character.is_ascii_punctuation())
-        .split_whitespace()
-        .map(|word| match word.to_ascii_lowercase().as_str() {
-            "zero" => "0".to_string(),
-            "one" => "1".to_string(),
-            "two" => "2".to_string(),
-            "three" => "3".to_string(),
-            "four" => "4".to_string(),
-            "five" => "5".to_string(),
-            "six" => "6".to_string(),
-            "seven" => "7".to_string(),
-            "eight" => "8".to_string(),
-            "nine" => "9".to_string(),
-            _ => word.to_ascii_lowercase(),
-        })
-        .collect::<Vec<_>>()
-        .join(" ")
 }

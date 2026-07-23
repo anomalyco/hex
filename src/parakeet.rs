@@ -233,7 +233,10 @@ impl WorkerState {
 }
 
 impl DictationWorker {
-    pub fn start(activity: InputActivity) -> Self {
+    pub fn start(
+        activity: InputActivity,
+        transformations: Arc<crate::personal_commands::TransformationClient>,
+    ) -> Self {
         const PROCESSOR_WORKERS: usize = 2;
         let (inference_jobs, inference_receiver) = mpsc::sync_channel::<InferenceCommand>(2);
         let (processor_jobs, processor_receiver) = mpsc::sync_channel::<ProcessorJob>(4);
@@ -300,6 +303,7 @@ impl DictationWorker {
             let processor_receiver = processor_receiver.clone();
             let processor_output = output_jobs.clone();
             let processor_events = event_sender.clone();
+            let transformations = transformations.clone();
             processor_workers.push(thread::spawn(move || {
                 loop {
                     let job = {
@@ -322,7 +326,7 @@ impl DictationWorker {
                             stage: DictationJobStage::Processing,
                         });
                     }
-                    let processed = if matches!(job.target, TranscriptionTarget::VoiceAction) {
+                    let mut processed = if matches!(job.target, TranscriptionTarget::VoiceAction) {
                         profiles.process_voice_action_cancellable(
                             &job.text,
                             job.context.selected_text.as_deref(),
@@ -336,6 +340,42 @@ impl DictationWorker {
                             &job.control.cancelled,
                         )
                     };
+                    if !processed.transformations.is_empty() && !job.control.is_cancelled() {
+                        let started = Instant::now();
+                        match transformations.transform(
+                            &processed.transformations,
+                            &processed.text,
+                            &job.context,
+                            &job.control.cancelled,
+                        ) {
+                            Ok(text) => {
+                                processed.text = text;
+                                let observation = processed.observation.get_or_insert_with(|| {
+                                    ProcessingObservation {
+                                        profile: "Custom transformations".into(),
+                                        latency_ms: 0,
+                                        fallback: None,
+                                    }
+                                });
+                                observation.latency_ms = observation
+                                    .latency_ms
+                                    .saturating_add(started.elapsed().as_millis() as u64);
+                            }
+                            Err(error) => {
+                                let observation = processed.observation.get_or_insert_with(|| {
+                                    ProcessingObservation {
+                                        profile: "Custom transformations".into(),
+                                        latency_ms: 0,
+                                        fallback: None,
+                                    }
+                                });
+                                observation.latency_ms = observation
+                                    .latency_ms
+                                    .saturating_add(started.elapsed().as_millis() as u64);
+                                observation.fallback = Some(error);
+                            }
+                        }
+                    }
                     if job.control.is_cancelled() {
                         let _ = processor_output.send(OutputJob::Cancelled { job_id: job.job_id });
                         continue;
@@ -349,7 +389,7 @@ impl DictationWorker {
                             tracing::warn!(
                                 profile = observation.profile,
                                 %error,
-                                "dictation post-processing fell back to raw transcript"
+                                "dictation processing fell back to the previous pipeline output"
                             );
                         }
                     }
@@ -772,8 +812,7 @@ fn finish_output(
 }
 
 fn prepare_transcript(text: &str, protocol: Option<&DictationProtocol>) -> String {
-    let stripped = strip_transcript_protocol(text, protocol);
-    crate::text_replacements::replace(&stripped)
+    strip_transcript_protocol(text, protocol)
 }
 
 #[cfg(test)]

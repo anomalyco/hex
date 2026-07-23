@@ -17,10 +17,19 @@ import type {
   Modifier,
   NativeAction,
   PromiseHex,
+  Transformation,
 } from "./model.js"
-import type { HostInput, HostOutput, Registration, RegistrationCommand } from "./protocol.js"
+import type {
+  HostInput,
+  HostOutput,
+  Registration,
+  RegistrationCommand,
+  RegistrationTransformation,
+} from "./protocol.js"
 
 const MAX_COMMANDS = 512
+const MAX_TRANSFORMATIONS = 128
+const MAX_TRANSFORMATIONS_PER_INVOCATION = 32
 const MAX_PHRASES_PER_COMMAND = 16
 const MAX_PROTOCOL_PHRASES = 16
 const MAX_REGISTRATION_BYTES = 256 * 1024
@@ -28,6 +37,7 @@ const MAX_FRAME_BYTES = 64 * 1024
 const MAX_ID_BYTES = 128
 const MAX_LABEL_BYTES = 1024
 const MAX_VALUE_BYTES = 4096
+const MAX_TRANSFORMATION_TEXT_BYTES = 48 * 1024
 const MAX_ERROR_BYTES = 4096
 const MAX_PRESS_REPEAT = 100
 const MAX_PENDING_TOOL_CALLS = 1024
@@ -51,6 +61,9 @@ const record = (value: unknown): Record<string, unknown> | undefined =>
     : undefined
 
 const isFunction = (value: unknown): value is HostHandlerFunction =>
+  typeof value === "function"
+
+const isTransformation = (value: unknown): value is Transformation =>
   typeof value === "function"
 
 // Bound and normalize host input; Rust independently validates every registered action.
@@ -131,6 +144,7 @@ const adaptCapabilities = <Result>(
 interface PreparedConfig {
   readonly registration: Registration
   readonly handlers: ReadonlyMap<string, HostHandler>
+  readonly transformations: ReadonlyMap<string, Transformation>
 }
 
 export const prepareConfig = (value: unknown): PreparedConfig => {
@@ -141,6 +155,31 @@ export const prepareConfig = (value: unknown): PreparedConfig => {
   if (entries.length > MAX_COMMANDS) throw new Error(`A config may register at most ${MAX_COMMANDS} commands`)
 
   const handlers = new Map<string, HostHandler>()
+  const transformations = new Map<string, Transformation>()
+  const rawTransformations = config?.transformations === undefined
+    ? {}
+    : record(config.transformations)
+  if (rawTransformations === undefined) throw new Error("transformations must be an object")
+  const transformationEntries = Object.entries(rawTransformations)
+  if (transformationEntries.length > MAX_TRANSFORMATIONS) {
+    throw new Error(`A config may register at most ${MAX_TRANSFORMATIONS} transformations`)
+  }
+  const registrationTransformations = transformationEntries.map(
+    ([rawId, rawDefinition]): RegistrationTransformation => {
+      const id = boundedString(rawId, "transformation id", MAX_ID_BYTES)
+      const definition = record(rawDefinition)
+      if (definition === undefined) throw new Error(`transformations.${id} must be an object`)
+      const name = boundedString(definition.name, `transformations.${id}.name`, MAX_LABEL_BYTES)
+      const description = definition.description === undefined
+        ? undefined
+        : boundedString(definition.description, `transformations.${id}.description`, MAX_LABEL_BYTES)
+      if (!isTransformation(definition.transform)) {
+        throw new Error(`transformations.${id}.transform must be a function`)
+      }
+      transformations.set(id, definition.transform)
+      return { id, name, ...(description === undefined ? {} : { description }) }
+    },
+  )
   const rawDictation = config?.dictation
   let dictation: Registration["dictation"]
   if (rawDictation !== undefined) {
@@ -219,12 +258,13 @@ export const prepareConfig = (value: unknown): PreparedConfig => {
     type: "registration",
     protocolVersion: PROTOCOL_VERSION,
     ...(dictation === undefined ? {} : { dictation }),
+    transformations: registrationTransformations,
     commands: registrationCommands,
   }
   if (utf8Length(JSON.stringify(registration)) > MAX_REGISTRATION_BYTES) {
     throw new Error(`The serialized registration exceeds ${MAX_REGISTRATION_BYTES} bytes`)
   }
-  return { registration, handlers }
+  return { registration, handlers, transformations }
 }
 
 export const evaluateConfig = async (entrypoint: string): Promise<unknown> => {
@@ -274,6 +314,41 @@ const decodeInput = (line: string): HostInput => {
           ...(windowTitle === undefined ? {} : { windowTitle }),
         },
       }
+    case "transform": {
+      const context = record(input.context)
+      if (context === undefined) throw new Error("transform.context must be an object")
+      if (!Array.isArray(input.transformationIds)
+        || input.transformationIds.length === 0
+        || input.transformationIds.length > MAX_TRANSFORMATIONS_PER_INVOCATION) {
+        throw new Error(`transform.transformationIds must contain 1 through ${MAX_TRANSFORMATIONS_PER_INVOCATION} IDs`)
+      }
+      const text = typeof input.text === "string"
+        && utf8Length(input.text) <= MAX_TRANSFORMATION_TEXT_BYTES
+        ? input.text
+        : undefined
+      if (text === undefined) throw new Error("transform.text must be a bounded string")
+      return {
+        type: "transform",
+        invocationId: boundedString(input.invocationId, "transform.invocationId", MAX_ID_BYTES),
+        transformationIds: input.transformationIds.map((id, index) =>
+          boundedString(id, `transform.transformationIds[${index}]`, MAX_ID_BYTES)),
+        text,
+        context: {
+          ...(context.application === undefined ? {} : {
+            application: boundedString(context.application, "transform.context.application", MAX_VALUE_BYTES),
+          }),
+          ...(context.browserHost === undefined ? {} : {
+            browserHost: boundedString(context.browserHost, "transform.context.browserHost", 253),
+          }),
+          ...(context.browserUrl === undefined ? {} : {
+            browserUrl: boundedString(context.browserUrl, "transform.context.browserUrl", MAX_VALUE_BYTES),
+          }),
+          ...(context.windowTitle === undefined ? {} : {
+            windowTitle: boundedString(context.windowTitle, "transform.context.windowTitle", MAX_VALUE_BYTES),
+          }),
+        },
+      }
+    }
     case "toolResult": {
       const result = record(input.result)
       const invocationId = boundedString(input.invocationId, "toolResult.invocationId", MAX_ID_BYTES)
@@ -359,7 +434,7 @@ export const runHost = async ({ config, input, write }: HostOptions): Promise<vo
   }
 
   await send(prepared.registration)
-  const fibers = new Map<string, Fiber.Fiber<void, unknown>>()
+  const fibers = new Map<string, Fiber.Fiber<unknown, unknown>>()
   const pendingTools = new Map<string, PendingToolCall>()
   let nextToolCallId = 0
 
@@ -469,12 +544,61 @@ export const runHost = async ({ config, input, write }: HostOptions): Promise<vo
     })
   }
 
+  const transform = (
+    invocationId: string,
+    transformationIds: readonly string[],
+    text: string,
+    context: Extract<HostInput, { readonly type: "transform" }>["context"],
+  ): void => {
+    if (fibers.has(invocationId)) {
+      void send({
+        type: "transformationResult",
+        invocationId,
+        result: { type: "failure", message: "Invocation ID is already active" },
+      }).catch(() => undefined)
+      return
+    }
+    const operation = Effect.tryPromise({
+      try: async () => {
+        let transformed = text
+        for (const id of transformationIds) {
+          const transformation = prepared.transformations.get(id)
+          if (transformation === undefined) throw new Error(`Unknown transformation: ${id}`)
+          transformed = await transformation(transformed, context)
+          if (typeof transformed !== "string") throw new Error(`Transformation ${id} did not return a string`)
+          if (utf8Length(transformed) > MAX_TRANSFORMATION_TEXT_BYTES) {
+            throw new Error(`Transformation ${id} returned too much text`)
+          }
+        }
+        return transformed
+      },
+      catch: (error) => error,
+    })
+    const fiber = Effect.runFork(operation)
+    fibers.set(invocationId, fiber)
+    fiber.addObserver((exit) => {
+      fibers.delete(invocationId)
+      if (closing) return
+      const result = Exit.isSuccess(exit)
+        ? { type: "success" as const, text: exit.value }
+        : { type: "failure" as const, message: errorMessage(Cause.squash(exit.cause)) }
+      void send({ type: "transformationResult", invocationId, result }).catch(() => undefined)
+    })
+  }
+
   try {
     await Promise.race([
       (async () => {
         for await (const message of frames(input)) {
           if (message.type === "invoke") {
             invoke(message.invocationId, message.commandId, message.context)
+          } else if (message.type === "transform") {
+            transform(
+              message.invocationId,
+              message.transformationIds,
+              message.text,
+              message.context,
+            )
           } else if (message.type === "toolResult") {
             const pending = pendingTools.get(message.toolCallId)
             if (pending === undefined || pending.invocationId !== message.invocationId) {

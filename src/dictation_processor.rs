@@ -12,6 +12,7 @@ use color_eyre::eyre::{Result, WrapErr, eyre};
 use serde::{Deserialize, Serialize};
 
 use crate::context::{ContextSelector, ContextSnapshot};
+use crate::text_replacements::ReplacementSet;
 
 const PROTOCOL_PROMPT: &str = "You transform dictated speech into replacement text. Return only the text that should be pasted. Do not add an explanation, label, alternative, or Markdown fence.";
 const VOICE_ACTION_PROTOCOL_PROMPT: &str = "You execute a one-off voice instruction. When selected text is provided, transform or use it as instructed. When no text is selected, generate the requested text. Return only the exact paste-ready result without an explanation, label, alternative, or Markdown fence.";
@@ -20,19 +21,40 @@ static MODEL_CATALOG: OnceLock<ModelCatalog> = OnceLock::new();
 #[derive(Clone)]
 pub struct Profile {
     name: String,
+    ai_enabled: bool,
     prompt: String,
     model: Option<Model>,
     deadline: Option<Duration>,
+    replacements: ReplacementSet,
+    transformations: Vec<String>,
 }
 
 impl Profile {
     pub fn new(name: impl Into<String>, prompt: impl Into<String>) -> Self {
         Self {
             name: name.into(),
+            ai_enabled: false,
             prompt: prompt.into(),
             model: None,
             deadline: None,
+            replacements: ReplacementSet::default(),
+            transformations: Vec::new(),
         }
+    }
+
+    pub fn ai_enabled(mut self, enabled: bool) -> Self {
+        self.ai_enabled = enabled;
+        self
+    }
+
+    pub(crate) fn replacements(mut self, replacements: ReplacementSet) -> Self {
+        self.replacements = replacements;
+        self
+    }
+
+    pub fn transformations(mut self, transformations: Vec<String>) -> Self {
+        self.transformations = transformations;
+        self
     }
 
     pub fn model(mut self, provider: impl Into<String>, id: impl Into<String>) -> Self {
@@ -70,18 +92,18 @@ struct Model {
 #[derive(Clone)]
 struct ContextualProfile {
     selector: ContextSelector,
-    profile: Option<Profile>,
+    profile: Profile,
 }
 
 #[derive(Clone)]
 pub struct Profiles {
-    default: Option<Profile>,
+    default: Profile,
     deadline: Duration,
     contextual: Vec<ContextualProfile>,
 }
 
 impl Profiles {
-    pub fn new(default: Option<Profile>) -> Self {
+    pub fn new(default: Profile) -> Self {
         Self {
             default,
             deadline: Duration::from_secs(30),
@@ -95,25 +117,14 @@ impl Profiles {
     }
 
     pub fn application(self, application: impl Into<String>, profile: Profile) -> Self {
-        self.push(
-            ContextSelector::application(application.into()),
-            Some(profile),
-        )
-    }
-
-    pub fn application_raw(self, application: impl Into<String>) -> Self {
-        self.push(ContextSelector::application(application.into()), None)
+        self.push(ContextSelector::application(application.into()), profile)
     }
 
     pub fn browser_host(self, host: impl Into<String>, profile: Profile) -> Self {
-        self.push(ContextSelector::browser_host(host.into()), Some(profile))
+        self.push(ContextSelector::browser_host(host.into()), profile)
     }
 
-    pub fn browser_host_raw(self, host: impl Into<String>) -> Self {
-        self.push(ContextSelector::browser_host(host.into()), None)
-    }
-
-    fn push(mut self, selector: ContextSelector, profile: Option<Profile>) -> Self {
+    fn push(mut self, selector: ContextSelector, profile: Profile) -> Self {
         if self
             .contextual
             .iter()
@@ -127,7 +138,7 @@ impl Profiles {
         self
     }
 
-    fn select<'a>(&'a self, context: &ContextSnapshot) -> Option<&'a Profile> {
+    fn select<'a>(&'a self, context: &ContextSnapshot) -> &'a Profile {
         let selected = self
             .contextual
             .iter()
@@ -139,13 +150,12 @@ impl Profiles {
                     !candidate.selector.is_browser() && candidate.selector.matches(context)
                 })
             });
-        selected
-            .map(|selected| selected.profile.as_ref())
-            .unwrap_or(self.default.as_ref())
+        selected.map_or(&self.default, |selected| &selected.profile)
     }
 
     pub fn processes(&self, context: &ContextSnapshot) -> bool {
-        self.select(context).is_some()
+        let profile = self.select(context);
+        profile.ai_enabled || !profile.transformations.is_empty()
     }
 
     pub fn process_cancellable(
@@ -154,13 +164,16 @@ impl Profiles {
         context: &ContextSnapshot,
         cancelled: &AtomicBool,
     ) -> Processed {
-        let Some(profile) = self.select(context) else {
+        let profile = self.select(context);
+        let corrected = profile.replacements.replace(transcript);
+        if !profile.ai_enabled {
             return Processed {
-                text: transcript.into(),
+                text: corrected,
                 observation: None,
+                transformations: profile.transformations.clone(),
             };
-        };
-        let prompt = prompt(profile, transcript, context);
+        }
+        let prompt = prompt(profile, &corrected, context);
         let deadline = profile.deadline.unwrap_or(self.deadline);
         let started = Instant::now();
         match generate_cancellable(&prompt, profile.model.as_ref(), deadline, cancelled) {
@@ -178,23 +191,26 @@ impl Profiles {
                         latency_ms,
                         fallback: None,
                     }),
+                    transformations: profile.transformations.clone(),
                 }
             }
             Ok(_) => Processed {
-                text: transcript.into(),
+                text: corrected.clone(),
                 observation: Some(ProcessingObservation {
                     profile: profile.name.clone(),
                     latency_ms: started.elapsed().as_millis() as u64,
                     fallback: Some("processor returned empty text".into()),
                 }),
+                transformations: profile.transformations.clone(),
             },
             Err(error) => Processed {
-                text: transcript.into(),
+                text: corrected,
                 observation: Some(ProcessingObservation {
                     profile: profile.name.clone(),
                     latency_ms: started.elapsed().as_millis() as u64,
                     fallback: Some(error.to_string()),
                 }),
+                transformations: profile.transformations.clone(),
             },
         }
     }
@@ -237,6 +253,7 @@ impl Profiles {
                         latency_ms,
                         fallback: None,
                     }),
+                    transformations: Vec::new(),
                 }
             }
             Ok(_) => voice_action_failure(started, "processor returned empty text".into()),
@@ -383,6 +400,7 @@ fn opencode_api<T: for<'de> Deserialize<'de>>(path: &str) -> Result<T> {
 pub struct Processed {
     pub text: String,
     pub observation: Option<ProcessingObservation>,
+    pub transformations: Vec<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -426,6 +444,7 @@ fn voice_action_failure(started: Instant, error: String) -> Processed {
             latency_ms: started.elapsed().as_millis() as u64,
             fallback: Some(error),
         }),
+        transformations: Vec::new(),
     }
 }
 
@@ -619,7 +638,7 @@ mod tests {
     }
 
     fn profiles() -> Profiles {
-        Profiles::new(Some(Profile::new("default", "default prompt")))
+        Profiles::new(Profile::new("default", "default prompt").ai_enabled(true))
             .application("Slack", Profile::new("slack", "slack prompt"))
             .browser_host("x.com", Profile::new("x", "x prompt"))
     }
@@ -630,18 +649,11 @@ mod tests {
         assert_eq!(
             profiles
                 .select(&context("Brave Browser", Some("https://x.com/home")))
-                .unwrap()
                 .name,
             "x"
         );
-        assert_eq!(
-            profiles.select(&context("Slack", None)).unwrap().name,
-            "slack"
-        );
-        assert_eq!(
-            profiles.select(&context("Zed", None)).unwrap().name,
-            "default"
-        );
+        assert_eq!(profiles.select(&context("Slack", None)).name, "slack");
+        assert_eq!(profiles.select(&context("Zed", None)).name, "default");
     }
 
     #[test]
@@ -686,17 +698,34 @@ mod tests {
 
     #[test]
     fn a_contextual_raw_mode_overrides_processed_default() {
-        let profiles =
-            Profiles::new(Some(Profile::new("default", "default prompt"))).application_raw("Slack");
+        let profiles = Profiles::new(Profile::new("default", "default prompt").ai_enabled(true))
+            .application("Slack", Profile::new("raw", "").ai_enabled(false));
 
-        assert!(profiles.select(&context("Slack", None)).is_none());
-        assert_eq!(
-            profiles
-                .select(&context("Zed", None))
-                .expect("default profile")
-                .name,
-            "default"
+        assert!(!profiles.select(&context("Slack", None)).ai_enabled);
+        assert_eq!(profiles.select(&context("Zed", None)).name, "default");
+    }
+
+    #[test]
+    fn mode_corrections_run_before_registered_transformations() {
+        let profile = Profile::new("Global", "")
+            .replacements(ReplacementSet::new(&[
+                crate::app_settings::TextReplacement {
+                    matched_phrase: "open code".into(),
+                    output: "OpenCode".into(),
+                },
+            ]))
+            .transformations(vec!["lowercase".into()]);
+        let profiles = Profiles::new(profile);
+
+        let processed = profiles.process_cancellable(
+            "Use open code.",
+            &context("Zed", None),
+            &AtomicBool::new(false),
         );
+
+        assert_eq!(processed.text, "Use OpenCode.");
+        assert_eq!(processed.transformations, ["lowercase"]);
+        assert!(processed.observation.is_none());
     }
 
     #[test]

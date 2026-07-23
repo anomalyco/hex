@@ -3176,6 +3176,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "gpui-symbols"
+version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "96928d6fc8d3b8a9b4e4bb5b128e654cf6106203216993f37dbb7ddec9d72e15"
+dependencies = [
+ "gpui",
+ "image",
+ "objc",
+ "smallvec",
+]
+
+[[package]]
 name = "gpui_collections"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8531,6 +8543,7 @@ dependencies = [
  "fs2",
  "getrandom 0.3.4",
  "gpui",
+ "gpui-symbols",
  "gtk",
  "hound",
  "libc",

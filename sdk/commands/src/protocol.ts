@@ -11,14 +11,28 @@ export interface RegistrationCommand {
     | { readonly type: "handler" }
 }
 
+export interface RegistrationTransformation {
+  readonly id: string
+  readonly name: string
+  readonly description?: string
+}
+
 export interface Registration {
   readonly type: "registration"
   readonly protocolVersion: 1
   readonly dictation?: DictationProtocolConfig
+  readonly transformations: readonly RegistrationTransformation[]
   readonly commands: readonly RegistrationCommand[]
 }
 
 export type HostInput =
+  | {
+    readonly type: "transform"
+    readonly invocationId: string
+    readonly transformationIds: readonly string[]
+    readonly text: string
+    readonly context: HandlerContext
+  }
   | {
     readonly type: "invoke"
     readonly invocationId: string
@@ -35,6 +49,13 @@ export type HostInput =
 
 export type HostOutput =
   | Registration
+  | {
+    readonly type: "transformationResult"
+    readonly invocationId: string
+    readonly result:
+      | { readonly type: "success"; readonly text: string }
+      | { readonly type: "failure"; readonly message: string }
+  }
   | {
     readonly type: "toolCall"
     readonly invocationId: string

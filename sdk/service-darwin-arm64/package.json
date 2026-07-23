@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "description": "Signed native HEX transcription helper for Apple Silicon macOS",
-  "license": "UNLICENSED",
+  "license": "MIT",
   "os": ["darwin"],
   "cpu": ["arm64"],
   "files": [

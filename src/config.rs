@@ -34,32 +34,28 @@ fn build_dictation_profiles(settings: &DictationProcessingSettings) -> Profiles 
     for mode in &settings.modes {
         let profile = mode_profile(mode);
         for application in &mode.applications {
-            profiles = match &profile {
-                Some(profile) => profiles.application(application.clone(), profile.clone()),
-                None => profiles.application_raw(application.clone()),
-            };
+            profiles = profiles.application(application.clone(), profile.clone());
         }
         for host in &mode.browser_hosts {
-            profiles = match &profile {
-                Some(profile) => profiles.browser_host(host.clone(), profile.clone()),
-                None => profiles.browser_host_raw(host.clone()),
-            };
+            profiles = profiles.browser_host(host.clone(), profile.clone());
         }
     }
     profiles
 }
 
-fn mode_profile(mode: &crate::app_settings::DictationMode) -> Option<Profile> {
+fn mode_profile(mode: &crate::app_settings::DictationMode) -> Profile {
     let processing = &mode.post_processing;
-    if !processing.enabled {
-        return None;
-    }
     let name = if mode.name.trim().is_empty() {
         "Untitled mode"
     } else {
         &mode.name
     };
-    let mut profile = Profile::new(name, &processing.prompt);
+    let mut profile = Profile::new(name, &processing.prompt)
+        .ai_enabled(processing.enabled)
+        .replacements(crate::text_replacements::ReplacementSet::new(
+            &mode.replacements,
+        ))
+        .transformations(mode.transformations.clone());
     if let Some((provider, model)) = processing
         .model
         .as_deref()
@@ -74,9 +70,9 @@ fn mode_profile(mode: &crate::app_settings::DictationMode) -> Option<Profile> {
             profile = profile.variant(variant);
         }
     }
-    Some(profile.deadline(std::time::Duration::from_secs(
+    profile.deadline(std::time::Duration::from_secs(
         processing.deadline_seconds.max(1),
-    )))
+    ))
 }
 
 /// Native system commands and typed captures that cannot yet be expressed by

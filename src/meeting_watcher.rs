@@ -136,9 +136,19 @@ fn run_with_shell_preview(
         .as_ref()
         .map(|path| crate::events::EventLog::create(path))
         .transpose()?;
+    let (developer_sender, developer_receiver) = mpsc::sync_channel(8);
     let local_api = event_log
         .as_ref()
-        .map(|events| crate::local_api::LocalApi::start(events.clone()))
+        .map(|events| {
+            if crate::DEVELOPER_FEATURES_ENABLED {
+                crate::local_api::LocalApi::start_with_developer_control(
+                    events.clone(),
+                    developer_sender.clone(),
+                )
+            } else {
+                crate::local_api::LocalApi::start(events.clone())
+            }
+        })
         .transpose()?;
     let meeting_project_root = listener
         .as_ref()
@@ -397,6 +407,7 @@ fn run_with_shell_preview(
             drive_ui(
                 event_receiver,
                 indicator_receiver,
+                developer_receiver,
                 MeetingUi {
                     commands: command_sender,
                     app_window: app_window.clone(),
@@ -423,6 +434,7 @@ fn run_with_shell_preview(
 async fn drive_ui(
     events: Receiver<ControllerEvent>,
     indicator_events: Receiver<crate::dictation_indicator::DictationIndicatorEvent>,
+    developer_calls: Receiver<crate::developer_control::DeveloperCall>,
     ui: MeetingUi,
     shutdown: &AtomicBool,
     indicator_enabled: bool,
@@ -446,6 +458,17 @@ async fn drive_ui(
         }
         if let Some(dictation_indicator) = &mut dictation_indicator {
             let _ = cx.update(|cx| dictation_indicator.follow_pointer(cx));
+        }
+        while let Ok(call) = developer_calls.try_recv() {
+            let reply = cx
+                .update(|cx| apply_developer_command(call.command, &ui, cx))
+                .unwrap_or_else(|error| {
+                    crate::developer_control::DeveloperReply::error(
+                        "developer-ui-failed",
+                        error.to_string(),
+                    )
+                });
+            let _ = call.reply.send(reply);
         }
         while let Ok(event) = events.try_recv() {
             let result = cx.update(|cx| match event {
@@ -521,6 +544,99 @@ async fn drive_ui(
             }
         }
         Timer::after(Duration::from_millis(16)).await;
+    }
+}
+
+fn apply_developer_command(
+    command: crate::developer_control::DeveloperCommand,
+    ui: &MeetingUi,
+    cx: &mut App,
+) -> crate::developer_control::DeveloperReply {
+    use crate::developer_control::{DeveloperCommand, DeveloperHudState, DeveloperReply};
+
+    match command {
+        DeveloperCommand::Status => {
+            let pane = ui.app_window.borrow().as_ref().copied().and_then(|handle| {
+                handle
+                    .update(cx, |window, _, _| window.developer_pane())
+                    .ok()
+            });
+            DeveloperReply::State {
+                window_open: pane.is_some(),
+                pane,
+                commands_enabled: crate::app_settings::commands_enabled(),
+            }
+        }
+        DeveloperCommand::Hud { state } => {
+            ui.indicator.send(DictationIndicatorEvent::Reset);
+            match state {
+                DeveloperHudState::Reset => {}
+                DeveloperHudState::Recording => {
+                    ui.indicator.send(DictationIndicatorEvent::Started);
+                    ui.indicator.send(DictationIndicatorEvent::Meter {
+                        average: 0.08,
+                        peak: 0.42,
+                    });
+                }
+                DeveloperHudState::Transcribing => {
+                    ui.indicator
+                        .send(DictationIndicatorEvent::Submitted { job_id: 0 });
+                    ui.indicator
+                        .send(DictationIndicatorEvent::Transcribing { job_id: 0 });
+                }
+                DeveloperHudState::Processing => {
+                    ui.indicator
+                        .send(DictationIndicatorEvent::Submitted { job_id: 0 });
+                    ui.indicator
+                        .send(DictationIndicatorEvent::Processing { job_id: 0 });
+                }
+            }
+            DeveloperReply::Ok
+        }
+        DeveloperCommand::ShowPane { pane } => {
+            let handle = match crate::app_window::open_or_focus(
+                &ui.app_window,
+                ui.event_path.clone(),
+                config::voice_control(),
+                ui.meeting_requests.clone(),
+                ui.indicator.clone(),
+                ui.recognition_start.clone(),
+                cx,
+            ) {
+                Ok(handle) => handle,
+                Err(error) => {
+                    return DeveloperReply::error("open-window-failed", error.to_string());
+                }
+            };
+            match handle.update(cx, |window, _, cx| window.developer_select_pane(pane, cx)) {
+                Ok(()) => DeveloperReply::Ok,
+                Err(error) => DeveloperReply::error("show-pane-failed", error.to_string()),
+            }
+        }
+        DeveloperCommand::SetCommandsEnabled { enabled } => {
+            let handle = ui.app_window.borrow().as_ref().copied();
+            if let Some(handle) = handle
+                && let Ok(result) = handle.update(cx, |window, _, cx| {
+                    window.developer_set_commands_enabled(enabled, cx)
+                })
+            {
+                return match result {
+                    Ok(()) => DeveloperReply::Ok,
+                    Err(error) => DeveloperReply::error("settings-save-failed", error),
+                };
+            }
+            let mut settings = match AppSettings::load() {
+                Ok(settings) => settings,
+                Err(error) => {
+                    return DeveloperReply::error("settings-load-failed", error.to_string());
+                }
+            };
+            settings.commands_enabled = enabled;
+            match settings.save() {
+                Ok(()) => DeveloperReply::Ok,
+                Err(error) => DeveloperReply::error("settings-save-failed", error.to_string()),
+            }
+        }
     }
 }
 
@@ -853,7 +969,6 @@ fn button(
         .text_sm()
         .font_weight(gpui::FontWeight::SEMIBOLD)
         .text_color(foreground)
-        .cursor_pointer()
         .hover(|style| style.opacity(0.86))
         .active(|style| style.opacity(0.8))
         .child(label)

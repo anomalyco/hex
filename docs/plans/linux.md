@@ -23,7 +23,7 @@ The beta does not claim voice commands, application or browser context,
 meetings, native Wayland support, or package-manager installation. XWayland is
 not native Wayland support.
 
-## What Has Shipped
+## What Is Implemented
 
 - Global hold/release dictation, Escape cancellation, and double-tap lock.
 - Configurable persisted shortcut binding.
@@ -34,6 +34,15 @@ not native Wayland support.
 - XDG paths, diagnostics, and exclusive listener ownership.
 - Signed user-local updates with bounded download, exact size and SHA-256
   verification, atomic version activation, and restart handoff.
+
+The update path is implemented but is not yet proven by a complete signed
+cross-version update on the supported Arch/i3 host.
+
+The direct installer is published as `install-linux.sh`. It verifies the same
+signed feed and content-addressed artifact as the in-app updater, creates the
+managed version layout, and installs XDG desktop and autostart entries. An AUR
+package is the preferred future Arch-native channel; pacman must own updates for
+that layout.
 
 ## Remaining Work Is Sequenced By Capability
 
@@ -150,6 +159,7 @@ cargo fmt --check
 cargo test
 cargo clippy --all-targets --all-features -- -D warnings
 git diff --check
+./scripts/test-install-linux-release.sh
 ```
 
 Run behavior tests against real adapters rather than mocks that repeat

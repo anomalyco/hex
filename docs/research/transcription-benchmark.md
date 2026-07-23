@@ -140,12 +140,14 @@ cargo build --release
   > perf/transcription-corpus/transcribe-cpp-metal-v2-q8.jsonl
 ```
 
-## Decision Rule
+## Decision Rule Used For The Migration
 
-Retain the ONNX benchmark until `transcribe.cpp` is measured against
-independently referenced hold-to-dictate speech. Keep the production migration
-only if transcript quality has no material regression and the measured latency
-and memory wins survive packaging, signing, and foreground-app smoke testing.
+The production runtime has moved to `transcribe.cpp`; ONNX remains available
+only through the benchmark feature. At migration time, the rule was to retain
+ONNX until `transcribe.cpp` was measured against independently referenced
+hold-to-dictate speech, and to keep the migration only if quality had no
+material regression and latency and memory wins survived packaging, signing,
+and foreground-app smoke testing.
 
 Record every backend revision, model and quantization, macOS version, power
 state, and result filename. Run comparisons plugged in, with no other inference

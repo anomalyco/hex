@@ -55,4 +55,6 @@ export type {
   Modifier,
   NativeAction,
   PressOptions,
+  Transformation,
+  TransformationDefinition,
 } from "./model.js"

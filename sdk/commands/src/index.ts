@@ -19,4 +19,6 @@ export type {
   NativeAction,
   PressOptions,
   PromiseHex,
+  Transformation,
+  TransformationDefinition,
 } from "./model.js"

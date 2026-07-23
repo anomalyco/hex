@@ -1,11 +1,10 @@
-use std::sync::{OnceLock, RwLock};
+use std::sync::OnceLock;
 
 use regex::{Regex, RegexBuilder};
 
 use crate::app_settings::TextReplacement;
 
-static GLOBAL: OnceLock<RwLock<ReplacementSet>> = OnceLock::new();
-
+#[derive(Clone)]
 struct CompiledRule {
     matcher: Regex,
     output: String,
@@ -17,7 +16,7 @@ struct Candidate {
     rule: usize,
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub(crate) struct ReplacementSet {
     rules: Vec<CompiledRule>,
 }
@@ -93,21 +92,6 @@ impl ReplacementSet {
         output.push_str(&text[cursor..]);
         output
     }
-}
-
-pub(crate) fn set_global(rules: &[TextReplacement]) {
-    *GLOBAL
-        .get_or_init(|| RwLock::new(ReplacementSet::default()))
-        .write()
-        .unwrap_or_else(|error| error.into_inner()) = ReplacementSet::new(rules);
-}
-
-pub(crate) fn replace(text: &str) -> String {
-    GLOBAL
-        .get_or_init(|| RwLock::new(ReplacementSet::default()))
-        .read()
-        .unwrap_or_else(|error| error.into_inner())
-        .replace(text)
 }
 
 fn phrase_boundary(text: &str, start: usize, end: usize) -> bool {

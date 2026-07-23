@@ -94,6 +94,10 @@ impl LinuxHotkey {
     }
 
     pub fn label(&self) -> String {
+        self.keycaps().join("+")
+    }
+
+    pub fn keycaps(&self) -> Vec<String> {
         let mut parts = Vec::new();
         if self.control {
             parts.push("Ctrl".to_string());
@@ -113,7 +117,7 @@ impl LinuxHotkey {
             self.key.to_ascii_uppercase()
         };
         parts.push(key);
-        parts.join("+")
+        parts
     }
 
     pub(crate) fn modifier_mask(

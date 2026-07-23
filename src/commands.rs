@@ -5,7 +5,6 @@ use std::{error, fmt};
 
 use color_eyre::eyre::{Result, WrapErr, eyre};
 
-use crate::command_grammar::normalize;
 #[allow(unused_imports)]
 pub use crate::command_grammar::{
     CapturedCount, CapturedDigit, CapturedDirection, Command, CommandBuilder, ConfiguredCommand,
@@ -14,6 +13,7 @@ pub use crate::command_grammar::{
 pub use crate::context::ContextSelector as ContextPredicate;
 use crate::context::ContextSnapshot;
 use crate::keyboard::{Key, Modifiers};
+use crate::spoken_text::normalize;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Mode {
@@ -121,11 +121,22 @@ pub enum Decision<'a> {
     Wake,
     Sleep,
     Execute { id: &'a str, action: Action },
+    ExecuteSequence { commands: Vec<ResolvedCommand<'a>> },
+}
+
+#[derive(Clone)]
+pub struct ResolvedCommand<'a> {
+    pub id: &'a str,
+    pub action: Action,
+}
+
+struct QueuedAction {
+    id: String,
+    action: Action,
 }
 
 struct ActionRequest {
-    id: String,
-    action: Action,
+    actions: Vec<QueuedAction>,
     heard: String,
     context: String,
 }
@@ -148,14 +159,16 @@ impl ActionExecutor {
         let (outcome_sender, outcomes) = mpsc::channel();
         thread::spawn(move || {
             while let Ok(request) = request_receiver.recv() {
-                let outcome = ActionOutcome {
-                    id: request.id,
-                    heard: request.heard,
-                    context: request.context,
-                    result: execute(request.action).map_err(|error| error.to_string()),
-                };
-                if outcome_sender.send(outcome).is_err() {
-                    break;
+                for action in request.actions {
+                    let outcome = ActionOutcome {
+                        id: action.id,
+                        heard: request.heard.clone(),
+                        context: request.context.clone(),
+                        result: execute(action.action).map_err(|error| error.to_string()),
+                    };
+                    if outcome_sender.send(outcome).is_err() {
+                        return;
+                    }
                 }
             }
         });
@@ -169,10 +182,28 @@ impl ActionExecutor {
         heard: &str,
         context: String,
     ) -> Result<(), &'static str> {
+        self.submit_sequence([(id, action)], heard, context)
+    }
+
+    pub fn submit_sequence<I, S>(
+        &self,
+        actions: I,
+        heard: &str,
+        context: String,
+    ) -> Result<(), &'static str>
+    where
+        I: IntoIterator<Item = (S, Action)>,
+        S: Into<String>,
+    {
         self.requests
             .try_send(ActionRequest {
-                id: id.into(),
-                action,
+                actions: actions
+                    .into_iter()
+                    .map(|(id, action)| QueuedAction {
+                        id: id.into(),
+                        action,
+                    })
+                    .collect(),
                 heard: heard.into(),
                 context,
             })
@@ -311,23 +342,67 @@ impl CommandConfig {
         }
 
         let words = heard.split_whitespace().collect::<Vec<_>>();
-        if let Some((command, action)) = self
-            .commands
+        let mut parses = vec![Vec::<Vec<ResolvedCommand<'a>>>::new(); words.len() + 1];
+        parses[0].push(Vec::new());
+        for start in 0..words.len() {
+            if parses[start].is_empty() {
+                continue;
+            }
+            let prefixes = parses[start].clone();
+            for end in start + 1..=words.len() {
+                let Some(command) = self.resolve_words(&words[start..end], context) else {
+                    continue;
+                };
+                for prefix in &prefixes {
+                    if parses[end].len() == 2 {
+                        break;
+                    }
+                    let mut parse = prefix.clone();
+                    parse.push(command.clone());
+                    parses[end].push(parse);
+                }
+            }
+        }
+
+        let mut parses = parses.pop().expect("command parse table cannot be empty");
+        if parses.len() != 1 {
+            return Decision::Ignore;
+        }
+        let mut commands = parses.pop().expect("one command parse must exist");
+        if commands.is_empty() {
+            return Decision::Ignore;
+        }
+        if commands.len() == 1 {
+            let command = commands.pop().expect("one resolved command must exist");
+            return Decision::Execute {
+                id: command.id,
+                action: command.action,
+            };
+        }
+        if commands.iter().all(|command| command.action.is_chainable()) {
+            Decision::ExecuteSequence { commands }
+        } else {
+            Decision::Ignore
+        }
+    }
+
+    fn resolve_words<'a>(
+        &'a self,
+        words: &[&str],
+        context: &ContextSnapshot,
+    ) -> Option<ResolvedCommand<'a>> {
+        self.commands
             .iter()
             .filter_map(|command| {
                 command
-                    .match_words(&words, context)
+                    .match_words(words, context)
                     .map(|action| (command, action))
             })
             .max_by_key(|(command, _)| command.specificity())
-        {
-            return Decision::Execute {
+            .map(|(command, action)| ResolvedCommand {
                 id: command.id(),
                 action,
-            };
-        }
-
-        Decision::Ignore
+            })
     }
 
     pub fn catalog(&self) -> Vec<CommandInfo> {
@@ -373,6 +448,18 @@ impl CommandConfig {
                 },
             })
             .collect()
+    }
+}
+
+impl Action {
+    fn is_chainable(&self) -> bool {
+        !matches!(
+            self,
+            Self::StartDictation
+                | Self::StartMeeting
+                | Self::StopMeeting
+                | Self::InvokeHandler { .. }
+        )
     }
 }
 
@@ -757,6 +844,154 @@ mod tests {
                 id: "shortcut.command-one",
                 ..
             }
+        ));
+    }
+
+    #[test]
+    fn resolves_an_unambiguous_sequence_in_the_initial_context() {
+        let config = CommandConfig::new()
+            .command(
+                Command::new("edit.move", "Move the cursor")
+                    .spoken(("go", Direction, Count.optional()))
+                    .action(|(direction, count)| Action::RepeatedKeystroke {
+                        key: direction.key(),
+                        modifiers: Modifiers::NONE,
+                        count: count.map_or(1, CapturedCount::get),
+                    }),
+            )
+            .command(
+                Command::new("edit.enter", "Press enter")
+                    .phrases(["press enter"])
+                    .action(|()| Action::Keystroke {
+                        key: Key::Enter,
+                        modifiers: Modifiers::NONE,
+                    }),
+            );
+
+        let Decision::ExecuteSequence { commands } =
+            config.resolve(Mode::Listening, "go down five press enter", &no_context())
+        else {
+            panic!("expected command sequence");
+        };
+        assert_eq!(
+            commands
+                .iter()
+                .map(|command| command.id)
+                .collect::<Vec<_>>(),
+            ["edit.move", "edit.enter"]
+        );
+        assert!(matches!(
+            commands[0].action,
+            Action::RepeatedKeystroke {
+                key: Key::Down,
+                count: 5,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn resolves_sequences_separated_by_transcript_punctuation() {
+        let config = CommandConfig::new().command(
+            Command::new("go-back", "Go back")
+                .phrases(["go back"])
+                .action(|()| Action::Keystroke {
+                    key: Key::Character('['),
+                    modifiers: Modifiers::COMMAND,
+                }),
+        );
+
+        let Decision::ExecuteSequence { commands } =
+            config.resolve(Mode::Listening, "Go back, go back.", &no_context())
+        else {
+            panic!("expected repeated command sequence");
+        };
+        assert_eq!(
+            commands
+                .iter()
+                .map(|command| command.id)
+                .collect::<Vec<_>>(),
+            ["go-back", "go-back"]
+        );
+    }
+
+    #[test]
+    fn rejects_an_utterance_with_multiple_complete_decompositions() {
+        let config = CommandConfig::new()
+            .command(
+                Command::new("open", "Open")
+                    .phrases(["open"])
+                    .action(|()| Action::TypeText("open".into())),
+            )
+            .command(
+                Command::new("slack", "Slack")
+                    .phrases(["slack"])
+                    .action(|()| Action::TypeText("slack".into())),
+            )
+            .command(
+                Command::new("open-slack", "Open Slack")
+                    .phrases(["open slack"])
+                    .action(|()| Action::OpenApplication("Slack".into())),
+            );
+
+        assert!(matches!(
+            config.resolve(Mode::Listening, "open slack", &no_context()),
+            Decision::Ignore
+        ));
+    }
+
+    #[test]
+    fn only_uses_commands_available_in_the_initial_context() {
+        let config = CommandConfig::new()
+            .command(
+                Command::new("open-slack", "Open Slack")
+                    .phrases(["slack"])
+                    .action(|()| Action::OpenApplication("Slack".into())),
+            )
+            .command(
+                Command::new("slack-threads", "Open Slack threads")
+                    .phrases(["threads"])
+                    .when(ContextPredicate::application("Slack"))
+                    .action(|()| Action::Keystroke {
+                        key: Key::Character('t'),
+                        modifiers: Modifiers::COMMAND.with(Modifiers::SHIFT),
+                    }),
+            );
+
+        assert!(matches!(
+            config.resolve(Mode::Listening, "slack threads", &no_context()),
+            Decision::Ignore
+        ));
+        let slack = ContextSnapshot {
+            application: Some("Slack".into()),
+            ..ContextSnapshot::default()
+        };
+        assert!(matches!(
+            config.resolve(Mode::Listening, "slack threads", &slack),
+            Decision::ExecuteSequence { .. }
+        ));
+    }
+
+    #[test]
+    fn interactive_commands_cannot_participate_in_sequences() {
+        let config = CommandConfig::new()
+            .command(
+                Command::new("meeting", "Start meeting")
+                    .phrases(["start meeting"])
+                    .action(|()| Action::StartMeeting),
+            )
+            .command(
+                Command::new("enter", "Press enter")
+                    .phrases(["press enter"])
+                    .action(|()| Action::Keystroke {
+                        key: Key::Enter,
+                        modifiers: Modifiers::NONE,
+                    }),
+            );
+
+        assert!(matches!(
+            config.resolve(Mode::Listening, "start meeting press enter", &no_context()),
+            Decision::Ignore
         ));
     }
 

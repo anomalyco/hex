@@ -1,19 +1,22 @@
 use std::collections::{HashMap, VecDeque};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use rubato::{FftFixedIn, Resampler};
+
+use crate::audio::CaptureInstant;
 
 #[cfg(target_os = "macos")]
 use crate::recording_environment::{RecordingEnvironmentController, RecordingEnvironmentSession};
 
-const RING_BUFFER_DURATION: Duration = Duration::from_secs(1);
+const VOICE_PRE_ROLL_DURATION: Duration = Duration::from_secs(1);
+const TIMELINE_BUFFER_DURATION: Duration = Duration::from_secs(10);
 const PRE_ROLL_DURATION: Duration = Duration::from_millis(450);
 pub const MINIMUM_HOLD_DURATION: Duration = Duration::from_millis(300);
 const MINIMUM_PARAKEET_DURATION: Duration = Duration::from_millis(1500);
 const INITIAL_RECORDING_CAPACITY: Duration = Duration::from_secs(10);
 const PARAKEET_SAMPLE_RATE: u32 = 16_000;
 
-use crate::command_grammar::normalize;
+use crate::spoken_text::normalize;
 
 const MAX_PROTOCOL_PHRASES: usize = 16;
 const MAX_PROTOCOL_PHRASE_BYTES: usize = 256;
@@ -354,25 +357,27 @@ pub fn resample_for_parakeet(samples: &[f32], source_rate: u32) -> Vec<f32> {
 }
 
 pub fn try_resample_for_parakeet(samples: &[f32], source_rate: u32) -> Result<Vec<f32>, String> {
-    let mut recording = Recording::try_new(Instant::now(), source_rate)?;
+    let mut recording = Recording::try_new(CaptureInstant::ZERO, source_rate)?;
     recording.push(samples);
-    Ok(recording.finish())
+    Ok(recording.finish(None))
 }
 
 pub struct DictationCapture {
     sample_rate: u32,
     ring: VecDeque<f32>,
+    ring_captured_through: Option<CaptureInstant>,
     recording: Option<Recording>,
     #[cfg(target_os = "macos")]
     recording_environment: Option<RecordingEnvironmentController>,
 }
 
 struct Recording {
-    started_at: Instant,
+    started_at: CaptureInstant,
     intentional: bool,
     samples: Vec<f32>,
     source_samples: usize,
     source_rate: u32,
+    recorded_through: Option<CaptureInstant>,
     input_buffer: Vec<f32>,
     resampler: Option<FftFixedIn<f32>>,
     #[cfg(target_os = "macos")]
@@ -402,11 +407,11 @@ impl RecordingEnvironmentState {
 impl Recording {
     const CHUNK_SIZE: usize = 1024;
 
-    fn new(started_at: Instant, source_rate: u32) -> Self {
+    fn new(started_at: CaptureInstant, source_rate: u32) -> Self {
         Self::try_new(started_at, source_rate).expect("microphone sample rate must be resampleable")
     }
 
-    fn try_new(started_at: Instant, source_rate: u32) -> Result<Self, String> {
+    fn try_new(started_at: CaptureInstant, source_rate: u32) -> Result<Self, String> {
         let resampler = (source_rate != PARAKEET_SAMPLE_RATE)
             .then(|| {
                 FftFixedIn::new(
@@ -428,6 +433,7 @@ impl Recording {
             )),
             source_samples: 0,
             source_rate,
+            recorded_through: None,
             input_buffer: Vec::with_capacity(Self::CHUNK_SIZE),
             resampler,
             #[cfg(target_os = "macos")]
@@ -466,7 +472,19 @@ impl Recording {
         }
     }
 
-    fn finish(mut self) -> Vec<f32> {
+    fn push_through(&mut self, samples: &[f32], captured_through: CaptureInstant) {
+        self.push(samples);
+        self.recorded_through = Some(captured_through);
+    }
+
+    fn finish(mut self, ended_at: Option<CaptureInstant>) -> Vec<f32> {
+        if let (Some(ended_at), Some(recorded_through)) = (ended_at, self.recorded_through)
+            && let Some(post_release) = recorded_through.checked_duration_since(ended_at)
+        {
+            self.source_samples = self
+                .source_samples
+                .saturating_sub(samples_for(post_release, self.source_rate));
+        }
         if let Some(resampler) = &mut self.resampler {
             let expected_samples =
                 self.source_samples * PARAKEET_SAMPLE_RATE as usize / self.source_rate as usize;
@@ -491,6 +509,8 @@ impl Recording {
             }
             self.samples.drain(..output_delay.min(self.samples.len()));
             self.samples.truncate(expected_samples);
+        } else {
+            self.samples.truncate(self.source_samples);
         }
         self.samples
     }
@@ -500,7 +520,8 @@ impl DictationCapture {
     pub fn new(sample_rate: u32) -> Self {
         Self {
             sample_rate,
-            ring: VecDeque::with_capacity(samples_for(RING_BUFFER_DURATION, sample_rate)),
+            ring: VecDeque::with_capacity(samples_for(TIMELINE_BUFFER_DURATION, sample_rate)),
+            ring_captured_through: None,
             recording: None,
             #[cfg(target_os = "macos")]
             recording_environment: None,
@@ -512,8 +533,13 @@ impl DictationCapture {
         self.recording_environment = Some(controller);
     }
 
+    #[cfg(any(test, target_os = "linux"))]
     pub fn keep_warm(&mut self, samples: &[f32]) {
-        let capacity = samples_for(RING_BUFFER_DURATION, self.sample_rate);
+        self.keep_warm_for(samples, TIMELINE_BUFFER_DURATION);
+    }
+
+    fn keep_warm_for(&mut self, samples: &[f32], retention: Duration) {
+        let capacity = samples_for(retention, self.sample_rate);
         if samples.len() >= capacity {
             self.ring.clear();
             self.ring.extend(&samples[samples.len() - capacity..]);
@@ -534,15 +560,46 @@ impl DictationCapture {
         self.recording.is_some()
     }
 
-    pub fn start(&mut self, now: Instant) {
+    #[cfg(any(test, target_os = "linux"))]
+    pub fn start(&mut self, now: CaptureInstant) {
         self.start_with_pre_roll(now, PRE_ROLL_DURATION, false);
     }
 
-    pub fn start_voice(&mut self, now: Instant) {
-        self.start_with_pre_roll(now, RING_BUFFER_DURATION, true);
+    #[cfg(test)]
+    pub fn start_voice(&mut self, now: CaptureInstant) {
+        self.start_with_pre_roll(now, VOICE_PRE_ROLL_DURATION, true);
     }
 
-    fn start_with_pre_roll(&mut self, now: Instant, duration: Duration, intentional: bool) {
+    pub fn start_at(&mut self, occurred_at: CaptureInstant) {
+        self.start_from_timeline(occurred_at, PRE_ROLL_DURATION, false)
+    }
+
+    pub fn start_voice_at(&mut self, occurred_at: CaptureInstant) {
+        self.start_from_timeline(occurred_at, VOICE_PRE_ROLL_DURATION, true)
+    }
+
+    fn start_from_timeline(
+        &mut self,
+        occurred_at: CaptureInstant,
+        pre_roll: Duration,
+        intentional: bool,
+    ) {
+        let delayed_audio = self
+            .ring_captured_through
+            .and_then(|through| through.checked_duration_since(occurred_at))
+            .unwrap_or_default();
+        self.start_with_pre_roll(
+            occurred_at,
+            pre_roll.saturating_add(delayed_audio),
+            intentional,
+        );
+        if let (Some(recording), Some(through)) = (&mut self.recording, self.ring_captured_through)
+        {
+            recording.recorded_through = Some(through);
+        }
+    }
+
+    fn start_with_pre_roll(&mut self, now: CaptureInstant, duration: Duration, intentional: bool) {
         #[cfg(target_os = "macos")]
         let environment = match &self.recording_environment {
             Some(controller) if intentional => RecordingEnvironmentState::Active {
@@ -571,7 +628,8 @@ impl DictationCapture {
         self.recording = Some(recording);
     }
 
-    pub fn push(&mut self, samples: &[f32], now: Instant) -> bool {
+    #[cfg(test)]
+    pub fn push(&mut self, samples: &[f32], now: CaptureInstant) -> bool {
         let became_intentional = self.become_intentional(now);
         if let Some(recording) = &mut self.recording {
             recording.push(samples);
@@ -579,7 +637,34 @@ impl DictationCapture {
         became_intentional
     }
 
-    pub fn become_intentional(&mut self, now: Instant) -> bool {
+    #[cfg(any(test, target_os = "linux"))]
+    pub fn ingest(&mut self, samples: &[f32], captured_through: CaptureInstant) -> bool {
+        self.ingest_with_pending(samples, captured_through, None)
+    }
+
+    pub fn ingest_with_pending(
+        &mut self,
+        samples: &[f32],
+        captured_through: CaptureInstant,
+        oldest_pending: Option<CaptureInstant>,
+    ) -> bool {
+        if let Some(recording) = &mut self.recording {
+            recording.push_through(samples, captured_through);
+        }
+        let retention = oldest_pending
+            .map(|pending| {
+                captured_through
+                    .saturating_duration_since(pending)
+                    .saturating_add(VOICE_PRE_ROLL_DURATION)
+                    .max(TIMELINE_BUFFER_DURATION)
+            })
+            .unwrap_or(TIMELINE_BUFFER_DURATION);
+        self.keep_warm_for(samples, retention);
+        self.ring_captured_through = Some(captured_through);
+        false
+    }
+
+    pub fn become_intentional(&mut self, now: CaptureInstant) -> bool {
         let Some(recording) = &mut self.recording else {
             return false;
         };
@@ -597,7 +682,7 @@ impl DictationCapture {
         self.recording = None;
     }
 
-    pub fn finish(&mut self, now: Instant) -> Finish {
+    pub fn finish(&mut self, now: CaptureInstant) -> Finish {
         let Some(recording) = self.recording.take() else {
             return Finish::Discard;
         };
@@ -606,7 +691,7 @@ impl DictationCapture {
         }
 
         Finish::Transcribe(DictationClip {
-            samples: recording.finish(),
+            samples: recording.finish(Some(now)),
         })
     }
 }
@@ -619,10 +704,14 @@ fn samples_for(duration: Duration, sample_rate: u32) -> usize {
 mod tests {
     use super::*;
 
+    fn capture_time() -> CaptureInstant {
+        CaptureInstant::from_nanos(60_000_000_000)
+    }
+
     #[test]
     fn quick_option_tap_discards() {
         let mut capture = DictationCapture::new(16_000);
-        let start = Instant::now();
+        let start = capture_time();
         capture.start(start);
         let _ = capture.push(&vec![0.5; 1_600], start + Duration::from_millis(100));
         assert!(matches!(
@@ -634,7 +723,7 @@ mod tests {
     #[test]
     fn modifier_capture_becomes_intentional_only_after_the_hold_threshold() {
         let mut capture = DictationCapture::new(16_000);
-        let start = Instant::now();
+        let start = capture_time();
         capture.start(start);
 
         assert!(!capture.push(&[0.5; 80], start + Duration::from_millis(299)));
@@ -645,12 +734,101 @@ mod tests {
     #[test]
     fn release_can_commit_the_intentional_transition_between_audio_chunks() {
         let mut capture = DictationCapture::new(16_000);
-        let start = Instant::now();
+        let start = capture_time();
         capture.start(start);
 
         assert!(!capture.push(&[0.5; 80], start + Duration::from_millis(299)));
         assert!(capture.become_intentional(start + MINIMUM_HOLD_DURATION));
         assert!(!capture.become_intentional(start + Duration::from_millis(301)));
+    }
+
+    #[test]
+    fn delayed_press_reconstructs_audio_from_the_original_boundary() {
+        let mut capture = DictationCapture::new(16_000);
+        let origin = capture_time();
+        for index in 1..=16 {
+            capture.ingest(
+                &vec![index as f32; 1_600],
+                origin + Duration::from_millis(index * 100),
+            );
+        }
+
+        capture.start_at(origin + Duration::from_secs(1));
+        for index in 17..=20 {
+            capture.ingest(
+                &vec![index as f32; 1_600],
+                origin + Duration::from_millis(index * 100),
+            );
+        }
+
+        let Finish::Transcribe(clip) = capture.finish(origin + Duration::from_millis(1_800)) else {
+            panic!("expected transcription")
+        };
+        assert_eq!(clip.duration_ms(), 1_250);
+        assert_eq!(clip.samples.first(), Some(&6.0));
+    }
+
+    #[test]
+    fn delayed_release_removes_audio_captured_after_the_physical_release() {
+        let mut capture = DictationCapture::new(16_000);
+        let origin = capture_time();
+        capture.ingest(&vec![0.25; 16_000], origin);
+        capture.start_at(origin);
+        for index in 1..=12 {
+            capture.ingest(
+                &vec![index as f32; 1_600],
+                origin + Duration::from_millis(index * 100),
+            );
+        }
+
+        let Finish::Transcribe(clip) = capture.finish(origin + Duration::from_secs(1)) else {
+            panic!("expected transcription")
+        };
+        assert_eq!(clip.duration_ms(), 1_450);
+        assert!(!clip.samples.contains(&11.0));
+        assert!(!clip.samples.contains(&12.0));
+    }
+
+    #[test]
+    fn minimum_hold_uses_source_event_times_after_a_processing_stall() {
+        let origin = capture_time();
+        let mut short = DictationCapture::new(16_000);
+        short.start_at(origin);
+        short.ingest(&vec![0.5; 16_000], origin + Duration::from_secs(2));
+        assert!(matches!(
+            short.finish(origin + Duration::from_millis(299)),
+            Finish::Discard
+        ));
+
+        let mut accepted = DictationCapture::new(16_000);
+        accepted.start_at(origin);
+        accepted.ingest(&vec![0.5; 16_000], origin + Duration::from_secs(2));
+        assert!(matches!(
+            accepted.finish(origin + MINIMUM_HOLD_DURATION),
+            Finish::Transcribe(_)
+        ));
+    }
+
+    #[test]
+    fn pending_input_extends_history_for_an_arbitrary_coordinator_stall() {
+        let mut capture = DictationCapture::new(16_000);
+        let origin = capture_time();
+        capture.ingest(&vec![0.25; 16_000], origin + Duration::from_secs(1));
+        let pressed_at = origin + Duration::from_secs(1);
+        for second in 2..=31 {
+            capture.ingest_with_pending(
+                &vec![second as f32; 16_000],
+                origin + Duration::from_secs(second),
+                Some(pressed_at),
+            );
+        }
+
+        capture.start_at(pressed_at);
+        let Finish::Transcribe(clip) = capture.finish(origin + Duration::from_secs(31)) else {
+            panic!("expected transcription")
+        };
+        assert_eq!(clip.duration_ms(), 30_450);
+        assert_eq!(clip.samples.first(), Some(&0.25));
     }
 
     #[test]
@@ -665,7 +843,7 @@ mod tests {
     fn intentional_hold_includes_pre_roll_and_parakeet_padding() {
         let mut capture = DictationCapture::new(16_000);
         capture.keep_warm(&vec![0.25; 16_000]);
-        let start = Instant::now();
+        let start = capture_time();
         capture.start(start);
         let _ = capture.push(&vec![0.5; 8_000], start + Duration::from_millis(500));
         let Finish::Transcribe(clip) = capture.finish(start + Duration::from_millis(500)) else {
@@ -683,7 +861,7 @@ mod tests {
         let mut capture = DictationCapture::new(16_000);
         capture.keep_warm(&[0.25; 8_000]);
         capture.keep_warm(&[0.25; 8_000]);
-        let start = Instant::now();
+        let start = capture_time();
 
         capture.start_voice(start);
         let _ = capture.push(&[0.5; 8_000], start + Duration::from_millis(500));
@@ -699,7 +877,7 @@ mod tests {
     #[test]
     fn capture_continues_past_sixty_seconds_until_explicitly_finished() {
         let mut capture = DictationCapture::new(16_000);
-        let start = Instant::now();
+        let start = capture_time();
         capture.start(start);
         let _ = capture.push(&vec![0.5; 61 * 16_000], start + Duration::from_secs(61));
 
@@ -717,9 +895,9 @@ mod tests {
             (48_000, 1_024),
             (48_000, 4_800),
         ] {
-            let mut recording = Recording::new(Instant::now(), sample_rate);
+            let mut recording = Recording::new(capture_time(), sample_rate);
             recording.push(&vec![0.5; input_len]);
-            let samples = recording.finish();
+            let samples = recording.finish(None);
             let expected = input_len * PARAKEET_SAMPLE_RATE as usize / sample_rate as usize;
 
             assert_eq!(samples.len(), expected);

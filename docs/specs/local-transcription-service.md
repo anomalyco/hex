@@ -1,12 +1,12 @@
 # HEX Local Transcription Service and SDK
 
-**Status:** Model preparation, bounded host-audio transcription, and a
-direct-child embedded service mode are implemented. Promise and Effect
-TypeScript host wrappers are implemented against a fake helper; signed helper
-packaging and a real consumer remain.
+**Status:** The internal service, direct-child mode, and Promise and Effect
+wrappers are implemented. The npm packages are private previews; signed helper
+packaging, clean-consumer validation, and a real consumer remain.
 
-**Authority:** This document defines the current service and future SDK product
-contract. Implementation sequencing lives in
+**Authority:** This document defines implemented internal service behavior and
+the target private SDK contract. It does not claim a published package.
+Implementation sequencing lives in
 [`../plans/typescript-sdk.md`](../plans/typescript-sdk.md).
 
 ## Product Boundary
@@ -34,7 +34,7 @@ HEX access. HEX Service has no microphone entitlement and never captures audio.
 | Decision | Reason |
 | --- | --- |
 | Host owns microphone capture | Correct TCC identity, intuitive permission prompt, no shared permission broker. |
-| Service owns models and inference | One verified model installation and one warm runtime can serve many apps. |
+| Service owns models and inference | Hosts share verified model artifacts while each helper owns its warm runtime. |
 | Completed audio goes over localhost | Simple final-only contract; no partial transcripts or bidirectional session protocol. |
 | Model preparation is explicit | A transcription call never hides a large network download. |
 | Installed-but-cold models may reload automatically | Warmth is transient and can change because of another client or memory pressure. |
@@ -156,8 +156,10 @@ export type ModelProgress =
   | { type: "loading" };
 ```
 
-Preparing means download, checksum verification, strict-Metal load, and
-prewarm. It does not select the model or change full HEX.app settings. The
+For managed GGUF models, preparation means download, checksum verification,
+strict-Metal load, and prewarm. System-managed runtimes such as Apple Speech
+perform their platform-specific availability and readiness checks instead. A
+preparation does not select the model or change full HEX.app settings. The
 service serializes preparation and preserves the existing artifact and warm
 runtime when a replacement fails.
 

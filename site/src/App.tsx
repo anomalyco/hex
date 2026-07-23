@@ -3,7 +3,7 @@ import ChatteringTeeth from "./ChatteringTeeth"
 
 const DOWNLOAD_URL =
   "https://pub-089d681d41754031a4aefa7017d8c2fb.r2.dev/releases/HEX-latest-arm64.dmg"
-const LINUX_INSTALL_URL = "https://github.com/anomalyco/hex#linux-x11-beta"
+const LINUX_INSTALL_URL = "https://github.com/anomalyco/hex/blob/main/docs/linux.md"
 
 function HexMark() {
   return (
@@ -55,8 +55,8 @@ export default function App() {
             <ChatteringTeeth />
           </div>
           <p>
-            Private, local dictation for {isLinux ? "Linux." : "Mac."} Hold Option, say what you mean,
-            and HEX pastes it where you are.
+            Local voice dictation for {isLinux ? "Linux." : "Mac."} Hold {isLinux ? "Alt-Space" : "Option"},
+            say what you mean, and HEX pastes it where you are.
           </p>
         </div>
 
@@ -69,7 +69,7 @@ export default function App() {
               whileTap={{ scale: 0.985 }}
             >
               <LinuxMark />
-              <span>Linux install guide</span>
+              <span>Install on Linux</span>
               <span className="download__arrow" aria-hidden="true">&#8599;</span>
             </m.a>
           ) : (
@@ -85,7 +85,7 @@ export default function App() {
             </m.a>
           )}
           <p className="requirements">
-            {isLinux ? "Source install  ·  x86_64 Arch/X11 beta" : "Apple silicon  ·  macOS 15+"}
+            {isLinux ? "x86_64 Arch/X11 beta" : "Apple silicon  ·  macOS 15+"}
           </p>
         </div>
       </section>

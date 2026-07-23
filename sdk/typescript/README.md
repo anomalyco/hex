@@ -1,16 +1,21 @@
 # HEX TypeScript Client
 
+> **Status:** Private API preview. `@hex-ai/client` is not published to npm and
+> the repository does not contain a runnable native helper. The examples below
+> require an internally prepared Apple silicon macOS helper artifact.
+
 Host the native HEX transcription helper as a direct child process. The host
 application owns microphone capture and settings; HEX owns local model
 preparation and transcription. Model artifacts remain shared per user while the
 helper process and warm model belong to the host.
 
-The package is private while helper packaging and the first real Electron
-consumer are being validated.
-
 On Apple Silicon, `@hex-ai/service-darwin-arm64` is installed as an optional
 dependency and selected automatically. The release workflow prepares its
 signed/notarized executable; normal consumers never pass a command or path.
+
+This document records the intended consumer API. Do not depend on package names,
+versions, or distribution behavior until the first real consumer and clean
+package installation have been validated.
 
 ## Promise API
 

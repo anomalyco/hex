@@ -7,6 +7,12 @@ documents do not define current behavior or active work.
 The prototype compares three earlier app-shell directions spanning Meetings,
 Commands, Activity/Debug, and Settings.
 
+Supporting material:
+
+- [`DECISIONS.md`](DECISIONS.md): decisions made after the comparison.
+- [`SYNTHESIS.md`](SYNTHESIS.md): combined design direction.
+- [`ACTIVITY_DATA.md`](ACTIVITY_DATA.md): historical data audit.
+
 ```sh
 bun prototypes/app-shell/serve.ts
 ```

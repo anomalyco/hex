@@ -64,6 +64,14 @@ export interface HandlerContext {
 
 export type Handler = (arguments_: HandlerArguments) => void | Promise<void>
 
+export type Transformation = (text: string, context: HandlerContext) => string | Promise<string>
+
+export interface TransformationDefinition {
+  readonly name: string
+  readonly description?: string
+  readonly transform: Transformation
+}
+
 export interface CommandMetadata {
   readonly phrases: readonly [string, ...string[]]
   readonly group?: string
@@ -87,6 +95,7 @@ export type CommandDefinitionFor<Run> = CommandMetadata & (
 
 export interface HexConfigFor<Definition extends CommandMetadata> {
   readonly dictation?: DictationProtocolConfig
+  readonly transformations?: Readonly<Record<string, TransformationDefinition>>
   readonly commands: Readonly<Record<string, Definition>>
 }
 

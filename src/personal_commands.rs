@@ -23,6 +23,8 @@ const HOST_START_TIMEOUT: Duration = Duration::from_secs(5);
 const POLL_INTERVAL: Duration = Duration::from_millis(250);
 const RELOAD_DEBOUNCE: Duration = Duration::from_millis(350);
 const MAX_COMMANDS: usize = 512;
+const MAX_TRANSFORMATIONS: usize = 128;
+const MAX_TRANSFORMATIONS_PER_INVOCATION: usize = 32;
 const MAX_PHRASES: usize = 16;
 const MAX_REPEAT: u8 = 100;
 const MAX_PENDING_INVOCATIONS: usize = 1024;
@@ -40,6 +42,8 @@ const MAX_WATCH_ENTRIES: usize = 4096;
 const MAX_WATCH_DEPTH: usize = 32;
 const MAX_STATUS_BYTES: usize = 256 * 1024;
 const MAX_STATUS_ERROR_BYTES: usize = 4096;
+const MAX_TRANSFORMATION_TEXT_BYTES: usize = 48 * 1024;
+const TRANSFORMATION_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -48,8 +52,18 @@ pub struct StatusSnapshot {
     pub catalog: Vec<StatusCommand>,
     #[serde(default)]
     pub dictation: Option<StatusDictationProtocol>,
+    #[serde(default)]
+    pub transformations: Vec<StatusTransformation>,
     pub host_state: HostState,
     pub last_reload_error: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StatusTransformation {
+    pub id: String,
+    pub name: String,
+    pub description: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -107,6 +121,7 @@ impl Default for StatusSnapshot {
             active_generation: None,
             catalog: Vec::new(),
             dictation: None,
+            transformations: Vec::new(),
             host_state: HostState::NotConfigured,
             last_reload_error: None,
         }
@@ -204,33 +219,51 @@ fn validate_status(status: &StatusSnapshot) -> Result<()> {
         )
         .map_err(|error| eyre!(error))?;
     }
+    if status.transformations.len() > MAX_TRANSFORMATIONS {
+        return Err(eyre!("personal transformation catalog is too large"));
+    }
+    let mut transformation_ids = HashSet::new();
+    for transformation in &status.transformations {
+        validate_text(&transformation.id, "status transformation id", 128)?;
+        validate_text(&transformation.name, "status transformation name", 1024)?;
+        if let Some(description) = &transformation.description {
+            validate_text(description, "status transformation description", 1024)?;
+        }
+        if !transformation_ids.insert(&transformation.id) {
+            return Err(eyre!("status transformation IDs must be unique"));
+        }
+    }
     Ok(())
 }
 
 pub fn initialize_workspace() -> Result<PathBuf> {
     let workspace = crate::app_paths::personal_commands_workspace()?;
     let sdk = crate::app_paths::personal_commands_sdk()?;
-    initialize_workspace_at(&workspace, &sdk)?;
+    let sdk_changed = initialize_workspace_at(&workspace, &sdk)?;
     let bun = find_bun().ok_or_else(|| eyre!("Bun is required to install personal commands"))?;
-    let status = Command::new(bun)
-        .arg("install")
-        .current_dir(&workspace)
-        .status()
-        .wrap_err("could not install the personal command workspace")?;
-    if !status.success() {
-        return Err(eyre!(
-            "Bun failed to install the personal command workspace"
-        ));
+    if sdk_changed {
+        remove_installed_managed_sdk(&workspace)?;
     }
+    install_workspace_dependencies(&workspace, &bun)?;
     Ok(workspace)
 }
 
-pub fn initialize_workspace_at(workspace: &Path, sdk: &Path) -> Result<()> {
+pub fn initialize_workspace_at(workspace: &Path, sdk: &Path) -> Result<bool> {
     let template = sdk.join("workspace-template");
     if !sdk.join("package.json").is_file()
         || !sdk.join("dist/bin.js").is_file()
         || !template.is_dir()
     {
+        return Err(eyre!("personal command SDK resources are incomplete"));
+    }
+    fs::create_dir_all(workspace)?;
+    let sdk_changed = refresh_managed_sdk_at(workspace, sdk)?;
+    copy_directory(&template, workspace, false)?;
+    Ok(sdk_changed)
+}
+
+fn refresh_managed_sdk_at(workspace: &Path, sdk: &Path) -> Result<bool> {
+    if !sdk.join("package.json").is_file() || !sdk.join("dist/bin.js").is_file() {
         return Err(eyre!("personal command SDK resources are incomplete"));
     }
     fs::create_dir_all(workspace)?;
@@ -242,11 +275,84 @@ pub fn initialize_workspace_at(workspace: &Path, sdk: &Path) -> Result<()> {
     fs::create_dir(&staged_sdk)?;
     fs::copy(sdk.join("package.json"), staged_sdk.join("package.json"))?;
     copy_directory(&sdk.join("dist"), &staged_sdk.join("dist"), true)?;
-    if installed_sdk.exists() {
-        fs::remove_dir_all(&installed_sdk)?;
+    if directory_manifest(&staged_sdk)? == directory_manifest(&installed_sdk)? {
+        fs::remove_dir_all(staged_sdk)?;
+        return Ok(false);
     }
-    fs::rename(staged_sdk, installed_sdk)?;
-    copy_directory(&template, workspace, false)?;
+    let previous_sdk = workspace.join(".hex-sdk.previous");
+    if previous_sdk.exists() {
+        fs::remove_dir_all(&previous_sdk)?;
+    }
+    if installed_sdk.exists() {
+        fs::rename(&installed_sdk, &previous_sdk)?;
+    }
+    if let Err(error) = fs::rename(&staged_sdk, &installed_sdk) {
+        if previous_sdk.exists() {
+            let _ = fs::rename(&previous_sdk, &installed_sdk);
+        }
+        return Err(error.into());
+    }
+    if previous_sdk.exists() {
+        fs::remove_dir_all(previous_sdk)?;
+    }
+    Ok(true)
+}
+
+fn directory_manifest(root: &Path) -> Result<Vec<(PathBuf, Option<Vec<u8>>)>> {
+    if !root.exists() {
+        return Ok(Vec::new());
+    }
+    let mut manifest = Vec::new();
+    let mut pending = vec![root.to_path_buf()];
+    while let Some(directory) = pending.pop() {
+        for entry in fs::read_dir(&directory)? {
+            let entry = entry?;
+            let path = entry.path();
+            let file_type = entry.file_type()?;
+            if file_type.is_symlink() {
+                return Err(eyre!("managed SDK resources must not contain symlinks"));
+            }
+            let relative = path
+                .strip_prefix(root)
+                .map_err(|_| eyre!("managed SDK path escaped its root"))?
+                .to_path_buf();
+            if file_type.is_dir() {
+                manifest.push((relative, None));
+                pending.push(path);
+            } else if file_type.is_file() {
+                manifest.push((relative, Some(fs::read(path)?)));
+            }
+        }
+    }
+    manifest.sort_by(|left, right| left.0.cmp(&right.0));
+    Ok(manifest)
+}
+
+fn install_workspace_dependencies(workspace: &Path, bun: &Path) -> Result<()> {
+    let status = Command::new(bun)
+        .arg("install")
+        .current_dir(workspace)
+        .status()
+        .wrap_err("could not install the personal command workspace")?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(eyre!(
+            "Bun failed to install the personal command workspace"
+        ))
+    }
+}
+
+fn remove_installed_managed_sdk(workspace: &Path) -> Result<()> {
+    let installed = workspace.join("node_modules/@hex/commands");
+    let Ok(metadata) = fs::symlink_metadata(&installed) else {
+        return Ok(());
+    };
+    if metadata.is_dir() && !metadata.file_type().is_symlink() {
+        fs::remove_dir_all(installed)?;
+    } else {
+        fs::remove_file(installed)?;
+    }
     Ok(())
 }
 
@@ -275,12 +381,15 @@ pub struct PersonalCommands {
     stop: Arc<AtomicBool>,
     worker: Option<thread::JoinHandle<()>>,
     worker_done: Receiver<()>,
+    transformations: Arc<TransformationClient>,
 }
 
 #[derive(Clone)]
 pub struct RuntimeSnapshot {
     pub commands: CommandConfig,
     pub dictation: Arc<DictationProtocol>,
+    generation: u64,
+    transformations: HashSet<String>,
 }
 
 impl RuntimeSnapshot {
@@ -288,7 +397,108 @@ impl RuntimeSnapshot {
         Self {
             commands,
             dictation: Arc::new(DictationProtocol::default()),
+            generation: 0,
+            transformations: HashSet::new(),
         }
+    }
+}
+
+#[derive(Default)]
+pub struct TransformationClient {
+    active: RwLock<Option<ActiveTransformations>>,
+}
+
+#[derive(Clone)]
+struct ActiveTransformations {
+    generation: u64,
+    ids: HashSet<String>,
+    requests: SyncSender<Request>,
+}
+
+struct TransformationRequest {
+    generation: u64,
+    ids: Vec<String>,
+    text: String,
+    context: ContextSnapshot,
+    response: SyncSender<std::result::Result<String, String>>,
+}
+
+impl TransformationClient {
+    pub fn transform(
+        &self,
+        ids: &[String],
+        text: &str,
+        context: &ContextSnapshot,
+        cancelled: &AtomicBool,
+    ) -> std::result::Result<String, String> {
+        if ids.is_empty() {
+            return Ok(text.into());
+        }
+        if text.len() > MAX_TRANSFORMATION_TEXT_BYTES {
+            return Err("custom transformation input is too large".into());
+        }
+        let active = self
+            .active
+            .read()
+            .unwrap_or_else(|error| error.into_inner())
+            .clone()
+            .ok_or_else(|| "custom transformations are unavailable".to_string())?;
+        if ids.len() > MAX_TRANSFORMATIONS_PER_INVOCATION
+            || ids.iter().any(|id| !active.ids.contains(id))
+        {
+            return Err("mode references an unavailable custom transformation".into());
+        }
+        let (sender, receiver) = mpsc::sync_channel(1);
+        active
+            .requests
+            .try_send(Request::Transform(Box::new(TransformationRequest {
+                generation: active.generation,
+                ids: ids.to_vec(),
+                text: text.into(),
+                context: context.clone(),
+                response: sender,
+            })))
+            .map_err(|error| match error {
+                TrySendError::Full(_) => "custom transformation queue is full".to_string(),
+                TrySendError::Disconnected(_) => {
+                    "custom transformation host is unavailable".to_string()
+                }
+            })?;
+        let started = Instant::now();
+        loop {
+            if cancelled.load(Ordering::Acquire) {
+                return Err("dictation was cancelled".into());
+            }
+            let remaining = TRANSFORMATION_TIMEOUT.saturating_sub(started.elapsed());
+            if remaining.is_zero() {
+                return Err("custom transformations timed out".into());
+            }
+            match receiver.recv_timeout(remaining.min(Duration::from_millis(50))) {
+                Ok(result) => return result,
+                Err(mpsc::RecvTimeoutError::Timeout) => {}
+                Err(mpsc::RecvTimeoutError::Disconnected) => {
+                    return Err("custom transformation host stopped".into());
+                }
+            }
+        }
+    }
+
+    fn activate(&self, runtime: &RuntimeSnapshot, requests: SyncSender<Request>) {
+        *self
+            .active
+            .write()
+            .unwrap_or_else(|error| error.into_inner()) = Some(ActiveTransformations {
+            generation: runtime.generation,
+            ids: runtime.transformations.clone(),
+            requests,
+        });
+    }
+
+    fn clear(&self) {
+        *self
+            .active
+            .write()
+            .unwrap_or_else(|error| error.into_inner()) = None;
     }
 }
 
@@ -301,6 +511,7 @@ struct Invocation {
 
 enum Request {
     Invoke(Box<Invocation>),
+    Transform(Box<TransformationRequest>),
     Reload,
 }
 
@@ -332,6 +543,20 @@ struct PendingInvocation {
     started: Instant,
 }
 
+struct PendingTransformation {
+    generation: u64,
+    response: SyncSender<std::result::Result<String, String>>,
+    started: Instant,
+}
+
+type CandidateRegistration = (
+    HostProcess,
+    RuntimeSnapshot,
+    Vec<StatusCommand>,
+    Option<StatusDictationProtocol>,
+    Vec<StatusTransformation>,
+);
+
 #[derive(Default)]
 struct RestartBackoff {
     failures: u8,
@@ -356,6 +581,8 @@ enum HostOutput {
     Registration {
         protocol_version: u8,
         dictation: Option<RegistrationDictationProtocol>,
+        #[serde(default)]
+        transformations: Vec<RegistrationTransformation>,
         commands: Vec<RegistrationCommand>,
     },
     ToolCall {
@@ -367,6 +594,18 @@ enum HostOutput {
         invocation_id: String,
         result: WireResult,
     },
+    TransformationResult {
+        invocation_id: String,
+        result: TransformationWireResult,
+    },
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct RegistrationTransformation {
+    id: String,
+    name: String,
+    description: Option<String>,
 }
 
 #[derive(Clone, Deserialize)]
@@ -468,6 +707,13 @@ enum WireResult {
     Failure { message: String },
 }
 
+#[derive(Deserialize)]
+#[serde(tag = "type", rename_all = "camelCase")]
+enum TransformationWireResult {
+    Success { text: String },
+    Failure { message: String },
+}
+
 #[derive(Serialize)]
 #[serde(
     tag = "type",
@@ -478,6 +724,12 @@ enum HostInput {
     Invoke {
         invocation_id: String,
         command_id: String,
+        context: InvocationContext,
+    },
+    Transform {
+        invocation_id: String,
+        transformation_ids: Vec<String>,
+        text: String,
         context: InvocationContext,
     },
     ToolResult {
@@ -499,6 +751,15 @@ struct InvocationContext {
     browser_url: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     window_title: Option<String>,
+}
+
+fn invocation_context(context: &ContextSnapshot) -> InvocationContext {
+    InvocationContext {
+        application: context.application.clone(),
+        browser_host: context.browser_host().map(Into::into),
+        browser_url: context.browser_url.as_ref().map(ToString::to_string),
+        window_title: context.window_title.clone(),
+    }
 }
 
 const fn one() -> u8 {
@@ -542,18 +803,28 @@ impl RestartBackoff {
 }
 
 impl PersonalCommands {
-    pub fn start(base: CommandConfig) -> Option<Self> {
+    pub fn start(base: CommandConfig, transformations: Arc<TransformationClient>) -> Option<Self> {
         let active = Arc::new(RwLock::new(Arc::new(RuntimeSnapshot::native(base.clone()))));
         let (request_sender, requests) = mpsc::sync_channel(32);
         let (outcome_sender, outcomes) = mpsc::sync_channel(64);
         let stop = Arc::new(AtomicBool::new(false));
         let worker_active = active.clone();
         let worker_stop = stop.clone();
+        let worker_transformations = transformations.clone();
+        let worker_requests = request_sender.clone();
         let (done_sender, worker_done) = mpsc::sync_channel(1);
         let worker = thread::Builder::new()
             .name("personal-command-host".into())
             .spawn(move || {
-                run_worker(base, worker_active, requests, outcome_sender, worker_stop);
+                run_worker(
+                    base,
+                    worker_active,
+                    requests,
+                    worker_requests,
+                    outcome_sender,
+                    worker_stop,
+                    worker_transformations,
+                );
                 let _ = done_sender.send(());
             })
             .ok()?;
@@ -564,6 +835,7 @@ impl PersonalCommands {
             stop,
             worker: Some(worker),
             worker_done,
+            transformations,
         })
     }
 
@@ -601,6 +873,7 @@ impl PersonalCommands {
 
 impl Drop for PersonalCommands {
     fn drop(&mut self) {
+        self.transformations.clear();
         self.stop.store(true, Ordering::Release);
         let _ = self.requests.try_send(Request::Reload);
         if self
@@ -619,8 +892,10 @@ fn run_worker(
     base: CommandConfig,
     active: Arc<RwLock<Arc<RuntimeSnapshot>>>,
     requests: Receiver<Request>,
+    request_sender: SyncSender<Request>,
     outcomes: SyncSender<ActionOutcome>,
     stop: Arc<AtomicBool>,
+    transformations: Arc<TransformationClient>,
 ) {
     let mut status = StatusSnapshot {
         host_state: HostState::Starting,
@@ -650,6 +925,43 @@ fn run_worker(
         tracing::warn!("Bun was not found; personal commands are unavailable");
         return;
     };
+    let sdk = match crate::app_paths::personal_commands_sdk() {
+        Ok(sdk) => sdk,
+        Err(error) => {
+            status.host_state = HostState::Unavailable;
+            status.last_reload_error = Some(bounded_status_error(&error.to_string()));
+            persist_status(&status);
+            tracing::warn!(%error, "personal command SDK is unavailable");
+            return;
+        }
+    };
+    let sdk_changed = match refresh_managed_sdk_at(&workspace, &sdk) {
+        Ok(changed) => changed,
+        Err(error) => {
+            status.host_state = HostState::Unavailable;
+            status.last_reload_error = Some(bounded_status_error(&error.to_string()));
+            persist_status(&status);
+            tracing::warn!(%error, "could not refresh the managed personal command SDK");
+            return;
+        }
+    };
+    let managed_host = workspace.join("node_modules/@hex/commands/dist/bin.js");
+    if sdk_changed || !managed_host.is_file() {
+        let refreshed = (|| {
+            if sdk_changed {
+                remove_installed_managed_sdk(&workspace)?;
+            }
+            install_workspace_dependencies(&workspace, &bun)
+        })();
+        if let Err(error) = refreshed {
+            status.host_state = HostState::Unavailable;
+            status.last_reload_error = Some(bounded_status_error(&error.to_string()));
+            persist_status(&status);
+            tracing::warn!(%error, "could not activate the current personal command SDK");
+            return;
+        }
+        tracing::info!(sdk_changed, "refreshed the managed personal command SDK");
+    }
     let host_entrypoint = match crate::app_paths::personal_commands_host() {
         Ok(path) => path,
         Err(error) => {
@@ -682,12 +994,15 @@ fn run_worker(
         &host_entrypoint,
         &mut generation,
         &mut status,
+        &request_sender,
+        &transformations,
     ) {
         restart_backoff.host_started(Instant::now());
         hosts.insert(host.generation, host);
     }
     let mut next_invocation = 0_u64;
     let mut pending = HashMap::<String, PendingInvocation>::new();
+    let mut pending_transformations = HashMap::<String, PendingTransformation>::new();
     let mut pending_tools = HashSet::<(u64, String, String)>::new();
 
     while !stop.load(Ordering::Acquire) {
@@ -698,6 +1013,7 @@ fn run_worker(
                 event,
                 &mut hosts,
                 &mut pending,
+                &mut pending_transformations,
                 &mut pending_tools,
                 &outcomes,
                 &tool_sender,
@@ -724,6 +1040,8 @@ fn run_worker(
                 &host_entrypoint,
                 &mut generation,
                 &mut status,
+                &request_sender,
+                &transformations,
             ) {
                 let now = Instant::now();
                 for host in hosts.values_mut() {
@@ -782,6 +1100,7 @@ fn run_worker(
                         host_generation,
                         &mut hosts,
                         &mut pending,
+                        &mut pending_transformations,
                         &mut pending_tools,
                         &outcomes,
                         reason,
@@ -811,18 +1130,84 @@ fn run_worker(
                     );
                 }
             }
+            Ok(Request::Transform(request)) => {
+                let request = *request;
+                if pending_transformations.len() >= MAX_PENDING_INVOCATIONS {
+                    let _ = request.response.send(Err(
+                        "too many custom transformations are still running".into(),
+                    ));
+                    continue;
+                }
+                let Some(host) = hosts.get(&request.generation) else {
+                    let _ = request
+                        .response
+                        .send(Err("custom transformation generation is unavailable".into()));
+                    continue;
+                };
+                next_invocation += 1;
+                let invocation_id = format!("{}-transform-{next_invocation}", request.generation);
+                let context = invocation_context(&request.context);
+                if host
+                    .input
+                    .try_send(HostInput::Transform {
+                        invocation_id: invocation_id.clone(),
+                        transformation_ids: request.ids,
+                        text: request.text,
+                        context,
+                    })
+                    .is_err()
+                {
+                    let _ = request
+                        .response
+                        .send(Err("custom transformation host is unavailable".into()));
+                } else {
+                    pending_transformations.insert(
+                        invocation_id,
+                        PendingTransformation {
+                            generation: request.generation,
+                            response: request.response,
+                            started: Instant::now(),
+                        },
+                    );
+                }
+            }
             Err(mpsc::RecvTimeoutError::Timeout) => {}
             Err(mpsc::RecvTimeoutError::Disconnected) => break,
             Ok(Request::Reload) => {}
         }
 
         let now = Instant::now();
+        let timed_out_generations = pending_transformations
+            .values()
+            .filter_map(|invocation| {
+                (invocation.started.elapsed() >= TRANSFORMATION_TIMEOUT)
+                    .then_some(invocation.generation)
+            })
+            .collect::<HashSet<_>>();
+        for generation in timed_out_generations {
+            let restart = generation_is_active(&hosts, generation);
+            fail_generation(
+                generation,
+                &mut hosts,
+                &mut pending,
+                &mut pending_transformations,
+                &mut pending_tools,
+                &outcomes,
+                "custom transformations timed out",
+            );
+            if restart {
+                restart_backoff.host_failed(now);
+            }
+        }
         let retired = hosts
             .iter()
             .filter_map(|(generation, host)| {
                 let has_pending = pending
                     .values()
-                    .any(|invocation| invocation.generation == *generation);
+                    .any(|invocation| invocation.generation == *generation)
+                    || pending_transformations
+                        .values()
+                        .any(|invocation| invocation.generation == *generation);
                 should_retire(host.retire_at, has_pending, now).then_some(*generation)
             })
             .collect::<Vec<_>>();
@@ -831,6 +1216,7 @@ fn run_worker(
                 generation,
                 &mut hosts,
                 &mut pending,
+                &mut pending_transformations,
                 &mut pending_tools,
                 &outcomes,
                 "personal command generation retired",
@@ -841,6 +1227,7 @@ fn run_worker(
         let _ = host.input.try_send(HostInput::Shutdown);
     }
     status.host_state = HostState::Stopped;
+    transformations.clear();
     persist_status(&status);
 }
 
@@ -855,6 +1242,8 @@ fn reload(
     host_entrypoint: &Path,
     generation: &mut u64,
     status: &mut StatusSnapshot,
+    requests: &SyncSender<Request>,
+    transformations: &TransformationClient,
 ) -> Option<HostProcess> {
     *generation += 1;
     match start_candidate(
@@ -866,11 +1255,13 @@ fn reload(
         bun,
         host_entrypoint,
     ) {
-        Ok((host, runtime, catalog, dictation)) => {
+        Ok((host, runtime, catalog, dictation, transformation_catalog)) => {
+            transformations.activate(&runtime, requests.clone());
             *active.write().expect("command registry poisoned") = Arc::new(runtime);
             status.active_generation = Some(*generation);
             status.catalog = catalog;
             status.dictation = dictation;
+            status.transformations = transformation_catalog;
             status.host_state = HostState::Active;
             status.last_reload_error = None;
             persist_status(status);
@@ -900,12 +1291,7 @@ fn start_candidate(
     config: &Path,
     bun: &Path,
     host_entrypoint: &Path,
-) -> Result<(
-    HostProcess,
-    RuntimeSnapshot,
-    Vec<StatusCommand>,
-    Option<StatusDictationProtocol>,
-)> {
+) -> Result<CandidateRegistration> {
     let mut child = Command::new(bun)
         .arg(host_entrypoint)
         .arg(config)
@@ -938,16 +1324,26 @@ fn start_candidate(
                 HostOutput::Registration {
                     protocol_version,
                     dictation,
+                    transformations,
                     commands,
                 },
             )) if event_generation == generation => {
                 let catalog = status_catalog(&commands);
                 let status_dictation = dictation.as_ref().map(StatusDictationProtocol::from);
+                let status_transformations = transformations
+                    .iter()
+                    .map(|transformation| StatusTransformation {
+                        id: transformation.id.clone(),
+                        name: transformation.name.clone(),
+                        description: transformation.description.clone(),
+                    })
+                    .collect();
                 let compiled = match compile_registration(
                     base,
                     generation,
                     protocol_version,
                     dictation,
+                    transformations,
                     commands,
                 ) {
                     Ok(compiled) => compiled,
@@ -975,6 +1371,7 @@ fn start_candidate(
                     compiled,
                     catalog,
                     status_dictation,
+                    status_transformations,
                 ));
             }
             Ok(HostEvent::Closed(event_generation, error)) if event_generation == generation => {
@@ -1024,6 +1421,7 @@ fn handle_host_event(
     event: HostEvent,
     hosts: &mut HashMap<u64, HostProcess>,
     pending: &mut HashMap<String, PendingInvocation>,
+    pending_transformations: &mut HashMap<String, PendingTransformation>,
     pending_tools: &mut HashSet<(u64, String, String)>,
     outcomes: &SyncSender<ActionOutcome>,
     tool_sender: &SyncSender<ToolJob>,
@@ -1051,6 +1449,7 @@ fn handle_host_event(
                     generation,
                     hosts,
                     pending,
+                    pending_transformations,
                     pending_tools,
                     outcomes,
                     "personal command host sent an invalid or excessive tool call",
@@ -1073,6 +1472,7 @@ fn handle_host_event(
                     generation,
                     hosts,
                     pending,
+                    pending_transformations,
                     pending_tools,
                     outcomes,
                     "personal command native tool queue is unavailable",
@@ -1127,9 +1527,62 @@ fn handle_host_event(
                     generation,
                     hosts,
                     pending,
+                    pending_transformations,
                     pending_tools,
                     outcomes,
                     "personal command host sent an invalid invocation result",
+                );
+                return restart;
+            }
+            false
+        }
+        HostEvent::Frame(
+            generation,
+            HostOutput::TransformationResult {
+                invocation_id,
+                result,
+            },
+        ) => {
+            let valid = pending_transformations
+                .get(&invocation_id)
+                .is_some_and(|invocation| invocation.generation == generation);
+            if valid {
+                let invocation = pending_transformations
+                    .remove(&invocation_id)
+                    .expect("transformation invocation checked");
+                let result = match result {
+                    TransformationWireResult::Success { text }
+                        if text.len() <= MAX_TRANSFORMATION_TEXT_BYTES =>
+                    {
+                        Ok(text)
+                    }
+                    TransformationWireResult::Success { .. } => {
+                        Err("custom transformation output is too large".into())
+                    }
+                    TransformationWireResult::Failure { message } => Err(bounded_error(&message)),
+                };
+                tracing::info!(
+                    generation,
+                    invocation_id,
+                    status = if result.is_ok() {
+                        "completed"
+                    } else {
+                        "failed"
+                    },
+                    duration_ms = invocation.started.elapsed().as_millis(),
+                    "custom transformation invocation"
+                );
+                let _ = invocation.response.send(result);
+            } else {
+                let restart = generation_is_active(hosts, generation);
+                fail_generation(
+                    generation,
+                    hosts,
+                    pending,
+                    pending_transformations,
+                    pending_tools,
+                    outcomes,
+                    "personal command host sent an invalid transformation result",
                 );
                 return restart;
             }
@@ -1155,6 +1608,7 @@ fn handle_host_event(
                         generation,
                         hosts,
                         pending,
+                        pending_transformations,
                         pending_tools,
                         outcomes,
                         "personal command host writer is unavailable",
@@ -1171,6 +1625,7 @@ fn handle_host_event(
                 generation,
                 hosts,
                 pending,
+                pending_transformations,
                 pending_tools,
                 outcomes,
                 "personal command host stopped",
@@ -1183,6 +1638,7 @@ fn handle_host_event(
                 generation,
                 hosts,
                 pending,
+                pending_transformations,
                 pending_tools,
                 outcomes,
                 "personal command host sent an unexpected registration",
@@ -1233,6 +1689,7 @@ fn compile_registration(
     generation: u64,
     protocol_version: u8,
     dictation: Option<RegistrationDictationProtocol>,
+    transformations: Vec<RegistrationTransformation>,
     commands: Vec<RegistrationCommand>,
 ) -> Result<RuntimeSnapshot> {
     if protocol_version != 1 {
@@ -1242,6 +1699,22 @@ fn compile_registration(
     }
     if commands.len() > MAX_COMMANDS {
         return Err(eyre!("personal registry exceeds {MAX_COMMANDS} commands"));
+    }
+    if transformations.len() > MAX_TRANSFORMATIONS {
+        return Err(eyre!(
+            "personal registry exceeds {MAX_TRANSFORMATIONS} transformations"
+        ));
+    }
+    let mut transformation_ids = HashSet::new();
+    for transformation in transformations {
+        validate_text(&transformation.id, "transformation id", 128)?;
+        validate_text(&transformation.name, "transformation name", 1024)?;
+        if let Some(description) = &transformation.description {
+            validate_text(description, "transformation description", 1024)?;
+        }
+        if !transformation_ids.insert(transformation.id) {
+            return Err(eyre!("duplicate transformation id"));
+        }
     }
     let mut compiled = base.clone();
     for command in commands {
@@ -1305,6 +1778,8 @@ fn compile_registration(
     Ok(RuntimeSnapshot {
         commands: compiled,
         dictation: Arc::new(dictation),
+        generation,
+        transformations: transformation_ids,
     })
 }
 
@@ -1459,6 +1934,7 @@ fn fail_generation(
     generation: u64,
     hosts: &mut HashMap<u64, HostProcess>,
     pending: &mut HashMap<String, PendingInvocation>,
+    pending_transformations: &mut HashMap<String, PendingTransformation>,
     pending_tools: &mut HashSet<(u64, String, String)>,
     outcomes: &SyncSender<ActionOutcome>,
     error: &str,
@@ -1487,6 +1963,15 @@ fn fail_generation(
                 context: invocation.context,
                 result: Err(error.into()),
             });
+        }
+    }
+    let transformation_ids = pending_transformations
+        .iter()
+        .filter_map(|(id, invocation)| (invocation.generation == generation).then_some(id.clone()))
+        .collect::<Vec<_>>();
+    for id in transformation_ids {
+        if let Some(invocation) = pending_transformations.remove(&id) {
+            let _ = invocation.response.send(Err(error.into()));
         }
     }
 }
@@ -1753,9 +2238,15 @@ mod tests {
         else {
             panic!("expected registration")
         };
-        let compiled =
-            compile_registration(&CommandConfig::new(), 7, protocol_version, None, commands)
-                .unwrap();
+        let compiled = compile_registration(
+            &CommandConfig::new(),
+            7,
+            protocol_version,
+            None,
+            vec![],
+            commands,
+        )
+        .unwrap();
 
         assert!(matches!(
             compiled.commands.resolve(Mode::Listening, "open example", &ContextSnapshot::default()),
@@ -1795,6 +2286,53 @@ mod tests {
     }
 
     #[test]
+    fn transformation_client_dispatches_only_registered_ids() {
+        let (requests, receiver) = mpsc::sync_channel(1);
+        let client = TransformationClient::default();
+        *client
+            .active
+            .write()
+            .unwrap_or_else(|error| error.into_inner()) = Some(ActiveTransformations {
+            generation: 4,
+            ids: HashSet::from(["lowercase".into()]),
+            requests,
+        });
+        let worker = thread::spawn(move || {
+            let Request::Transform(request) = receiver.recv().unwrap() else {
+                panic!("expected transformation request");
+            };
+            assert_eq!(request.generation, 4);
+            assert_eq!(request.ids, ["lowercase"]);
+            request
+                .response
+                .send(Ok(request.text.to_lowercase()))
+                .unwrap();
+        });
+
+        let transformed = client
+            .transform(
+                &["lowercase".into()],
+                "HELLO",
+                &ContextSnapshot::default(),
+                &AtomicBool::new(false),
+            )
+            .unwrap();
+
+        assert_eq!(transformed, "hello");
+        assert!(
+            client
+                .transform(
+                    &["missing".into()],
+                    "HELLO",
+                    &ContextSnapshot::default(),
+                    &AtomicBool::new(false),
+                )
+                .is_err()
+        );
+        worker.join().unwrap();
+    }
+
+    #[test]
     fn invalid_candidate_does_not_mutate_base_registry() {
         let base = CommandConfig::new().command(
             ConfiguredCommand::literal(
@@ -1811,7 +2349,7 @@ mod tests {
         )
         .unwrap();
 
-        assert!(compile_registration(&base, 1, 1, None, vec![command]).is_err());
+        assert!(compile_registration(&base, 1, 1, None, vec![], vec![command]).is_err());
         assert!(matches!(
             base.resolve(
                 Mode::Listening,
@@ -1835,6 +2373,7 @@ mod tests {
                 cancel: vec!["discard note".into()],
             }),
             vec![],
+            vec![],
         )
         .unwrap();
         assert!(
@@ -1850,7 +2389,8 @@ mod tests {
                 .is_none()
         );
 
-        let fallback = compile_registration(&CommandConfig::new(), 1, 1, None, vec![]).unwrap();
+        let fallback =
+            compile_registration(&CommandConfig::new(), 1, 1, None, vec![], vec![]).unwrap();
         assert!(
             fallback
                 .dictation
@@ -1873,8 +2413,15 @@ mod tests {
         };
 
         assert!(
-            compile_registration(&CommandConfig::new(), 1, 1, Some(protocol), vec![command])
-                .is_err()
+            compile_registration(
+                &CommandConfig::new(),
+                1,
+                1,
+                Some(protocol),
+                vec![],
+                vec![command]
+            )
+            .is_err()
         );
     }
 
@@ -1889,7 +2436,7 @@ mod tests {
             r#"{"id":"personal","phrases":["go to sleep"],"execution":{"type":"handler"}}"#,
         ] {
             let command = serde_json::from_str(input).unwrap();
-            assert!(compile_registration(&base, 1, 1, None, vec![command]).is_err());
+            assert!(compile_registration(&base, 1, 1, None, vec![], vec![command]).is_err());
         }
     }
 
@@ -1899,7 +2446,9 @@ mod tests {
             r#"{"id":"bad","phrases":["bad"],"when":{"browserHost":"https://x.com/path"},"execution":{"type":"handler"}}"#,
         )
         .unwrap();
-        assert!(compile_registration(&CommandConfig::new(), 1, 1, None, vec![command]).is_err());
+        assert!(
+            compile_registration(&CommandConfig::new(), 1, 1, None, vec![], vec![command]).is_err()
+        );
 
         let context = ContextSnapshot {
             application: Some("Brave Browser".into()),
@@ -2081,7 +2630,7 @@ mod tests {
         let workspace = std::env::temp_dir().join(format!("hex-workspace-{unique}"));
         let sdk = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("sdk/commands");
 
-        initialize_workspace_at(&workspace, &sdk).unwrap();
+        assert!(initialize_workspace_at(&workspace, &sdk).unwrap());
         assert!(workspace.join(".hex-sdk/dist/bin.js").is_file());
         assert!(workspace.join("package.json").is_file());
         assert!(workspace.join("tsconfig.json").is_file());
@@ -2092,7 +2641,17 @@ mod tests {
                 .is_file()
         );
         fs::write(workspace.join("hex.config.ts"), "// user config\n").unwrap();
-        initialize_workspace_at(&workspace, &sdk).unwrap();
+        assert!(!initialize_workspace_at(&workspace, &sdk).unwrap());
+        assert_eq!(
+            fs::read_to_string(workspace.join("hex.config.ts")).unwrap(),
+            "// user config\n"
+        );
+        fs::write(workspace.join(".hex-sdk/dist/index.js"), "stale SDK\n").unwrap();
+        assert!(initialize_workspace_at(&workspace, &sdk).unwrap());
+        assert_eq!(
+            fs::read(workspace.join(".hex-sdk/dist/index.js")).unwrap(),
+            fs::read(sdk.join("dist/index.js")).unwrap()
+        );
         assert_eq!(
             fs::read_to_string(workspace.join("hex.config.ts")).unwrap(),
             "// user config\n"
@@ -2126,6 +2685,11 @@ mod tests {
                 send: vec!["send note".into()],
                 cancel: vec!["discard note".into()],
             }),
+            transformations: vec![StatusTransformation {
+                id: "lowercase".into(),
+                name: "Lowercase".into(),
+                description: Some("Use lowercase output".into()),
+            }],
             host_state: HostState::Active,
             last_reload_error: None,
         };

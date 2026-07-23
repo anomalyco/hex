@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+root=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 mode=${1:-prepare}
 version=${HEX_VERSION:-$(cargo metadata --no-deps --format-version 1 --manifest-path "$root/Cargo.toml" | jq -r '.packages[0].version')}
 bucket=${HEX_RELEASE_BUCKET:-hex-releases}
@@ -9,6 +9,8 @@ base_url=${HEX_RELEASE_BASE_URL:-https://pub-089d681d41754031a4aefa7017d8c2fb.r2
 dist="$root/dist"
 target_dir=${CARGO_TARGET_DIR:-"$root/target"}
 feed="$dist/linux-update.json"
+prepared_commit="$dist/linux-release-commit"
+installer="$root/scripts/install-linux-release.sh"
 expected_public_key=bfad02e62208ff144b5c9d21c7e79c7c16c6904299a437d857303007cd4ff7d8
 public_key_prefix=302a300506032b6570032100
 
@@ -32,6 +34,18 @@ if ! printf '%s\n' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
   echo "Stable Linux releases require a non-prerelease semantic version." >&2
   exit 1
 fi
+if [ -n "$(git -C "$root" status --porcelain)" ]; then
+  echo "Commit or remove all working-tree changes before releasing." >&2
+  exit 1
+fi
+upstream=$(git -C "$root" rev-parse --abbrev-ref '@{upstream}' 2>/dev/null || true)
+if [ -z "$upstream" ] || [ "$(git -C "$root" rev-parse HEAD)" != "$(git -C "$root" rev-parse "$upstream")" ]; then
+  echo "Push the release commit to its upstream branch before releasing." >&2
+  exit 1
+fi
+test -f "$installer"
+sh -n "$installer"
+grep -Fq "$expected_public_key" "$installer"
 
 mkdir -p "$dist"
 exec 9> "$dist/.release-linux.lock"
@@ -80,6 +94,7 @@ verify_prepared() {
 published_version() {
   remote_feed="$temporary/remote-linux-update.json"
   status=$(curl --silent --show-error --proto '=https' --proto-redir '=https' \
+    --connect-timeout 10 --max-time 60 \
     --header 'Cache-Control: no-cache' --write-out '%{http_code}' \
     --output "$remote_feed" "$base_url/linux-update.json")
   case "$status" in
@@ -114,35 +129,54 @@ require_newer_than_published() {
 }
 
 if [ "$mode" = publish ]; then
-  if [ ! -f "$feed" ]; then
+  if [ ! -f "$feed" ] || [ ! -f "$prepared_commit" ]; then
     echo "Prepare and validate version $version before publishing it." >&2
     exit 1
   fi
+  test "$(cat "$prepared_commit")" = "$(git -C "$root" rev-parse HEAD)"
   verify_prepared
   require_newer_than_published
   wrangler r2 object put "$bucket/releases/$artifact" --remote \
     --file "$artifact_path" \
-    --content-type application/octet-stream
+    --content-type application/octet-stream \
+    --cache-control 'public, max-age=31536000, immutable'
   remote_artifact="$temporary/$artifact"
   curl --fail --silent --show-error --proto '=https' --proto-redir '=https' \
+    --connect-timeout 10 --max-time 600 \
     "$base_url/releases/$artifact" -o "$remote_artifact"
   cmp -s "$artifact_path" "$remote_artifact"
+  wrangler r2 object put "$bucket/install-linux.sh" --remote \
+    --file "$installer" \
+    --content-type text/x-shellscript \
+    --content-disposition 'attachment; filename="install-linux.sh"' \
+    --cache-control 'public, max-age=300'
+  remote_installer="$temporary/install-linux.sh"
+  curl --fail --silent --show-error --proto '=https' --proto-redir '=https' \
+    --connect-timeout 10 --max-time 60 --header 'Cache-Control: no-cache' \
+    "$base_url/install-linux.sh?commit=$(git -C "$root" rev-parse HEAD)" \
+    -o "$remote_installer"
+  cmp -s "$installer" "$remote_installer"
   # Recheck immediately before publishing the only mutable object.
   require_newer_than_published
   wrangler r2 object put "$bucket/linux-update.json" --remote \
     --file "$feed" \
-    --content-type application/json
+    --content-type application/json \
+    --cache-control 'no-cache'
   curl --fail --silent --show-error --proto '=https' --proto-redir '=https' \
-    --header 'Cache-Control: no-cache' "$base_url/linux-update.json" \
+    --connect-timeout 10 --max-time 60 --header 'Cache-Control: no-cache' \
+    "$base_url/linux-update.json" \
     -o "$temporary/published-linux-update.json"
   cmp -s "$feed" "$temporary/published-linux-update.json"
   echo "$base_url/releases/$artifact"
+  echo "$base_url/install-linux.sh"
   exit 0
 fi
 if [ "$mode" != prepare ]; then
   echo "Usage: $0 [prepare|publish]" >&2
   exit 1
 fi
+require python3
+"$root/scripts/test-install-linux-release.sh"
 if [ -z "${HEX_LINUX_SIGNING_KEY:-}" ]; then
   echo "Set HEX_LINUX_SIGNING_KEY to the Ed25519 private PEM." >&2
   exit 1
@@ -183,6 +217,7 @@ jq -n \
   '{payload:$payload,signature:$signature}' > "$feed"
 
 verify_prepared
+git -C "$root" rev-parse HEAD > "$prepared_commit"
 echo "$artifact_path"
 echo "$feed"
 echo "Prepared but not published. Run $0 publish after validation." >&2

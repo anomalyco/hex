@@ -3,7 +3,7 @@ use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use clap::{Parser, Subcommand};
 use color_eyre::Result;
@@ -157,7 +157,7 @@ pub(crate) fn listen(
         Some(name) => AudioInput::open_matching(name)?,
         None => AudioInput::open(&[])?,
     };
-    let mut events = EventLog::create(event_path)?;
+    let events = EventLog::create(event_path)?;
     events.emit(&VoiceEvent::SessionStarted {
         timestamp_ms: now_ms(),
     })?;
@@ -168,20 +168,9 @@ pub(crate) fn listen(
     })?;
     println!("Listening on {}. Press Ctrl-C to stop.", input.device_name);
 
-    let mut last_drop_report = Instant::now();
-    let mut dropped_chunks = 0;
     while !shutdown.load(Ordering::Relaxed) {
-        dropped_chunks += input.take_dropped_chunks();
-        if last_drop_report.elapsed() >= Duration::from_secs(1) {
-            if dropped_chunks > 0 {
-                tracing::warn!(dropped_chunks, "microphone chunks were dropped");
-                dropped_chunks = 0;
-            }
-            last_drop_report = Instant::now();
-        }
-
         let chunk = match input.recv_timeout(Duration::from_millis(100)) {
-            AudioInputEvent::Chunk(chunk) => chunk,
+            AudioInputEvent::Chunk { samples, .. } => samples,
             AudioInputEvent::Timeout => continue,
             AudioInputEvent::StreamFailed(error) => {
                 return Err(color_eyre::eyre::eyre!(

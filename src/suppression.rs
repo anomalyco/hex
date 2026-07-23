@@ -1,15 +1,16 @@
-use std::collections::HashSet;
+use std::collections::{HashSet, VecDeque};
 use std::ffi::c_void;
 use std::ptr;
 use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU64, Ordering};
-use std::sync::mpsc::{self, Receiver, SyncSender, TrySendError};
+use std::sync::mpsc::{self, Receiver, Sender, SyncSender};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use color_eyre::eyre::{Result, eyre};
 
 use crate::app_settings::RuntimeHotkey;
+use crate::audio::CaptureInstant;
 use crate::dictation::MINIMUM_HOLD_DURATION;
 
 const DOUBLE_TAP_WINDOW: Duration = MINIMUM_HOLD_DURATION;
@@ -57,6 +58,7 @@ unsafe extern "C" {
     ) -> *mut c_void;
     fn CGEventTapEnable(tap: *mut c_void, enable: bool);
     fn CGEventGetFlags(event: EventRef) -> u64;
+    fn CGEventGetTimestamp(event: EventRef) -> u64;
     fn CGEventGetIntegerValueField(event: EventRef, field: u32) -> i64;
 }
 
@@ -97,14 +99,59 @@ impl InputEvent {
     }
 }
 
+#[derive(Clone, Copy, Debug)]
+pub struct ObservedInputEvent {
+    sequence: u64,
+    pub event: InputEvent,
+    pub capture_at: CaptureInstant,
+}
+
+#[derive(Clone, Default)]
+pub struct PendingInputEvents(Arc<Mutex<VecDeque<(u64, CaptureInstant)>>>);
+
+impl PendingInputEvents {
+    pub fn oldest(&self) -> Option<CaptureInstant> {
+        self.0
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .front()
+            .map(|(_, at)| *at)
+    }
+
+    fn push(&self, sequence: u64, at: CaptureInstant) {
+        self.0
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .push_back((sequence, at));
+    }
+
+    fn acknowledge(&self, sequence: u64) {
+        let mut pending = self.0.lock().unwrap_or_else(|error| error.into_inner());
+        if pending.front().is_some_and(|(next, _)| *next == sequence) {
+            pending.pop_front();
+        }
+    }
+}
+
 pub struct InputMonitor {
-    pub events: Receiver<InputEvent>,
+    pub events: Receiver<ObservedInputEvent>,
     pub activity: InputActivity,
     pub paste_key_code: u16,
-    missed_event: Arc<AtomicBool>,
+    pending: PendingInputEvents,
     escape_cancels: Arc<AtomicBool>,
     run_loop: Arc<AtomicPtr<c_void>>,
     worker: Option<JoinHandle<()>>,
+}
+
+pub struct PendingInputAcknowledgement<'a> {
+    pending: &'a PendingInputEvents,
+    sequence: u64,
+}
+
+impl Drop for PendingInputAcknowledgement<'_> {
+    fn drop(&mut self) {
+        self.pending.acknowledge(self.sequence);
+    }
 }
 
 #[derive(Clone, Default)]
@@ -122,7 +169,7 @@ impl InputActivity {
 
 impl InputMonitor {
     pub fn start() -> Result<Self> {
-        let (sender, events) = mpsc::sync_channel(64);
+        let (sender, events) = mpsc::channel::<ObservedInputEvent>();
         let (ready_sender, ready_receiver) = mpsc::sync_channel(1);
         let activity = InputActivity::default();
         let tap_activity = activity.clone();
@@ -130,9 +177,9 @@ impl InputMonitor {
         let tap_run_loop = run_loop.clone();
         let escape_cancels = Arc::new(AtomicBool::new(false));
         let tap_escape_cancels = escape_cancels.clone();
-        let missed_event = Arc::new(AtomicBool::new(false));
-        let tap_missed_event = missed_event.clone();
         let paste_key_code = crate::keyboard::key_code_for('v').unwrap_or(9);
+        let pending = PendingInputEvents::default();
+        let tap_pending = pending.clone();
         tracing::info!(
             paste_key_code,
             "resolved paste key for active keyboard layout"
@@ -143,7 +190,7 @@ impl InputMonitor {
                 tap_activity,
                 paste_key_code,
                 tap_escape_cancels,
-                tap_missed_event,
+                tap_pending,
                 tap_run_loop,
                 ready_sender,
             )
@@ -155,7 +202,7 @@ impl InputMonitor {
             events,
             activity,
             paste_key_code,
-            missed_event,
+            pending,
             escape_cancels,
             run_loop,
             worker: Some(worker),
@@ -166,8 +213,15 @@ impl InputMonitor {
         self.escape_cancels.store(enabled, Ordering::Release);
     }
 
-    pub fn take_missed_event(&self) -> bool {
-        self.missed_event.swap(false, Ordering::AcqRel)
+    pub fn pending_events(&self) -> PendingInputEvents {
+        self.pending.clone()
+    }
+
+    pub fn acknowledge_after(&self, event: ObservedInputEvent) -> PendingInputAcknowledgement<'_> {
+        PendingInputAcknowledgement {
+            pending: &self.pending,
+            sequence: event.sequence,
+        }
     }
 }
 
@@ -185,21 +239,22 @@ impl Drop for InputMonitor {
 }
 
 struct EventTapContext {
-    sender: SyncSender<InputEvent>,
+    sender: Sender<ObservedInputEvent>,
     activity: InputActivity,
     paste_key_code: u16,
     escape_cancels: Arc<AtomicBool>,
-    missed_event: Arc<AtomicBool>,
     tap: AtomicPtr<c_void>,
     shortcut_suppression: Mutex<ShortcutSuppression>,
+    pending: PendingInputEvents,
+    next_sequence: AtomicU64,
 }
 
 fn run_event_tap(
-    sender: SyncSender<InputEvent>,
+    sender: Sender<ObservedInputEvent>,
     activity: InputActivity,
     paste_key_code: u16,
     escape_cancels: Arc<AtomicBool>,
-    missed_event: Arc<AtomicBool>,
+    pending: PendingInputEvents,
     run_loop: Arc<AtomicPtr<c_void>>,
     ready: SyncSender<Result<()>>,
 ) {
@@ -208,9 +263,10 @@ fn run_event_tap(
         activity,
         paste_key_code,
         escape_cancels,
-        missed_event,
         tap: AtomicPtr::new(ptr::null_mut()),
         shortcut_suppression: Mutex::new(ShortcutSuppression::default()),
+        pending,
+        next_sequence: AtomicU64::new(0),
     }));
     let mask = [
         EVENT_LEFT_MOUSE_DOWN,
@@ -300,7 +356,7 @@ unsafe extern "C" fn event_callback(
             // SAFETY: `tap` is the CFMachPort returned by `CGEventTapCreate`.
             unsafe { CGEventTapEnable(tap, true) };
         }
-        send_input(context, InputEvent::TapDisabled);
+        send_input(context, InputEvent::TapDisabled, CaptureInstant::ZERO);
         return event;
     }
     if event.is_null() {
@@ -329,6 +385,8 @@ unsafe extern "C" fn event_callback(
         }
         _ => return event,
     };
+    // SAFETY: CoreGraphics supplied a valid event to this callback.
+    let capture_at = CaptureInstant::from_mach_ticks(unsafe { CGEventGetTimestamp(event) });
     if matches!(
         input,
         InputEvent::Key { down: true, .. } | InputEvent::MouseDown
@@ -343,7 +401,7 @@ unsafe extern "C" fn event_callback(
             .reset();
         return event;
     }
-    let delivered = send_input(context, input);
+    let delivered = send_input(context, input, capture_at);
     let mut suppression = context
         .shortcut_suppression
         .lock()
@@ -362,14 +420,17 @@ unsafe extern "C" fn event_callback(
     if suppress { ptr::null_mut() } else { event }
 }
 
-fn send_input(context: &EventTapContext, input: InputEvent) -> bool {
-    match context.sender.try_send(input) {
+fn send_input(context: &EventTapContext, event: InputEvent, capture_at: CaptureInstant) -> bool {
+    let sequence = context.next_sequence.fetch_add(1, Ordering::Relaxed);
+    context.pending.push(sequence, capture_at);
+    match context.sender.send(ObservedInputEvent {
+        sequence,
+        event,
+        capture_at,
+    }) {
         Ok(()) => true,
-        Err(TrySendError::Full(_)) => {
-            context.missed_event.store(true, Ordering::Release);
-            false
-        }
-        Err(TrySendError::Disconnected(_)) => {
+        Err(_) => {
+            context.pending.acknowledge(sequence);
             // SAFETY: The callback runs on the event-tap thread's run loop.
             unsafe { CFRunLoopStop(CFRunLoopGetCurrent()) };
             false
@@ -527,8 +588,8 @@ pub enum HotkeyAction {
 enum State {
     Idle,
     Recording {
-        started_at: Instant,
-        previous_release: Option<Instant>,
+        started_at: CaptureInstant,
+        previous_release: Option<CaptureInstant>,
     },
     Locked,
     Dirty,
@@ -539,14 +600,14 @@ pub struct DictationHotkey {
     pressed_keys: HashSet<u16>,
     paste_key_code: u16,
     double_tap_enabled: bool,
-    last_release_at: Option<Instant>,
+    last_release_at: Option<CaptureInstant>,
     binding: RuntimeHotkey,
     paste_actions_enabled: bool,
 }
 
 impl DictationHotkey {
     pub fn new(
-        now: Instant,
+        now: CaptureInstant,
         double_tap_enabled: bool,
         paste_key_code: u16,
         binding: RuntimeHotkey,
@@ -560,7 +621,11 @@ impl DictationHotkey {
         )
     }
 
-    pub fn new_without_paste(now: Instant, paste_key_code: u16, binding: RuntimeHotkey) -> Self {
+    pub fn new_without_paste(
+        now: CaptureInstant,
+        paste_key_code: u16,
+        binding: RuntimeHotkey,
+    ) -> Self {
         let mut hotkey = Self::with_binding(
             trigger_is_physically_down(binding, true),
             now,
@@ -574,7 +639,7 @@ impl DictationHotkey {
 
     fn with_binding(
         trigger_down: bool,
-        now: Instant,
+        now: CaptureInstant,
         paste_key_code: u16,
         double_tap_enabled: bool,
         binding: RuntimeHotkey,
@@ -627,7 +692,7 @@ impl DictationHotkey {
         was_recording.then_some(HotkeyAction::Cancel)
     }
 
-    pub fn process(&mut self, event: InputEvent, now: Instant) -> Option<HotkeyAction> {
+    pub fn process(&mut self, event: InputEvent, now: CaptureInstant) -> Option<HotkeyAction> {
         let fresh_key_down = match event {
             InputEvent::Key { code, down, .. } => {
                 if down {
@@ -742,31 +807,6 @@ impl DictationHotkey {
         }
     }
 
-    pub fn reconcile(&mut self, missed_input_event: bool) -> Option<HotkeyAction> {
-        if !missed_input_event {
-            return None;
-        }
-        self.reconcile_with_trigger_state(trigger_is_physically_down(self.binding, false))
-    }
-
-    fn reconcile_with_trigger_state(&mut self, trigger_down: bool) -> Option<HotkeyAction> {
-        match self.state {
-            State::Recording {
-                previous_release: Some(released),
-                ..
-            } if !trigger_down && released.elapsed() < DOUBLE_TAP_WINDOW => {
-                self.state = State::Locked;
-                None
-            }
-            State::Recording { .. } if !trigger_down => {
-                self.state = State::Idle;
-                self.last_release_at = self.double_tap_enabled.then_some(Instant::now());
-                Some(HotkeyAction::Finish)
-            }
-            _ => None,
-        }
-    }
-
     fn trigger_pressed(&self, event: InputEvent, fresh_key_down: bool) -> bool {
         match self.binding.key_code {
             Some(key_code) => {
@@ -814,6 +854,10 @@ mod tests {
     const SHIFT: u64 = 1 << 17;
     const FUNCTION: u64 = 1 << 23;
 
+    fn capture_time() -> CaptureInstant {
+        CaptureInstant::from_nanos(60_000_000_000)
+    }
+
     fn option_binding() -> RuntimeHotkey {
         RuntimeHotkey {
             modifiers: OPTION_KEY_MASK,
@@ -830,7 +874,7 @@ mod tests {
 
     #[test]
     fn standalone_function_modifier_starts_and_finishes_dictation() {
-        let now = Instant::now();
+        let now = capture_time();
         let mut hotkey = DictationHotkey::with_binding(false, now, 47, true, function_binding());
 
         assert_eq!(
@@ -852,13 +896,13 @@ mod tests {
         assert!(!suppression.modifier_shortcut_pressed);
     }
 
-    fn test_hotkey(trigger_down: bool, now: Instant) -> DictationHotkey {
+    fn test_hotkey(trigger_down: bool, now: CaptureInstant) -> DictationHotkey {
         DictationHotkey::with_binding(trigger_down, now, 42, true, option_binding())
     }
 
     #[test]
     fn option_press_and_release_finishes() {
-        let now = Instant::now();
+        let now = capture_time();
         let mut hotkey = test_hotkey(false, now);
         assert_eq!(
             hotkey.process(InputEvent::Flags(OPTION_KEY_MASK), now),
@@ -872,7 +916,7 @@ mod tests {
 
     #[test]
     fn key_chord_starts_on_key_down_and_finishes_on_key_up() {
-        let now = Instant::now();
+        let now = capture_time();
         let binding = RuntimeHotkey {
             modifiers: SHIFT_KEY_MASK,
             key_code: Some(49),
@@ -913,7 +957,7 @@ mod tests {
 
     #[test]
     fn key_chord_double_tap_locks_until_the_chord_is_pressed_again() {
-        let now = Instant::now();
+        let now = capture_time();
         let binding = RuntimeHotkey {
             modifiers: SHIFT_KEY_MASK,
             key_code: Some(49),
@@ -947,7 +991,7 @@ mod tests {
 
     #[test]
     fn modifier_chord_requires_the_exact_binding_to_start() {
-        let now = Instant::now();
+        let now = capture_time();
         let binding = RuntimeHotkey {
             modifiers: CONTROL_KEY_MASK | SHIFT_KEY_MASK,
             key_code: None,
@@ -976,7 +1020,7 @@ mod tests {
 
     #[test]
     fn option_command_edit_takes_over_from_option_dictation() {
-        let now = Instant::now();
+        let now = capture_time();
         let mut dictation = test_hotkey(false, now);
         let edit_binding = RuntimeHotkey {
             modifiers: OPTION_KEY_MASK | (1 << 20),
@@ -1005,7 +1049,7 @@ mod tests {
 
     #[test]
     fn option_double_tap_locks_until_option_is_pressed_again() {
-        let now = Instant::now();
+        let now = capture_time();
         let mut hotkey = test_hotkey(false, now);
 
         assert_eq!(
@@ -1047,7 +1091,7 @@ mod tests {
 
     #[test]
     fn disabling_double_tap_keeps_both_taps_as_press_and_hold() {
-        let now = Instant::now();
+        let now = capture_time();
         let mut hotkey = DictationHotkey::with_binding(false, now, 42, false, option_binding());
 
         hotkey.process(InputEvent::Flags(OPTION_KEY_MASK), now);
@@ -1068,7 +1112,7 @@ mod tests {
 
     #[test]
     fn a_slow_second_release_does_not_lock() {
-        let now = Instant::now();
+        let now = capture_time();
         let mut hotkey = test_hotkey(false, now);
 
         hotkey.process(InputEvent::Flags(OPTION_KEY_MASK), now);
@@ -1089,7 +1133,7 @@ mod tests {
 
     #[test]
     fn early_chord_discards_until_everything_is_released() {
-        let now = Instant::now();
+        let now = capture_time();
         let mut hotkey = test_hotkey(false, now);
         hotkey.process(InputEvent::Flags(OPTION_KEY_MASK), now);
         assert_eq!(
@@ -1125,8 +1169,8 @@ mod tests {
     }
 
     #[test]
-    fn escape_cancels_and_watchdog_finishes_missed_release() {
-        let now = Instant::now();
+    fn escape_cancels_active_capture() {
+        let now = capture_time();
         let mut hotkey = test_hotkey(true, now);
         assert_eq!(
             hotkey.process(
@@ -1139,30 +1183,6 @@ mod tests {
             ),
             Some(HotkeyAction::Cancel)
         );
-
-        let mut hotkey = test_hotkey(true, now);
-        assert_eq!(
-            hotkey.reconcile_with_trigger_state(false),
-            Some(HotkeyAction::Finish)
-        );
-    }
-
-    #[test]
-    fn healthy_input_delivery_never_reconciles_an_active_capture() {
-        let now = Instant::now();
-        let mut hotkey = test_hotkey(true, now);
-
-        assert_eq!(hotkey.reconcile(false), None);
-        assert!(hotkey.is_recording());
-    }
-
-    #[test]
-    fn dropped_event_recovery_accepts_extra_held_modifiers() {
-        let now = Instant::now();
-        let mut hotkey = test_hotkey(true, now);
-
-        assert_eq!(hotkey.reconcile_with_trigger_state(true), None);
-        assert!(hotkey.is_recording());
     }
 
     #[test]
@@ -1186,7 +1206,7 @@ mod tests {
 
     #[test]
     fn extra_modifier_after_threshold_is_ignored() {
-        let now = Instant::now();
+        let now = capture_time();
         let mut hotkey = test_hotkey(true, now);
         assert_eq!(
             hotkey.process(
@@ -1200,7 +1220,7 @@ mod tests {
 
     #[test]
     fn option_shift_v_pastes_last_transcript() {
-        let now = Instant::now();
+        let now = capture_time();
         let mut hotkey = test_hotkey(true, now);
         let paste_key_code = hotkey.paste_key_code;
         let key_down = InputEvent::Key {
@@ -1234,7 +1254,7 @@ mod tests {
 
     #[test]
     fn option_control_v_pastes_new_meeting_transcript() {
-        let now = Instant::now();
+        let now = capture_time();
         let mut hotkey = test_hotkey(true, now);
         let paste_key_code = hotkey.paste_key_code;
         assert_eq!(

@@ -1,7 +1,7 @@
 [Desktop Entry]
 Type=Application
 Name=HEX
-Comment=Private local voice dictation
+Comment=Local voice dictation
 Exec=@HEX_BIN@ app
 Icon=audio-input-microphone
 Terminal=false

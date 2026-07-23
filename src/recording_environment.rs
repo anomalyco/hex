@@ -125,9 +125,6 @@ impl Drop for RecordingEnvironmentSession {
 }
 
 pub fn prevent_sleep() -> Option<PreventSleep> {
-    if !app_settings::prevent_system_sleep() {
-        return None;
-    }
     match PreventSleep::start() {
         Ok(prevention) => Some(prevention),
         Err(error) => {

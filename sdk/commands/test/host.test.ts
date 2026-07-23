@@ -33,6 +33,7 @@ describe("command host", () => {
         send: ["send note"],
         cancel: ["discard note"],
       },
+      transformations: [],
       commands: [
         {
           id: "native",
@@ -48,6 +49,47 @@ describe("command host", () => {
       ],
     })
     expect(() => JSON.stringify(prepared.registration)).not.toThrow()
+  })
+
+  it("registers and applies ordered transformations", async () => {
+    const output: HostOutput[] = []
+    await runHost({
+      config: {
+        transformations: {
+          trim: { name: "Trim", transform: (text: string) => text.trim() },
+          lowercase: {
+            name: "Lowercase",
+            description: "Use lowercase output",
+            transform: async (text: string) => text.toLowerCase(),
+          },
+        },
+        commands: {},
+      },
+      input: messages([
+        {
+          type: "transform",
+          invocationId: "transform-1",
+          transformationIds: ["trim", "lowercase"],
+          text: "  HELLO  ",
+          context: { application: "Messages" },
+        },
+        { type: "shutdown" },
+      ]),
+      write: (frame) => { output.push(frame) },
+    })
+
+    expect(output[0]).toMatchObject({
+      type: "registration",
+      transformations: [
+        { id: "trim", name: "Trim" },
+        { id: "lowercase", name: "Lowercase", description: "Use lowercase output" },
+      ],
+    })
+    expect(output[1]).toEqual({
+      type: "transformationResult",
+      invocationId: "transform-1",
+      result: { type: "success", text: "hello" },
+    })
   })
 
   it("adapts vanilla handlers and round-trips tool calls", async () => {

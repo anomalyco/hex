@@ -34,6 +34,7 @@ const GEOMETRY_ANGULAR_FREQUENCY: f32 = 24.0;
 const HIDDEN_SCALE: f32 = 0.82;
 const HIDDEN_SOFTNESS: f32 = 4.0;
 const PROCESSING_MORPH_DURATION: Duration = Duration::from_millis(250);
+const RECORDING_FLASH_HALF_LIFE: Duration = Duration::from_millis(280);
 
 #[derive(Clone, Copy, Debug)]
 pub enum DictationIndicatorEvent {
@@ -69,7 +70,7 @@ pub struct HudTuning {
 impl Default for HudTuning {
     fn default() -> Self {
         Self {
-            style: -1.0,
+            style: 0.0,
             line_count: 3.0,
             curvature: 0.55,
             speed: 1.0,
@@ -406,7 +407,7 @@ impl Phase {
     }
 }
 
-#[repr(C)]
+#[repr(C, align(8))]
 #[derive(Clone, Copy)]
 struct Uniforms {
     resolution: [f32; 2],
@@ -432,6 +433,14 @@ struct Uniforms {
     sphere_depth: f32,
     light_angle: f32,
     completion: f32,
+    recording_flash: f32,
+    _padding: f32,
+}
+
+const _: () = assert!(std::mem::size_of::<Uniforms>() == 104);
+
+fn recording_flash(elapsed: Duration) -> f32 {
+    2.0_f32.powf(-elapsed.as_secs_f32() / RECORDING_FLASH_HALF_LIFE.as_secs_f32())
 }
 
 struct MetalRenderer {
@@ -823,6 +832,12 @@ impl MetalRenderer {
             } else {
                 0.0
             },
+            recording_flash: if matches!(self.phase, Phase::Recording) {
+                recording_flash(elapsed)
+            } else {
+                0.0
+            },
+            _padding: 0.0,
         };
         encoder.set_fragment_bytes(
             0,
@@ -948,6 +963,26 @@ mod tests {
             Phase::Completed.visible_duration(),
             Some(Duration::from_millis(240))
         );
+    }
+
+    #[test]
+    fn recording_flash_starts_bright_and_settles_without_a_second_pulse() {
+        let samples =
+            [0, 70, 280, 560, 1_120].map(|millis| recording_flash(Duration::from_millis(millis)));
+
+        assert_eq!(samples[0], 1.0);
+        assert!(samples.windows(2).all(|pair| pair[0] > pair[1]));
+        assert!((samples[2] - 0.5).abs() < 0.000_1);
+        assert!((samples[3] - 0.25).abs() < 0.000_1);
+        assert!(samples[4] < 0.07);
+    }
+
+    #[test]
+    fn rust_uniform_layout_matches_metal() {
+        assert_eq!(std::mem::size_of::<Uniforms>(), 104);
+        assert_eq!(std::mem::align_of::<Uniforms>(), 8);
+        assert_eq!(std::mem::offset_of!(Uniforms, recording_flash), 96);
+        assert_eq!(std::mem::offset_of!(Uniforms, _padding), 100);
     }
 
     #[test]

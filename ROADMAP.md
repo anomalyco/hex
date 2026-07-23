@@ -1,6 +1,6 @@
 # Roadmap
 
-HEX ships the coworker product loop: configurable hold-to-talk local dictation,
+HEX ships the macOS product loop: configurable hold-to-talk local dictation,
 explicit selected-text voice editing, optional context-aware OpenCode
 post-processing, a Metal HUD, bounded paste workers, settings, and a signed GPUI
 app bundle. Streaming commands are a disabled-by-default experimental opt-in;
@@ -13,7 +13,7 @@ direct-child embedding, model preparation, and bounded host-audio transcription;
 Promise and Effect TypeScript wrappers pass fake-helper tests. Signed helper
 packaging, an Electron bridge, and a first real consumer remain.
 
-## Validate The Coworker Release
+## Validate The macOS Release
 
 Runtime logs now live in Application Support, first-run setup installs the
 selected dictation model, and the release flow signs, notarizes,
@@ -54,17 +54,40 @@ Keep app-managed updates limited to the user-local direct-install layout. A
 future Arch package must leave updates to the package manager. Add commands,
 context, meetings, or Wayland only as explicit later capability slices.
 
+Converge the separate macOS and Linux GPUI roots on one capability-driven
+product shell without merging their lifecycle or platform behavior. Follow
+[`docs/plans/shared-desktop-ui.md`](docs/plans/shared-desktop-ui.md); preserve
+both settings formats and delete the duplicate Linux render tree only after the
+shared Settings and Activity slices work on both hosts.
+
 ## Harden The Real-Time Boundary
 
-Move append-only observation serialization and flushing off the microphone loop
-without making event delivery unbounded. Coalesce replaceable partial transcript
-updates if pressure requires dropping work; preserve completed transcripts,
-state transitions, command outcomes, and failures.
+Append-only observation serialization and flushing now run on a bounded writer
+instead of the semantic coordinator. Replaceable partial transcript and context
+observations may be dropped under pressure; completed transcripts, state
+transitions, command outcomes, and failures retain bounded backpressure.
 
-Diagnose recurring microphone chunk drops with runtime evidence before changing
-queue sizes or recognition cadence. Physically smoke-test custom modifier and
-key chords, lock behavior, cancellation, foreground insertion, and both reserved
-paste shortcuts.
+The authoritative dictation timeline now drains timestamped CoreAudio on its own
+thread; Moonshine receives a duration-bounded, generation-safe projection that
+may reset without affecting active capture. Physically smoke-test delayed
+shortcut boundaries, custom modifier and key chords, lock behavior,
+cancellation, foreground insertion, and both reserved paste shortcuts.
+
+The first installed timestamped-timeline build regressed physical dictation:
+shortcut input arrived, but long captures discarded and one accepted job reached
+inference with zero milliseconds of audio. The source treated raw CGEvent Mach
+ticks as nanoseconds; on the development Mac's `125/3` timebase, a three-second
+hold appeared to last roughly 72 ms and CoreAudio release trimming removed the
+whole clip. Source timestamps now convert through the Mach timebase. Physically
+verify non-empty captures, exact delayed release boundaries, and immediate HUD
+onset before considering the new owner validated.
+
+Keep the microphone and dictation model warm by default. Consider an explicit
+`Release microphone while idle` option only when commands are disabled; document
+that it removes pre-roll and adds first-capture latency. `Do nothing` is the
+default recording-audio behavior. Idle-sleep prevention is automatic and scoped
+to intentional dictation and active meeting capture rather than persisted as a
+user setting.
 
 Add end-of-speech detection only if it preserves explicit Send, Cancel, and
 locked-capture controls.
@@ -72,14 +95,22 @@ locked-capture controls.
 ## Make Diagnostics Incremental
 
 Ratatui and GPUI now share a bounded incremental event reader with session and
-partial-write handling. Move observation serialization and flushing off the
-microphone loop, then add heartbeat or process-liveness evidence so a crash
-cannot leave an old `Listening` event looking live.
+partial-write handling, and observation writes run on a bounded background
+writer. Add heartbeat or process-liveness evidence so a crash cannot leave an
+old `Listening` event looking live.
 
 Add an inspectable audit that separates capture failures, recognition errors,
 sleeping or discarded utterances, context mismatches, resolution misses, queue
 pressure, and action failures. Recommendations may propose command-taxonomy
 changes but must not mutate compiled configuration automatically.
+
+Add authenticated developer control to the existing loopback API and expose it
+through `hex dev`. The first vertical slices inspect app state, drive semantic
+HUD scenarios, open/focus panes, and toggle command mode on the GPUI thread.
+Extend the same bounded typed channel with fixture-audio capture, microphone
+recovery, model switching, permission snapshots, deterministic screenshots,
+and assertions over capture/job/UI state. MCP may wrap this protocol later; it
+must not become a second control server or settings authority.
 
 ## Generalize Context From Evidence
 
@@ -93,6 +124,11 @@ framework. Candidate implementations include Chromium-family AppleScript,
 Safari AppleScript, browser extensions, or Accessibility APIs. Diagnose Slack
 Huddle detection separately from generic browser context. Surface context age
 and failures instead of silently retaining an indefinitely stale snapshot.
+
+Keep installed-application discovery lazy. Opening Settings must not recursively
+scan application bundles or rasterize their icons; start that work only after
+the user opens `Add application`, and verify ordinary startup requests no
+Downloads, Calendar, or other unrelated TCC access.
 
 ## Complete Meeting Lifecycle Recovery
 
@@ -118,9 +154,9 @@ diarization only against real meeting recordings.
 
 ## Deliberate Deferrals
 
-Keep commands and profiles in compiled Rust until a second real consumer needs a
-configuration format. Do not add a plugin or agent framework around the current
-deep modules.
+Keep protected lifecycle commands and typed captures in compiled Rust. Ordinary
+literal commands and dictation control phrases already use the explicit
+TypeScript user config. Do not generalize that config into a plugin framework.
 
 Do not generalize the concrete macOS and Linux X11 adapters into a platform
 framework. Add seams only when a second implemented adapter requires one.

@@ -1,10 +1,24 @@
-# HEX for iOS
+# HEX For iOS
 
-This is the native iOS transcription prototype. It records a temporary local
-WAV, transcribes it on-device with Apple Speech or the FluidAudio Parakeet V2
-fallback, and deletes the audio after inference.
+**Status:** Native prototype, not the distributed macOS product. The containing
+app records a temporary WAV, transcribes on-device with Apple Speech or
+FluidAudio Parakeet V2, and removes the file after handled inference,
+cancellation, or failure. A crash can leave a file in the app's temporary
+directory until iOS removes it. The keyboard extension requests jobs and
+inserts completed text; it does not own the microphone or speech model.
 
-Generate and open the Xcode project with:
+## Build On A Physical iPhone
+
+Useful microphone and inference testing requires a physical iPhone. The
+simulator verifies compilation and UI only.
+
+Prerequisites:
+
+- Xcode 26 or newer.
+- [XcodeGen](https://github.com/yonaskolb/XcodeGen).
+- An Apple development team that can sign an app and keyboard extension.
+
+Generate the project:
 
 ```sh
 cd ios
@@ -12,40 +26,34 @@ xcodegen generate
 open HEXMobile.xcodeproj
 ```
 
-On iOS 26, HEX prefers Apple's on-device `SpeechTranscriber`; its language asset
-is installed and maintained by iOS. HEX selects the first supported locale from
-the user's ordered system languages, then falls back to the current locale and
-English. Earlier or unsupported devices retain the
-FluidAudio Parakeet V2 fallback. The progress bar covers asset download and
-model preheating.
+Before running on a device, replace the checked-in development team and bundle
+identifiers in `project.yml`. Create an App Group in your Apple developer account
+and use the same identifier in both app and keyboard entitlements.
 
-To use dictation in another app:
+On iOS 26, HEX prefers Apple's on-device `SpeechTranscriber`. iOS installs and
+maintains its language asset. Earlier or unsupported devices use the FluidAudio
+Parakeet V2 fallback. The progress bar covers asset download and model preheat.
 
-1. Add **HEX Keyboard** under **Settings > General > Keyboard > Keyboards**.
-2. Turn on **Allow Full Access** for HEX. Apple requires this before a keyboard
-   can access its containing app's private App Group; HEX does not use that
-   permission for network access.
-3. In any text field, choose the HEX keyboard and tap **Open HEX**. HEX prepares
-   local speech and starts the 15-minute session automatically.
-4. Swipe right along the bottom edge to return to the previous app, then tap
-   **Record** in the HEX keyboard.
-The containing app owns microphone capture and speech inference. The keyboard
-extension only sends bounded record/stop jobs and inserts completed text through
-`UITextDocumentProxy`. The orange microphone indicator remains visible while a
-keyboard session is active. Microphone capture and useful inference require a
-physical iPhone; the simulator build verifies compilation and UI only.
+## Test The Keyboard
 
-## TestFlight review notes
-
-HEX requires no account or sign-in. To test keyboard dictation:
-
-1. Launch HEX once and allow Microphone and Speech Recognition access.
+1. Launch HEX once and grant Microphone and Speech Recognition access.
 2. Add **HEX Keyboard** under **Settings > General > Keyboard > Keyboards**.
-3. Enable **Allow Full Access**. iOS requires this before the keyboard can use
-   the private App Group shared with its containing app. The keyboard extension
-   does not access the network, microphone, or speech models.
-4. Open any text field, switch to HEX Keyboard, and tap **Open HEX**.
-5. Wait for HEX to report that it is ready, swipe right along the bottom edge
-   to return, then tap **Record** in the keyboard.
-6. Tap **Stop and insert**. HEX transcribes on-device and inserts the result in
-   the active text field.
+3. Enable **Allow Full Access**. iOS requires this for the keyboard extension to
+   use the private App Group shared with its containing app. The keyboard
+   extension does not use Full Access for network, microphone, or model access.
+4. Open a text field, switch to HEX Keyboard, and tap **Open HEX**.
+5. HEX prepares a 15-minute keyboard session and may immediately start the
+   pending recording. Return to the previous app with the bottom-edge gesture.
+6. If the keyboard says **Recording**, tap **Stop and insert**. If it says
+   **Ready**, tap **Record** first.
+
+The orange microphone indicator remains visible while the containing app owns
+an active keyboard session.
+
+## App Review Notes
+
+HEX requires no account or sign-in. To review keyboard dictation, follow the
+steps above. Full Access is required only for the App Group bridge between the
+keyboard and containing app. Speech inference stays on-device, the keyboard
+extension does not access the microphone or network, and HEX removes temporary
+recording audio after each handled job.

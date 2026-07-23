@@ -15,14 +15,17 @@ only in debug builds.
 
 ## Architecture
 
-- `audio`: `cpal` device enumeration and capture, mono float PCM, dropped-chunk
-  accounting, live selection, and bounded stream recovery.
+- `audio`: `cpal` device enumeration and timestamped mono float PCM delivery,
+  live selection, and bounded stream recovery.
 - `moonshine`: the only Moonshine C adapter and the streaming recognizer.
-- `suppression`: the bounded macOS event tap, shortcut suppression, and the
+- `suppression`: the macOS event tap, shortcut suppression, and the
   configurable dictation-hotkey state machine.
 - `keyboard`: active-layout key resolution and balanced synthetic shortcuts.
 - `dictation`: warm pre-roll, growable capture, and 16 kHz
   local-transcription resampling.
+- `dictation_audio`: the authoritative microphone timeline, recording owner,
+  exact shortcut boundaries, recovery handoff, and disposable bounded command
+  audio projection.
 - `recording_environment`: serialized RAII ownership of idle-sleep prevention,
   output muting, and supported media-player pause/resume behavior.
 - `dictation_processor`: context-selected, deadline-bounded OpenCode rewrite
@@ -45,8 +48,9 @@ only in debug builds.
   clipboard restoration.
 - `selected_text`: bounded selected-text capture through Accessibility without
   touching the clipboard.
-- `recognition`: the microphone-loop coordinator for Moonshine, command mode,
-  hotkey and voice-delimited capture, workers, and observations.
+- `recognition`: the semantic coordinator for Moonshine, command mode, hotkey
+  and voice-delimited controls, workers, and observations. It does not own the
+  authoritative microphone timeline.
 - `command_grammar`: typed command patterns, captures, overlap detection, and
   command catalog metadata.
 - `commands`: pure contextual resolution plus bounded asynchronous macOS action
@@ -56,7 +60,7 @@ only in debug builds.
   the domain concept; Brave AppleScript is only the first adapter.
 - `app_settings`: persisted settings and live runtime projection for commands,
   hotkeys, microphone and transcription selection, recording behavior,
-  processing, sound volume, sleep prevention, and Dock policy.
+  processing, sound volume, and Dock policy.
 - `login_item`: the native `SMAppService.mainAppService` adapter. macOS owns
   registration state; it is deliberately not duplicated in `settings.json`.
 - `app_paths`: the Application Support owner for runtime logs and shared state.
@@ -65,9 +69,16 @@ only in debug builds.
 - `sparkle`: packaged-app-only Sparkle lifecycle and manual update checks.
 - `linux_updater`: signed direct-install updates, bounded downloads, atomic
   version activation, and restart handoff for user-local Linux installs.
-- `events`: append-only NDJSON observations and bounded incremental reading;
-  `dashboard` and the GPUI Activity pane are read-only projections.
-- `app_window`: the production Settings, Modes, Replacements, and opt-in
+- `events`: bounded asynchronous append-only NDJSON observations and bounded
+  incremental reading; `dashboard` and the GPUI Activity pane are read-only
+  projections.
+- `desktop_activity`: the shared listener, device, transcript, and session
+  projection over `EventReader`.
+- `desktop_host`: semantic desktop capabilities, portable UI snapshots, and
+  typed actions implemented by the macOS root and contained Linux adapter.
+- `desktop_ui`: platform-neutral GPUI visual tokens and controls shared by both
+  desktop roots.
+- `app_window`: the production Settings, mode-owned processing, and opt-in
   Commands shell plus developer-only Meetings and Activity panes.
 - `dictation_indicator`: the click-through Metal/GPUI capture and processing HUD.
 - `meeting`: explicit ScreenCaptureKit capture, owner-only WAV and transcript
@@ -109,15 +120,27 @@ CoreAudio formats, AppleScript details, or event serialization.
   shortcut again to finish or Escape to cancel.
 - When commands are enabled, every dictation or paste hotkey action resets
   Moonshine so shortcut audio cannot leak into a later command.
-- Recording audio behavior begins only after the intentional-hold threshold.
-  Ordinary shortcut chords must not mute output or pause media.
+- Recording audio behavior and idle-sleep prevention begin only after the
+  intentional-hold threshold. Ordinary shortcut chords must not mute output,
+  pause media, or prevent sleep.
 - Dictation remains available while command recognition sleeps.
 - Model inference, optional post-processing, paste, and application actions must
-  never block the audio-consumption loop. Their queues remain bounded.
+  never block authoritative audio capture. Their queues remain bounded.
+- CoreAudio capture timestamps and CGEvent shortcut timestamps share the macOS
+  boot-time clock, but raw CGEvent Mach ticks must be converted through the
+  current timebase before comparison. Delayed press handling reconstructs the
+  original onset from the timeline; delayed release handling excludes audio
+  captured after the physical release.
+- Active dictation capture is lossless with respect to Moonshine, event, UI,
+  context, and worker stalls. Command recognition is explicitly best-effort:
+  its backlog is bounded by duration, and pressure invalidates the generation,
+  discards stale audio and updates, and resets Moonshine without touching the
+  active recording.
 - Starting a new capture never cancels accepted dictation work. Pending jobs
   preserve submission-order output while capture remains immediately available.
 - Completing or pasting an older job must not reconcile or finish a newer
-  capture. Physical-state recovery runs only after the event tap drops input.
+  capture. Shortcut boundaries come from delivered CGEvent timestamps; do not
+  fabricate a release timestamp from later physical state.
 - Escape cancels the active capture first, then the newest unfinished dictation.
   Cancelled jobs never paste, update the last result, or block later output.
 - Model switches activate only after the pinned artifact is checksum-verified,
@@ -144,9 +167,9 @@ CoreAudio formats, AppleScript details, or event serialization.
   return only paste-ready text, and paste at the current focus. Failed, empty,
   cancelled, or timed-out actions paste nothing. Voice Action jobs share normal
   queueing and cancellation but never update the last dictation.
-- Post-processing is optional and best-effort. Empty, failed, or timed-out
-  processing falls back to the raw local transcript. It applies to Paste and
-  Send, but not meetings.
+- Mode processing is best-effort and ordered: corrections, optional OpenCode
+  rewriting, then selected TypeScript transformations. A failed step preserves
+  the previous pipeline output. It applies to Paste and Send, but not meetings.
 - OpenCode availability checks stay off the UI thread. A missing beta install is
   retried at a coarse interval so installing `opencode2` while Settings is open
   refreshes the model catalog without restarting HEX.
@@ -162,7 +185,8 @@ CoreAudio formats, AppleScript details, or event serialization.
 - Option-Shift-V pastes the last completed dictation. Option-Control-V pastes
   completed meeting turns added since the previous successful invocation.
 - Do not persist captured audio by default. Explicit foreground meeting
-  recording is the sole current exception and must remain visibly active.
+  recording must remain visibly active. Diagnostic dictation retention is an
+  explicit, bounded, owner-only opt-in through `HEX_RETAIN_DICTATION_AUDIO`.
 - Developer-only meeting detection may inspect process audio metadata but must
   not capture samples. Detection can offer recording; it must never start
   automatically. Release builds must not start the meeting controller.
@@ -203,6 +227,7 @@ cargo fmt --check
 cargo test
 cargo clippy --all-targets --all-features -- -D warnings
 git diff --check
+./scripts/test-install-linux-release.sh # x86_64 Linux only
 cd sdk/typescript && bun run check && bun run test && bun run build
 ```
 
@@ -210,7 +235,8 @@ The supported Linux beta and release host use x86_64 Arch Linux. Install its
 native build dependencies with:
 
 ```sh
-sudo pacman -S --needed base-devel git rustup alsa-lib curl gtk3 libxkbcommon \
+sudo pacman -S --needed base-devel git rustup python alsa-lib curl jq openssl xxd \
+  util-linux gtk3 libappindicator-gtk3 libxkbcommon \
   libxkbcommon-x11 libx11 libxcb openblas vulkan-headers vulkan-icd-loader \
   shaderc spirv-headers clang cmake pkgconf
 rustup default stable
@@ -220,8 +246,8 @@ For a source install, run `scripts/install-linux.sh`, then `hex model install`.
 The installer owns the user-local version layout, desktop entry, and autostart
 entry; only that managed layout participates in automatic updates.
 
-The automatic microphone setting prefers Universal Audio Thunderbolt, then
-Studio Display Microphone, then the macOS default. A saved microphone takes
+Automatic microphone selection follows the compiled preference order in
+`src/config.rs`, then falls back to the macOS default. A saved microphone takes
 precedence while available; override everything with `--device`. The app bundle
 build requires Xcode 26 for Icon Composer compilation and a Developer ID signing
 identity. `scripts/release-app.sh` prepares a notarized and stapled DMG plus its
@@ -254,9 +280,10 @@ Tab to cycle, and `q`/Escape to quit.
 
 ## Diagnostics
 
-- `~/Library/Application Support/voice-control/logs/live.ndjson`: state, transcript, command decision, outcome, processing,
-  and context.
-- `~/Library/Application Support/voice-control/logs/process.log`: Rust, CoreAudio, Moonshine, and context-adapter diagnostics.
+- `~/Library/Application Support/voice-control/logs/live.ndjson`: state,
+  transcript, command decision, outcome, processing, and context.
+- `~/Library/Application Support/voice-control/logs/process.log`: Rust,
+  CoreAudio, Moonshine, and context-adapter diagnostics.
 - `~/Library/Application Support/voice-control/meetings/`: manifests, separate
   tracks, recoverable live drafts, and atomically published final transcripts.
 
@@ -269,26 +296,12 @@ and action execution before changing aliases or thresholds.
 See `ROADMAP.md`. Do not add hypothetical seams for roadmap items. Introduce a
 seam once there are two real adapters or a current test requires substitution.
 
-## Current Gaps
+## Current Work
 
-- Validate a genuine signed Linux update between two released versions on the
-  target Arch/i3 machine, including restart and retained-version rollback.
-- Verify onboarding and model installation from a clean macOS account before
-  broadly sharing the coworker download; the signed Sparkle update path is live.
-- Finish validated legacy import and a persistent permission-health surface.
-- Physically smoke-test custom shortcut injection and last-dictation paste in
-  release; test the meeting paste shortcut separately in developer builds.
-- Move observation writes off the microphone loop and distinguish a stale or
-  crashed listener from a normal persisted `Stopping` state. Read-side event
-  projections are already bounded and incremental.
-- Replace System Events foreground polling with
-  `NSWorkspace.frontmostApplication`; add a second browser adapter before
-  generalizing the context interface further.
-- Add a persistent active-recording status, meeting idle-stop prompting, calendar
-  correlation, active-WAV repair, resumable finalization, transcript search, and
-  durable incremental transcript cursors.
-- Diagnose command-audio drops and Slack Huddle detection with runtime evidence.
-- Add edge tests for shutdown during capture, final-transcription failure, and
-  voice-triggered meeting start/stop.
-- Do not generalize the concrete macOS and Linux X11 adapters into hypothetical
-  platform or plugin seams. Follow `docs/plans/linux.md` for the selected target.
+`ROADMAP.md` is the authoritative work list. Keep these constraints visible:
+
+- Validate public onboarding from a clean macOS account and signed Linux updates
+  on the supported Arch/i3 host.
+- Add a second real browser adapter before generalizing browser context.
+- Do not turn concrete macOS, Linux X11, or command modules into hypothetical
+  platform or plugin frameworks.

@@ -7,19 +7,31 @@ use std::time::{Duration, Instant};
 
 use color_eyre::Result;
 use gpui::{
-    App, Application, Bounds, Context, FontWeight, Keystroke, SharedString, Timer, TitlebarOptions,
-    Window, WindowBounds, WindowKind, WindowOptions, div, prelude::*, px, rgb, size,
+    AnyElement, App, Application, Bounds, Context, Keystroke, Timer, TitlebarOptions, Window,
+    WindowBounds, WindowKind, WindowOptions, div, prelude::*, px, rgb, size,
 };
 use tray_icon::menu::{Menu, MenuEvent, MenuItem};
 use tray_icon::{Icon, MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use x11rb::connection::Connection;
 use x11rb::protocol::xproto::ConnectionExt;
 
-use crate::events::{EventReader, TranscriptPhase, VoiceEvent, VoiceState};
+use crate::desktop_activity::DesktopActivity;
+use crate::desktop_host::{
+    DesktopAction, DesktopCapabilities, DesktopHost, DesktopListenerSnapshot, DesktopShortcut,
+    DesktopSnapshot, DesktopUpdateStatus,
+};
+use crate::desktop_ui::{
+    LINE, MUTED, NavigationIcon, SIDEBAR_WIDTH, SURFACE, TEXT_SOFT, compact_button,
+    disclosure_button, error_message, hotkey_keycaps, navigation_item, pane_header, settings_panel,
+    settings_row, settings_section_label, sidebar_frame, toggle, window_frame,
+};
+use crate::events::EventReader;
 use crate::linux_updater::InstalledUpdate;
 
-const WINDOW_WIDTH: f32 = 760.0;
-const WINDOW_HEIGHT: f32 = 560.0;
+const WINDOW_WIDTH: f32 = 1040.0;
+const WINDOW_HEIGHT: f32 = 700.0;
+const MINIMUM_WIDTH: f32 = 860.0;
+const MINIMUM_HEIGHT: f32 = 560.0;
 const UPDATE_INTERVAL: Duration = Duration::from_secs(24 * 60 * 60);
 
 type ListenerResult = std::result::Result<(), String>;
@@ -49,24 +61,57 @@ impl TrayRuntime {
     }
 }
 
-struct LinuxApp {
+struct LinuxDesktopHost {
     event_path: PathBuf,
     event_reader: EventReader,
+    activity: DesktopActivity,
     listener_stop: Arc<Mutex<Option<Arc<AtomicBool>>>>,
     listener_result: Option<Receiver<ListenerResult>>,
     listener_worker: Option<JoinHandle<()>>,
+    session_before_start: Option<u64>,
+    awaiting_session_start: bool,
     status: String,
-    device: String,
-    transcripts: Vec<String>,
     error: Option<String>,
+    settings_error: Option<String>,
     settings: crate::linux_settings::LinuxSettings,
-    capturing_hotkey: bool,
     update: UpdateState,
+}
+
+struct LinuxApp {
+    host: LinuxDesktopHost,
+    pane: LinuxPane,
+    capturing_hotkey: bool,
+    model_picker_open: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum LinuxPane {
+    Settings,
+    Activity,
+}
+
+impl LinuxPane {
+    const ALL: [Self; 2] = [Self::Settings, Self::Activity];
+
+    const fn label(self) -> &'static str {
+        match self {
+            Self::Settings => "Settings",
+            Self::Activity => "Activity",
+        }
+    }
+
+    const fn icon(self) -> NavigationIcon {
+        match self {
+            Self::Settings => NavigationIcon::Settings,
+            Self::Activity => NavigationIcon::Activity,
+        }
+    }
 }
 
 enum UpdateState {
     Unmanaged,
     Checking(Receiver<Result<Option<InstalledUpdate>, String>>),
+    Failed(Instant),
     Waiting(Instant),
     Ready(InstalledUpdate),
 }
@@ -101,7 +146,7 @@ pub fn open(event_path: PathBuf, start_hidden: bool) -> Result<()> {
             .open_window(
                 WindowOptions {
                     window_bounds: Some(WindowBounds::Windowed(bounds)),
-                    window_min_size: Some(size(px(560.0), px(420.0))),
+                    window_min_size: Some(size(px(MINIMUM_WIDTH), px(MINIMUM_HEIGHT))),
                     kind: WindowKind::Floating,
                     titlebar: Some(TitlebarOptions {
                         title: Some("HEX".into()),
@@ -111,18 +156,16 @@ pub fn open(event_path: PathBuf, start_hidden: bool) -> Result<()> {
                 },
                 |_, cx| {
                     cx.new(|_| LinuxApp {
-                        event_path: event_path.clone(),
-                        event_reader: EventReader::open(&event_path),
-                        listener_stop: listener_stop.clone(),
-                        listener_result: None,
-                        listener_worker: None,
-                        status: "Ready".into(),
-                        device: "Default Audio Device".into(),
-                        transcripts: Vec::new(),
-                        error: settings_error.clone(),
-                        settings: settings.clone(),
+                        host: LinuxDesktopHost::new(
+                            event_path.clone(),
+                            listener_stop.clone(),
+                            settings.clone(),
+                            settings_error.clone(),
+                            update,
+                        ),
+                        pane: LinuxPane::Settings,
                         capturing_hotkey: false,
-                        update,
+                        model_picker_open: false,
                     })
                 },
             )
@@ -130,7 +173,7 @@ pub fn open(event_path: PathBuf, start_hidden: bool) -> Result<()> {
         let app = window.update(cx, |_, _, cx| cx.entity()).unwrap();
         let x11_window = find_hex_window().ok();
         app.update(cx, |app, cx| {
-            app.start();
+            let _ = app.host.dispatch(DesktopAction::StartListening);
             cx.notify();
         });
         let hotkey_app = app.clone();
@@ -158,17 +201,22 @@ pub fn open(event_path: PathBuf, start_hidden: bool) -> Result<()> {
                         }
                         TrayCommand::ToggleListening => {
                             let _ = tray_window.update(cx, |app, _, cx| {
-                                if app.is_running() {
-                                    app.stop();
+                                if app
+                                    .host
+                                    .snapshot()
+                                    .listener
+                                    .is_some_and(|listener| listener.running)
+                                {
+                                    let _ = app.host.dispatch(DesktopAction::StopListening);
                                 } else {
-                                    app.start();
+                                    let _ = app.host.dispatch(DesktopAction::StartListening);
                                 }
                                 cx.notify();
                             });
                         }
                         TrayCommand::Quit => {
                             let _ = tray_window.update(cx, |app, _, cx| {
-                                app.stop();
+                                let _ = app.host.dispatch(DesktopAction::StopListening);
                                 cx.quit();
                             });
                             return;
@@ -177,7 +225,7 @@ pub fn open(event_path: PathBuf, start_hidden: bool) -> Result<()> {
                 }
                 if app
                     .update(cx, |this, cx| {
-                        this.refresh();
+                        this.host.refresh();
                         cx.notify();
                     })
                     .is_err()
@@ -350,7 +398,34 @@ fn tray_icon() -> Result<Icon> {
     Ok(Icon::from_rgba(data, SIZE, SIZE)?)
 }
 
-impl LinuxApp {
+impl LinuxDesktopHost {
+    fn new(
+        event_path: PathBuf,
+        listener_stop: Arc<Mutex<Option<Arc<AtomicBool>>>>,
+        settings: crate::linux_settings::LinuxSettings,
+        error: Option<String>,
+        update: UpdateState,
+    ) -> Self {
+        let mut event_reader = EventReader::open(&event_path);
+        let mut activity = DesktopActivity::default();
+        activity.refresh(&mut event_reader);
+        Self {
+            event_reader,
+            event_path,
+            activity,
+            listener_stop,
+            listener_result: None,
+            listener_worker: None,
+            session_before_start: None,
+            awaiting_session_start: false,
+            status: "Ready".into(),
+            error: None,
+            settings_error: error,
+            settings,
+            update,
+        }
+    }
+
     fn start(&mut self) {
         if self.listener_result.is_some() {
             return;
@@ -370,6 +445,8 @@ impl LinuxApp {
         });
         self.listener_worker = Some(worker);
         self.listener_result = Some(result_receiver);
+        self.session_before_start = self.activity.session_started_at;
+        self.awaiting_session_start = true;
         self.status = "Starting".into();
         self.error = None;
     }
@@ -387,7 +464,8 @@ impl LinuxApp {
     }
 
     fn refresh(&mut self) {
-        if matches!(&self.update, UpdateState::Waiting(at) if Instant::now() >= *at) {
+        if matches!(&self.update, UpdateState::Waiting(at) | UpdateState::Failed(at) if Instant::now() >= *at)
+        {
             self.update = UpdateState::Checking(start_update_check());
         }
         let update_result = match &self.update {
@@ -406,7 +484,7 @@ impl LinuxApp {
                 Ok(None) => UpdateState::Waiting(Instant::now() + UPDATE_INTERVAL),
                 Err(error) => {
                     tracing::warn!(%error, "Linux update check failed");
-                    UpdateState::Waiting(Instant::now() + UPDATE_INTERVAL)
+                    UpdateState::Failed(Instant::now() + UPDATE_INTERVAL)
                 }
             };
         }
@@ -415,6 +493,7 @@ impl LinuxApp {
             match receiver.try_recv() {
                 Ok(Ok(())) => {
                     self.status = "Ready".into();
+                    self.awaiting_session_start = false;
                     self.listener_result = None;
                     self.join_listener();
                     self.listener_stop
@@ -424,6 +503,7 @@ impl LinuxApp {
                 }
                 Ok(Err(error)) => {
                     self.status = "Unavailable".into();
+                    self.awaiting_session_start = false;
                     self.error = Some(error);
                     self.listener_result = None;
                     self.join_listener();
@@ -435,6 +515,7 @@ impl LinuxApp {
                 Err(TryRecvError::Empty) => {}
                 Err(TryRecvError::Disconnected) => {
                     self.status = "Unavailable".into();
+                    self.awaiting_session_start = false;
                     self.error = Some("listener worker stopped unexpectedly".into());
                     self.listener_result = None;
                     self.join_listener();
@@ -442,40 +523,18 @@ impl LinuxApp {
             }
         }
 
-        if let Err(error) = self.event_reader.refresh() {
-            tracing::warn!(%error, path = %self.event_reader.path().display(), "could not refresh activity");
-            return;
-        }
-        let mut status = None;
-        let mut device = None;
-        let mut transcripts = Vec::new();
-        for event in self.event_reader.events() {
-            match event {
-                VoiceEvent::State {
-                    state,
-                    device: next_device,
-                    ..
-                } => {
-                    status = Some(state_label(*state));
-                    device = Some(next_device.clone());
-                }
-                VoiceEvent::Transcript {
-                    phase: TranscriptPhase::Completed,
-                    text,
-                    ..
-                } if !text.trim().is_empty() => transcripts.push(text.clone()),
-                _ => {}
-            }
+        self.activity.refresh(&mut self.event_reader);
+        if self.awaiting_session_start
+            && self.activity.session_started_at != self.session_before_start
+        {
+            self.awaiting_session_start = false;
         }
         if self.listener_result.is_some()
-            && let Some(status) = status
+            && !self.awaiting_session_start
+            && let Some(status) = self.activity.state_label()
         {
             self.status = status.into();
         }
-        if let Some(device) = device {
-            self.device = device;
-        }
-        self.transcripts = transcripts.into_iter().rev().take(8).collect();
     }
 
     fn is_running(&self) -> bool {
@@ -488,6 +547,51 @@ impl LinuxApp {
         }
     }
 
+    fn set_dictation_hotkey(&mut self, shortcut: DesktopShortcut) -> Result<()> {
+        if shortcut.function {
+            self.error = Some("The Fn modifier cannot be registered on X11".into());
+            return Err(color_eyre::eyre::eyre!(
+                "the Fn modifier cannot be registered on X11"
+            ));
+        }
+        let binding = crate::linux_settings::LinuxHotkey {
+            control: shortcut.control,
+            alt: shortcut.alt,
+            shift: shortcut.shift,
+            super_key: shortcut.platform,
+            key: if shortcut.key == " " {
+                "space".into()
+            } else {
+                shortcut.key.to_ascii_lowercase()
+            },
+        };
+        if let Err(error) = binding.validate().and_then(|()| {
+            crate::linux_input::X11HotkeyMonitor::start(binding.clone(), false).map(drop)
+        }) {
+            self.error = Some(format!("Could not register {}: {error:#}", binding.label()));
+            return Err(error);
+        }
+        let mut candidate = self.settings.clone();
+        candidate.dictation_hotkey = binding;
+        if let Err(error) = candidate.save() {
+            self.error = Some(format!("Could not save shortcut: {error:#}"));
+            return Err(error);
+        }
+        self.settings = candidate;
+        self.error = None;
+        self.settings_error = None;
+        Ok(())
+    }
+
+    fn restart_into_update(&self) -> Result<()> {
+        let UpdateState::Ready(update) = &self.update else {
+            return Err(color_eyre::eyre::eyre!("no installed update is ready"));
+        };
+        crate::linux_updater::relaunch(update)
+    }
+}
+
+impl LinuxApp {
     fn capture_hotkey(&mut self, keystroke: &Keystroke) -> bool {
         if !self.capturing_hotkey {
             return false;
@@ -496,33 +600,21 @@ impl LinuxApp {
             self.capturing_hotkey = false;
             return true;
         }
-        if keystroke.modifiers.function {
-            self.error = Some("The Fn modifier cannot be registered on X11".into());
-            return true;
-        }
-        let binding = crate::linux_settings::LinuxHotkey {
-            control: keystroke.modifiers.control,
+        let shortcut = DesktopShortcut {
             alt: keystroke.modifiers.alt,
+            control: keystroke.modifiers.control,
+            function: keystroke.modifiers.function,
+            key: keystroke.key.clone(),
+            platform: keystroke.modifiers.platform,
             shift: keystroke.modifiers.shift,
-            super_key: keystroke.modifiers.platform,
-            key: if keystroke.key == " " {
-                "space".into()
-            } else {
-                keystroke.key.to_ascii_lowercase()
-            },
         };
-        if let Err(error) = binding.validate().and_then(|()| {
-            crate::linux_input::X11HotkeyMonitor::start(binding.clone(), false).map(drop)
-        }) {
-            self.error = Some(format!("Could not register {}: {error:#}", binding.label()));
-            return true;
+        if self
+            .host
+            .dispatch(DesktopAction::SetDictationShortcut(shortcut))
+            .is_ok()
+        {
+            self.capturing_hotkey = false;
         }
-        self.settings.dictation_hotkey = binding;
-        match self.settings.save() {
-            Ok(()) => self.error = None,
-            Err(error) => self.error = Some(format!("Could not save shortcut: {error:#}")),
-        }
-        self.capturing_hotkey = false;
         true
     }
 }
@@ -536,7 +628,7 @@ fn start_update_check() -> Receiver<Result<Option<InstalledUpdate>, String>> {
     receiver
 }
 
-impl Drop for LinuxApp {
+impl Drop for LinuxDesktopHost {
     fn drop(&mut self) {
         if let Some(stop) = self
             .listener_stop
@@ -550,58 +642,120 @@ impl Drop for LinuxApp {
     }
 }
 
+impl DesktopHost for LinuxDesktopHost {
+    fn capabilities(&self) -> DesktopCapabilities {
+        DesktopCapabilities::linux_x11()
+    }
+
+    fn snapshot(&self) -> DesktopSnapshot {
+        let update_status = match &self.update {
+            UpdateState::Unmanaged => DesktopUpdateStatus::Unavailable,
+            UpdateState::Checking(_) => DesktopUpdateStatus::Checking,
+            UpdateState::Failed(_) => DesktopUpdateStatus::Failed,
+            UpdateState::Waiting(_) => DesktopUpdateStatus::Current,
+            UpdateState::Ready(_) => DesktopUpdateStatus::ReadyToRestart,
+        };
+        DesktopSnapshot {
+            activity: self.activity.clone(),
+            dictation_shortcut: self.settings.dictation_hotkey.keycaps(),
+            dictation_shortcut_label: self.settings.dictation_hotkey.label(),
+            double_tap_lock: self.settings.double_tap_lock,
+            listener: Some(DesktopListenerSnapshot {
+                running: self.is_running(),
+                status: self.status.clone(),
+            }),
+            operation_error: self.error.clone().or_else(|| self.settings_error.clone()),
+            observations_path: self.event_path.display().to_string(),
+            update_status,
+        }
+    }
+
+    fn dispatch(&mut self, action: DesktopAction) -> Result<()> {
+        match action {
+            DesktopAction::ClearError => self.error = None,
+            DesktopAction::RestartIntoUpdate => {
+                if let Err(error) = self.restart_into_update() {
+                    self.error = Some(format!("Could not restart HEX: {error:#}"));
+                    return Err(error);
+                }
+            }
+            DesktopAction::SetDictationShortcut(shortcut) => {
+                self.set_dictation_hotkey(shortcut)?;
+            }
+            DesktopAction::SetDoubleTapLock(enabled) => {
+                let mut candidate = self.settings.clone();
+                candidate.double_tap_lock = enabled;
+                if let Err(error) = candidate.save() {
+                    self.error = Some(format!("Could not save double-tap setting: {error:#}"));
+                    return Err(error);
+                }
+                self.settings = candidate;
+                self.error = None;
+                self.settings_error = None;
+            }
+            DesktopAction::StartListening => self.start(),
+            DesktopAction::StopListening => self.stop(),
+        }
+        Ok(())
+    }
+}
+
+#[cfg(any())]
 impl Render for LinuxApp {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let running = self.is_running();
-        let hotkey_label = if self.capturing_hotkey {
-            "Press a shortcut...".into()
+        let snapshot = self.host.snapshot();
+        let running = snapshot
+            .listener
+            .as_ref()
+            .is_some_and(|listener| listener.running);
+        let capabilities = self.host.capabilities();
+        let hotkey_content = if self.capturing_hotkey {
+            div()
+                .text_size(px(11.0))
+                .text_color(rgb(TEXT_SOFT))
+                .child("Press a shortcut...")
+                .into_any_element()
         } else {
-            self.settings.dictation_hotkey.label()
+            hotkey_keycaps(snapshot.dictation_shortcut.clone(), 1.0)
         };
         let shortcut_help = format!(
             "Hold {} to dictate. Release to transcribe and paste; Escape cancels.",
-            self.settings.dictation_hotkey.label()
+            snapshot.dictation_shortcut_label
         );
         let control = if running {
             "Stop listening"
         } else {
             "Start listening"
         };
-        let update = match &self.update {
-            UpdateState::Ready(executable) => Some(executable.clone()),
-            _ => None,
+        let update_ready = snapshot.update_status == DesktopUpdateStatus::ReadyToRestart;
+        let transcript_rows = if capabilities.activity {
+            snapshot
+                .activity
+                .transcripts
+                .iter()
+                .enumerate()
+                .map(|(index, transcript)| {
+                    div()
+                        .id(index)
+                        .py_3()
+                        .border_b_1()
+                        .border_color(rgb(LINE))
+                        .text_size(px(15.0))
+                        .text_color(rgb(TEXT_SOFT))
+                        .child(transcript.clone())
+                })
+                .collect::<Vec<_>>()
+        } else {
+            Vec::new()
         };
-        let transcript_rows = self
-            .transcripts
-            .iter()
-            .enumerate()
-            .map(|(index, transcript)| {
-                div()
-                    .id(index)
-                    .py_3()
-                    .border_b_1()
-                    .border_color(rgb(0x282c31))
-                    .text_size(px(15.0))
-                    .text_color(rgb(0xdce2e8))
-                    .child(transcript.clone())
-            })
-            .collect::<Vec<_>>();
 
-        div()
-            .size_full()
-            .flex()
-            .bg(rgb(0x0d0f11))
-            .text_color(rgb(0xe8ecef))
+        window_frame()
             .child(
-                div()
+                sidebar_frame()
                     .w(px(230.0))
-                    .h_full()
                     .flex()
                     .flex_col()
                     .p_5()
-                    .border_r_1()
-                    .border_color(rgb(0x25292d))
-                    .bg(rgb(0x121518))
                     .child(
                         div()
                             .text_size(px(28.0))
@@ -613,41 +767,36 @@ impl Render for LinuxApp {
                             .mt_1()
                             .text_size(px(11.0))
                             .font_weight(FontWeight::SEMIBOLD)
-                            .text_color(rgb(0x76818b))
+                            .text_color(rgb(FAINT))
                             .child("LINUX / X11 BETA"),
                     )
                     .child(
                         div()
                             .mt_8()
                             .text_size(px(11.0))
-                            .text_color(rgb(0x76818b))
+                            .text_color(rgb(FAINT))
                             .child("LISTENER"),
                     )
                     .child(
-                        div()
-                            .mt_2()
-                            .flex()
-                            .items_center()
-                            .gap_2()
-                            .child(div().size(px(8.0)).rounded_full().bg(if running {
-                                rgb(0x69d89f)
-                            } else {
-                                rgb(0x58616a)
-                            }))
-                            .child(self.status.clone()),
-                    )
-                    .child(
-                        div()
-                            .mt_3()
-                            .text_size(px(12.0))
-                            .text_color(rgb(0x99a3ac))
-                            .child(self.device.clone()),
+                        listener_status(
+                            snapshot.listener.as_ref().map_or_else(
+                                || "Unavailable".into(),
+                                |listener| listener.status.clone(),
+                            ),
+                            snapshot
+                                .activity
+                                .device
+                                .clone()
+                                .unwrap_or_else(|| "Default Audio Device".into()),
+                            running,
+                        )
+                        .mt_2(),
                     )
                     .child(
                         div()
                             .mt_6()
                             .text_size(px(11.0))
-                            .text_color(rgb(0x76818b))
+                            .text_color(rgb(FAINT))
                             .child("DICTATION SHORTCUT"),
                     )
                     .child(
@@ -663,18 +812,17 @@ impl Render for LinuxApp {
                             .border_color(if self.capturing_hotkey {
                                 rgb(0xd9ff68)
                             } else {
-                                rgb(0x343a40)
+                                rgb(LINE)
                             })
-                            .bg(rgb(0x191d21))
+                            .bg(rgb(SURFACE))
                             .text_size(px(12.0))
                             .font_weight(FontWeight::SEMIBOLD)
-                            .when(!running, |row| row.cursor_pointer())
                             .when(running, |row| row.opacity(0.5))
-                            .child(hotkey_label)
+                            .child(hotkey_content)
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 if !running {
                                     this.capturing_hotkey = !this.capturing_hotkey;
-                                    this.error = None;
+                                    let _ = this.host.dispatch(DesktopAction::ClearError);
                                     cx.notify();
                                 }
                             })),
@@ -690,22 +838,17 @@ impl Render for LinuxApp {
                             .justify_between()
                             .rounded_md()
                             .text_size(px(11.0))
-                            .text_color(rgb(0x99a3ac))
-                            .when(!running, |row| row.cursor_pointer())
+                            .text_color(rgb(MUTED))
                             .when(running, |row| row.opacity(0.5))
                             .child("Double-tap lock")
-                            .child(if self.settings.double_tap_lock {
-                                "Enabled"
-                            } else {
-                                "Disabled"
-                            })
+                            .child(toggle(if snapshot.double_tap_lock { 1.0 } else { 0.0 }))
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 if !running {
-                                    this.settings.double_tap_lock = !this.settings.double_tap_lock;
-                                    if let Err(error) = this.settings.save() {
-                                        this.error = Some(format!(
-                                            "Could not save double-tap setting: {error:#}"
-                                        ));
+                                    let enabled = !this.host.snapshot().double_tap_lock;
+                                    if let Err(error) =
+                                        this.host.dispatch(DesktopAction::SetDoubleTapLock(enabled))
+                                    {
+                                        tracing::error!(%error, "could not save double-tap setting");
                                     }
                                     cx.notify();
                                 }
@@ -720,7 +863,6 @@ impl Render for LinuxApp {
                             .items_center()
                             .justify_center()
                             .rounded_md()
-                            .cursor_pointer()
                             .bg(if running {
                                 rgb(0x302126)
                             } else {
@@ -736,9 +878,9 @@ impl Render for LinuxApp {
                             .child(control)
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 if running {
-                                    this.stop();
+                                    let _ = this.host.dispatch(DesktopAction::StopListening);
                                 } else {
-                                    this.start();
+                                    let _ = this.host.dispatch(DesktopAction::StartListening);
                                 }
                                 cx.notify();
                             })),
@@ -746,8 +888,7 @@ impl Render for LinuxApp {
                     .child(
                         div()
                             .mt_auto()
-                            .when_some(update, |panel, update| {
-                                let action = update.clone();
+                            .when(update_ready, |panel| {
                                 panel
                                     .child(
                                         div()
@@ -756,29 +897,25 @@ impl Render for LinuxApp {
                                             .child("Update ready"),
                                     )
                                     .child(
-                                        div()
+                                        compact_button("Restart")
                                             .id("restart-update")
                                             .mt_2()
-                                            .h(px(30.0))
-                                            .flex()
-                                            .items_center()
                                             .justify_center()
-                                            .rounded_md()
-                                            .cursor_pointer()
                                             .bg(rgb(0x252b20))
-                                            .text_size(px(11.0))
                                             .font_weight(FontWeight::SEMIBOLD)
-                                            .child("Restart")
                                             .on_click(cx.listener(move |this, _, _, cx| {
-                                                match crate::linux_updater::relaunch(&action) {
+                                                match this
+                                                    .host
+                                                    .dispatch(DesktopAction::RestartIntoUpdate)
+                                                {
                                                     Ok(()) => {
-                                                        this.stop();
+                                                        let _ = this
+                                                            .host
+                                                            .dispatch(DesktopAction::StopListening);
                                                         cx.quit();
                                                     }
                                                     Err(error) => {
-                                                        this.error = Some(format!(
-                                                            "Could not restart HEX: {error:#}"
-                                                        ));
+                                                        tracing::error!(%error, "could not restart HEX");
                                                         cx.notify();
                                                     }
                                                 }
@@ -790,25 +927,16 @@ impl Render for LinuxApp {
                                 div()
                                     .text_size(px(11.0))
                                     .line_height(px(17.0))
-                                    .text_color(rgb(0x68727b))
+                                    .text_color(rgb(FAINT))
                                     .child(shortcut_help),
                             ),
                     ),
             )
             .child(
-                div()
+                pane_frame()
                     .flex_1()
-                    .h_full()
                     .p_6()
-                    .flex()
-                    .flex_col()
-                    .child(
-                        div()
-                            .text_size(px(11.0))
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .text_color(rgb(0x76818b))
-                            .child("LOCAL TRANSCRIPT"),
-                    )
+                    .child(section_label("LOCAL TRANSCRIPT"))
                     .child(
                         div()
                             .mt_2()
@@ -816,18 +944,24 @@ impl Render for LinuxApp {
                             .font_weight(FontWeight::SEMIBOLD)
                             .child("What HEX hears"),
                     )
-                    .when_some(self.error.clone(), |panel, error| {
-                        panel.child(
-                            div()
-                                .mt_4()
-                                .p_3()
-                                .rounded_md()
-                                .bg(rgb(0x2e1d22))
-                                .text_size(px(12.0))
-                                .text_color(rgb(0xffa8b8))
-                                .child(error),
-                        )
-                    })
+                    .when_some(
+                        snapshot
+                            .operation_error
+                            .clone()
+                            .or_else(|| snapshot.activity.error.clone()),
+                        |panel, error| {
+                            panel.child(
+                                div()
+                                    .mt_4()
+                                    .p_3()
+                                    .rounded_md()
+                                    .bg(rgb(0x2e1d22))
+                                    .text_size(px(12.0))
+                                    .text_color(rgb(NEGATIVE))
+                                    .child(error),
+                            )
+                        },
+                    )
                     .child(
                         div()
                             .mt_5()
@@ -835,7 +969,7 @@ impl Render for LinuxApp {
                             .flex()
                             .flex_col()
                             .when(transcript_rows.is_empty(), |list| {
-                                list.child(div().mt_8().text_color(rgb(0x68727b)).child(
+                                list.child(div().mt_8().text_color(rgb(FAINT)).child(
                                     "Start listening, then speak. Completed phrases appear here.",
                                 ))
                             })
@@ -845,24 +979,367 @@ impl Render for LinuxApp {
                         div()
                             .pt_3()
                             .border_t_1()
-                            .border_color(rgb(0x282c31))
+                            .border_color(rgb(LINE))
                             .text_size(px(11.0))
-                            .text_color(rgb(0x68727b))
+                            .text_color(rgb(FAINT))
                             .child(SharedString::from(format!(
                                 "Observations: {}",
-                                self.event_path.display()
+                                snapshot.observations_path
                             ))),
                     ),
             )
     }
 }
 
-fn state_label(state: VoiceState) -> &'static str {
-    match state {
-        VoiceState::Listening => "Listening",
-        VoiceState::Sleeping => "Sleeping",
-        VoiceState::Dictating => "Dictating",
-        VoiceState::Transcribing => "Transcribing",
-        VoiceState::Stopping => "Stopping",
+impl LinuxApp {
+    fn render_shared_navigation(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        let capabilities = self.host.capabilities();
+        let items = LinuxPane::ALL
+            .into_iter()
+            .filter(|pane| *pane != LinuxPane::Activity || capabilities.activity)
+            .enumerate()
+            .map(|(index, pane)| {
+                navigation_item(pane.icon(), self.pane == pane)
+                    .id(("linux-nav", index))
+                    .child(pane.label())
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.pane = pane;
+                        cx.notify();
+                    }))
+            });
+        sidebar_frame()
+            .w(px(SIDEBAR_WIDTH))
+            .px(px(14.0))
+            .pt(px(52.0))
+            .pb_4()
+            .flex()
+            .flex_col()
+            .child(div().flex().flex_col().gap(px(2.0)).children(items))
+            .child(div().flex_1())
+            .into_any_element()
+    }
+
+    fn render_shared_settings(
+        &mut self,
+        snapshot: &DesktopSnapshot,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let running = snapshot
+            .listener
+            .as_ref()
+            .is_some_and(|listener| listener.running);
+        let shortcut = if self.capturing_hotkey {
+            div()
+                .w(px(180.0))
+                .h(px(34.0))
+                .flex()
+                .items_center()
+                .justify_center()
+                .rounded(px(6.0))
+                .border_1()
+                .border_color(rgb(TEXT_SOFT))
+                .bg(rgb(SURFACE))
+                .text_size(px(11.0))
+                .child("Press a shortcut...")
+                .into_any_element()
+        } else {
+            hotkey_keycaps(snapshot.dictation_shortcut.clone(), 1.0)
+        };
+        let update_ready = snapshot.update_status == DesktopUpdateStatus::ReadyToRestart;
+        let error = snapshot
+            .operation_error
+            .clone()
+            .or_else(|| snapshot.activity.error.clone());
+
+        div()
+            .h_full()
+            .min_w(px(0.0))
+            .flex()
+            .flex_col()
+            .flex_1()
+            .child(pane_header("Settings", None))
+            .child(
+                div().flex_1().px_8().py_6().flex().justify_center().child(
+                    div()
+                        .w_full()
+                        .max_w(px(788.0))
+                        .flex()
+                        .flex_col()
+                        .when_some(error, |content, error| {
+                            content
+                                .child(error_message("HEX could not complete the action.", error))
+                        })
+                        .child(settings_section_label("Dictation"))
+                        .child(
+                            settings_panel()
+                                .child(settings_row(
+                                    "Local transcription",
+                                    "Language and on-device speech model",
+                                    disclosure_button("English · Parakeet v2")
+                                        .id("transcription-model")
+                                        .on_click(cx.listener(|this, _, _, cx| {
+                                            this.model_picker_open = true;
+                                            cx.notify();
+                                        })),
+                                ))
+                                .child(settings_row(
+                                    "Microphone",
+                                    "Automatically chooses the default available input",
+                                    disclosure_button("Automatic"),
+                                ))
+                                .child(
+                                    settings_row(
+                                        "Dictation shortcut",
+                                        "Hold to dictate, then release to transcribe.",
+                                        shortcut,
+                                    )
+                                    .id("hotkey-capture")
+                                    .when(running, |row| row.opacity(0.5))
+                                    .on_click(cx.listener(
+                                        move |this, _, _, cx| {
+                                            if !running {
+                                                this.capturing_hotkey = !this.capturing_hotkey;
+                                                let _ =
+                                                    this.host.dispatch(DesktopAction::ClearError);
+                                                cx.notify();
+                                            }
+                                        },
+                                    )),
+                                ),
+                        )
+                        .child(settings_section_label("Behavior"))
+                        .child(
+                            settings_panel().child(
+                                settings_row(
+                                    "Double-tap to lock",
+                                    "Double-tap the shortcut for hands-free dictation",
+                                    toggle(if snapshot.double_tap_lock { 1.0 } else { 0.0 }),
+                                )
+                                .id("double-tap-lock")
+                                .when(running, |row| row.opacity(0.5))
+                                .on_click(cx.listener(
+                                    move |this, _, _, cx| {
+                                        if !running {
+                                            let enabled = !this.host.snapshot().double_tap_lock;
+                                            let _ = this
+                                                .host
+                                                .dispatch(DesktopAction::SetDoubleTapLock(enabled));
+                                            cx.notify();
+                                        }
+                                    },
+                                )),
+                            ),
+                        )
+                        .child(settings_section_label("Application"))
+                        .child(
+                            settings_panel()
+                                .child(settings_row(
+                                    "HEX",
+                                    "Linux X11 beta",
+                                    div()
+                                        .text_size(px(12.0))
+                                        .text_color(rgb(MUTED))
+                                        .child(format!("Version {}", env!("CARGO_PKG_VERSION"))),
+                                ))
+                                .when(update_ready, |panel| {
+                                    panel.child(settings_row(
+                                        "Update ready",
+                                        "Restart into the verified Linux release.",
+                                        compact_button("Restart")
+                                            .id("restart-update")
+                                            .border_1()
+                                            .border_color(rgb(LINE))
+                                            .on_click(cx.listener(|this, _, _, cx| {
+                                                if this
+                                                    .host
+                                                    .dispatch(DesktopAction::RestartIntoUpdate)
+                                                    .is_ok()
+                                                {
+                                                    let _ = this
+                                                        .host
+                                                        .dispatch(DesktopAction::StopListening);
+                                                    cx.quit();
+                                                } else {
+                                                    cx.notify();
+                                                }
+                                            })),
+                                    ))
+                                }),
+                        ),
+                ),
+            )
+            .into_any_element()
+    }
+
+    fn render_shared_activity(
+        &mut self,
+        snapshot: &DesktopSnapshot,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let refresh = compact_button("Refresh")
+            .id("refresh-activity")
+            .bg(rgb(SURFACE))
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.host.refresh();
+                cx.notify();
+            }))
+            .into_any_element();
+        let rows = snapshot
+            .activity
+            .transcripts
+            .iter()
+            .enumerate()
+            .map(|(index, transcript)| {
+                div()
+                    .id(("activity-transcript", index))
+                    .px_5()
+                    .py_4()
+                    .border_b_1()
+                    .border_color(rgb(LINE))
+                    .text_size(px(13.0))
+                    .text_color(rgb(TEXT_SOFT))
+                    .child(transcript.clone())
+            })
+            .collect::<Vec<_>>();
+        div()
+            .h_full()
+            .min_w(px(0.0))
+            .flex()
+            .flex_col()
+            .flex_1()
+            .child(pane_header("Activity", Some(refresh)))
+            .child(
+                div()
+                    .flex_1()
+                    .flex()
+                    .border_t_1()
+                    .border_color(rgb(LINE))
+                    .child(
+                        div()
+                            .w_1_2()
+                            .h_full()
+                            .border_r_1()
+                            .border_color(rgb(LINE))
+                            .when(rows.is_empty(), |list| {
+                                list.child(
+                                    div()
+                                        .p_6()
+                                        .text_size(px(13.0))
+                                        .text_color(rgb(MUTED))
+                                        .child("No activity yet."),
+                                )
+                            })
+                            .children(rows),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .h_full()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .text_size(px(13.0))
+                            .text_color(rgb(MUTED))
+                            .child("Completed dictation appears in the activity list."),
+                    ),
+            )
+            .into_any_element()
+    }
+
+    fn render_model_picker(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        let model = crate::linux_transcriber::default_model();
+        let installed = crate::transcription_models::is_installed(model, "en");
+        div()
+            .absolute()
+            .inset_0()
+            .bg(gpui::rgba(0x000000aa))
+            .flex()
+            .items_center()
+            .justify_center()
+            .child(
+                div()
+                    .w(px(560.0))
+                    .rounded(px(12.0))
+                    .border_1()
+                    .border_color(rgb(LINE))
+                    .bg(rgb(0x151515))
+                    .p_6()
+                    .flex()
+                    .flex_col()
+                    .gap_5()
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .justify_between()
+                            .child(
+                                div()
+                                    .text_size(px(20.0))
+                                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                                    .child("Local transcription"),
+                            )
+                            .child(compact_button("Close").id("close-model-picker").on_click(
+                                cx.listener(|this, _, _, cx| {
+                                    this.model_picker_open = false;
+                                    cx.notify();
+                                }),
+                            )),
+                    )
+                    .child(
+                        div()
+                            .p_4()
+                            .rounded(px(8.0))
+                            .border_1()
+                            .border_color(rgb(0x4b5fff))
+                            .bg(rgb(SURFACE))
+                            .flex()
+                            .items_center()
+                            .justify_between()
+                            .child(
+                                div()
+                                    .flex()
+                                    .flex_col()
+                                    .gap_1()
+                                    .child(
+                                        div()
+                                            .text_size(px(14.0))
+                                            .font_weight(gpui::FontWeight::SEMIBOLD)
+                                            .child("English · Parakeet v2"),
+                                    )
+                                    .child(
+                                        div()
+                                            .text_size(px(11.0))
+                                            .text_color(rgb(MUTED))
+                                            .child(model.size_label()),
+                                    ),
+                            )
+                            .child(
+                                div()
+                                    .text_size(px(11.0))
+                                    .text_color(rgb(if installed { 0x69d89f } else { 0xd8b069 }))
+                                    .child(if installed {
+                                        "Installed"
+                                    } else {
+                                        "Run `hex model install`"
+                                    }),
+                            ),
+                    ),
+            )
+            .into_any_element()
+    }
+}
+
+impl Render for LinuxApp {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let snapshot = self.host.snapshot();
+        let content = match self.pane {
+            LinuxPane::Settings => self.render_shared_settings(&snapshot, cx),
+            LinuxPane::Activity => self.render_shared_activity(&snapshot, cx),
+        };
+        let model_picker = self.model_picker_open.then(|| self.render_model_picker(cx));
+        window_frame()
+            .child(self.render_shared_navigation(cx))
+            .child(div().flex_1().h_full().overflow_hidden().child(content))
+            .children(model_picker)
     }
 }

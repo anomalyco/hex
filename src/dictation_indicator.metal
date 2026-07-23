@@ -25,6 +25,8 @@ struct Uniforms {
     float sphere_depth;
     float light_angle;
     float completion;
+    float recording_flash;
+    float _padding;
 };
 
 struct VertexOutput {
@@ -90,6 +92,8 @@ fragment float4 indicator_fragment(
     float post_processing = clamp(uniforms.post_processing, 0.0, 1.0);
     float editing = clamp(uniforms.editing, 0.0, 1.0);
     float completion = clamp(uniforms.completion, 0.0, 1.0);
+    float recording_flash = clamp(uniforms.recording_flash, 0.0, 1.0)
+        * (1.0 - processing);
     float completion_flash = smoothstep(0.0, 0.16, completion)
         * (1.0 - smoothstep(0.32, 1.0, completion));
     float recording = 1.0 - processing;
@@ -112,6 +116,7 @@ fragment float4 indicator_fragment(
         + glow(distance, 8.0 + lifecycle_softness) * average_power * 0.36);
     outer += processing * glow(distance, 2.6 + lifecycle_softness) * 0.045;
     outer += glow(distance, 6.0 + lifecycle_softness * 0.5) * completion_flash * 0.22;
+    outer += glow(distance, 7.0 + lifecycle_softness * 0.5) * recording_flash * 0.5;
     composite(result, accent, outer * (1.0 - shape));
 
     float3 recording_base = mix(
@@ -119,6 +124,7 @@ fragment float4 indicator_fragment(
         float3(1.0, 0.0, 0.0),
         average_power);
     recording_base = mix(recording_base, float3(0.0, 0.48, 0.3), editing);
+    recording_base = mix(recording_base, float3(1.0, 0.08, 0.06), recording_flash * 0.72);
     float sphere_light = clamp(0.48 - point.x * 0.035 - point.y * 0.045, 0.0, 1.0);
     float3 blue_base = mix(
         float3(0.0, 0.02, 0.32),
@@ -165,31 +171,81 @@ fragment float4 indicator_fragment(
         float orb_mask = coverage(orb_distance, orb_edge) * circularity;
         float2 sphere_uv = point / max(orb_radius, 0.001);
         float surface_z = sqrt(max(1.0 - dot(sphere_uv, sphere_uv), 0.0));
-        float light = clamp(0.42 - sphere_uv.x * 0.22 - sphere_uv.y * 0.28, 0.0, 1.0);
+        float depth = mix(0.55, 1.45, clamp(uniforms.sphere_depth, 0.0, 1.0));
+        float normal_z = pow(surface_z, depth);
+        float light_phase = uniforms.light_angle * 6.2831853
+            + uniforms.time * uniforms.line_speed * 0.22;
+        float2 light_direction = float2(cos(light_phase), sin(light_phase));
+        float light = clamp(
+            0.32 + dot(sphere_uv, light_direction) * 0.18 + normal_z * 0.28,
+            0.0,
+            1.0);
         float3 orb_shadow = mix(float3(0.0, 0.015, 0.24), float3(0.1, 0.0, 0.26), post_processing);
         float3 orb_light = mix(float3(0.05, 0.22, 0.72), float3(0.4, 0.05, 0.7), post_processing);
         composite(result, mix(orb_shadow, orb_light, light), orb_mask * processing * detail_clarity);
 
-        float rim = pow(1.0 - surface_z, 2.4);
+        float rim = pow(1.0 - normal_z, 2.4);
         composite(result, pipeline_accent, rim * orb_mask * processing * 0.3 * detail_clarity);
 
-        // Preserve the original three-part shine, but bow it subtly with the
-        // surface and filter every edge to the current pixel footprint.
-        float sweep_coordinate = point.x + sphere_uv.y * sphere_uv.y * 0.75;
-        float sweep_travel = orb_radius * 2.0 + 18.0;
-        float sweep_start = fmod(uniforms.time * 38.0, sweep_travel) - orb_radius - 7.0;
+        float style = clamp(uniforms.line_style, 0.0, 2.0);
+        float sharpness = clamp(uniforms.line_sharpness, 0.0, 1.0);
+        float highlight_count = clamp(round(uniforms.line_count), 1.0, 6.0);
         float shine = 0.0;
-        for (int index = 0; index < 3; index++) {
-            float line_distance = abs(sweep_coordinate - (sweep_start - float(index) * 4.1));
-            float aa = max(fwidth(line_distance), 0.24);
-            float band = 1.0 - smoothstep(1.0 - aa, 3.6 + aa, line_distance);
-            shine = max(shine, band);
+        if (style < 0.5) {
+            // A moving area light gives the orb motion without drawing stripes
+            // across its face.
+            float focus = clamp(
+                dot(sphere_uv, light_direction) * 0.55 + normal_z * 0.72,
+                0.0,
+                1.0);
+            shine = pow(focus, mix(3.0, 12.0, sharpness));
+        } else if (style < 1.5) {
+            // Meridian highlights wrap around the sphere instead of crossing
+            // it as flat screen-space lines.
+            float longitude = atan2(sphere_uv.x, normal_z) / 6.2831853;
+            float travel = uniforms.time * uniforms.line_speed * 0.11;
+            for (int index = 0; index < 6; index++) {
+                if (float(index) >= highlight_count) {
+                    break;
+                }
+                float offset = (float(index) + 0.5) / highlight_count;
+                float wrapped = abs(sin((longitude - travel - offset) * 6.2831853));
+                float band = 1.0 - smoothstep(
+                    mix(0.3, 0.05, sharpness),
+                    mix(0.62, 0.16, sharpness),
+                    wrapped);
+                shine = max(shine, band);
+            }
+        } else {
+            // Curved ribbons remain available in the lab for comparison, but
+            // are no longer the production default.
+            float curvature = mix(0.0, 3.0, clamp(uniforms.line_curvature, 0.0, 1.0));
+            float sweep_coordinate = point.x + sphere_uv.y * sphere_uv.y * curvature;
+            float sweep_travel = orb_radius * 2.0 + 18.0;
+            float sweep_start = fmod(
+                uniforms.time * 38.0 * uniforms.line_speed,
+                sweep_travel) - orb_radius - 7.0;
+            float spacing = mix(7.0, 2.8, (highlight_count - 1.0) / 5.0);
+            for (int index = 0; index < 6; index++) {
+                if (float(index) >= highlight_count) {
+                    break;
+                }
+                float line_distance = abs(
+                    sweep_coordinate - (sweep_start - float(index) * spacing));
+                float aa = max(fwidth(line_distance), 0.24);
+                float band = 1.0 - smoothstep(
+                    mix(1.4, 0.25, sharpness) - aa,
+                    mix(4.8, 1.5, sharpness) + aa,
+                    line_distance);
+                shine = max(shine, band);
+            }
         }
         float3 shine_color = mix(float3(0.66, 0.84, 1.0), float3(0.92, 0.72, 1.0), post_processing);
+        float shine_strength = mix(0.16, 0.68, clamp(uniforms.line_glow, 0.0, 1.0));
         composite(
             result,
             shine_color,
-            shine * surface_z * orb_mask * processing * 0.58 * detail_clarity);
+            shine * normal_z * orb_mask * processing * shine_strength * detail_clarity);
     }
 
     // Pending jobs sit beside the foreground state. Keeping this geometry
@@ -220,6 +276,9 @@ fragment float4 indicator_fragment(
         abs(distance) - 0.4,
         0.38 + lifecycle_softness * 0.3) * mix(0.56, 0.09, processing) * detail_clarity;
     composite(result, mix(accent, float3(1.0), 0.1), stroke);
+    screen(result, float3(1.0, 0.2, 0.16), shape * recording_flash * 0.36);
+    float recording_flash_rim = exp2(-pow(abs(distance) / 0.9, 2.0));
+    screen(result, float3(1.0, 0.58, 0.48), recording_flash_rim * recording_flash * 0.82);
 
     result *= uniforms.opacity;
     return result;

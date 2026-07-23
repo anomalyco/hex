@@ -4,11 +4,20 @@ This workspace configures literal custom voice commands for HEX. Run
 `bun run check` after editing `hex.config.ts`. HEX reloads valid changes and
 keeps the previous registry if evaluation or validation fails.
 
+Config and dependencies execute as the current user with normal filesystem,
+network, environment, and subprocess access. This host is supervised, not
+sandboxed. Add only trusted packages and review commands before enabling them.
+
+`.hex-sdk` is managed by HEX and provides the local `@hex/commands` package. Do
+not edit it or replace it with an npm dependency. HEX refreshes the managed SDK
+from the running app bundle on startup while preserving user-owned workspace
+files and third-party dependencies.
+
 - Import `defineHexConfig` from `@hex/commands` and use `run` with the provided
   `hex` capabilities for ordinary commands.
 - Import Effect APIs, `Hex`, and `defineHexConfig` from `@hex/commands/effect`.
-- Command keys are stable IDs. Phrases must not overlap another command at the
-  same context specificity or any protected native phrase.
+- Command keys are stable IDs. Phrases must not overlap a command whose context
+  can coexist at the same specificity, or any protected native phrase.
 - `dictation` declaratively replaces the native streaming protocol. `start`
   phrases match only at the beginning while listening; `stop`, `send`, and
   `cancel` match only at the end while voice dictation is active. These are not
@@ -24,5 +33,8 @@ keeps the previous registry if evaluation or validation fails.
 - Effect `run` accepts an Effect value or a function that returns an Effect.
 - Context contains `application`, `browserHost`, `browserUrl`, and `windowTitle`
   when available.
+- `transformations` registers named string functions. Selected transformations
+  run after a mode's corrections and optional OpenCode rewrite. Return only the
+  final transformed string; failures preserve the previous pipeline output.
 
 See `.agents/skills/personal-commands/SKILL.md` for examples.

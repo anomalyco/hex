@@ -19,8 +19,18 @@ mod config;
 mod context;
 #[cfg(all(debug_assertions, target_os = "macos"))]
 mod dashboard;
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+mod desktop_activity;
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+mod desktop_host;
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+mod desktop_ui;
+#[cfg(target_os = "macos")]
+mod developer_control;
 #[cfg_attr(target_os = "linux", allow(dead_code))]
 mod dictation;
+#[cfg(target_os = "macos")]
+mod dictation_audio;
 #[cfg(target_os = "macos")]
 mod dictation_diagnostics;
 #[cfg(target_os = "macos")]
@@ -64,6 +74,8 @@ mod meeting_watcher;
 mod microphone_activity;
 #[cfg_attr(target_os = "linux", allow(dead_code))]
 mod moonshine;
+#[cfg(all(target_os = "macos", debug_assertions))]
+mod moonshine_lab;
 #[cfg(target_os = "macos")]
 mod onboarding;
 #[cfg(target_os = "macos")]
@@ -80,6 +92,8 @@ mod recording_environment;
 mod selected_text;
 #[cfg(target_os = "macos")]
 mod sparkle;
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+mod spoken_text;
 #[cfg(target_os = "macos")]
 mod suppression;
 #[cfg(target_os = "macos")]
@@ -173,6 +187,12 @@ enum Command {
     /// Show the developer recognition dashboard.
     Status,
     #[cfg(debug_assertions)]
+    /// Inspect and control the running desktop app.
+    Dev {
+        #[command(subcommand)]
+        command: DevCommand,
+    },
+    #[cfg(debug_assertions)]
     /// Record, transcribe, and browse local meetings.
     Meeting {
         #[command(subcommand)]
@@ -196,6 +216,19 @@ enum Command {
         #[arg(long, default_value_t = 7)]
         runs: usize,
     },
+    #[cfg(debug_assertions)]
+    /// Record and evaluate command-recognition fixtures interactively.
+    MoonshineLab {
+        /// Corpus directory containing manifest.json and audio/*.wav.
+        #[arg(default_value = "perf/moonshine-corpus")]
+        directory: PathBuf,
+        /// Override the configured microphone preference order.
+        #[arg(long)]
+        device: Option<String>,
+        /// Evaluate every recorded fixture across every Moonshine profile.
+        #[arg(long)]
+        batch: bool,
+    },
 }
 
 #[cfg(target_os = "macos")]
@@ -210,6 +243,61 @@ enum TranscriptionBenchmarkBackend {
 enum CommandsCommand {
     /// Create or refresh ~/.config/hex and install its pinned dependencies.
     Init,
+}
+
+#[cfg(debug_assertions)]
+#[cfg(target_os = "macos")]
+#[derive(Subcommand)]
+enum DevCommand {
+    /// Inspect the running app and window state.
+    Status,
+    /// Drive a deterministic HUD state.
+    Hud {
+        #[arg(value_enum)]
+        state: DevHudState,
+    },
+    /// Open the app and select a pane.
+    Show {
+        #[arg(value_enum)]
+        pane: DevPane,
+    },
+    /// Enable or disable voice commands.
+    Commands {
+        #[arg(value_enum)]
+        state: DevToggle,
+    },
+}
+
+#[cfg(debug_assertions)]
+#[cfg(target_os = "macos")]
+#[derive(Clone, Copy, ValueEnum)]
+enum DevHudState {
+    Reset,
+    Recording,
+    Transcribing,
+    Processing,
+}
+
+#[cfg(debug_assertions)]
+#[cfg(target_os = "macos")]
+#[derive(Clone, Copy, ValueEnum)]
+enum DevPane {
+    Settings,
+    Modes,
+    VoiceAction,
+    Replacements,
+    HudLab,
+    Commands,
+    Meetings,
+    Activity,
+}
+
+#[cfg(debug_assertions)]
+#[cfg(target_os = "macos")]
+#[derive(Clone, Copy, ValueEnum)]
+enum DevToggle {
+    On,
+    Off,
 }
 
 #[cfg(target_os = "macos")]
@@ -443,6 +531,45 @@ fn main() -> Result<()> {
         #[cfg(debug_assertions)]
         Command::Status => dashboard::run(event_path, config::voice_control()),
         #[cfg(debug_assertions)]
+        Command::Dev { command } => {
+            use developer_control::{
+                DeveloperCommand, DeveloperHudState as RpcHudState, DeveloperPane as RpcPane,
+                DeveloperReply,
+            };
+            let command = match command {
+                DevCommand::Status => DeveloperCommand::Status,
+                DevCommand::Hud { state } => DeveloperCommand::Hud {
+                    state: match state {
+                        DevHudState::Reset => RpcHudState::Reset,
+                        DevHudState::Recording => RpcHudState::Recording,
+                        DevHudState::Transcribing => RpcHudState::Transcribing,
+                        DevHudState::Processing => RpcHudState::Processing,
+                    },
+                },
+                DevCommand::Show { pane } => DeveloperCommand::ShowPane {
+                    pane: match pane {
+                        DevPane::Settings => RpcPane::Settings,
+                        DevPane::Modes => RpcPane::Modes,
+                        DevPane::VoiceAction => RpcPane::VoiceAction,
+                        DevPane::Replacements => RpcPane::Replacements,
+                        DevPane::HudLab => RpcPane::HudLab,
+                        DevPane::Commands => RpcPane::Commands,
+                        DevPane::Meetings => RpcPane::Meetings,
+                        DevPane::Activity => RpcPane::Activity,
+                    },
+                },
+                DevCommand::Commands { state } => DeveloperCommand::SetCommandsEnabled {
+                    enabled: matches!(state, DevToggle::On),
+                },
+            };
+            let reply = local_api::call_developer(&command)?;
+            if let DeveloperReply::Error { code, message } = &reply {
+                return Err(eyre!("{code}: {message}"));
+            }
+            println!("{}", serde_json::to_string_pretty(&reply)?);
+            Ok(())
+        }
+        #[cfg(debug_assertions)]
         Command::Meeting {
             command: MeetingCommand::Record { title },
         } => {
@@ -499,6 +626,15 @@ fn main() -> Result<()> {
             };
             transcription_benchmark::run(&manifest, warmups, runs, backend)
         }
+        #[cfg(debug_assertions)]
+        Command::MoonshineLab {
+            directory,
+            device,
+            batch,
+        } => match batch {
+            true => moonshine_lab::run_batch(&root, &directory),
+            false => moonshine_lab::run(&root, &directory, device.as_deref()),
+        },
     }
 }
 

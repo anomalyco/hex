@@ -4,7 +4,7 @@ use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
-use std::sync::mpsc::{self, Receiver, TryRecvError, TrySendError};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, SyncSender, TryRecvError, TrySendError};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
@@ -28,6 +28,8 @@ const MAX_HEADER_BYTES: usize = 16 * 1024;
 const MAX_HEADERS: usize = 64;
 const MAX_PATH_BYTES: usize = 2 * 1024;
 const MAX_AUDIO_BYTES: usize = 64 * 1024 * 1024;
+const MAX_DEVELOPER_CONTROL_BYTES: usize = 16 * 1024;
+const DEVELOPER_CONTROL_TIMEOUT: Duration = Duration::from_secs(2);
 
 type HealthProvider = Arc<dyn Fn() -> HealthResponse + Send + Sync>;
 type ModelPreparer =
@@ -99,6 +101,7 @@ struct HttpContext {
     model_preparing: Arc<AtomicBool>,
     shutdown: Arc<AtomicBool>,
     transcription: crate::transcription_service::TranscriptionServiceHandle,
+    developer_control: Option<SyncSender<crate::developer_control::DeveloperCall>>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -114,6 +117,7 @@ struct CapabilitiesResponse {
     audio_formats: [&'static str; 1],
     partial_transcripts: bool,
     service_capture: bool,
+    developer_control: bool,
 }
 
 impl LocalApi {
@@ -128,23 +132,39 @@ impl LocalApi {
         Ok(api)
     }
 
+    pub fn start_with_developer_control(
+        events: EventLog,
+        developer_control: SyncSender<crate::developer_control::DeveloperCall>,
+    ) -> Result<Self> {
+        let instance = crate::instance::acquire("local-api")?;
+        let mut api = Self::start_bound(
+            Some(crate::app_paths::local_api_discovery_file()?),
+            Arc::new(current_health),
+            events,
+            Some(developer_control),
+        )?;
+        api._instance = Some(instance);
+        Ok(api)
+    }
+
     pub fn start_embedded(events: EventLog) -> Result<Self> {
         Self::start_without_discovery(Arc::new(current_health), events)
     }
 
     fn start_at(discovery_path: PathBuf, health: HealthProvider, events: EventLog) -> Result<Self> {
         prepare_discovery_path(&discovery_path)?;
-        Self::start_bound(Some(discovery_path), health, events)
+        Self::start_bound(Some(discovery_path), health, events, None)
     }
 
     fn start_without_discovery(health: HealthProvider, events: EventLog) -> Result<Self> {
-        Self::start_bound(None, health, events)
+        Self::start_bound(None, health, events, None)
     }
 
     fn start_bound(
         discovery_path: Option<PathBuf>,
         health: HealthProvider,
         events: EventLog,
+        developer_control: Option<SyncSender<crate::developer_control::DeveloperCall>>,
     ) -> Result<Self> {
         let (transcription_service, transcription) =
             crate::transcription_service::TranscriptionService::start()?;
@@ -176,19 +196,21 @@ impl LocalApi {
         let stop_observed = Arc::new(AtomicBool::new(false));
         let worker_stop_observed = stop_observed.clone();
         let unexpected_shutdown = worker_shutdown.clone();
+        let http_context = HttpContext {
+            token: token.into(),
+            health,
+            events: worker_events.clone(),
+            auth_limiter: AuthObservationLimiter::default(),
+            model_preparing: Arc::new(AtomicBool::new(false)),
+            shutdown: worker_shutdown,
+            transcription,
+            developer_control,
+        };
         let (ready, readiness) = mpsc::sync_channel(1);
         let worker = thread::Builder::new()
             .name("local-api".into())
             .spawn(move || {
-                serve(
-                    listener,
-                    token,
-                    health,
-                    worker_events.clone(),
-                    worker_shutdown,
-                    transcription,
-                    ready,
-                );
+                serve(listener, http_context, ready);
                 if !unexpected_shutdown.load(Ordering::Acquire) {
                     if let Some((path, document)) = worker_discovery {
                         remove_discovery_if_owned(&path, &document);
@@ -287,9 +309,12 @@ fn observe_stopped(events: &EventLog, observed: &AtomicBool) {
     if observed.swap(true, Ordering::AcqRel) {
         return;
     }
-    if let Err(error) = events.emit(&VoiceEvent::ApiServerStopped {
-        timestamp_ms: now_ms(),
-    }) {
+    if let Err(error) = events
+        .emit(&VoiceEvent::ApiServerStopped {
+            timestamp_ms: now_ms(),
+        })
+        .and_then(|()| events.flush())
+    {
         tracing::error!(%error, "could not record local API shutdown");
     }
 }
@@ -300,26 +325,11 @@ impl Drop for DiscoveryLease {
     }
 }
 
-fn serve(
-    listener: TcpListener,
-    token: String,
-    health: HealthProvider,
-    events: EventLog,
-    shutdown: Arc<AtomicBool>,
-    transcription: crate::transcription_service::TranscriptionServiceHandle,
-    ready: mpsc::SyncSender<bool>,
-) {
+fn serve(listener: TcpListener, context: HttpContext, ready: mpsc::SyncSender<bool>) {
     let (connections, pending) = mpsc::sync_channel(CONNECTION_QUEUE_CAPACITY);
     let pending = Arc::new(Mutex::new(pending));
-    let context = Arc::new(HttpContext {
-        token: token.into(),
-        health,
-        events,
-        auth_limiter: AuthObservationLimiter::default(),
-        model_preparing: Arc::new(AtomicBool::new(false)),
-        shutdown: shutdown.clone(),
-        transcription,
-    });
+    let shutdown = context.shutdown.clone();
+    let context = Arc::new(context);
     let workers = (0..HTTP_WORKERS)
         .filter_map(|index| {
             let pending = pending.clone();
@@ -390,15 +400,7 @@ fn http_worker(pending: Arc<Mutex<Receiver<TcpStream>>>, context: Arc<HttpContex
             continue;
         }
         let action = match read_request(&mut stream, &context.shutdown) {
-            Ok(request) => handle_request(
-                request,
-                &context.token,
-                &context.health,
-                &context.events,
-                &context.auth_limiter,
-                &context.model_preparing,
-                &context.transcription,
-            ),
+            Ok(request) => handle_request(request, &context),
             Err(RequestReadError::TooLarge) => {
                 RequestAction::Respond(HttpResponse::empty(431, "Request Header Fields Too Large"))
             }
@@ -451,30 +453,42 @@ fn http_worker(pending: Arc<Mutex<Receiver<TcpStream>>>, context: Arc<HttpContex
                     tracing::debug!(%error, "transcription client disconnected");
                 }
             }
+            RequestAction::DeveloperControl {
+                content_length,
+                body_prefix,
+            } => {
+                let response = developer_control(
+                    &mut stream,
+                    content_length,
+                    body_prefix,
+                    context.developer_control.as_ref(),
+                    &context.shutdown,
+                );
+                if let Err(error) = write_response(&mut stream, response) {
+                    tracing::debug!(%error, "developer control client disconnected");
+                }
+            }
         }
     }
 }
 
-fn handle_request(
-    request: HttpRequest,
-    token: &str,
-    health: &HealthProvider,
-    events: &EventLog,
-    auth_limiter: &AuthObservationLimiter,
-    model_preparing: &Arc<AtomicBool>,
-    transcription: &crate::transcription_service::TranscriptionServiceHandle,
-) -> RequestAction {
+fn handle_request(request: HttpRequest, context: &HttpContext) -> RequestAction {
     let path = request.path.split('?').next().unwrap_or("/");
-    if request.authorization.as_deref() != Some(&format!("Bearer {token}")) {
-        auth_limiter.observe(events, &request.method, path);
+    if request.authorization.as_deref() != Some(&format!("Bearer {}", context.token)) {
+        context
+            .auth_limiter
+            .observe(&context.events, &request.method, path);
         return RequestAction::Respond(HttpResponse::empty(401, "Unauthorized"));
     }
     if request.method == "POST" && path == "/transcriptions" {
-        return transcription_action(request, transcription);
+        return transcription_action(request, &context.transcription);
+    }
+    if request.method == "POST" && path == "/dev/control" {
+        return developer_control_action(request, context.developer_control.is_some());
     }
 
     let response = match (request.method.as_str(), path) {
-        ("GET", "/health") => HttpResponse::json(200, "OK", &health()),
+        ("GET", "/health") => HttpResponse::json(200, "OK", &(context.health)()),
         ("GET", "/capabilities") => HttpResponse::json(
             200,
             "OK",
@@ -482,6 +496,7 @@ fn handle_request(
                 audio_formats: ["audio/wav"],
                 partial_transcripts: false,
                 service_capture: false,
+                developer_control: context.developer_control.is_some(),
             },
         ),
         ("GET", "/models") => match model_infos(&request.path) {
@@ -513,7 +528,8 @@ fn handle_request(
                     &serde_json::json!({ "code": "unsupported-model" }),
                 ));
             };
-            if model_preparing
+            if context
+                .model_preparing
                 .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
                 .is_err()
             {
@@ -602,6 +618,143 @@ fn transcription_action(
         content_length,
         body_prefix: request.body_prefix,
         admission,
+    }
+}
+
+fn developer_control_action(request: HttpRequest, available: bool) -> RequestAction {
+    if !available {
+        return RequestAction::Respond(HttpResponse::json(
+            404,
+            "Not Found",
+            &serde_json::json!({ "code": "developer-control-unavailable" }),
+        ));
+    }
+    if !request
+        .content_type
+        .as_deref()
+        .and_then(|value| value.split(';').next())
+        .is_some_and(|value| value.trim().eq_ignore_ascii_case("application/json"))
+    {
+        return RequestAction::Respond(HttpResponse::json(
+            415,
+            "Unsupported Media Type",
+            &serde_json::json!({ "code": "unsupported-content-type" }),
+        ));
+    }
+    let Some(content_length) = request.content_length else {
+        return RequestAction::Respond(HttpResponse::json(
+            411,
+            "Length Required",
+            &serde_json::json!({ "code": "length-required" }),
+        ));
+    };
+    if content_length > MAX_DEVELOPER_CONTROL_BYTES {
+        return RequestAction::Respond(HttpResponse::json(
+            413,
+            "Content Too Large",
+            &serde_json::json!({ "code": "developer-control-too-large" }),
+        ));
+    }
+    RequestAction::DeveloperControl {
+        content_length,
+        body_prefix: request.body_prefix,
+    }
+}
+
+fn developer_control(
+    stream: &mut TcpStream,
+    content_length: usize,
+    mut body: Vec<u8>,
+    controls: Option<&SyncSender<crate::developer_control::DeveloperCall>>,
+    shutdown: &AtomicBool,
+) -> HttpResponse {
+    if let Err(error) = read_body_bounded(
+        stream,
+        content_length,
+        &mut body,
+        shutdown,
+        MAX_DEVELOPER_CONTROL_BYTES,
+        DEVELOPER_CONTROL_TIMEOUT,
+    ) {
+        return body_read_response(error);
+    }
+    let Ok(command) = serde_json::from_slice(&body) else {
+        return HttpResponse::json(
+            400,
+            "Bad Request",
+            &serde_json::json!({ "code": "invalid-developer-command" }),
+        );
+    };
+    let Some(controls) = controls else {
+        return HttpResponse::json(
+            404,
+            "Not Found",
+            &serde_json::json!({ "code": "developer-control-unavailable" }),
+        );
+    };
+    let (reply, response) = mpsc::sync_channel(1);
+    match controls.try_send(crate::developer_control::DeveloperCall { command, reply }) {
+        Ok(()) => {}
+        Err(TrySendError::Full(_)) => {
+            return HttpResponse::json(
+                503,
+                "Service Unavailable",
+                &serde_json::json!({ "code": "developer-control-busy" }),
+            );
+        }
+        Err(TrySendError::Disconnected(_)) => {
+            return HttpResponse::json(
+                503,
+                "Service Unavailable",
+                &serde_json::json!({ "code": "developer-control-unavailable" }),
+            );
+        }
+    }
+    match response.recv_timeout(DEVELOPER_CONTROL_TIMEOUT) {
+        Ok(reply) => HttpResponse::json(200, "OK", &reply),
+        Err(RecvTimeoutError::Timeout) => HttpResponse::json(
+            504,
+            "Gateway Timeout",
+            &serde_json::json!({ "code": "developer-ui-timeout" }),
+        ),
+        Err(RecvTimeoutError::Disconnected) => HttpResponse::json(
+            503,
+            "Service Unavailable",
+            &serde_json::json!({ "code": "developer-control-unavailable" }),
+        ),
+    }
+}
+
+fn body_read_response(error: BodyReadError) -> HttpResponse {
+    match error {
+        BodyReadError::ResourceExhausted => HttpResponse::json(
+            413,
+            "Content Too Large",
+            &serde_json::json!({ "code": "resource-exhausted" }),
+        ),
+        BodyReadError::Invalid => HttpResponse::json(
+            400,
+            "Bad Request",
+            &serde_json::json!({ "code": "invalid-body" }),
+        ),
+        BodyReadError::Deadline => HttpResponse::json(
+            408,
+            "Request Timeout",
+            &serde_json::json!({ "code": "request-timeout" }),
+        ),
+        BodyReadError::Shutdown => HttpResponse::json(
+            503,
+            "Service Unavailable",
+            &serde_json::json!({ "code": "shutting-down" }),
+        ),
+        BodyReadError::Io(error) => {
+            tracing::debug!(%error, "could not read request body");
+            HttpResponse::json(
+                400,
+                "Bad Request",
+                &serde_json::json!({ "code": "invalid-body" }),
+            )
+        }
     }
 }
 
@@ -803,7 +956,25 @@ fn read_body(
     body: &mut Vec<u8>,
     shutdown: &AtomicBool,
 ) -> std::result::Result<(), BodyReadError> {
-    if content_length > MAX_AUDIO_BYTES {
+    read_body_bounded(
+        stream,
+        content_length,
+        body,
+        shutdown,
+        MAX_AUDIO_BYTES,
+        UPLOAD_DEADLINE,
+    )
+}
+
+fn read_body_bounded(
+    stream: &mut TcpStream,
+    content_length: usize,
+    body: &mut Vec<u8>,
+    shutdown: &AtomicBool,
+    maximum: usize,
+    timeout: Duration,
+) -> std::result::Result<(), BodyReadError> {
+    if content_length > maximum {
         return Err(BodyReadError::ResourceExhausted);
     }
     if body.len() > content_length {
@@ -811,7 +982,7 @@ fn read_body(
     }
     body.try_reserve_exact(content_length - body.len())
         .map_err(|_| BodyReadError::ResourceExhausted)?;
-    let deadline = Instant::now() + UPLOAD_DEADLINE;
+    let deadline = Instant::now() + timeout;
     let mut buffer = [0_u8; 16 * 1024];
     while body.len() < content_length {
         if shutdown.load(Ordering::Acquire) {
@@ -1164,6 +1335,10 @@ enum RequestAction {
         body_prefix: Vec<u8>,
         admission: crate::transcription_service::AudioAdmission,
     },
+    DeveloperControl {
+        content_length: usize,
+        body_prefix: Vec<u8>,
+    },
 }
 
 struct PrepareGuard(Arc<AtomicBool>);
@@ -1312,6 +1487,61 @@ fn current_health() -> HealthResponse {
     }
 }
 
+pub fn call_developer(
+    command: &crate::developer_control::DeveloperCommand,
+) -> Result<crate::developer_control::DeveloperReply> {
+    let discovery_path = crate::app_paths::local_api_discovery_file()?;
+    let document: DiscoveryDocument = serde_json::from_slice(
+        &fs::read(&discovery_path)
+            .wrap_err_with(|| format!("could not read {}", discovery_path.display()))?,
+    )
+    .wrap_err("local API discovery is invalid")?;
+    if !valid_discovery(&document) || !discovery_is_live(&document) {
+        bail!("HEX local API is not running");
+    }
+    let body = serde_json::to_vec(command)?;
+    let address = SocketAddr::from(([127, 0, 0, 1], document.port));
+    let mut stream = TcpStream::connect_timeout(&address, CONNECTION_TIMEOUT)
+        .wrap_err("could not connect to HEX local API")?;
+    stream.set_read_timeout(Some(DEVELOPER_CONTROL_TIMEOUT))?;
+    stream.set_write_timeout(Some(CONNECTION_TIMEOUT))?;
+    write!(
+        stream,
+        "POST /dev/control HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: Bearer {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        document.token,
+        body.len(),
+    )?;
+    stream.write_all(&body)?;
+    stream.flush()?;
+
+    let mut response = Vec::new();
+    (&mut stream)
+        .take(64 * 1024 + 1)
+        .read_to_end(&mut response)?;
+    if response.len() > 64 * 1024 {
+        bail!("HEX developer response is too large");
+    }
+    let Some(header_end) = response.windows(4).position(|window| window == b"\r\n\r\n") else {
+        bail!("HEX developer response is malformed");
+    };
+    let headers = std::str::from_utf8(&response[..header_end])?;
+    let status = headers
+        .lines()
+        .next()
+        .and_then(|line| line.split_ascii_whitespace().nth(1))
+        .and_then(|status| status.parse::<u16>().ok())
+        .ok_or_else(|| eyre!("HEX developer response has no HTTP status"))?;
+    let body = &response[header_end + 4..];
+    if status != 200 {
+        let code = serde_json::from_slice::<serde_json::Value>(body)
+            .ok()
+            .and_then(|value| value.get("code")?.as_str().map(str::to_owned))
+            .unwrap_or_else(|| format!("http-{status}"));
+        bail!("HEX developer control failed: {code}");
+    }
+    serde_json::from_slice(body).wrap_err("HEX developer response is invalid")
+}
+
 fn generate_token() -> Result<String> {
     let mut random = [0_u8; 32];
     getrandom::fill(&mut random).map_err(|error| eyre!("could not generate API token: {error}"))?;
@@ -1441,6 +1671,7 @@ mod tests {
             serde_json::from_str(response_body(&capabilities)).unwrap();
         assert_eq!(capabilities["partialTranscripts"], false);
         assert_eq!(capabilities["serviceCapture"], false);
+        assert_eq!(capabilities["developerControl"], false);
         assert_eq!(capabilities["audioFormats"][0], "audio/wav");
         let models = request(document.port, Some(&document.token), "/models");
         let models: Vec<serde_json::Value> = serde_json::from_str(response_body(&models)).unwrap();
@@ -1467,6 +1698,44 @@ mod tests {
         assert_eq!(observations.matches("api_auth_failed").count(), 1);
         assert!(observations.contains("api_server_stopped"));
         assert!(!observations.contains(&document.token));
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn authenticated_developer_control_is_bounded_and_typed() {
+        let directory = temp_directory();
+        let events = EventLog::create(&directory.join("events.ndjson")).unwrap();
+        let (sender, controls) = mpsc::sync_channel(1);
+        let mut api =
+            LocalApi::start_bound(None, Arc::new(test_health), events, Some(sender)).unwrap();
+        let port = api.document.port;
+        let token = api.document.token.clone();
+        let client = thread::spawn(move || {
+            let body = r#"{"command":"hud","state":"recording"}"#;
+            raw_request(
+                port,
+                &format!(
+                    "POST /dev/control HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: Bearer {token}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                ),
+            )
+        });
+
+        let call = controls.recv_timeout(Duration::from_secs(2)).unwrap();
+        assert!(matches!(
+            call.command,
+            crate::developer_control::DeveloperCommand::Hud {
+                state: crate::developer_control::DeveloperHudState::Recording
+            }
+        ));
+        call.reply
+            .send(crate::developer_control::DeveloperReply::Ok)
+            .unwrap();
+        let response = client.join().unwrap();
+        assert!(response.starts_with("HTTP/1.1 200"));
+        assert_eq!(response_body(&response), r#"{"status":"ok"}"#);
+
+        api.shutdown();
         fs::remove_dir_all(directory).unwrap();
     }
 
@@ -1748,6 +2017,16 @@ mod tests {
         let health: HealthProvider = Arc::new(test_health);
         let (_service, transcription) =
             crate::transcription_service::TranscriptionService::start().unwrap();
+        let context = HttpContext {
+            token: "test-token".into(),
+            health,
+            events,
+            auth_limiter: AuthObservationLimiter::default(),
+            model_preparing: preparing,
+            shutdown: Arc::new(AtomicBool::new(false)),
+            transcription,
+            developer_control: None,
+        };
         let action = handle_request(
             HttpRequest {
                 method: "POST".into(),
@@ -1757,12 +2036,7 @@ mod tests {
                 content_length: None,
                 body_prefix: Vec::new(),
             },
-            "test-token",
-            &health,
-            &events,
-            &AuthObservationLimiter::default(),
-            &preparing,
-            &transcription,
+            &context,
         );
         let RequestAction::Respond(response) = action else {
             panic!("busy preparation must return a buffered conflict");

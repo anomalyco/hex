@@ -186,7 +186,6 @@ pub fn record(
     project_root: &Path,
     started_sender: Option<SyncSender<()>>,
 ) -> Result<MeetingManifest> {
-    let _sleep_prevention = crate::recording_environment::prevent_sleep();
     let (_, transcription_selection) = crate::app_settings::transcription_selection();
     let transcription_model = crate::transcription_models::validate(&transcription_selection)?;
     if !crate::transcription_models::is_installed(
@@ -283,6 +282,7 @@ pub fn record(
             }),
         );
         let capture_clock = Instant::now();
+        let sleep_prevention = crate::recording_environment::prevent_sleep();
         let start_result = (|| -> Result<()> {
             add_audio_handler(
                 &mut stream,
@@ -345,6 +345,7 @@ pub fn record(
         let stop_result = stream.stop_capture();
         drop(stream);
         drop(sender);
+        drop(sleep_prevention);
 
         manifest.ended_at_ms = Some(now_ms());
         manifest.duration_ms = Some(started.elapsed().as_millis() as u64);

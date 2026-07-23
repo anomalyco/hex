@@ -1,5 +1,10 @@
 # Custom Commands
 
+Edit `hex.config.ts`, not `.hex-sdk`. Config and installed dependencies execute
+with the user's normal permissions; use only trusted packages and avoid network,
+filesystem, environment, or subprocess access unless the requested command
+requires it. Run `bun run check` after editing.
+
 Replace the native voice-dictation protocol declaratively when desired:
 
 ```ts
@@ -20,6 +25,26 @@ export default defineHexConfig({
 controls are streaming suffixes only during an active voice capture. This block
 replaces the native phrases exactly and does not define command handlers. If it
 is omitted, HEX uses its built-in protocol.
+
+Register named finishing transformations when a dictation mode needs a
+deterministic text rule:
+
+```ts
+export default defineHexConfig({
+  transformations: {
+    lowercase: {
+      name: "Lowercase",
+      description: "Convert the final text to lowercase",
+      transform: (text) => text.toLowerCase(),
+    },
+  },
+  commands: {},
+})
+```
+
+The transformation appears in each mode's Custom transformations section. It
+runs after that mode's corrections and optional AI rewrite. Transformations may
+be async, receive the foreground context, and must return a string.
 
 Use a handler with the provided `hex` capabilities for ordinary commands:
 

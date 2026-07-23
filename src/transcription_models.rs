@@ -531,6 +531,8 @@ pub fn model_path(model: &ModelDefinition) -> Result<PathBuf> {
 }
 
 pub fn is_installed(model: &ModelDefinition, language: &str) -> bool {
+    #[cfg(not(target_os = "macos"))]
+    let _ = language;
     match model.runtime {
         ModelRuntime::Gguf(artifact) => model_path(model)
             .and_then(|path| Ok(fs::metadata(path)?.len() == artifact.bytes))

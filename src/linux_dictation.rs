@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 use color_eyre::Result;
 use color_eyre::eyre::eyre;
 
-use crate::audio::{AudioInput, AudioInputEvent};
+use crate::audio::{AudioInput, AudioInputEvent, CaptureInstant};
 use crate::dictation::{DictationCapture, Finish};
 use crate::events::{DictationPhase, EventLog, TranscriptPhase, VoiceEvent, VoiceState, now_ms};
 use crate::linux_input::{HotkeyEvent, X11HotkeyMonitor};
@@ -81,6 +81,7 @@ pub fn run(event_path: &Path, device: Option<&str>, shutdown: &AtomicBool) -> Re
     let mut events = EventLog::create(event_path)?;
     let mut capture = DictationCapture::new(input.sample_rate);
     let mut recording = false;
+    let mut captured_through = CaptureInstant::ZERO;
     let mut pending = 0_usize;
     events.emit(&VoiceEvent::SessionStarted {
         timestamp_ms: now_ms(),
@@ -98,14 +99,20 @@ pub fn run(event_path: &Path, device: Option<&str>, shutdown: &AtomicBool) -> Re
         while let Ok(action) = hotkey.events.try_recv() {
             match action {
                 HotkeyEvent::Start if !recording => {
-                    capture.start(Instant::now());
+                    capture.start(captured_through);
                     recording = true;
                     events.dictation(DictationPhase::Started, "")?;
                     emit_state(&mut events, VoiceState::Dictating, &input.device_name)?;
                 }
                 HotkeyEvent::Finish if recording => {
                     recording = false;
-                    submit_capture(&mut capture, &jobs, &mut events, &mut pending)?;
+                    submit_capture(
+                        &mut capture,
+                        captured_through,
+                        &jobs,
+                        &mut events,
+                        &mut pending,
+                    )?;
                     emit_state(
                         &mut events,
                         if pending > 0 {
@@ -154,14 +161,21 @@ pub fn run(event_path: &Path, device: Option<&str>, shutdown: &AtomicBool) -> Re
         }
 
         let chunk = match input.recv_timeout(UPDATE_INTERVAL) {
-            AudioInputEvent::Chunk(chunk) => chunk,
+            AudioInputEvent::Chunk {
+                samples,
+                captured_through: chunk_captured_through,
+            } => {
+                captured_through = chunk_captured_through;
+                samples
+            }
             AudioInputEvent::Timeout => continue,
             AudioInputEvent::StreamFailed(error) => {
                 return Err(eyre!("microphone stream stopped: {error}"));
             }
         };
         if recording {
-            let _ = capture.push(&chunk, Instant::now());
+            capture.ingest(&chunk, captured_through);
+            capture.become_intentional(captured_through);
         } else {
             capture.keep_warm(&chunk);
         }
@@ -178,11 +192,12 @@ pub fn run(event_path: &Path, device: Option<&str>, shutdown: &AtomicBool) -> Re
 
 fn submit_capture(
     capture: &mut DictationCapture,
+    ended_at: CaptureInstant,
     jobs: &SyncSender<Job>,
     events: &mut EventLog,
     pending: &mut usize,
 ) -> Result<()> {
-    match capture.finish(Instant::now()) {
+    match capture.finish(ended_at) {
         Finish::Discard => events.dictation(DictationPhase::Discarded, "")?,
         Finish::Transcribe(clip) => {
             let audio_ms = clip.duration_ms();

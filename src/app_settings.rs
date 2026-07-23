@@ -11,9 +11,9 @@ use serde::{Deserialize, Serialize};
 use crate::transcription_models::TranscriptionSelection;
 
 static RECORDING_AUDIO_BEHAVIOR: AtomicU8 = AtomicU8::new(0);
-static PREVENT_SYSTEM_SLEEP: AtomicBool = AtomicBool::new(true);
 static DOUBLE_TAP_LOCK: AtomicBool = AtomicBool::new(true);
 static COMMANDS_ENABLED: AtomicBool = AtomicBool::new(false);
+static CUSTOM_TRANSFORMATIONS_ENABLED: AtomicBool = AtomicBool::new(false);
 static DICTATION_HOTKEY: AtomicU64 = AtomicU64::new(1 << 19);
 static EDIT_HOTKEY: AtomicU64 = AtomicU64::new((1 << 19) | (1 << 20));
 static HOTKEY_CAPTURE_ACTIVE: AtomicBool = AtomicBool::new(false);
@@ -213,9 +213,9 @@ impl RuntimeHotkey {
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RecordingAudioBehavior {
-    #[default]
     Mute,
     PauseMedia,
+    #[default]
     DoNothing,
 }
 
@@ -230,7 +230,7 @@ impl Default for DictationProcessingSettings {
     fn default() -> Self {
         Self {
             default_mode: DictationMode {
-                name: "Default".into(),
+                name: "Global".into(),
                 ..Default::default()
             },
             modes: Vec::new(),
@@ -244,6 +244,8 @@ pub struct DictationMode {
     pub name: String,
     pub applications: Vec<String>,
     pub browser_hosts: Vec<String>,
+    pub replacements: Vec<TextReplacement>,
+    pub transformations: Vec<String>,
     pub post_processing: DictationPostProcessing,
 }
 
@@ -295,7 +297,7 @@ impl Default for DictationPostProcessing {
 }
 
 impl RecordingAudioBehavior {
-    pub const ALL: [Self; 3] = [Self::Mute, Self::PauseMedia, Self::DoNothing];
+    pub const ALL: [Self; 3] = [Self::DoNothing, Self::Mute, Self::PauseMedia];
 
     pub const fn label(self) -> &'static str {
         match self {
@@ -330,7 +332,6 @@ pub struct AppSettings {
     pub sound_effect_volume: f32,
     pub microphone: Option<String>,
     pub recording_audio_behavior: RecordingAudioBehavior,
-    pub prevent_system_sleep: bool,
     pub double_tap_lock: bool,
     pub dictation_hotkey: HotkeyBinding,
     #[serde(
@@ -342,6 +343,7 @@ pub struct AppSettings {
     pub transcription: TranscriptionSelection,
     pub dictation_processing: DictationProcessingSettings,
     pub voice_action: VoiceActionSettings,
+    #[serde(skip_serializing)]
     pub text_replacements: Vec<TextReplacement>,
 }
 
@@ -360,8 +362,7 @@ impl Default for AppSettings {
             sound_effects: true,
             sound_effect_volume: 0.5,
             microphone: None,
-            recording_audio_behavior: RecordingAudioBehavior::Mute,
-            prevent_system_sleep: true,
+            recording_audio_behavior: RecordingAudioBehavior::DoNothing,
             double_tap_lock: true,
             dictation_hotkey: HotkeyBinding::default(),
             edit_hotkey: HotkeyBinding::edit_default(),
@@ -380,6 +381,8 @@ impl AppSettings {
         match fs::read(path) {
             Ok(data) => {
                 let mut settings: Self = serde_json::from_slice(&data)?;
+                settings.dictation_processing.default_mode.name = "Global".into();
+                settings.migrate_legacy_replacements();
                 crate::transcription_models::validate(&settings.transcription)?;
                 settings.repair_hotkey_conflict();
                 settings.apply_runtime();
@@ -409,10 +412,22 @@ impl AppSettings {
 
     fn apply_runtime(&self) {
         COMMANDS_ENABLED.store(self.commands_enabled, Ordering::Release);
+        CUSTOM_TRANSFORMATIONS_ENABLED.store(
+            !self
+                .dictation_processing
+                .default_mode
+                .transformations
+                .is_empty()
+                || self
+                    .dictation_processing
+                    .modes
+                    .iter()
+                    .any(|mode| !mode.transformations.is_empty()),
+            Ordering::Release,
+        );
         crate::feedback::set_enabled(self.sound_effects);
         crate::feedback::set_volume(self.sound_effect_volume.clamp(0.0, 1.0));
         RECORDING_AUDIO_BEHAVIOR.store(self.recording_audio_behavior.encoded(), Ordering::Relaxed);
-        PREVENT_SYSTEM_SLEEP.store(self.prevent_system_sleep, Ordering::Relaxed);
         DOUBLE_TAP_LOCK.store(self.double_tap_lock, Ordering::Relaxed);
         DICTATION_HOTKEY.store(self.dictation_hotkey.encoded(), Ordering::Release);
         EDIT_HOTKEY.store(self.edit_hotkey.encoded(), Ordering::Release);
@@ -423,7 +438,26 @@ impl AppSettings {
             .get_or_init(Default::default)
             .write()
             .unwrap_or_else(|error| error.into_inner()) = self.voice_action.clone();
-        crate::text_replacements::set_global(&self.text_replacements);
+    }
+
+    fn migrate_legacy_replacements(&mut self) {
+        if self.text_replacements.is_empty() {
+            return;
+        }
+        if self
+            .dictation_processing
+            .default_mode
+            .replacements
+            .is_empty()
+        {
+            self.dictation_processing.default_mode.replacements = self.text_replacements.clone();
+        }
+        for mode in &mut self.dictation_processing.modes {
+            if mode.replacements.is_empty() {
+                mode.replacements = self.text_replacements.clone();
+            }
+        }
+        self.text_replacements.clear();
     }
 
     fn repair_hotkey_conflict(&mut self) {
@@ -508,8 +542,8 @@ pub fn commands_enabled() -> bool {
     COMMANDS_ENABLED.load(Ordering::Acquire)
 }
 
-pub fn prevent_system_sleep() -> bool {
-    PREVENT_SYSTEM_SLEEP.load(Ordering::Relaxed)
+pub fn custom_transformations_enabled() -> bool {
+    CUSTOM_TRANSFORMATIONS_ENABLED.load(Ordering::Acquire)
 }
 
 pub fn double_tap_lock() -> bool {
@@ -588,9 +622,8 @@ mod tests {
         assert_eq!(settings.microphone, None);
         assert_eq!(
             settings.recording_audio_behavior,
-            RecordingAudioBehavior::Mute
+            RecordingAudioBehavior::DoNothing
         );
-        assert!(settings.prevent_system_sleep);
         assert!(settings.double_tap_lock);
         assert_eq!(settings.dictation_hotkey, HotkeyBinding::default());
         assert_eq!(settings.edit_hotkey, HotkeyBinding::edit_default());
@@ -607,6 +640,15 @@ mod tests {
         assert!(settings.voice_action.variant.is_none());
         assert_eq!(settings.voice_action.deadline_seconds, 30);
         assert!(settings.text_replacements.is_empty());
+    }
+
+    #[test]
+    fn legacy_sleep_prevention_setting_is_ignored() {
+        let settings: AppSettings =
+            serde_json::from_str(r#"{"prevent_system_sleep":false}"#).unwrap();
+        let serialized = serde_json::to_value(settings).unwrap();
+
+        assert!(serialized.get("prevent_system_sleep").is_none());
     }
 
     #[test]
@@ -654,21 +696,31 @@ mod tests {
     }
 
     #[test]
-    fn text_replacements_round_trip_as_post_transcription_settings() {
-        let settings: AppSettings = serde_json::from_str(
+    fn legacy_global_replacements_migrate_into_every_mode() {
+        let mut settings: AppSettings = serde_json::from_str(
             r#"{"text_replacements":[{"matched_phrase":"open code","output":"OpenCode"}]}"#,
         )
         .unwrap();
+        settings.dictation_processing.modes.push(DictationMode {
+            name: "Messages".into(),
+            ..DictationMode::default()
+        });
+        settings.migrate_legacy_replacements();
 
         assert_eq!(
-            settings.text_replacements,
+            settings.dictation_processing.default_mode.replacements,
             [TextReplacement {
                 matched_phrase: "open code".into(),
                 output: "OpenCode".into(),
             }]
         );
+        assert_eq!(
+            settings.dictation_processing.modes[0].replacements,
+            settings.dictation_processing.default_mode.replacements
+        );
+        assert!(settings.text_replacements.is_empty());
         assert!(
-            serde_json::to_string(&settings)
+            !serde_json::to_string(&settings)
                 .unwrap()
                 .contains("text_replacements")
         );

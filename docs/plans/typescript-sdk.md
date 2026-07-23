@@ -1,9 +1,9 @@
 # HEX Local Transcription Service and SDK - Implementation Plan
 
-**Status:** Active. Service phases 1-3, the signed macOS artifact proof, and the
-direct-child embedded runtime tracer are implemented. Promise and Effect
-TypeScript wrappers now pass fake-helper tests. Signed helper packaging, an
-Electron bridge, release validation, and a real consumer remain.
+**Status:** Private preview. Service phases 1-3, a signed macOS artifact proof,
+direct-child mode, and Promise and Effect wrappers are implemented. The packages
+are not published. Signed package validation, an Electron bridge, and a real
+consumer remain.
 
 Companion to
 [`../specs/local-transcription-service.md`](../specs/local-transcription-service.md).
