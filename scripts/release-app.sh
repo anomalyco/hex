@@ -36,7 +36,7 @@ case "$build_number" in
     ;;
 esac
 published_build=$(curl --fail --silent --show-error "$base_url/appcast.xml" \
-  | sed -n 's:.*<sparkle:version>\([0-9][0-9]*\)</sparkle:version>.*:\1:p' \
+  | sed -n 's|.*<sparkle:version>\([0-9][0-9]*\)</sparkle:version>.*|\1|p' \
   | head -1)
 if [ -z "$published_build" ] || [ "$build_number" -le "$published_build" ]; then
   echo "Build $build_number must be newer than published build ${published_build:-unknown}." >&2
