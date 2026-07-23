@@ -83,6 +83,7 @@ type CfDataRef = *const c_void;
 const CF_STRING_ENCODING_UTF8: u32 = 0x0800_0100;
 const BAD_PASTEBOARD_FLAVOR: i32 = -25133;
 const DUPLICATE_PASTEBOARD_FLAVOR: i32 = -25134;
+const SYSTEM_TRANSLATED_FLAVOR: u32 = 1 << 8;
 
 #[link(name = "ApplicationServices", kind = "framework")]
 unsafe extern "C" {
@@ -166,14 +167,19 @@ impl Paster {
     }
 
     pub fn prepare(&mut self) {
-        if self.prepared_clipboard.is_some() {
+        let change_count = self.clipboard.changeCount();
+        if self
+            .prepared_clipboard
+            .as_ref()
+            .is_some_and(|prepared| prepared.change_count == change_count)
+        {
             return;
         }
+        self.prepared_clipboard = None;
         let _restore = self
             .clipboard_restore
             .lock()
             .unwrap_or_else(|error| error.into_inner());
-        let change_count = self.clipboard.changeCount();
         let started = Instant::now();
         match capture_clipboard(&self.clipboard) {
             Ok(snapshot) => {
@@ -286,6 +292,7 @@ impl Paster {
 }
 
 fn capture_clipboard(clipboard: &NSPasteboard) -> Result<ClipboardSnapshot> {
+    let capture_started = Instant::now();
     let pasteboard = create_pasteboard(&clipboard.name())?;
     unsafe { PasteboardSynchronize(pasteboard.0) };
     let mut item_count = 0;
@@ -309,6 +316,15 @@ fn capture_clipboard(clipboard: &NSPasteboard) -> Result<ClipboardSnapshot> {
             return Err(eyre!("could not list clipboard formats"));
         }
         let flavor_count = unsafe { CFArrayGetCount(flavors) };
+        let has_authoritative_flavor = (0..flavor_count).any(|flavor_index| {
+            let flavor = unsafe { CFArrayGetValueAtIndex(flavors, flavor_index) };
+            if flavor.is_null() {
+                return false;
+            }
+            let mut flags = 0;
+            (unsafe { PasteboardGetItemFlavorFlags(pasteboard.0, item, flavor, &mut flags) }) == 0
+                && flags & SYSTEM_TRANSLATED_FLAVOR == 0
+        });
         let result = (0..flavor_count)
             .map(|flavor_index| {
                 let flavor = unsafe { CFArrayGetValueAtIndex(flavors, flavor_index) };
@@ -321,9 +337,18 @@ fn capture_clipboard(clipboard: &NSPasteboard) -> Result<ClipboardSnapshot> {
                     unsafe { PasteboardGetItemFlavorFlags(pasteboard.0, item, flavor, &mut flags) },
                     "inspect clipboard format",
                 )?;
+                if !should_preserve_flavor(flags, has_authoritative_flavor) {
+                    tracing::debug!(%data_type, "skipping synthesized clipboard format");
+                    return Ok(None);
+                }
                 let mut data = ptr::null();
+                let flavor_started = Instant::now();
                 let status =
                     unsafe { PasteboardCopyItemFlavorData(pasteboard.0, item, flavor, &mut data) };
+                let flavor_ms = flavor_started.elapsed().as_millis();
+                if flavor_ms >= 100 {
+                    tracing::warn!(%data_type, flavor_ms, "clipboard format was slow to materialize");
+                }
                 if status == BAD_PASTEBOARD_FLAVOR {
                     tracing::debug!(%data_type, "skipping unavailable clipboard format");
                     return Ok(None);
@@ -344,7 +369,15 @@ fn capture_clipboard(clipboard: &NSPasteboard) -> Result<ClipboardSnapshot> {
         unsafe { CFRelease(flavors) };
         items.push(result?.into_iter().flatten().collect());
     }
+    let capture_ms = capture_started.elapsed().as_millis();
+    if capture_ms >= 100 {
+        tracing::warn!(capture_ms, item_count, "clipboard snapshot was slow");
+    }
     Ok(ClipboardSnapshot { items })
+}
+
+fn should_preserve_flavor(flags: u32, has_authoritative_flavor: bool) -> bool {
+    !has_authoritative_flavor || flags & SYSTEM_TRANSLATED_FLAVOR == 0
 }
 
 fn write_clipboard_text(clipboard: &NSPasteboard, text: &str) -> Result<()> {
@@ -569,6 +602,8 @@ mod tests {
     use super::*;
     use objc2_foundation::NSData;
 
+    static PASTEBOARD_TEST: Mutex<()> = Mutex::new(());
+
     #[test]
     fn joins_contiguous_dictation_with_sentence_aware_spacing() {
         assert_eq!(
@@ -617,6 +652,7 @@ mod tests {
 
     #[test]
     fn clipboard_snapshot_preserves_multiple_items_and_formats() {
+        let _test = PASTEBOARD_TEST.lock().unwrap();
         let clipboard = NSPasteboard::pasteboardWithUniqueName();
         let expected = [
             vec![
@@ -644,6 +680,75 @@ mod tests {
         clipboard.clearContents();
         restore_clipboard(&clipboard, &snapshot).unwrap();
 
+        assert_eq!(capture_clipboard(&clipboard).unwrap(), snapshot);
+    }
+
+    #[test]
+    fn eager_clipboard_capture_refreshes_a_stale_snapshot() {
+        let _test = PASTEBOARD_TEST.lock().unwrap();
+        let clipboard = NSPasteboard::pasteboardWithUniqueName();
+        let item = NSPasteboardItem::new();
+        assert!(item.setData_forType(
+            &NSData::with_bytes(b"first"),
+            &NSString::from_str("com.hex.fixture.first")
+        ));
+        clipboard.clearContents();
+        write_items(&clipboard, vec![item]).unwrap();
+        let mut paster = Paster {
+            clipboard: clipboard.clone(),
+            activity: InputActivity::default(),
+            continuation: None,
+            clipboard_restore: Arc::new(Mutex::new(ClipboardRestore::default())),
+            prepared_clipboard: None,
+        };
+        paster.prepare();
+        let first_change_count = paster.prepared_clipboard.as_ref().unwrap().change_count;
+
+        let item = NSPasteboardItem::new();
+        assert!(item.setData_forType(
+            &NSData::with_bytes(b"second"),
+            &NSString::from_str("com.hex.fixture.second")
+        ));
+        clipboard.clearContents();
+        write_items(&clipboard, vec![item]).unwrap();
+        paster.prepare();
+        let prepared = paster.prepared_clipboard.as_ref().unwrap();
+
+        assert_ne!(prepared.change_count, first_change_count);
+        assert_eq!(prepared.snapshot, capture_clipboard(&clipboard).unwrap());
+    }
+
+    #[test]
+    fn skips_regenerable_system_translations() {
+        assert!(!should_preserve_flavor(SYSTEM_TRANSLATED_FLAVOR, true));
+        assert!(should_preserve_flavor(0, true));
+        assert!(should_preserve_flavor(SYSTEM_TRANSLATED_FLAVOR, false));
+    }
+
+    #[test]
+    fn image_snapshot_keeps_its_authoritative_format() {
+        let _test = PASTEBOARD_TEST.lock().unwrap();
+        let clipboard = NSPasteboard::pasteboardWithUniqueName();
+        let item = NSPasteboardItem::new();
+        assert!(item.setData_forType(
+            &NSData::with_bytes(include_bytes!("../app/AppIcon.icon/Assets/Image.png")),
+            &NSString::from_str("public.png")
+        ));
+        clipboard.clearContents();
+        write_items(&clipboard, vec![item]).unwrap();
+
+        let snapshot = capture_clipboard(&clipboard).unwrap();
+        assert_eq!(
+            snapshot
+                .items
+                .iter()
+                .flatten()
+                .map(|flavor| flavor.data_type.as_str())
+                .collect::<Vec<_>>(),
+            vec!["public.png"]
+        );
+        clipboard.clearContents();
+        restore_clipboard(&clipboard, &snapshot).unwrap();
         assert_eq!(capture_clipboard(&clipboard).unwrap(), snapshot);
     }
 }
