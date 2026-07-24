@@ -34,7 +34,8 @@ use crate::desktop_transcription_picker::{
 use crate::desktop_ui::{
     CANVAS, COMPACT_MULTILINE_INPUT_HEIGHT, CONTROL_HEIGHT, FAINT, LINE, MUTED, NEGATIVE,
     NavigationIcon, SECTION_GAP, SIDEBAR_WIDTH, SURFACE, SURFACE_HOVER, SURFACE_SELECTED, TEXT,
-    TEXT_SOFT, bounded_pane_header, compact_button, compact_panel, compact_panel_header,
+    TEXT_SOFT, bounded_pane_header, bounded_pane_header_with_action, compact_button,
+    compact_header_plus_button, compact_panel, compact_panel_header, compact_plus_button,
     compact_section_label, disclosure_button, empty_message, error_message, hotkey_keycaps,
     listener_status, mix_color, navigation_item, pane_header, section_label, segmented_control,
     segmented_item, settings_copy, settings_panel, settings_row, settings_section_label,
@@ -709,6 +710,7 @@ pub struct AppWindow {
     application_picker_highlight: usize,
     model_picker_highlight: usize,
     mode_delete_armed: bool,
+    mode_context_menu: Option<Point<Pixels>>,
     settings_save_generation: u64,
     settings_dirty: bool,
     hotkey_capture: HotkeyCaptureState,
@@ -1072,6 +1074,7 @@ impl AppWindow {
             application_picker_highlight: 0,
             model_picker_highlight: 0,
             mode_delete_armed: false,
+            mode_context_menu: None,
             settings_save_generation: 0,
             settings_dirty: false,
             hotkey_capture: HotkeyCaptureState::Idle,
@@ -1115,6 +1118,9 @@ impl AppWindow {
             }
             window.reload_events();
         }
+        if window.pane == Pane::Modes {
+            window.ensure_application_catalog_load();
+        }
         if window.pane == Pane::HudLab {
             window.apply_hud_lab();
         }
@@ -1130,16 +1136,21 @@ impl AppWindow {
             }
             self.reload_events();
         }
+        if self.pane == Pane::Modes {
+            self.ensure_application_catalog_load();
+        }
         cx.notify();
     }
 
     fn select_pane(&mut self, pane: Pane, cx: &mut Context<Self>) {
         self.pane = pane;
+        self.mode_context_menu = None;
         match pane {
             Pane::HudLab => self.apply_hud_lab(),
             Pane::Meetings => self.reload_meetings(),
             Pane::Commands | Pane::Activity => self.reload_events(),
-            Pane::Modes | Pane::VoiceAction | Pane::Settings => {}
+            Pane::Modes => self.ensure_application_catalog_load(),
+            Pane::VoiceAction | Pane::Settings => {}
         }
         cx.notify();
     }
@@ -2161,10 +2172,8 @@ impl AppWindow {
             })
             .collect::<Vec<_>>();
 
-        let add = compact_button("Add correction")
+        let add = compact_header_plus_button()
             .id("add-mode-replacement")
-            .h(px(28.0))
-            .text_size(px(10.0))
             .on_click(cx.listener(move |this, _, window, cx| {
                 let replacement = TextReplacement::default();
                 let inputs = Self::replacement_inputs(&replacement, cx);
@@ -3416,19 +3425,12 @@ impl AppWindow {
 
     fn render_modes(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let compact = window.viewport_size().width < px(980.0);
-        let add = div()
+        let mode_list_width = if compact { 196.0 } else { 220.0 };
+        let modes_content_width = mode_list_width + 20.0 + 700.0;
+        let add = compact_plus_button()
             .id("add-dictation-mode")
-            .h(px(30.0))
-            .px_3()
-            .flex()
-            .items_center()
-            .rounded_sm()
-            .bg(rgb(SURFACE_SELECTED))
-            .text_size(px(12.0))
-            .font_weight(FontWeight::SEMIBOLD)
-            .text_color(rgb(TEXT_SOFT))
-            .hover(|button| button.bg(rgb(SURFACE_HOVER)).text_color(rgb(TEXT)))
-            .child("Add mode")
+            .size(px(30.0))
+            .hover(|button| button.bg(rgb(SURFACE_HOVER)))
             .on_click(cx.listener(|this, _, window, cx| {
                 let mut mode = this.settings.dictation_processing.default_mode.clone();
                 mode.name = format!("Mode {}", this.processing_inputs.modes.len() + 1);
@@ -3478,6 +3480,15 @@ impl AppWindow {
                         &self.application_catalog,
                     )
                     .id(("dictation-mode", index))
+                    .on_mouse_down(
+                        MouseButton::Right,
+                        cx.listener(move |this, event: &MouseDownEvent, window, cx| {
+                            this.select_mode(ModeSelection::Custom(index), window, cx);
+                            this.mode_context_menu = Some(event.position);
+                            cx.stop_propagation();
+                            cx.notify();
+                        }),
+                    )
                     .on_click(cx.listener(move |this, _, window, cx| {
                         this.select_mode(ModeSelection::Custom(index), window, cx);
                     }))
@@ -3490,34 +3501,93 @@ impl AppWindow {
             .size_full()
             .flex()
             .flex_col()
-            .child(pane_header("Modes", Some(add.into_any_element())))
+            .child(bounded_pane_header_with_action(
+                "Modes",
+                modes_content_width,
+                Some(add.into_any_element()),
+            ))
             .child(
                 div()
                     .flex_1()
+                    .min_h(px(0.0))
                     .overflow_hidden()
                     .flex()
-                    .gap_5()
+                    .justify_center()
                     .p_5()
                     .child(
                         div()
-                            .id("modes-list")
-                            .w(if compact { px(196.0) } else { px(220.0) })
-                            .h_full()
-                            .flex_none()
+                            .w_full()
+                            .max_w(px(modes_content_width))
+                            .min_h(px(0.0))
                             .flex()
-                            .flex_col()
-                            .gap_2()
-                            .child(compact_section_label("MODES"))
+                            .gap_5()
                             .child(
-                                compact_panel()
-                                    .id("mode-list-card")
-                                    .overflow_y_scroll()
-                                    .child(div().p_2().flex().flex_col().gap_1().children(rows)),
-                            ),
-                    )
-                    .child(detail),
+                                div()
+                                    .id("modes-list")
+                                    .w(px(mode_list_width))
+                                    .h_full()
+                                    .flex_none()
+                                    .flex()
+                                    .flex_col()
+                                    .gap_2()
+                                    .child(compact_section_label("MODES"))
+                                    .child(
+                                        compact_panel()
+                                            .id("mode-list-card")
+                                            .overflow_y_scroll()
+                                            .child(
+                                                div()
+                                                    .p_2()
+                                                    .flex()
+                                                    .flex_col()
+                                                    .gap_1()
+                                                    .children(rows),
+                                            ),
+                                    ),
+                            )
+                            .child(detail),
+                    ),
             )
             .into_any_element()
+    }
+
+    fn render_mode_context_menu(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let position = self.mode_context_menu?;
+        Some(
+            div()
+                .absolute()
+                .left(position.x)
+                .top(position.y)
+                .w(px(148.0))
+                .p_1()
+                .rounded(px(8.0))
+                .border_1()
+                .border_color(rgb(0x444444))
+                .bg(rgb(0x252525))
+                .child(
+                    div()
+                        .id("context-delete-mode")
+                        .h(px(30.0))
+                        .px_2()
+                        .flex()
+                        .items_center()
+                        .rounded(px(5.0))
+                        .text_size(px(11.0))
+                        .text_color(rgb(NEGATIVE))
+                        .hover(|item| item.bg(rgb(SURFACE_HOVER)))
+                        .child("Delete mode…")
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(move |this, _, _, cx| {
+                                this.mode_delete_armed = true;
+                                this.mode_context_menu = None;
+                                cx.stop_propagation();
+                                cx.notify();
+                            }),
+                        ),
+                )
+                .into_any_element(),
+        )
     }
 
     fn render_mode_detail(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
@@ -3621,10 +3691,10 @@ impl AppWindow {
             )
         });
         let processing = compact_panel()
-            .child(compact_panel_header(
-                "OpenCode transformation",
-                Some(processing_toggle),
-            ))
+            .child(
+                compact_panel_header("OpenCode transformation", Some(processing_toggle))
+                    .when(!processing_enabled, |header| header.border_b_0()),
+            )
             .when_some(processing_settings, |panel, settings| {
                 panel.child(div().px_3().pb_3().child(settings))
             })
@@ -3707,6 +3777,7 @@ impl AppWindow {
                     .flex()
                     .flex_col()
                     .gap(px(SECTION_GAP))
+                    .pb_5()
                     .child(compact_section_label("MODE"))
                     .child(basics)
                     .child(div().h(px(4.0)))
@@ -3727,26 +3798,15 @@ impl AppWindow {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let selected = self.mode_settings(selection).transformations.clone();
-        let catalog = self
-            .personal_commands_status
-            .transformations
-            .iter()
-            .map(|transformation| {
-                (
-                    transformation.id.clone(),
-                    transformation.name.clone(),
-                    transformation.description.clone(),
-                )
-            })
-            .collect::<Vec<_>>();
+        let catalog = &self.personal_commands_status.transformations;
         let selected_rows = selected
             .iter()
             .enumerate()
             .map(|(target_index, id)| {
                 let name = catalog
                     .iter()
-                    .find(|(candidate, _, _)| candidate == id)
-                    .map_or_else(|| id.clone(), |(_, name, _)| name.clone());
+                    .find(|transformation| &transformation.id == id)
+                    .map_or_else(|| id.clone(), |transformation| transformation.name.clone());
                 let drag = TransformationDrag {
                     selection,
                     id: id.clone(),
@@ -3825,95 +3885,88 @@ impl AppWindow {
             })
             .collect::<Vec<_>>();
 
-        let available_rows = catalog
-            .iter()
-            .enumerate()
-            .filter(|(_, (id, _, _))| !selected.contains(id))
-            .map(|(index, (id, name, description))| {
-                let id = id.clone();
-                let description = description.clone();
-                div()
-                    .id(("available-mode-transformation", index))
-                    .min_h(px(40.0))
-                    .px_3()
-                    .py_2()
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .gap_3()
-                    .border_t_1()
-                    .border_color(rgb(LINE))
-                    .hover(|row| row.bg(rgb(SURFACE_HOVER)))
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w(px(0.0))
-                            .child(
-                                div()
-                                    .text_size(px(11.0))
-                                    .font_weight(FontWeight::SEMIBOLD)
-                                    .text_color(rgb(TEXT_SOFT))
-                                    .child(name.clone()),
-                            )
-                            .when_some(description, |copy, description| {
-                                copy.child(
+        let available_rows = if self.transformation_picker_open {
+            catalog
+                .iter()
+                .enumerate()
+                .filter(|(_, transformation)| !selected.contains(&transformation.id))
+                .map(|(index, transformation)| {
+                    let id = transformation.id.clone();
+                    let name = transformation.name.clone();
+                    let description = transformation.description.clone();
+                    div()
+                        .id(("available-mode-transformation", index))
+                        .min_h(px(40.0))
+                        .px_3()
+                        .py_2()
+                        .flex()
+                        .items_center()
+                        .justify_between()
+                        .gap_3()
+                        .border_t_1()
+                        .border_color(rgb(LINE))
+                        .hover(|row| row.bg(rgb(SURFACE_HOVER)))
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w(px(0.0))
+                                .child(
                                     div()
-                                        .pt_1()
-                                        .text_size(px(10.0))
-                                        .text_color(rgb(FAINT))
-                                        .child(description),
+                                        .text_size(px(11.0))
+                                        .font_weight(FontWeight::SEMIBOLD)
+                                        .text_color(rgb(TEXT_SOFT))
+                                        .child(name),
                                 )
-                            }),
-                    )
-                    .child(
-                        div()
-                            .text_size(px(10.0))
-                            .text_color(rgb(TEXT_SOFT))
-                            .child("Add"),
-                    )
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.mode_settings_mut(selection)
-                            .transformations
-                            .push(id.clone());
-                        this.save_settings(cx);
-                    }))
-                    .into_any_element()
-            })
-            .collect::<Vec<_>>();
+                                .when_some(description, |copy, description| {
+                                    copy.child(
+                                        div()
+                                            .pt_1()
+                                            .text_size(px(10.0))
+                                            .text_color(rgb(FAINT))
+                                            .child(description),
+                                    )
+                                }),
+                        )
+                        .child(
+                            div()
+                                .text_size(px(10.0))
+                                .text_color(rgb(TEXT_SOFT))
+                                .child("Add"),
+                        )
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.mode_settings_mut(selection)
+                                .transformations
+                                .push(id.clone());
+                            this.save_settings(cx);
+                        }))
+                        .into_any_element()
+                })
+                .collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
         let available_empty = available_rows.is_empty();
         let catalog_empty = catalog.is_empty();
         let add = (!catalog_empty).then(|| {
-            compact_button(if self.transformation_picker_open {
-                "Done"
+            let button = if self.transformation_picker_open {
+                compact_button("Done")
             } else {
-                "Add transformation"
-            })
-            .id("toggle-transformation-picker")
-            .h(px(28.0))
-            .text_size(px(10.0))
-            .on_click(cx.listener(|this, _, _, cx| {
-                this.transformation_picker_open = !this.transformation_picker_open;
-                cx.notify();
-            }))
-            .into_any_element()
+                compact_header_plus_button()
+            };
+            button
+                .id("toggle-transformation-picker")
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.transformation_picker_open = !this.transformation_picker_open;
+                    cx.notify();
+                }))
+                .into_any_element()
         });
 
         compact_panel()
-            .child(compact_panel_header("Transformations", add))
-            .when(selected.is_empty(), |panel| {
-                panel.child(
-                    div()
-                        .px_3()
-                        .py_3()
-                        .text_size(px(11.0))
-                        .text_color(rgb(MUTED))
-                        .child(if catalog_empty {
-                            "No transformations are registered in hex.config.ts."
-                        } else {
-                            "No transformations in this mode."
-                        }),
-                )
-            })
+            .child(compact_panel_header("Transformations", add).when(
+                selected.is_empty() && !self.transformation_picker_open,
+                |header| header.border_b_0(),
+            ))
             .children(selected_rows)
             .when(self.transformation_picker_open && !catalog_empty, |panel| {
                 panel
@@ -4158,19 +4211,13 @@ impl AppWindow {
                             .gap_1()
                             .children(selected_rows)
                             .child(
-                                compact_button(if selected.is_empty() {
-                                    "Add application"
-                                } else {
-                                    "Add…"
-                                })
-                                .id("open-application-picker")
-                                .h(px(30.0))
-                                .text_size(px(10.0))
-                                .border_1()
-                                .border_color(rgb(LINE))
-                                .bg(rgb(CANVAS))
-                                .on_click(cx.listener(
-                                    |this, _, window, cx| {
+                                compact_plus_button()
+                                    .id("open-application-picker")
+                                    .size(px(30.0))
+                                    .border_1()
+                                    .border_color(rgb(LINE))
+                                    .bg(rgb(CANVAS))
+                                    .on_click(cx.listener(|this, _, window, cx| {
                                         this.application_picker_highlight = 0;
                                         this.application_picker_open = true;
                                         this.application_picker_error = None;
@@ -4183,8 +4230,7 @@ impl AppWindow {
                                             .focus_handle(cx)
                                             .focus(window);
                                         cx.notify();
-                                    },
-                                )),
+                                    })),
                             ),
                     ),
             )
@@ -4729,6 +4775,7 @@ impl AppWindow {
         self.application_picker_highlight = 0;
         self.model_picker_highlight = 0;
         self.mode_delete_armed = false;
+        self.mode_context_menu = None;
         self.application_search
             .entity
             .update(cx, |input, cx| input.set_text("", cx));
@@ -6221,14 +6268,30 @@ impl Render for AppWindow {
             .clone()
             .map(|language| self.render_transcription_picker(&language, cx));
         let setup = self.setup_visible.then(|| self.render_setup(cx));
+        let mode_context_menu = (self.pane == Pane::Modes)
+            .then(|| self.render_mode_context_menu(cx))
+            .flatten();
         window_frame()
             .track_focus(&self.window_focus)
             .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                if event.keystroke.key == "escape" && this.mode_context_menu.take().is_some() {
+                    cx.stop_propagation();
+                    cx.notify();
+                    return;
+                }
                 if event.keystroke.key == "escape" && this.transcription_picker_language.is_some() {
                     cx.stop_propagation();
                     this.dismiss_transcription_picker(cx);
                 }
             }))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, _, _, cx| {
+                    if this.mode_context_menu.take().is_some() {
+                        cx.notify();
+                    }
+                }),
+            )
             .on_action(|_: &CloseWindow, window, _| window.remove_window())
             .on_action(|_: &MinimizeWindow, window, _| window.minimize_window())
             .on_action(|_: &ToggleFullscreen, window, _| window.toggle_fullscreen())
@@ -6241,6 +6304,7 @@ impl Render for AppWindow {
             .child(div().flex_1().h_full().overflow_hidden().child(content))
             .children(setup)
             .children(transcription_picker)
+            .children(mode_context_menu)
     }
 }
 

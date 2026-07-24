@@ -68,7 +68,7 @@ fn disclosure_chevron() -> AnyElement {
 #[cfg(target_os = "macos")]
 fn plus_icon() -> AnyElement {
     gpui_symbols::Icon::new("plus")
-        .size(px(9.0))
+        .size(px(11.0))
         .color(rgb(TEXT_SOFT))
         .weight(gpui_symbols::SymbolWeight::Semibold)
         .rendering_mode(gpui_symbols::RenderingMode::Monochrome)
@@ -91,7 +91,7 @@ fn disclosure_chevron() -> AnyElement {
 #[cfg(target_os = "linux")]
 fn plus_icon() -> AnyElement {
     div()
-        .size(px(9.0))
+        .size(px(11.0))
         .flex()
         .items_center()
         .justify_center()
@@ -210,6 +210,14 @@ pub(crate) fn pane_header(title: &'static str, action: Option<AnyElement>) -> An
 
 #[cfg_attr(target_os = "linux", allow(dead_code))]
 pub(crate) fn bounded_pane_header(title: &'static str, max_width: f32) -> AnyElement {
+    bounded_pane_header_with_action(title, max_width, None)
+}
+
+pub(crate) fn bounded_pane_header_with_action(
+    title: &'static str,
+    max_width: f32,
+    action: Option<AnyElement>,
+) -> AnyElement {
     div()
         .h(px(70.0))
         .px_8()
@@ -223,6 +231,7 @@ pub(crate) fn bounded_pane_header(title: &'static str, max_width: f32) -> AnyEle
                 .max_w(px(max_width))
                 .flex()
                 .items_center()
+                .justify_between()
                 .border_b_1()
                 .border_color(rgb(LINE))
                 .child(
@@ -230,7 +239,8 @@ pub(crate) fn bounded_pane_header(title: &'static str, max_width: f32) -> AnyEle
                         .text_size(px(20.0))
                         .font_weight(FontWeight::SEMIBOLD)
                         .child(title),
-                ),
+                )
+                .when_some(action, |header, action| header.child(action)),
         )
         .into_any_element()
 }
@@ -388,20 +398,15 @@ pub(crate) fn compact_button(label: impl IntoElement) -> Div {
         .child(label)
 }
 
-pub(crate) fn plus_label(label: impl IntoElement) -> Div {
-    div()
-        .flex()
-        .items_center()
-        .gap_1()
-        .child(plus_icon())
-        .child(label)
+pub(crate) fn compact_plus_button() -> Div {
+    compact_button(plus_icon())
+        .size(px(28.0))
+        .px_0()
+        .justify_center()
 }
 
-pub(crate) fn compact_add_button(label: impl IntoElement) -> Div {
-    compact_button(plus_label(label))
-        .h(px(28.0))
-        .px_2()
-        .text_size(px(10.0))
+pub(crate) fn compact_header_plus_button() -> Div {
+    compact_plus_button().mr(px(-7.0))
 }
 
 pub(crate) fn compact_panel() -> Div {
