@@ -689,6 +689,8 @@ pub struct AppWindow {
     dock_icon_toggle: ToggleSpring,
     sound_volume_spring: ToggleSpring,
     recording_audio_spring: ToggleSpring,
+    mode_variant_spring: ToggleSpring,
+    voice_action_variant_spring: ToggleSpring,
     transcription_hints: ProcessingInput,
     transcription_picker_language: Option<String>,
     transcription_picker_error: Option<String>,
@@ -1039,6 +1041,8 @@ impl AppWindow {
             recording_audio_spring: ToggleSpring::at(recording_audio_index(
                 settings.recording_audio_behavior,
             ) as f32),
+            mode_variant_spring: ToggleSpring::at(0.0),
+            voice_action_variant_spring: ToggleSpring::at(0.0),
             transcription_hints,
             transcription_picker_language: preview_picker.map(|(language, _)| language.clone()),
             transcription_picker_error: matches!(
@@ -4383,7 +4387,7 @@ impl AppWindow {
     }
 
     fn render_processing_settings(
-        &self,
+        &mut self,
         target: ModelPickerTarget,
         prompt: Option<Entity<TextInput>>,
         model: Entity<TextInput>,
@@ -4391,6 +4395,15 @@ impl AppWindow {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let variant_position = {
+            let selected = self.model_settings_for(target).1.map(str::to_string);
+            let index = self.variant_index(target, selected.as_deref()) as f32;
+            let spring = self.variant_spring_mut(target);
+            if (spring.target - index).abs() > f32::EPSILON {
+                *spring = ToggleSpring::at(index);
+            }
+            spring.render_position(window)
+        };
         let compact = window.viewport_size().width < px(980.0);
         let focused = model.read(cx).is_focused(window);
         let (selected_model, selected_variant) = self.model_settings_for(target);
@@ -4497,23 +4510,12 @@ impl AppWindow {
         let mut variant_buttons = Vec::with_capacity(variants.len() + 1);
         if has_variants {
             variant_buttons.push(
-                div()
+                segmented_item(selected_variant.is_none())
                     .id("model-variant-default")
-                    .h(px(28.0))
-                    .px_3()
-                    .flex()
-                    .items_center()
-                    .rounded_sm()
-                    .text_size(px(11.0))
-                    .text_color(if selected_variant.is_none() {
-                        rgb(TEXT)
-                    } else {
-                        rgb(MUTED)
-                    })
-                    .when(selected_variant.is_none(), |button| {
-                        button.bg(rgb(SURFACE_SELECTED))
-                    })
-                    .hover(|button| button.bg(rgb(SURFACE_HOVER)).text_color(rgb(TEXT_SOFT)))
+                    .w(px(VARIANT_SEGMENT_WIDTH))
+                    .px(px(0.0))
+                    .justify_center()
+                    .bg(rgba(0x00000000))
                     .child("Default")
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.set_model_variant(target, None, cx);
@@ -4524,23 +4526,31 @@ impl AppWindow {
         variant_buttons.extend(variants.into_iter().enumerate().map(|(index, variant)| {
             let selected = selected_variant == Some(variant.as_str());
             let value = variant.clone();
-            div()
+            segmented_item(selected)
                 .id(("model-variant", index))
-                .h(px(28.0))
-                .px_3()
-                .flex()
-                .items_center()
-                .rounded_sm()
-                .text_size(px(11.0))
-                .text_color(if selected { rgb(TEXT) } else { rgb(MUTED) })
-                .when(selected, |button| button.bg(rgb(SURFACE_SELECTED)))
-                .hover(|button| button.bg(rgb(SURFACE_HOVER)).text_color(rgb(TEXT_SOFT)))
+                .w(px(VARIANT_SEGMENT_WIDTH))
+                .px(px(0.0))
+                .justify_center()
+                .bg(rgba(0x00000000))
                 .child(variant)
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.set_model_variant(target, Some(value.clone()), cx);
                 }))
                 .into_any_element()
         }));
+        let variant_control = segmented_control()
+            .relative()
+            .child(
+                div()
+                    .absolute()
+                    .left(px(2.0 + variant_position * VARIANT_SEGMENT_WIDTH))
+                    .top(px(2.0))
+                    .w(px(VARIANT_SEGMENT_WIDTH))
+                    .h(px(26.0))
+                    .rounded(px(4.0))
+                    .bg(rgb(SURFACE_SELECTED)),
+            )
+            .children(variant_buttons);
         let model_control = if let Some(presentation) = presentation.filter(|_| !focused) {
             let model_input = model.clone();
             if target == ModelPickerTarget::VoiceAction {
@@ -4667,12 +4677,7 @@ impl AppWindow {
                     panel.child(voice_action_setting_row(
                         "Thinking",
                         "Choose how much reasoning the model should use",
-                        div()
-                            .flex()
-                            .flex_wrap()
-                            .justify_end()
-                            .gap_1()
-                            .children(variant_buttons),
+                        variant_control,
                         false,
                         compact,
                     ))
@@ -4726,7 +4731,7 @@ impl AppWindow {
                                 .text_color(rgb(TEXT_SOFT))
                                 .child("Thinking"),
                         )
-                        .child(div().flex().flex_wrap().gap_1().children(variant_buttons)),
+                        .child(div().flex().child(variant_control)),
                 )
             })
             .when_some(prompt, |processing, prompt| {
@@ -4783,7 +4788,7 @@ impl AppWindow {
     ) {
         match target {
             ModelPickerTarget::Mode(selection) => {
-                self.mode_settings_mut(selection).post_processing.variant = variant;
+                self.mode_settings_mut(selection).post_processing.variant = variant.clone();
             }
             ModelPickerTarget::VoiceAction => {
                 if variant.is_some()
@@ -4792,10 +4797,34 @@ impl AppWindow {
                 {
                     self.settings.voice_action.model = catalog.default_key.clone();
                 }
-                self.settings.voice_action.variant = variant;
+                self.settings.voice_action.variant = variant.clone();
             }
         }
+        let index = self.variant_index(target, variant.as_deref()) as f32;
+        self.variant_spring_mut(target).set_target(index);
         self.save_settings(cx);
+    }
+
+    /// Position of a variant in the rendered segmented control; 0 is Default.
+    fn variant_index(&self, target: ModelPickerTarget, variant: Option<&str>) -> usize {
+        let ModelCatalogState::Loaded(catalog) = &self.model_catalog else {
+            return 0;
+        };
+        let Some(variant) = variant else {
+            return 0;
+        };
+        let (selected_model, _) = self.model_settings_for(target);
+        model_variants(catalog, selected_model)
+            .iter()
+            .position(|candidate| candidate == variant)
+            .map_or(0, |index| index + 1)
+    }
+
+    fn variant_spring_mut(&mut self, target: ModelPickerTarget) -> &mut ToggleSpring {
+        match target {
+            ModelPickerTarget::Mode(_) => &mut self.mode_variant_spring,
+            ModelPickerTarget::VoiceAction => &mut self.voice_action_variant_spring,
+        }
     }
 
     fn model_input_for(&self, target: ModelPickerTarget) -> Entity<TextInput> {
@@ -6451,6 +6480,9 @@ fn recording_audio_index(behavior: RecordingAudioBehavior) -> usize {
         RecordingAudioBehavior::DoNothing => 2,
     }
 }
+
+/// Uniform item width for the model-variant (Thinking) segmented control.
+const VARIANT_SEGMENT_WIDTH: f32 = 60.0;
 
 fn segmented_geometry(position: f32, widths: [f32; 3]) -> (f32, f32) {
     let position = position.clamp(0.0, 2.0);
