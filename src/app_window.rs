@@ -66,6 +66,7 @@ const WINDOW_HEIGHT: f32 = 700.0;
 const MINIMUM_WIDTH: f32 = 860.0;
 const MINIMUM_HEIGHT: f32 = 560.0;
 const SETTINGS_CONTENT_WIDTH: f32 = 788.0;
+const VOICE_ACTION_CONTENT_WIDTH: f32 = 700.0;
 const HOTKEY_MIN_WIDTH: f32 = 148.0;
 const OPENCODE_INSTALL_RETRY_INTERVAL: Duration = Duration::from_secs(5);
 const APPLE_SPEECH_RETRY_INTERVAL: Duration = Duration::from_secs(5);
@@ -624,11 +625,13 @@ impl ToggleSpring {
     }
 
     fn advance(&mut self, elapsed: Duration) {
+        /// Critically damped spring stiffness in rad/s; higher settles faster.
+        const STIFFNESS: f32 = 40.0;
         let mut remaining = elapsed.as_secs_f32().min(0.1);
         while remaining > 0.0 {
             let dt = remaining.min(1.0 / 240.0);
-            let acceleration =
-                -20.0_f32.powi(2) * (self.position - self.target) - 2.0 * 20.0 * self.velocity;
+            let acceleration = -STIFFNESS.powi(2) * (self.position - self.target)
+                - 2.0 * STIFFNESS * self.velocity;
             self.velocity += acceleration * dt;
             self.position += self.velocity * dt;
             remaining -= dt;
@@ -2952,7 +2955,10 @@ impl AppWindow {
                 .size_full()
                 .flex()
                 .flex_col()
-                .child(pane_header("Voice Action", None))
+                .child(bounded_pane_header(
+                    "Voice Action",
+                    VOICE_ACTION_CONTENT_WIDTH,
+                ))
                 .child(
                     div().flex_1().flex().items_center().justify_center().child(
                         div()
@@ -2994,7 +3000,10 @@ impl AppWindow {
             .size_full()
             .flex()
             .flex_col()
-            .child(pane_header("Voice Action", None))
+            .child(bounded_pane_header(
+                "Voice Action",
+                VOICE_ACTION_CONTENT_WIDTH,
+            ))
             .child(
                 div()
                     .id("voice-action-scroll")
@@ -3007,7 +3016,7 @@ impl AppWindow {
                     .child(
                         div()
                             .w_full()
-                            .max_w(px(700.0))
+                            .max_w(px(VOICE_ACTION_CONTENT_WIDTH))
                             .flex()
                             .flex_col()
                             .gap(px(18.0))
@@ -5390,15 +5399,19 @@ impl AppWindow {
             let selected = self.command_filter == filter;
             div()
                 .id(("command-filter", index))
-                .h(px(30.0))
-                .px_3()
+                .h(px(26.0))
+                .px(px(10.0))
                 .flex()
                 .items_center()
-                .rounded_sm()
-                .text_size(px(12.0))
+                .rounded(px(6.0))
+                .border_1()
+                .border_color(rgb(if selected { SURFACE_SELECTED } else { LINE }))
+                .text_size(px(11.0))
                 .text_color(if selected { rgb(TEXT) } else { rgb(MUTED) })
                 .when(selected, |item| item.bg(rgb(SURFACE_SELECTED)))
-                .hover(|item| item.bg(rgb(SURFACE_HOVER)).text_color(rgb(TEXT_SOFT)))
+                .when(!selected, |item| {
+                    item.hover(|item| item.bg(rgb(SURFACE_HOVER)).text_color(rgb(TEXT_SOFT)))
+                })
                 .child(filter.label().to_string())
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.command_filter = filter.clone();
@@ -5435,29 +5448,32 @@ impl AppWindow {
                         div()
                             .id(("command", index))
                             .w_full()
-                            .px_4()
-                            .py_3()
+                            .px_3()
+                            .py_2()
                             .flex()
                             .flex_col()
                             .gap_1()
-                            .when(selected, |row| row.bg(rgb(SURFACE_SELECTED)))
-                            .hover(|row| row.bg(rgb(SURFACE_HOVER)))
+                            .rounded(px(6.0))
+                            .when(selected, |row| {
+                                row.bg(rgb(0x292929)).hover(|row| row.bg(rgb(0x303030)))
+                            })
+                            .when(!selected, |row| row.hover(|row| row.bg(rgb(SURFACE_HOVER))))
                             .child(
                                 div()
-                                    .text_sm()
+                                    .w_full()
+                                    .text_size(px(12.0))
                                     .font_weight(FontWeight::SEMIBOLD)
+                                    .text_color(rgb(TEXT))
+                                    .truncate()
                                     .child(command.phrase),
                             )
                             .child(
                                 div()
-                                    .flex()
-                                    .items_center()
-                                    .justify_between()
-                                    .gap_3()
-                                    .text_size(px(11.0))
-                                    .text_color(rgb(MUTED))
-                                    .child(command.description)
-                                    .child(command_scope(&command.scope)),
+                                    .w_full()
+                                    .text_size(px(10.0))
+                                    .text_color(rgb(if selected { TEXT_SOFT } else { FAINT }))
+                                    .truncate()
+                                    .child(command.description),
                             )
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 this.selected_command = Some(command_id.clone());
@@ -5465,77 +5481,133 @@ impl AppWindow {
                             }))
                     });
                 div()
-                    .pb_3()
-                    .child(
-                        div()
-                            .px_4()
-                            .pt_4()
-                            .pb_2()
-                            .text_size(px(11.0))
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .text_color(rgb(FAINT))
-                            .child(task.clone()),
-                    )
-                    .children(rows)
+                    .child(compact_section_label(task.clone()).px_3().pt_2().pb_1())
+                    .child(div().flex().flex_col().gap_1().children(rows))
                     .into_any_element()
             })
             .collect();
 
+        let no_commands = groups.is_empty();
+        let commands_list_width = 300.0;
+        let commands_content_width = commands_list_width + 20.0 + 640.0;
         div()
             .size_full()
             .flex()
             .flex_col()
-            .child(pane_header("Commands", Some(commands_control)))
-            .when_some(last_error, |page, error| {
-                page.child(
-                    div()
-                        .px_4()
-                        .py_2()
-                        .border_b_1()
-                        .border_color(rgb(LINE))
-                        .text_size(px(11.0))
-                        .line_height(px(16.0))
-                        .text_color(rgb(NEGATIVE))
-                        .child(error),
-                )
-            })
-            .child(
-                div()
-                    .h(px(47.0))
-                    .px_4()
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .border_b_1()
-                    .border_color(rgb(LINE))
-                    .child(div().flex().items_center().gap_1().children(filter_items))
-                    .child(
-                        div()
-                            .text_size(px(11.0))
-                            .text_color(rgb(FAINT))
-                            .child(format!("Context: {context_label}")),
-                    ),
-            )
+            .child(bounded_pane_header_with_action(
+                "Commands",
+                commands_content_width,
+                Some(commands_control),
+            ))
             .child(
                 div()
                     .flex_1()
+                    .min_h(px(0.0))
                     .overflow_hidden()
                     .flex()
+                    .justify_center()
+                    .p_5()
                     .child(
                         div()
-                            .id("commands-list")
-                            .w(px(400.0))
-                            .h_full()
-                            .flex_none()
-                            .overflow_y_scroll()
-                            .border_r_1()
-                            .border_color(rgb(LINE))
-                            .when(groups.is_empty(), |list| {
-                                list.child(empty_message("No commands in this context."))
+                            .w_full()
+                            .max_w(px(commands_content_width))
+                            .min_h(px(0.0))
+                            .flex()
+                            .flex_col()
+                            .gap_3()
+                            .when_some(last_error, |column, error| {
+                                column.child(compact_panel().flex_none().child(error_message(
+                                    "Personal commands are not loading.",
+                                    error,
+                                )))
                             })
-                            .children(groups),
-                    )
-                    .child(self.render_command_detail()),
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_h(px(0.0))
+                                    .flex()
+                                    .gap_5()
+                                    .child(
+                                        div()
+                                            .w(px(commands_list_width))
+                                            .h_full()
+                                            .flex_none()
+                                            .flex()
+                                            .flex_col()
+                                            .gap_2()
+                                            .child(
+                                                div()
+                                                    .h(px(28.0))
+                                                    .flex_none()
+                                                    .flex()
+                                                    .items_center()
+                                                    .child(compact_section_label("COMMANDS")),
+                                            )
+                                            .child(
+                                                div()
+                                                    .flex_none()
+                                                    .flex()
+                                                    .flex_wrap()
+                                                    .gap_1()
+                                                    .children(filter_items),
+                                            )
+                                            .child(
+                                                compact_panel()
+                                                    .id("commands-list")
+                                                    .flex_1()
+                                                    .min_h(px(0.0))
+                                                    .overflow_y_scroll()
+                                                    .when(no_commands, |card| {
+                                                        card.child(empty_message(
+                                                            "No commands in this context.",
+                                                        ))
+                                                    })
+                                                    .child(
+                                                        div()
+                                                            .p_2()
+                                                            .flex()
+                                                            .flex_col()
+                                                            .gap_2()
+                                                            .children(groups),
+                                                    ),
+                                            ),
+                                    )
+                                    .child(
+                                        div()
+                                            .flex_1()
+                                            .min_w(px(0.0))
+                                            .h_full()
+                                            .flex()
+                                            .flex_col()
+                                            .gap_2()
+                                            .child(
+                                                div()
+                                                    .h(px(28.0))
+                                                    .flex_none()
+                                                    .flex()
+                                                    .items_center()
+                                                    .justify_between()
+                                                    .child(compact_section_label("COMMAND"))
+                                                    .child(
+                                                        div()
+                                                            .text_size(px(10.0))
+                                                            .text_color(rgb(FAINT))
+                                                            .child(format!(
+                                                                "Context: {context_label}"
+                                                            )),
+                                                    ),
+                                            )
+                                            .child(
+                                                compact_panel()
+                                                    .id("command-detail")
+                                                    .flex_1()
+                                                    .min_h(px(0.0))
+                                                    .overflow_y_scroll()
+                                                    .child(self.render_command_detail()),
+                                            ),
+                                    ),
+                            ),
+                    ),
             )
             .into_any_element()
     }
@@ -5546,7 +5618,14 @@ impl AppWindow {
             .as_deref()
             .and_then(|id| self.commands.iter().find(|command| command.id == id))
         else {
-            return detail_placeholder("Select a command.");
+            return div()
+                .py(px(120.0))
+                .flex()
+                .justify_center()
+                .text_size(px(12.0))
+                .text_color(rgb(FAINT))
+                .child("Select a command.")
+                .into_any_element();
         };
         let aliases = if command.aliases.is_empty() {
             "None".into()
@@ -5554,15 +5633,10 @@ impl AppWindow {
             command.aliases.join("\n")
         };
         div()
-            .id("command-detail")
-            .flex_1()
-            .h_full()
-            .overflow_y_scroll()
-            .px_6()
-            .py_6()
+            .p_5()
             .child(
                 div()
-                    .text_size(px(20.0))
+                    .text_size(px(15.0))
                     .font_weight(FontWeight::SEMIBOLD)
                     .child(command.phrase.clone()),
             )
@@ -5575,7 +5649,7 @@ impl AppWindow {
             )
             .child(
                 div()
-                    .pt_6()
+                    .pt_4()
                     .child(detail_row("Task", command.task.clone()))
                     .child(detail_row("Context", command_scope(&command.scope)))
                     .child(detail_row("Aliases", aliases)),
