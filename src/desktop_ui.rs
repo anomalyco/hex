@@ -529,7 +529,9 @@ pub(crate) fn segmented_item(selected: bool) -> Div {
         .text_size(px(11.0))
         .text_color(if selected { rgb(TEXT) } else { rgb(MUTED) })
         .when(selected, |item| item.bg(rgb(SURFACE_SELECTED)))
-        .hover(|item| item.text_color(rgb(TEXT_SOFT)))
+        .when(!selected, |item| {
+            item.hover(|item| item.bg(rgb(SURFACE_HOVER)).text_color(rgb(TEXT_SOFT)))
+        })
 }
 
 pub(crate) fn mix_color(from: Rgba, to: Rgba, position: f32) -> Rgba {
