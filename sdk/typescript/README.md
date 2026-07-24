@@ -75,6 +75,20 @@ const result = await Effect.runPromise(program)
 For dependency injection, `Hex.layer(options)` provides `Hex.Service` and owns
 the helper for the layer's scope.
 
+## Permissions
+
+The helper needs zero macOS TCC permissions. The host application captures
+microphone audio itself and sends encoded WAV, so the microphone prompt,
+`NSMicrophoneUsageDescription`, orange-dot indicator, and Privacy & Security
+entry all belong to the host's own bundle and signature. There is no second
+permission identity to sign, prompt for, or keep in sync.
+
+This is a deliberate decomposition: HEX owns model preparation and
+transcription; the host owns capture and consent. A future opt-in mode where
+the helper captures the microphone via TCC responsibility-chain inheritance
+is tracked in https://github.com/anomalyco/hex/issues/18 and is intentionally
+deferred until a real non-web consumer needs it.
+
 ## Host Boundary
 
 - Use from Node or Electron main/preload code, not an untrusted renderer.
