@@ -50,8 +50,8 @@ only in debug builds.
   API uses to drive the running app from `hex dev`.
 - `paste`: clipboard insertion, continuation joins, and generation-safe
   clipboard restoration.
-- `selected_text`: bounded selected-text capture through Accessibility without
-  touching the clipboard.
+- `accessibility`: bounded focused-window and selected-text capture through
+  Accessibility without touching the clipboard.
 - `recognition`: the semantic coordinator for Moonshine, command mode, hotkey
   and voice-delimited controls, workers, and observations. It does not own the
   authoritative microphone timeline.
@@ -65,8 +65,9 @@ only in debug builds.
 - `text_replacements`: phrase-boundary-aware compilation of configured text
   replacements applied longest-match-first to transcripts.
 - `config`: compiled commands, preferred input devices, and dictation profiles.
-- `context`: foreground application and browser context capture. Browser host is
-  the domain concept; Brave AppleScript is only the first adapter.
+- `context`: native foreground application and window context capture plus
+  browser context. Browser host is the domain concept; Brave AppleScript is only
+  the first adapter.
 - `application_catalog`: cached installed-application discovery with normalized
   bundle identity and rendered icons for the UI.
 - `app_settings`: persisted settings and live runtime projection for commands,

@@ -895,7 +895,7 @@ fn handle_hotkey_action(
 
 fn voice_action_context_snapshot(fallback: &ContextSnapshot) -> ContextSnapshot {
     let mut context = fallback.clone();
-    context.selected_text = crate::selected_text::capture_optional();
+    context.selected_text = crate::accessibility::capture_optional();
     context.input_revision = None;
     context
 }

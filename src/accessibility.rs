@@ -12,6 +12,7 @@ const MAX_SELECTED_TEXT_BYTES: usize = 64 * 1024;
 
 #[link(name = "ApplicationServices", kind = "framework")]
 unsafe extern "C" {
+    fn AXUIElementCreateApplication(pid: i32) -> AxUiElementRef;
     fn AXUIElementCreateSystemWide() -> AxUiElementRef;
     fn AXUIElementCopyAttributeValue(
         element: AxUiElementRef,
@@ -45,6 +46,56 @@ pub fn capture_optional() -> Option<String> {
     capture_accessibility()
         .ok()
         .filter(|text| !text.is_empty() && text.len() <= MAX_SELECTED_TEXT_BYTES)
+}
+
+pub fn focused_window_title(pid: i32) -> Option<String> {
+    capture_focused_window_title(pid)
+        .ok()
+        .filter(|title| !title.is_empty())
+}
+
+fn capture_focused_window_title(pid: i32) -> Result<String> {
+    // SAFETY: The create/copy APIs return retained Core Foundation objects.
+    let application = unsafe { AXUIElementCreateApplication(pid) };
+    if application.is_null() {
+        return Err(eyre!("could not inspect the foreground application"));
+    }
+    if unsafe { AXUIElementSetMessagingTimeout(application, 0.25) } != 0 {
+        unsafe { CFRelease(application) };
+        return Err(eyre!(
+            "could not bound communication with the foreground application"
+        ));
+    }
+
+    let focused_window_attribute = cf_string_literal(c"AXFocusedWindow")?;
+    let mut window = ptr::null();
+    let window_status = unsafe {
+        AXUIElementCopyAttributeValue(application, focused_window_attribute, &mut window)
+    };
+    unsafe { CFRelease(focused_window_attribute) };
+    unsafe { CFRelease(application) };
+    if window_status != 0 || window.is_null() {
+        return Err(eyre!("the foreground application has no focused window"));
+    }
+    if unsafe { AXUIElementSetMessagingTimeout(window.cast(), 0.25) } != 0 {
+        unsafe { CFRelease(window) };
+        return Err(eyre!(
+            "could not bound communication with the foreground window"
+        ));
+    }
+
+    let title_attribute = cf_string_literal(c"AXTitle")?;
+    let mut title = ptr::null();
+    let title_status =
+        unsafe { AXUIElementCopyAttributeValue(window.cast(), title_attribute, &mut title) };
+    unsafe { CFRelease(title_attribute) };
+    unsafe { CFRelease(window) };
+    if title_status != 0 || title.is_null() {
+        return Err(eyre!("the foreground window does not expose a title"));
+    }
+    let result = cf_string(title);
+    unsafe { CFRelease(title) };
+    result
 }
 
 fn capture_accessibility() -> Result<String> {

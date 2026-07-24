@@ -8,6 +8,11 @@ use std::time::{Duration, Instant};
 use color_eyre::eyre::{Result, WrapErr, eyre};
 use url::Url;
 
+#[cfg(target_os = "macos")]
+use objc2::rc::autoreleasepool;
+#[cfg(target_os = "macos")]
+use objc2_app_kit::NSWorkspace;
+
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ContextSnapshot {
     pub application: Option<String>,
@@ -113,54 +118,14 @@ impl Drop for ContextMonitor {
 }
 
 impl ContextSnapshot {
+    #[cfg(target_os = "macos")]
     pub fn capture() -> Result<Self> {
-        const CAPTURE_TIMEOUT: Duration = Duration::from_secs(2);
-        let mut child = Command::new("/usr/bin/osascript")
-            .args(["-e", CAPTURE_SCRIPT])
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .wrap_err("could not inspect the foreground application")?;
-        let started = Instant::now();
-        loop {
-            if child
-                .try_wait()
-                .wrap_err("could not inspect the foreground application")?
-                .is_some()
-            {
-                break;
-            }
-            if started.elapsed() >= CAPTURE_TIMEOUT {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err(eyre!("foreground context inspection timed out"));
-            }
-            thread::sleep(Duration::from_millis(10));
-        }
-        let output = child
-            .wait_with_output()
-            .wrap_err("could not inspect the foreground application")?;
-        if !output.status.success() {
-            return Err(eyre!(
-                "foreground context inspection failed: {}",
-                String::from_utf8_lossy(&output.stderr).trim()
-            ));
-        }
-        let text = String::from_utf8_lossy(&output.stdout);
-        let mut lines = text.lines();
-        let application = lines.next().filter(|line| !line.is_empty()).map(Into::into);
-        let browser_url = lines
-            .next()
-            .filter(|line| !line.is_empty())
-            .and_then(|line| Url::parse(line).ok());
-        let window_title = lines.next().filter(|line| !line.is_empty()).map(Into::into);
-        Ok(Self {
-            application,
-            browser_url,
-            window_title,
-            selected_text: None,
-            input_revision: None,
-        })
+        capture_macos()
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    pub fn capture() -> Result<Self> {
+        Ok(Self::default())
     }
 
     pub fn browser_host(&self) -> Option<&str> {
@@ -191,6 +156,70 @@ impl ContextSnapshot {
     }
 }
 
+#[cfg(target_os = "macos")]
+fn capture_macos() -> Result<ContextSnapshot> {
+    let (application, pid) = autoreleasepool(|_| {
+        let application = NSWorkspace::sharedWorkspace()
+            .frontmostApplication()
+            .ok_or_else(|| eyre!("macOS did not report a foreground application"))?;
+        let name = application
+            .localizedName()
+            .map(|name| name.to_string())
+            .ok_or_else(|| eyre!("the foreground application has no display name"))?;
+        Ok::<_, color_eyre::Report>((name, application.processIdentifier()))
+    })?;
+    let browser_url = if application == "Brave Browser" {
+        capture_brave_url()?
+    } else {
+        None
+    };
+    Ok(ContextSnapshot {
+        application: Some(application),
+        browser_url,
+        window_title: crate::accessibility::focused_window_title(pid),
+        selected_text: None,
+        input_revision: None,
+    })
+}
+
+#[cfg(target_os = "macos")]
+fn capture_brave_url() -> Result<Option<Url>> {
+    const CAPTURE_TIMEOUT: Duration = Duration::from_secs(2);
+    let mut child = Command::new("/usr/bin/osascript")
+        .args(["-e", BRAVE_URL_SCRIPT])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .wrap_err("could not inspect the active Brave tab")?;
+    let started = Instant::now();
+    loop {
+        if child
+            .try_wait()
+            .wrap_err("could not inspect the active Brave tab")?
+            .is_some()
+        {
+            break;
+        }
+        if started.elapsed() >= CAPTURE_TIMEOUT {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(eyre!("active Brave tab inspection timed out"));
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+    let output = child
+        .wait_with_output()
+        .wrap_err("could not inspect the active Brave tab")?;
+    if !output.status.success() {
+        return Err(eyre!(
+            "active Brave tab inspection failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    let url = String::from_utf8_lossy(&output.stdout);
+    Ok(Url::parse(url.trim()).ok())
+}
+
 fn normalize_browser_host(host: &str) -> String {
     host.trim_end_matches('.').to_ascii_lowercase()
 }
@@ -204,23 +233,12 @@ fn browser_hosts_equal(left: &str, right: &str) -> bool {
         .eq_ignore_ascii_case(right.trim_end_matches('.'))
 }
 
-const CAPTURE_SCRIPT: &str = r#"
-tell application "System Events"
-    set frontApp to name of first application process whose frontmost is true
+#[cfg(target_os = "macos")]
+const BRAVE_URL_SCRIPT: &str = r#"
+tell application "Brave Browser"
+    if (count of windows) > 0 then return URL of active tab of front window
 end tell
-set activeUrl to ""
-set windowTitle to ""
-tell application "System Events"
-    try
-        set windowTitle to name of front window of first application process whose frontmost is true
-    end try
-end tell
-if frontApp is "Brave Browser" then
-    tell application "Brave Browser"
-        if (count of windows) > 0 then set activeUrl to URL of active tab of front window
-    end tell
-end if
-return frontApp & linefeed & activeUrl & linefeed & windowTitle
+return ""
 "#;
 
 #[cfg(test)]

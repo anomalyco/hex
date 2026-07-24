@@ -1,3 +1,5 @@
+#[cfg(target_os = "macos")]
+mod accessibility;
 mod app_paths;
 #[cfg(target_os = "macos")]
 mod app_settings;
@@ -90,8 +92,6 @@ mod personal_commands;
 mod recognition;
 #[cfg(target_os = "macos")]
 mod recording_environment;
-#[cfg(target_os = "macos")]
-mod selected_text;
 #[cfg(target_os = "macos")]
 mod sparkle;
 #[cfg(any(target_os = "macos", target_os = "linux"))]

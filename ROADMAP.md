@@ -114,8 +114,9 @@ must not become a second control server or settings authority.
 
 ## Generalize Context From Evidence
 
-Replace System Events foreground polling with
-`NSWorkspace.frontmostApplication` when context capture is next revised. Keep
+Foreground application identity now comes from
+`NSWorkspace.frontmostApplication`, and focused window titles come from the
+bounded Accessibility bridge rather than repeated System Events scripts. Keep
 command and dictation-profile semantics expressed in application and browser-host
 terms rather than Brave-specific types.
 
