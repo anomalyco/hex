@@ -3409,6 +3409,10 @@ impl AppWindow {
         let modes_content_width = mode_list_width + 20.0 + 700.0;
         let add = compact_header_plus_button()
             .id("add-dictation-mode")
+            .border_1()
+            .border_color(rgb(LINE))
+            .bg(rgb(SURFACE))
+            .hover(|button| button.bg(rgb(0x303030)))
             .on_click(cx.listener(|this, _, window, cx| {
                 let mut mode = this.settings.dictation_processing.default_mode.clone();
                 mode.name = format!("Mode {}", this.processing_inputs.modes.len() + 1);
@@ -6544,8 +6548,10 @@ fn mode_row(
         .justify_center()
         .gap_1()
         .rounded(px(6.0))
-        .when(selected, |row| row.bg(rgb(SURFACE_SELECTED)))
-        .hover(|row| row.bg(rgb(SURFACE_HOVER)))
+        .when(selected, |row| {
+            row.bg(rgb(0x292929)).hover(|row| row.bg(rgb(0x303030)))
+        })
+        .when(!selected, |row| row.hover(|row| row.bg(rgb(SURFACE_HOVER))))
         .child(
             div()
                 .w_full()
