@@ -310,25 +310,32 @@ struct ModelVariant {
     id: String,
 }
 
+fn model_is_available(model: &ModelInfo) -> bool {
+    model.enabled
+        && model.status == "active"
+        && model
+            .capabilities
+            .output
+            .iter()
+            .any(|output| output == "text")
+}
+
 pub fn load_model_catalog() -> Result<ModelCatalog> {
     if let Some(catalog) = MODEL_CATALOG.get() {
         return Ok(catalog.clone());
     }
     let models: ModelsResponse = opencode_api("/api/model")?;
     let default: DefaultModelResponse = opencode_api("/api/model/default")?;
+    let catalog = build_model_catalog(models.data, default.data);
+    let _ = MODEL_CATALOG.set(catalog.clone());
+    Ok(catalog)
+}
+
+fn build_model_catalog(models: Vec<ModelInfo>, default: Option<ModelInfo>) -> ModelCatalog {
     let mut seen = HashSet::new();
-    let choices = models
-        .data
+    let mut choices: Vec<ModelChoice> = models
         .into_iter()
-        .filter(|model| {
-            model.enabled
-                && model.status == "active"
-                && model
-                    .capabilities
-                    .output
-                    .iter()
-                    .any(|output| output == "text")
-        })
+        .filter(model_is_available)
         .filter_map(|model| {
             let key = format!("{}/{}", model.provider_id, model.model_id);
             seen.insert(key.clone()).then_some(ModelChoice {
@@ -343,16 +350,28 @@ pub fn load_model_catalog() -> Result<ModelCatalog> {
             })
         })
         .collect();
-    let default = default.data;
-    let catalog = ModelCatalog {
+    if let Some(model) = default.as_ref().filter(|model| model_is_available(model)) {
+        let key = format!("{}/{}", model.provider_id, model.model_id);
+        if seen.insert(key.clone()) {
+            choices.push(ModelChoice {
+                key,
+                name: model.name.clone(),
+                provider: model.provider_id.clone(),
+                variants: model
+                    .variants
+                    .iter()
+                    .map(|variant| variant.id.clone())
+                    .collect(),
+            });
+        }
+    }
+    ModelCatalog {
         default_key: default
             .as_ref()
             .map(|model| format!("{}/{}", model.provider_id, model.model_id)),
         default_name: default.map(|model| model.name),
         models: choices,
-    };
-    let _ = MODEL_CATALOG.set(catalog.clone());
-    Ok(catalog)
+    }
 }
 
 pub fn opencode_installed() -> bool {
@@ -641,6 +660,28 @@ mod tests {
         Profiles::new(Profile::new("default", "default prompt").ai_enabled(true))
             .application("Slack", Profile::new("slack", "slack prompt"))
             .browser_host("x.com", Profile::new("x", "x prompt"))
+    }
+
+    #[test]
+    fn model_catalog_keeps_an_available_default_missing_from_the_model_list() {
+        let catalog = build_model_catalog(
+            Vec::new(),
+            Some(ModelInfo {
+                model_id: "gemini-3.6-flash".into(),
+                provider_id: "opencode".into(),
+                name: "Gemini 3.6 Flash".into(),
+                enabled: true,
+                status: "active".into(),
+                capabilities: ModelCapabilities {
+                    output: vec!["text".into()],
+                },
+                variants: vec![ModelVariant { id: "high".into() }],
+            }),
+        );
+
+        assert_eq!(catalog.models.len(), 1);
+        assert_eq!(catalog.models[0].key, "opencode/gemini-3.6-flash");
+        assert_eq!(catalog.models[0].variants, ["high"]);
     }
 
     #[test]

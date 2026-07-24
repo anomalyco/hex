@@ -64,7 +64,7 @@ const WINDOW_HEIGHT: f32 = 700.0;
 const MINIMUM_WIDTH: f32 = 860.0;
 const MINIMUM_HEIGHT: f32 = 560.0;
 const SETTINGS_CONTENT_WIDTH: f32 = 788.0;
-const HOTKEY_IDLE_WIDTH: f32 = 210.0;
+const HOTKEY_MIN_WIDTH: f32 = 148.0;
 const OPENCODE_INSTALL_RETRY_INTERVAL: Duration = Duration::from_secs(5);
 const APPLE_SPEECH_RETRY_INTERVAL: Duration = Duration::from_secs(5);
 const ACTIVITY_LIMIT: usize = 100;
@@ -1098,7 +1098,7 @@ impl AppWindow {
             settings_dirty: false,
             hotkey_capture: HotkeyCaptureState::Idle,
             hotkey_capture_animation: ToggleSpring::new(false),
-            hotkey_width_spring: ToggleSpring::at(HOTKEY_IDLE_WIDTH),
+            hotkey_width_spring: ToggleSpring::at(HOTKEY_MIN_WIDTH),
             window_focus,
             hotkey_focus,
             _hotkey_blur_subscription: hotkey_blur_subscription,
@@ -1795,6 +1795,15 @@ impl AppWindow {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let binding = match kind {
+            HotkeyKind::Dictation => &self.settings.dictation_hotkey,
+            HotkeyKind::Edit => &self.settings.edit_hotkey,
+        };
+        let binding_keycaps = match kind {
+            HotkeyKind::Dictation => self.snapshot().dictation_shortcut,
+            HotkeyKind::Edit => binding.keycaps(),
+        };
+        let idle_width = hotkey_idle_width(binding_keycaps.len());
         if matches!(
             self.hotkey_capture,
             HotkeyCaptureState::Saved { saved_at, .. }
@@ -1802,10 +1811,17 @@ impl AppWindow {
         ) {
             self.hotkey_capture = HotkeyCaptureState::Idle;
             self.hotkey_capture_animation.set_enabled(false);
-            self.hotkey_width_spring.set_target(HOTKEY_IDLE_WIDTH);
+            self.hotkey_width_spring.set_target(idle_width);
+        } else if matches!(self.hotkey_capture, HotkeyCaptureState::Idle) {
+            self.hotkey_width_spring.set_target(idle_width);
         }
         let intensity = self.hotkey_capture_animation.render_position(window);
-        let control_width = self.hotkey_width_spring.render_position(window);
+        let animated_control_width = self.hotkey_width_spring.render_position(window);
+        let control_width = if matches!(self.hotkey_capture, HotkeyCaptureState::Idle) {
+            idle_width
+        } else {
+            animated_control_width
+        };
         let capture_active = !matches!(self.hotkey_capture, HotkeyCaptureState::Idle);
         let this_capture = matches!(
             self.hotkey_capture,
@@ -1838,14 +1854,6 @@ impl AppWindow {
             HotkeyCaptureState::Idle
             | HotkeyCaptureState::Listening { .. }
             | HotkeyCaptureState::Saved { .. } => 0.0,
-        };
-        let binding = match kind {
-            HotkeyKind::Dictation => &self.settings.dictation_hotkey,
-            HotkeyKind::Edit => &self.settings.edit_hotkey,
-        };
-        let binding_keycaps = match kind {
-            HotkeyKind::Dictation => self.snapshot().dictation_shortcut,
-            HotkeyKind::Edit => binding.keycaps(),
         };
         let content = match &self.hotkey_capture {
             HotkeyCaptureState::Listening {
@@ -1947,13 +1955,11 @@ impl AppWindow {
             })
             .track_focus(&self.hotkey_focus)
             .w(px(control_width))
-            .min_w(px(HOTKEY_IDLE_WIDTH))
+            .min_w(px(HOTKEY_MIN_WIDTH))
             .h(px(32.0))
-            .pl(px(2.0))
-            .pr_3()
+            .px(px(6.0))
             .flex()
             .items_center()
-            .justify_center()
             .overflow_hidden()
             .rounded(px(6.0))
             .border_1()
@@ -1963,7 +1969,7 @@ impl AppWindow {
                 control_intensity * 0.55,
             ))
             .bg(mix_color(
-                rgb(SURFACE),
+                rgb(CANVAS),
                 capture_color,
                 control_intensity * (0.55 + pulse * 0.15),
             ))
@@ -2011,7 +2017,7 @@ impl AppWindow {
             crate::app_settings::set_hotkey_capture_active(false);
             self.hotkey_capture = HotkeyCaptureState::Idle;
             self.hotkey_capture_animation.set_enabled(false);
-            self.hotkey_width_spring.set_target(HOTKEY_IDLE_WIDTH);
+            self.hotkey_width_spring.set_target(HOTKEY_MIN_WIDTH);
             cx.notify();
         }
     }
@@ -4447,9 +4453,7 @@ impl AppWindow {
                     .filter_map(|key| catalog.models.iter().find(|choice| choice.key == key))
                     .cloned()
                     .collect();
-                let variants = selected_model
-                    .and_then(|key| catalog.models.iter().find(|choice| choice.key == key))
-                    .map_or_else(Vec::new, |choice| choice.variants.clone());
+                let variants = model_variants(catalog, selected_model);
                 let default_label = choice_keys
                     .first()
                     .is_some_and(Option::is_none)
@@ -4657,12 +4661,12 @@ impl AppWindow {
                 .child(model_control)
                 .when_some(suggestions, |field, suggestions| field.child(suggestions));
             let deadline_field = div()
-                .w(px(150.0))
+                .w(px(112.0))
                 .flex_none()
                 .flex()
                 .items_center()
                 .gap_2()
-                .child(div().w(px(82.0)).flex_none().child(deadline))
+                .child(div().w(px(54.0)).flex_none().child(deadline))
                 .child(
                     div()
                         .text_size(px(11.0))
@@ -4807,6 +4811,11 @@ impl AppWindow {
                 self.mode_settings_mut(selection).post_processing.variant = Some(variant);
             }
             ModelPickerTarget::VoiceAction => {
+                if self.settings.voice_action.model.is_none()
+                    && let ModelCatalogState::Loaded(catalog) = &self.model_catalog
+                {
+                    self.settings.voice_action.model = catalog.default_key.clone();
+                }
                 self.settings.voice_action.variant = Some(variant);
             }
         }
@@ -6455,23 +6464,27 @@ fn voice_action_setting_row(
         )
 }
 
+fn hotkey_idle_width(keycap_count: usize) -> f32 {
+    (112.0 + hotkey_keycaps_width(keycap_count)).max(HOTKEY_MIN_WIDTH)
+}
+
 fn hotkey_capture_width(keycap_count: usize) -> f32 {
     if keycap_count == 0 {
-        HOTKEY_IDLE_WIDTH
+        180.0
     } else {
         236.0 + hotkey_keycaps_width(keycap_count)
     }
 }
 
 fn hotkey_saved_width(keycap_count: usize) -> f32 {
-    (53.0 + hotkey_keycaps_width(keycap_count)).max(HOTKEY_IDLE_WIDTH)
+    (53.0 + hotkey_keycaps_width(keycap_count)).max(HOTKEY_MIN_WIDTH)
 }
 
 fn hotkey_keycaps_width(keycap_count: usize) -> f32 {
     if keycap_count == 0 {
         0.0
     } else {
-        35.0 * keycap_count as f32 + 3.0 * keycap_count.saturating_sub(1) as f32
+        34.0 * keycap_count as f32 + 3.0 * keycap_count.saturating_sub(1) as f32
     }
 }
 
@@ -6718,6 +6731,13 @@ fn model_presentation(
         key: key.to_owned(),
         is_default,
     })
+}
+
+fn model_variants(catalog: &ModelCatalog, selected_key: Option<&str>) -> Vec<String> {
+    selected_key
+        .or(catalog.default_key.as_deref())
+        .and_then(|key| catalog.models.iter().find(|choice| choice.key == key))
+        .map_or_else(Vec::new, |choice| choice.variants.clone())
 }
 
 fn fallback_model_presentation(key: &str) -> ModelPresentation {
@@ -7455,6 +7475,22 @@ mod tests {
 
         let default = model_presentation(&catalog, None).unwrap();
         assert!(default.is_default);
+    }
+
+    #[test]
+    fn default_model_exposes_its_thinking_variants() {
+        let catalog = ModelCatalog {
+            models: vec![crate::dictation_processor::ModelChoice {
+                key: "opencode/gemini-3.6-flash".into(),
+                name: "Gemini 3.6 Flash".into(),
+                provider: "opencode".into(),
+                variants: vec!["low".into(), "high".into()],
+            }],
+            default_key: Some("opencode/gemini-3.6-flash".into()),
+            default_name: Some("Gemini 3.6 Flash".into()),
+        };
+
+        assert_eq!(model_variants(&catalog, None), ["low", "high"]);
     }
 
     #[test]
