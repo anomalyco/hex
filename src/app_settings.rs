@@ -366,7 +366,7 @@ impl Default for AppSettings {
             double_tap_lock: true,
             dictation_hotkey: HotkeyBinding::default(),
             edit_hotkey: HotkeyBinding::edit_default(),
-            show_dock_icon: false,
+            show_dock_icon: true,
             transcription: TranscriptionSelection::default(),
             dictation_processing: DictationProcessingSettings::default(),
             voice_action: VoiceActionSettings::default(),
@@ -627,7 +627,7 @@ mod tests {
         assert!(settings.double_tap_lock);
         assert_eq!(settings.dictation_hotkey, HotkeyBinding::default());
         assert_eq!(settings.edit_hotkey, HotkeyBinding::edit_default());
-        assert!(!settings.show_dock_icon);
+        assert!(settings.show_dock_icon);
         assert_eq!(settings.transcription, TranscriptionSelection::default());
         assert!(
             !settings
