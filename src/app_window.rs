@@ -5406,18 +5406,33 @@ impl AppWindow {
                 tasks.push(task);
             }
         }
-        let groups: Vec<AnyElement> = tasks
-            .into_iter()
-            .map(|task| {
-                let rows = visible
+        let effective_selected = self
+            .selected_command
+            .clone()
+            .filter(|id| visible.iter().any(|index| self.commands[*index].id == *id))
+            .or_else(|| {
+                visible
+                    .first()
+                    .map(|index| self.commands[*index].id.clone())
+            });
+        let mut groups: Vec<AnyElement> = Vec::new();
+        for task in tasks {
+            groups.push(
+                compact_section_label(task.clone())
+                    .px_3()
+                    .pt_2()
+                    .pb_1()
+                    .into_any_element(),
+            );
+            groups.extend(
+                visible
                     .iter()
                     .copied()
                     .filter(|index| self.commands[*index].task == task)
                     .map(|index| {
                         let command = self.commands[index].clone();
                         let command_id = command.id.clone();
-                        let selected =
-                            self.selected_command.as_deref() == Some(command_id.as_str());
+                        let selected = effective_selected.as_deref() == Some(command_id.as_str());
                         div()
                             .id(("command", index))
                             .w_full()
@@ -5452,13 +5467,10 @@ impl AppWindow {
                                 this.selected_command = Some(command_id.clone());
                                 cx.notify();
                             }))
-                    });
-                div()
-                    .child(compact_section_label(task.clone()).px_3().pt_2().pb_1())
-                    .child(div().flex().flex_col().gap_1().children(rows))
-                    .into_any_element()
-            })
-            .collect();
+                            .into_any_element()
+                    }),
+            );
+        }
 
         let no_commands = groups.is_empty();
         let commands_list_width = 300.0;
@@ -5537,10 +5549,11 @@ impl AppWindow {
                                                     })
                                                     .child(
                                                         div()
+                                                            .w(px(commands_list_width - 2.0))
                                                             .p_2()
                                                             .flex()
                                                             .flex_col()
-                                                            .gap_2()
+                                                            .gap_1()
                                                             .children(groups),
                                                     ),
                                             ),
@@ -5576,7 +5589,9 @@ impl AppWindow {
                                                     .flex_1()
                                                     .min_h(px(0.0))
                                                     .overflow_y_scroll()
-                                                    .child(self.render_command_detail()),
+                                                    .child(self.render_command_detail(
+                                                        effective_selected.as_deref(),
+                                                    )),
                                             ),
                                     ),
                             ),
@@ -5585,11 +5600,9 @@ impl AppWindow {
             .into_any_element()
     }
 
-    fn render_command_detail(&self) -> AnyElement {
-        let Some(command) = self
-            .selected_command
-            .as_deref()
-            .and_then(|id| self.commands.iter().find(|command| command.id == id))
+    fn render_command_detail(&self, selected: Option<&str>) -> AnyElement {
+        let Some(command) =
+            selected.and_then(|id| self.commands.iter().find(|command| command.id == id))
         else {
             return div()
                 .py(px(120.0))
