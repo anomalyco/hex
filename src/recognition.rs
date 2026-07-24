@@ -317,10 +317,15 @@ pub fn listen(
                     voice_protocol = None;
                     control_stability.reset();
                 }
-                let voice_action_takeover = matches!(action, HotkeyAction::Discard)
-                    && edit_pending_since.is_some()
-                    && edit_hotkey.is_recording();
-                if voice_protocol.is_none() && !voice_action_takeover {
+                let voice_action_takeover = voice_action_owns_action(
+                    action,
+                    edit_pending_since.is_some(),
+                    edit_hotkey.is_recording(),
+                    edit_action,
+                );
+                if voice_action_takeover {
+                    let _ = hotkey.suspend();
+                } else if voice_protocol.is_none() {
                     handle_hotkey_action(
                         action,
                         capture_at,
@@ -1361,6 +1366,23 @@ fn recognition_boundary(
         .unwrap_or(fallback)
 }
 
+/// Whether an in-flight Option-Command gesture owns a dictation-hotkey
+/// action. While the Voice Action gesture is pending, recording, or acting on
+/// this event, the Option-only machine must not start, finish, or discard the
+/// capture: with a slow chord (Command joining after the hold threshold) both
+/// machines are otherwise live, and whichever modifier lifts first would let
+/// plain dictation consume the capture and leave the Voice Action to discard
+/// silently. Explicit paste shortcuts remain available.
+fn voice_action_owns_action(
+    action: HotkeyAction,
+    edit_pending: bool,
+    edit_recording: bool,
+    edit_action: Option<HotkeyAction>,
+) -> bool {
+    (edit_pending || edit_recording || edit_action.is_some())
+        && !matches!(action, HotkeyAction::PasteLast | HotkeyAction::PasteMeeting)
+}
+
 fn pending_voice_action_is_intentional(
     started_at: CaptureInstant,
     finished_at: CaptureInstant,
@@ -1535,6 +1557,107 @@ mod tests {
         let mut stability = ActivationStability::default();
 
         assert!(stability.observe(&say_protocol(), "Say!", true, Instant::now()));
+    }
+
+    #[test]
+    fn slow_chord_release_keeps_voice_action_ownership() {
+        use crate::app_settings::RuntimeHotkey;
+        use crate::suppression::{DictationHotkey, InputEvent};
+
+        const OPTION: u64 = 1 << 19;
+        const COMMAND: u64 = 1 << 20;
+        let now = CaptureInstant::from_nanos(60_000_000_000);
+        let mut dictation = DictationHotkey::new(
+            now,
+            true,
+            42,
+            RuntimeHotkey {
+                modifiers: OPTION,
+                key_code: None,
+            },
+        );
+        let mut edit = DictationHotkey::new_without_paste(
+            now,
+            42,
+            RuntimeHotkey {
+                modifiers: OPTION | COMMAND,
+                key_code: None,
+            },
+        );
+
+        // Option down: plain dictation starts, no Voice Action gesture yet.
+        let event = InputEvent::Flags(OPTION);
+        let edit_action = edit.process(event, now);
+        let action = dictation.process(event, now).expect("dictation starts");
+        assert_eq!(action, HotkeyAction::Start);
+        assert!(!voice_action_owns_action(
+            action,
+            false,
+            edit.is_recording(),
+            edit_action,
+        ));
+
+        // Command joins after the hold threshold: the dictation machine stays
+        // silently recording while the edit machine starts the gesture.
+        let chord_at = now + MINIMUM_HOLD_DURATION + Duration::from_millis(150);
+        let event = InputEvent::Flags(OPTION | COMMAND);
+        let edit_action = edit.process(event, chord_at);
+        assert_eq!(edit_action, Some(HotkeyAction::Start));
+        assert_eq!(dictation.process(event, chord_at), None);
+
+        // Option lifts first: both machines emit Finish on the same event.
+        // The Voice Action gesture must own the dictation Finish, or plain
+        // dictation would consume the capture out from under it.
+        let release_at = chord_at + Duration::from_secs(1);
+        let event = InputEvent::Flags(COMMAND);
+        let edit_action = edit.process(event, release_at);
+        assert_eq!(edit_action, Some(HotkeyAction::Finish));
+        let action = dictation
+            .process(event, release_at)
+            .expect("dictation machine also finishes");
+        assert_eq!(action, HotkeyAction::Finish);
+        assert!(voice_action_owns_action(
+            action,
+            true,
+            edit.is_recording(),
+            edit_action,
+        ));
+        let _ = dictation.suspend();
+
+        // A later plain Option dictation is unaffected.
+        let idle_at = release_at + Duration::from_secs(2);
+        let event = InputEvent::Flags(OPTION);
+        let edit_action = edit.process(event, idle_at);
+        let action = dictation.process(event, idle_at).expect("dictation starts");
+        assert_eq!(action, HotkeyAction::Start);
+        assert!(!voice_action_owns_action(
+            action,
+            false,
+            edit.is_recording(),
+            edit_action,
+        ));
+    }
+
+    #[test]
+    fn explicit_paste_shortcuts_stay_available_during_a_voice_action_gesture() {
+        assert!(!voice_action_owns_action(
+            HotkeyAction::PasteLast,
+            true,
+            true,
+            None,
+        ));
+        assert!(voice_action_owns_action(
+            HotkeyAction::Finish,
+            false,
+            false,
+            Some(HotkeyAction::Finish),
+        ));
+        assert!(!voice_action_owns_action(
+            HotkeyAction::Finish,
+            false,
+            false,
+            None,
+        ));
     }
 
     #[test]
