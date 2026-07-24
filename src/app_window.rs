@@ -34,11 +34,12 @@ use crate::desktop_transcription_picker::{
 use crate::desktop_ui::{
     CANVAS, COMPACT_MULTILINE_INPUT_HEIGHT, CONTROL_HEIGHT, FAINT, LINE, MUTED, NEGATIVE,
     NavigationIcon, SECTION_GAP, SIDEBAR_WIDTH, SURFACE, SURFACE_HOVER, SURFACE_SELECTED, TEXT,
-    TEXT_SOFT, bounded_pane_header, compact_button, compact_header_plus_button, compact_panel,
-    compact_panel_header, compact_plus_button, compact_section_label, disclosure_button,
-    empty_message, error_message, hotkey_keycaps, listener_status, mix_color, navigation_item,
-    pane_header, section_label, segmented_control, segmented_item, settings_copy, settings_panel,
-    settings_row, settings_section_label, sidebar_frame, toggle, window_frame,
+    TEXT_SOFT, bounded_pane_header, bounded_pane_header_with_action, compact_button,
+    compact_header_plus_button, compact_panel, compact_panel_header, compact_plus_button,
+    compact_section_label, disclosure_button, empty_message, error_message, hotkey_keycaps,
+    listener_status, mix_color, navigation_item, pane_header, section_label, segmented_control,
+    segmented_item, settings_copy, settings_panel, settings_row, settings_section_label,
+    sidebar_frame, toggle, window_frame,
 };
 use crate::dictation_indicator::{DictationIndicatorEvent, DictationIndicatorSender, HudTuning};
 use crate::dictation_processor::{ModelCatalog, ModelChoice};
@@ -63,6 +64,7 @@ const WINDOW_HEIGHT: f32 = 700.0;
 const MINIMUM_WIDTH: f32 = 860.0;
 const MINIMUM_HEIGHT: f32 = 560.0;
 const SETTINGS_CONTENT_WIDTH: f32 = 788.0;
+const HOTKEY_IDLE_WIDTH: f32 = 210.0;
 const OPENCODE_INSTALL_RETRY_INTERVAL: Duration = Duration::from_secs(5);
 const APPLE_SPEECH_RETRY_INTERVAL: Duration = Duration::from_secs(5);
 const ACTIVITY_LIMIT: usize = 100;
@@ -1096,7 +1098,7 @@ impl AppWindow {
             settings_dirty: false,
             hotkey_capture: HotkeyCaptureState::Idle,
             hotkey_capture_animation: ToggleSpring::new(false),
-            hotkey_width_spring: ToggleSpring::at(149.0),
+            hotkey_width_spring: ToggleSpring::at(HOTKEY_IDLE_WIDTH),
             window_focus,
             hotkey_focus,
             _hotkey_blur_subscription: hotkey_blur_subscription,
@@ -1800,7 +1802,7 @@ impl AppWindow {
         ) {
             self.hotkey_capture = HotkeyCaptureState::Idle;
             self.hotkey_capture_animation.set_enabled(false);
-            self.hotkey_width_spring.set_target(149.0);
+            self.hotkey_width_spring.set_target(HOTKEY_IDLE_WIDTH);
         }
         let intensity = self.hotkey_capture_animation.render_position(window);
         let control_width = self.hotkey_width_spring.render_position(window);
@@ -1945,7 +1947,7 @@ impl AppWindow {
             })
             .track_focus(&self.hotkey_focus)
             .w(px(control_width))
-            .min_w(px(149.0))
+            .min_w(px(HOTKEY_IDLE_WIDTH))
             .h(px(32.0))
             .pl(px(2.0))
             .pr_3()
@@ -2009,7 +2011,7 @@ impl AppWindow {
             crate::app_settings::set_hotkey_capture_active(false);
             self.hotkey_capture = HotkeyCaptureState::Idle;
             self.hotkey_capture_animation.set_enabled(false);
-            self.hotkey_width_spring.set_target(149.0);
+            self.hotkey_width_spring.set_target(HOTKEY_IDLE_WIDTH);
             cx.notify();
         }
     }
@@ -3018,90 +3020,87 @@ impl AppWindow {
                     .flex_1()
                     .overflow_y_scroll()
                     .px(if compact { px(20.0) } else { px(32.0) })
-                    .py_7()
+                    .py(px(22.0))
+                    .flex()
+                    .justify_center()
                     .child(
                         div()
+                            .w_full()
                             .max_w(px(700.0))
+                            .flex()
+                            .flex_col()
+                            .gap(px(18.0))
                             .child(
                                 div()
-                                    .text_size(px(18.0))
-                                    .font_weight(FontWeight::SEMIBOLD)
-                                    .child("Turn an instruction into paste-ready text"),
-                            )
-                            .child(
-                                div()
-                                    .pt_2()
-                                    .max_w(px(590.0))
-                                    .text_size(px(12.0))
-                                    .line_height(px(19.0))
-                                    .text_color(rgb(MUTED))
-                                    .child("Voice Action sends one spoken instruction to OpenCode. It can transform selected text or generate something new."),
-                            )
-                            .child(
-                                div()
-                                    .mt_5()
-                                    .p_2()
                                     .flex()
-                                    .when(compact, |guide| guide.flex_col())
-                                    .gap_2()
-                                    .rounded_md()
-                                    .border_1()
-                                    .border_color(rgb(LINE))
-                                    .bg(rgb(SURFACE))
-                                    .child(voice_action_step(
-                                        "1",
-                                        "Select text (optional)",
-                                        "A selection becomes context for the instruction.",
-                                    ))
-                                    .child(voice_action_step(
-                                        "2",
-                                        "Hold and speak",
-                                        "Hold the shortcut and describe the exact result you want.",
-                                    ))
-                                    .child(voice_action_step(
-                                        "3",
-                                        "Release to paste",
-                                        "The result is pasted wherever focus is when processing finishes.",
-                                    )),
-                            )
-                            .child(settings_section_label("Capture"))
-                            .child(
-                                settings_row(
-                                    "Shortcut",
-                                    "Start directly, or add Command while holding the dictation shortcut.",
-                                    hotkey,
-                                )
-                                .id("voice-action-hotkey-setting"),
-                            )
-                            .child(settings_section_label("Processing"))
-                            .child(mode_section_heading(
-                                "OpenCode model",
-                                "Voice Action has its own model and deadline, independent of dictation Modes.",
-                            ))
-                            .child(processing)
-                            .child(
-                                div()
-                                    .mt_6()
-                                    .p_4()
-                                    .rounded_sm()
-                                    .border_1()
-                                    .border_color(rgb(LINE))
-                                    .bg(rgb(SURFACE))
+                                    .items_start()
+                                    .justify_between()
+                                    .gap_4()
+                                    .px_1()
+                                    .pt_1()
                                     .child(
                                         div()
-                                            .text_size(px(11.0))
-                                            .font_weight(FontWeight::SEMIBOLD)
-                                            .text_color(rgb(TEXT_SOFT))
-                                            .child("Nothing is pasted on failure"),
+                                            .min_w(px(0.0))
+                                            .flex()
+                                            .flex_col()
+                                            .gap_1()
+                                            .child(
+                                                div()
+                                                    .text_size(px(17.0))
+                                                    .font_weight(FontWeight::SEMIBOLD)
+                                                    .child("Speak an instruction. Paste the result."),
+                                            )
+                                            .child(
+                                                div()
+                                                    .max_w(px(520.0))
+                                                    .text_size(px(11.0))
+                                                    .line_height(px(16.0))
+                                                    .text_color(rgb(MUTED))
+                                                    .child("Transform selected text or generate something new with a dedicated OpenCode model."),
+                                            ),
                                     )
                                     .child(
                                         div()
-                                            .pt_1()
-                                            .text_size(px(11.0))
-                                            .line_height(px(17.0))
-                                            .text_color(rgb(MUTED))
-                                            .child("If OpenCode fails, times out, returns an empty response, or the action is cancelled, HEX leaves the document untouched."),
+                                            .size(px(32.0))
+                                            .flex_none()
+                                            .flex()
+                                            .items_center()
+                                            .justify_center()
+                                            .rounded(px(8.0))
+                                            .border_1()
+                                            .border_color(rgb(0x3a3a3a))
+                                            .bg(rgb(0x2b2b2b))
+                                            .text_size(px(17.0))
+                                            .text_color(rgb(TEXT_SOFT))
+                                            .child("✦"),
                                     ),
+                            )
+                            .child(
+                                div()
+                                    .flex()
+                                    .flex_col()
+                                    .gap_2()
+                                    .child(compact_section_label("CAPTURE"))
+                                    .child(
+                                        compact_panel().child(
+                                            voice_action_setting_row(
+                                                "Shortcut",
+                                                "Hold to speak; selected text is included automatically",
+                                                hotkey,
+                                                false,
+                                                compact,
+                                            )
+                                            .id("voice-action-hotkey-setting"),
+                                        ),
+                                    ),
+                            )
+                            .child(
+                                div()
+                                    .flex()
+                                    .flex_col()
+                                    .gap_2()
+                                    .child(compact_section_label("PROCESSING"))
+                                    .child(processing),
                             ),
                     ),
             )
@@ -3412,12 +3411,8 @@ impl AppWindow {
         let compact = window.viewport_size().width < px(980.0);
         let mode_list_width = if compact { 196.0 } else { 220.0 };
         let modes_content_width = mode_list_width + 20.0 + 700.0;
-        let add = compact_plus_button()
+        let add = compact_header_plus_button()
             .id("add-dictation-mode")
-            .border_1()
-            .border_color(rgb(LINE))
-            .bg(rgb(SURFACE_SELECTED))
-            .hover(|button| button.bg(rgb(0x454545)))
             .on_click(cx.listener(|this, _, window, cx| {
                 let mut mode = this.settings.dictation_processing.default_mode.clone();
                 mode.name = format!("Mode {}", this.processing_inputs.modes.len() + 1);
@@ -3488,7 +3483,11 @@ impl AppWindow {
             .size_full()
             .flex()
             .flex_col()
-            .child(bounded_pane_header("Modes", modes_content_width))
+            .child(bounded_pane_header_with_action(
+                "Modes",
+                modes_content_width,
+                Some(add.into_any_element()),
+            ))
             .child(
                 div()
                     .flex_1()
@@ -3519,9 +3518,7 @@ impl AppWindow {
                                             .flex_none()
                                             .flex()
                                             .items_center()
-                                            .justify_between()
-                                            .child(compact_section_label("MODES"))
-                                            .child(add),
+                                            .child(compact_section_label("MODES")),
                                     )
                                     .child(
                                         compact_panel()
@@ -4565,9 +4562,44 @@ impl AppWindow {
                 }))
                 .into_any_element()
         }));
-        let model_control =
-            if let Some(presentation) = presentation.filter(|_| !focused) {
-                let model_input = model.clone();
+        let model_control = if let Some(presentation) = presentation.filter(|_| !focused) {
+            let model_input = model.clone();
+            if target == ModelPickerTarget::VoiceAction {
+                div()
+                    .id("selected-model")
+                    .h(px(32.0))
+                    .px_3()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .gap_3()
+                    .rounded_sm()
+                    .border_1()
+                    .border_color(rgb(LINE))
+                    .bg(rgb(CANVAS))
+                    .text_size(px(11.0))
+                    .text_color(rgb(TEXT_SOFT))
+                    .hover(|control| control.bg(rgb(SURFACE_HOVER)).text_color(rgb(TEXT)))
+                    .child(
+                        div()
+                            .min_w(px(0.0))
+                            .flex_1()
+                            .truncate()
+                            .child(presentation.name),
+                    )
+                    .child(
+                        div()
+                            .flex_none()
+                            .text_size(px(10.0))
+                            .text_color(rgb(MUTED))
+                            .child("⌄"),
+                    )
+                    .on_click(cx.listener(move |_, _, window, cx| {
+                        model_input.focus_handle(cx).focus(window);
+                        cx.notify();
+                    }))
+                    .into_any_element()
+            } else {
                 div()
                     .id("selected-model")
                     .h(px(54.0))
@@ -4614,9 +4646,60 @@ impl AppWindow {
                         cx.notify();
                     }))
                     .into_any_element()
-            } else {
-                model.clone().into_any_element()
-            };
+            }
+        } else {
+            model.clone().into_any_element()
+        };
+        if target == ModelPickerTarget::VoiceAction {
+            let model_field = div()
+                .w(px(220.0))
+                .flex_none()
+                .child(model_control)
+                .when_some(suggestions, |field, suggestions| field.child(suggestions));
+            let deadline_field = div()
+                .w(px(150.0))
+                .flex_none()
+                .flex()
+                .items_center()
+                .gap_2()
+                .child(div().w(px(82.0)).flex_none().child(deadline))
+                .child(
+                    div()
+                        .text_size(px(11.0))
+                        .text_color(rgb(MUTED))
+                        .child("seconds"),
+                );
+            return compact_panel()
+                .child(voice_action_setting_row(
+                    "OpenCode model",
+                    "Independent from dictation Modes",
+                    model_field,
+                    true,
+                    compact,
+                ))
+                .child(voice_action_setting_row(
+                    "Timeout",
+                    "Paste nothing if processing exceeds this limit",
+                    deadline_field,
+                    has_variants,
+                    compact,
+                ))
+                .when(has_variants, |panel| {
+                    panel.child(voice_action_setting_row(
+                        "Thinking",
+                        "Choose how much reasoning the model should use",
+                        div()
+                            .flex()
+                            .flex_wrap()
+                            .justify_end()
+                            .gap_1()
+                            .children(variant_buttons),
+                        false,
+                        compact,
+                    ))
+                })
+                .into_any_element();
+        }
         div()
             .pt_5()
             .flex()
@@ -6327,28 +6410,22 @@ impl Render for AppWindow {
     }
 }
 
-fn voice_action_step(number: &'static str, title: &'static str, description: &'static str) -> Div {
+fn voice_action_setting_row(
+    title: &'static str,
+    description: &'static str,
+    control: impl IntoElement,
+    divider: bool,
+    compact: bool,
+) -> Div {
     div()
-        .flex_1()
-        .min_w(px(0.0))
-        .p_3()
+        .w_full()
+        .min_h(px(64.0))
+        .px_3()
+        .py_3()
         .flex()
-        .items_start()
-        .gap_3()
-        .child(
-            div()
-                .size(px(24.0))
-                .flex_none()
-                .flex()
-                .items_center()
-                .justify_center()
-                .rounded_full()
-                .bg(rgb(SURFACE_SELECTED))
-                .text_size(px(11.0))
-                .font_weight(FontWeight::SEMIBOLD)
-                .text_color(rgb(TEXT_SOFT))
-                .child(number),
-        )
+        .when(compact, |row| row.flex_col().items_start().gap_3())
+        .when(!compact, |row| row.items_center().justify_between().gap_4())
+        .when(divider, |row| row.border_b_1().border_color(rgb(LINE)))
         .child(
             div()
                 .min_w(px(0.0))
@@ -6357,31 +6434,37 @@ fn voice_action_step(number: &'static str, title: &'static str, description: &'s
                 .gap_1()
                 .child(
                     div()
-                        .text_size(px(11.0))
+                        .text_size(px(12.0))
                         .font_weight(FontWeight::SEMIBOLD)
-                        .text_color(rgb(TEXT_SOFT))
+                        .text_color(rgb(TEXT))
                         .child(title),
                 )
                 .child(
                     div()
                         .text_size(px(10.0))
-                        .line_height(px(15.0))
+                        .line_height(px(14.0))
                         .text_color(rgb(MUTED))
                         .child(description),
                 ),
+        )
+        .child(
+            div()
+                .when(compact, |field| field.w_full())
+                .when(!compact, |field| field.flex_none())
+                .child(control),
         )
 }
 
 fn hotkey_capture_width(keycap_count: usize) -> f32 {
     if keycap_count == 0 {
-        170.0
+        HOTKEY_IDLE_WIDTH
     } else {
         236.0 + hotkey_keycaps_width(keycap_count)
     }
 }
 
 fn hotkey_saved_width(keycap_count: usize) -> f32 {
-    (53.0 + hotkey_keycaps_width(keycap_count)).max(149.0)
+    (53.0 + hotkey_keycaps_width(keycap_count)).max(HOTKEY_IDLE_WIDTH)
 }
 
 fn hotkey_keycaps_width(keycap_count: usize) -> f32 {
@@ -6425,26 +6508,6 @@ fn sound_volume_index(settings: &AppSettings) -> usize {
                 .total_cmp(&(settings.sound_effect_volume - **right).abs())
         })
         .map_or(0, |(index, _)| index + 1)
-}
-
-fn mode_section_heading(title: &'static str, description: &'static str) -> AnyElement {
-    div()
-        .flex()
-        .flex_col()
-        .gap_1()
-        .child(
-            div()
-                .text_size(px(13.0))
-                .font_weight(FontWeight::SEMIBOLD)
-                .child(title),
-        )
-        .child(
-            div()
-                .text_size(px(11.0))
-                .text_color(rgb(MUTED))
-                .child(description),
-        )
-        .into_any_element()
 }
 
 fn open_opencode_beta_docs() {

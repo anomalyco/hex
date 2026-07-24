@@ -9,7 +9,7 @@ use gpui::{
 };
 use unicode_segmentation::UnicodeSegmentation;
 
-use crate::desktop_ui::{LINE, MULTILINE_INPUT_HEIGHT, MUTED, SURFACE, TEXT, TEXT_INPUT_HEIGHT};
+use crate::desktop_ui::{CANVAS, LINE, MULTILINE_INPUT_HEIGHT, MUTED, TEXT, TEXT_INPUT_HEIGHT};
 
 const FOCUS: u32 = 0x5a86c8;
 const SELECTION: u32 = 0x4776b866;
@@ -1354,7 +1354,7 @@ impl Render for TextInput {
             .rounded_sm()
             .border_1()
             .border_color(rgb(border))
-            .bg(rgb(SURFACE))
+            .bg(rgb(CANVAS))
             .text_color(rgb(TEXT))
             .text_size(px(14.))
             .line_height(px(20.))
