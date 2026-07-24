@@ -291,11 +291,6 @@ impl TextInput {
         cx.notify();
     }
 
-    pub fn select_all_text(&mut self, cx: &mut Context<Self>) {
-        self.move_to(0, cx);
-        self.select_to(self.content.len(), cx);
-    }
-
     pub fn is_focused(&self, window: &Window) -> bool {
         self.focus_handle.is_focused(window)
     }

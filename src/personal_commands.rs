@@ -44,6 +44,8 @@ const MAX_STATUS_BYTES: usize = 256 * 1024;
 const MAX_STATUS_ERROR_BYTES: usize = 4096;
 const MAX_TRANSFORMATION_TEXT_BYTES: usize = 48 * 1024;
 const TRANSFORMATION_TIMEOUT: Duration = Duration::from_secs(10);
+const LOWERCASE_TRANSFORMATION_ID: &str = "lowercase";
+const SPONGEBOB_TRANSFORMATION_ID: &str = "spongebob-case";
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -64,6 +66,30 @@ pub struct StatusTransformation {
     pub id: String,
     pub name: String,
     pub description: Option<String>,
+}
+
+pub fn include_builtin_transformations(status: &mut StatusSnapshot) {
+    status.transformations.retain(|transformation| {
+        !matches!(
+            transformation.id.as_str(),
+            LOWERCASE_TRANSFORMATION_ID | SPONGEBOB_TRANSFORMATION_ID
+        )
+    });
+    status.transformations.splice(
+        0..0,
+        [
+            StatusTransformation {
+                id: LOWERCASE_TRANSFORMATION_ID.into(),
+                name: "Lowercase".into(),
+                description: Some("Convert the final text to lowercase".into()),
+            },
+            StatusTransformation {
+                id: SPONGEBOB_TRANSFORMATION_ID.into(),
+                name: "SpongeBob case".into(),
+                description: Some("Alternate lowercase and uppercase letters".into()),
+            },
+        ],
+    );
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -437,15 +463,45 @@ impl TransformationClient {
         if text.len() > MAX_TRANSFORMATION_TEXT_BYTES {
             return Err("custom transformation input is too large".into());
         }
+        if ids.len() > MAX_TRANSFORMATIONS_PER_INVOCATION {
+            return Err("mode references too many transformations".into());
+        }
+        let mut output = text.to_string();
+        let mut custom = Vec::new();
+        for id in ids {
+            if matches!(
+                id.as_str(),
+                LOWERCASE_TRANSFORMATION_ID | SPONGEBOB_TRANSFORMATION_ID
+            ) {
+                if !custom.is_empty() {
+                    output = self.transform_custom(&custom, &output, context, cancelled)?;
+                    custom.clear();
+                }
+                output = apply_builtin_transformation(id, &output).expect("built-in ID is known");
+            } else {
+                custom.push(id.clone());
+            }
+        }
+        if !custom.is_empty() {
+            output = self.transform_custom(&custom, &output, context, cancelled)?;
+        }
+        Ok(output)
+    }
+
+    fn transform_custom(
+        &self,
+        ids: &[String],
+        text: &str,
+        context: &ContextSnapshot,
+        cancelled: &AtomicBool,
+    ) -> std::result::Result<String, String> {
         let active = self
             .active
             .read()
             .unwrap_or_else(|error| error.into_inner())
             .clone()
             .ok_or_else(|| "custom transformations are unavailable".to_string())?;
-        if ids.len() > MAX_TRANSFORMATIONS_PER_INVOCATION
-            || ids.iter().any(|id| !active.ids.contains(id))
-        {
+        if ids.iter().any(|id| !active.ids.contains(id)) {
             return Err("mode references an unavailable custom transformation".into());
         }
         let (sender, receiver) = mpsc::sync_channel(1);
@@ -499,6 +555,30 @@ impl TransformationClient {
             .active
             .write()
             .unwrap_or_else(|error| error.into_inner()) = None;
+    }
+}
+
+fn apply_builtin_transformation(id: &str, text: &str) -> Option<String> {
+    match id {
+        LOWERCASE_TRANSFORMATION_ID => Some(text.to_lowercase()),
+        SPONGEBOB_TRANSFORMATION_ID => {
+            let mut uppercase = false;
+            let mut output = String::with_capacity(text.len());
+            for character in text.chars() {
+                if !character.is_alphabetic() {
+                    output.push(character);
+                    continue;
+                }
+                if uppercase {
+                    output.extend(character.to_uppercase());
+                } else {
+                    output.extend(character.to_lowercase());
+                }
+                uppercase = !uppercase;
+            }
+            Some(output)
+        }
+        _ => None,
     }
 }
 
@@ -2294,7 +2374,7 @@ mod tests {
             .write()
             .unwrap_or_else(|error| error.into_inner()) = Some(ActiveTransformations {
             generation: 4,
-            ids: HashSet::from(["lowercase".into()]),
+            ids: HashSet::from(["prefix".into()]),
             requests,
         });
         let worker = thread::spawn(move || {
@@ -2302,23 +2382,23 @@ mod tests {
                 panic!("expected transformation request");
             };
             assert_eq!(request.generation, 4);
-            assert_eq!(request.ids, ["lowercase"]);
+            assert_eq!(request.ids, ["prefix"]);
             request
                 .response
-                .send(Ok(request.text.to_lowercase()))
+                .send(Ok(format!("PREFIX:{}", request.text)))
                 .unwrap();
         });
 
         let transformed = client
             .transform(
-                &["lowercase".into()],
+                &["prefix".into(), LOWERCASE_TRANSFORMATION_ID.into()],
                 "HELLO",
                 &ContextSnapshot::default(),
                 &AtomicBool::new(false),
             )
             .unwrap();
 
-        assert_eq!(transformed, "hello");
+        assert_eq!(transformed, "prefix:hello");
         assert!(
             client
                 .transform(
@@ -2330,6 +2410,70 @@ mod tests {
                 .is_err()
         );
         worker.join().unwrap();
+    }
+
+    #[test]
+    fn built_in_transformations_do_not_require_the_personal_command_host() {
+        let client = TransformationClient::default();
+        let context = ContextSnapshot::default();
+        let cancelled = AtomicBool::new(false);
+
+        assert_eq!(
+            client
+                .transform(
+                    &[LOWERCASE_TRANSFORMATION_ID.into()],
+                    "Hello, WORLD!",
+                    &context,
+                    &cancelled,
+                )
+                .unwrap(),
+            "hello, world!"
+        );
+        assert_eq!(
+            client
+                .transform(
+                    &[SPONGEBOB_TRANSFORMATION_ID.into()],
+                    "Sponge Bob!",
+                    &context,
+                    &cancelled,
+                )
+                .unwrap(),
+            "sPoNgE bOb!"
+        );
+    }
+
+    #[test]
+    fn built_in_transformations_replace_matching_personal_catalog_entries() {
+        let mut status = StatusSnapshot {
+            transformations: vec![
+                StatusTransformation {
+                    id: LOWERCASE_TRANSFORMATION_ID.into(),
+                    name: "Custom lowercase".into(),
+                    description: None,
+                },
+                StatusTransformation {
+                    id: "custom".into(),
+                    name: "Custom".into(),
+                    description: None,
+                },
+            ],
+            ..StatusSnapshot::default()
+        };
+
+        include_builtin_transformations(&mut status);
+
+        assert_eq!(
+            status
+                .transformations
+                .iter()
+                .map(|transformation| transformation.id.as_str())
+                .collect::<Vec<_>>(),
+            [
+                LOWERCASE_TRANSFORMATION_ID,
+                SPONGEBOB_TRANSFORMATION_ID,
+                "custom"
+            ]
+        );
     }
 
     #[test]

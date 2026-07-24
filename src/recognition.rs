@@ -916,6 +916,14 @@ fn handle_edit_hotkey_action(
 ) -> Result<bool> {
     match action {
         HotkeyAction::Start => {
+            if !crate::dictation_processor::opencode_installed() {
+                feedback::play(Tone::Error);
+                events.dictation(
+                    DictationPhase::Failed("Voice Action requires OpenCode".into()),
+                    "",
+                )?;
+                return Ok(false);
+            }
             let promoted = dictation.is_recording();
             if !promoted {
                 dictation.start(action_at)?;

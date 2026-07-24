@@ -34,12 +34,11 @@ use crate::desktop_transcription_picker::{
 use crate::desktop_ui::{
     CANVAS, COMPACT_MULTILINE_INPUT_HEIGHT, CONTROL_HEIGHT, FAINT, LINE, MUTED, NEGATIVE,
     NavigationIcon, SECTION_GAP, SIDEBAR_WIDTH, SURFACE, SURFACE_HOVER, SURFACE_SELECTED, TEXT,
-    TEXT_SOFT, bounded_pane_header, bounded_pane_header_with_action, compact_button,
-    compact_header_plus_button, compact_panel, compact_panel_header, compact_plus_button,
-    compact_section_label, disclosure_button, empty_message, error_message, hotkey_keycaps,
-    listener_status, mix_color, navigation_item, pane_header, section_label, segmented_control,
-    segmented_item, settings_copy, settings_panel, settings_row, settings_section_label,
-    sidebar_frame, toggle, window_frame,
+    TEXT_SOFT, bounded_pane_header, compact_button, compact_header_plus_button, compact_panel,
+    compact_panel_header, compact_plus_button, compact_section_label, disclosure_button,
+    empty_message, error_message, hotkey_keycaps, listener_status, mix_color, navigation_item,
+    pane_header, section_label, segmented_control, segmented_item, settings_copy, settings_panel,
+    settings_row, settings_section_label, sidebar_frame, toggle, window_frame,
 };
 use crate::dictation_indicator::{DictationIndicatorEvent, DictationIndicatorSender, HudTuning};
 use crate::dictation_processor::{ModelCatalog, ModelChoice};
@@ -77,7 +76,10 @@ actions!(
         HideApplication,
         MinimizeWindow,
         QuitApplication,
+        ShowCommands,
+        ShowModes,
         ShowSettings,
+        ShowVoiceAction,
         ToggleFullscreen,
     ]
 );
@@ -225,6 +227,9 @@ pub struct AppWindowPreview {
     pub transcription_picker: Option<(String, PreviewModelState)>,
     pub onboarding: bool,
     pub collapse_mode_processing: bool,
+    pub open_transformation_picker: bool,
+    pub select_global_mode: bool,
+    pub opencode_unavailable: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -472,7 +477,6 @@ struct ProcessingInputs {
 struct VoiceActionInputs {
     model: ProcessingInput,
     deadline: ProcessingInput,
-    practice: ProcessingInput,
 }
 
 struct ReplacementInputs {
@@ -862,7 +866,12 @@ impl AppWindow {
             Self::transcription_hints_input(&settings.transcription.recognition_hints, cx);
         let processing_inputs = Self::processing_inputs(&settings, cx);
         let voice_action_inputs = Self::voice_action_inputs(&settings, cx);
-        let (model_catalog, model_catalog_receiver) = if preview_mode {
+        let (model_catalog, model_catalog_receiver) = if preview
+            .as_ref()
+            .is_some_and(|preview| preview.opencode_unavailable)
+        {
+            (ModelCatalogState::Missing, None)
+        } else if preview_mode {
             (
                 ModelCatalogState::Loaded(ModelCatalog {
                     models: vec![ModelChoice {
@@ -909,7 +918,7 @@ impl AppWindow {
             crate::app_paths::personal_commands_workspace()
                 .unwrap_or_else(|_| PathBuf::from("~/.config/hex"))
         };
-        let personal_commands_status = if preview_mode {
+        let mut personal_commands_status = if preview_mode {
             StatusSnapshot {
                 transformations: vec![
                     StatusTransformation {
@@ -932,6 +941,7 @@ impl AppWindow {
                 ..StatusSnapshot::default()
             })
         };
+        crate::personal_commands::include_builtin_transformations(&mut personal_commands_status);
         let commands = merged_catalog(&compiled_commands, &personal_commands_status);
         let preview_picker = preview
             .as_ref()
@@ -1055,7 +1065,12 @@ impl AppWindow {
             apple_speech_capability_retry_at: Instant::now(),
             processing_inputs,
             voice_action_inputs,
-            selected_mode: if preview.as_ref().is_some_and(|preview| {
+            selected_mode: if preview
+                .as_ref()
+                .is_some_and(|preview| preview.select_global_mode)
+            {
+                ModeSelection::Default
+            } else if preview.as_ref().is_some_and(|preview| {
                 matches!(preview.pane, PreviewPane::Modes | PreviewPane::Replacements)
             }) {
                 ModeSelection::Custom(0)
@@ -1070,7 +1085,9 @@ impl AppWindow {
             application_search,
             application_picker_open: false,
             application_picker_error: None,
-            transformation_picker_open: false,
+            transformation_picker_open: preview
+                .as_ref()
+                .is_some_and(|preview| preview.open_transformation_picker),
             application_picker_highlight: 0,
             model_picker_highlight: 0,
             mode_delete_armed: false,
@@ -1209,6 +1226,10 @@ impl AppWindow {
         }
         self.model_catalog_retry_at = Instant::now() + OPENCODE_INSTALL_RETRY_INTERVAL;
         self.model_catalog_receiver = Some(start_model_catalog_load());
+    }
+
+    fn opencode_available(&self) -> bool {
+        matches!(&self.model_catalog, ModelCatalogState::Loaded(_))
     }
 
     fn poll_application_catalog(&mut self) -> bool {
@@ -1391,9 +1412,10 @@ impl AppWindow {
         if self.preview {
             return false;
         }
-        let Ok(status) = crate::personal_commands::load_status() else {
+        let Ok(mut status) = crate::personal_commands::load_status() else {
             return false;
         };
+        crate::personal_commands::include_builtin_transformations(&mut status);
         if status == self.personal_commands_status {
             return false;
         }
@@ -1734,17 +1756,23 @@ impl AppWindow {
     }
 
     fn render_navigation(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        let opencode_available = self.opencode_available();
         let items = Pane::all(self.capabilities())
             .into_iter()
             .enumerate()
             .map(|(index, pane)| {
                 let selected = self.pane == pane;
-                navigation_item(pane.icon(), selected)
+                let enabled = pane != Pane::VoiceAction || opencode_available;
+                let item = navigation_item(pane.icon(), selected)
                     .id(("app-nav", index))
-                    .child(pane.label())
-                    .on_click(cx.listener(move |this, _, _, cx| {
+                    .child(pane.label());
+                if enabled {
+                    item.on_click(cx.listener(move |this, _, _, cx| {
                         this.select_pane(pane, cx);
                     }))
+                } else {
+                    item.opacity(0.42)
+                }
             });
 
         sidebar_frame()
@@ -2921,11 +2949,56 @@ impl AppWindow {
     }
 
     fn render_voice_action(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        if !self.opencode_available() {
+            let (title, description) = match &self.model_catalog {
+                ModelCatalogState::Loading => (
+                    "Checking for OpenCode",
+                    "Voice Action will be available after HEX connects to OpenCode.",
+                ),
+                ModelCatalogState::Missing => (
+                    "Voice Action requires OpenCode",
+                    "Install and configure OpenCode to turn spoken instructions into paste-ready text.",
+                ),
+                ModelCatalogState::Failed(_) => (
+                    "OpenCode is unavailable",
+                    "HEX could not load the OpenCode model catalog. Check OpenCode and try again.",
+                ),
+                ModelCatalogState::Loaded(_) => unreachable!(),
+            };
+            return div()
+                .size_full()
+                .flex()
+                .flex_col()
+                .child(pane_header("Voice Action", None))
+                .child(
+                    div().flex_1().flex().items_center().justify_center().child(
+                        div()
+                            .w(px(420.0))
+                            .p_5()
+                            .rounded_md()
+                            .border_1()
+                            .border_color(rgb(LINE))
+                            .bg(rgb(SURFACE))
+                            .child(settings_copy(title, description))
+                            .child(
+                                compact_button("Open OpenCode setup")
+                                    .id("open-opencode-setup")
+                                    .mt_4()
+                                    .w(px(170.0))
+                                    .justify_center()
+                                    .border_1()
+                                    .border_color(rgb(LINE))
+                                    .bg(rgb(SURFACE_SELECTED))
+                                    .on_click(|_, _, _| open_opencode_beta_docs()),
+                            ),
+                    ),
+                )
+                .into_any_element();
+        }
         let compact = window.viewport_size().width < px(980.0);
         let hotkey = self.render_hotkey_control(HotkeyKind::Edit, window, cx);
         let model = self.voice_action_inputs.model.entity.clone();
         let deadline = self.voice_action_inputs.deadline.entity.clone();
-        let practice = self.voice_action_inputs.practice.entity.clone();
         let processing = self.render_processing_settings(
             ModelPickerTarget::VoiceAction,
             None,
@@ -2990,84 +3063,6 @@ impl AppWindow {
                                         "Release to paste",
                                         "The result is pasted wherever focus is when processing finishes.",
                                     )),
-                            )
-                            .child(settings_section_label("Try it"))
-                            .child(
-                                div()
-                                    .p_4()
-                                    .rounded_md()
-                                    .border_1()
-                                    .border_color(rgb(LINE))
-                                    .bg(rgb(SURFACE))
-                                    .child(
-                                        div()
-                                            .flex()
-                                            .items_start()
-                                            .justify_between()
-                                            .gap_4()
-                                            .child(
-                                                div()
-                                                    .min_w(px(0.0))
-                                                    .child(
-                                                        div()
-                                                            .text_size(px(12.0))
-                                                            .font_weight(FontWeight::SEMIBOLD)
-                                                            .text_color(rgb(TEXT_SOFT))
-                                                            .child("Practice text"),
-                                                    )
-                                                    .child(
-                                                        div()
-                                                            .pt_1()
-                                                            .text_size(px(10.0))
-                                                            .text_color(rgb(MUTED))
-                                                            .child("Select the sample, then run Voice Action with one of the instructions below."),
-                                                    ),
-                                            )
-                                            .child(
-                                                compact_button("Select text")
-                                                    .id("select-voice-action-sample")
-                                                    .flex_none()
-                                                    .bg(rgb(SURFACE_SELECTED))
-                                                    .on_click(cx.listener(|this, _, window, cx| {
-                                                        let practice = this
-                                                            .voice_action_inputs
-                                                            .practice
-                                                            .entity
-                                                            .clone();
-                                                        practice.update(cx, |input, cx| {
-                                                            input.select_all_text(cx)
-                                                        });
-                                                        practice.focus_handle(cx).focus(window);
-                                                        cx.notify();
-                                                    })),
-                                            ),
-                                    )
-                                    .child(
-                                        div()
-                                            .mt_3()
-                                            .child(practice),
-                                    )
-                                    .child(
-                                        div()
-                                            .pt_3()
-                                            .text_size(px(10.0))
-                                            .font_weight(FontWeight::SEMIBOLD)
-                                            .text_color(rgb(MUTED))
-                                            .child("Try saying"),
-                                    )
-                                    .child(
-                                        div()
-                                            .pt_2()
-                                            .flex()
-                                            .flex_wrap()
-                                            .gap_2()
-                                            .children([
-                                                voice_action_prompt("Make this sound official"),
-                                                voice_action_prompt("Turn this into a three-step policy"),
-                                                voice_action_prompt("Rewrite this like a nature documentary"),
-                                                voice_action_prompt("Make it ominously polite"),
-                                            ]),
-                                    ),
                             )
                             .child(settings_section_label("Capture"))
                             .child(
@@ -3211,16 +3206,6 @@ impl AppWindow {
             deadline: ProcessingInput {
                 entity: deadline,
                 _subscriptions: vec![deadline_subscription],
-            },
-            practice: ProcessingInput {
-                entity: cx.new(|cx| {
-                    TextInput::new(
-                        cx,
-                        "Write or paste text to practice with...",
-                        "The moon appointed our office raccoon release manager; every deploy now requires a tiny trumpet solo.",
-                    )
-                }),
-                _subscriptions: Vec::new(),
             },
         }
     }
@@ -3429,8 +3414,10 @@ impl AppWindow {
         let modes_content_width = mode_list_width + 20.0 + 700.0;
         let add = compact_plus_button()
             .id("add-dictation-mode")
-            .size(px(30.0))
-            .hover(|button| button.bg(rgb(SURFACE_HOVER)))
+            .border_1()
+            .border_color(rgb(LINE))
+            .bg(rgb(SURFACE_SELECTED))
+            .hover(|button| button.bg(rgb(0x454545)))
             .on_click(cx.listener(|this, _, window, cx| {
                 let mut mode = this.settings.dictation_processing.default_mode.clone();
                 mode.name = format!("Mode {}", this.processing_inputs.modes.len() + 1);
@@ -3501,11 +3488,7 @@ impl AppWindow {
             .size_full()
             .flex()
             .flex_col()
-            .child(bounded_pane_header_with_action(
-                "Modes",
-                modes_content_width,
-                Some(add.into_any_element()),
-            ))
+            .child(bounded_pane_header("Modes", modes_content_width))
             .child(
                 div()
                     .flex_1()
@@ -3530,7 +3513,16 @@ impl AppWindow {
                                     .flex()
                                     .flex_col()
                                     .gap_2()
-                                    .child(compact_section_label("MODES"))
+                                    .child(
+                                        div()
+                                            .h(px(28.0))
+                                            .flex_none()
+                                            .flex()
+                                            .items_center()
+                                            .justify_between()
+                                            .child(compact_section_label("MODES"))
+                                            .child(add),
+                                    )
                                     .child(
                                         compact_panel()
                                             .id("mode-list-card")
@@ -3605,6 +3597,7 @@ impl AppWindow {
             )
         };
         let processing_enabled = self.selected_mode_settings().post_processing.enabled;
+        let processing_can_toggle = processing_enabled || self.opencode_available();
         let corrections = self.render_mode_replacements(selection, cx);
         let transformations = self.render_mode_transformations(selection, cx);
         let application_picker =
@@ -3671,14 +3664,17 @@ impl AppWindow {
             .flex()
             .items_center()
             .child(toggle(processing_position))
-            .on_click(cx.listener(move |this, _, _, cx| {
-                let enabled = !this.selected_mode_settings().post_processing.enabled;
-                this.selected_mode_inputs_mut()
-                    .processing_toggle
-                    .set_enabled(enabled);
-                this.selected_mode_settings_mut().post_processing.enabled = enabled;
-                this.save_settings(cx);
-            }))
+            .when(!processing_can_toggle, |control| control.opacity(0.42))
+            .when(processing_can_toggle, |control| {
+                control.on_click(cx.listener(move |this, _, _, cx| {
+                    let enabled = !this.selected_mode_settings().post_processing.enabled;
+                    this.selected_mode_inputs_mut()
+                        .processing_toggle
+                        .set_enabled(enabled);
+                    this.selected_mode_settings_mut().post_processing.enabled = enabled;
+                    this.save_settings(cx);
+                }))
+            })
             .into_any_element();
         let processing_settings = processing_enabled.then(|| {
             self.render_processing_settings(
@@ -3778,7 +3774,14 @@ impl AppWindow {
                     .flex_col()
                     .gap(px(SECTION_GAP))
                     .pb_5()
-                    .child(compact_section_label("MODE"))
+                    .child(
+                        div()
+                            .h(px(28.0))
+                            .flex_none()
+                            .flex()
+                            .items_center()
+                            .child(compact_section_label("MODE")),
+                    )
                     .child(basics)
                     .child(div().h(px(4.0)))
                     .child(compact_section_label("TEXT PROCESSING"))
@@ -3950,6 +3953,9 @@ impl AppWindow {
         let add = (!catalog_empty).then(|| {
             let button = if self.transformation_picker_open {
                 compact_button("Done")
+                    .h(px(28.0))
+                    .mr(px(-7.0))
+                    .text_size(px(10.0))
             } else {
                 compact_header_plus_button()
             };
@@ -6296,9 +6302,22 @@ impl Render for AppWindow {
             .on_action(|_: &MinimizeWindow, window, _| window.minimize_window())
             .on_action(|_: &ToggleFullscreen, window, _| window.toggle_fullscreen())
             .on_action(cx.listener(|this, _: &ShowSettings, window, cx| {
-                this.pane = Pane::Settings;
+                this.select_pane(Pane::Settings, cx);
                 window.activate_window();
-                cx.notify();
+            }))
+            .on_action(cx.listener(|this, _: &ShowModes, window, cx| {
+                this.select_pane(Pane::Modes, cx);
+                window.activate_window();
+            }))
+            .on_action(cx.listener(|this, _: &ShowVoiceAction, window, cx| {
+                if this.opencode_available() {
+                    this.select_pane(Pane::VoiceAction, cx);
+                    window.activate_window();
+                }
+            }))
+            .on_action(cx.listener(|this, _: &ShowCommands, window, cx| {
+                this.select_pane(Pane::Commands, cx);
+                window.activate_window();
             }))
             .child(self.render_navigation(cx))
             .child(div().flex_1().h_full().overflow_hidden().child(content))
@@ -6351,19 +6370,6 @@ fn voice_action_step(number: &'static str, title: &'static str, description: &'s
                         .child(description),
                 ),
         )
-}
-
-fn voice_action_prompt(prompt: &'static str) -> Div {
-    div()
-        .h(px(26.0))
-        .px_3()
-        .flex()
-        .items_center()
-        .rounded_full()
-        .bg(rgb(SURFACE_SELECTED))
-        .text_size(px(10.0))
-        .text_color(rgb(MUTED))
-        .child(prompt)
 }
 
 fn hotkey_capture_width(keycap_count: usize) -> f32 {
@@ -6497,7 +6503,7 @@ fn mode_row(
             row.child(
                 div()
                     .text_size(px(10.0))
-                    .text_color(rgb(FAINT))
+                    .text_color(rgb(if selected { TEXT_SOFT } else { FAINT }))
                     .truncate()
                     .child(subtitle),
             )

@@ -226,6 +226,9 @@ cargo run -- preview transcription-picker --language zh --model-state installed
 ./scripts/capture-preview.sh /tmp/hex-preview.png settings
 ./scripts/capture-preview.sh /tmp/hex-modes.png modes
 ./scripts/capture-preview.sh /tmp/hex-modes-collapsed.png modes --collapse-mode-processing
+./scripts/capture-preview.sh /tmp/hex-modes-picker.png modes --collapse-mode-processing --open-transformation-picker
+./scripts/capture-preview.sh /tmp/hex-modes-global.png modes --collapse-mode-processing --select-global-mode
+./scripts/capture-preview.sh /tmp/hex-voice-action-unavailable.png voice-action --opencode-unavailable
 HEX_PREVIEW_SKIP_BUILD=1 ./scripts/capture-preview.sh /tmp/hex-modes.png modes
 ./scripts/install-app.sh
 cargo fmt --check
@@ -244,7 +247,9 @@ preview. Targets include `settings`, `modes`, `voice-action`, `commands`,
 `dictation-hud`. The Modes preview includes representative activation,
 correction, model-variant, and transformation data so it exercises the complete
 editor. Pass `--collapse-mode-processing` to expose the lower transformation
-and deletion states without scrolling. After a successful build, set
+and deletion states without scrolling. Use `--open-transformation-picker`,
+`--select-global-mode`, and `--opencode-unavailable` to capture those states
+directly instead of scripting pointer coordinates. After a successful build, set
 `HEX_PREVIEW_SKIP_BUILD=1` for repeated
 captures that do not require recompilation; `HEX_PREVIEW_BINARY` can override
 the release binary path. Keep release previews authoritative for production

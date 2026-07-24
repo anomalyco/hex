@@ -169,6 +169,15 @@ enum Command {
         /// Collapse OpenCode settings in the representative Modes preview.
         #[arg(long)]
         collapse_mode_processing: bool,
+        /// Open the transformation picker in the representative Modes preview.
+        #[arg(long)]
+        open_transformation_picker: bool,
+        /// Select the Global row in the representative Modes preview.
+        #[arg(long)]
+        select_global_mode: bool,
+        /// Preview OpenCode-dependent controls without an available installation.
+        #[arg(long)]
+        opencode_unavailable: bool,
     },
     /// Listen and transcribe until interrupted.
     Listen {
@@ -415,6 +424,9 @@ fn main() -> Result<()> {
             language,
             model_state,
             collapse_mode_processing,
+            open_transformation_picker,
+            select_global_mode,
+            opencode_unavailable,
         } => {
             if matches!(target, AppPreviewTarget::DictationHud) {
                 return meeting_watcher::run(&SHUTDOWN, false, None, true);
@@ -453,6 +465,9 @@ fn main() -> Result<()> {
                         .then_some((language, model_state)),
                     onboarding: matches!(target, AppPreviewTarget::Onboarding),
                     collapse_mode_processing,
+                    open_transformation_picker,
+                    select_global_mode,
+                    opencode_unavailable,
                 },
             )
         }
