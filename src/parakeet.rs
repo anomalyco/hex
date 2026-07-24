@@ -16,6 +16,7 @@ use transcribe_cpp::{
 use crate::context::ContextSnapshot;
 use crate::dictation::{DictationClip, DictationProtocol, pad_for_parakeet};
 use crate::dictation_processor::ProcessingObservation;
+use crate::history::{History, HistoryDraft, HistoryKind};
 use crate::meeting::{self, TranscriptEntry, TranscriptPublication};
 use crate::paste::Paster;
 use crate::suppression::InputActivity;
@@ -115,6 +116,9 @@ struct ProcessorJob {
 
 struct CompletedTranscript {
     text: String,
+    /// Corrected local transcript before mode processing.
+    raw: String,
+    application: Option<String>,
     total_started: Instant,
     queue_ms: u128,
     audio_ms: u64,
@@ -236,6 +240,7 @@ impl DictationWorker {
     pub fn start(
         activity: InputActivity,
         transformations: Arc<crate::personal_commands::TransformationClient>,
+        history: Option<History>,
     ) -> Self {
         const PROCESSOR_WORKERS: usize = 2;
         let (inference_jobs, inference_receiver) = mpsc::sync_channel::<InferenceCommand>(2);
@@ -274,8 +279,13 @@ impl DictationWorker {
                     continue;
                 }
                 for job in ordered.push(job) {
-                    let event =
-                        finish_output(job, &mut paster, &mut last_transcript, &mut meeting_cursor);
+                    let event = finish_output(
+                        job,
+                        &mut paster,
+                        &mut last_transcript,
+                        &mut meeting_cursor,
+                        history.as_ref(),
+                    );
                     let mut state = output_state
                         .lock()
                         .unwrap_or_else(|error| error.into_inner());
@@ -400,6 +410,8 @@ impl DictationWorker {
                             target: job.target,
                             result: Box::new(Ok(CompletedTranscript {
                                 text: processed.text,
+                                raw: job.text,
+                                application: job.context.application,
                                 total_started: job.total_started,
                                 queue_ms: job.queue_ms,
                                 audio_ms: job.audio_ms,
@@ -519,8 +531,11 @@ impl DictationWorker {
                         }
                     }
                     result => {
+                        let application = job.context.application;
                         let result = result.map(|text| CompletedTranscript {
+                            raw: text.clone(),
                             text,
+                            application,
                             total_started,
                             queue_ms,
                             audio_ms,
@@ -719,6 +734,7 @@ fn finish_output(
     paster: &mut Paster,
     last_transcript: &mut Option<String>,
     meeting_cursor: &mut MeetingPasteCursor,
+    history: Option<&History>,
 ) -> WorkerEvent {
     match job {
         OutputJob::PreparePaste => unreachable!("paste preparation bypasses ordered output"),
@@ -767,6 +783,9 @@ fn finish_output(
                     ) {
                         *last_transcript = Some(completed.text.clone());
                     }
+                    if let Some(history) = history {
+                        record_history(history, target, &completed);
+                    }
                 }
                 tracing::info!(
                     audio_ms = completed.audio_ms,
@@ -808,6 +827,36 @@ fn finish_output(
             };
             WorkerEvent::Pasted { kind, result }
         }
+    }
+}
+
+/// Record one successfully pasted result. History failures must never fail
+/// the paste that already happened.
+fn record_history(history: &History, target: TranscriptionTarget, completed: &CompletedTranscript) {
+    let kind = match target {
+        TranscriptionTarget::Paste => HistoryKind::Dictation,
+        TranscriptionTarget::Send => HistoryKind::Send,
+        TranscriptionTarget::VoiceAction => HistoryKind::VoiceAction,
+    };
+    let draft = HistoryDraft {
+        kind,
+        raw_text: completed.raw.clone(),
+        final_text: completed.text.clone(),
+        application: completed.application.clone(),
+        processing: completed
+            .processing
+            .as_ref()
+            .map(|processing| crate::history::HistoryProcessing {
+                profile: processing.profile.clone(),
+                latency_ms: processing.latency_ms,
+                fallback: processing.fallback.clone(),
+            }),
+        audio_ms: completed.audio_ms,
+        inference_ms: completed.inference_ms as u64,
+        total_ms: completed.total_started.elapsed().as_millis() as u64,
+    };
+    if let Err(error) = history.record(draft) {
+        tracing::warn!(%error, "could not record dictation history");
     }
 }
 

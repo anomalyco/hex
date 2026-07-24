@@ -129,6 +129,17 @@ fn run_with_shell_preview(
     };
     let show_dock_icon = settings.show_dock_icon;
     let setup_ready = crate::onboarding::status(&settings.transcription).ready();
+    let history = if listener.is_some() {
+        match crate::history::History::open_default(settings.history_retention) {
+            Ok(history) => Some(history),
+            Err(error) => {
+                tracing::warn!(%error, "dictation history is unavailable");
+                None
+            }
+        }
+    } else {
+        None
+    };
     let app_event_path = listener
         .as_ref()
         .map(|listener| listener.event_path.clone());
@@ -242,6 +253,7 @@ fn run_with_shell_preview(
         let recognition_indicator = indicator_sender.clone();
         let meeting_requests =
             crate::DEVELOPER_FEATURES_ENABLED.then(|| recognition_meeting_requests.clone());
+        let recognition_history = history.clone();
         let start = recognition_start_receiver.expect("listener start receiver must exist");
         thread::spawn(move || {
             if !setup_ready {
@@ -264,6 +276,7 @@ fn run_with_shell_preview(
                 shutdown,
                 Some(recognition_indicator),
                 meeting_requests,
+                recognition_history,
             ) {
                 tracing::error!(%error, "desktop recognition stopped");
                 failure_indicator.send(crate::dictation_indicator::DictationIndicatorEvent::Failed);

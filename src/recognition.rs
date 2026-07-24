@@ -77,6 +77,7 @@ pub fn listen(
     shutdown: &AtomicBool,
     indicator: Option<DictationIndicatorSender>,
     meeting_requests: Option<SyncSender<MeetingRequest>>,
+    history: Option<crate::history::History>,
 ) -> Result<()> {
     let commands = Arc::new(commands);
     let native_runtime = Arc::new(crate::personal_commands::RuntimeSnapshot::native(
@@ -122,8 +123,11 @@ pub fn listen(
         recording_environment,
         input_monitor.pending_events(),
     )?;
-    let dictation_worker =
-        DictationWorker::start(input_monitor.activity.clone(), transformations.clone());
+    let dictation_worker = DictationWorker::start(
+        input_monitor.activity.clone(),
+        transformations.clone(),
+        history,
+    );
     let (mut transcription_revision, _) = crate::app_settings::transcription_selection();
     let mut action_executor = commands_enabled.then(ActionExecutor::start);
     let mut personal_host_enabled =

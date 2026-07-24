@@ -343,6 +343,7 @@ pub struct AppSettings {
     pub transcription: TranscriptionSelection,
     pub dictation_processing: DictationProcessingSettings,
     pub voice_action: VoiceActionSettings,
+    pub history_retention: crate::history::HistoryRetention,
     #[serde(skip_serializing)]
     pub text_replacements: Vec<TextReplacement>,
 }
@@ -370,6 +371,7 @@ impl Default for AppSettings {
             transcription: TranscriptionSelection::default(),
             dictation_processing: DictationProcessingSettings::default(),
             voice_action: VoiceActionSettings::default(),
+            history_retention: crate::history::HistoryRetention::default(),
             text_replacements: Vec::new(),
         }
     }

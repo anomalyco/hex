@@ -45,6 +45,7 @@ pub mod dictation_processor;
 mod events;
 #[cfg(target_os = "macos")]
 mod feedback;
+mod history;
 mod instance;
 #[cfg(target_os = "macos")]
 mod keyboard;
@@ -473,8 +474,15 @@ fn main() -> Result<()> {
         }
         Command::Listen { device } => {
             let _instance = instance::acquire("listener")?;
-            app_settings::AppSettings::load()?;
+            let settings = app_settings::AppSettings::load()?;
             let events = events::EventLog::create(&event_path)?;
+            let history = match history::History::open_default(settings.history_retention) {
+                Ok(history) => Some(history),
+                Err(error) => {
+                    tracing::warn!(%error, "dictation history is unavailable");
+                    None
+                }
+            };
             recognition::listen(
                 &root,
                 events,
@@ -483,6 +491,7 @@ fn main() -> Result<()> {
                 &SHUTDOWN,
                 None,
                 None,
+                history,
             )
         }
         Command::Service { embedded } => {
