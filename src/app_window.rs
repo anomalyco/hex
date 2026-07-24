@@ -1227,8 +1227,10 @@ impl AppWindow {
     }
 
     fn retry_model_catalog(&mut self) {
-        if !matches!(&self.model_catalog, ModelCatalogState::Missing)
-            || self.model_catalog_receiver.is_some()
+        if !matches!(
+            &self.model_catalog,
+            ModelCatalogState::Missing | ModelCatalogState::Failed(_)
+        ) || self.model_catalog_receiver.is_some()
             || Instant::now() < self.model_catalog_retry_at
         {
             return;

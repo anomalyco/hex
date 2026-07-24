@@ -3,9 +3,9 @@ use std::ffi::OsStr;
 use std::fs;
 use std::io::Read;
 use std::os::unix::fs::PermissionsExt;
+use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
-use std::process::{Command, ExitStatus, Stdio};
-use std::sync::OnceLock;
+use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -18,8 +18,7 @@ use crate::text_replacements::ReplacementSet;
 
 const PROTOCOL_PROMPT: &str = "You transform dictated speech into replacement text. Return only the text that should be pasted. Do not add an explanation, label, alternative, or Markdown fence.";
 const VOICE_ACTION_PROTOCOL_PROMPT: &str = "You execute a one-off voice instruction. When selected text is provided, transform or use it as instructed. When no text is selected, generate the requested text. Return only the exact paste-ready result without an explanation, label, alternative, or Markdown fence.";
-static MODEL_CATALOG: OnceLock<ModelCatalog> = OnceLock::new();
-static OPENCODE_EXECUTABLE: OnceLock<PathBuf> = OnceLock::new();
+const MAX_OPENCODE_OUTPUT_BYTES: u64 = 16 * 1024 * 1024;
 
 #[derive(Clone)]
 pub struct Profile {
@@ -324,14 +323,9 @@ fn model_is_available(model: &ModelInfo) -> bool {
 }
 
 pub fn load_model_catalog() -> Result<ModelCatalog> {
-    if let Some(catalog) = MODEL_CATALOG.get() {
-        return Ok(catalog.clone());
-    }
     let models: ModelsResponse = opencode_api("/api/model")?;
     let default: DefaultModelResponse = opencode_api("/api/model/default")?;
-    let catalog = build_model_catalog(models.data, default.data);
-    let _ = MODEL_CATALOG.set(catalog.clone());
-    Ok(catalog)
+    Ok(build_model_catalog(models.data, default.data))
 }
 
 fn build_model_catalog(models: Vec<ModelInfo>, default: Option<ModelInfo>) -> ModelCatalog {
@@ -577,6 +571,7 @@ fn run_command(
     cancelled: &AtomicBool,
 ) -> Result<CommandOutput> {
     let mut child = command
+        .process_group(0)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
@@ -593,19 +588,24 @@ fn run_command(
     let stderr = thread::spawn(move || read_output(stderr));
     let started = Instant::now();
     let status = loop {
-        if let Some(status) = child.try_wait().wrap_err("could not inspect opencode2")? {
-            break status;
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) => {}
+            Err(error) => {
+                terminate_process_group(&mut child);
+                let _ = stdout.join();
+                let _ = stderr.join();
+                return Err(error).wrap_err("could not inspect opencode2");
+            }
         }
         if cancelled.load(Ordering::Acquire) {
-            let _ = child.kill();
-            let _ = child.wait();
+            terminate_process_group(&mut child);
             let _ = stdout.join();
             let _ = stderr.join();
             return Err(eyre!("opencode2 {operation} was cancelled"));
         }
         if started.elapsed() >= deadline {
-            let _ = child.kill();
-            let _ = child.wait();
+            terminate_process_group(&mut child);
             let _ = stdout.join();
             let _ = stderr.join();
             return Err(eyre!(
@@ -615,6 +615,7 @@ fn run_command(
         }
         thread::sleep(Duration::from_millis(20));
     };
+    kill_process_group(child.id());
     let stdout = stdout
         .join()
         .map_err(|_| eyre!("opencode2 stdout reader panicked"))??;
@@ -628,46 +629,66 @@ fn run_command(
     })
 }
 
+fn terminate_process_group(child: &mut Child) {
+    kill_process_group(child.id());
+    let _ = child.kill();
+    let _ = child.wait();
+}
+
+fn kill_process_group(pid: u32) {
+    // run_command creates a new process group whose ID is the child PID.
+    unsafe {
+        libc::killpg(pid as libc::pid_t, libc::SIGKILL);
+    }
+}
+
 fn read_output(mut output: impl Read) -> Result<Vec<u8>> {
+    read_bounded_output(&mut output, MAX_OPENCODE_OUTPUT_BYTES)
+}
+
+fn read_bounded_output(mut output: impl Read, max_bytes: u64) -> Result<Vec<u8>> {
     let mut bytes = Vec::new();
     output
+        .by_ref()
+        .take(max_bytes + 1)
         .read_to_end(&mut bytes)
         .wrap_err("could not read opencode2 output")?;
-    Ok(bytes)
+    if bytes.len() as u64 > max_bytes {
+        Err(eyre!("opencode2 output exceeded {max_bytes} bytes"))
+    } else {
+        Ok(bytes)
+    }
 }
 
 fn opencode_executable() -> PathBuf {
-    if let Some(path) = OPENCODE_EXECUTABLE.get() {
-        return path.clone();
-    }
-    let path = find_opencode_executable(
+    let current_directory = std::env::current_dir().ok();
+    find_opencode_executable(
         std::env::var_os("VOICE_CONTROL_OPENCODE_CLI").map(PathBuf::from),
         std::env::var_os("PATH").as_deref(),
         dirs::home_dir().as_deref(),
-    );
-    let Some(path) = path else {
-        return "opencode2".into();
-    };
-    let _ = OPENCODE_EXECUTABLE.set(path.clone());
-    OPENCODE_EXECUTABLE.get().cloned().unwrap_or(path)
+        current_directory.as_deref(),
+    )
+    .unwrap_or_else(|| "opencode2".into())
 }
 
 fn find_opencode_executable(
     configured: Option<PathBuf>,
     path: Option<&OsStr>,
     home: Option<&Path>,
+    current_directory: Option<&Path>,
 ) -> Option<PathBuf> {
     if let Some(configured) = configured {
-        return is_executable(&configured).then_some(configured);
+        return Some(absolute_path(configured, current_directory));
     }
     let path_candidates = path
         .into_iter()
         .flat_map(std::env::split_paths)
-        .map(|directory| directory.join("opencode2"));
+        .map(|directory| absolute_path(directory.join("opencode2"), current_directory));
     let home_candidates = home.into_iter().flat_map(|home| {
         [
             home.join(".bun/bin/opencode2"),
             home.join("Library/pnpm/opencode2"),
+            home.join("Library/pnpm/bin/opencode2"),
             home.join(".yarn/bin/opencode2"),
             home.join(".config/yarn/global/node_modules/.bin/opencode2"),
             home.join(".npm-global/bin/opencode2"),
@@ -676,15 +697,59 @@ fn find_opencode_executable(
             home.join(".volta/bin/opencode2"),
             home.join(".asdf/shims/opencode2"),
             home.join(".local/share/mise/shims/opencode2"),
+            home.join(".nodenv/shims/opencode2"),
         ]
     });
     path_candidates
         .chain(home_candidates)
+        .chain(version_manager_candidates(home))
         .chain([
             PathBuf::from("/opt/homebrew/bin/opencode2"),
             PathBuf::from("/usr/local/bin/opencode2"),
         ])
         .find(|path| is_executable(path))
+}
+
+fn absolute_path(path: PathBuf, current_directory: Option<&Path>) -> PathBuf {
+    if path.is_absolute() {
+        path
+    } else {
+        current_directory
+            .map(|directory| directory.join(&path))
+            .unwrap_or(path)
+    }
+}
+
+fn version_manager_candidates(home: Option<&Path>) -> Vec<PathBuf> {
+    let Some(home) = home else {
+        return Vec::new();
+    };
+    let roots = [
+        (home.join(".nvm/versions/node"), "bin/opencode2"),
+        (
+            home.join("Library/Application Support/fnm/node-versions"),
+            "installation/bin/opencode2",
+        ),
+        (
+            home.join(".local/share/fnm/node-versions"),
+            "installation/bin/opencode2",
+        ),
+        (
+            home.join(".fnm/node-versions"),
+            "installation/bin/opencode2",
+        ),
+    ];
+    roots
+        .into_iter()
+        .flat_map(|(root, suffix)| {
+            fs::read_dir(root)
+                .into_iter()
+                .flatten()
+                .flatten()
+                .take(64)
+                .map(move |entry| entry.path().join(suffix))
+        })
+        .collect()
 }
 
 fn opencode_command() -> Result<Command> {
@@ -707,6 +772,7 @@ fn opencode_command_in(workspace: &Path) -> Result<Command> {
     let directory = workspace
         .to_str()
         .ok_or_else(|| eyre!("OpenCode workspace path is not valid UTF-8"))?;
+    let directory = encode_uri_component(directory);
     let mut command = Command::new(opencode_executable());
     command.current_dir(&workspace).args([
         "api",
@@ -714,6 +780,20 @@ fn opencode_command_in(workspace: &Path) -> Result<Command> {
         &format!("x-opencode-directory:{directory}"),
     ]);
     Ok(command)
+}
+
+fn encode_uri_component(value: &str) -> String {
+    let mut encoded = String::with_capacity(value.len());
+    for byte in value.bytes() {
+        if byte.is_ascii_alphanumeric() {
+            encoded.push(char::from(byte));
+        } else {
+            encoded.push('%');
+            encoded.push(char::from(b"0123456789ABCDEF"[(byte >> 4) as usize]));
+            encoded.push(char::from(b"0123456789ABCDEF"[(byte & 0x0f) as usize]));
+        }
+    }
+    encoded
 }
 
 #[cfg(test)]
@@ -744,14 +824,19 @@ mod tests {
             std::process::id(),
             thread::current().id()
         ));
-        let executable = root.join("Library/pnpm/opencode2");
+        let executable = root.join("Library/pnpm/bin/opencode2");
         std::fs::create_dir_all(executable.parent().unwrap()).unwrap();
         std::fs::write(&executable, "#!/bin/sh\n").unwrap();
         let mut permissions = executable.metadata().unwrap().permissions();
         permissions.set_mode(0o755);
         std::fs::set_permissions(&executable, permissions).unwrap();
 
-        let found = find_opencode_executable(None, Some(OsStr::new("/usr/bin:/bin")), Some(&root));
+        let found = find_opencode_executable(
+            None,
+            Some(OsStr::new("/usr/bin:/bin")),
+            Some(&root),
+            Some(&root),
+        );
 
         assert_eq!(found, Some(executable));
         std::fs::remove_dir_all(root).unwrap();
@@ -764,6 +849,7 @@ mod tests {
             std::process::id(),
             thread::current().id()
         ));
+        let root = root.join("scope %2F café");
 
         let command = opencode_command_in(&root).unwrap();
         let workspace = root.canonicalize().unwrap();
@@ -778,9 +864,46 @@ mod tests {
             [
                 "api",
                 "--header",
-                &format!("x-opencode-directory:{}", workspace.display())
+                &format!(
+                    "x-opencode-directory:{}",
+                    encode_uri_component(workspace.to_str().unwrap())
+                )
             ]
         );
+        std::fs::remove_dir_all(root.parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn configured_relative_executable_is_resolved_before_the_workspace_changes() {
+        let current = Path::new("/tmp/hex-launch");
+
+        let found = find_opencode_executable(
+            Some(PathBuf::from("bin/opencode2")),
+            None,
+            None,
+            Some(current),
+        );
+
+        assert_eq!(found, Some(current.join("bin/opencode2")));
+    }
+
+    #[test]
+    fn version_manager_discovery_is_bounded_to_known_roots() {
+        let root = std::env::temp_dir().join(format!(
+            "hex-opencode-nvm-{}-{:?}",
+            std::process::id(),
+            thread::current().id()
+        ));
+        let executable = root.join(".nvm/versions/node/v24.4.1/bin/opencode2");
+        std::fs::create_dir_all(executable.parent().unwrap()).unwrap();
+        std::fs::write(&executable, "#!/bin/sh\n").unwrap();
+        let mut permissions = executable.metadata().unwrap().permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(&executable, permissions).unwrap();
+
+        let found = find_opencode_executable(None, None, Some(&root), Some(&root));
+
+        assert_eq!(found, Some(executable));
         std::fs::remove_dir_all(root).unwrap();
     }
 
@@ -910,6 +1033,30 @@ mod tests {
 
         assert!(error.to_string().contains("was cancelled"));
         assert!(started.elapsed() < Duration::from_secs(1));
+    }
+
+    #[test]
+    fn descendant_holding_output_cannot_outlive_the_command() {
+        let mut command = Command::new("/bin/sh");
+        command.args(["-c", "sleep 5 &"]);
+        let started = Instant::now();
+
+        let _ = run_command(
+            command,
+            Duration::from_millis(500),
+            "test descendant",
+            &AtomicBool::new(false),
+        );
+
+        assert!(started.elapsed() < Duration::from_secs(1));
+    }
+
+    #[test]
+    fn command_output_is_bounded() {
+        let error = read_bounded_output(std::io::Cursor::new(b"12345"), 4)
+            .expect_err("oversized output unexpectedly succeeded");
+
+        assert!(error.to_string().contains("exceeded 4 bytes"));
     }
 
     #[test]
