@@ -127,7 +127,7 @@ pub fn listen(
     let dictation_worker = DictationWorker::start(
         input_monitor.activity.clone(),
         transformations.clone(),
-        history,
+        history.clone(),
     );
     let (mut transcription_revision, _) = crate::app_settings::transcription_selection();
     let mut action_executor = commands_enabled.then(ActionExecutor::start);
@@ -436,6 +436,14 @@ pub fn listen(
             )?;
             if !accepted {
                 edit_hotkey.suspend();
+            }
+        }
+        if let Some(history) = &history {
+            while let Some(text) = history.next_paste_request() {
+                if let Err(error) = dictation_worker.paste_history(text) {
+                    tracing::warn!(%error, "could not paste the history entry");
+                    feedback::play(Tone::Error);
+                }
             }
         }
         let mut received_worker_event = false;
@@ -1483,7 +1491,7 @@ fn handle_dictation_event(
             result: Ok(text),
         } => {
             let phase = match kind {
-                PasteKind::LastTranscript => DictationPhase::Repasted,
+                PasteKind::LastTranscript | PasteKind::History => DictationPhase::Repasted,
                 PasteKind::MeetingDelta => DictationPhase::MeetingPasted,
             };
             events.dictation(phase, text)?;

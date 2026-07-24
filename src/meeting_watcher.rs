@@ -60,6 +60,7 @@ struct MeetingUi {
     meeting_requests: SyncSender<MeetingRequest>,
     indicator: crate::dictation_indicator::DictationIndicatorSender,
     recognition_start: Option<SyncSender<()>>,
+    history: Option<crate::history::History>,
 }
 
 struct RuntimeWorkers {
@@ -295,6 +296,7 @@ fn run_with_shell_preview(
     let reopen_meeting_requests = meeting_request_sender.clone();
     let reopen_recognition_start = recognition_start_sender.clone();
     let reopen_preview = shell_preview.clone();
+    let reopen_history = history.clone();
     let reopen_indicator = indicator_sender.clone();
     let indicator_enabled = shell_preview
         .as_ref()
@@ -318,6 +320,7 @@ fn run_with_shell_preview(
                 reopen_meeting_requests.clone(),
                 reopen_indicator.clone(),
                 reopen_recognition_start.clone(),
+                reopen_history.clone(),
                 cx,
             ),
         };
@@ -402,6 +405,7 @@ fn run_with_shell_preview(
                     meeting_request_sender.clone(),
                     indicator_sender.clone(),
                     recognition_start_sender.clone(),
+                    history.clone(),
                     cx,
                 )
             }),
@@ -420,6 +424,7 @@ fn run_with_shell_preview(
         })
         .detach();
 
+        let ui_history = history.clone();
         cx.spawn(async move |cx| {
             drive_ui(
                 event_receiver,
@@ -432,6 +437,7 @@ fn run_with_shell_preview(
                     meeting_requests: meeting_request_sender.clone(),
                     indicator: indicator_sender.clone(),
                     recognition_start: recognition_start_sender.clone(),
+                    history: ui_history.clone(),
                 },
                 shutdown,
                 indicator_enabled,
@@ -502,6 +508,7 @@ async fn drive_ui(
                         ui.meeting_requests.clone(),
                         ui.indicator.clone(),
                         ui.recognition_start.clone(),
+                        ui.history.clone(),
                         cx,
                     ) {
                         tracing::error!(%error, "could not open HEX for starting meeting");
@@ -519,6 +526,7 @@ async fn drive_ui(
                         ui.meeting_requests.clone(),
                         ui.indicator.clone(),
                         ui.recognition_start.clone(),
+                        ui.history.clone(),
                         cx,
                     ) {
                         tracing::error!(%error, "could not open HEX for active meeting");
@@ -546,6 +554,7 @@ async fn drive_ui(
                         ui.meeting_requests.clone(),
                         ui.indicator.clone(),
                         ui.recognition_start.clone(),
+                        ui.history.clone(),
                         cx,
                     ) {
                         tracing::error!(%open_error, "could not open HEX for meeting failure");
@@ -618,6 +627,7 @@ fn apply_developer_command(
                 ui.meeting_requests.clone(),
                 ui.indicator.clone(),
                 ui.recognition_start.clone(),
+                ui.history.clone(),
                 cx,
             ) {
                 Ok(handle) => handle,

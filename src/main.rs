@@ -328,6 +328,7 @@ enum AppPreviewTarget {
     Commands,
     Meetings,
     Activity,
+    History,
     TranscriptionPicker,
 }
 
@@ -449,6 +450,7 @@ fn main() -> Result<()> {
                 AppPreviewTarget::Commands => app_window::PreviewPane::Commands,
                 AppPreviewTarget::Meetings => app_window::PreviewPane::Meetings,
                 AppPreviewTarget::Activity => app_window::PreviewPane::Activity,
+                AppPreviewTarget::History => app_window::PreviewPane::History,
                 AppPreviewTarget::DictationHud => unreachable!(),
             };
             let model_state = match model_state {

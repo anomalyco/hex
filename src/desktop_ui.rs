@@ -10,6 +10,7 @@ use std::sync::Arc;
 pub(crate) enum NavigationIcon {
     Activity,
     Commands,
+    History,
     HudLab,
     Meetings,
     Modes,
@@ -25,6 +26,7 @@ impl NavigationIcon {
             Self::Modes => "square.grid.2x2.fill",
             Self::VoiceAction => "sparkle",
             Self::Commands => "command",
+            Self::History => "clock.arrow.circlepath",
             Self::Meetings => "calendar",
             Self::Activity => "chart.bar",
             Self::HudLab => "flask",
@@ -38,6 +40,7 @@ impl NavigationIcon {
             Self::Modes => include_str!("../assets/icons/modes.svg"),
             Self::VoiceAction => include_str!("../assets/icons/voice-action.svg"),
             Self::Commands => include_str!("../assets/icons/commands.svg"),
+            Self::History => include_str!("../assets/icons/history.svg"),
             Self::Meetings => include_str!("../assets/icons/meetings.svg"),
             Self::Activity => include_str!("../assets/icons/activity.svg"),
             Self::HudLab => include_str!("../assets/icons/hud-lab.svg"),

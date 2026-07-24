@@ -76,6 +76,7 @@ pub enum DictationJobStage {
 pub enum PasteKind {
     LastTranscript,
     MeetingDelta,
+    History,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -141,6 +142,7 @@ enum OutputJob {
     Paste {
         sequence: u64,
         kind: PasteKind,
+        text: Option<String>,
     },
 }
 
@@ -626,14 +628,20 @@ impl DictationWorker {
     }
 
     pub fn paste_last(&self) -> Result<(), &'static str> {
-        self.submit_paste(PasteKind::LastTranscript)
+        self.submit_paste(PasteKind::LastTranscript, None)
     }
 
     pub fn paste_meeting(&self) -> Result<(), &'static str> {
-        self.submit_paste(PasteKind::MeetingDelta)
+        self.submit_paste(PasteKind::MeetingDelta, None)
     }
 
-    fn submit_paste(&self, kind: PasteKind) -> Result<(), &'static str> {
+    /// Paste a retained history entry's text through the ordered output
+    /// owner without touching the last dictation.
+    pub fn paste_history(&self, text: String) -> Result<(), &'static str> {
+        self.submit_paste(PasteKind::History, Some(text))
+    }
+
+    fn submit_paste(&self, kind: PasteKind, text: Option<String>) -> Result<(), &'static str> {
         let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
         if !state.output_available {
             return Err("dictation worker is unavailable");
@@ -642,7 +650,11 @@ impl DictationWorker {
         self.output_jobs
             .as_ref()
             .ok_or("dictation worker is unavailable")?
-            .try_send(OutputJob::Paste { sequence, kind })
+            .try_send(OutputJob::Paste {
+                sequence,
+                kind,
+                text,
+            })
             .map(|()| {
                 state.next_sequence += 1;
                 state.pending_pastes += 1;
@@ -812,7 +824,7 @@ fn finish_output(
         OutputJob::Completed { job_id, .. } | OutputJob::Cancelled { job_id } => {
             WorkerEvent::Cancelled { job_id }
         }
-        OutputJob::Paste { kind, .. } => {
+        OutputJob::Paste { kind, text, .. } => {
             let result = match kind {
                 PasteKind::LastTranscript => last_transcript
                     .as_deref()
@@ -824,6 +836,12 @@ fn finish_output(
                 PasteKind::MeetingDelta => {
                     paste_meeting_delta(paster, meeting_cursor).map_err(|error| error.to_string())
                 }
+                PasteKind::History => text
+                    .ok_or_else(|| "the history entry is unavailable".to_string())
+                    .and_then(|text| {
+                        paster.paste(&text).map_err(|error| error.to_string())?;
+                        Ok(text)
+                    }),
             };
             WorkerEvent::Pasted { kind, result }
         }
@@ -1256,6 +1274,7 @@ mod tests {
         let job = |sequence| OutputJob::Paste {
             sequence,
             kind: PasteKind::LastTranscript,
+            text: None,
         };
 
         assert!(outputs.push(job(1)).is_empty());
@@ -1298,6 +1317,7 @@ mod tests {
         let ready = outputs.push(OutputJob::Paste {
             sequence: 0,
             kind: PasteKind::LastTranscript,
+            text: None,
         });
         assert_eq!(ready.len(), 2);
         assert!(matches!(ready[1], OutputJob::Cancelled { .. }));

@@ -18,6 +18,7 @@ pub enum DeveloperPane {
     Modes,
     VoiceAction,
     Replacements,
+    History,
     HudLab,
     Commands,
     Meetings,

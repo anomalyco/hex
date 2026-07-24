@@ -10,6 +10,7 @@ use crate::transcription_models::{
 pub(crate) struct DesktopCapabilities {
     pub(crate) activity: bool,
     pub(crate) commands: bool,
+    pub(crate) history: bool,
     pub(crate) hud_lab: bool,
     pub(crate) meetings: bool,
     pub(crate) modes: bool,
@@ -25,6 +26,7 @@ impl DesktopCapabilities {
         Self {
             activity: developer_features,
             commands: true,
+            history: true,
             hud_lab: developer_features,
             meetings: developer_features,
             modes: true,
@@ -41,6 +43,7 @@ impl DesktopCapabilities {
         Self {
             activity: false,
             commands: false,
+            history: false,
             hud_lab: false,
             meetings: false,
             modes: false,
@@ -170,6 +173,7 @@ mod tests {
             DesktopCapabilities {
                 activity: false,
                 commands: false,
+                history: false,
                 hud_lab: false,
                 meetings: false,
                 modes: false,

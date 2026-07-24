@@ -48,6 +48,7 @@ use crate::dictation_processor::{ModelCatalog, ModelChoice};
 use crate::events::{
     CommandOutcome, DictationPhase, EventReader, TranscriptPhase, VoiceEvent, VoiceState, now_ms,
 };
+use crate::history::{History, HistoryEntry, HistoryKind, HistoryRetention};
 use crate::login_item::LoginItemStatus;
 use crate::meeting::{self, MeetingManifest, MeetingRequest, MeetingStatus};
 use crate::onboarding::{PermissionState, SetupStatus};
@@ -90,6 +91,7 @@ actions!(
 );
 
 /// Opens the app shell, or focuses and refreshes an existing shell window.
+#[allow(clippy::too_many_arguments)]
 pub fn open_or_focus(
     app_window: &Rc<RefCell<Option<WindowHandle<AppWindow>>>>,
     event_path: PathBuf,
@@ -97,6 +99,7 @@ pub fn open_or_focus(
     meeting_requests: SyncSender<MeetingRequest>,
     indicator: DictationIndicatorSender,
     recognition_start: Option<SyncSender<()>>,
+    history: Option<History>,
     cx: &mut App,
 ) -> gpui::Result<WindowHandle<AppWindow>> {
     if let Some(handle) = app_window.borrow().as_ref().copied()
@@ -108,6 +111,7 @@ pub fn open_or_focus(
                 this.meeting_requests = meeting_requests.clone();
                 this.indicator = indicator.clone();
                 this.recognition_start = recognition_start.clone();
+                this.history = history.clone();
                 this.refresh(cx);
                 window.activate_window();
             })
@@ -124,6 +128,7 @@ pub fn open_or_focus(
         meeting_requests,
         indicator,
         recognition_start,
+        history,
         None,
         cx,
     )
@@ -153,6 +158,7 @@ pub fn open_preview(
         meeting_requests,
         indicator,
         None,
+        None,
         Some(preview),
         cx,
     )
@@ -166,6 +172,7 @@ fn open_new(
     meeting_requests: SyncSender<MeetingRequest>,
     indicator: DictationIndicatorSender,
     recognition_start: Option<SyncSender<()>>,
+    history: Option<History>,
     preview: Option<AppWindowPreview>,
     cx: &mut App,
 ) -> gpui::Result<WindowHandle<AppWindow>> {
@@ -193,6 +200,7 @@ fn open_new(
                     meeting_requests,
                     indicator,
                     recognition_start,
+                    history,
                     preview,
                     window,
                     cx,
@@ -211,6 +219,7 @@ pub enum PreviewPane {
     Meetings,
     Commands,
     Activity,
+    History,
     Modes,
     VoiceAction,
     Replacements,
@@ -244,6 +253,7 @@ enum Pane {
     Commands,
     #[cfg_attr(not(debug_assertions), allow(dead_code))]
     Activity,
+    History,
     Modes,
     VoiceAction,
     Settings,
@@ -268,10 +278,11 @@ enum HudControl {
 }
 
 impl Pane {
-    const ALL: [Self; 7] = [
+    const ALL: [Self; 8] = [
         Self::Settings,
         Self::Modes,
         Self::VoiceAction,
+        Self::History,
         Self::HudLab,
         Self::Commands,
         Self::Meetings,
@@ -285,6 +296,7 @@ impl Pane {
                 Self::Settings => true,
                 Self::Modes => capabilities.modes,
                 Self::VoiceAction => capabilities.voice_action,
+                Self::History => capabilities.history,
                 Self::HudLab => capabilities.hud_lab,
                 Self::Commands => capabilities.commands,
                 Self::Meetings => capabilities.meetings,
@@ -299,6 +311,7 @@ impl Pane {
             Self::Meetings => "Meetings",
             Self::Commands => "Commands",
             Self::Activity => "Activity",
+            Self::History => "History",
             Self::Modes => "Modes",
             Self::VoiceAction => "Voice Action",
             Self::Settings => "Settings",
@@ -310,6 +323,7 @@ impl Pane {
             Self::Settings => NavigationIcon::Settings,
             Self::Modes => NavigationIcon::Modes,
             Self::VoiceAction => NavigationIcon::VoiceAction,
+            Self::History => NavigationIcon::History,
             Self::Commands => NavigationIcon::Commands,
             Self::Meetings => NavigationIcon::Meetings,
             Self::Activity => NavigationIcon::Activity,
@@ -323,6 +337,7 @@ impl Pane {
             PreviewPane::Meetings => Self::Meetings,
             PreviewPane::Commands => Self::Commands,
             PreviewPane::Activity => Self::Activity,
+            PreviewPane::History => Self::History,
             PreviewPane::Modes => Self::Modes,
             PreviewPane::VoiceAction => Self::VoiceAction,
             PreviewPane::Replacements => Self::Modes,
@@ -337,6 +352,7 @@ impl Pane {
             DeveloperPane::Modes => Self::Modes,
             DeveloperPane::VoiceAction => Self::VoiceAction,
             DeveloperPane::Replacements => Self::Modes,
+            DeveloperPane::History => Self::History,
             DeveloperPane::HudLab => Self::HudLab,
             DeveloperPane::Commands => Self::Commands,
             DeveloperPane::Meetings => Self::Meetings,
@@ -350,6 +366,7 @@ impl Pane {
             Self::Settings => DeveloperPane::Settings,
             Self::Modes => DeveloperPane::Modes,
             Self::VoiceAction => DeveloperPane::VoiceAction,
+            Self::History => DeveloperPane::History,
             Self::HudLab => DeveloperPane::HudLab,
             Self::Commands => DeveloperPane::Commands,
             Self::Meetings => DeveloperPane::Meetings,
@@ -763,9 +780,17 @@ pub struct AppWindow {
     current_context: (Option<String>, Option<String>),
     events_error: Option<String>,
     selected_event: Option<usize>,
+    history: Option<History>,
+    history_search: ProcessingInput,
+    history_entries: Vec<HistoryEntry>,
+    selected_history: Option<u64>,
+    history_error: Option<String>,
+    history_clear_armed: bool,
+    history_copied: Option<u64>,
 }
 
 impl AppWindow {
+    #[allow(clippy::too_many_arguments)]
     #[allow(clippy::too_many_arguments)]
     fn new(
         event_path: PathBuf,
@@ -773,6 +798,7 @@ impl AppWindow {
         meeting_requests: SyncSender<MeetingRequest>,
         indicator: DictationIndicatorSender,
         recognition_start: Option<SyncSender<()>>,
+        history: Option<History>,
         preview: Option<AppWindowPreview>,
         native_window: &mut Window,
         cx: &mut Context<Self>,
@@ -1015,6 +1041,16 @@ impl AppWindow {
                 Err(error) => (LoginItemStatus::Disabled, Some(error.to_string())),
             }
         };
+        let history = if preview_mode {
+            preview
+                .as_ref()
+                .is_some_and(|preview| matches!(preview.pane, PreviewPane::History))
+                .then(preview_history)
+                .flatten()
+        } else {
+            history
+        };
+        let history_search = Self::history_search_input(cx);
         let mut window = Self {
             preview: preview_mode,
             pane: preview
@@ -1143,6 +1179,13 @@ impl AppWindow {
             current_context: (None, None),
             events_error: None,
             selected_event: None,
+            history,
+            history_search,
+            history_entries: Vec::new(),
+            selected_history: None,
+            history_error: None,
+            history_clear_armed: false,
+            history_copied: None,
         };
         if !window.preview {
             if crate::DEVELOPER_FEATURES_ENABLED {
@@ -1153,6 +1196,7 @@ impl AppWindow {
             }
             window.reload_events();
         }
+        window.reload_history(cx);
         if window.pane == Pane::Modes {
             window.ensure_application_catalog_load();
         }
@@ -1171,6 +1215,7 @@ impl AppWindow {
             }
             self.reload_events();
         }
+        self.reload_history(cx);
         if self.pane == Pane::Modes {
             self.ensure_application_catalog_load();
         }
@@ -1184,6 +1229,7 @@ impl AppWindow {
             Pane::HudLab => self.apply_hud_lab(),
             Pane::Meetings => self.reload_meetings(),
             Pane::Commands | Pane::Activity => self.reload_events(),
+            Pane::History => self.reload_history(cx),
             Pane::Modes => self.ensure_application_catalog_load(),
             Pane::VoiceAction | Pane::Settings => {}
         }
@@ -1773,6 +1819,398 @@ impl AppWindow {
                 serde_json::to_string(event).ok().as_deref() == Some(selected.as_str())
             })
         });
+    }
+
+    fn history_search_input(cx: &mut Context<Self>) -> ProcessingInput {
+        let entity = cx.new(|cx| TextInput::picker(cx, "Search history", ""));
+        let changed = cx.subscribe(&entity, |this, _, _: &TextChanged, cx| {
+            this.reload_history(cx);
+            cx.notify();
+        });
+        ProcessingInput {
+            entity,
+            _subscriptions: vec![changed],
+        }
+    }
+
+    /// Refresh the bounded history snapshot for the current search query.
+    fn reload_history(&mut self, cx: &App) {
+        let Some(history) = &self.history else {
+            self.history_entries.clear();
+            self.selected_history = None;
+            return;
+        };
+        let query = self.history_search.entity.read(cx).text().to_string();
+        self.history_entries = history.search(&query);
+        if self
+            .selected_history
+            .is_some_and(|id| !self.history_entries.iter().any(|entry| entry.id == id))
+        {
+            self.selected_history = None;
+        }
+    }
+
+    fn set_history_retention(&mut self, retention: HistoryRetention, cx: &mut Context<Self>) {
+        if self.settings.history_retention == retention {
+            return;
+        }
+        self.settings.history_retention = retention;
+        if let Some(history) = &self.history
+            && let Err(error) = history.set_retention(retention)
+        {
+            self.history_error = Some(error.to_string());
+        }
+        self.save_settings(cx);
+        self.reload_history(cx);
+        cx.notify();
+    }
+
+    fn copy_history_entry(&mut self, id: u64, cx: &mut Context<Self>) {
+        let Some(entry) = self.history_entries.iter().find(|entry| entry.id == id) else {
+            return;
+        };
+        match arboard::Clipboard::new()
+            .and_then(|mut clipboard| clipboard.set_text(entry.final_text.clone()))
+        {
+            Ok(()) => {
+                self.history_copied = Some(id);
+                self.history_error = None;
+            }
+            Err(error) => self.history_error = Some(error.to_string()),
+        }
+        cx.notify();
+    }
+
+    /// Re-paste a retained entry through the recognition side's ordered paste
+    /// owner. The app hides first so insertion lands in the previously
+    /// focused application.
+    fn paste_history_entry(&mut self, id: u64, cx: &mut Context<Self>) {
+        let Some(entry) = self.history_entries.iter().find(|entry| entry.id == id) else {
+            return;
+        };
+        let Some(history) = &self.history else {
+            return;
+        };
+        match history.request_paste(entry.final_text.clone()) {
+            Ok(()) => {
+                self.history_error = None;
+                if !self.preview {
+                    crate::app_settings::hide_application();
+                }
+            }
+            Err(error) => self.history_error = Some(error.to_string()),
+        }
+        cx.notify();
+    }
+
+    fn delete_history_entry(&mut self, id: u64, cx: &mut Context<Self>) {
+        if let Some(history) = &self.history {
+            if let Err(error) = history.delete(id) {
+                self.history_error = Some(error.to_string());
+            }
+            self.reload_history(cx);
+        }
+        cx.notify();
+    }
+
+    fn clear_history(&mut self, cx: &mut Context<Self>) {
+        if !self.history_clear_armed {
+            self.history_clear_armed = true;
+            cx.notify();
+            return;
+        }
+        self.history_clear_armed = false;
+        if let Some(history) = &self.history {
+            if let Err(error) = history.clear() {
+                self.history_error = Some(error.to_string());
+            }
+            self.reload_history(cx);
+        }
+        cx.notify();
+    }
+
+    fn render_history(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        let retention = self.settings.history_retention;
+        let search = div().w(px(220.0)).child(self.history_search.entity.clone());
+        let retention_control = div()
+            .id("history-retention")
+            .h(px(30.0))
+            .px_3()
+            .flex()
+            .items_center()
+            .rounded_sm()
+            .bg(rgb(SURFACE))
+            .text_size(px(12.0))
+            .text_color(rgb(TEXT_SOFT))
+            .hover(|button| button.bg(rgb(SURFACE_HOVER)).text_color(rgb(TEXT)))
+            .child(format!("Keep: {}", retention.label()))
+            .on_click(cx.listener(move |this, _, _, cx| {
+                let all = HistoryRetention::ALL;
+                let index = all
+                    .iter()
+                    .position(|choice| *choice == this.settings.history_retention)
+                    .unwrap_or(0);
+                let next = all[(index + 1) % all.len()];
+                this.set_history_retention(next, cx);
+            }))
+            .into_any_element();
+        let clear = div()
+            .id("history-clear")
+            .h(px(30.0))
+            .px_3()
+            .flex()
+            .items_center()
+            .rounded_sm()
+            .bg(rgb(SURFACE))
+            .text_size(px(12.0))
+            .text_color(if self.history_clear_armed {
+                rgb(0xff8a80)
+            } else {
+                rgb(TEXT_SOFT)
+            })
+            .hover(|button| button.bg(rgb(SURFACE_HOVER)).text_color(rgb(TEXT)))
+            .child(if self.history_clear_armed {
+                "Really clear all?"
+            } else {
+                "Clear all"
+            })
+            .on_click(cx.listener(|this, _, _, cx| this.clear_history(cx)))
+            .into_any_element();
+        let header_action = div()
+            .flex()
+            .items_center()
+            .gap_3()
+            .child(search)
+            .child(retention_control)
+            .child(clear)
+            .into_any_element();
+        let rows: Vec<AnyElement> = self
+            .history_entries
+            .iter()
+            .enumerate()
+            .map(|(index, entry)| {
+                let id = entry.id;
+                let selected = self.selected_history == Some(id);
+                let age = event_age(entry.timestamp_ms);
+                let mut meta = entry.kind.label().to_string();
+                if let Some(application) = &entry.application {
+                    meta.push_str(" · ");
+                    meta.push_str(application);
+                }
+                div()
+                    .id(("history-entry", index))
+                    .w_full()
+                    .px_4()
+                    .py_3()
+                    .flex()
+                    .items_start()
+                    .justify_between()
+                    .gap_4()
+                    .border_b_1()
+                    .border_color(rgb(LINE))
+                    .when(selected, |row| row.bg(rgb(SURFACE_SELECTED)))
+                    .hover(|row| row.bg(rgb(SURFACE_HOVER)))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w(px(0.0))
+                            .flex()
+                            .flex_col()
+                            .gap_1()
+                            .child(
+                                div()
+                                    .text_size(px(12.0))
+                                    .text_color(rgb(TEXT_SOFT))
+                                    .line_height(px(18.0))
+                                    .truncate()
+                                    .child(entry.final_text.clone()),
+                            )
+                            .child(div().text_size(px(10.0)).text_color(rgb(FAINT)).child(meta)),
+                    )
+                    .child(
+                        div()
+                            .flex_none()
+                            .text_size(px(10.0))
+                            .text_color(rgb(FAINT))
+                            .child(age),
+                    )
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.selected_history = Some(id);
+                        this.history_clear_armed = false;
+                        cx.notify();
+                    }))
+                    .into_any_element()
+            })
+            .collect();
+        let retention_off = retention.is_off();
+        div()
+            .size_full()
+            .flex()
+            .flex_col()
+            .child(pane_header("History", Some(header_action)))
+            .child(
+                div()
+                    .flex_1()
+                    .overflow_hidden()
+                    .flex()
+                    .child(
+                        div()
+                            .id("history-list")
+                            .w(px(460.0))
+                            .h_full()
+                            .flex_none()
+                            .overflow_y_scroll()
+                            .border_r_1()
+                            .border_color(rgb(LINE))
+                            .when(retention_off, |list| {
+                                list.child(empty_message(
+                                    "History is off. New dictations are not retained.",
+                                ))
+                            })
+                            .when(
+                                !retention_off
+                                    && self.history_entries.is_empty()
+                                    && self.history_error.is_none(),
+                                |list| list.child(empty_message("No dictations retained yet.")),
+                            )
+                            .when_some(self.history_error.clone(), |list, error| {
+                                list.child(error_message("History could not be loaded.", error))
+                            })
+                            .children(rows),
+                    )
+                    .child(self.render_history_detail(cx)),
+            )
+            .into_any_element()
+    }
+
+    fn render_history_detail(&self, cx: &mut Context<Self>) -> AnyElement {
+        let Some(entry) = self
+            .selected_history
+            .and_then(|id| self.history_entries.iter().find(|entry| entry.id == id))
+        else {
+            return detail_placeholder("Select a history entry.");
+        };
+        let id = entry.id;
+        let copied = self.history_copied == Some(id);
+        let show_raw = entry.raw_text.trim() != entry.final_text.trim();
+        let action_button = |label: &'static str, id_suffix: &'static str| {
+            div()
+                .id(SharedString::from(format!("history-action-{id_suffix}")))
+                .h(px(30.0))
+                .px_3()
+                .flex()
+                .items_center()
+                .rounded_sm()
+                .bg(rgb(SURFACE))
+                .text_size(px(12.0))
+                .text_color(rgb(TEXT_SOFT))
+                .hover(|button| button.bg(rgb(SURFACE_HOVER)).text_color(rgb(TEXT)))
+                .child(label)
+        };
+        let mut latency = format!(
+            "{} ms audio · {} ms inference",
+            entry.audio_ms, entry.inference_ms
+        );
+        if entry.total_ms > 0 {
+            latency.push_str(&format!(" · {} ms total", entry.total_ms));
+        }
+        div()
+            .id("history-detail")
+            .flex_1()
+            .h_full()
+            .overflow_y_scroll()
+            .px_6()
+            .py_6()
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_3()
+                    .child(
+                        div()
+                            .text_size(px(18.0))
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .child(entry.kind.label()),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(11.0))
+                            .text_color(rgb(FAINT))
+                            .child(event_age(entry.timestamp_ms)),
+                    ),
+            )
+            .child(
+                div()
+                    .pt_4()
+                    .flex()
+                    .items_center()
+                    .gap_3()
+                    .child(
+                        action_button(if copied { "Copied" } else { "Copy" }, "copy").on_click(
+                            cx.listener(move |this, _, _, cx| this.copy_history_entry(id, cx)),
+                        ),
+                    )
+                    .child(action_button("Paste again", "paste").on_click(
+                        cx.listener(move |this, _, _, cx| this.paste_history_entry(id, cx)),
+                    ))
+                    .child(action_button("Delete", "delete").on_click(
+                        cx.listener(move |this, _, _, cx| this.delete_history_entry(id, cx)),
+                    )),
+            )
+            .child(
+                div()
+                    .mt_5()
+                    .pt_5()
+                    .border_t_1()
+                    .border_color(rgb(LINE))
+                    .child(section_label("Final text"))
+                    .child(
+                        div()
+                            .pt_3()
+                            .text_size(px(12.0))
+                            .line_height(px(19.0))
+                            .text_color(rgb(TEXT))
+                            .child(entry.final_text.clone()),
+                    ),
+            )
+            .when(show_raw, |detail| {
+                detail.child(
+                    div()
+                        .mt_5()
+                        .pt_5()
+                        .border_t_1()
+                        .border_color(rgb(LINE))
+                        .child(section_label("Raw transcript"))
+                        .child(
+                            div()
+                                .pt_3()
+                                .text_size(px(12.0))
+                                .line_height(px(19.0))
+                                .text_color(rgb(MUTED))
+                                .child(entry.raw_text.clone()),
+                        ),
+                )
+            })
+            .child(
+                div()
+                    .mt_5()
+                    .pt_5()
+                    .border_t_1()
+                    .border_color(rgb(LINE))
+                    .when_some(entry.application.clone(), |detail, application| {
+                        detail.child(detail_row("Application", application))
+                    })
+                    .when_some(entry.processing.clone(), |detail, processing| {
+                        let mut summary =
+                            format!("{} · {} ms", processing.profile, processing.latency_ms);
+                        if let Some(fallback) = &processing.fallback {
+                            summary.push_str(&format!(" · fell back: {fallback}"));
+                        }
+                        detail.child(detail_row("Processing", summary))
+                    })
+                    .child(detail_row("Latency", latency)),
+            )
+            .into_any_element()
     }
 
     fn render_navigation(&mut self, cx: &mut Context<Self>) -> AnyElement {
@@ -6375,6 +6813,7 @@ impl Render for AppWindow {
             Pane::Meetings => self.render_meetings(cx),
             Pane::Commands => self.render_commands(window, cx),
             Pane::Activity => self.render_activity(cx),
+            Pane::History => self.render_history(cx),
             Pane::Modes => self.render_modes(window, cx),
             Pane::VoiceAction => self.render_voice_action(window, cx),
             Pane::Settings => self.render_settings(window, cx),
@@ -6435,6 +6874,75 @@ impl Render for AppWindow {
             .children(transcription_picker)
             .children(mode_context_menu)
     }
+}
+
+/// Deterministic retained-history fixtures for the History pane preview.
+fn preview_history() -> Option<History> {
+    use crate::history::{HistoryDraft, HistoryProcessing, HistoryStore, now_ms};
+    let directory =
+        std::env::temp_dir().join(format!("hex-history-preview-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&directory);
+    std::fs::create_dir_all(&directory).ok()?;
+    let mut store = HistoryStore::open(
+        directory.join("history.json"),
+        HistoryRetention::Week,
+        now_ms(),
+    );
+    let now = now_ms();
+    let fixtures = [
+        (
+            26 * 60 * 60 * 1_000,
+            HistoryKind::Dictation,
+            "so um the parser needs a retry when the socket drops",
+            "The parser needs a retry when the socket drops.",
+            Some("Zed"),
+            Some(("Work notes", 940)),
+        ),
+        (
+            3 * 60 * 60 * 1_000,
+            HistoryKind::Send,
+            "sounds good shipping it after lunch",
+            "Sounds good — shipping it after lunch.",
+            Some("Slack"),
+            Some(("Messages", 610)),
+        ),
+        (
+            42 * 60 * 1_000,
+            HistoryKind::VoiceAction,
+            "write a haiku about warm tea",
+            "Steam curls from the cup—\nafternoon light through the glass,\nthe first sip of calm.",
+            Some("Brave Browser"),
+            None,
+        ),
+        (
+            4 * 60 * 1_000,
+            HistoryKind::Dictation,
+            "remember to publish the appcast after validating",
+            "remember to publish the appcast after validating",
+            Some("Messages"),
+            None,
+        ),
+    ];
+    for (age_ms, kind, raw, final_text, application, processing) in fixtures {
+        let _ = store.record(
+            HistoryDraft {
+                kind,
+                raw_text: raw.into(),
+                final_text: final_text.into(),
+                application: application.map(Into::into),
+                processing: processing.map(|(profile, latency_ms)| HistoryProcessing {
+                    profile: profile.into(),
+                    latency_ms,
+                    fallback: None,
+                }),
+                audio_ms: 2_800,
+                inference_ms: 96,
+                total_ms: 3_400,
+            },
+            now.saturating_sub(age_ms),
+        );
+    }
+    Some(History::new(store))
 }
 
 fn voice_action_setting_row(
@@ -7328,6 +7836,7 @@ mod tests {
                 Pane::Settings,
                 Pane::Modes,
                 Pane::VoiceAction,
+                Pane::History,
                 Pane::Commands,
             ]
         );

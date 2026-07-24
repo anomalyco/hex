@@ -9,6 +9,7 @@
 use std::fs;
 use std::io::{self, Write};
 use std::path::PathBuf;
+use std::sync::mpsc::{Receiver, SyncSender, TrySendError, sync_channel};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -207,10 +208,6 @@ impl HistoryStore {
         store
     }
 
-    pub const fn retention(&self) -> HistoryRetention {
-        self.retention
-    }
-
     /// Record one successful result. Returns the stable entry ID, or `None`
     /// while retention is off.
     pub fn record(&mut self, draft: HistoryDraft, now_ms: u64) -> io::Result<Option<u64>> {
@@ -283,10 +280,12 @@ impl HistoryStore {
         self.entries.iter().rev()
     }
 
+    #[cfg(test)]
     pub fn entry(&self, id: u64) -> Option<&HistoryEntry> {
         self.entries.iter().find(|entry| entry.id == id)
     }
 
+    #[cfg(test)]
     pub fn len(&self) -> usize {
         self.entries.len()
     }
@@ -352,17 +351,47 @@ impl HistoryStore {
     }
 }
 
-/// Thread-safe shared handle over one history store.
+/// Longest queue of pending paste-again requests.
+const PASTE_QUEUE: usize = 4;
+
+/// Thread-safe shared handle over one history store. The handle also carries
+/// the bounded paste-again queue between the UI and the recognition side that
+/// owns ordered paste output.
 #[derive(Clone)]
 pub struct History {
     store: Arc<Mutex<HistoryStore>>,
+    paste_sender: SyncSender<String>,
+    paste_receiver: Arc<Mutex<Receiver<String>>>,
 }
 
 impl History {
     pub fn new(store: HistoryStore) -> Self {
+        let (paste_sender, paste_receiver) = sync_channel(PASTE_QUEUE);
         Self {
             store: Arc::new(Mutex::new(store)),
+            paste_sender,
+            paste_receiver: Arc::new(Mutex::new(paste_receiver)),
         }
+    }
+
+    /// Ask the recognition side to paste retained text again. Best-effort and
+    /// bounded; refuses when a paste is already pending.
+    pub fn request_paste(&self, text: String) -> Result<(), &'static str> {
+        self.paste_sender
+            .try_send(text)
+            .map_err(|error| match error {
+                TrySendError::Full(_) => "a history paste is already pending",
+                TrySendError::Disconnected(_) => "the history paste queue is unavailable",
+            })
+    }
+
+    /// Take the next pending paste-again request, if any.
+    pub fn next_paste_request(&self) -> Option<String> {
+        self.paste_receiver
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .try_recv()
+            .ok()
     }
 
     /// Open the default store in Application Support.
@@ -387,17 +416,9 @@ impl History {
         self.locked().set_retention(retention, now_ms())
     }
 
-    pub fn retention(&self) -> HistoryRetention {
-        self.locked().retention()
-    }
-
     /// Bounded snapshot of matching entries, newest first.
     pub fn search(&self, query: &str) -> Vec<HistoryEntry> {
         self.locked().search(query).into_iter().cloned().collect()
-    }
-
-    pub fn entry(&self, id: u64) -> Option<HistoryEntry> {
-        self.locked().entry(id).cloned()
     }
 
     fn locked(&self) -> std::sync::MutexGuard<'_, HistoryStore> {

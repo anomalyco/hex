@@ -85,6 +85,10 @@ only in debug builds.
   persisted Linux settings, and the `transcribe.cpp` session.
 - `linux_updater`: signed direct-install updates, bounded downloads, atomic
   version activation, and restart handoff for user-local Linux installs.
+- `history`: the owner-only bounded retained-dictation store: retention
+  windows with hard entry and byte caps, atomic crash-safe persistence,
+  search, and the bounded paste-again queue between the History pane and the
+  ordered paste owner. Text and bounded metadata only, never audio.
 - `events`: bounded asynchronous append-only NDJSON observations and bounded
   incremental reading; `dashboard` and the GPUI Activity pane are read-only
   projections.
@@ -100,8 +104,8 @@ only in debug builds.
   both desktop roots over portable model presentation and platform preparation
   callbacks.
 - `app_window`: the production Settings, Modes with mode-owned processing,
-  Voice Action, Replacements, and opt-in Commands shell plus developer-only
-  Meetings, Activity, and HUD Lab panes.
+  Voice Action, History, Replacements, and opt-in Commands shell plus
+  developer-only Meetings, Activity, and HUD Lab panes.
 - `dictation_indicator`: the click-through Metal/GPUI capture and processing HUD.
 - `meeting`: explicit ScreenCaptureKit capture, owner-only WAV and transcript
   artifacts, final local-model publication, and recovery.
@@ -209,6 +213,10 @@ CoreAudio formats, AppleScript details, or event serialization.
 - Do not persist captured audio by default. Explicit foreground meeting
   recording must remain visibly active. Diagnostic dictation retention is an
   explicit, bounded, owner-only opt-in through `HEX_RETAIN_DICTATION_AUDIO`.
+- Retained dictation history records only successful pasted output: raw and
+  final text plus bounded metadata, never audio, full browser URLs, or window
+  titles. Every retention window remains subject to hard entry and byte caps,
+  and recording stops while retention is Off.
 - Developer-only meeting detection may inspect process audio metadata but must
   not capture samples. Detection can offer recording; it must never start
   automatically. Release builds must not start the meeting controller.
