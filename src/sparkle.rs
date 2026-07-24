@@ -94,6 +94,13 @@ fn start_inner() -> Result<()> {
         Retained::from_raw(controller)
             .ok_or_else(|| eyre!("Sparkle updater initialization returned null"))?
     };
+    unsafe {
+        let updater: *mut AnyObject = msg_send![&*controller, updater];
+        let automatically_checks: Bool = msg_send![updater, automaticallyChecksForUpdates];
+        if automatically_checks.as_bool() {
+            let _: () = msg_send![updater, checkForUpdatesInBackground];
+        }
+    }
     UPDATER.with(|updater| {
         *updater.borrow_mut() = Some(SparkleUpdater {
             controller,

@@ -35,7 +35,9 @@
   <key>SUEnableAutomaticChecks</key>
   <true/>
   <key>SUAutomaticallyUpdate</key>
-  <true/>
+  <false/>
+  <key>SUAllowsAutomaticUpdates</key>
+  <false/>
   <key>SUFeedURL</key>
   <string>https://pub-089d681d41754031a4aefa7017d8c2fb.r2.dev/appcast.xml</string>
   <key>SUPublicEDKey</key>
