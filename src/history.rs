@@ -8,7 +8,7 @@
 
 use std::fs;
 use std::io::{self, Write};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -199,10 +199,10 @@ impl HistoryStore {
                 tracing::warn!(%error, path = %store.path.display(), "could not read history");
             }
         }
-        if store.prune(now_ms) {
-            if let Err(error) = store.persist() {
-                tracing::warn!(%error, "could not persist pruned history");
-            }
+        if store.prune(now_ms)
+            && let Err(error) = store.persist()
+        {
+            tracing::warn!(%error, "could not persist pruned history");
         }
         store
     }
@@ -267,11 +267,7 @@ impl HistoryStore {
     /// Change retention and immediately prune to the new window. Turning
     /// history off stops recording but keeps existing entries until they are
     /// deleted explicitly.
-    pub fn set_retention(
-        &mut self,
-        retention: HistoryRetention,
-        now_ms: u64,
-    ) -> io::Result<()> {
+    pub fn set_retention(&mut self, retention: HistoryRetention, now_ms: u64) -> io::Result<()> {
         if self.retention == retention {
             return Ok(());
         }
@@ -397,11 +393,7 @@ impl History {
 
     /// Bounded snapshot of matching entries, newest first.
     pub fn search(&self, query: &str) -> Vec<HistoryEntry> {
-        self.locked()
-            .search(query)
-            .into_iter()
-            .cloned()
-            .collect()
+        self.locked().search(query).into_iter().cloned().collect()
     }
 
     pub fn entry(&self, id: u64) -> Option<HistoryEntry> {
@@ -448,10 +440,8 @@ mod tests {
     use super::*;
 
     fn temp_path(name: &str) -> PathBuf {
-        let directory = std::env::temp_dir().join(format!(
-            "hex-history-{}-{name}",
-            std::process::id()
-        ));
+        let directory =
+            std::env::temp_dir().join(format!("hex-history-{}-{name}", std::process::id()));
         let _ = fs::remove_dir_all(&directory);
         fs::create_dir_all(&directory).unwrap();
         directory.join("history.json")
@@ -534,7 +524,9 @@ mod tests {
         let path = temp_path("caps");
         let mut store = HistoryStore::open(path, HistoryRetention::Forever, 0);
         for index in 0..(MAX_ENTRIES + 5) {
-            store.record(draft(&format!("entry {index}")), index as u64).unwrap();
+            store
+                .record(draft(&format!("entry {index}")), index as u64)
+                .unwrap();
         }
         assert_eq!(store.len(), MAX_ENTRIES);
 

@@ -69,6 +69,7 @@ enum FinishResult {
     Rejected(String),
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn listen(
     project_root: &Path,
     events: EventLog,

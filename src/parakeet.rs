@@ -843,14 +843,13 @@ fn record_history(history: &History, target: TranscriptionTarget, completed: &Co
         raw_text: completed.raw.clone(),
         final_text: completed.text.clone(),
         application: completed.application.clone(),
-        processing: completed
-            .processing
-            .as_ref()
-            .map(|processing| crate::history::HistoryProcessing {
+        processing: completed.processing.as_ref().map(|processing| {
+            crate::history::HistoryProcessing {
                 profile: processing.profile.clone(),
                 latency_ms: processing.latency_ms,
                 fallback: processing.fallback.clone(),
-            }),
+            }
+        }),
         audio_ms: completed.audio_ms,
         inference_ms: completed.inference_ms as u64,
         total_ms: completed.total_started.elapsed().as_millis() as u64,

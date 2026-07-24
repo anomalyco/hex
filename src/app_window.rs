@@ -4563,42 +4563,7 @@ impl AppWindow {
             .when_some(variant_list, |control, list| control.child(list));
         let model_control = if let Some(presentation) = presentation.filter(|_| !focused) {
             let model_input = model.clone();
-            if target == ModelPickerTarget::VoiceAction {
-                div()
-                    .id("selected-model")
-                    .h(px(32.0))
-                    .px_3()
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .gap_3()
-                    .rounded_sm()
-                    .border_1()
-                    .border_color(rgb(LINE))
-                    .bg(rgb(CANVAS))
-                    .text_size(px(11.0))
-                    .text_color(rgb(TEXT_SOFT))
-                    .hover(|control| control.bg(rgb(SURFACE_HOVER)).text_color(rgb(TEXT)))
-                    .child(
-                        div()
-                            .min_w(px(0.0))
-                            .flex_1()
-                            .truncate()
-                            .child(presentation.name),
-                    )
-                    .child(
-                        div()
-                            .flex_none()
-                            .text_size(px(10.0))
-                            .text_color(rgb(MUTED))
-                            .child("⌄"),
-                    )
-                    .on_click(cx.listener(move |_, _, window, cx| {
-                        model_input.focus_handle(cx).focus(window);
-                        cx.notify();
-                    }))
-                    .into_any_element()
-            } else {
+            {
                 div()
                     .id("selected-model")
                     .h(px(54.0))
@@ -4649,51 +4614,6 @@ impl AppWindow {
         } else {
             model.clone().into_any_element()
         };
-        if target == ModelPickerTarget::VoiceAction {
-            let model_field = div()
-                .w(px(220.0))
-                .flex_none()
-                .child(model_control)
-                .when_some(suggestions, |field, suggestions| field.child(suggestions));
-            let deadline_field = div()
-                .w(px(112.0))
-                .flex_none()
-                .flex()
-                .items_center()
-                .gap_2()
-                .child(div().w(px(54.0)).flex_none().child(deadline))
-                .child(
-                    div()
-                        .text_size(px(11.0))
-                        .text_color(rgb(MUTED))
-                        .child("seconds"),
-                );
-            return compact_panel()
-                .child(voice_action_setting_row(
-                    "OpenCode model",
-                    "Independent from dictation Modes",
-                    model_field,
-                    true,
-                    compact,
-                ))
-                .when(has_variants, |panel| {
-                    panel.child(voice_action_setting_row(
-                        "Thinking",
-                        "Choose how much reasoning the model should use",
-                        variant_control,
-                        true,
-                        compact,
-                    ))
-                })
-                .child(voice_action_setting_row(
-                    "Timeout",
-                    "Paste nothing if processing exceeds this limit",
-                    deadline_field,
-                    false,
-                    compact,
-                ))
-                .into_any_element();
-        }
         div()
             .pt_5()
             .flex()
