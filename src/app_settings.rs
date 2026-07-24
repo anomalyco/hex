@@ -272,7 +272,7 @@ impl Default for VoiceActionSettings {
         Self {
             model: None,
             variant: None,
-            deadline_seconds: 30,
+            deadline_seconds: 60,
         }
     }
 }
@@ -640,7 +640,7 @@ mod tests {
         );
         assert!(settings.voice_action.model.is_none());
         assert!(settings.voice_action.variant.is_none());
-        assert_eq!(settings.voice_action.deadline_seconds, 30);
+        assert_eq!(settings.voice_action.deadline_seconds, 60);
         assert!(settings.text_replacements.is_empty());
     }
 

@@ -11,9 +11,9 @@ use std::time::{Duration, Instant};
 use gpui::{
     AnyElement, App, Bounds, Context, Div, Entity, FocusHandle, Focusable, FontWeight, IntoElement,
     KeyDownEvent, Modifiers as GpuiModifiers, ModifiersChangedEvent, MouseButton, MouseDownEvent,
-    MouseMoveEvent, PathPromptOptions, Pixels, Point, Render, ScrollHandle, Subscription, Timer,
-    TitlebarOptions, Window, WindowBounds, WindowHandle, WindowOptions, actions, div, img,
-    prelude::*, px, relative, rgb, rgba, size,
+    MouseMoveEvent, PathPromptOptions, Pixels, Point, Render, ScrollHandle, SharedString,
+    Subscription, Timer, TitlebarOptions, Window, WindowBounds, WindowHandle, WindowOptions,
+    actions, div, img, prelude::*, px, relative, rgb, rgba, size,
 };
 
 use crate::app_settings::{
@@ -481,7 +481,6 @@ struct ProcessingInputs {
 
 struct VoiceActionInputs {
     model: ProcessingInput,
-    deadline: ProcessingInput,
 }
 
 struct ReplacementInputs {
@@ -537,6 +536,16 @@ enum ModeSelection {
 enum ModelPickerTarget {
     Mode(ModeSelection),
     VoiceAction,
+}
+
+/// Shared parts of the OpenCode model picker rendered by every surface that
+/// selects a model: Modes processing and Voice Action.
+struct ProcessingPicker {
+    catalog_status: String,
+    model_control: AnyElement,
+    suggestions: Option<Div>,
+    has_variants: bool,
+    variant_control: Div,
 }
 
 enum ModelCatalogState {
@@ -2989,16 +2998,7 @@ impl AppWindow {
         }
         let compact = window.viewport_size().width < px(980.0);
         let hotkey = self.render_hotkey_control(HotkeyKind::Edit, window, cx);
-        let model = self.voice_action_inputs.model.entity.clone();
-        let deadline = self.voice_action_inputs.deadline.entity.clone();
-        let processing = self.render_processing_settings(
-            ModelPickerTarget::VoiceAction,
-            None,
-            model,
-            deadline,
-            window,
-            cx,
-        );
+        let processing = self.render_voice_action_processing(window, cx);
         div()
             .size_full()
             .flex()
@@ -3177,29 +3177,7 @@ impl AppWindow {
             settings.voice_action.model.as_deref().unwrap_or_default(),
             cx,
         );
-        let deadline = cx
-            .new(|cx| TextInput::new(cx, "30", settings.voice_action.deadline_seconds.to_string()));
-        let deadline_subscription = cx.subscribe(&deadline, |this, _, _: &TextChanged, cx| {
-            if let Ok(seconds) = this
-                .voice_action_inputs
-                .deadline
-                .entity
-                .read(cx)
-                .text()
-                .trim()
-                .parse::<u64>()
-            {
-                this.settings.voice_action.deadline_seconds = seconds.max(1);
-                this.schedule_settings_save(cx);
-            }
-        });
-        VoiceActionInputs {
-            model,
-            deadline: ProcessingInput {
-                entity: deadline,
-                _subscriptions: vec![deadline_subscription],
-            },
-        }
+        VoiceActionInputs { model }
     }
 
     fn synchronized_processing_input(
@@ -4398,16 +4376,17 @@ impl AppWindow {
         .detach();
     }
 
-    fn render_processing_settings(
+    /// Build the shared OpenCode model picker: the collapsed selected-model
+    /// card, the type-to-filter search input with bounded suggestions, the
+    /// catalog status line, and the thinking-variant control. Every surface
+    /// that selects a model renders these same parts.
+    fn processing_picker(
         &mut self,
         target: ModelPickerTarget,
-        prompt: Option<Entity<TextInput>>,
         model: Entity<TextInput>,
-        deadline: Entity<TextInput>,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let compact = window.viewport_size().width < px(980.0);
+    ) -> ProcessingPicker {
         let focused = model.read(cx).is_focused(window);
         let (selected_model, selected_variant) = self.model_settings_for(target);
         let selected_model_text = selected_model.unwrap_or_default();
@@ -4614,6 +4593,75 @@ impl AppWindow {
         } else {
             model.clone().into_any_element()
         };
+        ProcessingPicker {
+            catalog_status,
+            model_control,
+            suggestions,
+            has_variants,
+            variant_control,
+        }
+    }
+
+    /// The Voice Action processing panel: the shared model and thinking
+    /// pickers presented in the pane's setting-row language. The processing
+    /// deadline is not configurable here; Voice Action uses the persisted
+    /// default.
+    fn render_voice_action_processing(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let compact = window.viewport_size().width < px(980.0);
+        let model = self.voice_action_inputs.model.entity.clone();
+        let ProcessingPicker {
+            catalog_status,
+            model_control,
+            suggestions,
+            has_variants,
+            variant_control,
+        } = self.processing_picker(ModelPickerTarget::VoiceAction, model, window, cx);
+        let model_field = div()
+            .when(!compact, |field| field.w(px(380.0)).flex_none())
+            .when(compact, |field| field.w_full())
+            .child(model_control)
+            .when_some(suggestions, |field, suggestions| field.child(suggestions));
+        compact_panel()
+            .child(voice_action_setting_row(
+                "OpenCode model",
+                catalog_status,
+                model_field,
+                has_variants,
+                compact,
+            ))
+            .when(has_variants, |panel| {
+                panel.child(voice_action_setting_row(
+                    "Thinking",
+                    "Choose how much reasoning the model should use",
+                    div().w(px(160.0)).flex_none().child(variant_control),
+                    false,
+                    compact,
+                ))
+            })
+            .into_any_element()
+    }
+
+    fn render_processing_settings(
+        &mut self,
+        target: ModelPickerTarget,
+        prompt: Option<Entity<TextInput>>,
+        model: Entity<TextInput>,
+        deadline: Entity<TextInput>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let compact = window.viewport_size().width < px(980.0);
+        let ProcessingPicker {
+            catalog_status,
+            model_control,
+            suggestions,
+            has_variants,
+            variant_control,
+        } = self.processing_picker(target, model, window, cx);
         div()
             .pt_5()
             .flex()
@@ -6391,7 +6439,7 @@ impl Render for AppWindow {
 
 fn voice_action_setting_row(
     title: &'static str,
-    description: &'static str,
+    description: impl Into<SharedString>,
     control: impl IntoElement,
     divider: bool,
     compact: bool,
@@ -6423,7 +6471,7 @@ fn voice_action_setting_row(
                         .text_size(px(10.0))
                         .line_height(px(14.0))
                         .text_color(rgb(MUTED))
-                        .child(description),
+                        .child(description.into()),
                 ),
         )
         .child(
