@@ -15,6 +15,10 @@ pub fn logs_dir() -> Result<PathBuf> {
     Ok(support_dir()?.join("logs"))
 }
 
+pub fn opencode_workspace() -> Result<PathBuf> {
+    Ok(support_dir()?.join("opencode"))
+}
+
 #[cfg(target_os = "macos")]
 pub fn local_api_discovery_file() -> Result<PathBuf> {
     Ok(support_dir()?.join("local-api.json"))

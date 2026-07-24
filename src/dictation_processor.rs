@@ -1,7 +1,9 @@
 use std::collections::HashSet;
+use std::ffi::OsStr;
+use std::fs;
 use std::io::Read;
 use std::os::unix::fs::PermissionsExt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus, Stdio};
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -17,6 +19,7 @@ use crate::text_replacements::ReplacementSet;
 const PROTOCOL_PROMPT: &str = "You transform dictated speech into replacement text. Return only the text that should be pasted. Do not add an explanation, label, alternative, or Markdown fence.";
 const VOICE_ACTION_PROTOCOL_PROMPT: &str = "You execute a one-off voice instruction. When selected text is provided, transform or use it as instructed. When no text is selected, generate the requested text. Return only the exact paste-ready result without an explanation, label, alternative, or Markdown fence.";
 static MODEL_CATALOG: OnceLock<ModelCatalog> = OnceLock::new();
+static OPENCODE_EXECUTABLE: OnceLock<PathBuf> = OnceLock::new();
 
 #[derive(Clone)]
 pub struct Profile {
@@ -390,8 +393,8 @@ fn is_executable(path: &std::path::Path) -> bool {
 }
 
 fn opencode_api<T: for<'de> Deserialize<'de>>(path: &str) -> Result<T> {
-    let mut command = Command::new(opencode_executable());
-    command.args(["api", "get", path]).stdin(Stdio::null());
+    let mut command = opencode_command()?;
+    command.args(["get", path]).stdin(Stdio::null());
     let output = run_command(
         command,
         Duration::from_secs(10),
@@ -508,9 +511,9 @@ fn generate_cancellable(
                 deadline.as_secs()
             ));
         }
-        let mut command = Command::new(opencode_executable());
+        let mut command = opencode_command()?;
         command
-            .args(["api", "post", "/api/generate", "--data", &data])
+            .args(["post", "/api/generate", "--data", &data])
             .stdin(Stdio::null());
         let output = run_command(command, remaining, "/api/generate", cancelled)?;
         let status = output.status;
@@ -634,11 +637,83 @@ fn read_output(mut output: impl Read) -> Result<Vec<u8>> {
 }
 
 fn opencode_executable() -> PathBuf {
-    std::env::var_os("VOICE_CONTROL_OPENCODE_CLI")
-        .map(PathBuf::from)
-        .or_else(|| dirs::home_dir().map(|home| home.join(".bun/bin/opencode2")))
-        .filter(|path| path.is_file())
-        .unwrap_or_else(|| "opencode2".into())
+    if let Some(path) = OPENCODE_EXECUTABLE.get() {
+        return path.clone();
+    }
+    let path = find_opencode_executable(
+        std::env::var_os("VOICE_CONTROL_OPENCODE_CLI").map(PathBuf::from),
+        std::env::var_os("PATH").as_deref(),
+        dirs::home_dir().as_deref(),
+    );
+    let Some(path) = path else {
+        return "opencode2".into();
+    };
+    let _ = OPENCODE_EXECUTABLE.set(path.clone());
+    OPENCODE_EXECUTABLE.get().cloned().unwrap_or(path)
+}
+
+fn find_opencode_executable(
+    configured: Option<PathBuf>,
+    path: Option<&OsStr>,
+    home: Option<&Path>,
+) -> Option<PathBuf> {
+    if let Some(configured) = configured {
+        return is_executable(&configured).then_some(configured);
+    }
+    let path_candidates = path
+        .into_iter()
+        .flat_map(std::env::split_paths)
+        .map(|directory| directory.join("opencode2"));
+    let home_candidates = home.into_iter().flat_map(|home| {
+        [
+            home.join(".bun/bin/opencode2"),
+            home.join("Library/pnpm/opencode2"),
+            home.join(".yarn/bin/opencode2"),
+            home.join(".config/yarn/global/node_modules/.bin/opencode2"),
+            home.join(".npm-global/bin/opencode2"),
+            home.join(".local/bin/opencode2"),
+            home.join("bin/opencode2"),
+            home.join(".volta/bin/opencode2"),
+            home.join(".asdf/shims/opencode2"),
+            home.join(".local/share/mise/shims/opencode2"),
+        ]
+    });
+    path_candidates
+        .chain(home_candidates)
+        .chain([
+            PathBuf::from("/opt/homebrew/bin/opencode2"),
+            PathBuf::from("/usr/local/bin/opencode2"),
+        ])
+        .find(|path| is_executable(path))
+}
+
+fn opencode_command() -> Result<Command> {
+    opencode_command_in(&crate::app_paths::opencode_workspace()?)
+}
+
+fn opencode_command_in(workspace: &Path) -> Result<Command> {
+    fs::create_dir_all(workspace).wrap_err_with(|| {
+        format!(
+            "could not create OpenCode workspace {}",
+            workspace.display()
+        )
+    })?;
+    let workspace = workspace.canonicalize().wrap_err_with(|| {
+        format!(
+            "could not resolve OpenCode workspace {}",
+            workspace.display()
+        )
+    })?;
+    let directory = workspace
+        .to_str()
+        .ok_or_else(|| eyre!("OpenCode workspace path is not valid UTF-8"))?;
+    let mut command = Command::new(opencode_executable());
+    command.current_dir(&workspace).args([
+        "api",
+        "--header",
+        &format!("x-opencode-directory:{directory}"),
+    ]);
+    Ok(command)
 }
 
 #[cfg(test)]
@@ -660,6 +735,53 @@ mod tests {
         Profiles::new(Profile::new("default", "default prompt").ai_enabled(true))
             .application("Slack", Profile::new("slack", "slack prompt"))
             .browser_host("x.com", Profile::new("x", "x prompt"))
+    }
+
+    #[test]
+    fn standard_package_manager_location_finds_opencode_outside_the_gui_path() {
+        let root = std::env::temp_dir().join(format!(
+            "hex-opencode-discovery-{}-{:?}",
+            std::process::id(),
+            thread::current().id()
+        ));
+        let executable = root.join("Library/pnpm/opencode2");
+        std::fs::create_dir_all(executable.parent().unwrap()).unwrap();
+        std::fs::write(&executable, "#!/bin/sh\n").unwrap();
+        let mut permissions = executable.metadata().unwrap().permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(&executable, permissions).unwrap();
+
+        let found = find_opencode_executable(None, Some(OsStr::new("/usr/bin:/bin")), Some(&root));
+
+        assert_eq!(found, Some(executable));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn opencode_requests_are_scoped_to_the_hex_workspace() {
+        let root = std::env::temp_dir().join(format!(
+            "hex-opencode-workspace-{}-{:?}",
+            std::process::id(),
+            thread::current().id()
+        ));
+
+        let command = opencode_command_in(&root).unwrap();
+        let workspace = root.canonicalize().unwrap();
+        let args = command
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+
+        assert_eq!(command.get_current_dir(), Some(workspace.as_path()));
+        assert_eq!(
+            args,
+            [
+                "api",
+                "--header",
+                &format!("x-opencode-directory:{}", workspace.display())
+            ]
+        );
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
