@@ -119,6 +119,7 @@ pub(crate) const SIDEBAR: u32 = 0x202020;
 pub(crate) const SURFACE: u32 = 0x171717;
 pub(crate) const SURFACE_HOVER: u32 = 0x1d1d1d;
 pub(crate) const SURFACE_SELECTED: u32 = 0x3a3a3a;
+const SEGMENTED_ITEM_HOVER: u32 = 0x262626;
 pub(crate) const LINE: u32 = 0x292929;
 pub(crate) const ACCENT: u32 = 0x3b5cf6;
 pub(crate) const TEXT: u32 = 0xeeeeee;
@@ -530,7 +531,10 @@ pub(crate) fn segmented_item(selected: bool) -> Div {
         .text_color(if selected { rgb(TEXT) } else { rgb(MUTED) })
         .when(selected, |item| item.bg(rgb(SURFACE_SELECTED)))
         .when(!selected, |item| {
-            item.hover(|item| item.bg(rgb(SURFACE_HOVER)).text_color(rgb(TEXT_SOFT)))
+            item.hover(|item| {
+                item.bg(rgb(SEGMENTED_ITEM_HOVER))
+                    .text_color(rgb(TEXT_SOFT))
+            })
         })
 }
 

@@ -2485,17 +2485,13 @@ impl AppWindow {
                         self.settings.sound_effects
                             && (self.settings.sound_effect_volume - volume).abs() < 0.01
                     };
-                    div()
+                    segmented_item(selected)
                         .id(("sound-volume", index))
-                        .h(px(26.0))
                         .w(px(34.0))
-                        .flex()
-                        .items_center()
+                        .px(px(0.0))
                         .justify_center()
-                        .rounded(px(4.0))
                         .text_size(px(9.0))
-                        .text_color(if selected { rgb(TEXT) } else { rgb(MUTED) })
-                        .hover(|button| button.text_color(rgb(TEXT_SOFT)))
+                        .bg(rgba(0x00000000))
                         .child(label)
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.settings.sound_effects = volume > 0.0;
