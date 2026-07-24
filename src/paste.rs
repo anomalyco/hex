@@ -83,6 +83,7 @@ type CfDataRef = *const c_void;
 const CF_STRING_ENCODING_UTF8: u32 = 0x0800_0100;
 const BAD_PASTEBOARD_FLAVOR: i32 = -25133;
 const DUPLICATE_PASTEBOARD_FLAVOR: i32 = -25134;
+const SEND_AFTER_PASTE_DELAY: Duration = Duration::from_millis(100);
 const SYSTEM_TRANSLATED_FLAVOR: u32 = 1 << 8;
 
 #[link(name = "ApplicationServices", kind = "framework")]
@@ -278,7 +279,7 @@ impl Paster {
 
     pub fn paste_and_send(&mut self, text: &str) -> Result<()> {
         self.paste(text)?;
-        keyboard::post_enter()?;
+        send_after_paste(thread::sleep, keyboard::post_enter)?;
         self.continuation = None;
         Ok(())
     }
@@ -289,6 +290,14 @@ impl Paster {
         self.continuation = None;
         Ok(())
     }
+}
+
+fn send_after_paste(
+    wait: impl FnOnce(Duration),
+    post_enter: impl FnOnce() -> Result<()>,
+) -> Result<()> {
+    wait(SEND_AFTER_PASTE_DELAY);
+    post_enter()
 }
 
 fn capture_clipboard(clipboard: &NSPasteboard) -> Result<ClipboardSnapshot> {
@@ -599,10 +608,31 @@ fn replace_character(text: &str, index: usize, replacement: impl Iterator<Item =
 
 #[cfg(test)]
 mod tests {
+    use std::cell::RefCell;
+
     use super::*;
     use objc2_foundation::NSData;
 
     static PASTEBOARD_TEST: Mutex<()> = Mutex::new(());
+
+    #[test]
+    fn send_waits_for_the_target_to_apply_the_paste_before_pressing_enter() {
+        let steps = RefCell::new(Vec::new());
+
+        send_after_paste(
+            |delay| steps.borrow_mut().push(("wait", Some(delay))),
+            || {
+                steps.borrow_mut().push(("enter", None));
+                Ok(())
+            },
+        )
+        .unwrap();
+
+        assert_eq!(
+            steps.into_inner(),
+            vec![("wait", Some(SEND_AFTER_PASTE_DELAY)), ("enter", None)]
+        );
+    }
 
     #[test]
     fn joins_contiguous_dictation_with_sentence_aware_spacing() {
