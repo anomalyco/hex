@@ -9,6 +9,7 @@ use libloading::Library;
 use objc2::rc::Retained;
 use objc2::runtime::{AnyClass, AnyObject, Bool, NSObjectProtocol, ProtocolObject};
 use objc2::{MainThreadMarker, msg_send};
+use objc2_app_kit::NSApplication;
 use objc2_foundation::{NSNotification, NSNotificationCenter, NSString};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -113,6 +114,10 @@ fn start_inner() -> Result<()> {
 }
 
 pub fn check_for_updates() {
+    let Some(mtm) = MainThreadMarker::new() else {
+        tracing::warn!("Sparkle update checks must run on the main thread");
+        return;
+    };
     UPDATER.with(|updater| {
         let updater = updater.borrow();
         let Some(updater) = updater.as_ref() else {
@@ -122,8 +127,12 @@ pub fn check_for_updates() {
         };
         UPDATE_STATUS.store(UpdateStatus::Checking as u8, Ordering::Release);
         unsafe {
+            #[allow(deprecated)]
+            NSApplication::sharedApplication(mtm).activateIgnoringOtherApps(true);
             let _: () =
                 msg_send![&*updater.controller, checkForUpdates: std::ptr::null_mut::<AnyObject>()];
+            let user_driver: *mut AnyObject = msg_send![&*updater.controller, userDriver];
+            let _: () = msg_send![user_driver, showUpdateInFocus];
         }
     });
 }

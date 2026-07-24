@@ -82,9 +82,9 @@ whole clip. Source timestamps now convert through the Mach timebase. Physically
 verify non-empty captures, exact delayed release boundaries, and immediate HUD
 onset before considering the new owner validated.
 
-Keep the microphone and dictation model warm by default. Consider an explicit
-`Release microphone while idle` option only when commands are disabled; document
-that it removes pre-roll and adds first-capture latency. `Do nothing` is the
+Keep the microphone and dictation model warm by default. Add an explicit
+`Release microphone while idle` option that is effective only when commands are
+disabled; document that it removes pre-roll and adds first-capture latency. `Do nothing` is the
 default recording-audio behavior. Idle-sleep prevention is automatic and scoped
 to intentional dictation and active meeting capture rather than persisted as a
 user setting.
