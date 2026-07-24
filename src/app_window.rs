@@ -1963,7 +1963,7 @@ impl AppWindow {
             .w(px(control_width))
             .min_w(px(HOTKEY_MIN_WIDTH))
             .h(px(32.0))
-            .px(px(6.0))
+            .px(px(4.0))
             .flex()
             .items_center()
             .overflow_hidden()
