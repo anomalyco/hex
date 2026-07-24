@@ -3,8 +3,8 @@ use gpui::{
 };
 
 use crate::desktop_ui::{
-    CANVAS, FAINT, LINE, MUTED, SURFACE, SURFACE_HOVER, SURFACE_SELECTED, TEXT, TEXT_SOFT,
-    error_message,
+    ACCENT, CANVAS, FAINT, LINE, MUTED, PANEL_RADIUS, SIDEBAR, SURFACE, SURFACE_HOVER,
+    SURFACE_SELECTED, TEXT, TEXT_SOFT, error_message,
 };
 use crate::transcription_models::{
     ModelChoice, ModelDefinition, ModelRuntime, TranscriptionModelId, TranscriptionSelection,
@@ -80,11 +80,13 @@ pub(crate) fn render_transcription_picker<T: TranscriptionPickerDelegate>(
                 .px_3()
                 .flex()
                 .items_center()
-                .rounded_sm()
-                .text_size(px(12.0))
+                .rounded(px(6.0))
+                .text_size(px(13.0))
                 .text_color(if selected { rgb(TEXT) } else { rgb(MUTED) })
                 .when(selected, |row| row.bg(rgb(SURFACE_SELECTED)))
-                .hover(|row| row.bg(rgb(SURFACE_HOVER)).text_color(rgb(TEXT_SOFT)))
+                .when(!selected, |row| {
+                    row.hover(|row| row.bg(rgb(0x2a2a2a)).text_color(rgb(TEXT_SOFT)))
+                })
                 .child(*name)
                 .on_click(cx.listener(move |this, _, _, cx| {
                     cx.stop_propagation();
@@ -94,26 +96,27 @@ pub(crate) fn render_transcription_picker<T: TranscriptionPickerDelegate>(
     let model_cards = view.models.into_iter().enumerate().map(|(index, model)| {
         let language = view.language.clone();
         let definition = model.choice.model;
-        let (state_label, action, active, preparing, progress) = match model.status {
-            TranscriptionPickerStatus::Active => ("Active".into(), "", true, false, None),
+        let (state_label, action, active, preparing, progress, installed) = match model.status {
+            TranscriptionPickerStatus::Active => ("Active".into(), None, true, false, None, true),
             TranscriptionPickerStatus::Available { installed } => (
                 model.choice.recommendation.label().into(),
-                if installed {
-                    "Installed"
-                } else if matches!(definition.runtime, ModelRuntime::AppleSpeech) {
-                    "Use"
-                } else {
-                    "Download"
-                },
+                Some(
+                    if installed || matches!(definition.runtime, ModelRuntime::AppleSpeech) {
+                        "Use"
+                    } else {
+                        "Download"
+                    },
+                ),
                 false,
                 false,
                 None,
+                installed,
             ),
             TranscriptionPickerStatus::Preparing { label, progress } => {
-                (label, "Cancel", false, true, progress)
+                (label, Some("Cancel"), false, true, progress, false)
             }
         };
-        let metadata = if definition.coverage == language_name(&language) {
+        let mut metadata = if definition.coverage == language_name(&language) {
             format!("{} · {}", definition.quality_context, definition.timestamps)
         } else {
             format!(
@@ -121,16 +124,45 @@ pub(crate) fn render_transcription_picker<T: TranscriptionPickerDelegate>(
                 definition.coverage, definition.quality_context, definition.timestamps
             )
         };
+        if installed && !active {
+            metadata.push_str(" · Installed");
+        }
+        let badge = div()
+            .h(px(22.0))
+            .px_2()
+            .flex()
+            .items_center()
+            .rounded(px(6.0))
+            .text_size(px(10.0))
+            .map(|badge| {
+                if active {
+                    badge
+                        .bg(rgb(ACCENT))
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .text_color(rgb(TEXT))
+                } else if preparing {
+                    badge.bg(rgb(SURFACE_SELECTED)).text_color(rgb(TEXT_SOFT))
+                } else {
+                    badge
+                        .border_1()
+                        .border_color(rgb(LINE))
+                        .text_color(rgb(MUTED))
+                }
+            })
+            .child(state_label);
         div()
             .id(("transcription-model", index))
             .w_full()
             .p_4()
             .mb_3()
-            .rounded_sm()
+            .rounded(px(PANEL_RADIUS))
             .border_1()
             .border_color(if active { rgb(TEXT_SOFT) } else { rgb(LINE) })
             .bg(rgb(SURFACE))
-            .hover(|card| card.bg(rgb(SURFACE_HOVER)))
+            .when(!active, |card| {
+                card.cursor_pointer()
+                    .hover(|card| card.bg(rgb(SURFACE_HOVER)))
+            })
             .child(
                 div()
                     .flex()
@@ -142,16 +174,7 @@ pub(crate) fn render_transcription_picker<T: TranscriptionPickerDelegate>(
                             .font_weight(FontWeight::SEMIBOLD)
                             .child(definition.name),
                     )
-                    .child(
-                        div()
-                            .px_2()
-                            .py_1()
-                            .rounded_sm()
-                            .bg(rgb(SURFACE_SELECTED))
-                            .text_size(px(10.0))
-                            .text_color(rgb(TEXT_SOFT))
-                            .child(state_label),
-                    ),
+                    .child(badge),
             )
             .child(
                 div()
@@ -196,21 +219,33 @@ pub(crate) fn render_transcription_picker<T: TranscriptionPickerDelegate>(
             .child(
                 div()
                     .pt_3()
+                    .min_h(px(26.0))
                     .flex()
                     .items_center()
                     .justify_between()
-                    .text_size(px(10.0))
-                    .text_color(rgb(FAINT))
-                    .child(metadata)
                     .child(
                         div()
-                            .when(preparing, |status| {
-                                status
-                                    .text_color(rgb(TEXT_SOFT))
-                                    .font_weight(FontWeight::SEMIBOLD)
-                            })
-                            .child(action),
-                    ),
+                            .text_size(px(10.0))
+                            .text_color(rgb(FAINT))
+                            .child(metadata),
+                    )
+                    .when_some(action, |footer, action| {
+                        footer.child(
+                            div()
+                                .h(px(26.0))
+                                .px(px(10.0))
+                                .flex()
+                                .items_center()
+                                .rounded(px(6.0))
+                                .border_1()
+                                .border_color(rgb(LINE))
+                                .bg(rgb(CANVAS))
+                                .text_size(px(11.0))
+                                .text_color(rgb(TEXT_SOFT))
+                                .hover(|button| button.bg(rgb(SURFACE_HOVER)).text_color(rgb(TEXT)))
+                                .child(action),
+                        )
+                    }),
             )
             .on_click(cx.listener(move |this, _, _, cx| {
                 cx.stop_propagation();
@@ -229,6 +264,7 @@ pub(crate) fn render_transcription_picker<T: TranscriptionPickerDelegate>(
         .top_0()
         .left_0()
         .size_full()
+        .occlude()
         .flex()
         .items_center()
         .justify_center()
@@ -243,10 +279,11 @@ pub(crate) fn render_transcription_picker<T: TranscriptionPickerDelegate>(
                 .h(px(520.0))
                 .flex()
                 .flex_col()
-                .rounded_lg()
+                .rounded(px(PANEL_RADIUS + 2.0))
                 .border_1()
                 .border_color(rgb(LINE))
                 .bg(rgb(CANVAS))
+                .overflow_hidden()
                 .on_click(|_, _, cx| cx.stop_propagation())
                 .child(
                     div()
@@ -282,6 +319,7 @@ pub(crate) fn render_transcription_picker<T: TranscriptionPickerDelegate>(
                                 .h_full()
                                 .p_4()
                                 .overflow_y_scroll()
+                                .bg(rgb(SIDEBAR))
                                 .border_r_1()
                                 .border_color(rgb(LINE))
                                 .children(language_rows),
