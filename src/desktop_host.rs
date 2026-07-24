@@ -1,7 +1,9 @@
 use color_eyre::Result;
 
 use crate::desktop_activity::DesktopActivity;
-use crate::transcription_models::TranscriptionModelId;
+use crate::transcription_models::{
+    ModelPreparationStage, TranscriptionModelId, TranscriptionSelection,
+};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[cfg_attr(target_os = "linux", allow(dead_code))]
@@ -59,7 +61,7 @@ pub(crate) struct DesktopSnapshot {
     pub(crate) listener: Option<DesktopListenerSnapshot>,
     pub(crate) operation_error: Option<String>,
     pub(crate) observations_path: String,
-    pub(crate) transcription: Option<DesktopTranscriptionSnapshot>,
+    pub(crate) transcription: DesktopTranscriptionSnapshot,
     pub(crate) update_status: DesktopUpdateStatus,
 }
 
@@ -67,8 +69,8 @@ pub(crate) struct DesktopSnapshot {
 pub(crate) struct DesktopTranscriptionSnapshot {
     pub(crate) downloaded_bytes: u64,
     pub(crate) error: Option<String>,
-    pub(crate) language: String,
-    pub(crate) model: TranscriptionModelId,
+    pub(crate) preparation_stage: Option<ModelPreparationStage>,
+    pub(crate) selection: TranscriptionSelection,
     pub(crate) preparing: Option<TranscriptionModelId>,
 }
 
@@ -103,11 +105,6 @@ pub(crate) struct DesktopShortcut {
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(target_os = "macos", allow(dead_code))]
 pub(crate) enum DesktopAction {
-    CancelTranscriptionPreparation,
-    ChooseTranscription {
-        language: String,
-        model: TranscriptionModelId,
-    },
     ClearError,
     RestartIntoUpdate,
     SetDictationShortcut(DesktopShortcut),
@@ -145,7 +142,13 @@ mod tests {
                 listener: None,
                 operation_error: None,
                 observations_path: String::new(),
-                transcription: None,
+                transcription: DesktopTranscriptionSnapshot {
+                    downloaded_bytes: 0,
+                    error: None,
+                    preparation_stage: None,
+                    selection: TranscriptionSelection::default(),
+                    preparing: None,
+                },
                 update_status: DesktopUpdateStatus::Unavailable,
             }
         }

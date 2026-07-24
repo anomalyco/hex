@@ -6,25 +6,42 @@ use crate::desktop_ui::{
     CANVAS, FAINT, LINE, MUTED, SURFACE, SURFACE_HOVER, SURFACE_SELECTED, TEXT, TEXT_SOFT,
     error_message,
 };
-use crate::transcription_models::TranscriptionModelId;
+use crate::transcription_models::{
+    ModelChoice, ModelDefinition, ModelRuntime, TranscriptionModelId, TranscriptionSelection,
+    language_name,
+};
+
+pub(crate) fn transcription_selection_is_active(
+    selection: &TranscriptionSelection,
+    model: &ModelDefinition,
+    language: &str,
+    installed: bool,
+) -> bool {
+    installed && selection.model == model.id && selection.language == language
+}
 
 #[derive(Clone)]
 pub(crate) struct TranscriptionPickerModel {
-    pub(crate) action: String,
-    pub(crate) active: bool,
-    pub(crate) activation_progress: f32,
-    pub(crate) downloading: bool,
-    pub(crate) error_rate: &'static str,
-    pub(crate) id: TranscriptionModelId,
-    pub(crate) metadata: String,
-    pub(crate) name: &'static str,
-    pub(crate) progress: f32,
-    pub(crate) realtime: &'static str,
-    pub(crate) realtime_context: &'static str,
-    pub(crate) show_download_progress: bool,
-    pub(crate) show_loading_progress: bool,
-    pub(crate) size: String,
-    pub(crate) state_label: String,
+    pub(crate) choice: ModelChoice,
+    pub(crate) status: TranscriptionPickerStatus,
+}
+
+#[derive(Clone)]
+pub(crate) enum TranscriptionPickerStatus {
+    Active,
+    Available {
+        installed: bool,
+    },
+    Preparing {
+        label: String,
+        progress: Option<TranscriptionPickerProgress>,
+    },
+}
+
+#[derive(Clone, Copy)]
+pub(crate) enum TranscriptionPickerProgress {
+    Downloading(f32),
+    Loading(f32),
 }
 
 #[derive(Clone)]
@@ -76,6 +93,34 @@ pub(crate) fn render_transcription_picker<T: TranscriptionPickerDelegate>(
         });
     let model_cards = view.models.into_iter().enumerate().map(|(index, model)| {
         let language = view.language.clone();
+        let definition = model.choice.model;
+        let (state_label, action, active, preparing, progress) = match model.status {
+            TranscriptionPickerStatus::Active => ("Active".into(), "", true, false, None),
+            TranscriptionPickerStatus::Available { installed } => (
+                model.choice.recommendation.label().into(),
+                if installed {
+                    "Installed"
+                } else if matches!(definition.runtime, ModelRuntime::AppleSpeech) {
+                    "Use"
+                } else {
+                    "Download"
+                },
+                false,
+                false,
+                None,
+            ),
+            TranscriptionPickerStatus::Preparing { label, progress } => {
+                (label, "Cancel", false, true, progress)
+            }
+        };
+        let metadata = if definition.coverage == language_name(&language) {
+            format!("{} · {}", definition.quality_context, definition.timestamps)
+        } else {
+            format!(
+                "{} · {} · {}",
+                definition.coverage, definition.quality_context, definition.timestamps
+            )
+        };
         div()
             .id(("transcription-model", index))
             .w_full()
@@ -83,11 +128,7 @@ pub(crate) fn render_transcription_picker<T: TranscriptionPickerDelegate>(
             .mb_3()
             .rounded_sm()
             .border_1()
-            .border_color(if model.active {
-                rgb(TEXT_SOFT)
-            } else {
-                rgb(LINE)
-            })
+            .border_color(if active { rgb(TEXT_SOFT) } else { rgb(LINE) })
             .bg(rgb(SURFACE))
             .hover(|card| card.bg(rgb(SURFACE_HOVER)))
             .child(
@@ -99,7 +140,7 @@ pub(crate) fn render_transcription_picker<T: TranscriptionPickerDelegate>(
                         div()
                             .text_size(px(14.0))
                             .font_weight(FontWeight::SEMIBOLD)
-                            .child(model.name),
+                            .child(definition.name),
                     )
                     .child(
                         div()
@@ -109,7 +150,7 @@ pub(crate) fn render_transcription_picker<T: TranscriptionPickerDelegate>(
                             .bg(rgb(SURFACE_SELECTED))
                             .text_size(px(10.0))
                             .text_color(rgb(TEXT_SOFT))
-                            .child(model.state_label),
+                            .child(state_label),
                     ),
             )
             .child(
@@ -118,16 +159,29 @@ pub(crate) fn render_transcription_picker<T: TranscriptionPickerDelegate>(
                     .flex()
                     .gap_2()
                     .child(model_metric(
-                        model.realtime_context.to_uppercase(),
-                        model.realtime,
+                        definition.realtime_context.to_uppercase(),
+                        definition.realtime,
                     ))
-                    .child(model_metric("SIZE", model.size))
+                    .child(model_metric("SIZE", definition.size_label()))
                     .child(model_metric(
                         "ERROR RATE · LOWER IS BETTER",
-                        model.error_rate,
+                        definition.quality,
                     )),
             )
-            .when(model.show_download_progress, |card| {
+            .when_some(progress, |card, progress| {
+                let indicator = match progress {
+                    TranscriptionPickerProgress::Downloading(progress) => div()
+                        .h_full()
+                        .w(relative(progress))
+                        .rounded_sm()
+                        .bg(rgb(TEXT_SOFT)),
+                    TranscriptionPickerProgress::Loading(progress) => div()
+                        .ml(relative(progress * 0.75))
+                        .h_full()
+                        .w(relative(0.25))
+                        .rounded_sm()
+                        .bg(rgb(TEXT_SOFT)),
+                };
                 card.child(
                     div().pt_3().child(
                         div()
@@ -135,32 +189,7 @@ pub(crate) fn render_transcription_picker<T: TranscriptionPickerDelegate>(
                             .w_full()
                             .rounded_sm()
                             .bg(rgb(CANVAS))
-                            .child(
-                                div()
-                                    .h_full()
-                                    .w(relative(model.progress))
-                                    .rounded_sm()
-                                    .bg(rgb(TEXT_SOFT)),
-                            ),
-                    ),
-                )
-            })
-            .when(model.show_loading_progress, |card| {
-                card.child(
-                    div().pt_3().child(
-                        div()
-                            .h(px(3.0))
-                            .w_full()
-                            .rounded_sm()
-                            .bg(rgb(CANVAS))
-                            .child(
-                                div()
-                                    .ml(relative(model.activation_progress * 0.75))
-                                    .h_full()
-                                    .w(relative(0.25))
-                                    .rounded_sm()
-                                    .bg(rgb(TEXT_SOFT)),
-                            ),
+                            .child(indicator),
                     ),
                 )
             })
@@ -172,23 +201,23 @@ pub(crate) fn render_transcription_picker<T: TranscriptionPickerDelegate>(
                     .justify_between()
                     .text_size(px(10.0))
                     .text_color(rgb(FAINT))
-                    .child(model.metadata)
+                    .child(metadata)
                     .child(
                         div()
-                            .when(model.downloading, |status| {
+                            .when(preparing, |status| {
                                 status
                                     .text_color(rgb(TEXT_SOFT))
                                     .font_weight(FontWeight::SEMIBOLD)
                             })
-                            .child(model.action),
+                            .child(action),
                     ),
             )
             .on_click(cx.listener(move |this, _, _, cx| {
                 cx.stop_propagation();
-                if model.downloading {
+                if preparing {
                     this.cancel_transcription_preparation();
-                } else if !model.active {
-                    this.choose_transcription_model(model.id, language.clone(), cx);
+                } else if !active {
+                    this.choose_transcription_model(definition.id, language.clone(), cx);
                 }
                 cx.notify();
             }))

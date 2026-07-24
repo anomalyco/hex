@@ -29,6 +29,26 @@ struct JobResult {
 pub fn run(event_path: &Path, device: Option<&str>, shutdown: &AtomicBool) -> Result<()> {
     let settings = crate::linux_settings::LinuxSettings::load()?;
     let transcriber = LinuxTranscriber::load(&settings.transcription)?;
+    run_with_settings(event_path, device, shutdown, settings, transcriber)
+}
+
+pub fn run_with_transcriber(
+    event_path: &Path,
+    device: Option<&str>,
+    shutdown: &AtomicBool,
+    transcriber: LinuxTranscriber,
+) -> Result<()> {
+    let settings = crate::linux_settings::LinuxSettings::load()?;
+    run_with_settings(event_path, device, shutdown, settings, transcriber)
+}
+
+fn run_with_settings(
+    event_path: &Path,
+    device: Option<&str>,
+    shutdown: &AtomicBool,
+    settings: crate::linux_settings::LinuxSettings,
+    transcriber: LinuxTranscriber,
+) -> Result<()> {
     let input = match device {
         Some(name) => AudioInput::open_matching(name)?,
         None => AudioInput::open(&[])?,

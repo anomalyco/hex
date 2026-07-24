@@ -1,5 +1,5 @@
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
@@ -21,8 +21,9 @@ use crate::desktop_host::{
     DesktopSnapshot, DesktopTranscriptionSnapshot, DesktopUpdateStatus,
 };
 use crate::desktop_transcription_picker::{
-    TranscriptionPickerDelegate, TranscriptionPickerModel, TranscriptionPickerView,
-    render_transcription_picker,
+    TranscriptionPickerDelegate, TranscriptionPickerModel, TranscriptionPickerProgress,
+    TranscriptionPickerStatus, TranscriptionPickerView, render_transcription_picker,
+    transcription_selection_is_active,
 };
 use crate::desktop_ui::{
     LINE, MUTED, NavigationIcon, SIDEBAR_WIDTH, SURFACE, TEXT_SOFT, bounded_pane_header,
@@ -39,6 +40,21 @@ const MINIMUM_HEIGHT: f32 = 560.0;
 const UPDATE_INTERVAL: Duration = Duration::from_secs(24 * 60 * 60);
 
 type ListenerResult = std::result::Result<(), String>;
+type PreparationResult = std::result::Result<PreparedTranscription, String>;
+
+struct PreparedTranscription {
+    selection: crate::transcription_models::TranscriptionSelection,
+    transcriber: crate::linux_transcriber::LinuxTranscriber,
+}
+
+struct TranscriptionPreparation {
+    canceled: Arc<AtomicBool>,
+    model: crate::transcription_models::TranscriptionModelId,
+    progress: Arc<AtomicU64>,
+    result: Receiver<PreparationResult>,
+    stage: Arc<AtomicU8>,
+    worker: Option<JoinHandle<()>>,
+}
 
 #[derive(Clone, Copy)]
 enum TrayCommand {
@@ -79,41 +95,29 @@ struct LinuxDesktopHost {
     error: Option<String>,
     settings_error: Option<String>,
     settings: crate::linux_settings::LinuxSettings,
-    transcription_cancel: Option<Arc<AtomicBool>>,
+    prepared_transcriber: Option<crate::linux_transcriber::LinuxTranscriber>,
+    transcription_preparation: Option<TranscriptionPreparation>,
     transcription_error: Option<String>,
-    transcription_progress: Option<Arc<AtomicU64>>,
-    transcription_result: Option<
-        Receiver<std::result::Result<crate::transcription_models::TranscriptionSelection, String>>,
-    >,
-    transcription_preparing: Option<crate::transcription_models::TranscriptionModelId>,
     update: UpdateState,
 }
 
 struct LinuxApp {
     host: LinuxDesktopHost,
-    pane: LinuxPane,
     capturing_hotkey: bool,
-    transcription_picker_language: Option<String>,
-    transcription_picker_waiting: bool,
+    transcription_picker: TranscriptionPickerState,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum LinuxPane {
-    Settings,
+enum TranscriptionPickerState {
+    Closed,
+    Choosing(String),
+    Preparing(String),
 }
 
-impl LinuxPane {
-    const ALL: [Self; 1] = [Self::Settings];
-
-    const fn label(self) -> &'static str {
+impl TranscriptionPickerState {
+    fn language(&self) -> Option<&str> {
         match self {
-            Self::Settings => "Settings",
-        }
-    }
-
-    const fn icon(self) -> NavigationIcon {
-        match self {
-            Self::Settings => NavigationIcon::Settings,
+            Self::Closed => None,
+            Self::Choosing(language) | Self::Preparing(language) => Some(language),
         }
     }
 }
@@ -173,10 +177,8 @@ pub fn open(event_path: PathBuf, start_hidden: bool) -> Result<()> {
                             settings_error.clone(),
                             update,
                         ),
-                        pane: LinuxPane::Settings,
                         capturing_hotkey: false,
-                        transcription_picker_language: None,
-                        transcription_picker_waiting: false,
+                        transcription_picker: TranscriptionPickerState::Closed,
                     })
                 },
             )
@@ -237,17 +239,20 @@ pub fn open(event_path: PathBuf, start_hidden: bool) -> Result<()> {
                 if app
                     .update(cx, |this, cx| {
                         this.host.refresh();
-                        if this.transcription_picker_waiting {
-                            let transcription = this
-                                .host
-                                .snapshot()
-                                .transcription
-                                .expect("Linux transcription snapshot");
-                            if transcription.preparing.is_none() {
-                                this.transcription_picker_waiting = false;
-                                if transcription.error.is_none() {
-                                    this.transcription_picker_language = None;
-                                }
+                        if matches!(
+                            this.transcription_picker,
+                            TranscriptionPickerState::Preparing(_)
+                        ) && this.host.transcription_preparation.is_none()
+                        {
+                            let picker = std::mem::replace(
+                                &mut this.transcription_picker,
+                                TranscriptionPickerState::Closed,
+                            );
+                            if this.host.transcription_error.is_some()
+                                && let TranscriptionPickerState::Preparing(language) = picker
+                            {
+                                this.transcription_picker =
+                                    TranscriptionPickerState::Choosing(language);
                             }
                         }
                         cx.notify();
@@ -447,11 +452,9 @@ impl LinuxDesktopHost {
             error: None,
             settings_error: error,
             settings,
-            transcription_cancel: None,
+            prepared_transcriber: None,
+            transcription_preparation: None,
             transcription_error: None,
-            transcription_progress: None,
-            transcription_result: None,
-            transcription_preparing: None,
             update,
         }
     }
@@ -474,10 +477,21 @@ impl LinuxDesktopHost {
             .unwrap_or_else(|error| error.into_inner()) = Some(stop.clone());
         let (result_sender, result_receiver) = mpsc::channel();
         let event_path = self.event_path.clone();
+        let prepared_transcriber = self.prepared_transcriber.take();
         let worker = std::thread::spawn(move || {
-            let result = crate::instance::acquire("listener")
-                .and_then(|_instance| crate::linux_dictation::run(&event_path, None, &stop))
-                .map_err(|error| format!("{error:#}"));
+            let result = crate::instance::acquire("listener").and_then(|_instance| {
+                if let Some(transcriber) = prepared_transcriber {
+                    crate::linux_dictation::run_with_transcriber(
+                        &event_path,
+                        None,
+                        &stop,
+                        transcriber,
+                    )
+                } else {
+                    crate::linux_dictation::run(&event_path, None, &stop)
+                }
+            });
+            let result = result.map_err(|error| format!("{error:#}"));
             let _ = result_sender.send(result);
         });
         self.listener_worker = Some(worker);
@@ -528,9 +542,9 @@ impl LinuxDesktopHost {
         }
 
         let transcription_result =
-            self.transcription_result
+            self.transcription_preparation
                 .as_ref()
-                .and_then(|receiver| match receiver.try_recv() {
+                .and_then(|preparation| match preparation.result.try_recv() {
                     Ok(result) => Some(result),
                     Err(TryRecvError::Disconnected) => {
                         Some(Err("model preparation worker stopped unexpectedly".into()))
@@ -539,30 +553,38 @@ impl LinuxDesktopHost {
                 });
         let mut start_listener = false;
         if let Some(result) = transcription_result {
-            self.transcription_result = None;
-            self.transcription_cancel = None;
-            self.transcription_progress = None;
-            self.transcription_preparing = None;
-            match result {
-                Ok(selection) => {
-                    let mut candidate = self.settings.clone();
-                    candidate.transcription = selection;
-                    match candidate.save() {
-                        Ok(()) => {
-                            self.settings = candidate;
-                            self.transcription_error = None;
-                            self.settings_error = None;
-                            self.status = "Ready".into();
-                            start_listener = self.listen_when_ready;
-                        }
-                        Err(error) => {
-                            self.transcription_error =
-                                Some(format!("Could not save transcription selection: {error:#}"));
+            let mut preparation = self
+                .transcription_preparation
+                .take()
+                .expect("completed transcription preparation exists");
+            let was_canceled = preparation.canceled.load(Ordering::Relaxed);
+            if let Some(worker) = preparation.worker.take() {
+                let _ = worker.join();
+            }
+            if was_canceled {
+                self.transcription_error = None;
+            } else {
+                match result {
+                    Ok(prepared) => {
+                        let mut candidate = self.settings.clone();
+                        candidate.transcription = prepared.selection;
+                        match candidate.save() {
+                            Ok(()) => {
+                                self.settings = candidate;
+                                self.prepared_transcriber = Some(prepared.transcriber);
+                                self.transcription_error = None;
+                                self.settings_error = None;
+                                self.status = "Ready".into();
+                                start_listener = self.listen_when_ready;
+                            }
+                            Err(error) => {
+                                self.transcription_error = Some(format!(
+                                    "Could not save transcription selection: {error:#}"
+                                ));
+                            }
                         }
                     }
-                }
-                Err(error) => {
-                    if error != "model activation canceled" {
+                    Err(error) => {
                         self.transcription_error = Some(error);
                     }
                 }
@@ -683,7 +705,12 @@ impl LinuxDesktopHost {
             self.transcription_error = Some(error.clone());
             return Err(color_eyre::eyre::eyre!(error));
         }
-        self.cancel_transcription_preparation();
+        if self.transcription_preparation.is_some() {
+            self.cancel_transcription_preparation();
+            let error = "The previous model preparation is still stopping".to_string();
+            self.transcription_error = Some(error.clone());
+            return Err(color_eyre::eyre::eyre!(error));
+        }
         let selection = crate::transcription_models::TranscriptionSelection {
             model,
             language,
@@ -693,39 +720,53 @@ impl LinuxDesktopHost {
         let definition = crate::transcription_models::definition(model);
         let canceled = Arc::new(AtomicBool::new(false));
         let progress = Arc::new(AtomicU64::new(0));
+        let stage = Arc::new(AtomicU8::new(
+            crate::transcription_models::ModelPreparationStage::Downloading as u8,
+        ));
         let worker_canceled = canceled.clone();
         let worker_progress = progress.clone();
+        let worker_stage = stage.clone();
         let (sender, receiver) = mpsc::sync_channel(1);
-        std::thread::spawn(move || {
+        let worker = std::thread::spawn(move || {
             let result = (|| {
-                crate::transcription_models::download_with_progress(
+                crate::transcription_models::download_with_stage_progress(
                     definition,
                     &worker_canceled,
                     &worker_progress,
+                    &worker_stage,
                 )?;
                 if worker_canceled.load(Ordering::Relaxed) {
                     return Err(color_eyre::eyre::eyre!("model activation canceled"));
                 }
-                crate::linux_transcriber::LinuxTranscriber::load(&selection).map(drop)?;
-                Ok(selection)
+                crate::transcription_models::ModelPreparationStage::Loading.store(&worker_stage);
+                let transcriber = crate::linux_transcriber::LinuxTranscriber::load(&selection)?;
+                if worker_canceled.load(Ordering::Relaxed) {
+                    return Err(color_eyre::eyre::eyre!("model activation canceled"));
+                }
+                Ok(PreparedTranscription {
+                    selection,
+                    transcriber,
+                })
             })()
             .map_err(|error| format!("{error:#}"));
             let _ = sender.send(result);
         });
-        self.transcription_cancel = Some(canceled);
+        self.transcription_preparation = Some(TranscriptionPreparation {
+            canceled,
+            model,
+            progress,
+            result: receiver,
+            stage,
+            worker: Some(worker),
+        });
         self.transcription_error = None;
-        self.transcription_preparing = Some(model);
-        self.transcription_progress = Some(progress);
-        self.transcription_result = Some(receiver);
         Ok(())
     }
 
     fn cancel_transcription_preparation(&mut self) {
-        if let Some(canceled) = self.transcription_cancel.take() {
-            canceled.store(true, Ordering::Relaxed);
+        if let Some(preparation) = &self.transcription_preparation {
+            preparation.canceled.store(true, Ordering::Relaxed);
         }
-        self.transcription_progress = None;
-        self.transcription_preparing = None;
         self.transcription_error = None;
     }
 }
@@ -769,6 +810,7 @@ fn start_update_check() -> Receiver<Result<Option<InstalledUpdate>, String>> {
 
 impl Drop for LinuxDesktopHost {
     fn drop(&mut self) {
+        self.cancel_transcription_preparation();
         if let Some(stop) = self
             .listener_stop
             .lock()
@@ -778,6 +820,11 @@ impl Drop for LinuxDesktopHost {
             stop.store(true, Ordering::Relaxed);
         }
         self.join_listener();
+        if let Some(mut preparation) = self.transcription_preparation.take()
+            && let Some(worker) = preparation.worker.take()
+        {
+            let _ = worker.join();
+        }
     }
 }
 
@@ -805,28 +852,29 @@ impl DesktopHost for LinuxDesktopHost {
             }),
             operation_error: self.error.clone().or_else(|| self.settings_error.clone()),
             observations_path: self.event_path.display().to_string(),
-            transcription: Some(DesktopTranscriptionSnapshot {
+            transcription: DesktopTranscriptionSnapshot {
                 downloaded_bytes: self
-                    .transcription_progress
+                    .transcription_preparation
                     .as_ref()
-                    .map_or(0, |progress| progress.load(Ordering::Relaxed)),
+                    .map_or(0, |preparation| {
+                        preparation.progress.load(Ordering::Relaxed)
+                    }),
                 error: self.transcription_error.clone(),
-                language: self.settings.transcription.language.clone(),
-                model: self.settings.transcription.model,
-                preparing: self.transcription_preparing,
-            }),
+                preparation_stage: self.transcription_preparation.as_ref().map(|preparation| {
+                    crate::transcription_models::ModelPreparationStage::load(&preparation.stage)
+                }),
+                selection: self.settings.transcription.clone(),
+                preparing: self
+                    .transcription_preparation
+                    .as_ref()
+                    .map(|preparation| preparation.model),
+            },
             update_status,
         }
     }
 
     fn dispatch(&mut self, action: DesktopAction) -> Result<()> {
         match action {
-            DesktopAction::CancelTranscriptionPreparation => {
-                self.cancel_transcription_preparation();
-            }
-            DesktopAction::ChooseTranscription { language, model } => {
-                self.choose_transcription(model, language)?;
-            }
             DesktopAction::ClearError => self.error = None,
             DesktopAction::RestartIntoUpdate => {
                 if let Err(error) = self.restart_into_update() {
@@ -856,17 +904,8 @@ impl DesktopHost for LinuxDesktopHost {
 }
 
 impl LinuxApp {
-    fn render_shared_navigation(&mut self, cx: &mut Context<Self>) -> AnyElement {
+    fn render_shared_navigation(&self) -> AnyElement {
         debug_assert!(self.host.capabilities().listener_control);
-        let items = LinuxPane::ALL.into_iter().enumerate().map(|(index, pane)| {
-            navigation_item(pane.icon(), self.pane == pane)
-                .id(("linux-nav", index))
-                .child(pane.label())
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    this.pane = pane;
-                    cx.notify();
-                }))
-        });
         sidebar_frame()
             .w(px(SIDEBAR_WIDTH))
             .px(px(14.0))
@@ -874,7 +913,11 @@ impl LinuxApp {
             .pb_4()
             .flex()
             .flex_col()
-            .child(div().flex().flex_col().gap(px(2.0)).children(items))
+            .child(
+                navigation_item(NavigationIcon::Settings, true)
+                    .id("linux-nav-settings")
+                    .child("Settings"),
+            )
             .child(div().flex_1())
             .into_any_element()
     }
@@ -906,15 +949,13 @@ impl LinuxApp {
             hotkey_keycaps(snapshot.dictation_shortcut.clone(), 1.0)
         };
         let update_ready = snapshot.update_status == DesktopUpdateStatus::ReadyToRestart;
-        let transcription = snapshot
-            .transcription
-            .as_ref()
-            .expect("Linux always exposes local transcription");
+        let transcription = &snapshot.transcription;
         let transcription_label = format!(
             "{} · {}",
-            crate::transcription_models::language_name(&transcription.language),
-            crate::transcription_models::definition(transcription.model).name
+            crate::transcription_models::language_name(&transcription.selection.language),
+            crate::transcription_models::definition(transcription.selection.model).name
         );
+        let transcription_language = transcription.selection.language.clone();
 
         div()
             .size_full()
@@ -943,14 +984,11 @@ impl LinuxApp {
                                             "Language and on-device speech model",
                                             disclosure_button(transcription_label)
                                                 .id("transcription-model-setting")
-                                                .on_click(cx.listener(|this, _, _, cx| {
-                                                    this.transcription_picker_language = Some(
-                                                        this.host
-                                                            .snapshot()
-                                                            .transcription
-                                                            .expect("Linux transcription snapshot")
-                                                            .language,
-                                                    );
+                                                .on_click(cx.listener(move |this, _, _, cx| {
+                                                    this.transcription_picker =
+                                                        TranscriptionPickerState::Choosing(
+                                                            transcription_language.clone(),
+                                                        );
                                                     cx.notify();
                                                 })),
                                         ))
@@ -1054,20 +1092,23 @@ impl LinuxApp {
             .into_any_element()
     }
 
-    fn transcription_picker_view(&self, language: String) -> TranscriptionPickerView {
-        let snapshot = self.host.snapshot();
-        let transcription = snapshot
-            .transcription
-            .expect("Linux always exposes local transcription");
+    fn transcription_picker_view(
+        &self,
+        language: String,
+        transcription: &DesktopTranscriptionSnapshot,
+    ) -> TranscriptionPickerView {
         let models = crate::transcription_models::choices_for_runtime(&language, false)
             .into_iter()
             .map(|choice| {
                 let model = choice.model;
                 let installed = crate::transcription_models::is_installed(model, &language);
                 let downloading = transcription.preparing == Some(model.id);
-                let active = installed
-                    && transcription.model == model.id
-                    && transcription.language == language;
+                let active = transcription_selection_is_active(
+                    &transcription.selection,
+                    model,
+                    &language,
+                    installed,
+                );
                 let progress = if downloading {
                     model.download_bytes().map_or(0.0, |bytes| {
                         (transcription.downloaded_bytes as f32 / bytes as f32).clamp(0.0, 1.0)
@@ -1075,56 +1116,34 @@ impl LinuxApp {
                 } else {
                     0.0
                 };
-                let state_label = if downloading {
-                    if installed {
-                        "Loading model".to_string()
-                    } else {
-                        format!("Downloading {:.0}%", progress * 100.0)
-                    }
-                } else if active {
-                    "Active".to_string()
-                } else {
-                    choice.recommendation.label().to_string()
-                };
-                let metadata =
-                    if model.coverage == crate::transcription_models::language_name(&language) {
-                        format!("{} · {}", model.quality_context, model.timestamps)
-                    } else {
-                        format!(
-                            "{} · {} · {}",
-                            model.coverage, model.quality_context, model.timestamps
-                        )
+                let status = if downloading {
+                    let stage = transcription
+                        .preparation_stage
+                        .unwrap_or(crate::transcription_models::ModelPreparationStage::Downloading);
+                    let (label, progress) = match stage {
+                        crate::transcription_models::ModelPreparationStage::Downloading => (
+                            format!("Downloading {:.0}%", progress * 100.0),
+                            Some(TranscriptionPickerProgress::Downloading(progress)),
+                        ),
+                        crate::transcription_models::ModelPreparationStage::Verifying => {
+                            ("Verifying model".into(), None)
+                        }
+                        crate::transcription_models::ModelPreparationStage::Loading => (
+                            "Loading model".into(),
+                            Some(TranscriptionPickerProgress::Loading(0.25)),
+                        ),
                     };
-                TranscriptionPickerModel {
-                    action: if downloading {
-                        "Cancel"
-                    } else if active {
-                        ""
-                    } else if installed {
-                        "Installed"
-                    } else {
-                        "Download"
-                    }
-                    .into(),
-                    active,
-                    activation_progress: 0.25,
-                    downloading,
-                    error_rate: model.quality,
-                    id: model.id,
-                    metadata,
-                    name: model.name,
-                    progress,
-                    realtime: model.realtime,
-                    realtime_context: model.realtime_context,
-                    show_download_progress: downloading && !installed,
-                    show_loading_progress: downloading && installed,
-                    size: model.size_label(),
-                    state_label,
-                }
+                    TranscriptionPickerStatus::Preparing { label, progress }
+                } else if active {
+                    TranscriptionPickerStatus::Active
+                } else {
+                    TranscriptionPickerStatus::Available { installed }
+                };
+                TranscriptionPickerModel { choice, status }
             })
             .collect();
         TranscriptionPickerView {
-            error: transcription.error,
+            error: transcription.error.clone(),
             language,
             models,
         }
@@ -1133,10 +1152,13 @@ impl LinuxApp {
 
 impl TranscriptionPickerDelegate for LinuxApp {
     fn cancel_transcription_preparation(&mut self) {
-        self.transcription_picker_waiting = false;
-        let _ = self
-            .host
-            .dispatch(DesktopAction::CancelTranscriptionPreparation);
+        self.host.cancel_transcription_preparation();
+        if let TranscriptionPickerState::Preparing(language) = std::mem::replace(
+            &mut self.transcription_picker,
+            TranscriptionPickerState::Closed,
+        ) {
+            self.transcription_picker = TranscriptionPickerState::Choosing(language);
+        }
     }
 
     fn choose_transcription_model(
@@ -1145,23 +1167,24 @@ impl TranscriptionPickerDelegate for LinuxApp {
         language: String,
         _cx: &mut Context<Self>,
     ) {
-        self.transcription_picker_waiting = self
+        if self
             .host
-            .dispatch(DesktopAction::ChooseTranscription { language, model })
-            .is_ok();
+            .choose_transcription(model, language.clone())
+            .is_ok()
+        {
+            self.transcription_picker = TranscriptionPickerState::Preparing(language);
+        }
     }
 
     fn dismiss_transcription_picker(&mut self, cx: &mut Context<Self>) {
-        self.transcription_picker_language = None;
-        self.transcription_picker_waiting = false;
+        self.transcription_picker = TranscriptionPickerState::Closed;
         cx.notify();
     }
 
     fn select_transcription_language(&mut self, language: String, cx: &mut Context<Self>) {
-        if self.transcription_picker_language.as_deref() != Some(&language) {
-            self.cancel_transcription_preparation();
-            self.transcription_picker_language = Some(language);
-            self.transcription_picker_waiting = false;
+        if self.transcription_picker.language() != Some(&language) {
+            self.host.cancel_transcription_preparation();
+            self.transcription_picker = TranscriptionPickerState::Choosing(language);
             cx.notify();
         }
     }
@@ -1170,14 +1193,19 @@ impl TranscriptionPickerDelegate for LinuxApp {
 impl Render for LinuxApp {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let snapshot = self.host.snapshot();
-        let content = match self.pane {
-            LinuxPane::Settings => self.render_shared_settings(&snapshot, cx),
-        };
-        let model_picker = self.transcription_picker_language.clone().map(|language| {
-            render_transcription_picker(self.transcription_picker_view(language), cx)
-        });
+        let content = self.render_shared_settings(&snapshot, cx);
+        let model_picker =
+            self.transcription_picker
+                .language()
+                .map(str::to_owned)
+                .map(|language| {
+                    render_transcription_picker(
+                        self.transcription_picker_view(language, &snapshot.transcription),
+                        cx,
+                    )
+                });
         window_frame()
-            .child(self.render_shared_navigation(cx))
+            .child(self.render_shared_navigation())
             .child(div().flex_1().h_full().overflow_hidden().child(content))
             .children(model_picker)
     }

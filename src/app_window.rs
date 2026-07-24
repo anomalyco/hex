@@ -28,8 +28,10 @@ use crate::desktop_host::{
     DesktopUpdateStatus,
 };
 use crate::desktop_transcription_picker::{
-    TranscriptionPickerDelegate, TranscriptionPickerModel, TranscriptionPickerView,
+    TranscriptionPickerDelegate, TranscriptionPickerModel, TranscriptionPickerProgress,
+    TranscriptionPickerStatus, TranscriptionPickerView,
     render_transcription_picker as render_shared_transcription_picker,
+    transcription_selection_is_active,
 };
 use crate::desktop_ui::{
     CANVAS, COMPACT_MULTILINE_INPUT_HEIGHT, CONTROL_HEIGHT, FAINT, LINE, MUTED, NEGATIVE,
@@ -2269,63 +2271,36 @@ impl AppWindow {
             } else {
                 0.0
             };
-            let state_label = if downloading {
+            let status = if downloading {
                 if matches!(model.runtime, ModelRuntime::AppleSpeech) {
-                    "Preparing…".to_string()
+                    TranscriptionPickerStatus::Preparing {
+                        label: "Preparing…".into(),
+                        progress: None,
+                    }
                 } else if installed {
-                    format!(
-                        "Loading model · {}s",
-                        self.transcription_activation_started
-                            .map_or(0, |started| started.elapsed().as_secs())
-                    )
+                    let elapsed = self
+                        .transcription_activation_started
+                        .map_or(0, |started| started.elapsed().as_secs());
+                    let progress = self
+                        .transcription_activation_started
+                        .map_or(0.0, |started| (started.elapsed().as_secs_f32() % 1.6) / 1.6);
+                    TranscriptionPickerStatus::Preparing {
+                        label: format!("Loading model · {elapsed}s"),
+                        progress: Some(TranscriptionPickerProgress::Loading(progress)),
+                    }
                 } else {
-                    format!("Downloading {:.0}%", progress * 100.0)
+                    TranscriptionPickerStatus::Preparing {
+                        label: format!("Downloading {:.0}%", progress * 100.0),
+                        progress: matches!(model.runtime, ModelRuntime::Gguf(_))
+                            .then_some(TranscriptionPickerProgress::Downloading(progress)),
+                    }
                 }
             } else if active {
-                "Active".to_string()
+                TranscriptionPickerStatus::Active
             } else {
-                choice.recommendation.label().to_string()
+                TranscriptionPickerStatus::Available { installed }
             };
-            let metadata = if model.coverage == language_name(selected_language) {
-                format!("{} · {}", model.quality_context, model.timestamps)
-            } else {
-                format!(
-                    "{} · {} · {}",
-                    model.coverage, model.quality_context, model.timestamps
-                )
-            };
-            TranscriptionPickerModel {
-                action: if downloading {
-                    "Cancel"
-                } else if active {
-                    ""
-                } else if installed {
-                    "Installed"
-                } else if matches!(model.runtime, ModelRuntime::AppleSpeech) {
-                    "Use"
-                } else {
-                    "Download"
-                }
-                .into(),
-                active,
-                activation_progress: self
-                    .transcription_activation_started
-                    .map_or(0.0, |started| (started.elapsed().as_secs_f32() % 1.6) / 1.6),
-                downloading,
-                error_rate: model.quality,
-                id: model.id,
-                metadata,
-                name: model.name,
-                progress,
-                realtime: model.realtime,
-                realtime_context: model.realtime_context,
-                show_download_progress: downloading
-                    && !installed
-                    && matches!(model.runtime, ModelRuntime::Gguf(_)),
-                show_loading_progress: downloading && installed,
-                size: model.size_label(),
-                state_label,
-            }
+            TranscriptionPickerModel { choice, status }
         })
         .collect();
         TranscriptionPickerView {
@@ -4541,7 +4516,7 @@ impl AppWindow {
                     .hover(|button| button.bg(rgb(SURFACE_HOVER)).text_color(rgb(TEXT_SOFT)))
                     .child("Default")
                     .on_click(cx.listener(move |this, _, _, cx| {
-                        this.clear_model_variant(target, cx);
+                        this.set_model_variant(target, None, cx);
                     }))
                     .into_any_element(),
             );
@@ -4562,7 +4537,7 @@ impl AppWindow {
                 .hover(|button| button.bg(rgb(SURFACE_HOVER)).text_color(rgb(TEXT_SOFT)))
                 .child(variant)
                 .on_click(cx.listener(move |this, _, _, cx| {
-                    this.select_model_variant(target, value.clone(), cx);
+                    this.set_model_variant(target, Some(value.clone()), cx);
                 }))
                 .into_any_element()
         }));
@@ -4800,35 +4775,24 @@ impl AppWindow {
         self.save_settings(cx);
     }
 
-    fn select_model_variant(
+    fn set_model_variant(
         &mut self,
         target: ModelPickerTarget,
-        variant: String,
+        variant: Option<String>,
         cx: &mut Context<Self>,
     ) {
         match target {
             ModelPickerTarget::Mode(selection) => {
-                self.mode_settings_mut(selection).post_processing.variant = Some(variant);
+                self.mode_settings_mut(selection).post_processing.variant = variant;
             }
             ModelPickerTarget::VoiceAction => {
-                if self.settings.voice_action.model.is_none()
+                if variant.is_some()
+                    && self.settings.voice_action.model.is_none()
                     && let ModelCatalogState::Loaded(catalog) = &self.model_catalog
                 {
                     self.settings.voice_action.model = catalog.default_key.clone();
                 }
-                self.settings.voice_action.variant = Some(variant);
-            }
-        }
-        self.save_settings(cx);
-    }
-
-    fn clear_model_variant(&mut self, target: ModelPickerTarget, cx: &mut Context<Self>) {
-        match target {
-            ModelPickerTarget::Mode(selection) => {
-                self.mode_settings_mut(selection).post_processing.variant = None;
-            }
-            ModelPickerTarget::VoiceAction => {
-                self.settings.voice_action.variant = None;
+                self.settings.voice_action.variant = variant;
             }
         }
         self.save_settings(cx);
@@ -6258,27 +6222,19 @@ impl DesktopHost for AppWindow {
             listener: None,
             operation_error: self.settings_load_error.clone(),
             observations_path: self.event_reader.path().display().to_string(),
-            transcription: Some(DesktopTranscriptionSnapshot {
+            transcription: DesktopTranscriptionSnapshot {
                 downloaded_bytes: self.transcription_downloaded_bytes,
                 error: self.transcription_picker_error.clone(),
-                language: self.settings.transcription.language.clone(),
-                model: self.settings.transcription.model,
+                preparation_stage: None,
+                selection: self.settings.transcription.clone(),
                 preparing: self.transcription_downloading,
-            }),
+            },
             update_status,
         }
     }
 
     fn dispatch(&mut self, action: DesktopAction) -> color_eyre::Result<()> {
         match action {
-            DesktopAction::CancelTranscriptionPreparation => {
-                self.cancel_transcription_download();
-            }
-            DesktopAction::ChooseTranscription { .. } => {
-                return Err(color_eyre::eyre::eyre!(
-                    "transcription selection requires the desktop window context"
-                ));
-            }
             DesktopAction::ClearError => {}
             DesktopAction::RestartIntoUpdate
             | DesktopAction::StartListening
@@ -7293,15 +7249,6 @@ fn text_or(prefix: &str, text: &str) -> String {
     } else {
         format!("{prefix}: \"{text}\"")
     }
-}
-
-fn transcription_selection_is_active(
-    selection: &TranscriptionSelection,
-    model: &ModelDefinition,
-    language: &str,
-    installed: bool,
-) -> bool {
-    installed && selection.model == model.id && selection.language == language
 }
 
 #[cfg(test)]

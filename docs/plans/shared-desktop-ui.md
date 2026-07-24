@@ -159,10 +159,10 @@ shared root window lands.
 transcription picker now use shared GPUI presentation. `DesktopSnapshot` now
 also normalizes shortcut labels, listener status, operation errors, update
 status, observation metadata, and transcription selection/preparation state.
-Shortcut captures and model preparation cross the host seam as portable values
-while macOS and Linux continue to validate, prewarm, and persist their native
-runtime selections independently. Portable microphone view state still
-remains.
+Shortcut captures cross the host seam as portable values. The shared picker
+delegates model preparation to each current root while macOS and Linux validate,
+prewarm, and persist their native runtime selections independently. Portable
+microphone view state still remains.
 
 - Introduce portable view state for shortcut, double-tap lock, microphone, and
   transcription controls.

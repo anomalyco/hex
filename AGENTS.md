@@ -79,7 +79,8 @@ only in debug builds.
 - `desktop_ui`: platform-neutral GPUI visual tokens and controls shared by both
   desktop roots.
 - `desktop_transcription_picker`: the single GPUI language/model picker used by
-  both desktop roots over portable model presentation and typed host actions.
+  both desktop roots over portable model presentation and platform preparation
+  callbacks.
 - `app_window`: the production Settings, mode-owned processing, and opt-in
   Commands shell plus developer-only Meetings and Activity panes.
 - `dictation_indicator`: the click-through Metal/GPUI capture and processing HUD.
