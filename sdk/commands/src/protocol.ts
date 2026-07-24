@@ -38,6 +38,7 @@ export type HostInput =
     readonly invocationId: string
     readonly commandId: string
     readonly context: HandlerContext
+    readonly captures: Readonly<Record<string, string>>
   }
   | {
     readonly type: "toolResult"

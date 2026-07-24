@@ -53,6 +53,13 @@ export interface PromiseHex extends HexCapabilities<Promise<void>> {}
 export interface HandlerArguments {
   readonly hex: PromiseHex
   readonly context: HandlerContext
+  /**
+   * Free text matched by `{name}` placeholders in the spoken phrase, keyed by
+   * placeholder name. A placeholder captures the normalized trailing words,
+   * so "search amazon for {query}" invoked as "search amazon for wool socks"
+   * yields `{ query: "wool socks" }`. Empty for plain phrases.
+   */
+  readonly captures: Readonly<Record<string, string>>
 }
 
 export interface HandlerContext {

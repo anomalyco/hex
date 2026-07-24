@@ -21,12 +21,14 @@ export class ToolCallError extends Schema.TaggedErrorClass<ToolCallError>()(
 
 export interface HexService extends HexCapabilities<Effect.Effect<void, ToolCallError>> {
   readonly context: HandlerContext
+  readonly captures: Readonly<Record<string, string>>
 }
 
 export class Hex extends Context.Service<Hex, HexService>()("@hex/commands/Hex") {}
 
 export interface EffectHandlerArguments {
   readonly context: HandlerContext
+  readonly captures: Readonly<Record<string, string>>
 }
 
 export type EffectHandler<E = unknown> =

@@ -5,10 +5,11 @@ use std::{error, fmt};
 
 use color_eyre::eyre::{Result, WrapErr, eyre};
 
+pub(crate) use crate::command_grammar::phrase_placeholder;
 #[allow(unused_imports)]
 pub use crate::command_grammar::{
-    CapturedCount, CapturedDigit, CapturedDirection, Command, CommandBuilder, ConfiguredCommand,
-    Count, Digit, Direction, OptionalCount, PatternSpec, TypedPattern,
+    CapturedCount, CapturedDigit, CapturedDirection, CapturedPhrase, Command, CommandBuilder,
+    ConfiguredCommand, Count, Digit, Direction, OptionalCount, PatternSpec, TypedPattern,
 };
 pub use crate::context::ContextSelector as ContextPredicate;
 use crate::context::ContextSnapshot;
@@ -28,6 +29,7 @@ pub enum Action {
     StopMeeting,
     InvokeHandler {
         generation: u64,
+        capture: Option<CapturedPhrase>,
     },
     OpenApplication(String),
     OpenUrl(String),
@@ -66,6 +68,10 @@ pub enum CommandError {
     OverlappingAliases {
         id: String,
     },
+    InvalidCapture {
+        id: String,
+        message: String,
+    },
     OverlappingPatterns {
         first: String,
         second: String,
@@ -88,6 +94,9 @@ impl fmt::Display for CommandError {
             }
             Self::OverlappingPatterns { first, second } => {
                 write!(formatter, "command patterns overlap: {first} and {second}")
+            }
+            Self::InvalidCapture { id, message } => {
+                write!(formatter, "invalid capture in {id}: {message}")
             }
             Self::ReservedId { id } => write!(formatter, "reserved command id: {id}"),
             Self::ReservedPhrase { phrase } => {
@@ -615,6 +624,160 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    fn capture_command(id: &str, phrase: &str) -> ConfiguredCommand {
+        ConfiguredCommand::personal_command(
+            id,
+            "Capture test",
+            [phrase],
+            ContextPredicate::Always,
+            |capture| Action::InvokeHandler {
+                generation: 3,
+                capture,
+            },
+            None,
+        )
+        .expect("capture command compiles")
+    }
+
+    #[test]
+    fn capture_phrase_resolves_the_normalized_spoken_remainder() {
+        let mut commands = CommandConfig::new();
+        commands
+            .try_command(capture_command("search", "search amazon for {query}"))
+            .expect("capture command registers");
+
+        match commands.resolve(
+            Mode::Listening,
+            "Search Amazon for wool socks!",
+            &no_context(),
+        ) {
+            Decision::Execute {
+                id: "search",
+                action:
+                    Action::InvokeHandler {
+                        generation: 3,
+                        capture: Some(capture),
+                    },
+            } => {
+                assert_eq!(capture.name, "query");
+                assert_eq!(capture.text, "wool socks");
+            }
+            _ => panic!("expected the capture command to execute"),
+        }
+    }
+
+    #[test]
+    fn capture_phrase_requires_at_least_one_captured_word() {
+        let mut commands = CommandConfig::new();
+        commands
+            .try_command(capture_command("search", "search amazon for {query}"))
+            .expect("capture command registers");
+
+        assert!(matches!(
+            commands.resolve(Mode::Listening, "search amazon for", &no_context()),
+            Decision::Ignore
+        ));
+    }
+
+    #[test]
+    fn capture_phrase_rejects_captures_beyond_the_word_bound() {
+        let mut commands = CommandConfig::new();
+        commands
+            .try_command(capture_command("search", "search amazon for {query}"))
+            .expect("capture command registers");
+        let heard = format!("search amazon for {}", vec!["word"; 25].join(" "));
+
+        assert!(matches!(
+            commands.resolve(Mode::Listening, &heard, &no_context()),
+            Decision::Ignore
+        ));
+    }
+
+    #[test]
+    fn plain_aliases_on_a_capture_command_resolve_without_a_capture() {
+        let command = ConfiguredCommand::personal_command(
+            "search",
+            "Capture test",
+            ["open amazon", "search amazon for {query}"],
+            ContextPredicate::Always,
+            |capture| Action::InvokeHandler {
+                generation: 3,
+                capture,
+            },
+            None,
+        )
+        .expect("mixed aliases compile");
+        let mut commands = CommandConfig::new();
+        commands.try_command(command).expect("command registers");
+
+        assert!(matches!(
+            commands.resolve(Mode::Listening, "open amazon", &no_context()),
+            Decision::Execute {
+                action: Action::InvokeHandler { capture: None, .. },
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn invalid_capture_placeholders_are_rejected_at_configuration_time() {
+        for phrase in [
+            "{query}",
+            "search {Query}",
+            "search {query} everywhere",
+            "search {a} {b}",
+            "search {}",
+            "search {1query}",
+        ] {
+            let result = ConfiguredCommand::personal_command(
+                "bad",
+                "Capture test",
+                [phrase],
+                ContextPredicate::Always,
+                |capture| Action::InvokeHandler {
+                    generation: 3,
+                    capture,
+                },
+                None,
+            );
+            assert!(
+                matches!(result, Err(CommandError::InvalidCapture { .. })),
+                "{phrase} should be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn capture_phrases_conflict_with_longer_literal_phrases_sharing_their_prefix() {
+        let mut commands = CommandConfig::new();
+        commands
+            .try_command(capture_command("search", "search amazon for {query}"))
+            .expect("capture command registers");
+
+        let literal = ConfiguredCommand::literal(
+            "socks",
+            "Literal test",
+            ["search amazon for socks"],
+            ContextPredicate::Always,
+            Action::StartMeeting,
+        )
+        .expect("literal command compiles");
+        assert!(matches!(
+            commands.try_command(literal),
+            Err(CommandError::OverlappingPatterns { .. })
+        ));
+
+        let unrelated = ConfiguredCommand::literal(
+            "ebay",
+            "Literal test",
+            ["search ebay for socks"],
+            ContextPredicate::Always,
+            Action::StartMeeting,
+        )
+        .expect("literal command compiles");
+        assert!(commands.try_command(unrelated).is_ok());
     }
 
     #[test]

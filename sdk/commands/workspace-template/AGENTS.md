@@ -26,6 +26,13 @@ files and third-party dependencies.
   protocol changes are rejected together with command changes, preserving the
   last valid native snapshot.
 - `when` accepts exactly one of `application` or `browserHost`.
+- A phrase may end in one `{name}` capture placeholder, e.g.
+  `"search amazon for {query}"`. It requires at least one spoken word before
+  the placeholder and one or more words after the prefix; the normalized
+  remainder arrives as `captures.name` in the handler (and on the Effect `Hex`
+  service). Capture phrases require `run`; they cannot use a native `action`.
+  A capture phrase conflicts with any coexisting phrase that shares its
+  literal prefix.
 - Capabilities are `openUrl`, `openApplication`, `openPath`, `press`, and
   `typeText`.
 - Structured native action descriptors are available for fixed single actions,

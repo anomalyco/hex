@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::fs;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
@@ -12,7 +12,9 @@ use std::time::{Duration, Instant, SystemTime};
 use color_eyre::eyre::{Result, WrapErr, eyre};
 use serde::{Deserialize, Serialize};
 
-use crate::commands::{Action, ActionOutcome, CommandConfig, ConfiguredCommand, ContextPredicate};
+use crate::commands::{
+    Action, ActionOutcome, CapturedPhrase, CommandConfig, ConfiguredCommand, ContextPredicate,
+};
 use crate::context::ContextSnapshot;
 use crate::dictation::DictationProtocol;
 use crate::keyboard::{Key, Modifiers};
@@ -587,6 +589,7 @@ struct Invocation {
     command_id: String,
     heard: String,
     context: ContextSnapshot,
+    capture: Option<CapturedPhrase>,
 }
 
 enum Request {
@@ -805,6 +808,8 @@ enum HostInput {
         invocation_id: String,
         command_id: String,
         context: InvocationContext,
+        #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+        captures: BTreeMap<String, String>,
     },
     Transform {
         invocation_id: String,
@@ -932,6 +937,7 @@ impl PersonalCommands {
         command_id: impl Into<String>,
         heard: &str,
         context: ContextSnapshot,
+        capture: Option<CapturedPhrase>,
     ) -> Result<(), &'static str> {
         self.requests
             .try_send(Request::Invoke(Box::new(Invocation {
@@ -939,6 +945,7 @@ impl PersonalCommands {
                 command_id: command_id.into(),
                 heard: heard.into(),
                 context,
+                capture,
             })))
             .map_err(|error| match error {
                 TrySendError::Full(_) => "personal command host queue is full",
@@ -1166,10 +1173,16 @@ fn run_worker(
                         .map(ToString::to_string),
                     window_title: invocation.context.window_title.clone(),
                 };
+                let captures = invocation
+                    .capture
+                    .as_ref()
+                    .map(|capture| BTreeMap::from([(capture.name.clone(), capture.text.clone())]))
+                    .unwrap_or_default();
                 let input = HostInput::Invoke {
                     invocation_id: invocation_id.clone(),
                     command_id: invocation.command_id.clone(),
                     context,
+                    captures,
                 };
                 let host_generation = host.generation;
                 if let Err(error) = host.input.try_send(input) {
@@ -1821,10 +1834,6 @@ fn compile_registration(
                 ContextPredicate::browser_host(when.browser_host)
             }
         };
-        let action = match command.execution {
-            Execution::Native { action } => action.into_action()?,
-            Execution::Handler => Action::InvokeHandler { generation },
-        };
         let description = command
             .description
             .unwrap_or_else(|| "Custom command".into());
@@ -1832,14 +1841,42 @@ fn compile_registration(
         if let Some(group) = &command.group {
             validate_text(group, "command group", 1024)?;
         }
-        let configured = ConfiguredCommand::personal_literal(
-            command.id,
-            description,
-            command.phrases,
-            context,
-            action,
-            Some(command.group.unwrap_or_else(|| "Other".into())),
-        )?;
+        let group = Some(command.group.unwrap_or_else(|| "Other".into()));
+        let configured = match command.execution {
+            Execution::Native { action } => {
+                for phrase in &command.phrases {
+                    match crate::commands::phrase_placeholder(phrase) {
+                        Ok(None) => {}
+                        Ok(Some(_)) => {
+                            return Err(eyre!(
+                                "{}: {{capture}} placeholders require a handler command (use run instead of action)",
+                                command.id
+                            ));
+                        }
+                        Err(message) => return Err(eyre!("{}: {message}", command.id)),
+                    }
+                }
+                ConfiguredCommand::personal_literal(
+                    command.id,
+                    description,
+                    command.phrases,
+                    context,
+                    action.into_action()?,
+                    group,
+                )?
+            }
+            Execution::Handler => ConfiguredCommand::personal_command(
+                command.id,
+                description,
+                command.phrases,
+                context,
+                move |capture| Action::InvokeHandler {
+                    generation,
+                    capture,
+                },
+                group,
+            )?,
+        };
         compiled.try_command(configured)?;
     }
     let dictation = match dictation {
@@ -2342,7 +2379,10 @@ mod tests {
                 .resolve(Mode::Listening, "do work", &slack),
             Decision::Execute {
                 id: "handled",
-                action: Action::InvokeHandler { generation: 7 },
+                action: Action::InvokeHandler {
+                    generation: 7,
+                    capture: None,
+                },
             }
         ));
         assert_eq!(
@@ -2363,6 +2403,119 @@ mod tests {
                 .and_then(|command| command.group),
             Some("Other".into())
         );
+    }
+
+    #[test]
+    fn capture_phrases_compile_for_handlers_and_carry_the_spoken_remainder() {
+        let registration: HostOutput = serde_json::from_str(
+            r#"{"type":"registration","protocolVersion":1,"commands":[{"id":"search","phrases":["search amazon for {query}"],"execution":{"type":"handler"}}]}"#,
+        )
+        .unwrap();
+        let HostOutput::Registration {
+            protocol_version,
+            commands,
+            ..
+        } = registration
+        else {
+            panic!("expected registration")
+        };
+        let compiled = compile_registration(
+            &CommandConfig::new(),
+            7,
+            protocol_version,
+            None,
+            vec![],
+            commands,
+        )
+        .unwrap();
+
+        match compiled.commands.resolve(
+            Mode::Listening,
+            "search amazon for wool socks",
+            &ContextSnapshot::default(),
+        ) {
+            Decision::Execute {
+                id: "search",
+                action:
+                    Action::InvokeHandler {
+                        generation: 7,
+                        capture: Some(capture),
+                    },
+            } => {
+                assert_eq!(capture.name, "query");
+                assert_eq!(capture.text, "wool socks");
+            }
+            _ => panic!("expected the capture command to execute"),
+        }
+        assert!(matches!(
+            compiled.commands.resolve(
+                Mode::Listening,
+                "search amazon for",
+                &ContextSnapshot::default()
+            ),
+            Decision::Ignore
+        ));
+    }
+
+    #[test]
+    fn capture_phrases_are_rejected_for_native_commands() {
+        let registration: HostOutput = serde_json::from_str(
+            r#"{"type":"registration","protocolVersion":1,"commands":[{"id":"search","phrases":["search amazon for {query}"],"execution":{"type":"native","action":{"type":"openUrl","url":"https://example.com"}}}]}"#,
+        )
+        .unwrap();
+        let HostOutput::Registration {
+            protocol_version,
+            commands,
+            ..
+        } = registration
+        else {
+            panic!("expected registration")
+        };
+        let result = compile_registration(
+            &CommandConfig::new(),
+            7,
+            protocol_version,
+            None,
+            vec![],
+            commands,
+        );
+
+        match result {
+            Ok(_) => panic!("native capture phrases are invalid"),
+            Err(error) => assert!(error.to_string().contains("handler")),
+        }
+    }
+
+    #[test]
+    fn invoke_frames_serialize_captures_only_when_present() {
+        let context = InvocationContext {
+            application: None,
+            browser_host: None,
+            browser_url: None,
+            window_title: None,
+        };
+        let with_capture = HostInput::Invoke {
+            invocation_id: "7-1".into(),
+            command_id: "search".into(),
+            context,
+            captures: BTreeMap::from([("query".to_string(), "wool socks".to_string())]),
+        };
+        let json = serde_json::to_string(&with_capture).unwrap();
+        assert!(json.contains(r#""captures":{"query":"wool socks"}"#));
+
+        let without_capture = HostInput::Invoke {
+            invocation_id: "7-2".into(),
+            command_id: "search".into(),
+            context: InvocationContext {
+                application: None,
+                browser_host: None,
+                browser_url: None,
+                window_title: None,
+            },
+            captures: BTreeMap::new(),
+        };
+        let json = serde_json::to_string(&without_capture).unwrap();
+        assert!(!json.contains("captures"));
     }
 
     #[test]

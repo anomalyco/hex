@@ -1135,11 +1135,17 @@ fn handle_command(
         }
         Decision::Execute {
             id,
-            action: Action::InvokeHandler { generation },
+            action:
+                Action::InvokeHandler {
+                    generation,
+                    capture,
+                },
         } => {
             let outcome = personal_commands
                 .ok_or("personal command host is unavailable")
-                .and_then(|runtime| runtime.invoke(generation, id, heard, context.clone()));
+                .and_then(|runtime| {
+                    runtime.invoke(generation, id, heard, context.clone(), capture)
+                });
             match outcome {
                 Ok(()) => (Some(id.into()), CommandOutcome::Submitted),
                 Err(error) => {

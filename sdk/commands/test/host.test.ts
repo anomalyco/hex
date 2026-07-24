@@ -138,6 +138,72 @@ describe("command host", () => {
     expect(observedApplication).toBe("Brave Browser")
   })
 
+  it("passes bounded captures to vanilla and Effect handlers", async () => {
+    const output: HostOutput[] = []
+    const observedCaptures: Readonly<Record<string, string>>[] = []
+    let observedEffectCaptures: Readonly<Record<string, string>> | undefined
+    await runHost({
+      config: {
+        commands: {
+          search: {
+            phrases: ["search amazon for {query}"],
+            run: async ({ captures }: HandlerArguments) => {
+              observedCaptures.push(captures)
+            },
+          },
+          note: {
+            phrases: ["note {text}"],
+            run: Effect.gen(function* () {
+              const hex = yield* Hex
+              observedEffectCaptures = hex.captures
+            }),
+          },
+        },
+      },
+      input: messages([
+        {
+          type: "invoke",
+          invocationId: "inv-1",
+          commandId: "search",
+          context: {},
+          captures: { query: "wool socks" },
+        },
+        { type: "invoke", invocationId: "inv-2", commandId: "note", context: {}, captures: { text: "buy socks" } },
+        { type: "invoke", invocationId: "inv-3", commandId: "search", context: {} },
+        { type: "shutdown" },
+      ]),
+      write: (frame) => { output.push(frame) },
+    })
+    expect(output.filter((frame) => frame.type === "invocationResult")).toHaveLength(3)
+    expect(observedCaptures).toEqual([{ query: "wool socks" }, {}])
+    expect(observedEffectCaptures).toEqual({ text: "buy socks" })
+  })
+
+  it("rejects unbounded captures", async () => {
+    const output: HostOutput[] = []
+    const oversized = "x".repeat(2048)
+    await expect(runHost({
+      config: {
+        commands: {
+          search: {
+            phrases: ["search amazon for {query}"],
+            run: () => undefined,
+          },
+        },
+      },
+      input: messages([
+        {
+          type: "invoke",
+          invocationId: "inv-1",
+          commandId: "search",
+          context: {},
+          captures: { query: oversized },
+        },
+      ]),
+      write: (frame) => { output.push(frame) },
+    })).rejects.toThrow("invoke.captures.query")
+  })
+
   it("runs Effect handlers concurrently", async () => {
     const firstStarted = await Effect.runPromise(Deferred.make<void>())
     const releaseFirst = await Effect.runPromise(Deferred.make<void>())

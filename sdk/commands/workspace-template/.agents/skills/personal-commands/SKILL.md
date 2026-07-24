@@ -71,6 +71,27 @@ run: ({ hex }) => {
 }
 ```
 
+End a phrase with one `{name}` placeholder to capture the rest of the spoken
+words. The normalized remainder (lowercase, punctuation stripped) arrives as
+`captures.name`. Capture phrases require `run` and at least one spoken word
+before the placeholder:
+
+```ts
+export default defineHexConfig({
+  commands: {
+    "search-amazon": {
+      phrases: ["search amazon for {query}"],
+      run: ({ hex, captures }) =>
+        hex.openUrl(`https://www.amazon.com/s?k=${encodeURIComponent(captures.query ?? "")}`),
+    },
+  },
+})
+```
+
+Saying "search amazon for wool socks" opens the Amazon search for
+"wool socks". A capture phrase conflicts with any coexisting phrase that
+shares its literal prefix, and the capture is bounded (24 words / 512 bytes).
+
 Effect handlers use the Effect entrypoint and may be values or functions:
 
 ```ts

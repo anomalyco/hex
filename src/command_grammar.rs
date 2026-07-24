@@ -60,17 +60,32 @@ impl CapturedCount {
     }
 }
 
+/// Free text captured by a trailing `{name}` placeholder in a personal
+/// command phrase. The text is the normalized spoken remainder.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CapturedPhrase {
+    pub name: String,
+    pub text: String,
+}
+
+/// Longest normalized capture accepted from one completed command line.
+pub(crate) const MAX_CAPTURE_WORDS: usize = 24;
+pub(crate) const MAX_CAPTURE_BYTES: usize = 512;
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum PatternToken {
     Literal(String),
     Digit,
     Direction,
     Count,
+    /// One or more trailing free-text words captured verbatim.
+    Rest,
 }
 
 impl PatternToken {
     fn overlaps(&self, other: &Self) -> bool {
         match (self, other) {
+            (Self::Rest, _) | (_, Self::Rest) => true,
             (Self::Literal(left), Self::Literal(right)) => left == right,
             (Self::Literal(literal), slot) | (slot, Self::Literal(literal)) => {
                 slot.accepts_literal(literal)
@@ -89,6 +104,7 @@ impl PatternToken {
             Self::Digit => literal.len() == 1 && literal.as_bytes()[0].is_ascii_digit(),
             Self::Direction => parse_direction(literal).is_some(),
             Self::Count => parse_count(literal).is_some(),
+            Self::Rest => true,
         }
     }
 }
@@ -244,6 +260,99 @@ fn literal_phrase(phrase: impl Into<String>) -> TypedPattern<()> {
         signatures: vec![signature],
         parse: Box::new(move |heard| (heard == words).then_some(())),
     }
+}
+
+/// Validate a personal phrase and return its trailing capture name, if any.
+///
+/// A capture phrase has the shape `spoken words {name}`: at least one literal
+/// word, exactly one placeholder, placeholder last, and a lowercase
+/// `[a-z][a-z0-9_]*` name.
+pub(crate) fn phrase_placeholder(phrase: &str) -> Result<Option<String>, String> {
+    let opens = phrase.matches('{').count();
+    let closes = phrase.matches('}').count();
+    if opens == 0 && closes == 0 {
+        return Ok(None);
+    }
+    if opens != 1 || closes != 1 {
+        return Err("a phrase may contain at most one {capture} placeholder".into());
+    }
+    let open = phrase.find('{').expect("counted one opening brace");
+    let close = phrase.find('}').expect("counted one closing brace");
+    if close < open {
+        return Err("the {capture} placeholder is malformed".into());
+    }
+    if !phrase[close + 1..].trim().is_empty() {
+        return Err("the {capture} placeholder must end the phrase".into());
+    }
+    let name = &phrase[open + 1..close];
+    let mut characters = name.chars();
+    let starts_lowercase = characters
+        .next()
+        .is_some_and(|first| first.is_ascii_lowercase());
+    if !starts_lowercase
+        || !name
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+    {
+        return Err(
+            "capture names start with a lowercase letter and use lowercase letters, digits, and underscores"
+                .into(),
+        );
+    }
+    if normalize(&phrase[..open]).is_empty() {
+        return Err(
+            "a capture phrase needs at least one spoken word before the placeholder".into(),
+        );
+    }
+    Ok(Some(name.into()))
+}
+
+/// Compile a personal phrase that may end in a `{name}` capture placeholder.
+fn capture_pattern(phrase: String) -> Result<TypedPattern<Option<CapturedPhrase>>, String> {
+    let Some(name) = phrase_placeholder(&phrase)? else {
+        let words = normalize(&phrase)
+            .split_whitespace()
+            .map(str::to_string)
+            .collect::<Vec<_>>();
+        let signature = words.iter().cloned().map(PatternToken::Literal).collect();
+        return Ok(TypedPattern {
+            display: phrase,
+            signatures: vec![signature],
+            parse: Box::new(move |heard| (heard == words).then_some(None)),
+        });
+    };
+    let open = phrase.find('{').expect("placeholder was validated");
+    let words = normalize(&phrase[..open])
+        .split_whitespace()
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    let signature = words
+        .iter()
+        .cloned()
+        .map(PatternToken::Literal)
+        .chain([PatternToken::Rest])
+        .collect();
+    Ok(TypedPattern {
+        display: phrase.trim().to_string(),
+        signatures: vec![signature],
+        parse: Box::new(move |heard| {
+            if heard.len() <= words.len() {
+                return None;
+            }
+            let (prefix, rest) = heard.split_at(words.len());
+            if prefix != words || rest.len() > MAX_CAPTURE_WORDS {
+                return None;
+            }
+            let text = rest.join(" ");
+            if text.len() > MAX_CAPTURE_BYTES {
+                return None;
+            }
+            Some(Some(CapturedPhrase {
+                name: name.clone(),
+                text,
+            }))
+        }),
+    })
 }
 
 fn parse_direction(word: &str) -> Option<CapturedDirection> {
@@ -446,6 +555,62 @@ impl ConfiguredCommand {
         })
     }
 
+    /// Compile a personal command whose phrases may end in one `{name}`
+    /// capture placeholder. The action factory receives the capture matched
+    /// from the completed line, or `None` for plain literal aliases.
+    pub fn personal_command(
+        id: impl Into<String>,
+        description: impl Into<String>,
+        phrases: impl IntoIterator<Item = impl Into<String>>,
+        context: ContextSelector,
+        action: impl Fn(Option<CapturedPhrase>) -> Action + Send + Sync + 'static,
+        group: Option<String>,
+    ) -> Result<Self, CommandError> {
+        let id = id.into();
+        let mut patterns = Vec::new();
+        for phrase in phrases {
+            match capture_pattern(phrase.into()) {
+                Ok(pattern) => patterns.push(pattern),
+                Err(message) => return Err(CommandError::InvalidCapture { id, message }),
+            }
+        }
+        if patterns.is_empty()
+            || patterns
+                .iter()
+                .any(|pattern| pattern.signatures.iter().any(Vec::is_empty))
+        {
+            return Err(CommandError::MissingPhrase { id });
+        }
+        for (index, left) in patterns.iter().enumerate() {
+            for right in &patterns[index + 1..] {
+                if typed_patterns_overlap(left, right) {
+                    return Err(CommandError::OverlappingAliases { id });
+                }
+            }
+        }
+        let action = Arc::new(action);
+        Ok(Self {
+            id,
+            description: description.into(),
+            context,
+            protected: false,
+            group,
+            patterns: patterns
+                .into_iter()
+                .map(|pattern| {
+                    let action = action.clone();
+                    ErasedPattern {
+                        display: pattern.display,
+                        signatures: pattern.signatures,
+                        resolve: Arc::new(move |words| {
+                            (pattern.parse)(words).map(|capture| (action)(capture))
+                        }),
+                    }
+                })
+                .collect(),
+        })
+    }
+
     pub(crate) fn protocol_literal(
         id: impl Into<String>,
         phrases: impl IntoIterator<Item = impl Into<String>>,
@@ -525,14 +690,32 @@ fn patterns_overlap(left: &ErasedPattern, right: &ErasedPattern) -> bool {
 
 fn signatures_overlap(left: &[Vec<PatternToken>], right: &[Vec<PatternToken>]) -> bool {
     left.iter().any(|left| {
-        right.iter().any(|right| {
-            left.len() == right.len()
-                && left
-                    .iter()
-                    .zip(right)
-                    .all(|(left, right)| left.overlaps(right))
-        })
+        right
+            .iter()
+            .any(|right| signature_pair_overlaps(left, right))
     })
+}
+
+/// Whether one spoken word sequence could match both signatures. A trailing
+/// `Rest` capture accepts one or more arbitrary words, so a capture signature
+/// overlaps every signature that shares its literal prefix and is long enough
+/// to reach the capture.
+fn signature_pair_overlaps(left: &[PatternToken], right: &[PatternToken]) -> bool {
+    let left_rest = matches!(left.last(), Some(PatternToken::Rest));
+    let right_rest = matches!(right.last(), Some(PatternToken::Rest));
+    let left_fixed = &left[..left.len() - usize::from(left_rest)];
+    let right_fixed = &right[..right.len() - usize::from(right_rest)];
+    let lengths_compatible = match (left_rest, right_rest) {
+        (false, false) => left.len() == right.len(),
+        (true, false) => right_fixed.len() > left_fixed.len(),
+        (false, true) => left_fixed.len() > right_fixed.len(),
+        (true, true) => true,
+    };
+    lengths_compatible
+        && left_fixed
+            .iter()
+            .zip(right_fixed)
+            .all(|(left, right)| left.overlaps(right))
 }
 
 fn signatures_prefix_overlap(left: &[Vec<PatternToken>], right: &[Vec<PatternToken>]) -> bool {

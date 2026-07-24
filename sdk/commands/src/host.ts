@@ -41,6 +41,9 @@ const MAX_TRANSFORMATION_TEXT_BYTES = 48 * 1024
 const MAX_ERROR_BYTES = 4096
 const MAX_PRESS_REPEAT = 100
 const MAX_PENDING_TOOL_CALLS = 1024
+const MAX_CAPTURE_ENTRIES = 8
+const MAX_CAPTURE_NAME_BYTES = 64
+const MAX_CAPTURE_TEXT_BYTES = 1024
 const SHUTDOWN_TIMEOUT_MS = 2_000
 
 type HostHandler = Handler | EffectHandler
@@ -303,6 +306,16 @@ const decodeInput = (line: string): HostInput => {
       const browserHost = context.browserHost === undefined
         ? browserUrl === undefined ? undefined : new URL(browserUrl).hostname
         : boundedString(context.browserHost, "invoke.context.browserHost", 253)
+      const rawCaptures = input.captures === undefined ? {} : record(input.captures)
+      if (rawCaptures === undefined) throw new Error("invoke.captures must be an object")
+      const captureEntries = Object.entries(rawCaptures)
+      if (captureEntries.length > MAX_CAPTURE_ENTRIES) {
+        throw new Error(`invoke.captures must contain at most ${MAX_CAPTURE_ENTRIES} entries`)
+      }
+      const captures = Object.freeze(Object.fromEntries(captureEntries.map(([name, text]) => [
+        boundedString(name, "invoke.captures name", MAX_CAPTURE_NAME_BYTES),
+        boundedString(text, `invoke.captures.${name}`, MAX_CAPTURE_TEXT_BYTES),
+      ])))
       return {
         type: "invoke",
         invocationId: boundedString(input.invocationId, "invoke.invocationId", MAX_ID_BYTES),
@@ -313,6 +326,7 @@ const decodeInput = (line: string): HostInput => {
           ...(browserUrl === undefined ? {} : { browserUrl }),
           ...(windowTitle === undefined ? {} : { windowTitle }),
         },
+        captures,
       }
     case "transform": {
       const context = record(input.context)
@@ -458,8 +472,10 @@ export const runHost = async ({ config, input, write }: HostOptions): Promise<vo
   const makeHex = (
     invocationId: string,
     context: Extract<HostInput, { readonly type: "invoke" }>["context"],
+    captures: Readonly<Record<string, string>>,
   ): HexService => ({
     context,
+    captures,
     ...adaptCapabilities((action) => callTool(invocationId, action)),
   })
 
@@ -487,6 +503,7 @@ export const runHost = async ({ config, input, write }: HostOptions): Promise<vo
     invocationId: string,
     commandId: string,
     context: Extract<HostInput, { readonly type: "invoke" }>["context"],
+    captures: Readonly<Record<string, string>>,
   ): void => {
     if (fibers.has(invocationId)) {
       void send({
@@ -511,7 +528,7 @@ export const runHost = async ({ config, input, write }: HostOptions): Promise<vo
         Effect.sync(() => new AbortController()),
         (controller) => Effect.suspend(() => {
           const promiseHex = makePromiseHex(invocationId, controller.signal)
-          const result = handler({ hex: promiseHex.hex, context })
+          const result = handler({ hex: promiseHex.hex, context, captures })
           if (Effect.isEffect(result)) {
             return result.pipe(
               Effect.andThen(Effect.tryPromise({
@@ -531,7 +548,7 @@ export const runHost = async ({ config, input, write }: HostOptions): Promise<vo
         (controller) => Effect.sync(() => controller.abort()),
       )
     const fiber = Effect.runFork(
-      operation.pipe(Effect.provideService(Hex, Hex.of(makeHex(invocationId, context)))),
+      operation.pipe(Effect.provideService(Hex, Hex.of(makeHex(invocationId, context, captures)))),
     )
     fibers.set(invocationId, fiber)
     fiber.addObserver((exit) => {
@@ -591,7 +608,7 @@ export const runHost = async ({ config, input, write }: HostOptions): Promise<vo
       (async () => {
         for await (const message of frames(input)) {
           if (message.type === "invoke") {
-            invoke(message.invocationId, message.commandId, message.context)
+            invoke(message.invocationId, message.commandId, message.context, message.captures)
           } else if (message.type === "transform") {
             transform(
               message.invocationId,
