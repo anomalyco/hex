@@ -34,6 +34,8 @@ only in debug builds.
   `opencode2 api get` to discover or start its managed service.
 - `parakeet`: the strict-Metal `transcribe.cpp` adapter plus bounded inference,
   processing, ordered output, paste, last-result, and meeting-delta workers.
+- `apple_speech`: the Swift `SpeechAnalyzer` bridge with per-locale support
+  checks, asset reservation, and batch transcription.
 - `transcription`: runtime selection and transactional warm-model activation.
 - `transcription_models`: the compiled model catalog, language recommendations,
   pinned artifact verification, and lazy installation.
@@ -44,6 +46,8 @@ only in debug builds.
   transcription routes.
 - `sdk/typescript`: Promise and Effect v4 host wrappers for direct-child
   lifecycle, authenticated model preparation, and host-audio transcription.
+- `developer_control`: the typed debug-only command/reply protocol the local
+  API uses to drive the running app from `hex dev`.
 - `paste`: clipboard insertion, continuation joins, and generation-safe
   clipboard restoration.
 - `selected_text`: bounded selected-text capture through Accessibility without
@@ -55,9 +59,16 @@ only in debug builds.
   command catalog metadata.
 - `commands`: pure contextual resolution plus bounded asynchronous macOS action
   execution.
+- `personal_commands`: the Bun-hosted `@hex/commands` TypeScript workspace:
+  managed SDK provisioning, the watch-reloaded user command and transformation
+  host, bounded invocation dispatch, and status snapshots.
+- `text_replacements`: phrase-boundary-aware compilation of configured text
+  replacements applied longest-match-first to transcripts.
 - `config`: compiled commands, preferred input devices, and dictation profiles.
 - `context`: foreground application and browser context capture. Browser host is
   the domain concept; Brave AppleScript is only the first adapter.
+- `application_catalog`: cached installed-application discovery with normalized
+  bundle identity and rendered icons for the UI.
 - `app_settings`: persisted settings and live runtime projection for commands,
   hotkeys, microphone and transcription selection, recording behavior,
   processing, sound volume, and Dock policy.
@@ -67,6 +78,10 @@ only in debug builds.
 - `onboarding`: required permission health, selected dictation-model
   installation, the release startup gate, and opt-in command-model setup.
 - `sparkle`: packaged-app-only Sparkle lifecycle and manual update checks.
+- `linux`, `linux_app`, `linux_dictation`, `linux_input`, `linux_paste`,
+  `linux_settings`, `linux_transcriber`: the X11 beta CLI, GPUI shell and tray,
+  hotkey capture-transcribe-paste loop, X11 grabs and synthetic paste,
+  persisted Linux settings, and the `transcribe.cpp` session.
 - `linux_updater`: signed direct-install updates, bounded downloads, atomic
   version activation, and restart handoff for user-local Linux installs.
 - `events`: bounded asynchronous append-only NDJSON observations and bounded
@@ -78,11 +93,14 @@ only in debug builds.
   typed actions implemented by the macOS root and contained Linux adapter.
 - `desktop_ui`: platform-neutral GPUI visual tokens and controls shared by both
   desktop roots.
+- `text_input`: the shared GPUI single- and multi-line text input with editing,
+  selection, clipboard, and input-method support.
 - `desktop_transcription_picker`: the single GPUI language/model picker used by
   both desktop roots over portable model presentation and platform preparation
   callbacks.
-- `app_window`: the production Settings, mode-owned processing, and opt-in
-  Commands shell plus developer-only Meetings and Activity panes.
+- `app_window`: the production Settings, Modes with mode-owned processing,
+  Voice Action, Replacements, and opt-in Commands shell plus developer-only
+  Meetings, Activity, and HUD Lab panes.
 - `dictation_indicator`: the click-through Metal/GPUI capture and processing HUD.
 - `meeting`: explicit ScreenCaptureKit capture, owner-only WAV and transcript
   artifacts, final local-model publication, and recovery.

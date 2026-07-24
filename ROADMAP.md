@@ -11,7 +11,7 @@ meetings, native Wayland support, or a package-manager channel.
 The authenticated local transcription service now implements discovery,
 direct-child embedding, model preparation, and bounded host-audio transcription;
 Promise and Effect TypeScript wrappers pass fake-helper tests. Signed helper
-packaging, an Electron bridge, and a first real consumer remain.
+package validation, an Electron bridge, and a first real consumer remain.
 
 ## Validate The macOS Release
 
@@ -104,9 +104,9 @@ sleeping or discarded utterances, context mismatches, resolution misses, queue
 pressure, and action failures. Recommendations may propose command-taxonomy
 changes but must not mutate compiled configuration automatically.
 
-Add authenticated developer control to the existing loopback API and expose it
-through `hex dev`. The first vertical slices inspect app state, drive semantic
-HUD scenarios, open/focus panes, and toggle command mode on the GPUI thread.
+Authenticated developer control now rides the existing loopback API through the
+debug-only `hex dev` subcommand: it inspects app state, drives semantic HUD
+scenarios, opens/focuses panes, and toggles command mode on the GPUI thread.
 Extend the same bounded typed channel with fixture-audio capture, microphone
 recovery, model switching, permission snapshots, deterministic screenshots,
 and assertions over capture/job/UI state. MCP may wrap this protocol later; it

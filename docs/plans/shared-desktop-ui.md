@@ -93,13 +93,15 @@ The initial set should cover only behavior that currently varies:
 
 ```rust
 struct DesktopCapabilities {
+    activity: bool,
     commands: bool,
+    hud_lab: bool,
     meetings: bool,
+    modes: bool,
+    replacements: bool,
+    listener_control: bool,
+    update_restart: bool,
     voice_action: bool,
-    apple_speech: bool,
-    launch_at_login: bool,
-    dock_icon: bool,
-    recording_audio_behavior: bool,
 }
 ```
 
@@ -144,9 +146,10 @@ persistence behavior.
 
 **In progress.** `src/desktop_activity.rs` now projects the latest listener
 state, device, completed transcripts, and read failure from `EventReader` for
-both roots. Linux no longer interprets the event stream independently, and the
-macOS Activity header and Linux sidebar use the same listener-status control.
-The detailed Activity pane and Linux transcript list remain separate until the
+both roots, and Linux no longer interprets the event stream independently. The
+macOS Activity header renders the shared listener-status control; the current
+Linux root shows only the shared Settings pane and toggles listening from the
+tray menu, so the detailed Activity pane remains macOS developer-only until the
 shared root window lands.
 
 - Move the common `EventReader` projection into the shared window state.
