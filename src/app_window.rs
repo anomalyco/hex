@@ -2748,6 +2748,9 @@ impl AppWindow {
                                             crate::app_settings::set_dock_icon_visible(
                                                 this.settings.show_dock_icon,
                                             );
+                                            if this.settings.show_dock_icon {
+                                                cx.activate(true);
+                                            }
                                             this.save_settings(cx);
                                         })),
                                     )
