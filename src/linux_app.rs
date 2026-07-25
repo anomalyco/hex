@@ -26,9 +26,9 @@ use crate::desktop_transcription_picker::{
     transcription_selection_is_active,
 };
 use crate::desktop_ui::{
-    LINE, MUTED, NavigationIcon, SIDEBAR_WIDTH, SURFACE, TEXT_SOFT, bounded_pane_header,
-    compact_button, disclosure_button, hotkey_keycaps, navigation_item, settings_panel,
-    settings_row, settings_section_label, sidebar_frame, toggle, window_frame,
+    LINE, MUTED, NavigationIcon, SIDEBAR_WIDTH, SURFACE, TEXT_SOFT, compact_button,
+    disclosure_button, hotkey_keycaps, navigation_item, pane_header, settings_panel, settings_row,
+    settings_section_label, sidebar_frame, toggle, window_frame,
 };
 use crate::events::EventReader;
 use crate::linux_updater::InstalledUpdate;
@@ -961,7 +961,7 @@ impl LinuxApp {
             .size_full()
             .flex()
             .flex_col()
-            .child(bounded_pane_header("Settings", 788.0))
+            .child(pane_header("Settings"))
             .child(
                 div()
                     .id("settings-scroll")

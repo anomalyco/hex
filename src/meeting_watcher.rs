@@ -342,6 +342,7 @@ fn run_with_shell_preview(
             KeyBinding::new("cmd-2", crate::app_window::ShowModes, None),
             KeyBinding::new("cmd-3", crate::app_window::ShowVoiceAction, None),
             KeyBinding::new("cmd-4", crate::app_window::ShowCommands, None),
+            KeyBinding::new("cmd-5", crate::app_window::ShowHistory, None),
         ]);
         cx.bind_keys(crate::text_input::key_bindings());
         cx.on_action(move |_: &crate::app_window::CloseWindow, cx| {

@@ -26,7 +26,7 @@ impl NavigationIcon {
             Self::Modes => "square.grid.2x2.fill",
             Self::VoiceAction => "sparkle",
             Self::Commands => "command",
-            Self::History => "clock.arrow.circlepath",
+            Self::History => "clock.fill",
             Self::Meetings => "calendar",
             Self::Activity => "chart.bar",
             Self::HudLab => "flask",
@@ -191,35 +191,22 @@ pub(crate) fn navigation_item(icon: NavigationIcon, selected: bool) -> Div {
         )
 }
 
-#[allow(dead_code)]
-pub(crate) fn pane_header(title: &'static str, action: Option<AnyElement>) -> AnyElement {
-    div()
-        .h(px(70.0))
-        .px_8()
-        .flex_none()
-        .flex()
-        .items_center()
-        .justify_between()
-        .border_b_1()
-        .border_color(rgb(LINE))
-        .child(
-            div()
-                .text_size(px(20.0))
-                .font_weight(FontWeight::SEMIBOLD)
-                .child(title),
-        )
-        .when_some(action, |header, action| header.child(action))
-        .into_any_element()
-}
+/// The one content width every pane is bounded to. Headers and bodies share
+/// it; panes must not introduce their own content widths.
+pub(crate) const PANE_CONTENT_WIDTH: f32 = 940.0;
 
+/// The one fixed list-column width every list+detail pane uses.
 #[cfg_attr(target_os = "linux", allow(dead_code))]
-pub(crate) fn bounded_pane_header(title: &'static str, max_width: f32) -> AnyElement {
-    bounded_pane_header_with_action(title, max_width, None)
+pub(crate) const PANE_LIST_WIDTH: f32 = 320.0;
+
+pub(crate) fn pane_header(title: &'static str) -> AnyElement {
+    pane_header_with_action(title, None)
 }
 
-pub(crate) fn bounded_pane_header_with_action(
+/// The one pane header: title left, optional action right, bounded to
+/// [`PANE_CONTENT_WIDTH`] like the body below it.
+pub(crate) fn pane_header_with_action(
     title: &'static str,
-    max_width: f32,
     action: Option<AnyElement>,
 ) -> AnyElement {
     div()
@@ -232,7 +219,7 @@ pub(crate) fn bounded_pane_header_with_action(
             div()
                 .h_full()
                 .w_full()
-                .max_w(px(max_width))
+                .max_w(px(PANE_CONTENT_WIDTH))
                 .flex()
                 .items_center()
                 .justify_between()
@@ -247,6 +234,29 @@ pub(crate) fn bounded_pane_header_with_action(
                 .when_some(action, |header, action| header.child(action)),
         )
         .into_any_element()
+}
+
+/// The one pane body: fills the space under the header and centers its
+/// children. Put the pane's content column inside [`pane_content`].
+#[cfg_attr(target_os = "linux", allow(dead_code))]
+pub(crate) fn pane_body() -> Div {
+    div()
+        .flex_1()
+        .min_h(px(0.0))
+        .overflow_hidden()
+        .flex()
+        .justify_center()
+}
+
+/// The one pane content column, bounded to [`PANE_CONTENT_WIDTH`].
+#[cfg_attr(target_os = "linux", allow(dead_code))]
+pub(crate) fn pane_content() -> Div {
+    div()
+        .w_full()
+        .max_w(px(PANE_CONTENT_WIDTH))
+        .min_h(px(0.0))
+        .flex()
+        .flex_col()
 }
 
 #[cfg_attr(target_os = "linux", allow(dead_code))]

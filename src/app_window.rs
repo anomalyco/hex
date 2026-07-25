@@ -35,13 +35,13 @@ use crate::desktop_transcription_picker::{
 };
 use crate::desktop_ui::{
     CANVAS, COMPACT_MULTILINE_INPUT_HEIGHT, CONTROL_HEIGHT, FAINT, LINE, MUTED, NEGATIVE,
-    NavigationIcon, SECTION_GAP, SIDEBAR_WIDTH, SURFACE, SURFACE_HOVER, SURFACE_SELECTED, TEXT,
-    TEXT_SOFT, bounded_pane_header, bounded_pane_header_with_action, compact_button,
-    compact_header_plus_button, compact_panel, compact_panel_header, compact_plus_button,
-    compact_section_label, disclosure_button, empty_message, error_message, hotkey_keycaps,
-    listener_status, mix_color, navigation_item, pane_header, section_label, segmented_control,
-    segmented_item, settings_copy, settings_panel, settings_row, settings_section_label,
-    sidebar_frame, toggle, window_frame,
+    NavigationIcon, PANE_CONTENT_WIDTH, PANE_LIST_WIDTH, SECTION_GAP, SIDEBAR_WIDTH, SURFACE,
+    SURFACE_HOVER, SURFACE_SELECTED, TEXT, TEXT_SOFT, compact_button, compact_header_plus_button,
+    compact_panel, compact_panel_header, compact_plus_button, compact_section_label,
+    disclosure_button, empty_message, error_message, hotkey_keycaps, listener_status, mix_color,
+    navigation_item, pane_body, pane_content, pane_header, pane_header_with_action, section_label,
+    segmented_control, segmented_item, settings_copy, settings_panel, settings_row,
+    settings_section_label, sidebar_frame, toggle, window_frame,
 };
 use crate::dictation_indicator::{DictationIndicatorEvent, DictationIndicatorSender, HudTuning};
 use crate::dictation_processor::{ModelCatalog, ModelChoice};
@@ -66,8 +66,6 @@ const WINDOW_WIDTH: f32 = 1040.0;
 const WINDOW_HEIGHT: f32 = 700.0;
 const MINIMUM_WIDTH: f32 = 860.0;
 const MINIMUM_HEIGHT: f32 = 560.0;
-const SETTINGS_CONTENT_WIDTH: f32 = 788.0;
-const VOICE_ACTION_CONTENT_WIDTH: f32 = 700.0;
 const HOTKEY_MIN_WIDTH: f32 = 148.0;
 const OPENCODE_INSTALL_RETRY_INTERVAL: Duration = Duration::from_secs(5);
 const APPLE_SPEECH_RETRY_INTERVAL: Duration = Duration::from_secs(5);
@@ -83,6 +81,7 @@ actions!(
         MinimizeWindow,
         QuitApplication,
         ShowCommands,
+        ShowHistory,
         ShowModes,
         ShowSettings,
         ShowVoiceAction,
@@ -282,9 +281,9 @@ impl Pane {
         Self::Settings,
         Self::Modes,
         Self::VoiceAction,
+        Self::Commands,
         Self::History,
         Self::HudLab,
-        Self::Commands,
         Self::Meetings,
         Self::Activity,
     ];
@@ -296,9 +295,9 @@ impl Pane {
                 Self::Settings => true,
                 Self::Modes => capabilities.modes,
                 Self::VoiceAction => capabilities.voice_action,
+                Self::Commands => capabilities.commands,
                 Self::History => capabilities.history,
                 Self::HudLab => capabilities.hud_lab,
-                Self::Commands => capabilities.commands,
                 Self::Meetings => capabilities.meetings,
                 Self::Activity => capabilities.activity,
             })
@@ -1197,6 +1196,9 @@ impl AppWindow {
             window.reload_events();
         }
         window.reload_history(cx);
+        if window.preview {
+            window.selected_history = window.history_entries.first().map(|entry| entry.id);
+        }
         if window.pane == Pane::Modes {
             window.ensure_application_catalog_load();
         }
@@ -1881,28 +1883,6 @@ impl AppWindow {
         cx.notify();
     }
 
-    /// Re-paste a retained entry through the recognition side's ordered paste
-    /// owner. The app hides first so insertion lands in the previously
-    /// focused application.
-    fn paste_history_entry(&mut self, id: u64, cx: &mut Context<Self>) {
-        let Some(entry) = self.history_entries.iter().find(|entry| entry.id == id) else {
-            return;
-        };
-        let Some(history) = &self.history else {
-            return;
-        };
-        match history.request_paste(entry.final_text.clone()) {
-            Ok(()) => {
-                self.history_error = None;
-                if !self.preview {
-                    crate::app_settings::hide_application();
-                }
-            }
-            Err(error) => self.history_error = Some(error.to_string()),
-        }
-        cx.notify();
-    }
-
     fn delete_history_entry(&mut self, id: u64, cx: &mut Context<Self>) {
         if let Some(history) = &self.history {
             if let Err(error) = history.delete(id) {
@@ -1992,6 +1972,7 @@ impl AppWindow {
                 let id = entry.id;
                 let selected = self.selected_history == Some(id);
                 let age = event_age(entry.timestamp_ms);
+                let preview = entry.final_text.replace('\n', " ");
                 let mut meta = entry.kind.label().to_string();
                 if let Some(application) = &entry.application {
                     meta.push_str(" · ");
@@ -2019,11 +2000,12 @@ impl AppWindow {
                             .gap_1()
                             .child(
                                 div()
+                                    .w_full()
                                     .text_size(px(12.0))
                                     .text_color(rgb(TEXT_SOFT))
                                     .line_height(px(18.0))
                                     .truncate()
-                                    .child(entry.final_text.clone()),
+                                    .child(preview),
                             )
                             .child(div().text_size(px(10.0)).text_color(rgb(FAINT)).child(meta)),
                     )
@@ -2047,38 +2029,51 @@ impl AppWindow {
             .size_full()
             .flex()
             .flex_col()
-            .child(pane_header("History", Some(header_action)))
+            .child(pane_header_with_action("History", Some(header_action)))
             .child(
-                div()
-                    .flex_1()
-                    .overflow_hidden()
-                    .flex()
-                    .child(
-                        div()
-                            .id("history-list")
-                            .w(px(460.0))
-                            .h_full()
-                            .flex_none()
-                            .overflow_y_scroll()
-                            .border_r_1()
-                            .border_color(rgb(LINE))
-                            .when(retention_off, |list| {
-                                list.child(empty_message(
-                                    "History is off. New dictations are not retained.",
-                                ))
-                            })
-                            .when(
-                                !retention_off
-                                    && self.history_entries.is_empty()
-                                    && self.history_error.is_none(),
-                                |list| list.child(empty_message("No dictations retained yet.")),
-                            )
-                            .when_some(self.history_error.clone(), |list, error| {
-                                list.child(error_message("History could not be loaded.", error))
-                            })
-                            .children(rows),
-                    )
-                    .child(self.render_history_detail(cx)),
+                pane_body().p_5().child(
+                    pane_content()
+                        .flex_row()
+                        .gap_5()
+                        .child(
+                            compact_panel()
+                                .id("history-list")
+                                .w(px(PANE_LIST_WIDTH))
+                                .h_full()
+                                .flex_none()
+                                .overflow_y_scroll()
+                                .when(retention_off, |list| {
+                                    list.child(empty_message(
+                                        "History is off. New dictations are not retained.",
+                                    ))
+                                })
+                                .when(
+                                    !retention_off
+                                        && self.history_entries.is_empty()
+                                        && self.history_error.is_none(),
+                                    |list| list.child(empty_message("No dictations retained yet.")),
+                                )
+                                .when_some(self.history_error.clone(), |list, error| {
+                                    list.child(error_message("History could not be loaded.", error))
+                                })
+                                .child(
+                                    div()
+                                        .w(px(PANE_LIST_WIDTH - 2.0))
+                                        .flex()
+                                        .flex_col()
+                                        .children(rows),
+                                ),
+                        )
+                        .child(
+                            compact_panel()
+                                .flex_1()
+                                .min_w(px(0.0))
+                                .h_full()
+                                .flex()
+                                .flex_col()
+                                .child(self.render_history_detail(cx)),
+                        ),
+                ),
             )
             .into_any_element()
     }
@@ -2117,98 +2112,105 @@ impl AppWindow {
         div()
             .id("history-detail")
             .flex_1()
+            .min_w(px(0.0))
             .h_full()
             .overflow_y_scroll()
             .px_6()
             .py_6()
             .child(
                 div()
+                    .w_full()
                     .flex()
-                    .items_center()
-                    .gap_3()
+                    .flex_col()
                     .child(
                         div()
-                            .text_size(px(18.0))
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .child(entry.kind.label()),
+                            .flex()
+                            .items_center()
+                            .gap_3()
+                            .child(
+                                div()
+                                    .text_size(px(18.0))
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .child(entry.kind.label()),
+                            )
+                            .child(
+                                div()
+                                    .text_size(px(11.0))
+                                    .text_color(rgb(FAINT))
+                                    .child(event_age(entry.timestamp_ms)),
+                            ),
                     )
                     .child(
                         div()
-                            .text_size(px(11.0))
-                            .text_color(rgb(FAINT))
-                            .child(event_age(entry.timestamp_ms)),
-                    ),
-            )
-            .child(
-                div()
-                    .pt_4()
-                    .flex()
-                    .items_center()
-                    .gap_3()
-                    .child(
-                        action_button(if copied { "Copied" } else { "Copy" }, "copy").on_click(
-                            cx.listener(move |this, _, _, cx| this.copy_history_entry(id, cx)),
-                        ),
+                            .pt_4()
+                            .flex()
+                            .items_center()
+                            .gap_3()
+                            .child(
+                                action_button(if copied { "Copied" } else { "Copy" }, "copy")
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        this.copy_history_entry(id, cx)
+                                    })),
+                            )
+                            .child(action_button("Delete", "delete").on_click(cx.listener(
+                                move |this, _, _, cx| this.delete_history_entry(id, cx),
+                            ))),
                     )
-                    .child(action_button("Paste again", "paste").on_click(
-                        cx.listener(move |this, _, _, cx| this.paste_history_entry(id, cx)),
-                    ))
-                    .child(action_button("Delete", "delete").on_click(
-                        cx.listener(move |this, _, _, cx| this.delete_history_entry(id, cx)),
-                    )),
-            )
-            .child(
-                div()
-                    .mt_5()
-                    .pt_5()
-                    .border_t_1()
-                    .border_color(rgb(LINE))
-                    .child(section_label("Final text"))
                     .child(
                         div()
-                            .pt_3()
-                            .text_size(px(12.0))
-                            .line_height(px(19.0))
-                            .text_color(rgb(TEXT))
-                            .child(entry.final_text.clone()),
-                    ),
-            )
-            .when(show_raw, |detail| {
-                detail.child(
-                    div()
-                        .mt_5()
-                        .pt_5()
-                        .border_t_1()
-                        .border_color(rgb(LINE))
-                        .child(section_label("Raw transcript"))
-                        .child(
+                            .mt_5()
+                            .pt_5()
+                            .border_t_1()
+                            .border_color(rgb(LINE))
+                            .child(section_label("Final text"))
+                            .child(
+                                div()
+                                    .pt_3()
+                                    .text_size(px(12.0))
+                                    .line_height(px(19.0))
+                                    .text_color(rgb(TEXT))
+                                    .child(entry.final_text.clone()),
+                            ),
+                    )
+                    .when(show_raw, |detail| {
+                        detail.child(
                             div()
-                                .pt_3()
-                                .text_size(px(12.0))
-                                .line_height(px(19.0))
-                                .text_color(rgb(MUTED))
-                                .child(entry.raw_text.clone()),
-                        ),
-                )
-            })
-            .child(
-                div()
-                    .mt_5()
-                    .pt_5()
-                    .border_t_1()
-                    .border_color(rgb(LINE))
-                    .when_some(entry.application.clone(), |detail, application| {
-                        detail.child(detail_row("Application", application))
+                                .mt_5()
+                                .pt_5()
+                                .border_t_1()
+                                .border_color(rgb(LINE))
+                                .child(section_label("Raw transcript"))
+                                .child(
+                                    div()
+                                        .pt_3()
+                                        .text_size(px(12.0))
+                                        .line_height(px(19.0))
+                                        .text_color(rgb(MUTED))
+                                        .child(entry.raw_text.clone()),
+                                ),
+                        )
                     })
-                    .when_some(entry.processing.clone(), |detail, processing| {
-                        let mut summary =
-                            format!("{} · {} ms", processing.profile, processing.latency_ms);
-                        if let Some(fallback) = &processing.fallback {
-                            summary.push_str(&format!(" · fell back: {fallback}"));
-                        }
-                        detail.child(detail_row("Processing", summary))
-                    })
-                    .child(detail_row("Latency", latency)),
+                    .child(
+                        div()
+                            .mt_5()
+                            .pt_5()
+                            .border_t_1()
+                            .border_color(rgb(LINE))
+                            .when_some(entry.application.clone(), |detail, application| {
+                                detail.child(detail_row("Application", application))
+                            })
+                            .when_some(entry.processing.clone(), |detail, processing| {
+                                let mut summary = format!(
+                                    "{} · {} ms",
+                                    processing.profile, processing.latency_ms
+                                );
+                                if let Some(fallback) = &processing.fallback {
+                                    summary.push_str(&format!(" · fell back: {fallback}"));
+                                }
+                                detail.child(detail_row("Processing", summary))
+                            })
+                            .child(detail_row("Latency", latency)),
+                    ),
             )
             .into_any_element()
     }
@@ -3008,7 +3010,7 @@ impl AppWindow {
             .size_full()
             .flex()
             .flex_col()
-            .child(bounded_pane_header("Settings", SETTINGS_CONTENT_WIDTH))
+            .child(pane_header("Settings"))
             .child(
                 div()
                     .id("settings-scroll")
@@ -3025,7 +3027,7 @@ impl AppWindow {
                             .child(
                                 div()
                                     .w_full()
-                                    .max_w(px(SETTINGS_CONTENT_WIDTH))
+                                    .max_w(px(PANE_CONTENT_WIDTH))
                                     .relative()
                                     .child(settings_section_label("DICTATION"))
                                     .child(
@@ -3405,10 +3407,7 @@ impl AppWindow {
                 .size_full()
                 .flex()
                 .flex_col()
-                .child(bounded_pane_header(
-                    "Voice Action",
-                    VOICE_ACTION_CONTENT_WIDTH,
-                ))
+                .child(pane_header("Voice Action"))
                 .child(
                     div().flex_1().flex().items_center().justify_center().child(
                         div()
@@ -3441,10 +3440,7 @@ impl AppWindow {
             .size_full()
             .flex()
             .flex_col()
-            .child(bounded_pane_header(
-                "Voice Action",
-                VOICE_ACTION_CONTENT_WIDTH,
-            ))
+            .child(pane_header("Voice Action"))
             .child(
                 div()
                     .id("voice-action-scroll")
@@ -3457,7 +3453,7 @@ impl AppWindow {
                     .child(
                         div()
                             .w_full()
-                            .max_w(px(VOICE_ACTION_CONTENT_WIDTH))
+                            .max_w(px(PANE_CONTENT_WIDTH))
                             .flex()
                             .flex_col()
                             .gap(px(18.0))
@@ -3819,7 +3815,6 @@ impl AppWindow {
     fn render_modes(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let compact = window.viewport_size().width < px(980.0);
         let mode_list_width = if compact { 196.0 } else { 220.0 };
-        let modes_content_width = mode_list_width + 20.0 + 700.0;
         let add = compact_header_plus_button()
             .id("add-dictation-mode")
             .border_1()
@@ -3896,59 +3891,43 @@ impl AppWindow {
             .size_full()
             .flex()
             .flex_col()
-            .child(bounded_pane_header_with_action(
+            .child(pane_header_with_action(
                 "Modes",
-                modes_content_width,
                 Some(add.into_any_element()),
             ))
             .child(
-                div()
-                    .flex_1()
-                    .min_h(px(0.0))
-                    .overflow_hidden()
-                    .flex()
-                    .justify_center()
-                    .p_5()
-                    .child(
-                        div()
-                            .w_full()
-                            .max_w(px(modes_content_width))
-                            .min_h(px(0.0))
-                            .flex()
-                            .gap_5()
-                            .child(
-                                div()
-                                    .id("modes-list")
-                                    .w(px(mode_list_width))
-                                    .h_full()
-                                    .flex_none()
-                                    .flex()
-                                    .flex_col()
-                                    .gap_2()
-                                    .child(
-                                        div()
-                                            .h(px(28.0))
-                                            .flex_none()
-                                            .flex()
-                                            .items_center()
-                                            .child(compact_section_label("MODES")),
-                                    )
-                                    .child(
-                                        compact_panel()
-                                            .id("mode-list-card")
-                                            .overflow_y_scroll()
-                                            .child(
-                                                div()
-                                                    .p_2()
-                                                    .flex()
-                                                    .flex_col()
-                                                    .gap_1()
-                                                    .children(rows),
-                                            ),
-                                    ),
-                            )
-                            .child(detail),
-                    ),
+                pane_body().p_5().child(
+                    pane_content()
+                        .flex_row()
+                        .gap_5()
+                        .child(
+                            div()
+                                .id("modes-list")
+                                .w(px(mode_list_width))
+                                .h_full()
+                                .flex_none()
+                                .flex()
+                                .flex_col()
+                                .gap_2()
+                                .child(
+                                    div()
+                                        .h(px(28.0))
+                                        .flex_none()
+                                        .flex()
+                                        .items_center()
+                                        .child(compact_section_label("MODES")),
+                                )
+                                .child(
+                                    compact_panel()
+                                        .id("mode-list-card")
+                                        .overflow_y_scroll()
+                                        .child(
+                                            div().p_2().flex().flex_col().gap_1().children(rows),
+                                        ),
+                                ),
+                        )
+                        .child(detail),
+                ),
             )
             .into_any_element()
     }
@@ -5410,7 +5389,7 @@ impl AppWindow {
 
         let list = div()
             .id("meetings-list")
-            .w(px(300.0))
+            .w(px(PANE_LIST_WIDTH))
             .h_full()
             .flex_none()
             .overflow_y_scroll()
@@ -5429,7 +5408,7 @@ impl AppWindow {
             .size_full()
             .flex()
             .flex_col()
-            .child(pane_header("Meetings", Some(action)))
+            .child(pane_header_with_action("Meetings", Some(action)))
             .when_some(self.meeting_runtime_error.clone(), |pane, error| {
                 pane.child(
                     div()
@@ -5443,13 +5422,13 @@ impl AppWindow {
                 )
             })
             .child(
-                div()
-                    .id("meetings-workspace")
-                    .flex_1()
-                    .overflow_hidden()
-                    .flex()
-                    .child(list)
-                    .child(self.render_meeting_detail(cx)),
+                pane_body().child(
+                    pane_content()
+                        .id("meetings-workspace")
+                        .flex_row()
+                        .child(list)
+                        .child(self.render_meeting_detail(cx)),
+                ),
             )
             .into_any_element()
     }
@@ -5581,6 +5560,7 @@ impl AppWindow {
 
         div()
             .flex_1()
+            .min_w(px(0.0))
             .h_full()
             .overflow_hidden()
             .flex()
@@ -5884,129 +5864,112 @@ impl AppWindow {
         }
 
         let no_commands = groups.is_empty();
-        let commands_list_width = 300.0;
-        let commands_content_width = commands_list_width + 20.0 + 640.0;
+        let commands_list_width = PANE_LIST_WIDTH;
         div()
             .size_full()
             .flex()
             .flex_col()
-            .child(bounded_pane_header_with_action(
-                "Commands",
-                commands_content_width,
-                Some(commands_control),
-            ))
+            .child(pane_header_with_action("Commands", Some(commands_control)))
             .child(
-                div()
-                    .flex_1()
-                    .min_h(px(0.0))
-                    .overflow_hidden()
-                    .flex()
-                    .justify_center()
-                    .p_5()
-                    .child(
-                        div()
-                            .w_full()
-                            .max_w(px(commands_content_width))
-                            .min_h(px(0.0))
-                            .flex()
-                            .flex_col()
-                            .gap_3()
-                            .when_some(last_error, |column, error| {
-                                column.child(compact_panel().flex_none().child(error_message(
+                pane_body().p_5().child(
+                    pane_content()
+                        .gap_3()
+                        .when_some(last_error, |column, error| {
+                            column.child(
+                                compact_panel().flex_none().child(error_message(
                                     "Personal commands are not loading.",
                                     error,
-                                )))
-                            })
-                            .child(
-                                div()
-                                    .flex_1()
-                                    .min_h(px(0.0))
-                                    .flex()
-                                    .gap_5()
-                                    .child(
-                                        div()
-                                            .w(px(commands_list_width))
-                                            .h_full()
-                                            .flex_none()
-                                            .flex()
-                                            .flex_col()
-                                            .gap_2()
-                                            .child(
-                                                div()
-                                                    .h(px(28.0))
-                                                    .flex_none()
-                                                    .flex()
-                                                    .items_center()
-                                                    .child(compact_section_label("COMMANDS")),
-                                            )
-                                            .child(
-                                                div()
-                                                    .flex_none()
-                                                    .flex()
-                                                    .flex_wrap()
-                                                    .gap_1()
-                                                    .children(filter_items),
-                                            )
-                                            .child(
-                                                compact_panel()
-                                                    .id("commands-list")
-                                                    .flex_1()
-                                                    .min_h(px(0.0))
-                                                    .overflow_y_scroll()
-                                                    .when(no_commands, |card| {
-                                                        card.child(empty_message(
-                                                            "No commands in this context.",
-                                                        ))
-                                                    })
-                                                    .child(
-                                                        div()
-                                                            .w(px(commands_list_width - 2.0))
-                                                            .p_2()
-                                                            .flex()
-                                                            .flex_col()
-                                                            .gap_1()
-                                                            .children(groups),
-                                                    ),
-                                            ),
-                                    )
-                                    .child(
-                                        div()
-                                            .flex_1()
-                                            .min_w(px(0.0))
-                                            .h_full()
-                                            .flex()
-                                            .flex_col()
-                                            .gap_2()
-                                            .child(
-                                                div()
-                                                    .h(px(28.0))
-                                                    .flex_none()
-                                                    .flex()
-                                                    .items_center()
-                                                    .justify_between()
-                                                    .child(compact_section_label("COMMAND"))
-                                                    .child(
-                                                        div()
-                                                            .text_size(px(10.0))
-                                                            .text_color(rgb(FAINT))
-                                                            .child(format!(
-                                                                "Context: {context_label}"
-                                                            )),
-                                                    ),
-                                            )
-                                            .child(
-                                                compact_panel()
-                                                    .id("command-detail")
-                                                    .flex_1()
-                                                    .min_h(px(0.0))
-                                                    .overflow_y_scroll()
-                                                    .child(self.render_command_detail(
-                                                        effective_selected.as_deref(),
-                                                    )),
-                                            ),
-                                    ),
-                            ),
-                    ),
+                                )),
+                            )
+                        })
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_h(px(0.0))
+                                .flex()
+                                .gap_5()
+                                .child(
+                                    div()
+                                        .w(px(commands_list_width))
+                                        .h_full()
+                                        .flex_none()
+                                        .flex()
+                                        .flex_col()
+                                        .gap_2()
+                                        .child(
+                                            div()
+                                                .h(px(28.0))
+                                                .flex_none()
+                                                .flex()
+                                                .items_center()
+                                                .child(compact_section_label("COMMANDS")),
+                                        )
+                                        .child(
+                                            div()
+                                                .flex_none()
+                                                .flex()
+                                                .flex_wrap()
+                                                .gap_1()
+                                                .children(filter_items),
+                                        )
+                                        .child(
+                                            compact_panel()
+                                                .id("commands-list")
+                                                .flex_1()
+                                                .min_h(px(0.0))
+                                                .overflow_y_scroll()
+                                                .when(no_commands, |card| {
+                                                    card.child(empty_message(
+                                                        "No commands in this context.",
+                                                    ))
+                                                })
+                                                .child(
+                                                    div()
+                                                        .w(px(commands_list_width - 2.0))
+                                                        .p_2()
+                                                        .flex()
+                                                        .flex_col()
+                                                        .gap_1()
+                                                        .children(groups),
+                                                ),
+                                        ),
+                                )
+                                .child(
+                                    div()
+                                        .flex_1()
+                                        .min_w(px(0.0))
+                                        .h_full()
+                                        .flex()
+                                        .flex_col()
+                                        .gap_2()
+                                        .child(
+                                            div()
+                                                .h(px(28.0))
+                                                .flex_none()
+                                                .flex()
+                                                .items_center()
+                                                .justify_between()
+                                                .child(compact_section_label("COMMAND"))
+                                                .child(
+                                                    div()
+                                                        .text_size(px(10.0))
+                                                        .text_color(rgb(FAINT))
+                                                        .child(format!("Context: {context_label}")),
+                                                ),
+                                        )
+                                        .child(
+                                            compact_panel()
+                                                .id("command-detail")
+                                                .flex_1()
+                                                .min_h(px(0.0))
+                                                .overflow_y_scroll()
+                                                .child(self.render_command_detail(
+                                                    effective_selected.as_deref(),
+                                                )),
+                                        ),
+                                ),
+                        ),
+                ),
             )
             .into_any_element()
     }
@@ -6197,31 +6160,34 @@ impl AppWindow {
             .size_full()
             .flex()
             .flex_col()
-            .child(pane_header("Activity", Some(header_action)))
+            .child(pane_header_with_action("Activity", Some(header_action)))
             .child(
-                div()
-                    .flex_1()
-                    .overflow_hidden()
-                    .flex()
-                    .child(
-                        div()
-                            .id("activity-list")
-                            .w(px(460.0))
-                            .h_full()
-                            .flex_none()
-                            .overflow_y_scroll()
-                            .border_r_1()
-                            .border_color(rgb(LINE))
-                            .when(
-                                self.events.is_empty() && self.events_error.is_none(),
-                                |list| list.child(empty_message("No activity yet.")),
-                            )
-                            .when_some(self.events_error.clone(), |list, error| {
-                                list.child(error_message("Activity could not be loaded.", error))
-                            })
-                            .children(rows),
-                    )
-                    .child(self.render_event_detail()),
+                pane_body().child(
+                    pane_content()
+                        .flex_row()
+                        .child(
+                            div()
+                                .id("activity-list")
+                                .w(px(PANE_LIST_WIDTH))
+                                .h_full()
+                                .flex_none()
+                                .overflow_y_scroll()
+                                .border_r_1()
+                                .border_color(rgb(LINE))
+                                .when(
+                                    self.events.is_empty() && self.events_error.is_none(),
+                                    |list| list.child(empty_message("No activity yet.")),
+                                )
+                                .when_some(self.events_error.clone(), |list, error| {
+                                    list.child(error_message(
+                                        "Activity could not be loaded.",
+                                        error,
+                                    ))
+                                })
+                                .children(rows),
+                        )
+                        .child(self.render_event_detail()),
+                ),
             )
             .into_any_element()
     }
@@ -6234,6 +6200,7 @@ impl AppWindow {
         div()
             .id("activity-detail")
             .flex_1()
+            .min_w(px(0.0))
             .h_full()
             .overflow_y_scroll()
             .px_6()
@@ -6578,7 +6545,7 @@ impl AppWindow {
                     this.hud_dragging = None;
                 }),
             )
-            .child(pane_header(
+            .child(pane_header_with_action(
                 "HUD Lab",
                 Some(
                     compact_button(if copied { "Copied" } else { "Copy preset" })
@@ -6594,13 +6561,12 @@ impl AppWindow {
                 ),
             ))
             .child(
-                div()
+                pane_content()
                     .id("hud-lab-scroll")
                     .flex_1()
+                    .mx_auto()
                     .overflow_y_scroll()
                     .p_6()
-                    .flex()
-                    .flex_col()
                     .gap_6()
                     .child(
                         div()
@@ -6868,6 +6834,10 @@ impl Render for AppWindow {
                 this.select_pane(Pane::Commands, cx);
                 window.activate_window();
             }))
+            .on_action(cx.listener(|this, _: &ShowHistory, window, cx| {
+                this.select_pane(Pane::History, cx);
+                window.activate_window();
+            }))
             .child(self.render_navigation(cx))
             .child(div().flex_1().h_full().overflow_hidden().child(content))
             .children(setup)
@@ -6917,8 +6887,12 @@ fn preview_history() -> Option<History> {
         (
             4 * 60 * 1_000,
             HistoryKind::Dictation,
-            "remember to publish the appcast after validating",
-            "remember to publish the appcast after validating",
+            "so um remember to publish the appcast after validating the artifact and uh \
+             double check that the release notes mention the new capture placeholders \
+             before anyone downloads it",
+            "Remember to publish the appcast after validating the artifact, and double-check \
+             that the release notes mention the new capture placeholders before anyone \
+             downloads it.",
             Some("Messages"),
             None,
         ),
@@ -7836,8 +7810,8 @@ mod tests {
                 Pane::Settings,
                 Pane::Modes,
                 Pane::VoiceAction,
-                Pane::History,
                 Pane::Commands,
+                Pane::History,
             ]
         );
     }

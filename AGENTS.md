@@ -86,9 +86,8 @@ only in debug builds.
 - `linux_updater`: signed direct-install updates, bounded downloads, atomic
   version activation, and restart handoff for user-local Linux installs.
 - `history`: the owner-only bounded retained-dictation store: retention
-  windows with hard entry and byte caps, atomic crash-safe persistence,
-  search, and the bounded paste-again queue between the History pane and the
-  ordered paste owner. Text and bounded metadata only, never audio.
+  windows with hard entry and byte caps, atomic crash-safe persistence, and
+  search. Text and bounded metadata only, never audio.
 - `events`: bounded asynchronous append-only NDJSON observations and bounded
   incremental reading; `dashboard` and the GPUI Activity pane are read-only
   projections.
@@ -97,7 +96,9 @@ only in debug builds.
 - `desktop_host`: semantic desktop capabilities, portable UI snapshots, and
   typed actions implemented by the macOS root and contained Linux adapter.
 - `desktop_ui`: platform-neutral GPUI visual tokens and controls shared by both
-  desktop roots.
+  desktop roots, including the mandatory pane scaffold: `pane_header` /
+  `pane_header_with_action`, `pane_body`, `pane_content`, and the single
+  `PANE_CONTENT_WIDTH` and `PANE_LIST_WIDTH` layout constants.
 - `text_input`: the shared GPUI single- and multi-line text input with editing,
   selection, clipboard, and input-method support.
 - `desktop_transcription_picker`: the single GPUI language/model picker used by
@@ -231,6 +232,12 @@ CoreAudio formats, AppleScript details, or event serialization.
   paste output has completed, including ordered post-processing and insertion.
 - The HUD is observational and click-through. It must not alter capture
   boundaries, steal focus, or block controls in the foreground application.
+- Every desktop pane renders the shared scaffold from `desktop_ui`: the
+  bounded pane header plus one centered content column at `PANE_CONTENT_WIDTH`,
+  with list+detail panes using the fixed `PANE_LIST_WIDTH` list column. Panes
+  must not introduce their own header treatments or content widths, and text
+  columns beside a fixed column carry `flex_1` with a zero min-width so long
+  lines wrap instead of widening the pane.
 - Public app updates are Developer ID signed, notarized, stapled, EdDSA signed,
   published artifact-first/feed-last, and installed through Sparkle.
 - Linux direct-install updates accept only a strictly newer signed stable
