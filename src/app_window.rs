@@ -36,12 +36,13 @@ use crate::desktop_transcription_picker::{
 use crate::desktop_ui::{
     CANVAS, COMPACT_MULTILINE_INPUT_HEIGHT, CONTROL_HEIGHT, FAINT, LINE, MUTED, NEGATIVE,
     NavigationIcon, PANE_CONTENT_WIDTH, PANE_LIST_WIDTH, SECTION_GAP, SIDEBAR_WIDTH, SURFACE,
-    SURFACE_HOVER, SURFACE_SELECTED, TEXT, TEXT_SOFT, compact_button, compact_header_plus_button,
-    compact_panel, compact_panel_header, compact_plus_button, compact_section_label,
-    disclosure_button, empty_message, error_message, header_button, hotkey_keycaps,
-    listener_status, mix_color, navigation_item, pane_body, pane_content, pane_header,
-    pane_header_with_action, section_label, segmented_control, segmented_item, settings_copy,
-    settings_panel, settings_row, settings_section_label, sidebar_frame, toggle, window_frame,
+    SURFACE_HOVER, SURFACE_SELECTED, TEXT, TEXT_INPUT_HEIGHT, TEXT_SOFT, compact_button,
+    compact_header_plus_button, compact_panel, compact_panel_header, compact_plus_button,
+    compact_section_label, disclosure_button, empty_message, error_message, header_button,
+    hotkey_keycaps, listener_status, mix_color, navigation_item, pane_body, pane_content,
+    pane_header, pane_header_with_action, section_label, segmented_control, segmented_item,
+    settings_copy, settings_panel, settings_row, settings_section_label, sidebar_frame, toggle,
+    window_frame,
 };
 use crate::dictation_indicator::{DictationIndicatorEvent, DictationIndicatorSender, HudTuning};
 use crate::dictation_processor::{ModelCatalog, ModelChoice};
@@ -410,25 +411,6 @@ fn personal_workspace_state(
     }
 }
 
-#[derive(Clone, Eq, PartialEq)]
-enum ContextFilter {
-    All,
-    Global,
-    Application(String),
-    Browser(String),
-}
-
-impl ContextFilter {
-    fn label(&self) -> &str {
-        match self {
-            Self::All => "All",
-            Self::Global => "Global",
-            Self::Application(application) => application,
-            Self::Browser(host) => host,
-        }
-    }
-}
-
 #[derive(Clone, PartialEq)]
 struct TranscriptLine {
     source: String,
@@ -773,7 +755,7 @@ pub struct AppWindow {
     personal_workspace_receiver: Option<Receiver<Result<PathBuf, String>>>,
     personal_workspace_error: Option<String>,
     personal_commands_prompt_copied: bool,
-    command_filter: ContextFilter,
+    command_search: ProcessingInput,
     selected_command: Option<String>,
     events: Vec<VoiceEvent>,
     current_context: (Option<String>, Option<String>),
@@ -1052,6 +1034,7 @@ impl AppWindow {
             history
         };
         let history_search = Self::history_search_input(cx);
+        let command_search = Self::command_search_input(cx);
         let mut window = Self {
             preview: preview_mode,
             pane: preview
@@ -1174,7 +1157,7 @@ impl AppWindow {
             personal_workspace_receiver: None,
             personal_workspace_error: None,
             personal_commands_prompt_copied: false,
-            command_filter: ContextFilter::All,
+            command_search,
             selected_command: None,
             events: Vec::new(),
             current_context: (None, None),
@@ -5700,40 +5683,18 @@ impl AppWindow {
             )
             .into_any_element();
         let context_label = self.current_context_label();
-        let filters = self.context_filters();
-        if !filters.contains(&self.command_filter) {
-            self.command_filter = ContextFilter::All;
-        }
-        let filter_items = filters.into_iter().enumerate().map(|(index, filter)| {
-            let selected = self.command_filter == filter;
-            div()
-                .id(("command-filter", index))
-                .h(px(26.0))
-                .px(px(10.0))
-                .flex()
-                .items_center()
-                .rounded(px(6.0))
-                .border_1()
-                .border_color(rgb(if selected { SURFACE_SELECTED } else { LINE }))
-                .text_size(px(11.0))
-                .text_color(if selected { rgb(TEXT) } else { rgb(MUTED) })
-                .when(selected, |item| item.bg(rgb(SURFACE_SELECTED)))
-                .when(!selected, |item| {
-                    item.hover(|item| item.bg(rgb(SURFACE_HOVER)).text_color(rgb(TEXT_SOFT)))
-                })
-                .child(filter.label().to_string())
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    this.command_filter = filter.clone();
-                    this.selected_command = None;
-                    cx.notify();
-                }))
-        });
-
+        let query = self
+            .command_search
+            .entity
+            .read(cx)
+            .text()
+            .trim()
+            .to_lowercase();
         let visible: Vec<usize> = self
             .commands
             .iter()
             .enumerate()
-            .filter_map(|(index, command)| self.command_is_visible(command).then_some(index))
+            .filter_map(|(index, command)| Self::command_matches(command, &query).then_some(index))
             .collect();
         let mut tasks = Vec::new();
         for index in &visible {
@@ -5756,8 +5717,9 @@ impl AppWindow {
             groups.push(
                 compact_section_label(task.clone())
                     .px_3()
-                    .pt_2()
+                    .pt_3()
                     .pb_1()
+                    .text_color(rgb(MUTED))
                     .into_any_element(),
             );
             groups.extend(
@@ -5843,13 +5805,8 @@ impl AppWindow {
                                         .gap_2()
                                         .child(
                                             div()
-                                                .min_h(px(28.0))
                                                 .flex_none()
-                                                .flex()
-                                                .items_center()
-                                                .flex_wrap()
-                                                .gap_1()
-                                                .children(filter_items),
+                                                .child(self.command_search.entity.clone()),
                                         )
                                         .child(
                                             compact_panel()
@@ -5858,9 +5815,11 @@ impl AppWindow {
                                                 .min_h(px(0.0))
                                                 .overflow_y_scroll()
                                                 .when(no_commands, |card| {
-                                                    card.child(empty_message(
-                                                        "No commands in this context.",
-                                                    ))
+                                                    card.child(empty_message(if query.is_empty() {
+                                                        "No commands yet."
+                                                    } else {
+                                                        "No matching commands."
+                                                    }))
                                                 })
                                                 .child(
                                                     div()
@@ -5883,7 +5842,7 @@ impl AppWindow {
                                         .gap_2()
                                         .child(
                                             div()
-                                                .h(px(28.0))
+                                                .h(px(TEXT_INPUT_HEIGHT))
                                                 .flex_none()
                                                 .flex()
                                                 .items_center()
@@ -5955,47 +5914,36 @@ impl AppWindow {
             .into_any_element()
     }
 
-    fn command_is_visible(&self, command: &CatalogCommand) -> bool {
-        match &self.command_filter {
-            ContextFilter::All => true,
-            ContextFilter::Global => {
-                matches!(command.scope, CommandScope::Sleeping | CommandScope::Global)
-            }
-            ContextFilter::Application(application) => {
-                matches!(&command.scope, CommandScope::Application(scope) if scope == application)
-            }
-            ContextFilter::Browser(host) => {
-                matches!(&command.scope, CommandScope::Browser(scope) if scope == host)
-            }
+    fn command_search_input(cx: &mut Context<Self>) -> ProcessingInput {
+        let entity = cx.new(|cx| TextInput::picker(cx, "Search commands", ""));
+        let changed = cx.subscribe(&entity, |_, _, _: &TextChanged, cx| {
+            cx.notify();
+        });
+        ProcessingInput {
+            entity,
+            _subscriptions: vec![changed],
         }
     }
 
-    fn context_filters(&self) -> Vec<ContextFilter> {
-        let mut filters = vec![ContextFilter::All, ContextFilter::Global];
-        let (application, browser_host) = self.current_context();
-        for command in &self.commands {
-            let filter = match &command.scope {
-                CommandScope::Application(scope)
-                    if application.as_deref() == Some(scope.as_str()) =>
-                {
-                    Some(ContextFilter::Application(scope.clone()))
-                }
-                CommandScope::Browser(scope)
-                    if browser_host.as_deref().is_some_and(|host| {
-                        host == scope || host.strip_prefix("www.") == Some(scope.as_str())
-                    }) =>
-                {
-                    Some(ContextFilter::Browser(scope.clone()))
-                }
-                _ => None,
-            };
-            if let Some(filter) = filter
-                && !filters.contains(&filter)
-            {
-                filters.push(filter);
-            }
+    /// Case-insensitive match over everything a person might remember about a
+    /// command: its phrase, aliases, description, and group.
+    fn command_matches(command: &CatalogCommand, query: &str) -> bool {
+        if query.is_empty() {
+            return true;
         }
-        filters
+        let scope = match &command.scope {
+            CommandScope::Sleeping | CommandScope::Global => "global",
+            CommandScope::Application(name) => name,
+            CommandScope::Browser(host) => host,
+        };
+        command.phrase.to_lowercase().contains(query)
+            || command.description.to_lowercase().contains(query)
+            || command.task.to_lowercase().contains(query)
+            || scope.to_lowercase().contains(query)
+            || command
+                .aliases
+                .iter()
+                .any(|alias| alias.to_lowercase().contains(query))
     }
 
     fn current_context(&self) -> (Option<String>, Option<String>) {
