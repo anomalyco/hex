@@ -1,6 +1,6 @@
 [package]
 name = "voice-control"
-version = "2.0.19"
+version = "2.0.20"
 edition = "2024"
 default-run = "voice-control"
 license = "MIT"
