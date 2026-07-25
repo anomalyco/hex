@@ -97,8 +97,9 @@ only in debug builds.
   typed actions implemented by the macOS root and contained Linux adapter.
 - `desktop_ui`: platform-neutral GPUI visual tokens and controls shared by both
   desktop roots, including the mandatory pane scaffold: `pane_header` /
-  `pane_header_with_action`, `pane_body`, `pane_content`, and the single
-  `PANE_CONTENT_WIDTH` and `PANE_LIST_WIDTH` layout constants.
+  `pane_header_with_action`, `pane_body`, `pane_content`, the shared
+  `header_button` action chip, and the single `PANE_CONTENT_WIDTH` and
+  `PANE_LIST_WIDTH` layout constants.
 - `text_input`: the shared GPUI single- and multi-line text input with editing,
   selection, clipboard, and input-method support.
 - `desktop_transcription_picker`: the single GPUI language/model picker used by

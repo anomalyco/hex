@@ -248,6 +248,25 @@ pub(crate) fn pane_body() -> Div {
         .justify_center()
 }
 
+/// The one pane-header action button: a bordered 30-point chip. Every
+/// clickable header action renders this.
+#[cfg_attr(target_os = "linux", allow(dead_code))]
+pub(crate) fn header_button(label: impl IntoElement) -> Div {
+    div()
+        .h(px(30.0))
+        .px_3()
+        .flex()
+        .items_center()
+        .rounded_sm()
+        .border_1()
+        .border_color(rgb(LINE))
+        .bg(rgb(SURFACE))
+        .text_size(px(12.0))
+        .text_color(rgb(TEXT_SOFT))
+        .hover(|button| button.bg(rgb(SURFACE_HOVER)).text_color(rgb(TEXT)))
+        .child(label)
+}
+
 /// The one pane content column, bounded to [`PANE_CONTENT_WIDTH`].
 #[cfg_attr(target_os = "linux", allow(dead_code))]
 pub(crate) fn pane_content() -> Div {

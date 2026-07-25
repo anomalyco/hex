@@ -38,10 +38,10 @@ use crate::desktop_ui::{
     NavigationIcon, PANE_CONTENT_WIDTH, PANE_LIST_WIDTH, SECTION_GAP, SIDEBAR_WIDTH, SURFACE,
     SURFACE_HOVER, SURFACE_SELECTED, TEXT, TEXT_SOFT, compact_button, compact_header_plus_button,
     compact_panel, compact_panel_header, compact_plus_button, compact_section_label,
-    disclosure_button, empty_message, error_message, hotkey_keycaps, listener_status, mix_color,
-    navigation_item, pane_body, pane_content, pane_header, pane_header_with_action, section_label,
-    segmented_control, segmented_item, settings_copy, settings_panel, settings_row,
-    settings_section_label, sidebar_frame, toggle, window_frame,
+    disclosure_button, empty_message, error_message, header_button, hotkey_keycaps,
+    listener_status, mix_color, navigation_item, pane_body, pane_content, pane_header,
+    pane_header_with_action, section_label, segmented_control, segmented_item, settings_copy,
+    settings_panel, settings_row, settings_section_label, sidebar_frame, toggle, window_frame,
 };
 use crate::dictation_indicator::{DictationIndicatorEvent, DictationIndicatorSender, HudTuning};
 use crate::dictation_processor::{ModelCatalog, ModelChoice};
@@ -280,8 +280,8 @@ impl Pane {
     const ALL: [Self; 8] = [
         Self::Settings,
         Self::Modes,
-        Self::VoiceAction,
         Self::Commands,
+        Self::VoiceAction,
         Self::History,
         Self::HudLab,
         Self::Meetings,
@@ -294,8 +294,8 @@ impl Pane {
             .filter(|pane| match pane {
                 Self::Settings => true,
                 Self::Modes => capabilities.modes,
-                Self::VoiceAction => capabilities.voice_action,
                 Self::Commands => capabilities.commands,
+                Self::VoiceAction => capabilities.voice_action,
                 Self::History => capabilities.history,
                 Self::HudLab => capabilities.hud_lab,
                 Self::Meetings => capabilities.meetings,
@@ -817,6 +817,7 @@ impl AppWindow {
                         let login_item_changed = window.poll_login_item();
                         let personal_commands_changed = window.poll_personal_commands();
                         let personal_workspace_changed = window.poll_personal_workspace();
+                        let history_changed = window.poll_history(cx);
                         let update_status = crate::sparkle::status();
                         let update_status_changed = window.update_status != update_status;
                         if update_status_changed {
@@ -845,6 +846,7 @@ impl AppWindow {
                             || login_item_changed
                             || personal_commands_changed
                             || personal_workspace_changed
+                            || history_changed
                             || update_status_changed
                             || update_confirmation_expired
                         {
@@ -1852,6 +1854,17 @@ impl AppWindow {
         }
     }
 
+    /// Refresh the visible history while the pane is open so entries recorded
+    /// by the recognition side appear without reopening the pane.
+    fn poll_history(&mut self, cx: &App) -> bool {
+        if self.preview || self.pane != Pane::History || self.history.is_none() {
+            return false;
+        }
+        let previous = std::mem::take(&mut self.history_entries);
+        self.reload_history(cx);
+        self.history_entries != previous
+    }
+
     fn set_history_retention(&mut self, retention: HistoryRetention, cx: &mut Context<Self>) {
         if self.settings.history_retention == retention {
             return;
@@ -1912,18 +1925,8 @@ impl AppWindow {
     fn render_history(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let retention = self.settings.history_retention;
         let search = div().w(px(220.0)).child(self.history_search.entity.clone());
-        let retention_control = div()
+        let retention_control = header_button(format!("Keep: {}", retention.label()))
             .id("history-retention")
-            .h(px(30.0))
-            .px_3()
-            .flex()
-            .items_center()
-            .rounded_sm()
-            .bg(rgb(SURFACE))
-            .text_size(px(12.0))
-            .text_color(rgb(TEXT_SOFT))
-            .hover(|button| button.bg(rgb(SURFACE_HOVER)).text_color(rgb(TEXT)))
-            .child(format!("Keep: {}", retention.label()))
             .on_click(cx.listener(move |this, _, _, cx| {
                 let all = HistoryRetention::ALL;
                 let index = all
@@ -1934,28 +1937,17 @@ impl AppWindow {
                 this.set_history_retention(next, cx);
             }))
             .into_any_element();
-        let clear = div()
-            .id("history-clear")
-            .h(px(30.0))
-            .px_3()
-            .flex()
-            .items_center()
-            .rounded_sm()
-            .bg(rgb(SURFACE))
-            .text_size(px(12.0))
-            .text_color(if self.history_clear_armed {
-                rgb(0xff8a80)
-            } else {
-                rgb(TEXT_SOFT)
-            })
-            .hover(|button| button.bg(rgb(SURFACE_HOVER)).text_color(rgb(TEXT)))
-            .child(if self.history_clear_armed {
-                "Really clear all?"
-            } else {
-                "Clear all"
-            })
-            .on_click(cx.listener(|this, _, _, cx| this.clear_history(cx)))
-            .into_any_element();
+        let clear = header_button(if self.history_clear_armed {
+            "Really clear all?"
+        } else {
+            "Clear all"
+        })
+        .id("history-clear")
+        .when(self.history_clear_armed, |button| {
+            button.text_color(rgb(0xff8a80))
+        })
+        .on_click(cx.listener(|this, _, _, cx| this.clear_history(cx)))
+        .into_any_element();
         let header_action = div()
             .flex()
             .items_center()
@@ -3459,47 +3451,16 @@ impl AppWindow {
                             .gap(px(18.0))
                             .child(
                                 div()
-                                    .flex()
-                                    .items_start()
-                                    .justify_between()
-                                    .gap_4()
                                     .px_1()
                                     .pt_1()
+                                    .text_size(px(11.0))
+                                    .line_height(px(17.0))
+                                    .text_color(rgb(MUTED))
                                     .child(
-                                        div()
-                                            .min_w(px(0.0))
-                                            .flex()
-                                            .flex_col()
-                                            .gap_1()
-                                            .child(
-                                                div()
-                                                    .text_size(px(17.0))
-                                                    .font_weight(FontWeight::SEMIBOLD)
-                                                    .child("Speak an instruction. Paste the result."),
-                                            )
-                                            .child(
-                                                div()
-                                                    .max_w(px(520.0))
-                                                    .text_size(px(11.0))
-                                                    .line_height(px(16.0))
-                                                    .text_color(rgb(MUTED))
-                                                    .child("Transform selected text or generate something new with a dedicated OpenCode model."),
-                                            ),
-                                    )
-                                    .child(
-                                        div()
-                                            .size(px(32.0))
-                                            .flex_none()
-                                            .flex()
-                                            .items_center()
-                                            .justify_center()
-                                            .rounded(px(8.0))
-                                            .border_1()
-                                            .border_color(rgb(0x3a3a3a))
-                                            .bg(rgb(0x2b2b2b))
-                                            .text_size(px(17.0))
-                                            .text_color(rgb(TEXT_SOFT))
-                                            .child("✦"),
+                                        "Hold the shortcut and speak an instruction. HEX sends \
+                                         it, along with any text you have selected, to the model \
+                                         below and pastes the reply at your cursor. If the model \
+                                         returns nothing, nothing is pasted.",
                                     ),
                             )
                             .child(
@@ -3910,14 +3871,6 @@ impl AppWindow {
                                 .flex_col()
                                 .gap_2()
                                 .child(
-                                    div()
-                                        .h(px(28.0))
-                                        .flex_none()
-                                        .flex()
-                                        .items_center()
-                                        .child(compact_section_label("MODES")),
-                                )
-                                .child(
                                     compact_panel()
                                         .id("mode-list-card")
                                         .overflow_y_scroll()
@@ -4163,14 +4116,6 @@ impl AppWindow {
                     .flex_col()
                     .gap(px(SECTION_GAP))
                     .pb_5()
-                    .child(
-                        div()
-                            .h(px(28.0))
-                            .flex_none()
-                            .flex()
-                            .items_center()
-                            .child(compact_section_label("MODE")),
-                    )
                     .child(basics)
                     .child(div().h(px(4.0)))
                     .child(compact_section_label("TEXT PROCESSING"))
@@ -5665,7 +5610,7 @@ impl AppWindow {
             .or_else(|| self.personal_commands_status.last_reload_error.clone());
         let open_config = config_path.clone();
         let config_control = match workspace_state {
-            PersonalWorkspaceState::Missing => compact_button("Create Config")
+            PersonalWorkspaceState::Missing => header_button("Create Config")
                 .id("personal-commands-create")
                 .on_click(cx.listener(|this, _, _, cx| {
                     this.provision_personal_workspace();
@@ -5682,7 +5627,7 @@ impl AppWindow {
                 .child("Creating Config...")
                 .into_any_element(),
             PersonalWorkspaceState::Ready | PersonalWorkspaceState::Error => {
-                compact_button("Edit Config")
+                header_button("Edit Config")
                     .id("personal-commands-open-config")
                     .on_click(move |_, _, _| open_path(&open_config))
                     .into_any_element()
@@ -5705,7 +5650,7 @@ impl AppWindow {
                  hex.config.ts, and run `bun run check` from the workspace when finished. You \
                  may add npm packages when a command needs them."
             );
-            compact_button(if copied {
+            header_button(if copied {
                 "Copied"
             } else {
                 "Copy agent prompt"
@@ -5898,16 +5843,10 @@ impl AppWindow {
                                         .gap_2()
                                         .child(
                                             div()
-                                                .h(px(28.0))
+                                                .min_h(px(28.0))
                                                 .flex_none()
                                                 .flex()
                                                 .items_center()
-                                                .child(compact_section_label("COMMANDS")),
-                                        )
-                                        .child(
-                                            div()
-                                                .flex_none()
-                                                .flex()
                                                 .flex_wrap()
                                                 .gap_1()
                                                 .children(filter_items),
@@ -5948,8 +5887,7 @@ impl AppWindow {
                                                 .flex_none()
                                                 .flex()
                                                 .items_center()
-                                                .justify_between()
-                                                .child(compact_section_label("COMMAND"))
+                                                .justify_end()
                                                 .child(
                                                     div()
                                                         .text_size(px(10.0))
@@ -6075,18 +6013,8 @@ impl AppWindow {
 
     fn render_activity(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let snapshot = self.snapshot();
-        let refresh = div()
+        let refresh = header_button("Refresh")
             .id("refresh-activity")
-            .h(px(30.0))
-            .px_3()
-            .flex()
-            .items_center()
-            .rounded_sm()
-            .bg(rgb(SURFACE))
-            .text_size(px(12.0))
-            .text_color(rgb(TEXT_SOFT))
-            .hover(|button| button.bg(rgb(SURFACE_HOVER)).text_color(rgb(TEXT)))
-            .child("Refresh")
             .on_click(cx.listener(|this, _, _, cx| {
                 this.reload_events();
                 cx.notify();
@@ -6548,7 +6476,7 @@ impl AppWindow {
             .child(pane_header_with_action(
                 "HUD Lab",
                 Some(
-                    compact_button(if copied { "Copied" } else { "Copy preset" })
+                    header_button(if copied { "Copied" } else { "Copy preset" })
                         .id("copy-hud-preset")
                         .on_click(cx.listener(move |this, _, _, cx| {
                             if let Ok(mut clipboard) = arboard::Clipboard::new() {
@@ -7809,8 +7737,8 @@ mod tests {
             vec![
                 Pane::Settings,
                 Pane::Modes,
-                Pane::VoiceAction,
                 Pane::Commands,
+                Pane::VoiceAction,
                 Pane::History,
             ]
         );
