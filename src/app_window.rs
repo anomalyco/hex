@@ -69,6 +69,7 @@ const MINIMUM_WIDTH: f32 = 860.0;
 const MINIMUM_HEIGHT: f32 = 560.0;
 const HOTKEY_MIN_WIDTH: f32 = 148.0;
 const OPENCODE_INSTALL_RETRY_INTERVAL: Duration = Duration::from_secs(5);
+const MAX_OPENCODE_ERROR_BYTES: usize = 4 * 1024;
 const APPLE_SPEECH_RETRY_INTERVAL: Duration = Duration::from_secs(5);
 const ACTIVITY_LIMIT: usize = 100;
 const OPENCODE_BETA_DOCS_URL: &str = "https://v2.opencode.ai/";
@@ -553,13 +554,63 @@ enum ModelCatalogState {
     Failed(String),
 }
 
+struct OpenCodeUnavailableCopy<'a> {
+    title: &'static str,
+    description: &'static str,
+    error: Option<&'a str>,
+    can_retry: bool,
+    can_open_setup: bool,
+}
+
+fn opencode_unavailable_copy(state: &ModelCatalogState) -> Option<OpenCodeUnavailableCopy<'_>> {
+    match state {
+        ModelCatalogState::Loading => Some(OpenCodeUnavailableCopy {
+            title: "Checking for OpenCode",
+            description: "Voice Action will be available after HEX connects to OpenCode.",
+            error: None,
+            can_retry: false,
+            can_open_setup: false,
+        }),
+        ModelCatalogState::Missing => Some(OpenCodeUnavailableCopy {
+            title: "Voice Action requires OpenCode",
+            description: "Install and configure OpenCode to turn spoken instructions into paste-ready text.",
+            error: None,
+            can_retry: true,
+            can_open_setup: true,
+        }),
+        ModelCatalogState::Failed(error) => Some(OpenCodeUnavailableCopy {
+            title: "OpenCode is unavailable",
+            description: "HEX could not load the OpenCode model catalog.",
+            error: Some(error),
+            can_retry: true,
+            can_open_setup: false,
+        }),
+        ModelCatalogState::Loaded(_) => None,
+    }
+}
+
+fn bounded_opencode_error(error: &str) -> String {
+    if error.len() <= MAX_OPENCODE_ERROR_BYTES {
+        return error.into();
+    }
+    let mut end = MAX_OPENCODE_ERROR_BYTES;
+    while !error.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}…", &error[..end])
+}
+
 fn start_model_catalog_load() -> Receiver<ModelCatalogState> {
     let (sender, receiver) = sync_channel(1);
     thread::spawn(move || {
         let state = if crate::dictation_processor::opencode_installed() {
             match crate::dictation_processor::load_model_catalog() {
                 Ok(catalog) => ModelCatalogState::Loaded(catalog),
-                Err(error) => ModelCatalogState::Failed(error.to_string()),
+                Err(error) => {
+                    let error = bounded_opencode_error(&error.to_string());
+                    tracing::warn!(%error, "could not load OpenCode model catalog");
+                    ModelCatalogState::Failed(error)
+                }
             }
         } else {
             ModelCatalogState::Missing
@@ -1277,6 +1328,15 @@ impl AppWindow {
         {
             return;
         }
+        self.model_catalog_retry_at = Instant::now() + OPENCODE_INSTALL_RETRY_INTERVAL;
+        self.model_catalog_receiver = Some(start_model_catalog_load());
+    }
+
+    fn reload_model_catalog(&mut self) {
+        if self.model_catalog_receiver.is_some() {
+            return;
+        }
+        self.model_catalog = ModelCatalogState::Loading;
         self.model_catalog_retry_at = Instant::now() + OPENCODE_INSTALL_RETRY_INTERVAL;
         self.model_catalog_receiver = Some(start_model_catalog_load());
     }
@@ -2191,23 +2251,17 @@ impl AppWindow {
     }
 
     fn render_navigation(&mut self, cx: &mut Context<Self>) -> AnyElement {
-        let opencode_available = self.opencode_available();
         let items = Pane::all(self.capabilities())
             .into_iter()
             .enumerate()
             .map(|(index, pane)| {
                 let selected = self.pane == pane;
-                let enabled = pane != Pane::VoiceAction || opencode_available;
-                let item = navigation_item(pane.icon(), selected)
+                navigation_item(pane.icon(), selected)
                     .id(("app-nav", index))
-                    .child(pane.label());
-                if enabled {
-                    item.on_click(cx.listener(move |this, _, _, cx| {
+                    .child(pane.label())
+                    .on_click(cx.listener(move |this, _, _, cx| {
                         this.select_pane(pane, cx);
                     }))
-                } else {
-                    item.opacity(0.42)
-                }
             });
 
         sidebar_frame()
@@ -3362,22 +3416,28 @@ impl AppWindow {
     }
 
     fn render_voice_action(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        if !self.opencode_available() {
-            let (title, description) = match &self.model_catalog {
-                ModelCatalogState::Loading => (
-                    "Checking for OpenCode",
-                    "Voice Action will be available after HEX connects to OpenCode.",
-                ),
-                ModelCatalogState::Missing => (
-                    "Voice Action requires OpenCode",
-                    "Install and configure OpenCode to turn spoken instructions into paste-ready text.",
-                ),
-                ModelCatalogState::Failed(_) => (
-                    "OpenCode is unavailable",
-                    "HEX could not load the OpenCode model catalog. Check OpenCode and try again.",
-                ),
-                ModelCatalogState::Loaded(_) => unreachable!(),
-            };
+        if let Some(copy) = opencode_unavailable_copy(&self.model_catalog) {
+            let error = copy.error.map(str::to_owned);
+            let show_actions = copy.can_retry || copy.can_open_setup;
+            let actions = div()
+                .mt_4()
+                .flex()
+                .gap_2()
+                .when(copy.can_retry, |actions| {
+                    actions.child(compact_button("Retry").id("retry-opencode").on_click(
+                        cx.listener(|this, _, _, cx| {
+                            this.reload_model_catalog();
+                            cx.notify();
+                        }),
+                    ))
+                })
+                .when(copy.can_open_setup, |actions| {
+                    actions.child(
+                        compact_button("Open OpenCode setup")
+                            .id("open-opencode-setup")
+                            .on_click(|_, _, _| open_opencode_beta_docs()),
+                    )
+                });
             return div()
                 .size_full()
                 .flex()
@@ -3392,18 +3452,19 @@ impl AppWindow {
                             .border_1()
                             .border_color(rgb(LINE))
                             .bg(rgb(SURFACE))
-                            .child(settings_copy(title, description))
-                            .child(
-                                compact_button("Open OpenCode setup")
-                                    .id("open-opencode-setup")
-                                    .mt_4()
-                                    .w(px(170.0))
-                                    .justify_center()
-                                    .border_1()
-                                    .border_color(rgb(LINE))
-                                    .bg(rgb(SURFACE_SELECTED))
-                                    .on_click(|_, _, _| open_opencode_beta_docs()),
-                            ),
+                            .child(settings_copy(copy.title, copy.description))
+                            .when_some(error, |card, error| {
+                                card.child(
+                                    div()
+                                        .mt_3()
+                                        .rounded_sm()
+                                        .border_1()
+                                        .border_color(rgb(0x613b3b))
+                                        .bg(rgb(0x271b1b))
+                                        .child(error_message("OpenCode reported:", error)),
+                                )
+                            })
+                            .when(show_actions, |card| card.child(actions)),
                     ),
                 )
                 .into_any_element();
@@ -3923,6 +3984,18 @@ impl AppWindow {
         };
         let processing_enabled = self.selected_mode_settings().post_processing.enabled;
         let processing_can_toggle = processing_enabled || self.opencode_available();
+        let processing_unavailable = (!processing_enabled)
+            .then(|| opencode_unavailable_copy(&self.model_catalog))
+            .flatten()
+            .map(|copy| {
+                (
+                    copy.title,
+                    copy.description,
+                    copy.error.map(str::to_owned),
+                    copy.can_retry,
+                    copy.can_open_setup,
+                )
+            });
         let corrections = self.render_mode_replacements(selection, cx);
         let transformations = self.render_mode_transformations(selection, cx);
         let application_picker =
@@ -4011,13 +4084,72 @@ impl AppWindow {
                 cx,
             )
         });
+        let processing_unavailable =
+            processing_unavailable.map(|(title, description, error, can_retry, can_open_setup)| {
+                let actions = div()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .when(can_retry, |actions| {
+                        actions.child(compact_button("Retry").id("retry-mode-opencode").on_click(
+                            cx.listener(|this, _, _, cx| {
+                                this.reload_model_catalog();
+                                cx.notify();
+                            }),
+                        ))
+                    })
+                    .when(can_open_setup, |actions| {
+                        actions.child(
+                            compact_button("Open setup")
+                                .id("open-mode-opencode-setup")
+                                .on_click(|_, _, _| open_opencode_beta_docs()),
+                        )
+                    });
+                div()
+                    .px_3()
+                    .py_3()
+                    .flex()
+                    .items_start()
+                    .justify_between()
+                    .gap_4()
+                    .border_t_1()
+                    .border_color(rgb(LINE))
+                    .child(
+                        div()
+                            .min_w(px(0.0))
+                            .flex_1()
+                            .flex()
+                            .flex_col()
+                            .gap_1()
+                            .child(
+                                div()
+                                    .text_size(px(11.0))
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .text_color(rgb(TEXT_SOFT))
+                                    .child(title),
+                            )
+                            .child(
+                                div()
+                                    .text_size(px(10.0))
+                                    .line_height(px(16.0))
+                                    .text_color(rgb(if error.is_some() { NEGATIVE } else { FAINT }))
+                                    .child(error.unwrap_or_else(|| description.into())),
+                            ),
+                    )
+                    .when(can_retry || can_open_setup, |notice| notice.child(actions))
+            });
         let processing = compact_panel()
             .child(
-                compact_panel_header("OpenCode transformation", Some(processing_toggle))
-                    .when(!processing_enabled, |header| header.border_b_0()),
+                compact_panel_header("OpenCode transformation", Some(processing_toggle)).when(
+                    !processing_enabled && processing_unavailable.is_none(),
+                    |header| header.border_b_0(),
+                ),
             )
             .when_some(processing_settings, |panel, settings| {
                 panel.child(div().px_3().pb_3().child(settings))
+            })
+            .when_some(processing_unavailable, |panel, unavailable| {
+                panel.child(unavailable)
             })
             .into_any_element();
 
@@ -6701,10 +6833,8 @@ impl Render for AppWindow {
                 window.activate_window();
             }))
             .on_action(cx.listener(|this, _: &ShowVoiceAction, window, cx| {
-                if this.opencode_available() {
-                    this.select_pane(Pane::VoiceAction, cx);
-                    window.activate_window();
-                }
+                this.select_pane(Pane::VoiceAction, cx);
+                window.activate_window();
             }))
             .on_action(cx.listener(|this, _: &ShowCommands, window, cx| {
                 this.select_pane(Pane::Commands, cx);
@@ -7843,6 +7973,47 @@ mod tests {
 
         let default = model_presentation(&catalog, None).unwrap();
         assert!(default.is_default);
+    }
+
+    #[test]
+    fn opencode_failure_copy_preserves_the_actionable_error() {
+        let state = ModelCatalogState::Failed(
+            "OpenCode /api/model failed: config.providers was invalid".into(),
+        );
+
+        let copy = opencode_unavailable_copy(&state).unwrap();
+
+        assert_eq!(copy.title, "OpenCode is unavailable");
+        assert_eq!(
+            copy.description,
+            "HEX could not load the OpenCode model catalog."
+        );
+        assert_eq!(
+            copy.error,
+            Some("OpenCode /api/model failed: config.providers was invalid")
+        );
+        assert!(copy.can_retry);
+        assert!(!copy.can_open_setup);
+    }
+
+    #[test]
+    fn opencode_missing_copy_offers_setup_without_an_error() {
+        let copy = opencode_unavailable_copy(&ModelCatalogState::Missing).unwrap();
+
+        assert_eq!(copy.title, "Voice Action requires OpenCode");
+        assert_eq!(copy.error, None);
+        assert!(copy.can_retry);
+        assert!(copy.can_open_setup);
+    }
+
+    #[test]
+    fn opencode_errors_are_bounded_without_splitting_utf8() {
+        let error = "é".repeat(MAX_OPENCODE_ERROR_BYTES);
+        let bounded = bounded_opencode_error(&error);
+
+        assert!(bounded.ends_with('…'));
+        assert!(bounded.is_char_boundary(bounded.len()));
+        assert!(bounded.len() <= MAX_OPENCODE_ERROR_BYTES + '…'.len_utf8());
     }
 
     #[test]
