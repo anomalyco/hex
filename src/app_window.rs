@@ -4050,7 +4050,10 @@ impl AppWindow {
                         .items_center()
                         .justify_between()
                         .gap_4()
-                        .child(settings_copy("Web pages", "Switch when a domain is active"))
+                        .child(settings_copy(
+                            "Web pages",
+                            "Switch when a domain is active in Brave",
+                        ))
                         .child(div().max_w(px(300.0)).flex_1().child(browser_hosts)),
                 )
                 .into_any_element()
@@ -7380,7 +7383,7 @@ fn browser_hosts(value: &str) -> Vec<String> {
             url::Url::parse(&candidate)
                 .ok()?
                 .host_str()
-                .map(|host| host.strip_prefix("www.").unwrap_or(host).to_lowercase())
+                .map(str::to_lowercase)
         })
         .collect();
     hosts.sort();
@@ -7903,7 +7906,7 @@ mod tests {
     fn browser_hosts_are_canonicalized_and_deduplicated() {
         assert_eq!(
             browser_hosts(" https://www.Reddit.com/r/rust, , reddit.com, github.com/path"),
-            ["github.com", "reddit.com"]
+            ["github.com", "reddit.com", "www.reddit.com"]
         );
     }
 

@@ -78,6 +78,13 @@ impl ContextSelector {
 
 impl ContextMonitor {
     pub fn start() -> Self {
+        Self::start_with_capture(ContextSnapshot::capture, Duration::from_millis(500))
+    }
+
+    fn start_with_capture(
+        mut capture: impl FnMut() -> Result<ContextSnapshot> + Send + 'static,
+        poll_interval: Duration,
+    ) -> Self {
         let (sender, updates) = mpsc::sync_channel(1);
         let stop = Arc::new(AtomicBool::new(false));
         let worker_stop = stop.clone();
@@ -85,15 +92,11 @@ impl ContextMonitor {
             let mut previous = None;
             let mut previous_error = None;
             while !worker_stop.load(Ordering::Acquire) {
-                match ContextSnapshot::capture() {
+                match capture() {
                     Ok(context) => {
                         previous_error = None;
-                        if previous.as_ref() != Some(&context) {
-                            match sender.try_send(context.clone()) {
-                                Ok(()) => previous = Some(context),
-                                Err(TrySendError::Full(_)) => {}
-                                Err(TrySendError::Disconnected(_)) => break,
-                            }
+                        if !publish_context(&sender, &mut previous, context) {
+                            break;
                         }
                     }
                     Err(error) => {
@@ -102,13 +105,32 @@ impl ContextMonitor {
                             tracing::warn!(%error, "could not capture foreground context");
                             previous_error = Some(error);
                         }
+                        if !publish_context(&sender, &mut previous, ContextSnapshot::default()) {
+                            break;
+                        }
                     }
                 }
-                thread::sleep(Duration::from_millis(500));
+                thread::sleep(poll_interval);
             }
         });
         Self { updates, stop }
     }
+}
+
+fn publish_context(
+    sender: &mpsc::SyncSender<ContextSnapshot>,
+    previous: &mut Option<ContextSnapshot>,
+    context: ContextSnapshot,
+) -> bool {
+    if previous.as_ref() == Some(&context) {
+        return true;
+    }
+    match sender.try_send(context.clone()) {
+        Ok(()) => *previous = Some(context),
+        Err(TrySendError::Full(_)) => {}
+        Err(TrySendError::Disconnected(_)) => return false,
+    }
+    true
 }
 
 impl Drop for ContextMonitor {
@@ -244,6 +266,7 @@ return ""
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::AtomicUsize;
 
     #[test]
     fn application_matching_ignores_process_name_capitalization() {
@@ -253,5 +276,42 @@ mod tests {
         };
 
         assert!(ContextSelector::application("Zed").matches(&context));
+    }
+
+    #[test]
+    fn monitor_invalidates_stale_context_after_capture_failure() {
+        let captured = ContextSnapshot {
+            application: Some("Brave Browser".into()),
+            browser_url: Some(Url::parse("https://x.com/home").unwrap()),
+            ..ContextSnapshot::default()
+        };
+        let calls = Arc::new(AtomicUsize::new(0));
+        let capture_calls = calls.clone();
+        let expected = captured.clone();
+        let monitor = ContextMonitor::start_with_capture(
+            move || {
+                if capture_calls.fetch_add(1, Ordering::Relaxed) == 0 {
+                    Ok(captured.clone())
+                } else {
+                    Err(eyre!("browser adapter failed"))
+                }
+            },
+            Duration::from_millis(1),
+        );
+
+        assert_eq!(
+            monitor
+                .updates
+                .recv_timeout(Duration::from_secs(1))
+                .unwrap(),
+            expected
+        );
+        assert_eq!(
+            monitor
+                .updates
+                .recv_timeout(Duration::from_secs(1))
+                .unwrap(),
+            ContextSnapshot::default()
+        );
     }
 }
