@@ -68,7 +68,7 @@ const WINDOW_HEIGHT: f32 = 700.0;
 const MINIMUM_WIDTH: f32 = 860.0;
 const MINIMUM_HEIGHT: f32 = 560.0;
 const HOTKEY_MIN_WIDTH: f32 = 148.0;
-const OPENCODE_INSTALL_RETRY_INTERVAL: Duration = Duration::from_secs(5);
+const OPENCODE_INSTALL_RETRY_INTERVAL: Duration = Duration::from_secs(60);
 const MAX_OPENCODE_ERROR_BYTES: usize = 4 * 1024;
 const APPLE_SPEECH_RETRY_INTERVAL: Duration = Duration::from_secs(5);
 const ACTIVITY_LIMIT: usize = 100;
@@ -542,12 +542,14 @@ enum ModelPickerTarget {
 struct ProcessingPicker {
     catalog_status: String,
     model_control: AnyElement,
+    refresh_control: Option<AnyElement>,
     suggestions: Option<Div>,
     has_variants: bool,
     variant_control: Div,
 }
 
 enum ModelCatalogState {
+    Unchecked,
     Loading,
     Loaded(ModelCatalog),
     Missing,
@@ -559,16 +561,26 @@ struct OpenCodeUnavailableCopy<'a> {
     description: &'static str,
     error: Option<&'a str>,
     can_retry: bool,
+    retry_label: &'static str,
     can_open_setup: bool,
 }
 
 fn opencode_unavailable_copy(state: &ModelCatalogState) -> Option<OpenCodeUnavailableCopy<'_>> {
     match state {
+        ModelCatalogState::Unchecked => Some(OpenCodeUnavailableCopy {
+            title: "Connect OpenCode",
+            description: "Connect only when you want HEX to load OpenCode models.",
+            error: None,
+            can_retry: true,
+            retry_label: "Connect",
+            can_open_setup: false,
+        }),
         ModelCatalogState::Loading => Some(OpenCodeUnavailableCopy {
             title: "Checking for OpenCode",
             description: "Voice Action will be available after HEX connects to OpenCode.",
             error: None,
             can_retry: false,
+            retry_label: "Retry",
             can_open_setup: false,
         }),
         ModelCatalogState::Missing => Some(OpenCodeUnavailableCopy {
@@ -576,6 +588,7 @@ fn opencode_unavailable_copy(state: &ModelCatalogState) -> Option<OpenCodeUnavai
             description: "Install and configure OpenCode to turn spoken instructions into paste-ready text.",
             error: None,
             can_retry: true,
+            retry_label: "Check again",
             can_open_setup: true,
         }),
         ModelCatalogState::Failed(error) => Some(OpenCodeUnavailableCopy {
@@ -583,6 +596,7 @@ fn opencode_unavailable_copy(state: &ModelCatalogState) -> Option<OpenCodeUnavai
             description: "HEX could not load the OpenCode model catalog.",
             error: Some(error),
             can_retry: true,
+            retry_label: "Retry",
             can_open_setup: false,
         }),
         ModelCatalogState::Loaded(_) => None,
@@ -963,7 +977,7 @@ impl AppWindow {
                 None,
             )
         } else {
-            (ModelCatalogState::Loading, Some(start_model_catalog_load()))
+            (ModelCatalogState::Unchecked, None)
         };
         let application_catalog = if preview_mode {
             ApplicationCatalogState::Loaded(Vec::new())
@@ -1320,10 +1334,8 @@ impl AppWindow {
     }
 
     fn retry_model_catalog(&mut self) {
-        if !matches!(
-            &self.model_catalog,
-            ModelCatalogState::Missing | ModelCatalogState::Failed(_)
-        ) || self.model_catalog_receiver.is_some()
+        if !matches!(&self.model_catalog, ModelCatalogState::Missing)
+            || self.model_catalog_receiver.is_some()
             || Instant::now() < self.model_catalog_retry_at
         {
             return;
@@ -1333,7 +1345,7 @@ impl AppWindow {
     }
 
     fn reload_model_catalog(&mut self) {
-        if self.model_catalog_receiver.is_some() {
+        if self.preview || self.model_catalog_receiver.is_some() {
             return;
         }
         self.model_catalog = ModelCatalogState::Loading;
@@ -3419,12 +3431,13 @@ impl AppWindow {
         if let Some(copy) = opencode_unavailable_copy(&self.model_catalog) {
             let error = copy.error.map(str::to_owned);
             let show_actions = copy.can_retry || copy.can_open_setup;
+            let retry_label = copy.retry_label;
             let actions = div()
                 .mt_4()
                 .flex()
                 .gap_2()
                 .when(copy.can_retry, |actions| {
-                    actions.child(compact_button("Retry").id("retry-opencode").on_click(
+                    actions.child(compact_button(retry_label).id("retry-opencode").on_click(
                         cx.listener(|this, _, _, cx| {
                             this.reload_model_catalog();
                             cx.notify();
@@ -3984,18 +3997,16 @@ impl AppWindow {
         };
         let processing_enabled = self.selected_mode_settings().post_processing.enabled;
         let processing_can_toggle = processing_enabled || self.opencode_available();
-        let processing_unavailable = (!processing_enabled)
-            .then(|| opencode_unavailable_copy(&self.model_catalog))
-            .flatten()
-            .map(|copy| {
-                (
-                    copy.title,
-                    copy.description,
-                    copy.error.map(str::to_owned),
-                    copy.can_retry,
-                    copy.can_open_setup,
-                )
-            });
+        let processing_unavailable = opencode_unavailable_copy(&self.model_catalog).map(|copy| {
+            (
+                copy.title,
+                copy.description,
+                copy.error.map(str::to_owned),
+                copy.can_retry,
+                copy.retry_label,
+                copy.can_open_setup,
+            )
+        });
         let corrections = self.render_mode_replacements(selection, cx);
         let transformations = self.render_mode_transformations(selection, cx);
         let application_picker =
@@ -4087,19 +4098,21 @@ impl AppWindow {
                 cx,
             )
         });
-        let processing_unavailable =
-            processing_unavailable.map(|(title, description, error, can_retry, can_open_setup)| {
+        let processing_unavailable = processing_unavailable.map(
+            |(title, description, error, can_retry, retry_label, can_open_setup)| {
                 let actions = div()
                     .flex()
                     .items_center()
                     .gap_2()
                     .when(can_retry, |actions| {
-                        actions.child(compact_button("Retry").id("retry-mode-opencode").on_click(
-                            cx.listener(|this, _, _, cx| {
-                                this.reload_model_catalog();
-                                cx.notify();
-                            }),
-                        ))
+                        actions.child(
+                            compact_button(retry_label)
+                                .id("retry-mode-opencode")
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.reload_model_catalog();
+                                    cx.notify();
+                                })),
+                        )
                     })
                     .when(can_open_setup, |actions| {
                         actions.child(
@@ -4140,7 +4153,8 @@ impl AppWindow {
                             ),
                     )
                     .when(can_retry || can_open_setup, |notice| notice.child(actions))
-            });
+            },
+        );
         let processing = compact_panel()
             .child(
                 compact_panel_header("OpenCode transformation", Some(processing_toggle)).when(
@@ -4876,6 +4890,12 @@ impl AppWindow {
         let query = model.read(cx).text().trim().to_lowercase();
         let presentation = model_presentation(&self.model_catalog, selected_model);
         let (catalog_status, default_label, matches, variants) = match &self.model_catalog {
+            ModelCatalogState::Unchecked => (
+                "Connect OpenCode to load models".into(),
+                None,
+                Vec::new(),
+                Vec::new(),
+            ),
             ModelCatalogState::Loading => {
                 ("Loading OpenCode...".into(), None, Vec::new(), Vec::new())
             }
@@ -5073,9 +5093,20 @@ impl AppWindow {
         } else {
             model.clone().into_any_element()
         };
+        let refresh_control =
+            matches!(&self.model_catalog, ModelCatalogState::Loaded(_)).then(|| {
+                compact_button("Refresh")
+                    .id("refresh-opencode-models")
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.reload_model_catalog();
+                        cx.notify();
+                    }))
+                    .into_any_element()
+            });
         ProcessingPicker {
             catalog_status,
             model_control,
+            refresh_control,
             suggestions,
             has_variants,
             variant_control,
@@ -5096,6 +5127,7 @@ impl AppWindow {
         let ProcessingPicker {
             catalog_status,
             model_control,
+            refresh_control,
             suggestions,
             has_variants,
             variant_control,
@@ -5103,7 +5135,14 @@ impl AppWindow {
         let model_field = div()
             .when(!compact, |field| field.w(px(380.0)).flex_none())
             .when(compact, |field| field.w_full())
-            .child(model_control)
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .child(div().min_w(px(0.0)).flex_1().child(model_control))
+                    .when_some(refresh_control, |row, refresh| row.child(refresh)),
+            )
             .when_some(suggestions, |field, suggestions| field.child(suggestions));
         compact_panel()
             .child(voice_action_setting_row(
@@ -5138,6 +5177,7 @@ impl AppWindow {
         let ProcessingPicker {
             catalog_status,
             model_control,
+            refresh_control,
             suggestions,
             has_variants,
             variant_control,
@@ -5156,7 +5196,17 @@ impl AppWindow {
                         div()
                             .flex_1()
                             .min_w(px(0.0))
-                            .child(settings_control("Model", &catalog_status, model_control))
+                            .child(settings_control(
+                                "Model",
+                                &catalog_status,
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap_2()
+                                    .child(div().min_w(px(0.0)).flex_1().child(model_control))
+                                    .when_some(refresh_control, |row, refresh| row.child(refresh))
+                                    .into_any_element(),
+                            ))
                             .when(
                                 matches!(&self.model_catalog, ModelCatalogState::Missing),
                                 |field| {
@@ -7976,6 +8026,35 @@ mod tests {
 
         let default = model_presentation(&catalog, None).unwrap();
         assert!(default.is_default);
+    }
+
+    #[test]
+    fn model_search_finds_provider_models_with_nested_ids() {
+        let catalog = ModelCatalog {
+            models: vec![crate::dictation_processor::ModelChoice {
+                key: "console-groq/openai/gpt-oss-120b".into(),
+                name: "GPT OSS 120B".into(),
+                provider: "console-groq".into(),
+                variants: Vec::new(),
+            }],
+            default_key: None,
+            default_name: None,
+        };
+
+        assert_eq!(
+            filtered_model_keys(&catalog, "gpt oss"),
+            [Some("console-groq/openai/gpt-oss-120b".into())]
+        );
+    }
+
+    #[test]
+    fn unchecked_opencode_requires_explicit_connection() {
+        let copy = opencode_unavailable_copy(&ModelCatalogState::Unchecked).unwrap();
+
+        assert_eq!(copy.title, "Connect OpenCode");
+        assert_eq!(copy.retry_label, "Connect");
+        assert!(copy.can_retry);
+        assert!(!copy.can_open_setup);
     }
 
     #[test]
