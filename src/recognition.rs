@@ -310,7 +310,12 @@ pub fn listen(
             }
             let edit_action = edit_hotkey.process(input_event, capture_at);
             if matches!(edit_action, Some(HotkeyAction::Start)) && voice_protocol.is_none() {
-                edit_pending_since = Some(capture_at);
+                start_pending_voice_action(
+                    &mut edit_pending_since,
+                    capture_at,
+                    input.is_recording(),
+                    indicator.as_ref(),
+                );
             }
             if let Some(action) = hotkey.process(input_event, capture_at) {
                 if matches!(action, HotkeyAction::PasteLast | HotkeyAction::PasteMeeting) {
@@ -378,7 +383,7 @@ pub fn listen(
                             &context,
                             &input.device_name(),
                             &mut events,
-                            indicator.as_ref(),
+                            None,
                         )?;
                         if accepted {
                             handle_edit_hotkey_action(
@@ -394,6 +399,8 @@ pub fn listen(
                                 &mut events,
                                 indicator.as_ref(),
                             )?;
+                        } else if let Some(indicator) = &indicator {
+                            indicator.send(DictationIndicatorEvent::Failed);
                         }
                     }
                     Some(_) => {
@@ -432,10 +439,13 @@ pub fn listen(
                 &context,
                 &input.device_name(),
                 &mut events,
-                indicator.as_ref(),
+                None,
             )?;
             if !accepted {
                 edit_hotkey.suspend();
+                if let Some(indicator) = &indicator {
+                    indicator.send(DictationIndicatorEvent::Failed);
+                }
             }
         }
         let mut received_worker_event = false;
@@ -1383,6 +1393,22 @@ fn voice_action_owns_action(
         && !matches!(action, HotkeyAction::PasteLast | HotkeyAction::PasteMeeting)
 }
 
+fn start_pending_voice_action(
+    pending_since: &mut Option<CaptureInstant>,
+    started_at: CaptureInstant,
+    promoted: bool,
+    indicator: Option<&DictationIndicatorSender>,
+) {
+    *pending_since = Some(started_at);
+    if let Some(indicator) = indicator {
+        indicator.send(if promoted {
+            DictationIndicatorEvent::PromotedToVoiceAction
+        } else {
+            DictationIndicatorEvent::EditingStarted
+        });
+    }
+}
+
 fn pending_voice_action_is_intentional(
     started_at: CaptureInstant,
     finished_at: CaptureInstant,
@@ -1678,6 +1704,21 @@ mod tests {
             started_at,
             started_at + Duration::from_secs(1),
             HotkeyAction::Discard,
+        ));
+    }
+
+    #[test]
+    fn pending_voice_action_updates_the_hud_before_the_hold_threshold() {
+        let started_at = CaptureInstant::now();
+        let (indicator, events) = crate::dictation_indicator::channel();
+        let mut pending_since = None;
+
+        start_pending_voice_action(&mut pending_since, started_at, false, Some(&indicator));
+
+        assert_eq!(pending_since, Some(started_at));
+        assert!(matches!(
+            events.try_recv(),
+            Ok(DictationIndicatorEvent::EditingStarted)
         ));
     }
 }

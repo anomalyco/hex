@@ -443,6 +443,14 @@ fn recording_flash(elapsed: Duration) -> f32 {
     2.0_f32.powf(-elapsed.as_secs_f32() / RECORDING_FLASH_HALF_LIFE.as_secs_f32())
 }
 
+fn recording_flash_for(phase: Phase, editing: bool, elapsed: Duration) -> f32 {
+    if matches!(phase, Phase::Recording) && !editing {
+        recording_flash(elapsed)
+    } else {
+        0.0
+    }
+}
+
 struct MetalRenderer {
     layer: MetalLayer,
     command_queue: CommandQueue,
@@ -832,11 +840,7 @@ impl MetalRenderer {
             } else {
                 0.0
             },
-            recording_flash: if matches!(self.phase, Phase::Recording) {
-                recording_flash(elapsed)
-            } else {
-                0.0
-            },
+            recording_flash: recording_flash_for(self.phase, self.editing, elapsed),
             _padding: 0.0,
         };
         encoder.set_fragment_bytes(
@@ -975,6 +979,18 @@ mod tests {
         assert!((samples[2] - 0.5).abs() < 0.000_1);
         assert!((samples[3] - 0.25).abs() < 0.000_1);
         assert!(samples[4] < 0.07);
+    }
+
+    #[test]
+    fn voice_action_starts_green_without_the_dictation_flash() {
+        assert_eq!(
+            recording_flash_for(Phase::Recording, true, Duration::ZERO),
+            0.0
+        );
+        assert_eq!(
+            recording_flash_for(Phase::Recording, false, Duration::ZERO),
+            1.0
+        );
     }
 
     #[test]
