@@ -3428,7 +3428,7 @@ impl AppWindow {
                 .flex()
                 .gap_2()
                 .when(copy.can_retry, |actions| {
-                    actions.child(compact_button(retry_label).id("retry-opencode").on_click(
+                    actions.child(header_button(retry_label).id("retry-opencode").on_click(
                         cx.listener(|this, _, _, cx| {
                             this.reload_model_catalog();
                             cx.notify();
@@ -3437,7 +3437,7 @@ impl AppWindow {
                 })
                 .when(copy.can_open_setup, |actions| {
                     actions.child(
-                        compact_button("Open OpenCode setup")
+                        header_button("Open OpenCode setup")
                             .id("open-opencode-setup")
                             .on_click(|_, _, _| open_opencode_beta_docs()),
                     )
@@ -4097,7 +4097,7 @@ impl AppWindow {
                     .gap_2()
                     .when(can_retry, |actions| {
                         actions.child(
-                            compact_button(retry_label)
+                            header_button(retry_label)
                                 .id("retry-mode-opencode")
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.reload_model_catalog();
@@ -4107,7 +4107,7 @@ impl AppWindow {
                     })
                     .when(can_open_setup, |actions| {
                         actions.child(
-                            compact_button("Open setup")
+                            header_button("Open setup")
                                 .id("open-mode-opencode-setup")
                                 .on_click(|_, _, _| open_opencode_beta_docs()),
                         )
