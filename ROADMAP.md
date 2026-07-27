@@ -111,6 +111,10 @@ Extend the same bounded typed channel with fixture-audio capture, microphone
 recovery, model switching, permission snapshots, deterministic screenshots,
 and assertions over capture/job/UI state. MCP may wrap this protocol later; it
 must not become a second control server or settings authority.
+When that wrapper exists, publish it as a standard npm stdio package with a
+`bin` entry so clients can run it through `npx -y`, and publish matching MCP
+Registry metadata. Do not publish an MCP package before the protocol exposes a
+real supported user capability.
 
 ## Generalize Context From Evidence
 

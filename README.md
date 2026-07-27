@@ -66,6 +66,13 @@ you can paste into a local coding agent.
 Custom command files and dependencies are executable local code with your user
 permissions. Review agent changes and install only dependencies you trust.
 
+To teach a coding agent how to configure personal commands and transformations,
+install the official HEX skill:
+
+```sh
+npx skills add anomalyco/hex --skill hex-personal-commands
+```
+
 ## Privacy And Local Data
 
 - Speech transcription and command recognition run locally.
