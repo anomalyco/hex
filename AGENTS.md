@@ -198,12 +198,14 @@ CoreAudio formats, AppleScript details, or event serialization.
 - Mode processing is best-effort and ordered: corrections, optional OpenCode
   rewriting, then selected TypeScript transformations. A failed step preserves
   the previous pipeline output. It applies to Paste and Send, but not meetings.
-- OpenCode availability checks stay off the UI thread. App launch must not run
-  `opencode2` or start its managed service; catalog loading begins only after an
-  explicit Connect/Refresh action, while an actual processing request may start
-  the service on demand. A missing beta install is retried at a coarse interval
-  so installing `opencode2` after connecting refreshes the model catalog without
-  restarting HEX.
+- OpenCode availability checks stay off the UI thread. When the app finds the
+  `opencode2` executable, it loads the catalog through `opencode2 api`, which
+  automatically starts or reuses the managed service. HEX never invokes
+  `opencode2 serve --service` or owns that service's lifecycle directly. A
+  missing beta install is retried at a coarse interval so installing
+  `opencode2` while Settings is open refreshes the model catalog without
+  restarting HEX. Catalog failures require an explicit retry rather than
+  spawning clients in a tight loop.
 - Ordinary resolver commands execute only from completed Moonshine lines.
   Voice-delimited activation and stable control phrases are deliberate exceptions.
 - Contextual commands enter the candidate set only when their predicate matches.

@@ -549,7 +549,6 @@ struct ProcessingPicker {
 }
 
 enum ModelCatalogState {
-    Unchecked,
     Loading,
     Loaded(ModelCatalog),
     Missing,
@@ -567,14 +566,6 @@ struct OpenCodeUnavailableCopy<'a> {
 
 fn opencode_unavailable_copy(state: &ModelCatalogState) -> Option<OpenCodeUnavailableCopy<'_>> {
     match state {
-        ModelCatalogState::Unchecked => Some(OpenCodeUnavailableCopy {
-            title: "Connect OpenCode",
-            description: "Connect only when you want HEX to load OpenCode models.",
-            error: None,
-            can_retry: true,
-            retry_label: "Connect",
-            can_open_setup: false,
-        }),
         ModelCatalogState::Loading => Some(OpenCodeUnavailableCopy {
             title: "Checking for OpenCode",
             description: "Voice Action will be available after HEX connects to OpenCode.",
@@ -977,7 +968,7 @@ impl AppWindow {
                 None,
             )
         } else {
-            (ModelCatalogState::Unchecked, None)
+            (ModelCatalogState::Loading, Some(start_model_catalog_load()))
         };
         let application_catalog = if preview_mode {
             ApplicationCatalogState::Loaded(Vec::new())
@@ -4890,12 +4881,6 @@ impl AppWindow {
         let query = model.read(cx).text().trim().to_lowercase();
         let presentation = model_presentation(&self.model_catalog, selected_model);
         let (catalog_status, default_label, matches, variants) = match &self.model_catalog {
-            ModelCatalogState::Unchecked => (
-                "Connect OpenCode to load models".into(),
-                None,
-                Vec::new(),
-                Vec::new(),
-            ),
             ModelCatalogState::Loading => {
                 ("Loading OpenCode...".into(), None, Vec::new(), Vec::new())
             }
@@ -8045,16 +8030,6 @@ mod tests {
             filtered_model_keys(&catalog, "gpt oss"),
             [Some("console-groq/openai/gpt-oss-120b".into())]
         );
-    }
-
-    #[test]
-    fn unchecked_opencode_requires_explicit_connection() {
-        let copy = opencode_unavailable_copy(&ModelCatalogState::Unchecked).unwrap();
-
-        assert_eq!(copy.title, "Connect OpenCode");
-        assert_eq!(copy.retry_label, "Connect");
-        assert!(copy.can_retry);
-        assert!(!copy.can_open_setup);
     }
 
     #[test]
