@@ -37,10 +37,11 @@ Add a persistent permission-health surface so revoked Microphone, Accessibility,
 or Input Monitoring access remains diagnosable after onboarding. Keep true
 processor chains as future work only if real profiles need composition.
 
-Import useful original-Hex preferences once from the preferred Application
-Support file. Validate each field, ignore malformed and unknown values, and
-record completion. The legacy files disagree about launch-at-login, so migration
-must ask or defer rather than guess.
+Replace the public Swift app through the direct, explicitly confirmed migration
+in [`docs/plans/swift-to-rust-migration.md`](docs/plans/swift-to-rust-migration.md).
+Converge both installed populations on `Hex.app`, `com.kitlangton.Hex`, the
+`com.kitlangton.Hex` Application Support root, and the R2 update channel only
+after the allowlisted preference import and agreed parity work are complete.
 
 ## Validate The Linux X11 Beta
 
