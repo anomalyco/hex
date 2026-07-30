@@ -51,8 +51,9 @@ Swift installations, but ongoing Rust releases and artifacts live on R2.
 - Add audio playback for new Rust history as explicit, bounded retention. This
   is a new opt-in capability, not preserved consent from Swift history, and it
   does not make legacy Swift recordings visible in Rust.
-- Complete every parity item in this plan before exposing 2.1.0 through the
-  legacy S3 appcast.
+- Complete core migration safety and behavioral parity before exposing 2.1.0
+  through the legacy S3 appcast. Retained audio playback soaks independently
+  and does not block migration.
 - Use Sparkle's native seven-cohort phased rollout with a 48-hour interval.
   Manual checks bypass phasing and may receive the update immediately.
 
@@ -395,7 +396,8 @@ soak completed parity slices before 2.1.0:
   physical event-trace tests and run for at least seven days;
 - retained audio playback ships off by default as an independently disableable
   2.0.x capability and runs for at least seven days with storage, cancellation,
-  crash-recovery, and privacy validation.
+  crash-recovery, and privacy validation. A playback delay or rollback does not
+  block S3 exposure after every core and behavioral gate passes.
 
 The legacy S3 feed sees none of these intermediate releases. The 2.1.0 release
 gate then contains the already-soaked behavior plus identity, preflight storage
@@ -662,7 +664,8 @@ Sparkle will not install build 91 over build 20100.
 - Swift-only users retain every allowlisted behavior and receive normal model
   onboarding.
 - No legacy history, audio, model, or unknown file is deleted.
-- Every agreed parity feature ships before migration exposure.
+- Core migration safety and behavioral parity ship before migration exposure;
+  retained audio playback remains independently gated.
 - A signed 0.8.4-to-2.1.0 update succeeds on a clean eligible account.
 - A signed 2.0.23-to-2.1.0 update succeeds and repairs identity-owned system
   state explicitly.
