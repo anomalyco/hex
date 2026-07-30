@@ -28,10 +28,12 @@
   <true/>
   <key>NSAppleEventsUsageDescription</key>
   <string>HEX uses automation to identify the foreground app and browser and pause supported media while you dictate.</string>
+  <key>NSAccessibilityUsageDescription</key>
+  <string>HEX uses Accessibility to paste dictation and read selected text for Voice Action.</string>
+  <key>NSInputMonitoringUsageDescription</key>
+  <string>HEX uses Input Monitoring to detect your dictation shortcuts in every app.</string>
   <key>NSMicrophoneUsageDescription</key>
   <string>HEX uses your microphone for private local dictation and does not store the captured audio.</string>
-  <key>NSSpeechRecognitionUsageDescription</key>
-  <string>HEX uses on-device Apple Speech when you select it as your transcription model.</string>
   <key>SUEnableAutomaticChecks</key>
   <true/>
   <key>SUAutomaticallyUpdate</key>
