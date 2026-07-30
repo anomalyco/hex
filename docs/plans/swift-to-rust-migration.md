@@ -357,6 +357,28 @@ Release the completed work as HEX 2.1.0, build 20100. Build one signed app
 payload with the target identity, then package transition DMGs appropriate to
 each installed population.
 
+### Gate Work Before The Identity Transition
+
+Do not first expose every behavioral change inside the identity-changing build.
+Use one or more ordinary 2.0.x R2 releases under the current Rust identity to
+soak completed parity slices before 2.1.0:
+
+- low-risk presentation and model-selection slices, including the status item,
+  permission health, and Auto language, pass the complete release suite and run
+  for at least 48 hours on current Rust installations;
+- input and capture-lifecycle slices, including side-aware hotkeys,
+  double-tap-only, configurable Paste Last, and idle microphone release, pass
+  physical event-trace tests and run for at least seven days;
+- retained audio playback ships off by default as an independently disableable
+  2.0.x capability and runs for at least seven days with storage, cancellation,
+  crash-recovery, and privacy validation.
+
+The legacy S3 feed sees none of these intermediate releases. The 2.1.0 release
+gate then contains the already-soaked behavior plus identity, preflight storage
+takeover, Swift preference import, migration presentation, and transition
+packaging. A failure in an intermediate capability blocks S3 exposure without
+requiring the identity migration itself to debug that feature.
+
 Extend release tooling rather than hand-editing this transition. It must:
 
 - package `HEX.app` and `Hex.app` archives from the same signed payload;
@@ -472,7 +494,8 @@ recorded Boolean.
 1. Implement identity and Application Support takeover behind deterministic
    migration tests.
 2. Implement and test the Swift preference importer.
-3. Ship every agreed parity feature on the R2 development channel.
+3. Ship every agreed parity feature in ordinary 2.0.x R2 releases and satisfy
+   the slice-specific soak gates above.
 4. Physically validate capture, release boundaries, custom chords, lock,
    cancellation, paste, and configurable paste-last behavior.
 5. Validate clean-account installation and both genuine Sparkle transitions.
