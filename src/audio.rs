@@ -123,7 +123,7 @@ pub enum AudioInputEvent {
 }
 
 pub struct RecoveringAudioInput {
-    input: AudioInput,
+    input: Option<AudioInput>,
     device_override: Option<String>,
     selected_device: Option<String>,
     active_revision: u64,
@@ -139,6 +139,7 @@ pub enum RecoveringAudioInputEvent {
     Timeout,
     Interrupted,
     Reopened,
+    OpenFailed(String),
 }
 
 const MICROPHONE_RETRY_INITIAL: Duration = Duration::from_millis(250);
@@ -324,7 +325,7 @@ impl RecoveringAudioInput {
             AudioInput::open(AUTOMATIC_INPUT_DEVICE_PREFERENCES)?
         };
         Ok(Self {
-            input,
+            input: Some(input),
             device_override: device_override.map(str::to_owned),
             selected_device: selected_device.map(str::to_owned),
             active_revision: selection_revision,
@@ -333,11 +334,51 @@ impl RecoveringAudioInput {
         })
     }
 
+    pub fn closed(
+        device_override: Option<&str>,
+        selection_revision: u64,
+        selected_device: Option<&str>,
+    ) -> Self {
+        Self {
+            input: None,
+            device_override: device_override.map(str::to_owned),
+            selected_device: selected_device.map(str::to_owned),
+            active_revision: selection_revision,
+            recovery: MicrophoneRecovery::default(),
+            replacement: None,
+        }
+    }
+
+    pub fn request_open(&mut self) {
+        if self.input.is_none() && self.replacement.is_none() {
+            self.start_replacement();
+        }
+    }
+
+    pub fn close(&mut self) {
+        self.input = None;
+        self.replacement = None;
+        self.recovery.recovered();
+    }
+
+    pub fn is_open(&self) -> bool {
+        self.input.is_some()
+    }
+
     pub fn request_selection(&mut self, revision: u64, selected_device: Option<&str>) {
         if self.device_override.is_some() || revision == self.active_revision {
             return;
         }
         self.selected_device = selected_device.map(str::to_owned);
+        if self.input.is_none() {
+            let was_opening = self.replacement.take().is_some();
+            self.active_revision = revision;
+            self.recovery.recovered();
+            if was_opening {
+                self.start_replacement();
+            }
+            return;
+        }
         self.recovery
             .request_selection_change(revision, Instant::now());
     }
@@ -358,21 +399,25 @@ impl RecoveringAudioInput {
                 return RecoveringAudioInputEvent::Timeout;
             }
             match result {
-                Ok(replacement) if capture_idle => {
-                    self.input = replacement;
+                Ok(replacement) if capture_idle || self.input.is_none() => {
+                    self.input = Some(replacement);
                     self.active_revision = opened_revision;
                     self.recovery.recovered();
-                    tracing::info!(device = %self.input.device_name, "dictation microphone reopened");
+                    tracing::info!(device = %self.device_name(), "dictation microphone reopened");
                     return RecoveringAudioInputEvent::Reopened;
                 }
                 Ok(_) => {
                     self.recovery.failed(now);
                 }
                 Err(error) => {
+                    if self.input.is_none() {
+                        self.recovery.recovered();
+                        return RecoveringAudioInputEvent::OpenFailed(error);
+                    }
                     self.recovery.failed(now);
                     tracing::warn!(
                         %error,
-                        device = %self.input.device_name,
+                        device = %self.device_name(),
                         "could not reopen dictation microphone; retrying"
                     );
                 }
@@ -385,7 +430,11 @@ impl RecoveringAudioInput {
             std::thread::sleep(timeout);
             return RecoveringAudioInputEvent::Timeout;
         }
-        match self.input.recv_timeout(timeout) {
+        let Some(input) = self.input.as_ref() else {
+            std::thread::sleep(timeout);
+            return RecoveringAudioInputEvent::Timeout;
+        };
+        match input.recv_timeout(timeout) {
             AudioInputEvent::Chunk {
                 samples,
                 captured_through,
@@ -395,7 +444,7 @@ impl RecoveringAudioInput {
             },
             AudioInputEvent::Timeout => RecoveringAudioInputEvent::Timeout,
             AudioInputEvent::StreamFailed(error) => {
-                tracing::warn!(%error, device = %self.input.device_name, "microphone stream stopped; reopening it");
+                tracing::warn!(%error, device = %input.device_name, "microphone stream stopped; reopening it");
                 self.recovery.request_stream_recovery(Instant::now());
                 RecoveringAudioInputEvent::Interrupted
             }
@@ -403,11 +452,18 @@ impl RecoveringAudioInput {
     }
 
     pub fn sample_rate(&self) -> u32 {
-        self.input.sample_rate
+        self.input
+            .as_ref()
+            .expect("microphone sample rate requested while closed")
+            .sample_rate
     }
 
     pub fn device_name(&self) -> &str {
-        &self.input.device_name
+        &self
+            .input
+            .as_ref()
+            .expect("microphone name requested while closed")
+            .device_name
     }
 
     fn start_replacement(&mut self) {
@@ -419,9 +475,17 @@ impl RecoveringAudioInput {
             .device_override
             .clone()
             .or_else(|| self.selected_device.clone());
+        let has_device_override = self.device_override.is_some();
+        let cold_open = self.input.is_none();
         let (sender, receiver) = mpsc::sync_channel(1);
         std::thread::spawn(move || {
             let result = match device {
+                Some(device) if cold_open && !has_device_override => {
+                    AudioInput::open_named(&device).or_else(|error| {
+                    tracing::warn!(%error, device, "selected microphone is unavailable; using automatic selection");
+                    AudioInput::open(AUTOMATIC_INPUT_DEVICE_PREFERENCES)
+                    })
+                }
                 Some(device) => AudioInput::open_named(&device),
                 None => AudioInput::open(AUTOMATIC_INPUT_DEVICE_PREFERENCES),
             }
@@ -608,6 +672,18 @@ mod tests {
         report_stream_error(&sender, "Device sample rate changed".into());
 
         assert_eq!(errors.try_recv().unwrap(), "Device sample rate changed");
+    }
+
+    #[test]
+    fn closed_input_applies_selection_without_opening() {
+        let mut input = RecoveringAudioInput::closed(None, 3, Some("Old microphone"));
+
+        input.request_selection(4, Some("Next microphone"));
+
+        assert!(!input.is_open());
+        assert_eq!(input.active_revision, 4);
+        assert_eq!(input.selected_device.as_deref(), Some("Next microphone"));
+        assert!(input.replacement.is_none());
     }
 
     #[test]

@@ -14,6 +14,7 @@ use crate::recording_environment::RecordingEnvironmentController;
 use crate::suppression::PendingInputEvents;
 
 const RECOGNITION_QUEUE_CAPACITY: usize = 64;
+const EVENT_QUEUE_CAPACITY: usize = 16;
 const MAX_RECOGNITION_BACKLOG: Duration = Duration::from_millis(500);
 
 pub struct RecognitionAudio {
@@ -45,6 +46,7 @@ impl Drop for RecognitionAudio {
 }
 
 pub enum DictationAudioEvent {
+    OpenFailed(String),
     Interrupted {
         was_recording: bool,
         capture_generation: u64,
@@ -101,6 +103,7 @@ enum Command {
         revision: u64,
         device: Option<String>,
     },
+    SetReleaseWhileIdle(bool),
     Shutdown,
     InvalidateRecognition {
         reply: SyncSender<u64>,
@@ -113,17 +116,36 @@ enum Command {
 
 struct Owner {
     input: RecoveringAudioInput,
+    release_while_idle: bool,
+    pending_capture: Option<PendingCapture>,
     capture: DictationCapture,
     recording_environment: RecordingEnvironmentController,
     commands: Receiver<Command>,
     recognition: SyncSender<RecognitionAudio>,
-    events: Sender<DictationAudioEvent>,
+    events: SyncSender<DictationAudioEvent>,
     state: Arc<State>,
     dropped_recognition_frames: u64,
     recognition_generation: u64,
     recognition_overflowed: bool,
     pending_input: PendingInputEvents,
     last_captured_through: Option<CaptureInstant>,
+}
+
+#[derive(Clone, Copy)]
+struct PendingCapture {
+    at: CaptureInstant,
+    voice: bool,
+    intentional_at: Option<CaptureInstant>,
+}
+
+impl PendingCapture {
+    fn mark_intentional(&mut self, at: CaptureInstant) {
+        let became_intentional = self.intentional_at.is_none()
+            && at.duration_since(self.at) >= crate::dictation::MINIMUM_HOLD_DURATION;
+        if became_intentional {
+            self.intentional_at = Some(at);
+        }
+    }
 }
 
 impl DictationAudio {
@@ -133,30 +155,51 @@ impl DictationAudio {
         selected_device: Option<&str>,
         recording_environment: RecordingEnvironmentController,
         pending_input: PendingInputEvents,
+        release_while_idle: bool,
     ) -> Result<Self> {
-        let input =
-            RecoveringAudioInput::open(device_override, selection_revision, selected_device)?;
+        let input = if release_while_idle {
+            RecoveringAudioInput::closed(device_override, selection_revision, selected_device)
+        } else {
+            RecoveringAudioInput::open(device_override, selection_revision, selected_device)?
+        };
         let state = Arc::new(State {
-            sample_rate: AtomicU64::new(u64::from(input.sample_rate())),
+            sample_rate: AtomicU64::new(if input.is_open() {
+                u64::from(input.sample_rate())
+            } else {
+                0
+            }),
             captured_through: AtomicU64::new(0),
-            device_name: Mutex::new(input.device_name().to_owned()),
+            device_name: Mutex::new(
+                input
+                    .is_open()
+                    .then(|| input.device_name().to_owned())
+                    .or_else(|| device_override.map(str::to_owned))
+                    .or_else(|| selected_device.map(str::to_owned))
+                    .unwrap_or_else(|| "Default microphone".into()),
+            ),
             recording: AtomicBool::new(false),
             recovering: AtomicBool::new(false),
             recognition_generation: AtomicU64::new(0),
             outstanding_recognition_frames: Arc::new(AtomicU64::new(0)),
             capture_generation: AtomicU64::new(0),
         });
-        let mut capture = DictationCapture::new(input.sample_rate());
+        let mut capture = DictationCapture::new(if input.is_open() {
+            input.sample_rate()
+        } else {
+            16_000
+        });
         capture.enable_recording_environment(recording_environment.clone());
         let (command_sender, commands) = mpsc::channel();
         let (recognition_sender, recognition) = mpsc::sync_channel(RECOGNITION_QUEUE_CAPACITY);
-        let (event_sender, events) = mpsc::channel();
+        let (event_sender, events) = mpsc::sync_channel(EVENT_QUEUE_CAPACITY);
         let owner_state = state.clone();
         let worker = thread::Builder::new()
             .name("dictation-audio".into())
             .spawn(move || {
                 Owner {
                     input,
+                    release_while_idle,
+                    pending_capture: None,
                     capture,
                     recording_environment,
                     commands,
@@ -213,6 +256,10 @@ impl DictationAudio {
             revision,
             device: device.map(str::to_owned),
         });
+    }
+
+    pub fn set_release_while_idle(&self, release: bool) {
+        let _ = self.commands.send(Command::SetReleaseWhileIdle(release));
     }
 
     pub fn recognition_generation(&self) -> u64 {
@@ -320,9 +367,10 @@ impl Owner {
                 Err(TryRecvError::Disconnected) => break,
                 Err(TryRecvError::Empty) => {}
             }
+            let capture_idle = self.capture_idle();
             let event = self
                 .input
-                .recv_timeout(Duration::from_millis(10), self.capture_idle());
+                .recv_timeout(Duration::from_millis(10), capture_idle);
             self.handle_input(event);
         }
     }
@@ -346,33 +394,69 @@ impl Owner {
                     self.next_recognition_generation();
                     self.recognition_overflowed = false;
                 }
-                self.drain_through(at);
                 self.state.capture_generation.fetch_add(1, Ordering::AcqRel);
-                if voice {
-                    self.capture.start_voice_at(at)
+                if self.input.is_open() {
+                    self.drain_through(at);
+                    if voice {
+                        self.capture.start_voice_at(at)
+                    } else {
+                        self.capture.start_at(at)
+                    }
                 } else {
-                    self.capture.start_at(at)
+                    self.pending_capture = Some(PendingCapture {
+                        at,
+                        voice,
+                        intentional_at: None,
+                    });
+                    self.input.request_open();
                 }
                 self.state.recording.store(true, Ordering::Release);
                 let _ = reply.send(true);
             }
             Command::BecomeIntentional { at, reply } => {
-                self.drain_through(at);
-                let _ = reply.send(self.capture.become_intentional(at));
+                let became_intentional = if let Some(pending) = &mut self.pending_capture {
+                    pending.mark_intentional(at);
+                    false
+                } else {
+                    self.drain_through(at);
+                    self.capture.become_intentional(at)
+                };
+                let _ = reply.send(became_intentional);
             }
             Command::Finish { at, reply } => {
-                self.drain_through(at);
-                let finish = self.capture.finish(at);
+                let finish = if self.pending_capture.take().is_some() {
+                    self.input.close();
+                    Finish::Discard
+                } else {
+                    self.drain_through(at);
+                    self.capture.finish(at)
+                };
                 self.state.recording.store(false, Ordering::Release);
                 let _ = reply.send(finish);
+                self.close_if_idle();
             }
             Command::Cancel { reply } => {
+                self.pending_capture = None;
+                if !self.input.is_open() {
+                    self.input.close();
+                }
                 self.capture.cancel();
                 self.state.recording.store(false, Ordering::Release);
                 let _ = reply.send(());
+                self.close_if_idle();
             }
             Command::SelectMicrophone { revision, device } => {
                 self.input.request_selection(revision, device.as_deref());
+            }
+            Command::SetReleaseWhileIdle(release) => {
+                self.release_while_idle = release;
+                if self.capture_idle() {
+                    if release {
+                        self.close_input();
+                    } else if !self.input.is_open() {
+                        self.input.request_open();
+                    }
+                }
             }
             Command::InvalidateRecognition { reply } => {
                 let generation = self.next_recognition_generation();
@@ -403,16 +487,21 @@ impl Owner {
             if remaining.is_zero() {
                 break;
             }
-            let event = self.input.recv_timeout(
-                remaining.min(Duration::from_millis(10)),
-                self.capture_idle(),
-            );
+            let capture_idle = self.capture_idle();
+            if !self.input.is_open() {
+                break;
+            }
+            let event = self
+                .input
+                .recv_timeout(remaining.min(Duration::from_millis(10)), capture_idle);
             self.handle_input(event);
         }
     }
 
     fn capture_idle(&self) -> bool {
-        !self.capture.is_recording() && self.pending_input.oldest().is_none()
+        !self.capture.is_recording()
+            && self.pending_capture.is_none()
+            && self.pending_input.oldest().is_none()
     }
 
     fn handle_input(&mut self, event: RecoveringAudioInputEvent) {
@@ -422,7 +511,7 @@ impl Owner {
                 captured_through,
             } => {
                 let chunk_nanos =
-                    samples.len() as u128 * 1_000_000_000 / u128::from(self.input.sample_rate());
+                    samples.len() as u128 * 1_000_000_000 / u128::from(self.sample_rate());
                 let captured_from = captured_through
                     .checked_sub(Duration::from_nanos(chunk_nanos as u64))
                     .unwrap_or(captured_through);
@@ -432,16 +521,18 @@ impl Owner {
                     let gap = captured_from.duration_since(previous);
                     let was_recording = self.capture.is_recording();
                     let capture_generation = self.state.capture_generation.load(Ordering::Acquire);
-                    self.capture = DictationCapture::new(self.input.sample_rate());
+                    self.capture = DictationCapture::new(self.sample_rate());
                     self.capture
                         .enable_recording_environment(self.recording_environment.clone());
                     self.state.recording.store(false, Ordering::Release);
                     self.next_recognition_generation();
-                    let _ = self.events.send(DictationAudioEvent::CaptureDiscontinuity {
-                        was_recording,
-                        capture_generation,
-                        gap_ms: gap.as_millis() as u64,
-                    });
+                    let _ = self
+                        .events
+                        .try_send(DictationAudioEvent::CaptureDiscontinuity {
+                            was_recording,
+                            capture_generation,
+                            gap_ms: gap.as_millis() as u64,
+                        });
                 }
                 self.last_captured_through = Some(captured_through);
                 self.state
@@ -464,21 +555,25 @@ impl Owner {
                 self.capture.cancel();
                 self.state.recording.store(false, Ordering::Release);
                 self.state.recovering.store(true, Ordering::Release);
-                let _ = self.events.send(DictationAudioEvent::Interrupted {
+                let _ = self.events.try_send(DictationAudioEvent::Interrupted {
                     was_recording,
                     capture_generation,
                 });
+                if self.release_while_idle {
+                    self.close_input();
+                }
             }
             RecoveringAudioInputEvent::Reopened => {
                 self.last_captured_through = None;
                 self.next_recognition_generation();
                 self.recognition_overflowed = false;
-                self.capture = DictationCapture::new(self.input.sample_rate());
+                let sample_rate = self.input.sample_rate();
+                self.capture = DictationCapture::new(sample_rate);
                 self.capture
                     .enable_recording_environment(self.recording_environment.clone());
                 self.state
                     .sample_rate
-                    .store(u64::from(self.input.sample_rate()), Ordering::Release);
+                    .store(u64::from(sample_rate), Ordering::Release);
                 self.state.captured_through.store(0, Ordering::Release);
                 *self
                     .state
@@ -486,18 +581,36 @@ impl Owner {
                     .lock()
                     .unwrap_or_else(|error| error.into_inner()) =
                     self.input.device_name().to_owned();
-                self.state.recording.store(false, Ordering::Release);
                 self.state.recovering.store(false, Ordering::Release);
-                let _ = self.events.send(DictationAudioEvent::Reopened);
+                if let Some(pending) = self.pending_capture.take() {
+                    if pending.voice {
+                        self.capture.start_voice_at(pending.at);
+                    } else {
+                        self.capture.start_at(pending.at);
+                    }
+                    if let Some(at) = pending.intentional_at {
+                        let _ = self.capture.become_intentional(at);
+                    }
+                } else {
+                    self.state.recording.store(false, Ordering::Release);
+                    if self.release_while_idle {
+                        self.close_input();
+                    }
+                }
+                let _ = self.events.try_send(DictationAudioEvent::Reopened);
+            }
+            RecoveringAudioInputEvent::OpenFailed(error) => {
+                self.pending_capture = None;
+                self.state.recording.store(false, Ordering::Release);
+                let _ = self.events.try_send(DictationAudioEvent::OpenFailed(error));
             }
         }
     }
 
     fn forward_recognition(&mut self, samples: Vec<f32>, captured_through: CaptureInstant) {
         let frames = samples.len() as u64;
-        let max_frames = u64::from(self.input.sample_rate())
-            * MAX_RECOGNITION_BACKLOG.as_millis() as u64
-            / 1_000;
+        let max_frames =
+            u64::from(self.sample_rate()) * MAX_RECOGNITION_BACKLOG.as_millis() as u64 / 1_000;
         let outstanding = self
             .state
             .outstanding_recognition_frames
@@ -509,7 +622,7 @@ impl Owner {
         let audio = RecognitionAudio {
             samples,
             captured_through,
-            sample_rate: self.input.sample_rate(),
+            sample_rate: self.sample_rate(),
             generation: self.recognition_generation,
             outstanding_frames: self.state.outstanding_recognition_frames.clone(),
         };
@@ -537,7 +650,7 @@ impl Owner {
         let dropped_frames = std::mem::take(&mut self.dropped_recognition_frames);
         let _ = self
             .events
-            .send(DictationAudioEvent::RecognitionDiscontinuity { dropped_frames });
+            .try_send(DictationAudioEvent::RecognitionDiscontinuity { dropped_frames });
     }
 
     fn next_recognition_generation(&mut self) -> u64 {
@@ -546,5 +659,63 @@ impl Owner {
             .recognition_generation
             .store(self.recognition_generation, Ordering::Release);
         self.recognition_generation
+    }
+
+    fn sample_rate(&self) -> u32 {
+        if self.input.is_open() {
+            self.input.sample_rate()
+        } else {
+            16_000
+        }
+    }
+
+    fn close_if_idle(&mut self) {
+        if self.release_while_idle && !self.capture.is_recording() && self.pending_capture.is_none()
+        {
+            self.close_input();
+        }
+    }
+
+    fn close_input(&mut self) {
+        self.input.close();
+        self.last_captured_through = None;
+        self.next_recognition_generation();
+        self.recognition_overflowed = false;
+        self.state.captured_through.store(0, Ordering::Release);
+        self.state.recovering.store(false, Ordering::Release);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn capture_time() -> CaptureInstant {
+        CaptureInstant::from_nanos(60_000_000_000)
+    }
+
+    #[test]
+    fn pending_open_uses_physical_press_for_intentional_threshold() {
+        let pressed_at = capture_time();
+        let mut pending = PendingCapture {
+            at: pressed_at,
+            voice: false,
+            intentional_at: None,
+        };
+
+        pending.mark_intentional(pressed_at + Duration::from_millis(299));
+        assert_eq!(pending.intentional_at, None);
+        pending.mark_intentional(pressed_at + crate::dictation::MINIMUM_HOLD_DURATION);
+        assert_eq!(
+            pending.intentional_at,
+            Some(pressed_at + crate::dictation::MINIMUM_HOLD_DURATION)
+        );
+        pending.mark_intentional(
+            pressed_at + crate::dictation::MINIMUM_HOLD_DURATION + Duration::from_millis(1),
+        );
+        assert_eq!(
+            pending.intentional_at,
+            Some(pressed_at + crate::dictation::MINIMUM_HOLD_DURATION)
+        );
     }
 }

@@ -130,6 +130,7 @@ pub fn listen(
         microphone.as_deref(),
         recording_environment,
         input_monitor.pending_events(),
+        false,
     )?;
     let dictation_worker = DictationWorker::start(
         input_monitor.activity.clone(),
@@ -222,6 +223,7 @@ pub fn listen(
         let next_commands_enabled = crate::app_settings::commands_enabled();
         if next_commands_enabled != commands_enabled {
             commands_enabled = next_commands_enabled;
+            input.set_release_while_idle(false);
             mode = Mode::Listening;
             if commands_enabled {
                 command_loader = Some(load_command_recognizer(project_root.to_path_buf()));
@@ -497,6 +499,27 @@ pub fn listen(
 
         while let Some(audio_event) = input.try_recv_event() {
             match audio_event {
+                DictationAudioEvent::OpenFailed(error) => {
+                    hotkey.suspend();
+                    edit_hotkey.suspend();
+                    edit_context = None;
+                    edit_pending_since = None;
+                    feedback::play(Tone::Error);
+                    events.dictation(
+                        DictationPhase::Failed(format!("Could not open microphone: {error}")),
+                        "",
+                    )?;
+                    if let Some(indicator) = &indicator {
+                        indicator.send(DictationIndicatorEvent::Failed);
+                    }
+                    emit_engine_state(
+                        &mut events,
+                        false,
+                        &dictation_worker,
+                        mode,
+                        &input.device_name(),
+                    )?;
+                }
                 DictationAudioEvent::RecognitionDiscontinuity { dropped_frames } => {
                     tracing::warn!(
                         dropped_recognition_frames = dropped_frames,
