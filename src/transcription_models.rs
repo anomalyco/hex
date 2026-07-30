@@ -110,7 +110,6 @@ pub enum Recommendation {
     Fastest,
     MostAccurate,
     RecognitionHints,
-    BuiltIn,
 }
 
 impl Recommendation {
@@ -120,7 +119,6 @@ impl Recommendation {
             Self::Fastest => "Fastest",
             Self::MostAccurate => "Most accurate",
             Self::RecognitionHints => "Recognition hints",
-            Self::BuiltIn => "Built in",
         }
     }
 }
@@ -163,6 +161,10 @@ pub struct GgufArtifact {
 }
 
 impl ModelDefinition {
+    pub const fn available(&self) -> bool {
+        !matches!(self.runtime, ModelRuntime::AppleSpeech)
+    }
+
     fn download_url(&self) -> Result<String> {
         let ModelRuntime::Gguf(artifact) = self.runtime else {
             bail!("{} is managed by macOS and has no GGUF artifact", self.name);
@@ -427,15 +429,12 @@ pub fn language_name(code: &str) -> &str {
         .unwrap_or(code)
 }
 
-pub(crate) fn choices_for_runtime(
-    language: &str,
-    apple_speech_supported: bool,
-) -> Vec<ModelChoice> {
+pub(crate) fn choices_for_runtime(language: &str) -> Vec<ModelChoice> {
     let choice = |id, recommendation| ModelChoice {
         model: definition(id),
         recommendation,
     };
-    let mut choices = match language {
+    match language {
         "en" => vec![
             choice(
                 TranscriptionModelId::ParakeetV2,
@@ -488,14 +487,7 @@ pub(crate) fn choices_for_runtime(
             TranscriptionModelId::WhisperLargeV3Turbo,
             Recommendation::Recommended,
         )],
-    };
-    if apple_speech_supported {
-        choices.push(choice(
-            TranscriptionModelId::AppleSpeech,
-            Recommendation::BuiltIn,
-        ));
     }
-    choices
 }
 
 pub fn validate(selection: &TranscriptionSelection) -> Result<&'static ModelDefinition> {
@@ -506,6 +498,9 @@ pub fn validate(selection: &TranscriptionSelection) -> Result<&'static ModelDefi
         bail!("unsupported transcription language: {}", selection.language);
     }
     let model = definition(selection.model);
+    if !model.available() {
+        bail!("{} is unavailable", model.name);
+    }
     if !model.supports_language(&selection.language) {
         bail!(
             "{} does not support {}",
@@ -815,12 +810,12 @@ mod tests {
 
     #[test]
     fn recommendations_are_language_specific() {
-        let english = choices_for_runtime("en", false);
+        let english = choices_for_runtime("en");
         assert_eq!(english[0].model.id, TranscriptionModelId::ParakeetV2);
         assert_eq!(english[0].recommendation, Recommendation::Recommended);
         assert_eq!(english[1].model.id, TranscriptionModelId::CohereTranscribe);
         assert_eq!(english[1].recommendation, Recommendation::MostAccurate);
-        let mandarin = choices_for_runtime("zh", false);
+        let mandarin = choices_for_runtime("zh");
         assert_eq!(mandarin[0].model.id, TranscriptionModelId::Qwen3Asr06B);
         assert_eq!(mandarin[1].model.id, TranscriptionModelId::SenseVoiceSmall);
     }
@@ -847,18 +842,22 @@ mod tests {
     }
 
     #[test]
-    fn apple_speech_is_only_offered_when_the_runtime_supports_the_locale() {
+    fn apple_speech_is_retained_only_for_persisted_selection_migration() {
         assert!(
-            choices_for_runtime("en", false)
+            choices_for_runtime("en")
                 .iter()
                 .all(|choice| choice.model.id != TranscriptionModelId::AppleSpeech)
         );
-        assert_eq!(
-            choices_for_runtime("en", true).last().unwrap().model.id,
-            TranscriptionModelId::AppleSpeech
-        );
         let apple_speech = definition(TranscriptionModelId::AppleSpeech);
         assert!(matches!(apple_speech.runtime, ModelRuntime::AppleSpeech));
+        assert!(!apple_speech.available());
+        assert!(
+            validate(&TranscriptionSelection {
+                model: TranscriptionModelId::AppleSpeech,
+                ..TranscriptionSelection::default()
+            })
+            .is_err()
+        );
         assert_eq!(apple_speech.download_bytes(), None);
         assert!(model_path(apple_speech).is_err());
     }

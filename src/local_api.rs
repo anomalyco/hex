@@ -521,6 +521,13 @@ fn handle_request(request: HttpRequest, context: &HttpContext) -> RequestAction 
                 ));
             };
             let model = crate::transcription_models::definition(id);
+            if !model.available() {
+                return RequestAction::Respond(HttpResponse::json(
+                    404,
+                    "Not Found",
+                    &serde_json::json!({ "code": "unknown-model" }),
+                ));
+            }
             let Ok(selection) = installation_selection(model, &request.path) else {
                 return RequestAction::Respond(HttpResponse::json(
                     400,
@@ -1033,6 +1040,7 @@ fn model_infos(path: &str) -> std::result::Result<Vec<ModelInfo>, &'static str> 
     }
     Ok(crate::transcription_models::MODELS
         .iter()
+        .filter(|model| model.available())
         .map(|model| {
             let managed = matches!(
                 model.runtime,
@@ -1675,9 +1683,16 @@ mod tests {
         assert_eq!(capabilities["audioFormats"][0], "audio/wav");
         let models = request(document.port, Some(&document.token), "/models");
         let models: Vec<serde_json::Value> = serde_json::from_str(response_body(&models)).unwrap();
-        assert_eq!(models.len(), crate::transcription_models::MODELS.len());
+        assert_eq!(
+            models.len(),
+            crate::transcription_models::MODELS
+                .iter()
+                .filter(|model| model.available())
+                .count()
+        );
         assert_eq!(models[0]["id"], "parakeet_v2");
         assert!(models[0]["downloadBytes"].is_number());
+        assert!(models.iter().all(|model| model["id"] != "apple_speech"));
         let unknown_model = request_with_method(
             document.port,
             Some(&document.token),
@@ -1687,6 +1702,17 @@ mod tests {
         assert!(unknown_model.starts_with("HTTP/1.1 404"));
         assert_eq!(
             serde_json::from_str::<serde_json::Value>(response_body(&unknown_model)).unwrap()["code"],
+            "unknown-model"
+        );
+        let disabled_model = request_with_method(
+            document.port,
+            Some(&document.token),
+            "POST",
+            "/models/apple_speech/prepare?language=en",
+        );
+        assert!(disabled_model.starts_with("HTTP/1.1 404"));
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(response_body(&disabled_model)).unwrap()["code"],
             "unknown-model"
         );
 
@@ -1771,23 +1797,11 @@ mod tests {
     }
 
     #[test]
-    fn model_preparation_uses_the_host_language_without_app_settings() {
+    fn model_preparation_rejects_disabled_apple_speech() {
         let apple = crate::transcription_models::definition(
             crate::transcription_models::TranscriptionModelId::AppleSpeech,
         );
-        let selection =
-            installation_selection(apple, "/models/apple_speech/prepare?language=de").unwrap();
-
-        assert_eq!(selection.model, apple.id);
-        assert_eq!(selection.language, "de");
-        assert!(selection.recognition_hints.is_empty());
-        assert!(
-            installation_selection(
-                apple,
-                "/models/apple_speech/prepare?language=en&language=de"
-            )
-            .is_err()
-        );
+        assert!(installation_selection(apple, "/models/apple_speech/prepare?language=de").is_err());
     }
 
     #[test]

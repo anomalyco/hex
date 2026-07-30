@@ -7,7 +7,6 @@ use crate::transcription::Transcript;
 use color_eyre::eyre::{Result, eyre};
 
 unsafe extern "C" {
-    fn hex_apple_speech_supported(locale: *const c_char) -> c_int;
     fn hex_apple_speech_ready(locale: *const c_char) -> c_int;
     fn hex_apple_speech_prepare(locale: *const c_char, error: *mut *mut c_char) -> *mut c_void;
     fn hex_apple_speech_transcribe(
@@ -25,33 +24,12 @@ pub struct AppleSpeech {
     selection: crate::transcription_models::TranscriptionSelection,
 }
 
-static SUPPORTED_LOCALES: OnceLock<Mutex<HashMap<String, bool>>> = OnceLock::new();
 static READY_LOCALES: OnceLock<Mutex<HashMap<String, usize>>> = OnceLock::new();
 
 // The retained Swift actor is safe to move to the dedicated inference thread.
 unsafe impl Send for AppleSpeech {}
 
 impl AppleSpeech {
-    pub fn support_status(language: &str) -> Option<bool> {
-        let mut locales = SUPPORTED_LOCALES
-            .get_or_init(Default::default)
-            .lock()
-            .unwrap_or_else(|error| error.into_inner());
-        if let Some(supported) = locales.get(language) {
-            return Some(*supported);
-        }
-        let supported = with_locale(language, |locale| unsafe {
-            hex_apple_speech_supported(locale)
-        })
-        .unwrap_or(-1);
-        if supported < 0 {
-            return None;
-        }
-        let supported = supported != 0;
-        locales.insert(language.to_string(), supported);
-        Some(supported)
-    }
-
     pub fn readiness_status(language: &str) -> Option<bool> {
         if READY_LOCALES
             .get_or_init(Default::default)

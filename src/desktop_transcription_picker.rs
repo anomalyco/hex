@@ -7,8 +7,7 @@ use crate::desktop_ui::{
     SURFACE_SELECTED, TEXT, TEXT_SOFT, error_message,
 };
 use crate::transcription_models::{
-    ModelChoice, ModelDefinition, ModelRuntime, TranscriptionModelId, TranscriptionSelection,
-    language_name,
+    ModelChoice, ModelDefinition, TranscriptionModelId, TranscriptionSelection, language_name,
 };
 
 pub(crate) fn transcription_selection_is_active(
@@ -100,13 +99,7 @@ pub(crate) fn render_transcription_picker<T: TranscriptionPickerDelegate>(
             TranscriptionPickerStatus::Active => ("Active".into(), None, true, false, None, true),
             TranscriptionPickerStatus::Available { installed } => (
                 model.choice.recommendation.label().into(),
-                Some(
-                    if installed || matches!(definition.runtime, ModelRuntime::AppleSpeech) {
-                        "Use"
-                    } else {
-                        "Download"
-                    },
-                ),
+                Some(if installed { "Use" } else { "Download" }),
                 false,
                 false,
                 None,

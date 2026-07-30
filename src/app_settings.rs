@@ -385,8 +385,12 @@ impl AppSettings {
                 let mut settings: Self = serde_json::from_slice(&data)?;
                 settings.dictation_processing.default_mode.name = "Global".into();
                 settings.migrate_legacy_replacements();
+                let transcription_migrated = settings.migrate_disabled_transcription_model();
                 crate::transcription_models::validate(&settings.transcription)?;
                 settings.repair_hotkey_conflict();
+                if transcription_migrated && let Err(error) = settings.save() {
+                    tracing::warn!(%error, "could not persist the replacement transcription model");
+                }
                 settings.apply_runtime();
                 Ok(settings)
             }
@@ -460,6 +464,18 @@ impl AppSettings {
             }
         }
         self.text_replacements.clear();
+    }
+
+    fn migrate_disabled_transcription_model(&mut self) -> bool {
+        if crate::transcription_models::definition(self.transcription.model).available() {
+            return false;
+        }
+        tracing::warn!(
+            model = self.transcription.model.as_str(),
+            "replaced a disabled transcription model"
+        );
+        self.transcription = TranscriptionSelection::default();
+        true
     }
 
     fn repair_hotkey_conflict(&mut self) {
@@ -676,6 +692,18 @@ mod tests {
 
         assert_eq!(decoded.transcription, settings.transcription);
         assert!(crate::transcription_models::validate(&decoded.transcription).is_ok());
+    }
+
+    #[test]
+    fn disabled_apple_speech_selection_migrates_to_parakeet_v2() {
+        let mut settings: AppSettings = serde_json::from_str(
+            r#"{"transcription":{"model":"apple_speech","language":"de","recognition_hints":""}}"#,
+        )
+        .unwrap();
+
+        assert!(settings.migrate_disabled_transcription_model());
+        assert_eq!(settings.transcription, TranscriptionSelection::default());
+        assert!(!settings.migrate_disabled_transcription_model());
     }
 
     #[test]

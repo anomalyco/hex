@@ -65,19 +65,21 @@ pub struct HudTuning {
     pub glow: f32,
     pub depth: f32,
     pub light_angle: f32,
+    pub outline: f32,
 }
 
 impl Default for HudTuning {
     fn default() -> Self {
         Self {
-            style: 0.0,
-            line_count: 3.0,
-            curvature: 0.55,
-            speed: 1.0,
-            sharpness: 0.65,
-            glow: 0.3,
-            depth: 0.75,
+            style: 1.0,
+            line_count: 2.0,
+            curvature: 0.47,
+            speed: 17.08,
+            sharpness: 0.29,
+            glow: 0.77,
+            depth: 0.65,
             light_angle: 0.35,
+            outline: 1.0,
         }
     }
 }
@@ -432,12 +434,13 @@ struct Uniforms {
     line_glow: f32,
     sphere_depth: f32,
     light_angle: f32,
+    sphere_outline: f32,
     completion: f32,
     recording_flash: f32,
     _padding: f32,
 }
 
-const _: () = assert!(std::mem::size_of::<Uniforms>() == 104);
+const _: () = assert!(std::mem::size_of::<Uniforms>() == 112);
 
 fn recording_flash(elapsed: Duration) -> f32 {
     2.0_f32.powf(-elapsed.as_secs_f32() / RECORDING_FLASH_HALF_LIFE.as_secs_f32())
@@ -835,6 +838,7 @@ impl MetalRenderer {
             line_glow: self.tuning.glow,
             sphere_depth: self.tuning.depth,
             light_angle: self.tuning.light_angle,
+            sphere_outline: self.tuning.outline,
             completion: if matches!(self.phase, Phase::Completed) {
                 (elapsed.as_secs_f32() / 0.24).clamp(0.0, 1.0)
             } else {
@@ -995,10 +999,11 @@ mod tests {
 
     #[test]
     fn rust_uniform_layout_matches_metal() {
-        assert_eq!(std::mem::size_of::<Uniforms>(), 104);
+        assert_eq!(std::mem::size_of::<Uniforms>(), 112);
         assert_eq!(std::mem::align_of::<Uniforms>(), 8);
-        assert_eq!(std::mem::offset_of!(Uniforms, recording_flash), 96);
-        assert_eq!(std::mem::offset_of!(Uniforms, _padding), 100);
+        assert_eq!(std::mem::offset_of!(Uniforms, sphere_outline), 92);
+        assert_eq!(std::mem::offset_of!(Uniforms, recording_flash), 100);
+        assert_eq!(std::mem::offset_of!(Uniforms, _padding), 104);
     }
 
     #[test]

@@ -1097,7 +1097,7 @@ impl LinuxApp {
         language: String,
         transcription: &DesktopTranscriptionSnapshot,
     ) -> TranscriptionPickerView {
-        let models = crate::transcription_models::choices_for_runtime(&language, false)
+        let models = crate::transcription_models::choices_for_runtime(&language)
             .into_iter()
             .map(|choice| {
                 let model = choice.model;

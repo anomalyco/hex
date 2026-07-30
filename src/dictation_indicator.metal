@@ -24,6 +24,7 @@ struct Uniforms {
     float line_glow;
     float sphere_depth;
     float light_angle;
+    float sphere_outline;
     float completion;
     float recording_flash;
     float _padding;
@@ -189,8 +190,10 @@ fragment float4 indicator_fragment(
 
         float style = clamp(uniforms.line_style, 0.0, 2.0);
         float sharpness = clamp(uniforms.line_sharpness, 0.0, 1.0);
+        float blur_amount = 1.0 - sharpness;
         float highlight_count = clamp(round(uniforms.line_count), 1.0, 6.0);
         float shine = 0.0;
+        float soft_shine = 0.0;
         if (style < 0.5) {
             // A moving area light gives the orb motion without drawing stripes
             // across its face.
@@ -208,13 +211,14 @@ fragment float4 indicator_fragment(
                 if (float(index) >= highlight_count) {
                     break;
                 }
-                float offset = (float(index) + 0.5) / highlight_count;
-                float wrapped = abs(sin((longitude - travel - offset) * 6.2831853));
-                float band = 1.0 - smoothstep(
-                    mix(0.3, 0.05, sharpness),
-                    mix(0.62, 0.16, sharpness),
-                    wrapped);
-                shine = max(shine, band);
+                float offset = float(index) / highlight_count;
+                float angular_delta = fract(longitude - travel - offset + 0.5) - 0.5;
+                float angular_distance = abs(angular_delta);
+                float core = exp2(-pow(angular_distance / 0.018, 2.0));
+                float halo_radius = mix(0.025, 0.14, blur_amount);
+                float halo = exp2(-pow(angular_distance / halo_radius, 2.0));
+                shine = max(shine, core);
+                soft_shine = max(soft_shine, halo);
             }
         } else {
             // Curved ribbons remain available in the lab for comparison, but
@@ -242,10 +246,20 @@ fragment float4 indicator_fragment(
         }
         float3 shine_color = mix(float3(0.66, 0.84, 1.0), float3(0.92, 0.72, 1.0), post_processing);
         float shine_strength = mix(0.16, 0.68, clamp(uniforms.line_glow, 0.0, 1.0));
+        float surface_wrap = orb_mask * mix(0.28, 1.0, normal_z);
+        float rim_spill = (1.0 - orb_mask)
+            * exp2(-pow(max(orb_distance, 0.0) / 2.2, 2.0));
         composite(
             result,
             shine_color,
-            shine * normal_z * orb_mask * processing * shine_strength * detail_clarity);
+            soft_shine * (surface_wrap + rim_spill * 0.72) * processing * blur_amount
+                * shine_strength * 0.52
+                * detail_clarity);
+        composite(
+            result,
+            shine_color,
+            shine * surface_wrap * processing * shine_strength
+                * mix(1.0, 0.36, blur_amount) * detail_clarity);
     }
 
     // Pending jobs sit beside the foreground state. Keeping this geometry
@@ -272,9 +286,11 @@ fragment float4 indicator_fragment(
     float completion_rim = exp2(-pow(abs(distance) / 0.72, 2.0));
     screen(result, float3(0.82, 0.93, 1.0), completion_rim * completion_flash * 0.58);
 
+    float sphere_outline = clamp(uniforms.sphere_outline, 0.0, 1.0);
+    float processing_stroke = mix(0.04, 0.4, sphere_outline);
     float stroke = coverage(
         abs(distance) - 0.4,
-        0.38 + lifecycle_softness * 0.3) * mix(0.56, 0.09, processing) * detail_clarity;
+        0.38 + lifecycle_softness * 0.3) * mix(0.56, processing_stroke, processing) * detail_clarity;
     composite(result, mix(accent, float3(1.0), 0.1), stroke);
     screen(result, float3(1.0, 0.2, 0.16), shape * recording_flash * 0.36);
     float recording_flash_rim = exp2(-pow(abs(distance) / 0.9, 2.0));

@@ -70,7 +70,6 @@ const MINIMUM_HEIGHT: f32 = 560.0;
 const HOTKEY_MIN_WIDTH: f32 = 148.0;
 const OPENCODE_INSTALL_RETRY_INTERVAL: Duration = Duration::from_secs(60);
 const MAX_OPENCODE_ERROR_BYTES: usize = 4 * 1024;
-const APPLE_SPEECH_RETRY_INTERVAL: Duration = Duration::from_secs(5);
 const ACTIVITY_LIMIT: usize = 100;
 const OPENCODE_BETA_DOCS_URL: &str = "https://v2.opencode.ai/";
 
@@ -272,11 +271,14 @@ enum HudControl {
     LineCount,
     Curvature,
     Speed,
-    Sharpness,
+    Blur,
     Glow,
     Depth,
     LightAngle,
+    Outline,
 }
+
+const HUD_MAX_SPEED: f32 = 24.0;
 
 impl Pane {
     const ALL: [Self; 8] = [
@@ -431,31 +433,6 @@ struct ToggleSpring {
     velocity: f32,
     target: f32,
     last_frame: Instant,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-struct AppleSpeechCapability {
-    language: String,
-    supported: Option<bool>,
-    ready: Option<bool>,
-}
-
-fn start_apple_speech_capability_load(language: String) -> Receiver<AppleSpeechCapability> {
-    let (sender, receiver) = sync_channel(1);
-    thread::spawn(move || {
-        let supported = crate::apple_speech::AppleSpeech::support_status(&language);
-        let ready = match supported {
-            Some(true) => crate::apple_speech::AppleSpeech::readiness_status(&language),
-            Some(false) => Some(false),
-            None => None,
-        };
-        let _ = sender.send(AppleSpeechCapability {
-            language,
-            supported,
-            ready,
-        });
-    });
-    receiver
 }
 
 struct ProcessingInput {
@@ -766,10 +743,6 @@ pub struct AppWindow {
     transcription_downloaded_bytes: u64,
     transcription_activation_started: Option<Instant>,
     transcription_preview_installed: Option<bool>,
-    apple_speech_capability: Option<AppleSpeechCapability>,
-    apple_speech_capability_loading: Option<String>,
-    apple_speech_capability_receiver: Option<Receiver<AppleSpeechCapability>>,
-    apple_speech_capability_retry_at: Instant,
     processing_inputs: ProcessingInputs,
     voice_action_inputs: VoiceActionInputs,
     selected_mode: ModeSelection,
@@ -848,8 +821,6 @@ impl AppWindow {
                         let model_catalog_changed = window.poll_model_catalog();
                         window.retry_model_catalog();
                         let application_catalog_changed = window.poll_application_catalog();
-                        window.retry_apple_speech_capability();
-                        let apple_speech_changed = window.poll_apple_speech_capability();
                         let transcription_changed = window.poll_transcription_download();
                         let setup_changed = window.poll_setup();
                         let login_item_changed = window.poll_login_item();
@@ -878,7 +849,6 @@ impl AppWindow {
                         }
                         if model_catalog_changed
                             || application_catalog_changed
-                            || apple_speech_changed
                             || transcription_changed
                             || setup_changed
                             || login_item_changed
@@ -899,11 +869,7 @@ impl AppWindow {
         })
         .detach();
         let preview_mode = preview.is_some();
-        let preview_choices = |language: &str| {
-            let apple_speech_supported =
-                crate::apple_speech::AppleSpeech::support_status(language).unwrap_or(false);
-            crate::transcription_models::choices_for_runtime(language, apple_speech_supported)
-        };
+        let preview_choices = crate::transcription_models::choices_for_runtime;
         let (settings, settings_load_error) = if let Some(preview) = &preview {
             let mut settings = AppSettings::default();
             if let Some((language, _)) = &preview.transcription_picker
@@ -1034,9 +1000,6 @@ impl AppWindow {
                 .then(|| preview_choices(language)[0].model.id)
         });
         let selected_model = validate(&settings.transcription).ok();
-        let selected_apple_language = selected_model
-            .filter(|model| matches!(model.runtime, ModelRuntime::AppleSpeech))
-            .map(|_| settings.transcription.language.clone());
         let setup_status = if preview.as_ref().is_some_and(|preview| preview.onboarding) {
             SetupStatus {
                 microphone: PermissionState::NeedsRequest,
@@ -1048,23 +1011,12 @@ impl AppWindow {
         } else {
             crate::onboarding::status_with_transcription_model(selected_model.is_some_and(
                 |model| {
-                    !matches!(model.runtime, ModelRuntime::AppleSpeech)
-                        && crate::transcription_models::is_installed(
-                            model,
-                            &settings.transcription.language,
-                        )
+                    crate::transcription_models::is_installed(
+                        model,
+                        &settings.transcription.language,
+                    )
                 },
             ))
-        };
-        let (apple_speech_capability_loading, apple_speech_capability_receiver) = if preview_mode {
-            (None, None)
-        } else if let Some(language) = selected_apple_language {
-            (
-                Some(language.clone()),
-                Some(start_apple_speech_capability_load(language)),
-            )
-        } else {
-            (None, None)
         };
         let setup_visible = preview.as_ref().is_some_and(|preview| preview.onboarding)
             || !preview_mode && !setup_status.ready();
@@ -1100,10 +1052,7 @@ impl AppWindow {
             activity: DesktopActivity::default(),
             meeting_requests,
             indicator,
-            hud_tuning: HudTuning {
-                style: 0.0,
-                ..HudTuning::default()
-            },
+            hud_tuning: HudTuning::default(),
             hud_demo: HudDemoState::Transcribing,
             hud_queued: 1,
             hud_dragging: None,
@@ -1153,10 +1102,6 @@ impl AppWindow {
                 ) => Some(false),
                 Some(PreviewModelState::Actual) | None => None,
             },
-            apple_speech_capability: None,
-            apple_speech_capability_loading,
-            apple_speech_capability_receiver,
-            apple_speech_capability_retry_at: Instant::now(),
             processing_inputs,
             voice_action_inputs,
             selected_mode: if preview
@@ -1381,62 +1326,6 @@ impl AppWindow {
         self.application_catalog_receiver = Some(receiver);
     }
 
-    fn ensure_apple_speech_capability(&mut self, language: &str) {
-        let unresolved = self
-            .apple_speech_capability
-            .as_ref()
-            .is_some_and(|capability| {
-                capability.language == language
-                    && (capability.supported.is_none() || capability.ready.is_none())
-            });
-        if self.preview
-            || self
-                .apple_speech_capability
-                .as_ref()
-                .is_some_and(|capability| capability.language == language && !unresolved)
-            || self.apple_speech_capability_loading.as_deref() == Some(language)
-            || unresolved && Instant::now() < self.apple_speech_capability_retry_at
-        {
-            return;
-        }
-        let language = language.to_string();
-        if self
-            .apple_speech_capability
-            .as_ref()
-            .is_some_and(|capability| capability.language != language)
-        {
-            self.apple_speech_capability = None;
-        }
-        self.apple_speech_capability_loading = Some(language.clone());
-        self.apple_speech_capability_receiver = Some(start_apple_speech_capability_load(language));
-    }
-
-    fn poll_apple_speech_capability(&mut self) -> bool {
-        let Some(receiver) = &self.apple_speech_capability_receiver else {
-            return false;
-        };
-        let Ok(capability) = receiver.try_recv() else {
-            return false;
-        };
-        self.apple_speech_capability = Some(capability);
-        self.apple_speech_capability_retry_at = Instant::now() + APPLE_SPEECH_RETRY_INTERVAL;
-        self.apple_speech_capability_loading = None;
-        self.apple_speech_capability_receiver = None;
-        true
-    }
-
-    fn retry_apple_speech_capability(&mut self) {
-        let Some(language) = self
-            .apple_speech_capability
-            .as_ref()
-            .filter(|capability| capability.supported.is_none() || capability.ready.is_none())
-            .map(|capability| capability.language.clone())
-        else {
-            return;
-        };
-        self.ensure_apple_speech_capability(&language);
-    }
-
     fn poll_transcription_download(&mut self) -> bool {
         let mut changed = false;
         if let Some(progress) = &self.transcription_download_progress {
@@ -1474,19 +1363,7 @@ impl AppWindow {
             return changed;
         }
         let transcription_model = validate(&self.settings.transcription).is_ok_and(|model| {
-            if matches!(model.runtime, ModelRuntime::AppleSpeech) {
-                self.apple_speech_capability
-                    .as_ref()
-                    .is_some_and(|capability| {
-                        capability.language == self.settings.transcription.language
-                            && capability.ready == Some(true)
-                    })
-            } else {
-                crate::transcription_models::is_installed(
-                    model,
-                    &self.settings.transcription.language,
-                )
-            }
+            crate::transcription_models::is_installed(model, &self.settings.transcription.language)
         });
         let status = crate::onboarding::status_with_transcription_model(transcription_model);
         if status != self.setup_status {
@@ -1580,16 +1457,6 @@ impl AppWindow {
     }
 
     fn apply_transcription_selection(&mut self, selection: TranscriptionSelection) {
-        if matches!(
-            definition(selection.model).runtime,
-            ModelRuntime::AppleSpeech
-        ) {
-            self.apple_speech_capability = Some(AppleSpeechCapability {
-                language: selection.language.clone(),
-                supported: Some(true),
-                ready: Some(true),
-            });
-        }
         if self.preview {
             self.settings.transcription = selection;
             self.transcription_picker_language = None;
@@ -1686,17 +1553,8 @@ impl AppWindow {
     }
 
     fn transcription_model_installed(&self, model: &ModelDefinition, language: &str) -> bool {
-        self.transcription_preview_installed.unwrap_or_else(|| {
-            if matches!(model.runtime, ModelRuntime::AppleSpeech) {
-                self.apple_speech_capability
-                    .as_ref()
-                    .is_some_and(|capability| {
-                        capability.language == language && capability.ready == Some(true)
-                    })
-            } else {
-                crate::transcription_models::is_installed(model, language)
-            }
-        })
+        self.transcription_preview_installed
+            .unwrap_or_else(|| crate::transcription_models::is_installed(model, language))
     }
 
     pub fn meeting_starting(&mut self, cx: &mut Context<Self>) {
@@ -2730,67 +2588,52 @@ impl AppWindow {
     }
 
     fn transcription_picker_view(&mut self, selected_language: &str) -> TranscriptionPickerView {
-        self.ensure_apple_speech_capability(selected_language);
-        let apple_speech_supported =
-            self.apple_speech_capability
-                .as_ref()
-                .is_some_and(|capability| {
-                    capability.language == selected_language && capability.supported == Some(true)
-                });
-        let models = crate::transcription_models::choices_for_runtime(
-            selected_language,
-            apple_speech_supported,
-        )
-        .into_iter()
-        .map(|choice| {
-            let model = choice.model;
-            let installed = self.transcription_model_installed(model, selected_language);
-            let downloading = self.transcription_downloading == Some(model.id);
-            let active = transcription_selection_is_active(
-                &self.settings.transcription,
-                model,
-                selected_language,
-                installed,
-            );
-            let progress = if downloading {
-                model.download_bytes().map_or(0.0, |bytes| {
-                    (self.transcription_downloaded_bytes as f32 / bytes as f32).clamp(0.0, 1.0)
-                })
-            } else {
-                0.0
-            };
-            let status = if downloading {
-                if matches!(model.runtime, ModelRuntime::AppleSpeech) {
-                    TranscriptionPickerStatus::Preparing {
-                        label: "Preparing…".into(),
-                        progress: None,
-                    }
-                } else if installed {
-                    let elapsed = self
-                        .transcription_activation_started
-                        .map_or(0, |started| started.elapsed().as_secs());
-                    let progress = self
-                        .transcription_activation_started
-                        .map_or(0.0, |started| (started.elapsed().as_secs_f32() % 1.6) / 1.6);
-                    TranscriptionPickerStatus::Preparing {
-                        label: format!("Loading model · {elapsed}s"),
-                        progress: Some(TranscriptionPickerProgress::Loading(progress)),
-                    }
+        let models = crate::transcription_models::choices_for_runtime(selected_language)
+            .into_iter()
+            .map(|choice| {
+                let model = choice.model;
+                let installed = self.transcription_model_installed(model, selected_language);
+                let downloading = self.transcription_downloading == Some(model.id);
+                let active = transcription_selection_is_active(
+                    &self.settings.transcription,
+                    model,
+                    selected_language,
+                    installed,
+                );
+                let progress = if downloading {
+                    model.download_bytes().map_or(0.0, |bytes| {
+                        (self.transcription_downloaded_bytes as f32 / bytes as f32).clamp(0.0, 1.0)
+                    })
                 } else {
-                    TranscriptionPickerStatus::Preparing {
-                        label: format!("Downloading {:.0}%", progress * 100.0),
-                        progress: matches!(model.runtime, ModelRuntime::Gguf(_))
-                            .then_some(TranscriptionPickerProgress::Downloading(progress)),
+                    0.0
+                };
+                let status = if downloading {
+                    if installed {
+                        let elapsed = self
+                            .transcription_activation_started
+                            .map_or(0, |started| started.elapsed().as_secs());
+                        let progress = self
+                            .transcription_activation_started
+                            .map_or(0.0, |started| (started.elapsed().as_secs_f32() % 1.6) / 1.6);
+                        TranscriptionPickerStatus::Preparing {
+                            label: format!("Loading model · {elapsed}s"),
+                            progress: Some(TranscriptionPickerProgress::Loading(progress)),
+                        }
+                    } else {
+                        TranscriptionPickerStatus::Preparing {
+                            label: format!("Downloading {:.0}%", progress * 100.0),
+                            progress: matches!(model.runtime, ModelRuntime::Gguf(_))
+                                .then_some(TranscriptionPickerProgress::Downloading(progress)),
+                        }
                     }
-                }
-            } else if active {
-                TranscriptionPickerStatus::Active
-            } else {
-                TranscriptionPickerStatus::Available { installed }
-            };
-            TranscriptionPickerModel { choice, status }
-        })
-        .collect();
+                } else if active {
+                    TranscriptionPickerStatus::Active
+                } else {
+                    TranscriptionPickerStatus::Available { installed }
+                };
+                TranscriptionPickerModel { choice, status }
+            })
+            .collect();
         TranscriptionPickerView {
             error: self.transcription_picker_error.clone(),
             language: selected_language.to_string(),
@@ -6327,11 +6170,12 @@ impl AppWindow {
         match control {
             HudControl::LineCount => (self.hud_tuning.line_count - 1.0) / 5.0,
             HudControl::Curvature => self.hud_tuning.curvature,
-            HudControl::Speed => self.hud_tuning.speed / 2.5,
-            HudControl::Sharpness => self.hud_tuning.sharpness,
+            HudControl::Speed => self.hud_tuning.speed / HUD_MAX_SPEED,
+            HudControl::Blur => 1.0 - self.hud_tuning.sharpness,
             HudControl::Glow => self.hud_tuning.glow,
             HudControl::Depth => self.hud_tuning.depth,
             HudControl::LightAngle => self.hud_tuning.light_angle,
+            HudControl::Outline => self.hud_tuning.outline,
         }
         .clamp(0.0, 1.0)
     }
@@ -6341,11 +6185,12 @@ impl AppWindow {
         match control {
             HudControl::LineCount => self.hud_tuning.line_count = (1.0 + value * 5.0).round(),
             HudControl::Curvature => self.hud_tuning.curvature = value,
-            HudControl::Speed => self.hud_tuning.speed = value * 2.5,
-            HudControl::Sharpness => self.hud_tuning.sharpness = value,
+            HudControl::Speed => self.hud_tuning.speed = value * HUD_MAX_SPEED,
+            HudControl::Blur => self.hud_tuning.sharpness = 1.0 - value,
             HudControl::Glow => self.hud_tuning.glow = value,
             HudControl::Depth => self.hud_tuning.depth = value,
             HudControl::LightAngle => self.hud_tuning.light_angle = value,
+            HudControl::Outline => self.hud_tuning.outline = value,
         }
         self.hud_copied = false;
         self.indicator
@@ -6375,16 +6220,18 @@ impl AppWindow {
                 glow: 0.4,
                 depth: 0.75,
                 light_angle: 0.35,
+                outline: 0.25,
             },
             1 => HudTuning {
                 style: 1.0,
-                line_count: 3.0,
-                curvature: 0.56,
-                speed: 0.82,
-                sharpness: 0.68,
-                glow: 0.24,
-                depth: 0.68,
+                line_count: 2.0,
+                curvature: 0.47,
+                speed: 17.08,
+                sharpness: 0.29,
+                glow: 0.77,
+                depth: 0.65,
                 light_angle: 0.35,
+                outline: 1.0,
             },
             _ => HudTuning {
                 style: 2.0,
@@ -6395,6 +6242,7 @@ impl AppWindow {
                 glow: 0.28,
                 depth: 0.74,
                 light_angle: 0.35,
+                outline: 0.3,
             },
         };
         self.hud_copied = false;
@@ -6404,15 +6252,16 @@ impl AppWindow {
 
     fn hud_preset(&self) -> String {
         format!(
-            "hud-v1 style={} lines={:.0} curvature={:.2} speed={:.2} sharpness={:.2} glow={:.2} depth={:.2} light={:.2}",
+            "hud-v1 style={} lines={:.0} curvature={:.2} speed={:.2} blur={:.2} glow={:.2} depth={:.2} light={:.2} outline={:.2}",
             self.hud_tuning.style as usize,
             self.hud_tuning.line_count,
             self.hud_tuning.curvature,
             self.hud_tuning.speed,
-            self.hud_tuning.sharpness,
+            1.0 - self.hud_tuning.sharpness,
             self.hud_tuning.glow,
             self.hud_tuning.depth,
             self.hud_tuning.light_angle,
+            self.hud_tuning.outline,
         )
     }
 
@@ -6640,10 +6489,11 @@ impl AppWindow {
                                 self.render_hud_slider(HudControl::LineCount, "Line count", cx),
                                 self.render_hud_slider(HudControl::Curvature, "Curvature", cx),
                                 self.render_hud_slider(HudControl::Speed, "Speed", cx),
-                                self.render_hud_slider(HudControl::Sharpness, "Sharpness", cx),
+                                self.render_hud_slider(HudControl::Blur, "Highlight blur", cx),
                                 self.render_hud_slider(HudControl::Glow, "Line glow", cx),
                                 self.render_hud_slider(HudControl::Depth, "Sphere depth", cx),
                                 self.render_hud_slider(HudControl::LightAngle, "Light angle", cx),
+                                self.render_hud_slider(HudControl::Outline, "Sphere outline", cx),
                             ])),
                     )
                     .child(
