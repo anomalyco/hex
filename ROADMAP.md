@@ -31,10 +31,10 @@ Microphone selection, idle-safe live switching, unavailable-device fallback,
 sound-effect volume, application/browser-host processing modes, and the native
 `SMAppService` login-item toggle now ship. Runtime settings changes project live
 and persist atomically; launch-at-login remains owned by macOS rather than the
-settings file.
-
-Add a persistent permission-health surface so revoked Microphone, Accessibility,
-or Input Monitoring access remains diagnosable after onboarding. Keep true
+settings file. A persistent menu-bar item keeps Settings, Paste Last, updates,
+and Quit reachable when the Dock icon is hidden. Settings now surfaces revoked
+Microphone, Accessibility, or Input Monitoring access after onboarding, and
+supported transcription runtimes expose automatic language detection. Keep true
 processor chains as future work only if real profiles need composition.
 
 Replace the public Swift app through the direct, explicitly confirmed migration
