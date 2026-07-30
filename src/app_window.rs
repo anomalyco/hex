@@ -627,12 +627,6 @@ enum HotkeyKind {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum MicrophonePrerequisite {
-    EnableCommands,
-    ReleaseMicrophone,
-}
-
-#[derive(Clone, Copy)]
 enum MicrophonePolicyChange {
     SetCommands(bool),
     SetReleaseWhileIdle(bool),
@@ -754,7 +748,7 @@ pub struct AppWindow {
     update_status_changed_at: Instant,
     commands_toggle: ToggleSpring,
     release_microphone_toggle: ToggleSpring,
-    microphone_prerequisite: Option<MicrophonePrerequisite>,
+    pending_microphone_policy: Option<MicrophonePolicyChange>,
     double_tap_toggle: ToggleSpring,
     double_tap_only_visibility: ToggleSpring,
     dock_icon_toggle: ToggleSpring,
@@ -831,7 +825,6 @@ pub struct AppWindow {
 }
 
 impl AppWindow {
-    #[allow(clippy::too_many_arguments)]
     #[allow(clippy::too_many_arguments)]
     fn new(
         event_path: PathBuf,
@@ -1134,7 +1127,7 @@ impl AppWindow {
             update_status_changed_at: Instant::now(),
             commands_toggle: ToggleSpring::new(settings.commands_enabled),
             release_microphone_toggle: ToggleSpring::new(settings.release_microphone_while_idle),
-            microphone_prerequisite: None,
+            pending_microphone_policy: None,
             double_tap_toggle: ToggleSpring::new(settings.double_tap_lock),
             double_tap_only_visibility: ToggleSpring::new(
                 settings.double_tap_lock && settings.dictation_hotkey.key.is_some(),
@@ -1375,7 +1368,7 @@ impl AppWindow {
             .set_enabled(self.settings.commands_enabled);
         self.release_microphone_toggle
             .set_enabled(self.settings.release_microphone_while_idle);
-        self.microphone_prerequisite = None;
+        self.pending_microphone_policy = None;
         self.settings_save_generation = self.settings_save_generation.wrapping_add(1);
         self.settings_dirty = false;
         self.settings_load_error = None;
@@ -3182,40 +3175,41 @@ impl AppWindow {
                         }))
                 }),
             );
-        let release_microphone_control =
-            if self.microphone_prerequisite == Some(MicrophonePrerequisite::ReleaseMicrophone) {
-                compact_button("Disable Commands & Release Microphone")
-                    .id("confirm-release-microphone")
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        if let Err(error) = this.update_microphone_policy(
-                            MicrophonePolicyChange::DisableCommandsAndRelease,
-                            cx,
-                        ) {
-                            tracing::error!(%error, "could not update microphone policy");
-                        }
-                    }))
-                    .into_any_element()
-            } else {
-                div()
-                    .id("release-microphone-while-idle")
-                    .child(toggle(release_microphone_position))
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        let enabled = !this.settings.release_microphone_while_idle;
-                        if enabled && this.settings.commands_enabled {
-                            this.microphone_prerequisite =
-                                Some(MicrophonePrerequisite::ReleaseMicrophone);
-                            cx.notify();
-                            return;
-                        }
-                        if let Err(error) = this.update_microphone_policy(
-                            MicrophonePolicyChange::SetReleaseWhileIdle(enabled),
-                            cx,
-                        ) {
-                            tracing::error!(%error, "could not update microphone policy");
-                        }
-                    }))
-                    .into_any_element()
-            };
+        let release_microphone_control = if self.pending_microphone_policy
+            == Some(MicrophonePolicyChange::DisableCommandsAndRelease)
+        {
+            compact_button("Disable Commands & Release Microphone")
+                .id("confirm-release-microphone")
+                .on_click(cx.listener(|this, _, _, cx| {
+                    if let Err(error) = this.update_microphone_policy(
+                        MicrophonePolicyChange::DisableCommandsAndRelease,
+                        cx,
+                    ) {
+                        tracing::error!(%error, "could not update microphone policy");
+                    }
+                }))
+                .into_any_element()
+        } else {
+            div()
+                .id("release-microphone-while-idle")
+                .child(toggle(release_microphone_position))
+                .on_click(cx.listener(|this, _, _, cx| {
+                    let enabled = !this.settings.release_microphone_while_idle;
+                    if enabled && this.settings.commands_enabled {
+                        this.pending_microphone_policy =
+                            Some(MicrophonePolicyChange::DisableCommandsAndRelease);
+                        cx.notify();
+                        return;
+                    }
+                    if let Err(error) = this.update_microphone_policy(
+                        MicrophonePolicyChange::SetReleaseWhileIdle(enabled),
+                        cx,
+                    ) {
+                        tracing::error!(%error, "could not update microphone policy");
+                    }
+                }))
+                .into_any_element()
+        };
         div()
             .size_full()
             .flex()
@@ -6051,35 +6045,36 @@ impl AppWindow {
             }))
         });
         let commands_position = self.commands_toggle.render_position(window);
-        let commands_toggle_control =
-            if self.microphone_prerequisite == Some(MicrophonePrerequisite::EnableCommands) {
-                compact_button("Keep Microphone Ready & Enable Commands")
-                    .id("confirm-enable-commands")
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        cx.stop_propagation();
-                        if let Err(error) = this.update_microphone_policy(
-                            MicrophonePolicyChange::KeepReadyAndEnableCommands,
-                            cx,
-                        ) {
-                            tracing::error!(%error, "could not update microphone policy");
-                        }
-                    }))
-                    .into_any_element()
-            } else {
-                div()
-                    .flex()
-                    .items_center()
-                    .gap_3()
-                    .child(div().text_size(px(11.0)).text_color(rgb(MUTED)).child(
-                        if self.settings.commands_enabled {
-                            "Enabled"
-                        } else {
-                            "Off"
-                        },
-                    ))
-                    .child(toggle(commands_position))
-                    .into_any_element()
-            };
+        let commands_toggle_control = if self.pending_microphone_policy
+            == Some(MicrophonePolicyChange::KeepReadyAndEnableCommands)
+        {
+            compact_button("Keep Microphone Ready & Enable Commands")
+                .id("confirm-enable-commands")
+                .on_click(cx.listener(|this, _, _, cx| {
+                    cx.stop_propagation();
+                    if let Err(error) = this.update_microphone_policy(
+                        MicrophonePolicyChange::KeepReadyAndEnableCommands,
+                        cx,
+                    ) {
+                        tracing::error!(%error, "could not update microphone policy");
+                    }
+                }))
+                .into_any_element()
+        } else {
+            div()
+                .flex()
+                .items_center()
+                .gap_3()
+                .child(div().text_size(px(11.0)).text_color(rgb(MUTED)).child(
+                    if self.settings.commands_enabled {
+                        "Enabled"
+                    } else {
+                        "Off"
+                    },
+                ))
+                .child(toggle(commands_position))
+                .into_any_element()
+        };
         let commands_control = div()
             .flex()
             .items_center()
@@ -6095,8 +6090,8 @@ impl AppWindow {
                     .on_click(cx.listener(|this, _, _, cx| {
                         let enabled = !this.settings.commands_enabled;
                         if enabled && this.settings.release_microphone_while_idle {
-                            this.microphone_prerequisite =
-                                Some(MicrophonePrerequisite::EnableCommands);
+                            this.pending_microphone_policy =
+                                Some(MicrophonePolicyChange::KeepReadyAndEnableCommands);
                             cx.notify();
                             return;
                         }

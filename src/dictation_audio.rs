@@ -14,7 +14,6 @@ use crate::recording_environment::RecordingEnvironmentController;
 use crate::suppression::PendingInputEvents;
 
 const RECOGNITION_QUEUE_CAPACITY: usize = 64;
-const EVENT_QUEUE_CAPACITY: usize = 16;
 const MAX_RECOGNITION_BACKLOG: Duration = Duration::from_millis(500);
 
 pub struct RecognitionAudio {
@@ -128,7 +127,7 @@ struct Owner {
     recording_environment: RecordingEnvironmentController,
     commands: Receiver<Command>,
     recognition: SyncSender<RecognitionAudio>,
-    events: SyncSender<DictationAudioEvent>,
+    events: Sender<DictationAudioEvent>,
     state: Arc<State>,
     dropped_recognition_frames: u64,
     recognition_generation: u64,
@@ -189,15 +188,17 @@ impl DictationAudio {
             outstanding_recognition_frames: Arc::new(AtomicU64::new(0)),
             capture_generation: AtomicU64::new(0),
         });
-        let mut capture = DictationCapture::new(if input.is_open() {
-            input.sample_rate()
-        } else {
-            16_000
-        });
-        capture.enable_recording_environment(recording_environment.clone());
+        let capture = new_capture(
+            if input.is_open() {
+                input.sample_rate()
+            } else {
+                16_000
+            },
+            &recording_environment,
+        );
         let (command_sender, commands) = mpsc::channel();
         let (recognition_sender, recognition) = mpsc::sync_channel(RECOGNITION_QUEUE_CAPACITY);
-        let (event_sender, events) = mpsc::sync_channel(EVENT_QUEUE_CAPACITY);
+        let (event_sender, events) = mpsc::channel();
         let owner_state = state.clone();
         let worker = thread::Builder::new()
             .name("dictation-audio".into())
@@ -374,6 +375,18 @@ impl Owner {
                 Err(TryRecvError::Disconnected) => break,
                 Err(TryRecvError::Empty) => {}
             }
+            if !self.input.is_open() && !self.input.is_opening() {
+                match self.commands.recv() {
+                    Ok(command) => {
+                        if !self.handle(command) {
+                            break;
+                        }
+                        self.close_if_idle();
+                        continue;
+                    }
+                    Err(_) => break,
+                }
+            }
             let capture_idle = self.capture_idle();
             let event = self
                 .input
@@ -433,7 +446,7 @@ impl Owner {
             }
             Command::Finish { at, reply } => {
                 let finish = if self.pending_capture.take().is_some() {
-                    self.input.close();
+                    self.input.cancel_open();
                     Finish::Discard
                 } else {
                     self.drain_through(at);
@@ -441,17 +454,15 @@ impl Owner {
                 };
                 self.state.recording.store(false, Ordering::Release);
                 let _ = reply.send(finish);
-                self.close_if_idle();
             }
             Command::Cancel { reply } => {
                 self.pending_capture = None;
                 if !self.input.is_open() {
-                    self.input.close();
+                    self.input.cancel_open();
                 }
                 self.capture.cancel();
                 self.state.recording.store(false, Ordering::Release);
                 let _ = reply.send(());
-                self.close_if_idle();
             }
             Command::SelectMicrophone { revision, device } => {
                 self.input.request_selection(revision, device.as_deref());
@@ -529,18 +540,14 @@ impl Owner {
                     let gap = captured_from.duration_since(previous);
                     let was_recording = self.capture.is_recording();
                     let capture_generation = self.state.capture_generation.load(Ordering::Acquire);
-                    self.capture = DictationCapture::new(self.sample_rate());
-                    self.capture
-                        .enable_recording_environment(self.recording_environment.clone());
+                    self.capture = new_capture(self.sample_rate(), &self.recording_environment);
                     self.state.recording.store(false, Ordering::Release);
                     self.next_recognition_generation();
-                    let _ = self
-                        .events
-                        .try_send(DictationAudioEvent::CaptureDiscontinuity {
-                            was_recording,
-                            capture_generation,
-                            gap_ms: gap.as_millis() as u64,
-                        });
+                    let _ = self.events.send(DictationAudioEvent::CaptureDiscontinuity {
+                        was_recording,
+                        capture_generation,
+                        gap_ms: gap.as_millis() as u64,
+                    });
                 }
                 self.last_captured_through = Some(captured_through);
                 self.state
@@ -563,7 +570,7 @@ impl Owner {
                 self.capture.cancel();
                 self.state.recording.store(false, Ordering::Release);
                 self.state.recovering.store(true, Ordering::Release);
-                let _ = self.events.try_send(DictationAudioEvent::Interrupted {
+                let _ = self.events.send(DictationAudioEvent::Interrupted {
                     was_recording,
                     capture_generation,
                 });
@@ -576,9 +583,7 @@ impl Owner {
                 self.next_recognition_generation();
                 self.recognition_overflowed = false;
                 let sample_rate = self.input.sample_rate();
-                self.capture = DictationCapture::new(sample_rate);
-                self.capture
-                    .enable_recording_environment(self.recording_environment.clone());
+                self.capture = new_capture(sample_rate, &self.recording_environment);
                 self.state
                     .sample_rate
                     .store(u64::from(sample_rate), Ordering::Release);
@@ -598,7 +603,7 @@ impl Owner {
                     }
                     if let Some(at) = pending.intentional_at {
                         let _ = self.capture.become_intentional(at);
-                        let _ = self.events.try_send(DictationAudioEvent::ReadyIntentional {
+                        let _ = self.events.send(DictationAudioEvent::ReadyIntentional {
                             capture_generation: self
                                 .state
                                 .capture_generation
@@ -611,12 +616,12 @@ impl Owner {
                         self.close_input();
                     }
                 }
-                let _ = self.events.try_send(DictationAudioEvent::Reopened);
+                let _ = self.events.send(DictationAudioEvent::Reopened);
             }
             RecoveringAudioInputEvent::OpenFailed(error) => {
                 self.pending_capture = None;
                 self.state.recording.store(false, Ordering::Release);
-                let _ = self.events.try_send(DictationAudioEvent::OpenFailed {
+                let _ = self.events.send(DictationAudioEvent::OpenFailed {
                     capture_generation: self.state.capture_generation.load(Ordering::Acquire),
                     error,
                 });
@@ -667,7 +672,7 @@ impl Owner {
         let dropped_frames = std::mem::take(&mut self.dropped_recognition_frames);
         let _ = self
             .events
-            .try_send(DictationAudioEvent::RecognitionDiscontinuity { dropped_frames });
+            .send(DictationAudioEvent::RecognitionDiscontinuity { dropped_frames });
     }
 
     fn next_recognition_generation(&mut self) -> u64 {
@@ -687,11 +692,7 @@ impl Owner {
     }
 
     fn close_if_idle(&mut self) {
-        if self.release_while_idle
-            && self.input.is_open()
-            && !self.capture.is_recording()
-            && self.pending_capture.is_none()
-        {
+        if self.release_while_idle && self.input.is_open() && self.capture_idle() {
             self.close_input();
         }
     }
@@ -704,6 +705,15 @@ impl Owner {
         self.state.captured_through.store(0, Ordering::Release);
         self.state.recovering.store(false, Ordering::Release);
     }
+}
+
+fn new_capture(
+    sample_rate: u32,
+    recording_environment: &RecordingEnvironmentController,
+) -> DictationCapture {
+    let mut capture = DictationCapture::new(sample_rate);
+    capture.enable_recording_environment(recording_environment.clone());
+    capture
 }
 
 #[cfg(test)]

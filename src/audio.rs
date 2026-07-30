@@ -311,19 +311,7 @@ impl RecoveringAudioInput {
         selection_revision: u64,
         selected_device: Option<&str>,
     ) -> Result<Self> {
-        let input = if let Some(device) = device_override {
-            AudioInput::open_named(device)?
-        } else if let Some(device) = selected_device {
-            match AudioInput::open_named(device) {
-                Ok(input) => input,
-                Err(error) => {
-                    tracing::warn!(%error, device, "selected microphone is unavailable; using automatic selection");
-                    AudioInput::open(AUTOMATIC_INPUT_DEVICE_PREFERENCES)?
-                }
-            }
-        } else {
-            AudioInput::open(AUTOMATIC_INPUT_DEVICE_PREFERENCES)?
-        };
+        let input = open_configured_input(device_override, selected_device, true)?;
         Ok(Self {
             input: Some(input),
             device_override: device_override.map(str::to_owned),
@@ -363,6 +351,17 @@ impl RecoveringAudioInput {
 
     pub fn is_open(&self) -> bool {
         self.input.is_some()
+    }
+
+    pub fn is_opening(&self) -> bool {
+        self.replacement.is_some()
+    }
+
+    pub fn cancel_open(&mut self) {
+        self.replacement = None;
+        if self.input.is_none() {
+            self.recovery.recovered();
+        }
     }
 
     pub fn request_selection(&mut self, revision: u64, selected_device: Option<&str>) {
@@ -471,24 +470,16 @@ impl RecoveringAudioInput {
             .recovery
             .target_revision
             .unwrap_or(self.active_revision);
-        let device = self
-            .device_override
-            .clone()
-            .or_else(|| self.selected_device.clone());
-        let has_device_override = self.device_override.is_some();
+        let device_override = self.device_override.clone();
+        let selected_device = self.selected_device.clone();
         let cold_open = self.input.is_none();
         let (sender, receiver) = mpsc::sync_channel(1);
         std::thread::spawn(move || {
-            let result = match device {
-                Some(device) if cold_open && !has_device_override => {
-                    AudioInput::open_named(&device).or_else(|error| {
-                    tracing::warn!(%error, device, "selected microphone is unavailable; using automatic selection");
-                    AudioInput::open(AUTOMATIC_INPUT_DEVICE_PREFERENCES)
-                    })
-                }
-                Some(device) => AudioInput::open_named(&device),
-                None => AudioInput::open(AUTOMATIC_INPUT_DEVICE_PREFERENCES),
-            }
+            let result = open_configured_input(
+                device_override.as_deref(),
+                selected_device.as_deref(),
+                cold_open,
+            )
             .map_err(|error| error.to_string());
             let _ = sender.send((revision, result));
         });
@@ -507,6 +498,26 @@ impl RecoveringAudioInput {
         self.replacement = None;
         Some(result)
     }
+}
+
+fn open_configured_input(
+    device_override: Option<&str>,
+    selected_device: Option<&str>,
+    fallback_from_selected: bool,
+) -> Result<AudioInput> {
+    if let Some(device) = device_override {
+        return AudioInput::open_named(device);
+    }
+    if let Some(device) = selected_device {
+        return AudioInput::open_named(device).or_else(|error| {
+            if !fallback_from_selected {
+                return Err(error);
+            }
+            tracing::warn!(%error, device, "selected microphone is unavailable; using automatic selection");
+            AudioInput::open(AUTOMATIC_INPUT_DEVICE_PREFERENCES)
+        });
+    }
+    AudioInput::open(AUTOMATIC_INPUT_DEVICE_PREFERENCES)
 }
 
 pub fn input_device_names() -> Result<Vec<String>> {
