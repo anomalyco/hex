@@ -272,6 +272,8 @@ item produce the existing error feedback rather than a stale history paste.
 
 ### Add Automatic Language Detection
 
+**Implemented on main; signed-release soak remains.**
+
 - Represent `Auto` explicitly for transcription runtimes that actually support
   language detection, not as a magic language string.
 - Preserve explicit language validation for fixed-language models.
@@ -281,6 +283,8 @@ item produce the existing error feedback rather than a stale history paste.
   language before activation. Whisper Auto omits the runtime language hint.
 
 ### Restore The macOS Menu-Bar Item
+
+**Implemented on main; signed-release soak remains.**
 
 Provide a persistent native status item with:
 
@@ -296,6 +300,8 @@ Settings pane; Paste Last reports unavailable state; Quit follows normal worker
 shutdown rather than terminating workers out from under pending work.
 
 ### Keep Permission Failures Diagnosable
+
+**Implemented on main; signed-release soak remains.**
 
 After onboarding, show a compact Settings warning only while Microphone, Input
 Monitoring, or Accessibility is missing or requires action. Healthy permissions
