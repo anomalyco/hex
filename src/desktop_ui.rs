@@ -332,10 +332,12 @@ pub(crate) fn hotkey_keycaps(parts: Vec<String>, opacity: f32) -> AnyElement {
         .gap(px(3.0))
         .opacity(opacity)
         .children(parts.into_iter().map(|part| {
+            let (side, label) = split_sided_keycap(&part);
             div()
                 .min_w(px(34.0))
                 .h(px(24.0))
                 .px_2()
+                .relative()
                 .flex()
                 .items_center()
                 .justify_center()
@@ -346,9 +348,35 @@ pub(crate) fn hotkey_keycaps(parts: Vec<String>, opacity: f32) -> AnyElement {
                 .text_size(px(12.0))
                 .font_weight(FontWeight::NORMAL)
                 .text_color(rgb(TEXT))
-                .child(part)
+                .when_some(side, |keycap, side| {
+                    keycap.child(
+                        div()
+                            .absolute()
+                            .top(px(2.0))
+                            .left(px(4.0))
+                            .text_size(px(7.0))
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .text_color(rgb(FAINT))
+                            .child(side),
+                    )
+                })
+                .child(label)
         }))
         .into_any_element()
+}
+
+fn split_sided_keycap(part: &str) -> (Option<&'static str>, String) {
+    match part {
+        "L⌃" => (Some("L"), "⌃".into()),
+        "R⌃" => (Some("R"), "⌃".into()),
+        "L⌥" => (Some("L"), "⌥".into()),
+        "R⌥" => (Some("R"), "⌥".into()),
+        "L⇧" => (Some("L"), "⇧".into()),
+        "R⇧" => (Some("R"), "⇧".into()),
+        "L⌘" => (Some("L"), "⌘".into()),
+        "R⌘" => (Some("R"), "⌘".into()),
+        _ => (None, part.to_string()),
+    }
 }
 
 pub(crate) fn toggle(position: f32) -> AnyElement {
@@ -596,4 +624,16 @@ pub(crate) fn error_message(message: &'static str, error: String) -> AnyElement 
                 .child(error),
         )
         .into_any_element()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::split_sided_keycap;
+
+    #[test]
+    fn side_badges_only_apply_to_sided_modifiers() {
+        assert_eq!(split_sided_keycap("L⌥"), (Some("L"), "⌥".into()));
+        assert_eq!(split_sided_keycap("R⌘"), (Some("R"), "⌘".into()));
+        assert_eq!(split_sided_keycap("Return"), (None, "Return".into()));
+    }
 }

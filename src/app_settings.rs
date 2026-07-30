@@ -132,6 +132,16 @@ impl HotkeyModifiers {
             + self.function as u8
     }
 
+    pub const fn without_side_constraints(self) -> Self {
+        Self {
+            control: either_side(self.control),
+            option: either_side(self.option),
+            shift: either_side(self.shift),
+            command: either_side(self.command),
+            function: self.function,
+        }
+    }
+
     fn contains(self, required: Self) -> bool {
         modifier_contains(self.control, required.control)
             && modifier_contains(self.option, required.option)
@@ -150,6 +160,13 @@ impl HotkeyModifiers {
         ]
         .into_iter()
         .filter_map(|(enabled, label)| enabled.then_some(label))
+    }
+}
+
+const fn either_side(side: Option<ModifierSide>) -> Option<ModifierSide> {
+    match side {
+        Some(_) => Some(ModifierSide::Either),
+        None => None,
     }
 }
 
@@ -1043,6 +1060,26 @@ mod tests {
         )
         .unwrap();
         assert_eq!(legacy.option, Some(ModifierSide::Either));
+    }
+
+    #[test]
+    fn side_constraints_can_be_removed_from_chord_modifiers() {
+        let modifiers = HotkeyModifiers {
+            option: Some(ModifierSide::Left),
+            command: Some(ModifierSide::Right),
+            function: true,
+            ..Default::default()
+        };
+
+        assert_eq!(
+            modifiers.without_side_constraints(),
+            HotkeyModifiers {
+                option: Some(ModifierSide::Either),
+                command: Some(ModifierSide::Either),
+                function: true,
+                ..Default::default()
+            }
+        );
     }
 
     #[test]

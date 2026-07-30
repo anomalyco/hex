@@ -2231,18 +2231,14 @@ impl AppWindow {
         }
         let intensity = self.hotkey_capture_animation.render_position(window);
         let animated_control_width = self.hotkey_width_spring.render_position(window);
-        let control_width = if matches!(self.hotkey_capture, HotkeyCaptureState::Idle) {
-            idle_width
-        } else {
-            animated_control_width
-        };
-        let capture_active = !matches!(self.hotkey_capture, HotkeyCaptureState::Idle);
         let this_capture = matches!(
             self.hotkey_capture,
             HotkeyCaptureState::Listening { kind: active, .. }
                 | HotkeyCaptureState::Saved { kind: active, .. }
                 if active == kind
         );
+        let control_width = hotkey_control_width(this_capture, idle_width, animated_control_width);
+        let capture_active = !matches!(self.hotkey_capture, HotkeyCaptureState::Idle);
         let control_intensity = intensity;
         let capture_color = if matches!(
             self.hotkey_capture,
@@ -2450,7 +2446,7 @@ impl AppWindow {
             self.cancel_hotkey_capture(cx);
             return;
         }
-        let modifiers = hotkey_modifiers(event.keystroke.modifiers);
+        let modifiers = hotkey_modifiers(event.keystroke.modifiers).without_side_constraints();
         let key = match hotkey_key(&event.keystroke.key) {
             Ok(key) => key,
             Err(message) => {
@@ -2507,6 +2503,11 @@ impl AppWindow {
             }
         };
         if let Some(modifiers) = released {
+            let modifiers = if modifiers.count() == 1 {
+                modifiers
+            } else {
+                modifiers.without_side_constraints()
+            };
             self.save_hotkey_binding(
                 HotkeyBinding {
                     modifiers,
@@ -7042,6 +7043,10 @@ fn hotkey_idle_width(keycap_count: usize) -> f32 {
     (112.0 + hotkey_keycaps_width(keycap_count)).max(HOTKEY_MIN_WIDTH)
 }
 
+fn hotkey_control_width(active: bool, idle_width: f32, animated_width: f32) -> f32 {
+    if active { animated_width } else { idle_width }
+}
+
 fn hotkey_capture_width(keycap_count: usize) -> f32 {
     if keycap_count == 0 {
         180.0
@@ -7914,6 +7919,12 @@ mod tests {
 
     use super::*;
     use crate::personal_commands::StatusExecution;
+
+    #[test]
+    fn inactive_hotkey_controls_keep_their_idle_width() {
+        assert_eq!(hotkey_control_width(false, 146.0, 270.0), 146.0);
+        assert_eq!(hotkey_control_width(true, 146.0, 270.0), 270.0);
+    }
 
     #[test]
     fn production_navigation_keeps_commands_available_as_an_opt_in() {
