@@ -1,4 +1,6 @@
-use std::fs;
+use std::fs::{self, File, OpenOptions};
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+use std::path::Path;
 use std::process::Command;
 
 use block2::RcBlock;
@@ -84,14 +86,44 @@ pub fn permission_warnings(status: SetupStatus) -> Vec<PermissionWarning> {
 }
 
 pub fn completion_recorded() -> bool {
-    crate::app_paths::support_dir()
-        .is_ok_and(|directory| directory.join("onboarding-complete").is_file())
+    let Ok(directory) = crate::app_paths::support_dir() else {
+        return false;
+    };
+    completion_recorded_at(&directory)
 }
 
 pub fn record_completion() -> color_eyre::Result<()> {
     let directory = crate::app_paths::support_dir()?;
-    fs::create_dir_all(&directory)?;
-    fs::write(directory.join("onboarding-complete"), [])?;
+    record_completion_at(&directory)
+}
+
+fn completion_recorded_at(directory: &Path) -> bool {
+    if directory.join("onboarding-complete").is_file() {
+        return true;
+    }
+    if !directory.join("settings.json").is_file() {
+        return false;
+    }
+    if let Err(error) = record_completion_at(directory) {
+        tracing::warn!(%error, "could not migrate onboarding completion");
+    }
+    true
+}
+
+fn record_completion_at(directory: &Path) -> color_eyre::Result<()> {
+    fs::create_dir_all(directory)?;
+    let destination = directory.join("onboarding-complete");
+    let temporary = directory.join(".onboarding-complete.tmp");
+    let file = OpenOptions::new()
+        .create(true)
+        .truncate(true)
+        .write(true)
+        .mode(0o600)
+        .open(&temporary)?;
+    file.set_permissions(fs::Permissions::from_mode(0o600))?;
+    file.sync_all()?;
+    fs::rename(temporary, destination)?;
+    File::open(directory)?.sync_all()?;
     Ok(())
 }
 
@@ -269,6 +301,38 @@ mod tests {
             ..ready_status()
         });
         assert_eq!(warning[0].action, PermissionAction::OpenMicrophoneSettings);
+    }
+
+    #[test]
+    fn existing_rust_settings_migrate_onboarding_completion() {
+        let directory =
+            std::env::temp_dir().join(format!("hex-onboarding-migration-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&directory);
+        fs::create_dir_all(&directory).unwrap();
+        fs::write(directory.join("settings.json"), b"{}").unwrap();
+
+        assert!(completion_recorded_at(&directory));
+        let marker = directory.join("onboarding-complete");
+        assert!(marker.is_file());
+        assert_eq!(
+            fs::metadata(marker).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn fresh_install_does_not_skip_onboarding() {
+        let directory =
+            std::env::temp_dir().join(format!("hex-onboarding-fresh-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&directory);
+        fs::create_dir_all(&directory).unwrap();
+
+        assert!(!completion_recorded_at(&directory));
+        assert!(!directory.join("onboarding-complete").exists());
+
+        fs::remove_dir_all(directory).unwrap();
     }
 
     fn ready_status() -> SetupStatus {
