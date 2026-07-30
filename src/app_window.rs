@@ -70,6 +70,7 @@ const WINDOW_HEIGHT: f32 = 700.0;
 const MINIMUM_WIDTH: f32 = 860.0;
 const MINIMUM_HEIGHT: f32 = 560.0;
 const HOTKEY_MIN_WIDTH: f32 = 148.0;
+const HOTKEY_SIDE_SELECTOR_WIDTH: f32 = 88.0;
 const OPENCODE_INSTALL_RETRY_INTERVAL: Duration = Duration::from_secs(60);
 const PERMISSION_REFRESH_INTERVAL: Duration = Duration::from_secs(5);
 const MAX_OPENCODE_ERROR_BYTES: usize = 4 * 1024;
@@ -665,6 +666,9 @@ impl ToggleSpring {
     }
 
     fn set_target(&mut self, target: f32) {
+        if self.target == target {
+            return;
+        }
         self.target = target;
         self.last_frame = Instant::now();
     }
@@ -771,6 +775,7 @@ pub struct AppWindow {
     hotkey_capture: HotkeyCaptureState,
     hotkey_capture_animation: ToggleSpring,
     hotkey_width_spring: ToggleSpring,
+    hotkey_side_animations: [ToggleSpring; 3],
     window_focus: FocusHandle,
     hotkey_focus: FocusHandle,
     _hotkey_blur_subscription: Subscription,
@@ -1175,6 +1180,17 @@ impl AppWindow {
             hotkey_capture: HotkeyCaptureState::Idle,
             hotkey_capture_animation: ToggleSpring::new(false),
             hotkey_width_spring: ToggleSpring::at(HOTKEY_MIN_WIDTH),
+            hotkey_side_animations: [
+                ToggleSpring::new(standalone_modifier_side(&settings.dictation_hotkey).is_some()),
+                ToggleSpring::new(standalone_modifier_side(&settings.edit_hotkey).is_some()),
+                ToggleSpring::new(
+                    settings
+                        .paste_last_hotkey
+                        .as_ref()
+                        .and_then(standalone_modifier_side)
+                        .is_some(),
+                ),
+            ],
             window_focus,
             hotkey_focus,
             _hotkey_blur_subscription: hotkey_blur_subscription,
@@ -2413,14 +2429,20 @@ impl AppWindow {
     ) -> AnyElement {
         let hotkey = self.render_hotkey_control(kind, window, cx);
         let side = self.hotkey_binding(kind).and_then(standalone_modifier_side);
-        div()
-            .flex()
-            .items_center()
-            .gap_2()
-            .child(hotkey)
-            .when_some(side, |control, selected| {
-                control.child(
-                    segmented_control().children(
+        let side_animation = &mut self.hotkey_side_animations[hotkey_kind_index(kind)];
+        side_animation.set_enabled(side.is_some());
+        let side_position = side_animation.render_position(window).clamp(0.0, 1.0);
+        let selected = side.unwrap_or(ModifierSide::Either);
+        let side_selector = div()
+            .w(px(HOTKEY_SIDE_SELECTOR_WIDTH * side_position))
+            .mr(px(8.0 * side_position))
+            .flex_none()
+            .overflow_hidden()
+            .opacity(side_position)
+            .child(
+                segmented_control()
+                    .w(px(HOTKEY_SIDE_SELECTOR_WIDTH))
+                    .children(
                         [
                             ("L", ModifierSide::Left),
                             ("Either", ModifierSide::Either),
@@ -2448,8 +2470,12 @@ impl AppWindow {
                                 }))
                         }),
                     ),
-                )
-            })
+            );
+        div()
+            .flex()
+            .items_center()
+            .child(side_selector)
+            .child(hotkey)
             .into_any_element()
     }
 
