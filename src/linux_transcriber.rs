@@ -128,9 +128,17 @@ impl LinuxTranscriber {
             ));
         }
         let capabilities = model.capabilities();
+        if selection.language == crate::transcription_models::AUTO_LANGUAGE
+            && !capabilities.supports_language_detect
+        {
+            return Err(eyre!(
+                "{} does not advertise automatic language detection",
+                definition.name
+            ));
+        }
         let language = definition
-            .accepts_language_hint
-            .then(|| definition.runtime_language(&selection.language).to_string());
+            .runtime_language_hint(&selection.language)
+            .map(str::to_string);
         let device_label = format!("{} ({})", device.description, device.kind);
         tracing::info!(
             backend = device.kind,

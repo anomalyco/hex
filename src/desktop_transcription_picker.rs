@@ -355,3 +355,29 @@ fn model_metric(label: impl IntoElement, value: impl IntoElement) -> gpui::Div {
                 .child(value),
         )
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn automatic_language_is_a_distinct_model_selection() {
+        let model =
+            crate::transcription_models::definition(TranscriptionModelId::WhisperLargeV3Turbo);
+        let selection = TranscriptionSelection {
+            model: model.id,
+            language: crate::transcription_models::AUTO_LANGUAGE.into(),
+            recognition_hints: String::new(),
+        };
+
+        assert!(transcription_selection_is_active(
+            &selection,
+            model,
+            crate::transcription_models::AUTO_LANGUAGE,
+            true,
+        ));
+        assert!(!transcription_selection_is_active(
+            &selection, model, "en", true,
+        ));
+    }
+}

@@ -29,6 +29,7 @@ export interface ModelInfo {
   readonly managed: boolean
   readonly downloadBytes: number | null
   readonly languages: readonly string[]
+  readonly supportsLanguageDetection: boolean
 }
 
 export type ModelProgress =

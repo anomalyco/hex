@@ -15,6 +15,7 @@ if (process.env.HEX_FAKE_MODE === "bad-handshake") {
     managed: false,
     downloadBytes: 42,
     languages: ["en"],
+    supportsLanguageDetection: false,
   }]
   const server = http.createServer((request, response) => {
     if (request.headers.authorization !== `Bearer ${token}`) {

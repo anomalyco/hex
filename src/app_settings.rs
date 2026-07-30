@@ -695,6 +695,25 @@ mod tests {
     }
 
     #[test]
+    fn automatic_language_selection_round_trips_explicitly() {
+        let settings = AppSettings {
+            transcription: TranscriptionSelection {
+                model: crate::transcription_models::TranscriptionModelId::WhisperLargeV3Turbo,
+                language: crate::transcription_models::AUTO_LANGUAGE.into(),
+                recognition_hints: String::new(),
+            },
+            ..AppSettings::default()
+        };
+
+        let encoded = serde_json::to_string(&settings).unwrap();
+        let decoded: AppSettings = serde_json::from_str(&encoded).unwrap();
+
+        assert!(encoded.contains(r#""language":"auto""#));
+        assert_eq!(decoded.transcription, settings.transcription);
+        assert!(crate::transcription_models::validate(&decoded.transcription).is_ok());
+    }
+
+    #[test]
     fn disabled_apple_speech_selection_migrates_to_parakeet_v2() {
         let mut settings: AppSettings = serde_json::from_str(
             r#"{"transcription":{"model":"apple_speech","language":"de","recognition_hints":""}}"#,

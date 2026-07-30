@@ -141,6 +141,7 @@ pub struct ModelDefinition {
     pub runtime: ModelRuntime,
     pub languages: &'static [&'static str],
     pub accepts_language_hint: bool,
+    pub supports_language_detection: bool,
     pub supports_recognition_hints: bool,
 }
 
@@ -176,7 +177,11 @@ impl ModelDefinition {
     }
 
     pub fn supports_language(&self, language: &str) -> bool {
-        self.languages.contains(&"*") || self.languages.contains(&language)
+        if language == AUTO_LANGUAGE {
+            self.supports_language_detection
+        } else {
+            self.languages.contains(&"*") || self.languages.contains(&language)
+        }
     }
 
     pub fn runtime_language<'a>(&self, language: &'a str) -> &'a str {
@@ -185,6 +190,19 @@ impl ModelDefinition {
         } else {
             language
         }
+    }
+
+    pub fn runtime_language_hint<'a>(&self, language: &'a str) -> Option<&'a str> {
+        (language != AUTO_LANGUAGE && self.accepts_language_hint)
+            .then(|| self.runtime_language(language))
+    }
+
+    pub fn presentation_languages(&self) -> Vec<&'static str> {
+        self.languages
+            .iter()
+            .copied()
+            .chain(self.supports_language_detection.then_some(AUTO_LANGUAGE))
+            .collect()
     }
 
     pub fn size_label(&self) -> String {
@@ -285,6 +303,7 @@ pub const MODELS: &[ModelDefinition] = &[
         runtime: ModelRuntime::Gguf(&PARAKEET_V2_ARTIFACT),
         languages: &["en"],
         accepts_language_hint: true,
+        supports_language_detection: false,
         supports_recognition_hints: false,
     },
     ModelDefinition {
@@ -299,6 +318,7 @@ pub const MODELS: &[ModelDefinition] = &[
         runtime: ModelRuntime::Gguf(&PARAKEET_V3_ARTIFACT),
         languages: PARAKEET_V3_LANGUAGES,
         accepts_language_hint: true,
+        supports_language_detection: false,
         supports_recognition_hints: false,
     },
     ModelDefinition {
@@ -313,6 +333,7 @@ pub const MODELS: &[ModelDefinition] = &[
         runtime: ModelRuntime::Gguf(&WHISPER_ARTIFACT),
         languages: &["*"],
         accepts_language_hint: true,
+        supports_language_detection: true,
         supports_recognition_hints: true,
     },
     ModelDefinition {
@@ -326,7 +347,8 @@ pub const MODELS: &[ModelDefinition] = &[
         timestamps: "No timestamps",
         runtime: ModelRuntime::Gguf(&QWEN_ARTIFACT),
         languages: QWEN_LANGUAGES,
-        accepts_language_hint: false,
+        accepts_language_hint: true,
+        supports_language_detection: true,
         supports_recognition_hints: false,
     },
     ModelDefinition {
@@ -341,6 +363,7 @@ pub const MODELS: &[ModelDefinition] = &[
         runtime: ModelRuntime::Gguf(&SENSEVOICE_ARTIFACT),
         languages: &["zh", "yue", "en", "ja", "ko"],
         accepts_language_hint: true,
+        supports_language_detection: true,
         supports_recognition_hints: false,
     },
     ModelDefinition {
@@ -355,6 +378,7 @@ pub const MODELS: &[ModelDefinition] = &[
         runtime: ModelRuntime::Gguf(&COHERE_ARTIFACT),
         languages: COHERE_LANGUAGES,
         accepts_language_hint: true,
+        supports_language_detection: false,
         supports_recognition_hints: false,
     },
     ModelDefinition {
@@ -369,11 +393,15 @@ pub const MODELS: &[ModelDefinition] = &[
         runtime: ModelRuntime::AppleSpeech,
         languages: &["*"],
         accepts_language_hint: true,
+        supports_language_detection: false,
         supports_recognition_hints: false,
     },
 ];
 
+pub const AUTO_LANGUAGE: &str = "auto";
+
 pub const LANGUAGES: &[(&str, &str)] = &[
+    (AUTO_LANGUAGE, "Auto"),
     ("en", "English"),
     ("zh", "Mandarin Chinese"),
     ("yue", "Cantonese"),
@@ -435,6 +463,20 @@ pub(crate) fn choices_for_runtime(language: &str) -> Vec<ModelChoice> {
         recommendation,
     };
     match language {
+        AUTO_LANGUAGE => vec![
+            choice(
+                TranscriptionModelId::WhisperLargeV3Turbo,
+                Recommendation::Recommended,
+            ),
+            choice(
+                TranscriptionModelId::SenseVoiceSmall,
+                Recommendation::Fastest,
+            ),
+            choice(
+                TranscriptionModelId::Qwen3Asr06B,
+                Recommendation::Recommended,
+            ),
+        ],
         "en" => vec![
             choice(
                 TranscriptionModelId::ParakeetV2,
@@ -873,6 +915,55 @@ mod tests {
             })
             .is_err()
         );
+        assert!(
+            validate(&TranscriptionSelection {
+                model: TranscriptionModelId::ParakeetV2,
+                language: AUTO_LANGUAGE.into(),
+                recognition_hints: String::new(),
+            })
+            .is_err()
+        );
+        assert!(
+            validate(&TranscriptionSelection {
+                model: TranscriptionModelId::WhisperLargeV3Turbo,
+                language: AUTO_LANGUAGE.into(),
+                recognition_hints: String::new(),
+            })
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn automatic_language_choices_only_include_detection_models() {
+        let choices = choices_for_runtime(AUTO_LANGUAGE);
+
+        assert!(!choices.is_empty());
+        assert!(
+            choices
+                .iter()
+                .all(|choice| choice.model.supports_language_detection)
+        );
+        assert!(
+            choices
+                .iter()
+                .any(|choice| choice.model.id == TranscriptionModelId::Qwen3Asr06B)
+        );
+        assert!(
+            choices
+                .iter()
+                .any(|choice| choice.model.id == TranscriptionModelId::SenseVoiceSmall)
+        );
+    }
+
+    #[test]
+    fn runtime_language_arguments_distinguish_detection_from_hints() {
+        let whisper = definition(TranscriptionModelId::WhisperLargeV3Turbo);
+        let qwen = definition(TranscriptionModelId::Qwen3Asr06B);
+
+        assert_eq!(whisper.runtime_language_hint(AUTO_LANGUAGE), None);
+        assert_eq!(whisper.runtime_language_hint("fil"), Some("tl"));
+        assert_eq!(qwen.runtime_language_hint(AUTO_LANGUAGE), None);
+        assert_eq!(qwen.runtime_language_hint("zh"), Some("zh"));
     }
 
     #[test]
@@ -909,6 +1000,7 @@ mod tests {
             runtime: ModelRuntime::Gguf(&FIXTURE_ARTIFACT),
             languages: &["en"],
             accepts_language_hint: false,
+            supports_language_detection: false,
             supports_recognition_hints: false,
         };
         let path = std::env::temp_dir().join(format!(
@@ -946,6 +1038,7 @@ mod tests {
             runtime: ModelRuntime::Gguf(&FIXTURE_ARTIFACT),
             languages: &["en"],
             accepts_language_hint: false,
+            supports_language_detection: false,
             supports_recognition_hints: false,
         };
         let path = std::env::temp_dir().join(format!(

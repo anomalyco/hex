@@ -99,6 +99,7 @@ export const decodeModels = (value: unknown): readonly ModelInfo[] => {
     const managed = input && boolean(input.managed)
     const downloadBytes = input?.downloadBytes === null ? null : number(input?.downloadBytes)
     const languages = input?.languages
+    const supportsLanguageDetection = input?.supportsLanguageDetection
     if (
       id === undefined
       || !isModelId(id)
@@ -109,6 +110,7 @@ export const decodeModels = (value: unknown): readonly ModelInfo[] => {
       || downloadBytes === undefined
       || !Array.isArray(languages)
       || !languages.every((language) => typeof language === "string")
+      || typeof supportsLanguageDetection !== "boolean"
     ) return invalid("model catalog entry")
     return {
       id,
@@ -118,6 +120,7 @@ export const decodeModels = (value: unknown): readonly ModelInfo[] => {
       managed,
       downloadBytes,
       languages,
+      supportsLanguageDetection,
     }
   })
 }

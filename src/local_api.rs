@@ -1054,7 +1054,8 @@ fn model_infos(path: &str) -> std::result::Result<Vec<ModelInfo>, &'static str> 
                 verified: managed && installed || crate::transcription_models::is_verified(model),
                 managed,
                 download_bytes: model.download_bytes(),
-                languages: model.languages,
+                languages: model.presentation_languages(),
+                supports_language_detection: model.supports_language_detection,
             }
         })
         .collect())
@@ -1366,7 +1367,8 @@ struct ModelInfo {
     verified: bool,
     managed: bool,
     download_bytes: Option<u64>,
-    languages: &'static [&'static str],
+    languages: Vec<&'static str>,
+    supports_language_detection: bool,
 }
 
 fn read_request(
@@ -1692,6 +1694,18 @@ mod tests {
         );
         assert_eq!(models[0]["id"], "parakeet_v2");
         assert!(models[0]["downloadBytes"].is_number());
+        assert_eq!(models[0]["supportsLanguageDetection"], false);
+        let whisper = models
+            .iter()
+            .find(|model| model["id"] == "whisper_large_v3_turbo")
+            .unwrap();
+        assert_eq!(whisper["supportsLanguageDetection"], true);
+        assert!(
+            whisper["languages"]
+                .as_array()
+                .unwrap()
+                .contains(&"auto".into())
+        );
         assert!(models.iter().all(|model| model["id"] != "apple_speech"));
         let unknown_model = request_with_method(
             document.port,
@@ -1802,6 +1816,17 @@ mod tests {
             crate::transcription_models::TranscriptionModelId::AppleSpeech,
         );
         assert!(installation_selection(apple, "/models/apple_speech/prepare?language=de").is_err());
+    }
+
+    #[test]
+    fn model_selection_accepts_auto_only_for_detection_models() {
+        assert!(
+            transcription_selection("/transcriptions?model=whisper_large_v3_turbo&language=auto")
+                .is_ok()
+        );
+        assert!(
+            transcription_selection("/transcriptions?model=parakeet_v2&language=auto").is_err()
+        );
     }
 
     #[test]

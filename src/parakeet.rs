@@ -1025,8 +1025,17 @@ impl Parakeet {
         );
         let capabilities = model.capabilities();
         if let (Some(selection), Some(definition)) = (selection, definition) {
-            let runtime_language = definition.runtime_language(&selection.language);
-            if !capabilities.languages.is_empty()
+            let runtime_language = definition.runtime_language_hint(&selection.language);
+            if selection.language == crate::transcription_models::AUTO_LANGUAGE
+                && !capabilities.supports_language_detect
+            {
+                return Err(eyre!(
+                    "{} does not advertise automatic language detection",
+                    definition.name
+                ));
+            }
+            if let Some(runtime_language) = runtime_language
+                && !capabilities.languages.is_empty()
                 && !capabilities
                     .languages
                     .iter()
@@ -1050,9 +1059,10 @@ impl Parakeet {
         let session = model.session()?;
         let language = selection
             .zip(definition)
-            .filter(|(_, definition)| definition.accepts_language_hint)
-            .map(|(selection, definition)| {
-                definition.runtime_language(&selection.language).to_string()
+            .and_then(|(selection, definition)| {
+                definition
+                    .runtime_language_hint(&selection.language)
+                    .map(str::to_string)
             });
         let family = selection
             .zip(definition)
