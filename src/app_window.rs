@@ -17,8 +17,8 @@ use gpui::{
 };
 
 use crate::app_settings::{
-    AppSettings, DictationMode, HotkeyBinding, HotkeyKey, HotkeyModifiers, RecordingAudioBehavior,
-    TextReplacement,
+    AppSettings, DictationMode, HotkeyBinding, HotkeyKey, HotkeyModifiers, ModifierSide,
+    RecordingAudioBehavior, TextReplacement,
 };
 use crate::application_catalog::InstalledApplication;
 use crate::commands::{CommandConfig, CommandInfo, CommandScope};
@@ -2239,7 +2239,7 @@ impl AppWindow {
         );
         let control_width = hotkey_control_width(this_capture, idle_width, animated_control_width);
         let capture_active = !matches!(self.hotkey_capture, HotkeyCaptureState::Idle);
-        let control_intensity = intensity;
+        let control_intensity = hotkey_control_intensity(this_capture, intensity);
         let capture_color = if matches!(
             self.hotkey_capture,
             HotkeyCaptureState::Saved { kind: active, .. } if active == kind
@@ -2403,6 +2403,70 @@ impl AppWindow {
                 this.capture_hotkey_modifiers(event, cx);
             }))
             .into_any_element()
+    }
+
+    fn render_hotkey_setting_control(
+        &mut self,
+        kind: HotkeyKind,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let hotkey = self.render_hotkey_control(kind, window, cx);
+        let side = self.hotkey_binding(kind).and_then(standalone_modifier_side);
+        div()
+            .flex()
+            .items_center()
+            .gap_2()
+            .child(hotkey)
+            .when_some(side, |control, selected| {
+                control.child(
+                    segmented_control().children(
+                        [
+                            ("L", ModifierSide::Left),
+                            ("Either", ModifierSide::Either),
+                            ("R", ModifierSide::Right),
+                        ]
+                        .into_iter()
+                        .enumerate()
+                        .map(|(index, (label, side))| {
+                            segmented_item(selected == side)
+                                .id(("hotkey-side", hotkey_kind_index(kind) * 3 + index))
+                                .h(px(26.0))
+                                .px(if side == ModifierSide::Either {
+                                    px(8.0)
+                                } else {
+                                    px(6.0)
+                                })
+                                .text_size(px(9.0))
+                                .child(label)
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    let Some(binding) = this.hotkey_binding_mut(kind) else {
+                                        return;
+                                    };
+                                    set_standalone_modifier_side(binding, side);
+                                    this.save_settings(cx);
+                                }))
+                        }),
+                    ),
+                )
+            })
+            .into_any_element()
+    }
+
+    fn hotkey_binding(&self, kind: HotkeyKind) -> Option<&HotkeyBinding> {
+        match kind {
+            HotkeyKind::Dictation => Some(&self.settings.dictation_hotkey),
+            HotkeyKind::Edit => Some(&self.settings.edit_hotkey),
+            HotkeyKind::PasteLast => self.settings.paste_last_hotkey.as_ref(),
+        }
+    }
+
+    fn hotkey_binding_mut(&mut self, kind: HotkeyKind) -> Option<&mut HotkeyBinding> {
+        match kind {
+            HotkeyKind::Dictation => Some(&mut self.settings.dictation_hotkey),
+            HotkeyKind::Edit => Some(&mut self.settings.edit_hotkey),
+            HotkeyKind::PasteLast => self.settings.paste_last_hotkey.as_mut(),
+        }
     }
 
     fn begin_hotkey_capture(
@@ -2858,7 +2922,7 @@ impl AppWindow {
 
     fn render_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let permission_warnings = self.render_permission_warnings(cx);
-        let hotkey_control = self.render_hotkey_control(HotkeyKind::Dictation, window, cx);
+        let hotkey_control = self.render_hotkey_setting_control(HotkeyKind::Dictation, window, cx);
         let paste_last_control = self.render_hotkey_control(HotkeyKind::PasteLast, window, cx);
         let transcription_model = definition(self.settings.transcription.model);
         let transcription_label = format!(
@@ -3474,7 +3538,7 @@ impl AppWindow {
                 .into_any_element();
         }
         let compact = window.viewport_size().width < px(980.0);
-        let hotkey = self.render_hotkey_control(HotkeyKind::Edit, window, cx);
+        let hotkey = self.render_hotkey_setting_control(HotkeyKind::Edit, window, cx);
         let processing = self.render_voice_action_processing(window, cx);
         div()
             .size_full()
@@ -7043,8 +7107,47 @@ fn hotkey_idle_width(keycap_count: usize) -> f32 {
     (112.0 + hotkey_keycaps_width(keycap_count)).max(HOTKEY_MIN_WIDTH)
 }
 
+const fn hotkey_kind_index(kind: HotkeyKind) -> usize {
+    match kind {
+        HotkeyKind::Dictation => 0,
+        HotkeyKind::Edit => 1,
+        HotkeyKind::PasteLast => 2,
+    }
+}
+
+fn standalone_modifier_side(binding: &HotkeyBinding) -> Option<ModifierSide> {
+    if binding.key.is_some() || binding.modifiers.count() != 1 {
+        return None;
+    }
+    binding
+        .modifiers
+        .control
+        .or(binding.modifiers.option)
+        .or(binding.modifiers.shift)
+        .or(binding.modifiers.command)
+}
+
+fn set_standalone_modifier_side(binding: &mut HotkeyBinding, side: ModifierSide) {
+    if standalone_modifier_side(binding).is_none() {
+        return;
+    }
+    if binding.modifiers.control.is_some() {
+        binding.modifiers.control = Some(side);
+    } else if binding.modifiers.option.is_some() {
+        binding.modifiers.option = Some(side);
+    } else if binding.modifiers.shift.is_some() {
+        binding.modifiers.shift = Some(side);
+    } else if binding.modifiers.command.is_some() {
+        binding.modifiers.command = Some(side);
+    }
+}
+
 fn hotkey_control_width(active: bool, idle_width: f32, animated_width: f32) -> f32 {
     if active { animated_width } else { idle_width }
+}
+
+fn hotkey_control_intensity(active: bool, intensity: f32) -> f32 {
+    if active { intensity } else { 0.0 }
 }
 
 fn hotkey_capture_width(keycap_count: usize) -> f32 {
@@ -7924,6 +8027,37 @@ mod tests {
     fn inactive_hotkey_controls_keep_their_idle_width() {
         assert_eq!(hotkey_control_width(false, 146.0, 270.0), 146.0);
         assert_eq!(hotkey_control_width(true, 146.0, 270.0), 270.0);
+        assert_eq!(hotkey_control_intensity(false, 0.8), 0.0);
+        assert_eq!(hotkey_control_intensity(true, 0.8), 0.8);
+    }
+
+    #[test]
+    fn side_selection_only_changes_a_standalone_modifier() {
+        let mut standalone = HotkeyBinding {
+            modifiers: HotkeyModifiers {
+                option: Some(ModifierSide::Left),
+                ..Default::default()
+            },
+            key: None,
+        };
+        set_standalone_modifier_side(&mut standalone, ModifierSide::Either);
+        assert_eq!(
+            standalone_modifier_side(&standalone),
+            Some(ModifierSide::Either)
+        );
+
+        let mut chord = HotkeyBinding {
+            modifiers: HotkeyModifiers {
+                option: Some(ModifierSide::Left),
+                ..Default::default()
+            },
+            key: Some(HotkeyKey {
+                code: 0,
+                label: "A".into(),
+            }),
+        };
+        set_standalone_modifier_side(&mut chord, ModifierSide::Right);
+        assert_eq!(chord.modifiers.option, Some(ModifierSide::Left));
     }
 
     #[test]
