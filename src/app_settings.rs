@@ -839,11 +839,21 @@ pub fn recording_audio_behavior() -> RecordingAudioBehavior {
 }
 
 pub fn commands_enabled() -> bool {
-    MICROPHONE_POLICY.load(Ordering::Acquire) & 1 != 0
+    microphone_policy().commands_enabled
 }
 
-pub fn release_microphone_while_idle() -> bool {
-    MICROPHONE_POLICY.load(Ordering::Acquire) & 2 != 0
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct MicrophonePolicy {
+    pub commands_enabled: bool,
+    pub release_while_idle: bool,
+}
+
+pub fn microphone_policy() -> MicrophonePolicy {
+    let policy = MICROPHONE_POLICY.load(Ordering::Acquire);
+    MicrophonePolicy {
+        commands_enabled: policy & 1 != 0,
+        release_while_idle: policy & 2 != 0,
+    }
 }
 
 pub fn custom_transformations_enabled() -> bool {

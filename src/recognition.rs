@@ -93,7 +93,8 @@ pub fn listen(
     let transformations = Arc::new(crate::personal_commands::TransformationClient::default());
     shutdown.store(false, Ordering::Relaxed);
     feedback::preload()?;
-    let mut commands_enabled = crate::app_settings::commands_enabled();
+    let mut microphone_policy = crate::app_settings::microphone_policy();
+    let mut commands_enabled = microphone_policy.commands_enabled;
     let mut recognizer = commands_enabled
         .then(|| Moonshine::load(project_root))
         .transpose()?;
@@ -130,7 +131,7 @@ pub fn listen(
         microphone.as_deref(),
         recording_environment,
         input_monitor.pending_events(),
-        false,
+        microphone_policy.release_while_idle,
     )?;
     let dictation_worker = DictationWorker::start(
         input_monitor.activity.clone(),
@@ -154,14 +155,22 @@ pub fn listen(
         timestamp_ms: now_ms(),
     })?;
     if hotkey.is_recording() {
-        input.start(input.captured_through())?;
+        input.start(if microphone_policy.release_while_idle {
+            CaptureInstant::now()
+        } else {
+            input.captured_through()
+        })?;
         events.dictation(DictationPhase::Started, "")?;
         if let Some(indicator) = &indicator {
             indicator.send(DictationIndicatorEvent::Started);
         }
     }
     if edit_hotkey.is_recording() {
-        input.start(input.captured_through())?;
+        input.start(if microphone_policy.release_while_idle {
+            CaptureInstant::now()
+        } else {
+            input.captured_through()
+        })?;
         edit_context = Some(voice_action_context_snapshot(&context));
         events.dictation(DictationPhase::Started, "")?;
         if let Some(indicator) = &indicator {
@@ -220,10 +229,15 @@ pub fn listen(
                 handle_action_outcome(outcome, &mut events)?;
             }
         }
-        let next_commands_enabled = crate::app_settings::commands_enabled();
+        let next_microphone_policy = crate::app_settings::microphone_policy();
+        let next_commands_enabled = next_microphone_policy.commands_enabled;
+        let release_policy_changed =
+            next_microphone_policy.release_while_idle != microphone_policy.release_while_idle;
+        if release_policy_changed && !next_microphone_policy.release_while_idle {
+            input.set_release_while_idle(false);
+        }
         if next_commands_enabled != commands_enabled {
             commands_enabled = next_commands_enabled;
-            input.set_release_while_idle(false);
             mode = Mode::Listening;
             if commands_enabled {
                 command_loader = Some(load_command_recognizer(project_root.to_path_buf()));
@@ -235,6 +249,10 @@ pub fn listen(
                 tracing::info!("voice commands disabled");
             }
         }
+        if release_policy_changed && next_microphone_policy.release_while_idle {
+            input.set_release_while_idle(true);
+        }
+        microphone_policy = next_microphone_policy;
         let next_personal_host_enabled =
             commands_enabled || crate::app_settings::custom_transformations_enabled();
         if next_personal_host_enabled != personal_host_enabled {
@@ -446,12 +464,22 @@ pub fn listen(
         }
         if hotkey.is_recording()
             && edit_pending_since.is_none()
-            && input.become_intentional(input.captured_through())?
+            && input.become_intentional(if microphone_policy.release_while_idle {
+                CaptureInstant::now()
+            } else {
+                input.captured_through()
+            })?
         {
             feedback::play(Tone::DictationStart);
         }
         if edit_pending_since.is_some_and(|started| {
-            input.captured_through().duration_since(started) >= MINIMUM_HOLD_DURATION
+            (if microphone_policy.release_while_idle {
+                CaptureInstant::now()
+            } else {
+                input.captured_through()
+            })
+            .duration_since(started)
+                >= MINIMUM_HOLD_DURATION
         }) && edit_hotkey.is_recording()
         {
             let capture_at = edit_pending_since.expect("pending voice action has a boundary");
@@ -499,7 +527,18 @@ pub fn listen(
 
         while let Some(audio_event) = input.try_recv_event() {
             match audio_event {
-                DictationAudioEvent::OpenFailed(error) => {
+                DictationAudioEvent::ReadyIntentional { capture_generation } => {
+                    if capture_generation == input.capture_generation() && input.is_recording() {
+                        feedback::play(Tone::DictationStart);
+                    }
+                }
+                DictationAudioEvent::OpenFailed {
+                    capture_generation,
+                    error,
+                } => {
+                    if capture_generation != input.capture_generation() {
+                        continue;
+                    }
                     hotkey.suspend();
                     edit_hotkey.suspend();
                     edit_context = None;
@@ -998,9 +1037,11 @@ fn handle_edit_hotkey_action(
                 dictation.start(action_at)?;
                 reset_command_recognizer(dictation, recognizer)?;
             }
-            let _ = dictation.become_intentional(dictation.captured_through())?;
+            let became_intentional = dictation.become_intentional(CaptureInstant::now())?;
             *edit_context = Some(voice_action_context_snapshot(context));
-            feedback::play(Tone::DictationStart);
+            if became_intentional {
+                feedback::play(Tone::DictationStart);
+            }
             if !promoted {
                 events.dictation(DictationPhase::Started, "")?;
             }

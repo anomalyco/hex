@@ -23,9 +23,9 @@ only in debug builds.
 - `keyboard`: active-layout key resolution and balanced synthetic shortcuts.
 - `dictation`: warm pre-roll, growable capture, and 16 kHz
   local-transcription resampling.
-- `dictation_audio`: the authoritative microphone timeline, recording owner,
-  exact shortcut boundaries, recovery handoff, and disposable bounded command
-  audio projection.
+- `dictation_audio`: the authoritative microphone timeline, lazy stream
+  lifecycle, recording owner, exact shortcut boundaries, recovery handoff, and
+  disposable bounded command audio projection.
 - `recording_environment`: serialized RAII ownership of idle-sleep prevention,
   output muting, and supported media-player pause/resume behavior.
 - `dictation_processor`: context-selected, deadline-bounded OpenCode rewrite
@@ -153,6 +153,12 @@ CoreAudio formats, AppleScript details, or event serialization.
 - Recording audio behavior and idle-sleep prevention begin only after the
   intentional-hold threshold. Ordinary shortcut chords must not mute output,
   pause media, or prevent sleep.
+- `Release microphone while idle` and Commands are mutually exclusive through
+  explicit confirmed transitions and a shared runtime policy. When release is
+  enabled, pressing the shortcut opens the selected device asynchronously with
+  no pre-roll, preserves the physical press for the hold threshold, discards a
+  release before readiness, and closes only after the authoritative capture is
+  idle. Accepted jobs never keep the stream open.
 - Dictation remains available while command recognition sleeps.
 - Model inference, optional post-processing, paste, and application actions must
   never block authoritative audio capture. Their queues remain bounded.

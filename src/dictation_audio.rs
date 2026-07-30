@@ -46,7 +46,13 @@ impl Drop for RecognitionAudio {
 }
 
 pub enum DictationAudioEvent {
-    OpenFailed(String),
+    OpenFailed {
+        capture_generation: u64,
+        error: String,
+    },
+    ReadyIntentional {
+        capture_generation: u64,
+    },
     Interrupted {
         was_recording: bool,
         capture_generation: u64,
@@ -362,6 +368,7 @@ impl Owner {
                     if !self.handle(command) {
                         break;
                     }
+                    self.close_if_idle();
                     continue;
                 }
                 Err(TryRecvError::Disconnected) => break,
@@ -372,6 +379,7 @@ impl Owner {
                 .input
                 .recv_timeout(Duration::from_millis(10), capture_idle);
             self.handle_input(event);
+            self.close_if_idle();
         }
     }
 
@@ -590,6 +598,12 @@ impl Owner {
                     }
                     if let Some(at) = pending.intentional_at {
                         let _ = self.capture.become_intentional(at);
+                        let _ = self.events.try_send(DictationAudioEvent::ReadyIntentional {
+                            capture_generation: self
+                                .state
+                                .capture_generation
+                                .load(Ordering::Acquire),
+                        });
                     }
                 } else {
                     self.state.recording.store(false, Ordering::Release);
@@ -602,7 +616,10 @@ impl Owner {
             RecoveringAudioInputEvent::OpenFailed(error) => {
                 self.pending_capture = None;
                 self.state.recording.store(false, Ordering::Release);
-                let _ = self.events.try_send(DictationAudioEvent::OpenFailed(error));
+                let _ = self.events.try_send(DictationAudioEvent::OpenFailed {
+                    capture_generation: self.state.capture_generation.load(Ordering::Acquire),
+                    error,
+                });
             }
         }
     }
@@ -670,7 +687,10 @@ impl Owner {
     }
 
     fn close_if_idle(&mut self) {
-        if self.release_while_idle && !self.capture.is_recording() && self.pending_capture.is_none()
+        if self.release_while_idle
+            && self.input.is_open()
+            && !self.capture.is_recording()
+            && self.pending_capture.is_none()
         {
             self.close_input();
         }

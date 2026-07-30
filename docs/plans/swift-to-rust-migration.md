@@ -317,6 +317,8 @@ the existing microphone and Apple Events descriptions.
 
 ### Release The Microphone While Idle
 
+**Implemented on main; physical event testing and release soak remain.**
+
 Add `Release microphone while idle`, effective only when voice commands are
 disabled. It removes pre-roll and adds first-capture startup latency.
 
