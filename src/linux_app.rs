@@ -846,6 +846,8 @@ impl DesktopHost for LinuxDesktopHost {
             dictation_shortcut: self.settings.dictation_hotkey.keycaps(),
             dictation_shortcut_label: self.settings.dictation_hotkey.label(),
             double_tap_lock: self.settings.double_tap_lock,
+            double_tap_only: false,
+            paste_last_shortcut: None,
             listener: Some(DesktopListenerSnapshot {
                 running: self.is_running(),
                 status: self.status.clone(),
@@ -895,6 +897,9 @@ impl DesktopHost for LinuxDesktopHost {
                 self.settings = candidate;
                 self.error = None;
                 self.settings_error = None;
+            }
+            DesktopAction::SetDoubleTapOnly(_) => {
+                return Err(eyre!("double-tap-only is unavailable on X11"));
             }
             DesktopAction::StartListening => self.start(),
             DesktopAction::StopListening => self.stop(),

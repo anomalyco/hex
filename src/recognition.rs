@@ -108,6 +108,7 @@ pub fn listen(
         input_monitor.paste_key_code,
         crate::app_settings::dictation_hotkey(),
     );
+    hotkey.set_double_tap_only(crate::app_settings::double_tap_only());
     let mut edit_hotkey = DictationHotkey::new_without_paste(
         CaptureInstant::now(),
         input_monitor.paste_key_code,
@@ -268,6 +269,7 @@ pub fn listen(
             }
         }
         hotkey.set_double_tap_enabled(crate::app_settings::double_tap_lock());
+        hotkey.set_double_tap_only(crate::app_settings::double_tap_only());
         hotkey.set_binding(crate::app_settings::dictation_hotkey());
         edit_hotkey.set_binding(crate::app_settings::edit_hotkey());
         let (next_microphone_revision, microphone) = crate::app_settings::microphone_selection();
@@ -1622,7 +1624,7 @@ mod tests {
             true,
             42,
             RuntimeHotkey {
-                modifiers: OPTION,
+                modifiers: crate::app_settings::modifiers_from_flags(OPTION),
                 key_code: None,
             },
         );
@@ -1630,7 +1632,7 @@ mod tests {
             now,
             42,
             RuntimeHotkey {
-                modifiers: OPTION | COMMAND,
+                modifiers: crate::app_settings::modifiers_from_flags(OPTION | COMMAND),
                 key_code: None,
             },
         );

@@ -622,6 +622,7 @@ enum ApplicationCatalogState {
 enum HotkeyKind {
     Dictation,
     Edit,
+    PasteLast,
 }
 
 enum HotkeyCaptureState {
@@ -2201,10 +2202,20 @@ impl AppWindow {
         let binding = match kind {
             HotkeyKind::Dictation => &self.settings.dictation_hotkey,
             HotkeyKind::Edit => &self.settings.edit_hotkey,
+            HotkeyKind::PasteLast => self
+                .settings
+                .paste_last_hotkey
+                .as_ref()
+                .unwrap_or(&self.settings.dictation_hotkey),
         };
         let binding_keycaps = match kind {
             HotkeyKind::Dictation => self.snapshot().dictation_shortcut,
             HotkeyKind::Edit => binding.keycaps(),
+            HotkeyKind::PasteLast => self
+                .settings
+                .paste_last_hotkey
+                .as_ref()
+                .map_or_else(|| vec!["Off".into()], HotkeyBinding::keycaps),
         };
         let idle_width = hotkey_idle_width(binding_keycaps.len());
         if matches!(
@@ -2303,6 +2314,7 @@ impl AppWindow {
                             .id(match kind {
                                 HotkeyKind::Dictation => "cancel-dictation-hotkey-capture",
                                 HotkeyKind::Edit => "cancel-edit-hotkey-capture",
+                                HotkeyKind::PasteLast => "cancel-paste-last-hotkey-capture",
                             })
                             .h(px(26.0))
                             .ml_1()
@@ -2355,6 +2367,7 @@ impl AppWindow {
             .id(match kind {
                 HotkeyKind::Dictation => "dictation-hotkey-control",
                 HotkeyKind::Edit => "edit-hotkey-control",
+                HotkeyKind::PasteLast => "paste-last-hotkey-control",
             })
             .track_focus(&self.hotkey_focus)
             .w(px(control_width))
@@ -2516,23 +2529,27 @@ impl AppWindow {
             self.set_hotkey_capture_message("Press a shortcut", cx);
             return;
         }
-        let paste_key_code = crate::keyboard::key_code_for('v').unwrap_or(9);
-        if binding.conflicts_with_paste(paste_key_code) {
-            self.set_hotkey_capture_message("Reserved by paste", cx);
-            return;
-        }
         let kind = match self.hotkey_capture {
             HotkeyCaptureState::Listening { kind, .. } => kind,
             HotkeyCaptureState::Idle | HotkeyCaptureState::Saved { .. } => return,
         };
-        let conflicts = match kind {
-            HotkeyKind::Dictation => {
-                crate::app_settings::hotkeys_conflict(&binding, &self.settings.edit_hotkey)
-            }
-            HotkeyKind::Edit => {
-                crate::app_settings::hotkeys_conflict(&self.settings.dictation_hotkey, &binding)
-            }
+        let mut others = match kind {
+            HotkeyKind::Dictation => vec![self.settings.edit_hotkey.clone()],
+            HotkeyKind::Edit => vec![self.settings.dictation_hotkey.clone()],
+            HotkeyKind::PasteLast => vec![
+                self.settings.dictation_hotkey.clone(),
+                self.settings.edit_hotkey.clone(),
+            ],
         };
+        if kind != HotkeyKind::PasteLast
+            && let Some(paste) = &self.settings.paste_last_hotkey
+        {
+            others.push(paste.clone());
+        }
+        if crate::DEVELOPER_FEATURES_ENABLED {
+            others.push(HotkeyBinding::paste_meeting_default());
+        }
+        let conflicts = crate::app_settings::hotkey_conflicts(&binding, others);
         if conflicts {
             self.set_hotkey_capture_message("Already in use", cx);
             return;
@@ -2542,6 +2559,7 @@ impl AppWindow {
         match kind {
             HotkeyKind::Dictation => self.settings.dictation_hotkey = binding,
             HotkeyKind::Edit => self.settings.edit_hotkey = binding,
+            HotkeyKind::PasteLast => self.settings.paste_last_hotkey = Some(binding),
         }
         self.save_settings(cx);
         crate::app_settings::set_hotkey_capture_active(false);
@@ -2840,6 +2858,7 @@ impl AppWindow {
     fn render_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let permission_warnings = self.render_permission_warnings(cx);
         let hotkey_control = self.render_hotkey_control(HotkeyKind::Dictation, window, cx);
+        let paste_last_control = self.render_hotkey_control(HotkeyKind::PasteLast, window, cx);
         let transcription_model = definition(self.settings.transcription.model);
         let transcription_label = format!(
             "{} · {}",
@@ -3087,6 +3106,44 @@ impl AppWindow {
                                             }
                                             cx.notify();
                                         })),
+                                    )
+                                    .child(
+                                        settings_row(
+                                            "Double-tap only",
+                                            "For key shortcuts, wait for two complete taps before recording",
+                                            toggle(if self.settings.double_tap_only { 1.0 } else { 0.0 }),
+                                        )
+                                        .id("double-tap-only-setting")
+                                        .on_click(cx.listener(|this, _, _, cx| {
+                                            let enabled = !this.snapshot().double_tap_only;
+                                            if let Err(error) = this.dispatch(
+                                                DesktopAction::SetDoubleTapOnly(enabled),
+                                            ) {
+                                                tracing::error!(%error, "could not update double-tap-only setting");
+                                            }
+                                            cx.notify();
+                                        })),
+                                    )
+                                    .child(
+                                        settings_row(
+                                            "Paste last dictation",
+                                            "Pastes the last ordinary dictation from this app session",
+                                            div()
+                                                .flex()
+                                                .items_center()
+                                                .gap_2()
+                                                .child(paste_last_control)
+                                                .child(
+                                                    compact_button("Disable")
+                                                        .id("disable-paste-last-hotkey")
+                                                        .on_click(cx.listener(|this, _, _, cx| {
+                                                            this.settings.paste_last_hotkey = None;
+                                                            this.save_settings(cx);
+                                                        })),
+                                                ),
+                                        )
+                                        .border_b_0()
+                                        .id("paste-last-hotkey-setting"),
                                     )
                             )
                             .child(settings_section_label("APPLICATION"))
@@ -6679,6 +6736,12 @@ impl DesktopHost for AppWindow {
             dictation_shortcut_label: dictation_shortcut.join("+"),
             dictation_shortcut,
             double_tap_lock: self.settings.double_tap_lock,
+            double_tap_only: self.settings.double_tap_only,
+            paste_last_shortcut: self
+                .settings
+                .paste_last_hotkey
+                .as_ref()
+                .map(HotkeyBinding::keycaps),
             listener: None,
             operation_error: self.settings_load_error.clone(),
             observations_path: self.event_reader.path().display().to_string(),
@@ -6705,10 +6768,10 @@ impl DesktopHost for AppWindow {
             }
             DesktopAction::SetDictationShortcut(shortcut) => {
                 let modifiers = HotkeyModifiers {
-                    control: shortcut.control,
-                    option: shortcut.alt,
-                    shift: shortcut.shift,
-                    command: shortcut.platform,
+                    control: shortcut.control.then_some(Default::default()),
+                    option: shortcut.alt.then_some(Default::default()),
+                    shift: shortcut.shift.then_some(Default::default()),
+                    command: shortcut.platform.then_some(Default::default()),
                     function: shortcut.function,
                 };
                 let key = if shortcut.key.is_empty() {
@@ -6732,11 +6795,14 @@ impl DesktopHost for AppWindow {
                 {
                     return Err(color_eyre::eyre::eyre!("shortcut requires a modifier"));
                 }
-                let paste_key_code = crate::keyboard::key_code_for('v').unwrap_or(9);
-                if binding.conflicts_with_paste(paste_key_code) {
-                    return Err(color_eyre::eyre::eyre!("shortcut is reserved by paste"));
+                let mut others = vec![self.settings.edit_hotkey.clone()];
+                if let Some(paste) = &self.settings.paste_last_hotkey {
+                    others.push(paste.clone());
                 }
-                if crate::app_settings::hotkeys_conflict(&binding, &self.settings.edit_hotkey) {
+                if crate::DEVELOPER_FEATURES_ENABLED {
+                    others.push(HotkeyBinding::paste_meeting_default());
+                }
+                if crate::app_settings::hotkey_conflicts(&binding, others) {
                     return Err(color_eyre::eyre::eyre!("shortcut is already in use"));
                 }
                 let mut candidate = self.settings.clone();
@@ -6752,6 +6818,9 @@ impl DesktopHost for AppWindow {
             DesktopAction::SetDoubleTapLock(enabled) => {
                 let mut candidate = self.settings.clone();
                 candidate.double_tap_lock = enabled;
+                if !enabled {
+                    candidate.double_tap_only = false;
+                }
                 if !self.preview {
                     candidate.save()?;
                 }
@@ -6760,6 +6829,19 @@ impl DesktopHost for AppWindow {
                 self.settings_dirty = false;
                 self.settings_load_error = None;
                 self.double_tap_toggle.set_enabled(enabled);
+            }
+            DesktopAction::SetDoubleTapOnly(enabled) => {
+                let mut candidate = self.settings.clone();
+                candidate.double_tap_only = enabled
+                    && candidate.double_tap_lock
+                    && candidate.dictation_hotkey.key.is_some();
+                if !self.preview {
+                    candidate.save()?;
+                }
+                self.settings = candidate;
+                self.settings_save_generation = self.settings_save_generation.wrapping_add(1);
+                self.settings_dirty = false;
+                self.settings_load_error = None;
             }
         }
         Ok(())
@@ -7473,11 +7555,16 @@ const fn permission_warning_id(kind: PermissionKind) -> &'static str {
 }
 
 fn hotkey_modifiers(modifiers: GpuiModifiers) -> HotkeyModifiers {
+    let physical =
+        crate::app_settings::modifiers_from_flags(crate::suppression::physical_modifier_flags());
+    if !physical.is_empty() {
+        return physical;
+    }
     HotkeyModifiers {
-        control: modifiers.control,
-        option: modifiers.alt,
-        shift: modifiers.shift,
-        command: modifiers.platform,
+        control: modifiers.control.then_some(Default::default()),
+        option: modifiers.alt.then_some(Default::default()),
+        shift: modifiers.shift.then_some(Default::default()),
+        command: modifiers.platform.then_some(Default::default()),
         function: modifiers.function,
     }
 }

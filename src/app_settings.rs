@@ -1,6 +1,6 @@
 use std::fs;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::{OnceLock, RwLock};
 
 use color_eyre::eyre::{Result, eyre};
@@ -12,10 +12,10 @@ use crate::transcription_models::TranscriptionSelection;
 
 static RECORDING_AUDIO_BEHAVIOR: AtomicU8 = AtomicU8::new(0);
 static DOUBLE_TAP_LOCK: AtomicBool = AtomicBool::new(true);
+static DOUBLE_TAP_ONLY: AtomicBool = AtomicBool::new(false);
 static COMMANDS_ENABLED: AtomicBool = AtomicBool::new(false);
 static CUSTOM_TRANSFORMATIONS_ENABLED: AtomicBool = AtomicBool::new(false);
-static DICTATION_HOTKEY: AtomicU64 = AtomicU64::new(1 << 19);
-static EDIT_HOTKEY: AtomicU64 = AtomicU64::new((1 << 19) | (1 << 20));
+static HOTKEYS: OnceLock<RwLock<RuntimeHotkeys>> = OnceLock::new();
 static HOTKEY_CAPTURE_ACTIVE: AtomicBool = AtomicBool::new(false);
 static TRANSCRIPTION_SELECTION: OnceLock<RwLock<RuntimeTranscriptionSelection>> = OnceLock::new();
 static MICROPHONE_SELECTION: OnceLock<RwLock<RuntimeMicrophoneSelection>> = OnceLock::new();
@@ -33,85 +33,145 @@ struct RuntimeMicrophoneSelection {
     device: Option<String>,
 }
 
-const KEY_CODE_MASK: u64 = u16::MAX as u64;
-const KEY_CODE_PRESENT: u64 = 1 << 63;
-const SHIFT_KEY_MASK: u64 = 1 << 17;
-const CONTROL_KEY_MASK: u64 = 1 << 18;
-const OPTION_KEY_MASK: u64 = 1 << 19;
-const COMMAND_KEY_MASK: u64 = 1 << 20;
-const FUNCTION_KEY_MASK: u64 = 1 << 23;
-const HOTKEY_MODIFIERS_MASK: u64 =
+pub const SHIFT_KEY_MASK: u64 = 1 << 17;
+pub const CONTROL_KEY_MASK: u64 = 1 << 18;
+pub const OPTION_KEY_MASK: u64 = 1 << 19;
+pub const COMMAND_KEY_MASK: u64 = 1 << 20;
+pub const FUNCTION_KEY_MASK: u64 = 1 << 23;
+pub const HOTKEY_MODIFIERS_MASK: u64 =
     SHIFT_KEY_MASK | CONTROL_KEY_MASK | OPTION_KEY_MASK | COMMAND_KEY_MASK | FUNCTION_KEY_MASK;
+pub const LEFT_CONTROL_MASK: u64 = 0x0000_0001;
+pub const LEFT_SHIFT_MASK: u64 = 0x0000_0002;
+pub const RIGHT_SHIFT_MASK: u64 = 0x0000_0004;
+pub const LEFT_COMMAND_MASK: u64 = 0x0000_0008;
+pub const RIGHT_COMMAND_MASK: u64 = 0x0000_0010;
+pub const LEFT_OPTION_MASK: u64 = 0x0000_0020;
+pub const RIGHT_OPTION_MASK: u64 = 0x0000_0040;
+pub const RIGHT_CONTROL_MASK: u64 = 0x0000_2000;
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ModifierSide {
+    Left,
+    Right,
+    #[default]
+    Either,
+}
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(default)]
 pub struct HotkeyModifiers {
-    pub control: bool,
-    pub option: bool,
-    pub shift: bool,
-    pub command: bool,
+    #[serde(deserialize_with = "deserialize_modifier_side")]
+    pub control: Option<ModifierSide>,
+    #[serde(deserialize_with = "deserialize_modifier_side")]
+    pub option: Option<ModifierSide>,
+    #[serde(deserialize_with = "deserialize_modifier_side")]
+    pub shift: Option<ModifierSide>,
+    #[serde(deserialize_with = "deserialize_modifier_side")]
+    pub command: Option<ModifierSide>,
     pub function: bool,
+}
+
+fn deserialize_modifier_side<'de, D>(
+    deserializer: D,
+) -> std::result::Result<Option<ModifierSide>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::de::Error;
+    let value = Option::<serde_json::Value>::deserialize(deserializer)?;
+    match value {
+        None | Some(serde_json::Value::Bool(false)) => Ok(None),
+        Some(serde_json::Value::Bool(true)) => Ok(Some(ModifierSide::Either)),
+        Some(serde_json::Value::String(value)) => {
+            serde_json::from_value(serde_json::Value::String(value))
+                .map(Some)
+                .map_err(D::Error::custom)
+        }
+        Some(_) => Err(D::Error::custom(
+            "modifier side must be left, right, either, or null",
+        )),
+    }
 }
 
 impl HotkeyModifiers {
     pub const fn option() -> Self {
         Self {
-            option: true,
-            control: false,
-            shift: false,
-            command: false,
+            option: Some(ModifierSide::Either),
+            control: None,
+            shift: None,
+            command: None,
             function: false,
         }
     }
 
     pub const fn option_command() -> Self {
         Self {
-            option: true,
-            command: true,
-            control: false,
-            shift: false,
+            option: Some(ModifierSide::Either),
+            command: Some(ModifierSide::Either),
+            control: None,
+            shift: None,
             function: false,
         }
     }
 
     pub const fn is_empty(self) -> bool {
-        !self.control && !self.option && !self.shift && !self.command && !self.function
+        self.control.is_none()
+            && self.option.is_none()
+            && self.shift.is_none()
+            && self.command.is_none()
+            && !self.function
     }
 
     pub const fn count(self) -> u8 {
-        self.control as u8
-            + self.option as u8
-            + self.shift as u8
-            + self.command as u8
+        self.control.is_some() as u8
+            + self.option.is_some() as u8
+            + self.shift.is_some() as u8
+            + self.command.is_some() as u8
             + self.function as u8
     }
 
-    const fn contains(self, required: Self) -> bool {
-        (!required.control || self.control)
-            && (!required.option || self.option)
-            && (!required.shift || self.shift)
-            && (!required.command || self.command)
+    fn contains(self, required: Self) -> bool {
+        modifier_contains(self.control, required.control)
+            && modifier_contains(self.option, required.option)
+            && modifier_contains(self.shift, required.shift)
+            && modifier_contains(self.command, required.command)
             && (!required.function || self.function)
-    }
-
-    fn event_flags(self) -> u64 {
-        (self.control as u64 * CONTROL_KEY_MASK)
-            | (self.option as u64 * OPTION_KEY_MASK)
-            | (self.shift as u64 * SHIFT_KEY_MASK)
-            | (self.command as u64 * COMMAND_KEY_MASK)
-            | (self.function as u64 * FUNCTION_KEY_MASK)
     }
 
     fn keycaps(self) -> impl Iterator<Item = &'static str> {
         [
             (self.function, "fn"),
-            (self.control, "⌃"),
-            (self.option, "⌥"),
-            (self.shift, "⇧"),
-            (self.command, "⌘"),
+            (self.control.is_some(), side_keycap(self.control, "⌃")),
+            (self.option.is_some(), side_keycap(self.option, "⌥")),
+            (self.shift.is_some(), side_keycap(self.shift, "⇧")),
+            (self.command.is_some(), side_keycap(self.command, "⌘")),
         ]
         .into_iter()
         .filter_map(|(enabled, label)| enabled.then_some(label))
+    }
+}
+
+fn modifier_contains(candidate: Option<ModifierSide>, required: Option<ModifierSide>) -> bool {
+    match (candidate, required) {
+        (_, None) => true,
+        (Some(ModifierSide::Either), Some(_)) | (Some(_), Some(ModifierSide::Either)) => true,
+        (Some(candidate), Some(required)) => candidate == required,
+        (None, Some(_)) => false,
+    }
+}
+
+fn side_keycap(side: Option<ModifierSide>, symbol: &'static str) -> &'static str {
+    match (side, symbol) {
+        (Some(ModifierSide::Left), "⌃") => "L⌃",
+        (Some(ModifierSide::Right), "⌃") => "R⌃",
+        (Some(ModifierSide::Left), "⌥") => "L⌥",
+        (Some(ModifierSide::Right), "⌥") => "R⌥",
+        (Some(ModifierSide::Left), "⇧") => "L⇧",
+        (Some(ModifierSide::Right), "⇧") => "R⇧",
+        (Some(ModifierSide::Left), "⌘") => "L⌘",
+        (Some(ModifierSide::Right), "⌘") => "R⌘",
+        _ => symbol,
     }
 }
 
@@ -144,6 +204,34 @@ impl HotkeyBinding {
             key: None,
         }
     }
+
+    pub fn paste_last_default() -> Self {
+        Self {
+            modifiers: HotkeyModifiers {
+                option: Some(ModifierSide::Either),
+                shift: Some(ModifierSide::Either),
+                ..Default::default()
+            },
+            key: Some(HotkeyKey {
+                code: crate::keyboard::key_code_for('v').unwrap_or(9),
+                label: "V".into(),
+            }),
+        }
+    }
+
+    pub fn paste_meeting_default() -> Self {
+        Self {
+            modifiers: HotkeyModifiers {
+                option: Some(ModifierSide::Either),
+                control: Some(ModifierSide::Either),
+                ..Default::default()
+            },
+            key: Some(HotkeyKey {
+                code: crate::keyboard::key_code_for('v').unwrap_or(9),
+                label: "V".into(),
+            }),
+        }
+    }
 }
 
 impl HotkeyBinding {
@@ -159,54 +247,137 @@ impl HotkeyBinding {
         self.modifiers.is_empty() && self.key.is_none()
     }
 
+    pub fn runtime(&self) -> RuntimeHotkey {
+        RuntimeHotkey {
+            modifiers: self.modifiers,
+            key_code: self.key.as_ref().map(|key| key.code),
+        }
+    }
+
+    #[cfg(test)]
     pub fn conflicts_with_paste(&self, paste_key_code: u16) -> bool {
         self.key
             .as_ref()
             .is_some_and(|key| key.code == paste_key_code)
-            && !self.modifiers.command
-            && self.modifiers.option
-            && ((self.modifiers.shift && !self.modifiers.control)
+            && self.modifiers.command.is_none()
+            && self.modifiers.option.is_some()
+            && ((self.modifiers.shift.is_some() && self.modifiers.control.is_none())
                 || (crate::DEVELOPER_FEATURES_ENABLED
-                    && self.modifiers.control
-                    && !self.modifiers.shift))
+                    && self.modifiers.control.is_some()
+                    && self.modifiers.shift.is_none()))
     }
 
+    #[cfg(test)]
     pub fn is_modifier_prefix_of(&self, other: &Self) -> bool {
         self.key.is_none()
             && other.modifiers.contains(self.modifiers)
             && (self.modifiers != other.modifiers || other.key.is_some())
     }
 
-    fn encoded(&self) -> u64 {
-        let key = self
-            .key
-            .as_ref()
-            .map_or(0, |key| KEY_CODE_PRESENT | u64::from(key.code));
-        self.modifiers.event_flags() | key
+    pub fn overlaps(&self, other: &Self) -> bool {
+        self.key.as_ref().map(|key| key.code) == other.key.as_ref().map(|key| key.code)
+            && modifiers_overlap(self.modifiers, other.modifiers)
+    }
+}
+
+fn modifiers_overlap(left: HotkeyModifiers, right: HotkeyModifiers) -> bool {
+    modifier_overlap(left.control, right.control)
+        && modifier_overlap(left.option, right.option)
+        && modifier_overlap(left.shift, right.shift)
+        && modifier_overlap(left.command, right.command)
+        && left.function == right.function
+}
+
+fn modifier_overlap(left: Option<ModifierSide>, right: Option<ModifierSide>) -> bool {
+    match (left, right) {
+        (None, None) => true,
+        (Some(ModifierSide::Either), Some(_)) | (Some(_), Some(ModifierSide::Either)) => true,
+        (Some(left), Some(right)) => left == right,
+        _ => false,
     }
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct RuntimeHotkey {
-    pub modifiers: u64,
+    pub modifiers: HotkeyModifiers,
     pub key_code: Option<u16>,
 }
 
 impl RuntimeHotkey {
     pub fn is_empty(self) -> bool {
-        self.modifiers == 0 && self.key_code.is_none()
+        self.modifiers.is_empty() && self.key_code.is_none()
     }
 
     pub fn exact_modifiers(self, flags: u64) -> bool {
-        flags & HOTKEY_MODIFIERS_MASK == self.modifiers
+        modifiers_from_flags(flags).matches_exactly(self.modifiers)
     }
 
     pub fn required_modifiers_down(self, flags: u64) -> bool {
-        flags & self.modifiers == self.modifiers
+        modifiers_from_flags(flags).contains(self.modifiers)
     }
 
     pub fn matches_key_press(self, code: u16, flags: u64) -> bool {
         self.key_code == Some(code) && self.exact_modifiers(flags)
+    }
+}
+
+impl HotkeyModifiers {
+    pub fn matches_exactly(self, expected: Self) -> bool {
+        modifiers_overlap(self, expected)
+            && self.control.is_some() == expected.control.is_some()
+            && self.option.is_some() == expected.option.is_some()
+            && self.shift.is_some() == expected.shift.is_some()
+            && self.command.is_some() == expected.command.is_some()
+            && self.function == expected.function
+    }
+}
+
+pub fn modifiers_from_flags(flags: u64) -> HotkeyModifiers {
+    HotkeyModifiers {
+        control: side_from_flags(
+            flags,
+            CONTROL_KEY_MASK,
+            LEFT_CONTROL_MASK,
+            RIGHT_CONTROL_MASK,
+        ),
+        option: side_from_flags(flags, OPTION_KEY_MASK, LEFT_OPTION_MASK, RIGHT_OPTION_MASK),
+        shift: side_from_flags(flags, SHIFT_KEY_MASK, LEFT_SHIFT_MASK, RIGHT_SHIFT_MASK),
+        command: side_from_flags(
+            flags,
+            COMMAND_KEY_MASK,
+            LEFT_COMMAND_MASK,
+            RIGHT_COMMAND_MASK,
+        ),
+        function: flags & FUNCTION_KEY_MASK != 0,
+    }
+}
+
+fn side_from_flags(flags: u64, general: u64, left: u64, right: u64) -> Option<ModifierSide> {
+    match (flags & left != 0, flags & right != 0) {
+        (true, false) => Some(ModifierSide::Left),
+        (false, true) => Some(ModifierSide::Right),
+        (true, true) | (false, false) if flags & general != 0 => Some(ModifierSide::Either),
+        _ => None,
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct RuntimeHotkeys {
+    pub dictation: RuntimeHotkey,
+    pub edit: RuntimeHotkey,
+    pub paste_last: Option<RuntimeHotkey>,
+    pub paste_meeting: Option<RuntimeHotkey>,
+}
+
+impl Default for RuntimeHotkeys {
+    fn default() -> Self {
+        Self {
+            dictation: HotkeyBinding::default().runtime(),
+            edit: HotkeyBinding::edit_default().runtime(),
+            paste_last: Some(HotkeyBinding::paste_last_default().runtime()),
+            paste_meeting: crate::DEVELOPER_FEATURES_ENABLED
+                .then(|| HotkeyBinding::paste_meeting_default().runtime()),
+        }
     }
 }
 
@@ -333,12 +504,14 @@ pub struct AppSettings {
     pub microphone: Option<String>,
     pub recording_audio_behavior: RecordingAudioBehavior,
     pub double_tap_lock: bool,
+    pub double_tap_only: bool,
     pub dictation_hotkey: HotkeyBinding,
     #[serde(
         default = "HotkeyBinding::edit_default",
         deserialize_with = "deserialize_edit_hotkey"
     )]
     pub edit_hotkey: HotkeyBinding,
+    pub paste_last_hotkey: Option<HotkeyBinding>,
     pub show_dock_icon: bool,
     pub transcription: TranscriptionSelection,
     pub dictation_processing: DictationProcessingSettings,
@@ -365,8 +538,10 @@ impl Default for AppSettings {
             microphone: None,
             recording_audio_behavior: RecordingAudioBehavior::DoNothing,
             double_tap_lock: true,
+            double_tap_only: false,
             dictation_hotkey: HotkeyBinding::default(),
             edit_hotkey: HotkeyBinding::edit_default(),
+            paste_last_hotkey: Some(HotkeyBinding::paste_last_default()),
             show_dock_icon: true,
             transcription: TranscriptionSelection::default(),
             dictation_processing: DictationProcessingSettings::default(),
@@ -378,12 +553,19 @@ impl Default for AppSettings {
 }
 
 impl AppSettings {
+    fn normalize_double_tap_settings(&mut self) {
+        if !self.double_tap_lock || self.dictation_hotkey.key.is_none() {
+            self.double_tap_only = false;
+        }
+    }
+
     pub fn load() -> Result<Self> {
         let path = path()?;
         match fs::read(path) {
             Ok(data) => {
                 let mut settings: Self = serde_json::from_slice(&data)?;
                 settings.dictation_processing.default_mode.name = "Global".into();
+                settings.normalize_double_tap_settings();
                 settings.migrate_legacy_replacements();
                 let transcription_migrated = settings.migrate_disabled_transcription_model();
                 crate::transcription_models::validate(&settings.transcription)?;
@@ -435,8 +617,20 @@ impl AppSettings {
         crate::feedback::set_volume(self.sound_effect_volume.clamp(0.0, 1.0));
         RECORDING_AUDIO_BEHAVIOR.store(self.recording_audio_behavior.encoded(), Ordering::Relaxed);
         DOUBLE_TAP_LOCK.store(self.double_tap_lock, Ordering::Relaxed);
-        DICTATION_HOTKEY.store(self.dictation_hotkey.encoded(), Ordering::Release);
-        EDIT_HOTKEY.store(self.edit_hotkey.encoded(), Ordering::Release);
+        DOUBLE_TAP_ONLY.store(
+            self.double_tap_lock && self.double_tap_only && self.dictation_hotkey.key.is_some(),
+            Ordering::Relaxed,
+        );
+        *HOTKEYS
+            .get_or_init(Default::default)
+            .write()
+            .unwrap_or_else(|error| error.into_inner()) = RuntimeHotkeys {
+            dictation: self.dictation_hotkey.runtime(),
+            edit: self.edit_hotkey.runtime(),
+            paste_last: self.paste_last_hotkey.as_ref().map(HotkeyBinding::runtime),
+            paste_meeting: crate::DEVELOPER_FEATURES_ENABLED
+                .then(|| HotkeyBinding::paste_meeting_default().runtime()),
+        };
         set_transcription_selection(&self.transcription);
         set_microphone_selection(self.microphone.as_deref());
         crate::config::update_dictation_profiles(&self.dictation_processing);
@@ -493,8 +687,8 @@ impl AppSettings {
             });
         let control_command = HotkeyBinding {
             modifiers: HotkeyModifiers {
-                control: true,
-                command: true,
+                control: Some(ModifierSide::Either),
+                command: Some(ModifierSide::Either),
                 ..Default::default()
             },
             key: None,
@@ -515,7 +709,16 @@ impl AppSettings {
 }
 
 pub fn hotkeys_conflict(dictation: &HotkeyBinding, edit: &HotkeyBinding) -> bool {
-    dictation == edit || edit.is_modifier_prefix_of(dictation)
+    dictation.overlaps(edit)
+}
+
+pub fn hotkey_conflicts(
+    candidate: &HotkeyBinding,
+    others: impl IntoIterator<Item = HotkeyBinding>,
+) -> bool {
+    others
+        .into_iter()
+        .any(|binding| candidate.overlaps(&binding))
 }
 
 fn set_microphone_selection(device: Option<&str>) {
@@ -568,12 +771,23 @@ pub fn double_tap_lock() -> bool {
     DOUBLE_TAP_LOCK.load(Ordering::Relaxed)
 }
 
+pub fn double_tap_only() -> bool {
+    DOUBLE_TAP_ONLY.load(Ordering::Relaxed)
+}
+
+pub fn runtime_hotkeys() -> RuntimeHotkeys {
+    *HOTKEYS
+        .get_or_init(Default::default)
+        .read()
+        .unwrap_or_else(|error| error.into_inner())
+}
+
 pub fn dictation_hotkey() -> RuntimeHotkey {
-    decode_hotkey(DICTATION_HOTKEY.load(Ordering::Acquire))
+    runtime_hotkeys().dictation
 }
 
 pub fn edit_hotkey() -> RuntimeHotkey {
-    decode_hotkey(EDIT_HOTKEY.load(Ordering::Acquire))
+    runtime_hotkeys().edit
 }
 
 pub fn voice_action_settings() -> VoiceActionSettings {
@@ -582,13 +796,6 @@ pub fn voice_action_settings() -> VoiceActionSettings {
         .read()
         .unwrap_or_else(|error| error.into_inner())
         .clone()
-}
-
-fn decode_hotkey(encoded: u64) -> RuntimeHotkey {
-    RuntimeHotkey {
-        modifiers: encoded & HOTKEY_MODIFIERS_MASK,
-        key_code: (encoded & KEY_CODE_PRESENT != 0).then_some((encoded & KEY_CODE_MASK) as u16),
-    }
 }
 
 pub fn hotkey_capture_active() -> bool {
@@ -643,8 +850,13 @@ mod tests {
             RecordingAudioBehavior::DoNothing
         );
         assert!(settings.double_tap_lock);
+        assert!(!settings.double_tap_only);
         assert_eq!(settings.dictation_hotkey, HotkeyBinding::default());
         assert_eq!(settings.edit_hotkey, HotkeyBinding::edit_default());
+        assert_eq!(
+            settings.paste_last_hotkey,
+            Some(HotkeyBinding::paste_last_default())
+        );
         assert!(settings.show_dock_icon);
         assert_eq!(settings.transcription, TranscriptionSelection::default());
         assert!(
@@ -776,13 +988,13 @@ mod tests {
     }
 
     #[test]
-    fn hotkey_runtime_encoding_preserves_modifiers_and_key_code() {
+    fn hotkey_runtime_preserves_modifier_sides_and_key_code() {
         let binding = HotkeyBinding {
             modifiers: HotkeyModifiers {
-                control: true,
-                option: false,
-                shift: true,
-                command: false,
+                control: Some(ModifierSide::Left),
+                option: None,
+                shift: Some(ModifierSide::Right),
+                command: None,
                 function: true,
             },
             key: Some(HotkeyKey {
@@ -790,16 +1002,87 @@ mod tests {
                 label: "Space".into(),
             }),
         };
-        DICTATION_HOTKEY.store(binding.encoded(), Ordering::Release);
+        let runtime = binding.runtime();
 
-        let runtime = dictation_hotkey();
-
-        assert_eq!(
-            runtime.modifiers,
-            CONTROL_KEY_MASK | SHIFT_KEY_MASK | FUNCTION_KEY_MASK
-        );
+        assert_eq!(runtime.modifiers, binding.modifiers);
         assert_eq!(runtime.key_code, Some(49));
-        DICTATION_HOTKEY.store(HotkeyBinding::default().encoded(), Ordering::Release);
+    }
+
+    #[test]
+    fn modifier_sides_round_trip_and_legacy_booleans_decode_as_either() {
+        let settings = AppSettings {
+            dictation_hotkey: HotkeyBinding {
+                modifiers: HotkeyModifiers {
+                    option: Some(ModifierSide::Right),
+                    command: Some(ModifierSide::Left),
+                    ..Default::default()
+                },
+                key: Some(HotkeyKey {
+                    code: 0,
+                    label: "A".into(),
+                }),
+            },
+            paste_last_hotkey: None,
+            double_tap_only: true,
+            ..Default::default()
+        };
+
+        let encoded = serde_json::to_string(&settings).unwrap();
+        let decoded: AppSettings = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(decoded.dictation_hotkey, settings.dictation_hotkey);
+        assert_eq!(decoded.paste_last_hotkey, None);
+        assert!(decoded.double_tap_only);
+
+        let legacy: HotkeyModifiers = serde_json::from_str(
+            r#"{"control":false,"option":true,"shift":false,"command":false,"function":false}"#,
+        )
+        .unwrap();
+        assert_eq!(legacy.option, Some(ModifierSide::Either));
+    }
+
+    #[test]
+    fn side_aware_matching_and_conflicts_share_the_same_algebra() {
+        let left = HotkeyBinding {
+            modifiers: HotkeyModifiers {
+                option: Some(ModifierSide::Left),
+                ..Default::default()
+            },
+            key: Some(HotkeyKey {
+                code: 0,
+                label: "A".into(),
+            }),
+        };
+        let right = HotkeyBinding {
+            modifiers: HotkeyModifiers {
+                option: Some(ModifierSide::Right),
+                ..Default::default()
+            },
+            key: left.key.clone(),
+        };
+        let either = HotkeyBinding {
+            modifiers: HotkeyModifiers {
+                option: Some(ModifierSide::Either),
+                ..Default::default()
+            },
+            key: left.key.clone(),
+        };
+
+        assert!(!left.overlaps(&right));
+        assert!(left.overlaps(&either));
+        assert!(
+            left.runtime()
+                .matches_key_press(0, OPTION_KEY_MASK | LEFT_OPTION_MASK,)
+        );
+        assert!(
+            !left
+                .runtime()
+                .matches_key_press(0, OPTION_KEY_MASK | RIGHT_OPTION_MASK,)
+        );
+        assert!(
+            either
+                .runtime()
+                .matches_key_press(0, OPTION_KEY_MASK | RIGHT_OPTION_MASK,)
+        );
     }
 
     #[test]
@@ -810,13 +1093,13 @@ mod tests {
         };
         for modifiers in [
             HotkeyModifiers {
-                option: true,
-                shift: true,
+                option: Some(ModifierSide::Either),
+                shift: Some(ModifierSide::Either),
                 ..Default::default()
             },
             HotkeyModifiers {
-                option: true,
-                control: true,
+                option: Some(ModifierSide::Either),
+                control: Some(ModifierSide::Either),
                 ..Default::default()
             },
         ] {
