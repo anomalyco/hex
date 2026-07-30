@@ -16,6 +16,7 @@ static DOUBLE_TAP_ONLY: AtomicBool = AtomicBool::new(false);
 static COMMANDS_ENABLED: AtomicBool = AtomicBool::new(false);
 static CUSTOM_TRANSFORMATIONS_ENABLED: AtomicBool = AtomicBool::new(false);
 static HOTKEYS: OnceLock<RwLock<RuntimeHotkeys>> = OnceLock::new();
+static PASTE_KEY_CODE: OnceLock<u16> = OnceLock::new();
 static HOTKEY_CAPTURE_ACTIVE: AtomicBool = AtomicBool::new(false);
 static TRANSCRIPTION_SELECTION: OnceLock<RwLock<RuntimeTranscriptionSelection>> = OnceLock::new();
 static MICROPHONE_SELECTION: OnceLock<RwLock<RuntimeMicrophoneSelection>> = OnceLock::new();
@@ -213,7 +214,7 @@ impl HotkeyBinding {
                 ..Default::default()
             },
             key: Some(HotkeyKey {
-                code: crate::keyboard::key_code_for('v').unwrap_or(9),
+                code: paste_key_code(),
                 label: "V".into(),
             }),
         }
@@ -227,11 +228,15 @@ impl HotkeyBinding {
                 ..Default::default()
             },
             key: Some(HotkeyKey {
-                code: crate::keyboard::key_code_for('v').unwrap_or(9),
+                code: paste_key_code(),
                 label: "V".into(),
             }),
         }
     }
+}
+
+fn paste_key_code() -> u16 {
+    *PASTE_KEY_CODE.get_or_init(|| crate::keyboard::key_code_for('v').unwrap_or(9))
 }
 
 impl HotkeyBinding {
