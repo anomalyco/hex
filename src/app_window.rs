@@ -70,7 +70,7 @@ const WINDOW_HEIGHT: f32 = 700.0;
 const MINIMUM_WIDTH: f32 = 860.0;
 const MINIMUM_HEIGHT: f32 = 560.0;
 const HOTKEY_MIN_WIDTH: f32 = 148.0;
-const HOTKEY_SIDE_SELECTOR_WIDTH: f32 = 88.0;
+const HOTKEY_SIDE_SELECTOR_WIDTH: f32 = 116.0;
 const OPENCODE_INSTALL_RETRY_INTERVAL: Duration = Duration::from_secs(60);
 const PERMISSION_REFRESH_INTERVAL: Duration = Duration::from_secs(5);
 const MAX_OPENCODE_ERROR_BYTES: usize = 4 * 1024;
@@ -776,6 +776,7 @@ pub struct AppWindow {
     hotkey_capture_animation: ToggleSpring,
     hotkey_width_spring: ToggleSpring,
     hotkey_side_animations: [ToggleSpring; 3],
+    hotkey_side_selection_springs: [ToggleSpring; 3],
     window_focus: FocusHandle,
     hotkey_focus: FocusHandle,
     _hotkey_blur_subscription: Subscription,
@@ -1190,6 +1191,22 @@ impl AppWindow {
                         .and_then(standalone_modifier_side)
                         .is_some(),
                 ),
+            ],
+            hotkey_side_selection_springs: [
+                ToggleSpring::at(hotkey_side_index(
+                    standalone_modifier_side(&settings.dictation_hotkey)
+                        .unwrap_or(ModifierSide::Either),
+                ) as f32),
+                ToggleSpring::at(hotkey_side_index(
+                    standalone_modifier_side(&settings.edit_hotkey).unwrap_or(ModifierSide::Either),
+                ) as f32),
+                ToggleSpring::at(hotkey_side_index(
+                    settings
+                        .paste_last_hotkey
+                        .as_ref()
+                        .and_then(standalone_modifier_side)
+                        .unwrap_or(ModifierSide::Either),
+                ) as f32),
             ],
             window_focus,
             hotkey_focus,
@@ -2433,6 +2450,12 @@ impl AppWindow {
         side_animation.set_enabled(side.is_some());
         let side_position = side_animation.render_position(window).clamp(0.0, 1.0);
         let selected = side.unwrap_or(ModifierSide::Either);
+        let side_widths = [34.0, 44.0, 34.0];
+        let side_selection_spring =
+            &mut self.hotkey_side_selection_springs[hotkey_kind_index(kind)];
+        side_selection_spring.set_target(hotkey_side_index(selected) as f32);
+        let selection_position = side_selection_spring.render_position(window);
+        let (selection_left, selection_width) = segmented_geometry(selection_position, side_widths);
         let side_selector = div()
             .w(px(HOTKEY_SIDE_SELECTOR_WIDTH * side_position))
             .mr(px(8.0 * side_position))
@@ -2442,23 +2465,33 @@ impl AppWindow {
             .child(
                 segmented_control()
                     .w(px(HOTKEY_SIDE_SELECTOR_WIDTH))
+                    .relative()
+                    .child(
+                        div()
+                            .absolute()
+                            .left(px(selection_left))
+                            .top(px(2.0))
+                            .w(px(selection_width))
+                            .h(px(26.0))
+                            .rounded(px(4.0))
+                            .bg(rgb(SURFACE_SELECTED)),
+                    )
                     .children(
                         [
-                            ("L", ModifierSide::Left),
+                            ("Left", ModifierSide::Left),
                             ("Either", ModifierSide::Either),
-                            ("R", ModifierSide::Right),
+                            ("Right", ModifierSide::Right),
                         ]
                         .into_iter()
                         .enumerate()
                         .map(|(index, (label, side))| {
                             segmented_item(selected == side)
                                 .id(("hotkey-side", hotkey_kind_index(kind) * 3 + index))
+                                .w(px(side_widths[index]))
                                 .h(px(26.0))
-                                .px(if side == ModifierSide::Either {
-                                    px(8.0)
-                                } else {
-                                    px(6.0)
-                                })
+                                .px(px(0.0))
+                                .justify_center()
+                                .bg(rgba(0x00000000))
                                 .text_size(px(9.0))
                                 .child(label)
                                 .on_click(cx.listener(move |this, _, _, cx| {
@@ -2466,6 +2499,8 @@ impl AppWindow {
                                         return;
                                     };
                                     set_standalone_modifier_side(binding, side);
+                                    this.hotkey_side_selection_springs[hotkey_kind_index(kind)]
+                                        .set_target(index as f32);
                                     this.save_settings(cx);
                                 }))
                         }),
@@ -7138,6 +7173,14 @@ const fn hotkey_kind_index(kind: HotkeyKind) -> usize {
         HotkeyKind::Dictation => 0,
         HotkeyKind::Edit => 1,
         HotkeyKind::PasteLast => 2,
+    }
+}
+
+const fn hotkey_side_index(side: ModifierSide) -> usize {
+    match side {
+        ModifierSide::Left => 0,
+        ModifierSide::Either => 1,
+        ModifierSide::Right => 2,
     }
 }
 
