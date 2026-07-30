@@ -740,6 +740,7 @@ pub struct AppWindow {
     update_status_changed_at: Instant,
     commands_toggle: ToggleSpring,
     double_tap_toggle: ToggleSpring,
+    double_tap_only_visibility: ToggleSpring,
     dock_icon_toggle: ToggleSpring,
     sound_volume_spring: ToggleSpring,
     recording_audio_spring: ToggleSpring,
@@ -1117,6 +1118,9 @@ impl AppWindow {
             update_status_changed_at: Instant::now(),
             commands_toggle: ToggleSpring::new(settings.commands_enabled),
             double_tap_toggle: ToggleSpring::new(settings.double_tap_lock),
+            double_tap_only_visibility: ToggleSpring::new(
+                settings.double_tap_lock && settings.dictation_hotkey.key.is_some(),
+            ),
             dock_icon_toggle: ToggleSpring::new(settings.show_dock_icon),
             sound_volume_spring: ToggleSpring::at(sound_volume_index(&settings) as f32),
             recording_audio_spring: ToggleSpring::at(recording_audio_index(
@@ -2680,12 +2684,16 @@ impl AppWindow {
             self.set_hotkey_capture_message("Already in use", cx);
             return;
         }
+        let key_based = binding.key.is_some();
         self.hotkey_width_spring
             .set_target(hotkey_saved_width(binding.keycaps().len()));
         match kind {
             HotkeyKind::Dictation => self.settings.dictation_hotkey = binding,
             HotkeyKind::Edit => self.settings.edit_hotkey = binding,
             HotkeyKind::PasteLast => self.settings.paste_last_hotkey = Some(binding),
+        }
+        if kind == HotkeyKind::Dictation && !key_based {
+            self.settings.double_tap_only = false;
         }
         self.save_settings(cx);
         crate::app_settings::set_hotkey_capture_active(false);
@@ -3000,6 +3008,13 @@ impl AppWindow {
                 cx.notify();
             }));
         let double_tap_position = self.double_tap_toggle.render_position(window);
+        self.double_tap_only_visibility.set_enabled(
+            self.settings.double_tap_lock && self.settings.dictation_hotkey.key.is_some(),
+        );
+        let double_tap_only_visibility = self
+            .double_tap_only_visibility
+            .render_position(window)
+            .clamp(0.0, 1.0);
         let dock_icon_position = self.dock_icon_toggle.render_position(window);
         let launch_at_login_position = self.launch_at_login_toggle.render_position(window);
         let microphone_label = self
@@ -3234,21 +3249,27 @@ impl AppWindow {
                                         })),
                                     )
                                     .child(
-                                        settings_row(
-                                            "Double-tap only",
-                                            "For key shortcuts, wait for two complete taps before recording",
-                                            toggle(if self.settings.double_tap_only { 1.0 } else { 0.0 }),
-                                        )
-                                        .id("double-tap-only-setting")
-                                        .on_click(cx.listener(|this, _, _, cx| {
-                                            let enabled = !this.snapshot().double_tap_only;
-                                            if let Err(error) = this.dispatch(
-                                                DesktopAction::SetDoubleTapOnly(enabled),
-                                            ) {
-                                                tracing::error!(%error, "could not update double-tap-only setting");
-                                            }
-                                            cx.notify();
-                                        })),
+                                        div()
+                                            .h(px(72.0 * double_tap_only_visibility))
+                                            .overflow_hidden()
+                                            .opacity(double_tap_only_visibility)
+                                            .child(
+                                                settings_row(
+                                                    "Double-tap only",
+                                                    "Wait for two complete shortcut taps before recording",
+                                                    toggle(if self.settings.double_tap_only { 1.0 } else { 0.0 }),
+                                                )
+                                                .id("double-tap-only-setting")
+                                                .on_click(cx.listener(|this, _, _, cx| {
+                                                    let enabled = !this.snapshot().double_tap_only;
+                                                    if let Err(error) = this.dispatch(
+                                                        DesktopAction::SetDoubleTapOnly(enabled),
+                                                    ) {
+                                                        tracing::error!(%error, "could not update double-tap-only setting");
+                                                    }
+                                                    cx.notify();
+                                                })),
+                                            ),
                                     )
                                     .child(
                                         settings_row(
