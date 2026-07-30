@@ -334,6 +334,24 @@ Opening the microphone, first-capture buffering, cancellation before stream
 readiness, device switching, and recovery remain owned by `dictation_audio`, not
 coordinated by the Settings UI.
 
+When idle release is enabled:
+
+- `dictation_audio` closes the stream only after active capture is idle; already
+  accepted jobs own their audio and do not keep the microphone open;
+- a physical shortcut press starts opening the current selected device without
+  fabricating pre-roll or moving the source event timestamp;
+- the 300 ms intentional-hold decision still uses physical event time, not
+  stream-open completion time;
+- release before the stream is ready cancels the open and discards without
+  inference, paste, feedback side effects, or a fabricated release boundary;
+- release after readiness submits only audio actually captured between stream
+  readiness and the physical release;
+- device-open failure produces bounded error feedback and returns to idle;
+- microphone selection while closed applies on the next open, and recovery
+  retries only while a capture still owns the stream;
+- changing the setting during active or locked capture takes effect after that
+  capture finishes or cancels.
+
 ### Restore Bounded Audio Playback For New History
 
 Add `Retain audio for playback`, off by default.
