@@ -714,7 +714,9 @@ fn apply_developer_command(
                     return DeveloperReply::error("settings-load-failed", error.to_string());
                 }
             };
-            settings.commands_enabled = enabled;
+            if let Err(error) = settings.set_commands_enabled(enabled) {
+                return DeveloperReply::error("settings-conflict", error.to_string());
+            }
             match settings.save() {
                 Ok(()) => DeveloperReply::Ok,
                 Err(error) => DeveloperReply::error("settings-save-failed", error.to_string()),

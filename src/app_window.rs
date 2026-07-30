@@ -626,6 +626,20 @@ enum HotkeyKind {
     PasteLast,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum MicrophonePrerequisite {
+    EnableCommands,
+    ReleaseMicrophone,
+}
+
+#[derive(Clone, Copy)]
+enum MicrophonePolicyChange {
+    SetCommands(bool),
+    SetReleaseWhileIdle(bool),
+    KeepReadyAndEnableCommands,
+    DisableCommandsAndRelease,
+}
+
 enum HotkeyCaptureState {
     Idle,
     Listening {
@@ -739,6 +753,8 @@ pub struct AppWindow {
     update_status: crate::sparkle::UpdateStatus,
     update_status_changed_at: Instant,
     commands_toggle: ToggleSpring,
+    release_microphone_toggle: ToggleSpring,
+    microphone_prerequisite: Option<MicrophonePrerequisite>,
     double_tap_toggle: ToggleSpring,
     double_tap_only_visibility: ToggleSpring,
     dock_icon_toggle: ToggleSpring,
@@ -1117,6 +1133,8 @@ impl AppWindow {
             update_status: crate::sparkle::status(),
             update_status_changed_at: Instant::now(),
             commands_toggle: ToggleSpring::new(settings.commands_enabled),
+            release_microphone_toggle: ToggleSpring::new(settings.release_microphone_while_idle),
+            microphone_prerequisite: None,
             double_tap_toggle: ToggleSpring::new(settings.double_tap_lock),
             double_tap_only_visibility: ToggleSpring::new(
                 settings.double_tap_lock && settings.dictation_hotkey.key.is_some(),
@@ -1325,20 +1343,44 @@ impl AppWindow {
         enabled: bool,
         cx: &mut Context<Self>,
     ) -> Result<(), String> {
-        self.settings.commands_enabled = enabled;
-        self.commands_toggle.set_enabled(enabled);
-        self.settings_save_generation = self.settings_save_generation.wrapping_add(1);
-        let result = if self.preview {
-            Ok(())
-        } else {
-            self.settings.save().map_err(|error| error.to_string())
-        };
-        if result.is_ok() {
-            self.settings_dirty = false;
-            self.settings_load_error = None;
+        self.update_microphone_policy(MicrophonePolicyChange::SetCommands(enabled), cx)
+            .map_err(|error| error.to_string())
+    }
+
+    fn update_microphone_policy(
+        &mut self,
+        change: MicrophonePolicyChange,
+        cx: &mut Context<Self>,
+    ) -> color_eyre::Result<()> {
+        let mut candidate = self.settings.clone();
+        match change {
+            MicrophonePolicyChange::SetCommands(enabled) => {
+                candidate.set_commands_enabled(enabled)?
+            }
+            MicrophonePolicyChange::SetReleaseWhileIdle(enabled) => {
+                candidate.set_release_microphone_while_idle(enabled)?
+            }
+            MicrophonePolicyChange::KeepReadyAndEnableCommands => {
+                candidate.keep_microphone_ready_and_enable_commands()
+            }
+            MicrophonePolicyChange::DisableCommandsAndRelease => {
+                candidate.disable_commands_and_release_microphone()
+            }
         }
+        if !self.preview {
+            candidate.save()?;
+        }
+        self.settings = candidate;
+        self.commands_toggle
+            .set_enabled(self.settings.commands_enabled);
+        self.release_microphone_toggle
+            .set_enabled(self.settings.release_microphone_while_idle);
+        self.microphone_prerequisite = None;
+        self.settings_save_generation = self.settings_save_generation.wrapping_add(1);
+        self.settings_dirty = false;
+        self.settings_load_error = None;
         cx.notify();
-        result
+        Ok(())
     }
 
     fn poll_model_catalog(&mut self) -> bool {
@@ -3008,6 +3050,7 @@ impl AppWindow {
                 cx.notify();
             }));
         let double_tap_position = self.double_tap_toggle.render_position(window);
+        let release_microphone_position = self.release_microphone_toggle.render_position(window);
         self.double_tap_only_visibility.set_enabled(
             self.settings.double_tap_lock && self.settings.dictation_hotkey.key.is_some(),
         );
@@ -3139,6 +3182,40 @@ impl AppWindow {
                         }))
                 }),
             );
+        let release_microphone_control =
+            if self.microphone_prerequisite == Some(MicrophonePrerequisite::ReleaseMicrophone) {
+                compact_button("Disable Commands & Release Microphone")
+                    .id("confirm-release-microphone")
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        if let Err(error) = this.update_microphone_policy(
+                            MicrophonePolicyChange::DisableCommandsAndRelease,
+                            cx,
+                        ) {
+                            tracing::error!(%error, "could not update microphone policy");
+                        }
+                    }))
+                    .into_any_element()
+            } else {
+                div()
+                    .id("release-microphone-while-idle")
+                    .child(toggle(release_microphone_position))
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        let enabled = !this.settings.release_microphone_while_idle;
+                        if enabled && this.settings.commands_enabled {
+                            this.microphone_prerequisite =
+                                Some(MicrophonePrerequisite::ReleaseMicrophone);
+                            cx.notify();
+                            return;
+                        }
+                        if let Err(error) = this.update_microphone_policy(
+                            MicrophonePolicyChange::SetReleaseWhileIdle(enabled),
+                            cx,
+                        ) {
+                            tracing::error!(%error, "could not update microphone policy");
+                        }
+                    }))
+                    .into_any_element()
+            };
         div()
             .size_full()
             .flex()
@@ -3230,6 +3307,11 @@ impl AppWindow {
                                         )
                                         .id("recording-audio-setting"),
                                     )
+                                    .child(settings_row(
+                                        "Release microphone while idle",
+                                        "Adds first-capture latency and disables audio pre-roll",
+                                        release_microphone_control,
+                                    ))
                                     .child(
                                         settings_row(
                                             "Double-tap to lock",
@@ -5969,15 +6051,22 @@ impl AppWindow {
             }))
         });
         let commands_position = self.commands_toggle.render_position(window);
-        let commands_control = div()
-            .flex()
-            .items_center()
-            .gap_2()
-            .child(config_control)
-            .when_some(copy_prompt, |controls, prompt| controls.child(prompt))
-            .child(
+        let commands_toggle_control =
+            if self.microphone_prerequisite == Some(MicrophonePrerequisite::EnableCommands) {
+                compact_button("Keep Microphone Ready & Enable Commands")
+                    .id("confirm-enable-commands")
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        cx.stop_propagation();
+                        if let Err(error) = this.update_microphone_policy(
+                            MicrophonePolicyChange::KeepReadyAndEnableCommands,
+                            cx,
+                        ) {
+                            tracing::error!(%error, "could not update microphone policy");
+                        }
+                    }))
+                    .into_any_element()
+            } else {
                 div()
-                    .id("commands-enabled")
                     .flex()
                     .items_center()
                     .gap_3()
@@ -5989,8 +6078,28 @@ impl AppWindow {
                         },
                     ))
                     .child(toggle(commands_position))
+                    .into_any_element()
+            };
+        let commands_control = div()
+            .flex()
+            .items_center()
+            .gap_2()
+            .child(config_control)
+            .when_some(copy_prompt, |controls, prompt| controls.child(prompt))
+            .child(
+                div()
+                    .id("commands-enabled")
+                    .flex()
+                    .items_center()
+                    .child(commands_toggle_control)
                     .on_click(cx.listener(|this, _, _, cx| {
                         let enabled = !this.settings.commands_enabled;
+                        if enabled && this.settings.release_microphone_while_idle {
+                            this.microphone_prerequisite =
+                                Some(MicrophonePrerequisite::EnableCommands);
+                            cx.notify();
+                            return;
+                        }
                         if let Err(error) = this.developer_set_commands_enabled(enabled, cx) {
                             tracing::error!(%error, "could not save app settings");
                         }

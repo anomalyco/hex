@@ -13,7 +13,7 @@ use crate::transcription_models::TranscriptionSelection;
 static RECORDING_AUDIO_BEHAVIOR: AtomicU8 = AtomicU8::new(0);
 static DOUBLE_TAP_LOCK: AtomicBool = AtomicBool::new(true);
 static DOUBLE_TAP_ONLY: AtomicBool = AtomicBool::new(false);
-static COMMANDS_ENABLED: AtomicBool = AtomicBool::new(false);
+static MICROPHONE_POLICY: AtomicU8 = AtomicU8::new(0);
 static CUSTOM_TRANSFORMATIONS_ENABLED: AtomicBool = AtomicBool::new(false);
 static HOTKEYS: OnceLock<RwLock<RuntimeHotkeys>> = OnceLock::new();
 static PASTE_KEY_CODE: OnceLock<u16> = OnceLock::new();
@@ -521,6 +521,7 @@ impl RecordingAudioBehavior {
 #[serde(default)]
 pub struct AppSettings {
     pub commands_enabled: bool,
+    pub release_microphone_while_idle: bool,
     pub sound_effects: bool,
     pub sound_effect_volume: f32,
     pub microphone: Option<String>,
@@ -555,6 +556,7 @@ impl Default for AppSettings {
     fn default() -> Self {
         Self {
             commands_enabled: false,
+            release_microphone_while_idle: false,
             sound_effects: true,
             sound_effect_volume: 0.5,
             microphone: None,
@@ -575,6 +577,55 @@ impl Default for AppSettings {
 }
 
 impl AppSettings {
+    fn normalize_microphone_policy(&mut self) -> bool {
+        if self.commands_enabled && self.release_microphone_while_idle {
+            tracing::warn!("disabled voice commands because idle microphone release is enabled");
+            self.commands_enabled = false;
+            true
+        } else {
+            false
+        }
+    }
+
+    fn validate_microphone_policy(&self) -> Result<()> {
+        if self.commands_enabled && self.release_microphone_while_idle {
+            return Err(eyre!(
+                "voice commands require the microphone to remain ready"
+            ));
+        }
+        Ok(())
+    }
+
+    pub fn set_commands_enabled(&mut self, enabled: bool) -> Result<()> {
+        if enabled && self.release_microphone_while_idle {
+            return Err(eyre!(
+                "disable idle microphone release before enabling voice commands"
+            ));
+        }
+        self.commands_enabled = enabled;
+        Ok(())
+    }
+
+    pub fn set_release_microphone_while_idle(&mut self, enabled: bool) -> Result<()> {
+        if enabled && self.commands_enabled {
+            return Err(eyre!(
+                "disable voice commands before enabling idle microphone release"
+            ));
+        }
+        self.release_microphone_while_idle = enabled;
+        Ok(())
+    }
+
+    pub fn keep_microphone_ready_and_enable_commands(&mut self) {
+        self.release_microphone_while_idle = false;
+        self.commands_enabled = true;
+    }
+
+    pub fn disable_commands_and_release_microphone(&mut self) {
+        self.commands_enabled = false;
+        self.release_microphone_while_idle = true;
+    }
+
     fn normalize_double_tap_settings(&mut self) {
         if !self.double_tap_lock || self.dictation_hotkey.key.is_none() {
             self.double_tap_only = false;
@@ -586,13 +637,16 @@ impl AppSettings {
         match fs::read(path) {
             Ok(data) => {
                 let mut settings: Self = serde_json::from_slice(&data)?;
+                let microphone_policy_migrated = settings.normalize_microphone_policy();
                 settings.dictation_processing.default_mode.name = "Global".into();
                 settings.normalize_double_tap_settings();
                 settings.migrate_legacy_replacements();
                 let transcription_migrated = settings.migrate_disabled_transcription_model();
                 crate::transcription_models::validate(&settings.transcription)?;
                 settings.repair_hotkey_conflict();
-                if transcription_migrated && let Err(error) = settings.save() {
+                if (transcription_migrated || microphone_policy_migrated)
+                    && let Err(error) = settings.save()
+                {
                     tracing::warn!(%error, "could not persist the replacement transcription model");
                 }
                 settings.apply_runtime();
@@ -608,6 +662,7 @@ impl AppSettings {
     }
 
     pub fn save(&self) -> Result<()> {
+        self.validate_microphone_policy()?;
         let path = path()?;
         let parent = path
             .parent()
@@ -621,7 +676,9 @@ impl AppSettings {
     }
 
     fn apply_runtime(&self) {
-        COMMANDS_ENABLED.store(self.commands_enabled, Ordering::Release);
+        let policy =
+            u8::from(self.commands_enabled) | (u8::from(self.release_microphone_while_idle) << 1);
+        MICROPHONE_POLICY.store(policy, Ordering::Release);
         CUSTOM_TRANSFORMATIONS_ENABLED.store(
             !self
                 .dictation_processing
@@ -782,7 +839,11 @@ pub fn recording_audio_behavior() -> RecordingAudioBehavior {
 }
 
 pub fn commands_enabled() -> bool {
-    COMMANDS_ENABLED.load(Ordering::Acquire)
+    MICROPHONE_POLICY.load(Ordering::Acquire) & 1 != 0
+}
+
+pub fn release_microphone_while_idle() -> bool {
+    MICROPHONE_POLICY.load(Ordering::Acquire) & 2 != 0
 }
 
 pub fn custom_transformations_enabled() -> bool {
@@ -864,6 +925,7 @@ mod tests {
     fn missing_fields_receive_defaults() {
         let settings: AppSettings = serde_json::from_str("{}").unwrap();
         assert!(!settings.commands_enabled);
+        assert!(!settings.release_microphone_while_idle);
         assert!(settings.sound_effects);
         assert_eq!(settings.sound_effect_volume, 0.5);
         assert_eq!(settings.microphone, None);
@@ -901,6 +963,37 @@ mod tests {
         let serialized = serde_json::to_value(settings).unwrap();
 
         assert!(serialized.get("prevent_system_sleep").is_none());
+    }
+
+    #[test]
+    fn microphone_policy_requires_explicit_combined_transitions() {
+        let mut settings = AppSettings::default();
+        settings.set_release_microphone_while_idle(true).unwrap();
+        assert!(settings.set_commands_enabled(true).is_err());
+        assert!(!settings.commands_enabled);
+        assert!(settings.release_microphone_while_idle);
+
+        settings.keep_microphone_ready_and_enable_commands();
+        assert!(settings.commands_enabled);
+        assert!(!settings.release_microphone_while_idle);
+        assert!(settings.set_release_microphone_while_idle(true).is_err());
+
+        settings.disable_commands_and_release_microphone();
+        assert!(!settings.commands_enabled);
+        assert!(settings.release_microphone_while_idle);
+    }
+
+    #[test]
+    fn invalid_persisted_microphone_policy_prefers_idle_release() {
+        let mut settings: AppSettings = serde_json::from_str(
+            r#"{"commands_enabled":true,"release_microphone_while_idle":true}"#,
+        )
+        .unwrap();
+
+        assert!(settings.normalize_microphone_policy());
+        assert!(!settings.commands_enabled);
+        assert!(settings.release_microphone_while_idle);
+        assert!(settings.validate_microphone_policy().is_ok());
     }
 
     #[test]
