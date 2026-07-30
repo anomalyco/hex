@@ -1,3 +1,4 @@
+use std::fs;
 use std::process::Command;
 
 use block2::RcBlock;
@@ -12,6 +13,27 @@ pub enum PermissionState {
     Ready,
     NeedsRequest,
     NeedsSettings,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PermissionKind {
+    Microphone,
+    InputMonitoring,
+    Accessibility,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PermissionAction {
+    RequestMicrophone,
+    OpenMicrophoneSettings,
+    OpenInputMonitoringSettings,
+    OpenAccessibilitySettings,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct PermissionWarning {
+    pub kind: PermissionKind,
+    pub action: PermissionAction,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -31,6 +53,46 @@ impl SetupStatus {
             && self.command_model
             && self.transcription_model
     }
+}
+
+pub fn permission_warnings(status: SetupStatus) -> Vec<PermissionWarning> {
+    let mut warnings = Vec::with_capacity(3);
+    match status.microphone {
+        PermissionState::Ready => {}
+        PermissionState::NeedsRequest => warnings.push(PermissionWarning {
+            kind: PermissionKind::Microphone,
+            action: PermissionAction::RequestMicrophone,
+        }),
+        PermissionState::NeedsSettings => warnings.push(PermissionWarning {
+            kind: PermissionKind::Microphone,
+            action: PermissionAction::OpenMicrophoneSettings,
+        }),
+    }
+    if status.input_monitoring != PermissionState::Ready {
+        warnings.push(PermissionWarning {
+            kind: PermissionKind::InputMonitoring,
+            action: PermissionAction::OpenInputMonitoringSettings,
+        });
+    }
+    if status.accessibility != PermissionState::Ready {
+        warnings.push(PermissionWarning {
+            kind: PermissionKind::Accessibility,
+            action: PermissionAction::OpenAccessibilitySettings,
+        });
+    }
+    warnings
+}
+
+pub fn completion_recorded() -> bool {
+    crate::app_paths::support_dir()
+        .is_ok_and(|directory| directory.join("onboarding-complete").is_file())
+}
+
+pub fn record_completion() -> color_eyre::Result<()> {
+    let directory = crate::app_paths::support_dir()?;
+    fs::create_dir_all(&directory)?;
+    fs::write(directory.join("onboarding-complete"), [])?;
+    Ok(())
 }
 
 pub fn status(selection: &TranscriptionSelection) -> SetupStatus {
@@ -166,5 +228,56 @@ mod tests {
             PermissionState::NeedsSettings
         );
         assert_eq!(microphone_authorization_state(3), PermissionState::Ready);
+    }
+
+    #[test]
+    fn healthy_permissions_have_no_warning_projection() {
+        assert!(permission_warnings(ready_status()).is_empty());
+    }
+
+    #[test]
+    fn warning_projection_preserves_permission_order_and_actions() {
+        let warnings = permission_warnings(SetupStatus {
+            microphone: PermissionState::NeedsRequest,
+            input_monitoring: PermissionState::NeedsSettings,
+            accessibility: PermissionState::NeedsSettings,
+            ..ready_status()
+        });
+        assert_eq!(
+            warnings,
+            [
+                PermissionWarning {
+                    kind: PermissionKind::Microphone,
+                    action: PermissionAction::RequestMicrophone,
+                },
+                PermissionWarning {
+                    kind: PermissionKind::InputMonitoring,
+                    action: PermissionAction::OpenInputMonitoringSettings,
+                },
+                PermissionWarning {
+                    kind: PermissionKind::Accessibility,
+                    action: PermissionAction::OpenAccessibilitySettings,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn denied_microphone_maps_to_settings_in_warning_projection() {
+        let warning = permission_warnings(SetupStatus {
+            microphone: PermissionState::NeedsSettings,
+            ..ready_status()
+        });
+        assert_eq!(warning[0].action, PermissionAction::OpenMicrophoneSettings);
+    }
+
+    fn ready_status() -> SetupStatus {
+        SetupStatus {
+            microphone: PermissionState::Ready,
+            input_monitoring: PermissionState::Ready,
+            accessibility: PermissionState::Ready,
+            command_model: true,
+            transcription_model: true,
+        }
     }
 }

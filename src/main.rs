@@ -181,6 +181,9 @@ enum Command {
         /// Preview OpenCode-dependent controls without an available installation.
         #[arg(long)]
         opencode_unavailable: bool,
+        /// Show missing post-onboarding permissions in Settings.
+        #[arg(long)]
+        permissions_missing: bool,
     },
     /// Listen and transcribe until interrupted.
     Listen {
@@ -431,6 +434,7 @@ fn main() -> Result<()> {
             open_transformation_picker,
             select_global_mode,
             opencode_unavailable,
+            permissions_missing,
         } => {
             if matches!(target, AppPreviewTarget::DictationHud) {
                 return meeting_watcher::run(&SHUTDOWN, false, None, true);
@@ -473,6 +477,7 @@ fn main() -> Result<()> {
                     open_transformation_picker,
                     select_global_mode,
                     opencode_unavailable,
+                    permissions_missing,
                 },
             )
         }

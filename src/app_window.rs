@@ -52,7 +52,9 @@ use crate::events::{
 use crate::history::{History, HistoryEntry, HistoryKind, HistoryRetention};
 use crate::login_item::LoginItemStatus;
 use crate::meeting::{self, MeetingManifest, MeetingRequest, MeetingStatus};
-use crate::onboarding::{PermissionState, SetupStatus};
+use crate::onboarding::{
+    PermissionAction, PermissionKind, PermissionState, PermissionWarning, SetupStatus,
+};
 use crate::personal_commands::{HostState, StatusContext, StatusSnapshot, StatusTransformation};
 use crate::text_input::{
     Changed as TextChanged, Dismissed as TextDismissed, Navigate as TextNavigate,
@@ -69,6 +71,7 @@ const MINIMUM_WIDTH: f32 = 860.0;
 const MINIMUM_HEIGHT: f32 = 560.0;
 const HOTKEY_MIN_WIDTH: f32 = 148.0;
 const OPENCODE_INSTALL_RETRY_INTERVAL: Duration = Duration::from_secs(60);
+const PERMISSION_REFRESH_INTERVAL: Duration = Duration::from_secs(5);
 const MAX_OPENCODE_ERROR_BYTES: usize = 4 * 1024;
 const ACTIVITY_LIMIT: usize = 100;
 const OPENCODE_BETA_DOCS_URL: &str = "https://v2.opencode.ai/";
@@ -244,6 +247,7 @@ pub struct AppWindowPreview {
     pub open_transformation_picker: bool,
     pub select_global_mode: bool,
     pub opencode_unavailable: bool,
+    pub permissions_missing: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -717,6 +721,8 @@ pub struct AppWindow {
     recognition_start: Option<SyncSender<()>>,
     setup_status: SetupStatus,
     setup_visible: bool,
+    onboarding_completed: bool,
+    permission_refresh_at: Instant,
     settings: AppSettings,
     settings_load_error: Option<String>,
     microphone_devices: Vec<String>,
@@ -767,6 +773,7 @@ pub struct AppWindow {
     window_focus: FocusHandle,
     hotkey_focus: FocusHandle,
     _hotkey_blur_subscription: Subscription,
+    _activation_subscription: Subscription,
     meetings: Vec<MeetingManifest>,
     meetings_error: Option<String>,
     meeting_runtime_error: Option<String>,
@@ -948,6 +955,15 @@ impl AppWindow {
         let hotkey_blur_subscription = cx.on_blur(&hotkey_focus, native_window, |this, _, cx| {
             this.cancel_hotkey_capture(cx)
         });
+        let activation_subscription =
+            cx.observe_window_activation(native_window, |this, window, cx| {
+                if window.is_window_active() {
+                    this.permission_refresh_at = Instant::now();
+                    if this.poll_setup() {
+                        cx.notify();
+                    }
+                }
+            });
         let compiled_commands = commands
             .catalog()
             .into_iter()
@@ -1008,6 +1024,25 @@ impl AppWindow {
                 command_model: false,
                 transcription_model: false,
             }
+        } else if preview
+            .as_ref()
+            .is_some_and(|preview| preview.permissions_missing)
+        {
+            SetupStatus {
+                microphone: PermissionState::NeedsRequest,
+                input_monitoring: PermissionState::NeedsSettings,
+                accessibility: PermissionState::NeedsSettings,
+                command_model: true,
+                transcription_model: true,
+            }
+        } else if preview_mode {
+            SetupStatus {
+                microphone: PermissionState::Ready,
+                input_monitoring: PermissionState::Ready,
+                accessibility: PermissionState::Ready,
+                command_model: true,
+                transcription_model: true,
+            }
         } else {
             crate::onboarding::status_with_transcription_model(selected_model.is_some_and(
                 |model| {
@@ -1018,8 +1053,9 @@ impl AppWindow {
                 },
             ))
         };
+        let onboarding_completed = preview_mode || crate::onboarding::completion_recorded();
         let setup_visible = preview.as_ref().is_some_and(|preview| preview.onboarding)
-            || !preview_mode && !setup_status.ready();
+            || !onboarding_completed && !setup_status.ready();
         let microphone_devices = crate::audio::input_device_names().unwrap_or_else(|error| {
             tracing::warn!(%error, "could not list microphones for settings");
             Vec::new()
@@ -1060,6 +1096,8 @@ impl AppWindow {
             recognition_start,
             setup_status,
             setup_visible,
+            onboarding_completed,
+            permission_refresh_at: Instant::now() + PERMISSION_REFRESH_INTERVAL,
             microphone_devices,
             microphone_picker_open: false,
             microphone_picker_error: None,
@@ -1139,6 +1177,7 @@ impl AppWindow {
             window_focus,
             hotkey_focus,
             _hotkey_blur_subscription: hotkey_blur_subscription,
+            _activation_subscription: activation_subscription,
             settings,
             settings_load_error,
             meetings: Vec::new(),
@@ -1207,6 +1246,8 @@ impl AppWindow {
         if self.pane == Pane::Modes {
             self.ensure_application_catalog_load();
         }
+        self.permission_refresh_at = Instant::now();
+        self.poll_setup();
         cx.notify();
     }
 
@@ -1219,7 +1260,8 @@ impl AppWindow {
             Pane::Commands | Pane::Activity => self.reload_events(),
             Pane::History => self.reload_history(cx),
             Pane::Modes => self.ensure_application_catalog_load(),
-            Pane::VoiceAction | Pane::Settings => {}
+            Pane::VoiceAction => {}
+            Pane::Settings => self.permission_refresh_at = Instant::now(),
         }
         cx.notify();
     }
@@ -1359,13 +1401,16 @@ impl AppWindow {
     }
 
     fn poll_setup(&mut self) -> bool {
-        if !self.setup_visible && self.recognition_start.is_none() {
+        if self.preview
+            || Instant::now() < self.permission_refresh_at
+            || !self.setup_visible
+                && self.recognition_start.is_none()
+                && self.pane != Pane::Settings
+        {
             return false;
         }
+        self.permission_refresh_at = Instant::now() + PERMISSION_REFRESH_INTERVAL;
         let mut changed = false;
-        if self.preview {
-            return changed;
-        }
         let transcription_model = validate(&self.settings.transcription).is_ok_and(|model| {
             crate::transcription_models::is_installed(model, &self.settings.transcription.language)
         });
@@ -1375,6 +1420,12 @@ impl AppWindow {
             changed = true;
         }
         if self.setup_status.ready() {
+            if !self.onboarding_completed {
+                if let Err(error) = crate::onboarding::record_completion() {
+                    tracing::warn!(%error, "could not record onboarding completion");
+                }
+                self.onboarding_completed = true;
+            }
             if let Some(start) = self.recognition_start.take() {
                 let _ = start.try_send(());
             }
@@ -2744,7 +2795,50 @@ impl AppWindow {
         cx.notify();
     }
 
+    fn render_permission_warnings(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let warnings = crate::onboarding::permission_warnings(self.setup_status);
+        if self.setup_visible || warnings.is_empty() {
+            return None;
+        }
+        Some(
+            div()
+                .child(settings_section_label("PERMISSIONS"))
+                .child(
+                    settings_panel().children(warnings.into_iter().map(|warning| {
+                        let (name, description) = permission_warning_copy(warning.kind);
+                        let action = compact_button(permission_action_label(warning.action))
+                            .id(permission_warning_id(warning.kind))
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.perform_permission_action(warning);
+                                cx.notify();
+                            }));
+                        settings_row(name, description, action)
+                    })),
+                )
+                .into_any_element(),
+        )
+    }
+
+    fn perform_permission_action(&mut self, warning: PermissionWarning) {
+        match warning.action {
+            PermissionAction::RequestMicrophone => crate::onboarding::request_microphone(),
+            PermissionAction::OpenMicrophoneSettings => {
+                crate::onboarding::open_permission_settings("microphone");
+            }
+            PermissionAction::OpenInputMonitoringSettings => {
+                crate::onboarding::request_input_monitoring();
+                crate::onboarding::open_permission_settings("input");
+            }
+            PermissionAction::OpenAccessibilitySettings => {
+                crate::onboarding::request_accessibility();
+                crate::onboarding::open_permission_settings("accessibility");
+            }
+        }
+        self.permission_refresh_at = Instant::now() + PERMISSION_REFRESH_INTERVAL;
+    }
+
     fn render_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        let permission_warnings = self.render_permission_warnings(cx);
         let hotkey_control = self.render_hotkey_control(HotkeyKind::Dictation, window, cx);
         let transcription_model = definition(self.settings.transcription.model);
         let transcription_label = format!(
@@ -2908,6 +3002,7 @@ impl AppWindow {
                                     .w_full()
                                     .max_w(px(PANE_CONTENT_WIDTH))
                                     .relative()
+                                    .children(permission_warnings)
                                     .child(settings_section_label("DICTATION"))
                                     .child(
                                         settings_panel()
@@ -7341,6 +7436,40 @@ fn setup_ready_badge() -> AnyElement {
         .text_color(rgb(0x91bd99))
         .child("Ready")
         .into_any_element()
+}
+
+const fn permission_warning_copy(kind: PermissionKind) -> (&'static str, &'static str) {
+    match kind {
+        PermissionKind::Microphone => (
+            "Microphone access is off",
+            "HEX cannot record dictation until microphone access is restored.",
+        ),
+        PermissionKind::InputMonitoring => (
+            "Input Monitoring is off",
+            "HEX cannot recognize the dictation shortcut in other apps.",
+        ),
+        PermissionKind::Accessibility => (
+            "Accessibility is off",
+            "HEX cannot paste completed dictation into the foreground app.",
+        ),
+    }
+}
+
+const fn permission_action_label(action: PermissionAction) -> &'static str {
+    match action {
+        PermissionAction::RequestMicrophone => "Allow",
+        PermissionAction::OpenMicrophoneSettings
+        | PermissionAction::OpenInputMonitoringSettings
+        | PermissionAction::OpenAccessibilitySettings => "Open Settings",
+    }
+}
+
+const fn permission_warning_id(kind: PermissionKind) -> &'static str {
+    match kind {
+        PermissionKind::Microphone => "permission-warning-microphone",
+        PermissionKind::InputMonitoring => "permission-warning-input-monitoring",
+        PermissionKind::Accessibility => "permission-warning-accessibility",
+    }
 }
 
 fn hotkey_modifiers(modifiers: GpuiModifiers) -> HotkeyModifiers {
