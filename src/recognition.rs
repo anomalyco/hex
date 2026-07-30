@@ -69,6 +69,11 @@ enum FinishResult {
     Rejected(String),
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RecognitionControl {
+    PasteLast,
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn listen(
     project_root: &Path,
@@ -79,6 +84,7 @@ pub fn listen(
     indicator: Option<DictationIndicatorSender>,
     meeting_requests: Option<SyncSender<MeetingRequest>>,
     history: Option<crate::history::History>,
+    controls: Option<Receiver<RecognitionControl>>,
 ) -> Result<()> {
     let commands = Arc::new(commands);
     let native_runtime = Arc::new(crate::personal_commands::RuntimeSnapshot::native(
@@ -173,6 +179,24 @@ pub fn listen(
     }
 
     while !shutdown.load(Ordering::Relaxed) {
+        if let Some(controls) = &controls {
+            while let Ok(control) = controls.try_recv() {
+                match control {
+                    RecognitionControl::PasteLast => handle_hotkey_action(
+                        HotkeyAction::PasteLast,
+                        CaptureInstant::now(),
+                        &mut recognizer,
+                        &input,
+                        &dictation_worker,
+                        mode,
+                        &context,
+                        &input.device_name(),
+                        &mut events,
+                        indicator.as_ref(),
+                    )?,
+                }
+            }
+        }
         while let Ok(next_context) = context_monitor.updates.try_recv() {
             if context != next_context {
                 input_monitor.activity.invalidate();

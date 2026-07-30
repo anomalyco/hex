@@ -108,6 +108,8 @@ only in debug builds.
 - `app_window`: the production Settings, Modes with mode-owned processing,
   Voice Action, History, Replacements, and opt-in Commands shell plus
   developer-only Meetings, Activity, and HUD Lab panes.
+- `status_item`: the persistent macOS menu-bar owner for Settings, Paste Last
+  Dictation, update checks, and orderly application shutdown.
 - `dictation_indicator`: the click-through Metal/GPUI capture and processing HUD.
 - `meeting`: explicit ScreenCaptureKit capture, owner-only WAV and transcript
   artifacts, final local-model publication, and recovery.

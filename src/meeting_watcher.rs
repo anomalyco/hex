@@ -61,6 +61,8 @@ struct MeetingUi {
     indicator: crate::dictation_indicator::DictationIndicatorSender,
     recognition_start: Option<SyncSender<()>>,
     history: Option<crate::history::History>,
+    recognition_controls: SyncSender<crate::recognition::RecognitionControl>,
+    status_actions: Option<Receiver<crate::status_item::StatusItemAction>>,
 }
 
 struct RuntimeWorkers {
@@ -174,6 +176,7 @@ fn run_with_shell_preview(
     let (event_sender, event_receiver) = mpsc::sync_channel(32);
     let (command_sender, command_receiver) = mpsc::sync_channel(8);
     let (meeting_request_sender, meeting_request_receiver) = mpsc::sync_channel(8);
+    let (recognition_control_sender, recognition_control_receiver) = mpsc::sync_channel(8);
     let (indicator_sender, indicator_receiver) = dictation_indicator::channel();
     if dictation_preview {
         let preview_sender = indicator_sender.clone();
@@ -278,6 +281,7 @@ fn run_with_shell_preview(
                 Some(recognition_indicator),
                 meeting_requests,
                 recognition_history,
+                Some(recognition_control_receiver),
             ) {
                 tracing::error!(%error, "desktop recognition stopped");
                 failure_indicator.send(crate::dictation_indicator::DictationIndicatorEvent::Failed);
@@ -387,7 +391,18 @@ fn run_with_shell_preview(
         if shell_preview.is_none() {
             crate::sparkle::start();
         }
-        crate::app_settings::set_dock_icon_visible(show_dock_icon);
+        let status_actions = if shell_preview.is_none() {
+            match crate::status_item::install() {
+                Ok(actions) => Some(actions),
+                Err(error) => {
+                    tracing::error!(%error, "could not install HEX status item");
+                    None
+                }
+            }
+        } else {
+            None
+        };
+        crate::app_settings::set_dock_icon_visible(show_dock_icon || status_actions.is_none());
         let open_result = match shell_preview.clone() {
             Some(preview) => Some(crate::app_window::open_preview(
                 &app_window,
@@ -439,6 +454,8 @@ fn run_with_shell_preview(
                     indicator: indicator_sender.clone(),
                     recognition_start: recognition_start_sender.clone(),
                     history: ui_history.clone(),
+                    recognition_controls: recognition_control_sender.clone(),
+                    status_actions,
                 },
                 shutdown,
                 indicator_enabled,
@@ -493,6 +510,44 @@ async fn drive_ui(
                     )
                 });
             let _ = call.reply.send(reply);
+        }
+        if let Some(status_actions) = &ui.status_actions {
+            while let Ok(action) = status_actions.try_recv() {
+                let result = cx.update(|cx| match action {
+                    crate::status_item::StatusItemAction::OpenSettings => {
+                        match crate::app_window::open_or_focus(
+                            &ui.app_window,
+                            ui.event_path.clone(),
+                            config::voice_control(),
+                            ui.meeting_requests.clone(),
+                            ui.indicator.clone(),
+                            ui.recognition_start.clone(),
+                            ui.history.clone(),
+                            cx,
+                        ) {
+                            Ok(handle) => {
+                                let _ = handle.update(cx, |window, _, cx| window.show_settings(cx));
+                            }
+                            Err(error) => {
+                                tracing::error!(%error, "could not open HEX from status item");
+                            }
+                        }
+                    }
+                    crate::status_item::StatusItemAction::PasteLast => {
+                        let _ = ui
+                            .recognition_controls
+                            .try_send(crate::recognition::RecognitionControl::PasteLast);
+                    }
+                    crate::status_item::StatusItemAction::CheckForUpdates => {
+                        crate::sparkle::check_for_updates();
+                    }
+                    crate::status_item::StatusItemAction::Quit => cx.quit(),
+                });
+                if let Err(error) = result {
+                    tracing::error!(%error, "could not handle HEX status item action");
+                    return;
+                }
+            }
         }
         while let Ok(event) = events.try_recv() {
             let result = cx.update(|cx| match event {

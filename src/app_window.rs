@@ -1224,6 +1224,10 @@ impl AppWindow {
         cx.notify();
     }
 
+    pub(crate) fn show_settings(&mut self, cx: &mut Context<Self>) {
+        self.select_pane(Pane::Settings, cx);
+    }
+
     pub(crate) fn developer_select_pane(
         &mut self,
         pane: crate::developer_control::DeveloperPane,
@@ -3672,7 +3676,6 @@ impl AppWindow {
             .border_1()
             .border_color(rgb(LINE))
             .bg(rgb(SURFACE))
-            .hover(|button| button.bg(rgb(0x303030)))
             .on_click(cx.listener(|this, _, window, cx| {
                 let mut mode = this.settings.dictation_processing.default_mode.clone();
                 mode.name = format!("Mode {}", this.processing_inputs.modes.len() + 1);

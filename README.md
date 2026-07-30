@@ -91,7 +91,7 @@ Review and redact diagnostics before sharing them.
 
 | Symptom | Check |
 | --- | --- |
-| HEX appears to disappear | Reopen it from Applications. The Dock icon is optional. |
+| HEX appears to disappear | Open HEX from its menu-bar hexagon. If the status item could not start, HEX keeps its Dock icon visible. |
 | The shortcut does nothing | Open HEX and verify Microphone and Input Monitoring access. |
 | Recording works but text does not paste | Verify Accessibility access. |
 | Transcription does not start | Confirm that the selected local model is installed. |

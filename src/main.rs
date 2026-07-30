@@ -98,6 +98,8 @@ mod sparkle;
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 mod spoken_text;
 #[cfg(target_os = "macos")]
+mod status_item;
+#[cfg(target_os = "macos")]
 mod suppression;
 #[cfg(target_os = "macos")]
 mod text_input;
@@ -494,6 +496,7 @@ fn main() -> Result<()> {
                 None,
                 None,
                 history,
+                None,
             )
         }
         Command::Service { embedded } => {
