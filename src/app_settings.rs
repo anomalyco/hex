@@ -634,7 +634,7 @@ impl AppSettings {
 
     pub fn load() -> Result<Self> {
         let path = path()?;
-        match fs::read(path) {
+        match fs::read(&path) {
             Ok(data) => {
                 let mut settings: Self = serde_json::from_slice(&data)?;
                 let microphone_policy_migrated = settings.normalize_microphone_policy();
@@ -653,6 +653,13 @@ impl AppSettings {
                 Ok(settings)
             }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                if let Some(mut settings) = crate::swift_settings_import::import() {
+                    settings.normalize_double_tap_settings();
+                    settings.repair_hotkey_conflict();
+                    settings.save()?;
+                    tracing::info!("imported preferences from Swift HEX");
+                    return Ok(settings);
+                }
                 let settings = Self::default();
                 settings.apply_runtime();
                 Ok(settings)

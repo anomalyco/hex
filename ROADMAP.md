@@ -40,8 +40,8 @@ processor chains as future work only if real profiles need composition.
 Replace the public Swift app through the direct, explicitly confirmed migration
 in [`docs/plans/swift-to-rust-migration.md`](docs/plans/swift-to-rust-migration.md).
 Converge both installed populations on `Hex.app`, `com.kitlangton.Hex`, the
-`com.kitlangton.Hex` Application Support root, and the R2 update channel only
-after the allowlisted preference import and agreed parity work are complete.
+existing Rust `voice-control` Application Support root, and the R2 update channel
+only after the allowlisted preference import and agreed parity work are complete.
 
 ## Validate The Linux X11 Beta
 

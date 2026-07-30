@@ -102,6 +102,8 @@ mod status_item;
 #[cfg(target_os = "macos")]
 mod suppression;
 #[cfg(target_os = "macos")]
+mod swift_settings_import;
+#[cfg(target_os = "macos")]
 mod text_input;
 #[cfg(target_os = "macos")]
 mod text_replacements;
