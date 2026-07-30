@@ -48,12 +48,11 @@ Swift installations, but ongoing Rust releases and artifacts live on R2.
   Do not merge Swift preferences over an existing Rust `settings.json`.
 - Relocate an existing Rust Application Support tree as one unit. This is a
   path takeover, not a field-level settings migration.
-- Add audio playback for new Rust history as explicit, bounded retention. This
-  is a new opt-in capability, not preserved consent from Swift history, and it
-  does not make legacy Swift recordings visible in Rust.
+- Keep Rust product history text-only. Do not retain product dictation audio or
+  add playback controls. The bounded environment-controlled diagnostic capture
+  remains a separate explicit developer facility, not history retention.
 - Complete core migration safety and behavioral parity before exposing 2.1.0
-  through the legacy S3 appcast. Retained audio playback soaks independently
-  and does not block migration.
+  through the legacy S3 appcast.
 - Use Sparkle's native seven-cohort phased rollout with a 48-hour interval.
   Manual checks bypass phasing and may receive the update immediately.
 
@@ -353,28 +352,16 @@ When idle release is enabled:
 - changing the setting during active or locked capture takes effect after that
   capture finishes or cancels.
 
-### Restore Bounded Audio Playback For New History
+### Keep Product History Text-Only
 
-Add `Retain audio for playback`, off by default.
+Do not retain audio for product history and do not add playback controls. Swift
+`saveTranscriptionHistory=true` imports no recordings and grants no consent for
+new audio retention. The migration banner states that old transcript and audio
+history remains untouched on disk and that new HEX history contains text only.
 
-- Retain 16 kHz mono WAV only for successful Dictation, Send, and Voice Action
-  entries admitted to History.
-- History Off prevents audio retention.
-- Cancelled, failed, discarded, and non-pasted captures delete disposable audio.
-- Audio expires or is deleted with its history entry.
-- A 1 GB hard cap deletes the oldest retained audio first without deleting the
-  text history entry.
-- History rows expose Play/Pause only, and only one entry plays at a time.
-- Deleting a playing entry stops playback and deletes its WAV.
-- Do not import or play Swift WAVs.
-
-Swift `saveTranscriptionHistory=true` does not imply consent for new Rust audio
-retention. The migration banner explicitly says future history is text-only
-until the user enables playback retention.
-
-This deliberately supersedes the current shipped invariant that product history
-never retains audio. Update `AGENTS.md`, privacy documentation, settings copy,
-and release notes only when the feature ships.
+The explicit `HEX_RETAIN_DICTATION_AUDIO` diagnostic remains owner-only,
+bounded, off by default, and separate from History. It is not migrated,
+discoverable through the product UI, or treated as playback storage.
 
 ## Publish Two Transition Artifacts
 
@@ -393,11 +380,7 @@ soak completed parity slices before 2.1.0:
   for at least 48 hours on current Rust installations;
 - input and capture-lifecycle slices, including side-aware hotkeys,
   double-tap-only, configurable Paste Last, and idle microphone release, pass
-  physical event-trace tests and run for at least seven days;
-- retained audio playback ships off by default as an independently disableable
-  2.0.x capability and runs for at least seven days with storage, cancellation,
-  crash-recovery, and privacy validation. A playback delay or rollback does not
-  block S3 exposure after every core and behavioral gate passes.
+  physical event-trace tests and run for at least seven days.
 
 The legacy S3 feed sees none of these intermediate releases. The 2.1.0 release
 gate then contains the already-soaked behavior plus identity, preflight storage
@@ -625,16 +608,12 @@ Sparkle will not install build 91 over build 20100.
 - Rust-origin Sparkle upgrade intentionally preserves its installed `HEX.app`
   path while adopting the permanent bundle identifier.
 
-### Audio Playback
+### Audio Privacy
 
-- successful Dictation, Send, and Voice Action retention;
-- failed, cancelled, discarded, and non-pasted deletion;
-- history Off and each retention window;
-- oldest-audio pruning at 1 GB without text-entry deletion;
-- one-at-a-time Play/Pause;
-- delete while playing;
-- crash-safe WAV publication and orphan cleanup;
-- no Swift WAV discovery or import.
+- product History persists no audio and exposes no playback controls;
+- no Swift WAV discovery, import, mutation, or deletion;
+- diagnostic audio retention remains explicit, bounded, owner-only, and absent
+  from product History.
 
 ### Release Security
 
@@ -664,8 +643,7 @@ Sparkle will not install build 91 over build 20100.
 - Swift-only users retain every allowlisted behavior and receive normal model
   onboarding.
 - No legacy history, audio, model, or unknown file is deleted.
-- Core migration safety and behavioral parity ship before migration exposure;
-  retained audio playback remains independently gated.
+- Core migration safety and behavioral parity ship before migration exposure.
 - A signed 0.8.4-to-2.1.0 update succeeds on a clean eligible account.
 - A signed 2.0.23-to-2.1.0 update succeeds and repairs identity-owned system
   state explicitly.
