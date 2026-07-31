@@ -1,6 +1,6 @@
 use std::fs;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
 use std::sync::{OnceLock, RwLock};
 
 use color_eyre::eyre::{Result, eyre};
@@ -18,6 +18,7 @@ static CUSTOM_TRANSFORMATIONS_ENABLED: AtomicBool = AtomicBool::new(false);
 static HOTKEYS: OnceLock<RwLock<RuntimeHotkeys>> = OnceLock::new();
 static PASTE_KEY_CODE: OnceLock<u16> = OnceLock::new();
 static HOTKEY_CAPTURE_ACTIVE: AtomicBool = AtomicBool::new(false);
+static SETTINGS_TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 static TRANSCRIPTION_SELECTION: OnceLock<RwLock<RuntimeTranscriptionSelection>> = OnceLock::new();
 static MICROPHONE_SELECTION: OnceLock<RwLock<RuntimeMicrophoneSelection>> = OnceLock::new();
 static VOICE_ACTION_SETTINGS: OnceLock<RwLock<VoiceActionSettings>> = OnceLock::new();
@@ -671,14 +672,19 @@ impl AppSettings {
     pub fn save(&self) -> Result<()> {
         self.validate_microphone_policy()?;
         let path = path()?;
+        self.write_to(&path)?;
+        self.apply_runtime();
+        Ok(())
+    }
+
+    fn write_to(&self, path: &std::path::Path) -> Result<()> {
         let parent = path
             .parent()
             .ok_or_else(|| eyre!("settings path has no parent"))?;
         fs::create_dir_all(parent)?;
-        let temporary = path.with_extension("json.tmp");
+        let temporary = settings_temporary_path(path);
         fs::write(&temporary, serde_json::to_vec_pretty(self)?)?;
         fs::rename(temporary, path)?;
-        self.apply_runtime();
         Ok(())
     }
 
@@ -792,6 +798,11 @@ impl AppSettings {
             self.edit_hotkey = binding;
         }
     }
+}
+
+fn settings_temporary_path(path: &std::path::Path) -> PathBuf {
+    let sequence = SETTINGS_TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    path.with_extension(format!("json.{}.{}.tmp", std::process::id(), sequence))
 }
 
 pub fn hotkeys_conflict(dictation: &HotkeyBinding, edit: &HotkeyBinding) -> bool {
@@ -971,6 +982,16 @@ mod tests {
         assert!(settings.voice_action.variant.is_none());
         assert_eq!(settings.voice_action.deadline_seconds, 60);
         assert!(settings.text_replacements.is_empty());
+    }
+
+    #[test]
+    fn concurrent_settings_writers_use_distinct_temporary_paths() {
+        let path = PathBuf::from("/tmp/settings.json");
+
+        assert_ne!(
+            settings_temporary_path(&path),
+            settings_temporary_path(&path)
+        );
     }
 
     #[test]

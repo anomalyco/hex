@@ -65,12 +65,14 @@ The importer starts from current Rust defaults and independently applies valid
 values for:
 
 - Dictation shortcut, including left/either/right modifier sides.
-- Paste Last shortcut, including an explicitly disabled shortcut.
+- Paste Last shortcut. Swift 0.8.4 omits this optional field when disabled, so
+  an absent or null value disables the Rust shortcut.
 - Double-tap lock and double-tap-only behavior.
 - Recording audio behavior.
 - Microphone lifecycle policy by inverting Swift `superFastModeEnabled` into
   Rust `release_microphone_while_idle`.
-- Sound enabled and volume.
+- Sound enabled and volume, normalized from Swift's `0...0.2` stored gain to
+  Rust's `0...1` user-facing scale.
 - Dock icon visibility.
 
 Character shortcuts resolve through the active macOS keyboard layout. Stable
@@ -79,8 +81,10 @@ ambiguous, empty, or malformed shortcuts preserve the Rust default. Invalid
 individual scalar fields also preserve their Rust defaults without blocking
 other fields.
 
-A successful import writes the ordinary Rust `settings.json` atomically. That
-file is the idempotence marker; there is no migration receipt. Explicit
+A successful import writes the ordinary Rust `settings.json` atomically. Each
+writer uses a process-unique temporary publication path, so concurrent first
+loaders cannot collide on `settings.json.tmp`. The settings file is the
+idempotence marker; there is no migration receipt. Explicit
 `HEX_APPLICATION_SUPPORT_DIR` instances skip import so previews, tests, and
 embedded services stay isolated and deterministic.
 

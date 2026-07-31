@@ -11,6 +11,7 @@ use crate::app_settings::{
 };
 
 const SWIFT_SETTINGS_PATH: &str = "Library/Containers/com.kitlangton.Hex/Data/Library/Application Support/com.kitlangton.Hex/hex_settings.json";
+const SWIFT_BASE_SOUND_EFFECT_VOLUME: f32 = 0.2;
 
 pub fn import() -> Option<AppSettings> {
     // Explicit support roots are isolated test, preview, or embedded-service instances.
@@ -47,7 +48,7 @@ fn import_fields(source: &Map<String, Value>) -> AppSettings {
         settings.sound_effects = value
     });
     apply(source, "soundEffectsVolume", |value: f32| {
-        settings.sound_effect_volume = value.clamp(0.0, 1.0)
+        settings.sound_effect_volume = (value / SWIFT_BASE_SOUND_EFFECT_VOLUME).clamp(0.0, 1.0)
     });
     apply(source, "showDockIcon", |value| {
         settings.show_dock_icon = value
@@ -69,17 +70,14 @@ fn import_fields(source: &Map<String, Value>) -> AppSettings {
     if let Some(binding) = field::<SwiftHotkey>(source, "hotkey").and_then(convert_hotkey) {
         settings.dictation_hotkey = binding;
     }
-    if let Some(value) = source.get("pasteLastTranscriptHotkey") {
-        settings.paste_last_hotkey = if value.is_null() {
-            None
-        } else {
-            serde_json::from_value::<SwiftHotkey>(value.clone())
-                .ok()
-                .and_then(convert_hotkey)
-                .map(Some)
-                .unwrap_or_else(|| settings.paste_last_hotkey.clone())
-        };
-    }
+    settings.paste_last_hotkey = match source.get("pasteLastTranscriptHotkey") {
+        None | Some(Value::Null) => None,
+        Some(value) => serde_json::from_value::<SwiftHotkey>(value.clone())
+            .ok()
+            .and_then(convert_hotkey)
+            .map(Some)
+            .unwrap_or_else(|| settings.paste_last_hotkey.clone()),
+    };
 
     settings
 }
@@ -288,7 +286,7 @@ mod tests {
         let source = serde_json::from_str::<Value>(
             r#"{
                 "soundEffectsEnabled": false,
-                "soundEffectsVolume": 0.25,
+                "soundEffectsVolume": 0.1,
                 "showDockIcon": false,
                 "recordingAudioBehavior": "pauseMedia",
                 "superFastModeEnabled": false,
@@ -309,7 +307,7 @@ mod tests {
         let settings = import_fields(source.as_object().unwrap());
 
         assert!(!settings.sound_effects);
-        assert_eq!(settings.sound_effect_volume, 0.25);
+        assert_eq!(settings.sound_effect_volume, 0.5);
         assert!(!settings.show_dock_icon);
         assert_eq!(
             settings.recording_audio_behavior,
@@ -338,7 +336,8 @@ mod tests {
                 "soundEffectsVolume": 8,
                 "showDockIcon": false,
                 "recordingAudioBehavior": "unknown",
-                "hotkey": {"modifiers": {"modifiers": ["option"]}}
+                "hotkey": {"modifiers": {"modifiers": ["option"]}},
+                "pasteLastTranscriptHotkey": {"key": 42}
             }"#,
         )
         .unwrap();
@@ -355,6 +354,10 @@ mod tests {
         assert_eq!(
             settings.dictation_hotkey.modifiers.option,
             Some(ModifierSide::Either)
+        );
+        assert_eq!(
+            settings.paste_last_hotkey,
+            Some(HotkeyBinding::paste_last_default())
         );
     }
 
@@ -373,6 +376,15 @@ mod tests {
         let settings = import_fields(source.as_object().unwrap());
 
         assert_eq!(settings.dictation_hotkey, HotkeyBinding::default());
+    }
+
+    #[test]
+    fn omitted_paste_last_shortcut_imports_as_disabled() {
+        let source = serde_json::from_str::<Value>(r#"{"soundEffectsEnabled":true}"#).unwrap();
+
+        let settings = import_fields(source.as_object().unwrap());
+
+        assert!(settings.paste_last_hotkey.is_none());
     }
 
     #[test]
