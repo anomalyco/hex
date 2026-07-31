@@ -4,11 +4,13 @@ set -eu
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 source_bundle=$("$root/scripts/build-app.sh")
 install_dir="$HOME/Applications"
-installed_bundle="$install_dir/HEX.app"
-previous_bundle="$install_dir/Voice Control.app"
+installed_bundle="$install_dir/$(basename "$source_bundle")"
 
 stop_bundle() {
-  executable="$1/Contents/MacOS/voice-control-watch"
+  bundle="$1"
+  [ -d "$bundle" ] || return
+  executable_name=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$bundle/Contents/Info.plist")
+  executable="$bundle/Contents/MacOS/$executable_name"
   if ! pgrep -f "$executable" >/dev/null; then
     return
   fi
@@ -26,8 +28,13 @@ stop_bundle() {
 
 mkdir -p "$install_dir"
 stop_bundle "$installed_bundle"
-stop_bundle "$previous_bundle"
-rm -rf "$installed_bundle" "$previous_bundle"
+for previous_bundle in "$install_dir/HEX.app" "$install_dir/Hex.app" "$install_dir/Voice Control.app"; do
+  if [ "$previous_bundle" != "$installed_bundle" ]; then
+    stop_bundle "$previous_bundle"
+    rm -rf "$previous_bundle"
+  fi
+done
+rm -rf "$installed_bundle"
 /usr/bin/ditto "$source_bundle" "$installed_bundle"
 /usr/bin/open "$installed_bundle"
 echo "$installed_bundle"

@@ -2,14 +2,39 @@
 set -eu
 
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-bundle="$root/target/HEX.app"
-executable="$bundle/Contents/MacOS/voice-control-watch"
-frameworks="$bundle/Contents/Frameworks"
 icon_output="$root/target/AppIcon.assets"
 icon_info="$root/target/AppIcon-info.plist"
 sparkle_dir=$("$root/scripts/setup-sparkle.sh")
 version=${HEX_VERSION:-$(cargo metadata --no-deps --format-version 1 --manifest-path "$root/Cargo.toml" | jq -r '.packages[0].version')}
 build_number=${HEX_BUILD_NUMBER:-$(printf '%s\n' "$version" | awk -F. '{ print ($1 * 10000) + ($2 * 100) + $3 }')}
+app_identity=${HEX_APP_IDENTITY:-auto}
+
+if [ "$app_identity" = "auto" ]; then
+  case "$version" in
+    0.*|1.*|2.0.*) app_identity=current ;;
+    *) app_identity=permanent ;;
+  esac
+fi
+case "$app_identity" in
+  current)
+    bundle_name=HEX.app
+    bundle_id=com.kitlangton.voice-control.agent
+    executable_name=voice-control-watch
+    ;;
+  permanent)
+    bundle_name=Hex.app
+    bundle_id=com.kitlangton.Hex
+    executable_name=hex
+    ;;
+  *)
+    echo "HEX_APP_IDENTITY must be auto, current, or permanent." >&2
+    exit 1
+    ;;
+esac
+
+bundle="$root/target/app-$app_identity/$bundle_name"
+executable="$bundle/Contents/MacOS/$executable_name"
+frameworks="$bundle/Contents/Frameworks"
 
 cargo build --release --manifest-path "$root/Cargo.toml"
 rm -rf "$bundle"
@@ -23,6 +48,8 @@ cp "$root/sdk/commands/package.json" "$bundle/Contents/Resources/commands-sdk/"
 /usr/bin/ditto "$root/sdk/commands/workspace-template" "$bundle/Contents/Resources/commands-sdk/workspace-template"
 /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $version" "$bundle/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $build_number" "$bundle/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier $bundle_id" "$bundle/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c "Set :CFBundleExecutable $executable_name" "$bundle/Contents/Info.plist"
 rm -rf "$icon_output"
 mkdir -p "$icon_output"
 xcrun actool "$root/app/AppIcon.icon" \

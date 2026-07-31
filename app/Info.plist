@@ -5,9 +5,9 @@
   <key>CFBundleDisplayName</key>
   <string>HEX</string>
   <key>CFBundleExecutable</key>
-  <string>voice-control-watch</string>
+  <string>hex</string>
   <key>CFBundleIdentifier</key>
-  <string>com.kitlangton.voice-control.agent</string>
+  <string>com.kitlangton.Hex</string>
   <key>CFBundleInfoDictionaryVersion</key>
   <string>6.0</string>
   <key>CFBundleIconFile</key>

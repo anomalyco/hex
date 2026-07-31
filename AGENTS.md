@@ -325,7 +325,14 @@ precedence while available; override everything with `--device`. The app bundle
 build requires Xcode 26 for Icon Composer compilation and a Developer ID signing
 identity. `scripts/release-app.sh` prepares a notarized and stapled DMG plus its
 signed Sparkle appcast; run `scripts/release-app.sh publish` only after validating
-the prepared artifact.
+the prepared artifact. Versions before 2.1 default to the current Rust package
+identity; 2.1 and later default to `Hex.app`, `com.kitlangton.Hex`, and executable
+`hex`. The one-time public transition uses
+`scripts/release-transition-app.sh prepare`, which produces independently signed
+`HEX.app` and `Hex.app` host-name archives plus validated R2 and legacy-S3 feeds.
+Run its `publish` mode only after signed upgrade testing; immutable R2 artifacts
+must publish before either feed. `verify-public` downloads both public feeds and
+artifacts into a clean directory and validates them.
 
 `SMAppService` is meaningful only from a signed app installed in
 `/Applications`. When replacing a local bundle outside Finder during a login-item
@@ -333,8 +340,11 @@ smoke test, register the new bundle with Launch Services before launch:
 
 ```sh
 '/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister' \
-  -f /Applications/HEX.app
+  -f /Applications/Hex.app
 ```
+
+An existing Rust-origin installation may retain `/Applications/HEX.app` after
+Sparkle replacement; pass its actual host path to `lsregister` in that case.
 
 Verify both registration and unregistration with `sfltool dumpbtm`, and restore
 the user's original login-item state after the test. Do not add release test

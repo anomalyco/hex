@@ -396,8 +396,7 @@ fn main() -> Result<()> {
     let executable_name = std::env::current_exe()
         .ok()
         .and_then(|path| path.file_stem().map(ToOwned::to_owned));
-    let bundled_watcher =
-        executable_name.as_deref() == Some(std::ffi::OsStr::new("voice-control-watch"));
+    let bundled_watcher = is_bundled_app_executable(executable_name.as_deref());
     let bundled_service = executable_name.as_deref() == Some(std::ffi::OsStr::new("hex-service"));
     let command = cli.command.unwrap_or({
         if bundled_watcher {
@@ -678,6 +677,26 @@ fn main() -> Result<()> {
             true => moonshine_lab::run_batch(&root, &directory),
             false => moonshine_lab::run(&root, &directory, device.as_deref()),
         },
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn is_bundled_app_executable(name: Option<&std::ffi::OsStr>) -> bool {
+    name.is_some_and(|name| name == "voice-control-watch" || name == "hex")
+}
+
+#[cfg(all(test, target_os = "macos"))]
+mod tests {
+    use super::is_bundled_app_executable;
+
+    #[test]
+    fn both_packaged_executable_names_launch_the_app() {
+        assert!(is_bundled_app_executable(Some(
+            "voice-control-watch".as_ref()
+        )));
+        assert!(is_bundled_app_executable(Some("hex".as_ref())));
+        assert!(!is_bundled_app_executable(Some("voice-control".as_ref())));
+        assert!(!is_bundled_app_executable(Some("hex-service".as_ref())));
     }
 }
 

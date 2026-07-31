@@ -17,7 +17,7 @@ preparation, warm runtime state, and inference.
 - The service never requests microphone permission or captures audio.
 - Submitted audio is never persisted.
 - A failed model preparation preserves the current artifact, warm runtime, and
-  full HEX.app selection.
+  full `Hex.app` selection.
 - `transcribe()` never initiates a model download.
 - There is no product duration limit. Operational resource refusal is typed and
   based on actual process safety, not an arbitrary number of seconds.

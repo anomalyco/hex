@@ -42,6 +42,8 @@ in [`docs/plans/swift-to-rust-migration.md`](docs/plans/swift-to-rust-migration.
 Converge both installed populations on `Hex.app`, `com.kitlangton.Hex`, the
 existing Rust `voice-control` Application Support root, and the R2 update channel
 only after the allowlisted preference import and agreed parity work are complete.
+Transition tooling now builds both host-name archives and validates the R2 and
+legacy-S3 feeds; signed upgrade testing and the physical soak remain.
 
 ## Validate The Linux X11 Beta
 

@@ -20,6 +20,10 @@ if [ "$mode" != "prepare" ] && [ "$mode" != "publish" ]; then
   echo "Usage: $0 [prepare|publish]" >&2
   exit 1
 fi
+if [ "$version" = 2.1.0 ]; then
+  echo "HEX 2.1.0 must use scripts/release-transition-app.sh." >&2
+  exit 1
+fi
 if [ -n "$(git -C "$root" status --porcelain)" ]; then
   echo "Commit or remove all working-tree changes before releasing." >&2
   exit 1
@@ -77,6 +81,10 @@ fi
 
 export HEX_VERSION="$version" HEX_BUILD_NUMBER="$build_number"
 bundle=$("$root/scripts/build-app.sh")
+bundle_name=$(basename "$bundle")
+if [ "$bundle_name" = Hex.app ]; then
+  "$root/scripts/validate-permanent-app.sh" "$bundle" Hex.app "$version" "$build_number" >/dev/null
+fi
 if [ -z "$identity" ]; then
   identity=$(security find-identity -v -p codesigning | sed -n "s/.*\"\(Developer ID Application:.*($team_id)\)\"/\1/p" | head -1)
 fi
@@ -94,7 +102,7 @@ xcrun notarytool submit "$dist/HEX-$version.zip" --keychain-profile "$notary_pro
 xcrun stapler staple "$bundle"
 xcrun stapler validate "$bundle"
 
-/usr/bin/ditto "$bundle" "$dist/staging/HEX.app"
+/usr/bin/ditto "$bundle" "$dist/staging/$bundle_name"
 ln -s /Applications "$dist/staging/Applications"
 hdiutil create -quiet -fs APFS -format ULFO -volname HEX -srcfolder "$dist/staging" "$dist/$artifact"
 codesign --force --timestamp --sign "$identity" "$dist/$artifact"

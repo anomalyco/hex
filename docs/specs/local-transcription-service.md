@@ -54,7 +54,7 @@ administrator access, login-item approval, Dock icon, or foreground window. The
 host must not launch the helper through Launch Services.
 
 Because the service does not capture audio, it does not need microphone TCC
-identity. Full HEX.app remains responsible for its own global-hotkey capture and
+identity. Full `Hex.app` remains responsible for its own global-hotkey capture and
 can submit completed audio to its own transcription runtime later.
 
 Verified model artifacts remain shared per user under Application Support.
@@ -159,7 +159,7 @@ export type ModelProgress =
 For managed GGUF models, preparation means download, checksum verification,
 strict-Metal load, and prewarm. System-managed runtimes such as Apple Speech
 perform their platform-specific availability and readiness checks instead. A
-preparation does not select the model or change full HEX.app settings. The
+preparation does not select the model or change full `Hex.app` settings. The
 service serializes preparation and preserves the existing artifact and warm
 runtime when a replacement fails.
 

@@ -8,7 +8,9 @@ archive="$root/target/Sparkle-$version.tar.xz"
 destination="$root/target/sparkle-$version"
 url="https://github.com/sparkle-project/Sparkle/releases/download/$version/Sparkle-$version.tar.xz"
 
-if [ -x "$destination/bin/generate_appcast" ] && [ -d "$destination/Sparkle.framework" ]; then
+if [ -x "$destination/bin/generate_appcast" ] \
+  && [ -x "$destination/bin/sign_update" ] \
+  && [ -d "$destination/Sparkle.framework" ]; then
   echo "$destination"
   exit 0
 fi

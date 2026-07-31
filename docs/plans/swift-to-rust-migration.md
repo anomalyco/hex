@@ -1,8 +1,8 @@
 # Migrate Swift HEX Users To Rust HEX
 
-**Status:** In progress. The preference importer is implemented. The public
-identity transition remains gated on parity soak, signed upgrade testing, and
-release-tooling validation.
+**Status:** In progress. The preference importer and transition-aware package
+and feed tooling are implemented. The public identity transition remains gated
+on parity soak and signed upgrade testing.
 
 ## Outcome
 
