@@ -26,9 +26,9 @@ swift_dmg="$dist/$swift_artifact"
 source_commit_file="$dist/source-commit"
 
 case "$mode" in
-  prepare|publish|verify-public) ;;
+  prepare|validate|publish|verify-public) ;;
   *)
-    echo "Usage: $0 [prepare|publish|verify-public]" >&2
+    echo "Usage: $0 [prepare|validate|publish|verify-public]" >&2
     exit 1
     ;;
 esac
@@ -131,7 +131,10 @@ validate_prepared() {
   extract_dmg_app "$swift_dmg" Hex.app "$validation/swift.app"
   "$root/scripts/validate-permanent-app.sh" "$validation/rust.app" rust.app "$version" "$build_number" >/dev/null
   "$root/scripts/validate-permanent-app.sh" "$validation/swift.app" swift.app "$version" "$build_number" >/dev/null
-  diff -qr "$validation/rust.app" "$validation/swift.app" >/dev/null \
+  rust_hash=$(codesign -d --verbose=4 "$validation/rust.app" 2>&1 | sed -n 's/^CDHash=//p')
+  swift_hash=$(codesign -d --verbose=4 "$validation/swift.app" 2>&1 | sed -n 's/^CDHash=//p')
+  [ -n "$rust_hash" ] || fail "the Rust-host archive has no code-directory hash"
+  [ "$rust_hash" = "$swift_hash" ] \
     || fail "the two transition archives do not contain the same signed payload"
   rm -rf "$validation"
   validate_feed "$r2_updates/appcast.xml" "$rust_dmg" "$base_url/releases/$rust_artifact" "$previous_rust_build"
@@ -161,6 +164,12 @@ verify_public() {
 if [ "$mode" = verify-public ]; then
   verify_public
   echo "Public transition feeds and artifacts are valid."
+  exit 0
+fi
+
+if [ "$mode" = validate ]; then
+  validate_prepared
+  echo "Prepared transition feeds and artifacts are valid."
   exit 0
 fi
 

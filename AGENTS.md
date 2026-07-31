@@ -330,9 +330,10 @@ identity; 2.1 and later default to `Hex.app`, `com.kitlangton.Hex`, and executab
 `hex`. The one-time public transition uses
 `scripts/release-transition-app.sh prepare`, which produces independently signed
 `HEX.app` and `Hex.app` host-name archives plus validated R2 and legacy-S3 feeds.
-Run its `publish` mode only after signed upgrade testing; immutable R2 artifacts
-must publish before either feed. `verify-public` downloads both public feeds and
-artifacts into a clean directory and validates them.
+Its `validate` mode rechecks prepared archives and feeds without publishing. Run
+`publish` only after signed upgrade testing; immutable R2 artifacts must publish
+before either feed. `verify-public` downloads both public feeds and artifacts
+into a clean directory and validates them.
 
 `SMAppService` is meaningful only from a signed app installed in
 `/Applications`. When replacing a local bundle outside Finder during a login-item
