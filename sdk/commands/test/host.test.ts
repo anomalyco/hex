@@ -1,8 +1,8 @@
 import { Deferred, Effect } from "effect"
 import { describe, expect, it } from "vitest"
 import { Hex } from "../src/effect.js"
-import { openUrl } from "../src/index.js"
-import type { HandlerArguments } from "../src/index.js"
+import { choice, digit, letter, openUrl, text, union } from "../src/index.js"
+import type { HandlerArguments, Letter } from "../src/index.js"
 import { prepareConfig, runHost } from "../src/host.js"
 import type { HostOutput } from "../src/protocol.js"
 
@@ -26,7 +26,7 @@ describe("command host", () => {
     })
     expect(prepared.registration).toEqual({
       type: "registration",
-      protocolVersion: 1,
+      protocolVersion: 2,
       dictation: {
         start: ["begin note"],
         stop: ["finish note"],
@@ -141,7 +141,7 @@ describe("command host", () => {
   it("passes bounded captures to vanilla and Effect handlers", async () => {
     const output: HostOutput[] = []
     const observedCaptures: Readonly<Record<string, string>>[] = []
-    let observedEffectCaptures: Readonly<Record<string, string>> | undefined
+    let observedEffectCaptures: Readonly<Record<string, string | number>> | undefined
     await runHost({
       config: {
         commands: {
@@ -177,6 +177,331 @@ describe("command host", () => {
     expect(output.filter((frame) => frame.type === "invocationResult")).toHaveLength(3)
     expect(observedCaptures).toEqual([{ query: "wool socks" }, {}])
     expect(observedEffectCaptures).toEqual({ text: "buy socks" })
+  })
+
+  it("registers typed capture schemas and passes numeric values", async () => {
+    const output: HostOutput[] = []
+    let observed: number | undefined
+    await runHost({
+      config: {
+        commands: {
+          control: {
+            phrases: ["control {number}"],
+            captures: { number: digit({ min: 1, max: 3 }) },
+            run: ({ captures }: HandlerArguments<{ readonly number: number }>) => {
+              observed = captures.number
+            },
+          },
+        },
+      },
+      input: messages([
+        { type: "invoke", invocationId: "inv-1", commandId: "control", context: {}, captures: { number: 2 } },
+        { type: "shutdown" },
+      ]),
+      write: (frame) => { output.push(frame) },
+    })
+
+    expect(output[0]).toMatchObject({
+      protocolVersion: 2,
+      commands: [{ captures: { number: { type: "digit", min: 1, max: 3 } } }],
+    })
+    expect(observed).toBe(2)
+  })
+
+  it("rejects invocation values that do not match the registered schema", async () => {
+    const output: HostOutput[] = []
+    await runHost({
+      config: {
+        commands: {
+          control: {
+            phrases: ["control {number}"],
+            captures: { number: digit({ min: 1, max: 3 }) },
+            run: () => undefined,
+          },
+        },
+      },
+      input: messages([
+        { type: "invoke", invocationId: "bad", commandId: "control", context: {}, captures: { number: 7 } },
+        { type: "shutdown" },
+      ]),
+      write: (frame) => { output.push(frame) },
+    })
+
+    expect(output.at(-1)).toEqual({
+      type: "invocationResult",
+      invocationId: "bad",
+      result: { type: "failure", message: "Command control received invalid captures" },
+    })
+  })
+
+  it("normalizes choice aliases and passes only canonical values", async () => {
+    const output: HostOutput[] = []
+    let observed: { direction: "left" | "right"; edge: "top" | "bottom" } | undefined
+    await runHost({
+      config: {
+        commands: {
+          move: {
+            phrases: ["move {direction} {edge}"],
+            captures: {
+              direction: choice({ left: ["LEFT!", "back"], right: ["right", "forward"] } as const),
+              edge: choice(["top", "bottom"] as const),
+            },
+            run: ({ captures }: HandlerArguments<{
+              readonly direction: "left" | "right"
+              readonly edge: "top" | "bottom"
+            }>) => { observed = captures },
+          },
+        },
+      },
+      input: messages([
+        {
+          type: "invoke",
+          invocationId: "choice-1",
+          commandId: "move",
+          context: {},
+          captures: { direction: "left", edge: "bottom" },
+        },
+        { type: "shutdown" },
+      ]),
+      write: (frame) => { output.push(frame) },
+    })
+
+    expect(output[0]).toMatchObject({
+      protocolVersion: 2,
+      commands: [{
+        captures: {
+          direction: {
+            type: "choice",
+            choices: { left: ["left", "back"], right: ["right", "forward"] },
+          },
+          edge: { type: "choice", choices: { top: ["top"], bottom: ["bottom"] } },
+        },
+      }],
+    })
+    expect(observed).toEqual({ direction: "left", edge: "bottom" })
+  })
+
+  it("rejects noncanonical choice invocation values", async () => {
+    const output: HostOutput[] = []
+    await runHost({
+      config: {
+        commands: {
+          move: {
+            phrases: ["move {direction}"],
+            captures: { direction: choice({ left: ["left", "back"] } as const) },
+            run: () => undefined,
+          },
+        },
+      },
+      input: messages([
+        { type: "invoke", invocationId: "bad-choice", commandId: "move", context: {}, captures: { direction: "back" } },
+        { type: "shutdown" },
+      ]),
+      write: (frame) => { output.push(frame) },
+    })
+
+    expect(output.at(-1)).toMatchObject({
+      invocationId: "bad-choice",
+      result: { type: "failure", message: "Command move received invalid captures" },
+    })
+  })
+
+  it("registers letters and accepts only canonical lowercase invocation values", async () => {
+    const output: HostOutput[] = []
+    let observed: string | undefined
+    await runHost({
+      config: {
+        commands: {
+          control: {
+            phrases: ["control {key}"],
+            captures: { key: letter() },
+            run: ({ captures }: HandlerArguments<{ readonly key: Letter }>) => { observed = captures.key },
+          },
+        },
+      },
+      input: messages([
+        { type: "invoke", invocationId: "letter", commandId: "control", context: {}, captures: { key: "q" } },
+        { type: "invoke", invocationId: "uppercase", commandId: "control", context: {}, captures: { key: "Q" } },
+        { type: "shutdown" },
+      ]),
+      write: (frame) => { output.push(frame) },
+    })
+
+    expect(output[0]).toMatchObject({ commands: [{ captures: { key: { type: "letter" } } }] })
+    expect(observed).toBe("q")
+    expect(output.at(-1)).toMatchObject({
+      invocationId: "uppercase",
+      result: { type: "failure", message: "Command control received invalid captures" },
+    })
+  })
+
+  it("registers flattened unions and validates each canonical runtime value", async () => {
+    const output: HostOutput[] = []
+    const observed: Array<string | number> = []
+    const key = union(
+      letter(),
+      digit(),
+      choice({ home: ["home"], escape: ["escape", "cancel"] } as const),
+    )
+    await runHost({
+      config: {
+        commands: {
+          key: {
+            phrases: ["key {key}"],
+            captures: { key },
+            run: ({ captures }: HandlerArguments<{ readonly key: Letter | number | "home" | "escape" }>) => {
+              observed.push(captures.key)
+            },
+          },
+        },
+      },
+      input: messages([
+        { type: "invoke", invocationId: "letter", commandId: "key", context: {}, captures: { key: "q" } },
+        { type: "invoke", invocationId: "digit", commandId: "key", context: {}, captures: { key: 2 } },
+        { type: "invoke", invocationId: "choice", commandId: "key", context: {}, captures: { key: "escape" } },
+        { type: "invoke", invocationId: "alias", commandId: "key", context: {}, captures: { key: "cancel" } },
+        { type: "shutdown" },
+      ]),
+      write: (frame) => { output.push(frame) },
+    })
+
+    expect(output[0]).toMatchObject({
+      commands: [{ captures: { key: { type: "union", members: [
+        { type: "letter" },
+        { type: "digit", min: 0, max: 9 },
+        { type: "choice", choices: { home: ["home"], escape: ["escape", "cancel"] } },
+      ] } } }],
+    })
+    expect(observed).toEqual(["q", 2, "escape"])
+    expect(output.at(-1)).toMatchObject({
+      invocationId: "alias",
+      result: { type: "failure", message: "Command key received invalid captures" },
+    })
+  })
+
+  it("validates typed capture schemas and every alias binding", () => {
+    expect(prepareConfig({
+      commands: {
+        nested: {
+          phrases: ["key {key}"],
+          captures: { key: {
+            type: "union",
+            members: [
+              { type: "letter" },
+              { type: "union", members: [
+                { type: "digit", min: 0, max: 9 },
+                { type: "choice", choices: { home: ["home"] } },
+              ] },
+            ],
+          } },
+          run: () => undefined,
+        },
+      },
+    }).registration.commands[0]?.captures).toMatchObject({
+      key: { type: "union", members: [{ type: "letter" }, { type: "digit" }, { type: "choice" }] },
+    })
+
+    expect(() => prepareConfig({
+      commands: {
+        bad: {
+          phrases: ["move {from} to {to}", "move {from}"],
+          captures: { from: digit({ min: 1, max: 3 }), to: digit({ min: 4, max: 6 }) },
+          run: () => undefined,
+        },
+      },
+    })).toThrow("bind every declared capture exactly once")
+    expect(() => prepareConfig({
+      commands: {
+        bad: {
+          phrases: ["say {words} now"],
+          captures: { words: text() },
+          run: () => undefined,
+        },
+      },
+    })).toThrow("text() capture must be trailing")
+    expect(() => prepareConfig({
+      commands: {
+        bad: {
+          phrases: ["control {number}"],
+          captures: { number: digit({ min: 3, max: 1 }) },
+          run: () => undefined,
+        },
+      },
+    })).toThrow("digit range")
+    expect(() => prepareConfig({
+      commands: {
+        bad: {
+          phrases: ["control {number}"],
+          captures: { number: digit({ min: 1, max: 3 }) },
+          action: openUrl("https://example.com"),
+        },
+      },
+    })).toThrow("require run")
+    const oversizedUnion = {
+      type: "union",
+      members: [
+        { type: "choice", choices: Object.fromEntries(Array.from({ length: 16 }, (_, value) => [
+          `left${value}`,
+          Array.from({ length: 16 }, (_, alias) => `left-${value}-${alias}-${"x".repeat(40)}`),
+        ])) },
+        { type: "choice", choices: Object.fromEntries(Array.from({ length: 16 }, (_, value) => [
+          `right${value}`,
+          Array.from({ length: 16 }, (_, alias) => `right-${value}-${alias}-${"x".repeat(40)}`),
+        ])) },
+      ],
+    }
+    for (const descriptor of [
+      { type: "choice", choices: {} },
+      { type: "choice", choices: { left: [] } },
+      { type: "choice", choices: { left: ["two words"] } },
+      { type: "choice", choices: { left: ["LEFT"], other: ["left!"] } },
+      { type: "choice", choices: { "": ["left"] } },
+      { type: "choice", choices: { left: ["left"] }, extra: true },
+      { type: "letter", extra: true },
+      choice(["left", "left"] as const),
+      { type: "choice", choices: { ["x".repeat(129)]: ["left"] } },
+      { type: "choice", choices: { left: ["x".repeat(65)] } },
+      { type: "choice", choices: { left: Array.from({ length: 17 }, (_, index) => `word${index}`) } },
+      {
+        type: "choice",
+        choices: Object.fromEntries(Array.from({ length: 65 }, (_, index) => [`value${index}`, [`word${index}`]])),
+      },
+      { type: "union", members: [{ type: "letter" }] },
+      { type: "union", members: [{ type: "letter" }, { type: "text" }] },
+      { type: "union", members: [{ type: "letter" }, { type: "choice", choices: { a: ["alpha"] } }] },
+      { type: "union", members: [{ type: "digit", min: 0, max: 9 }, { type: "choice", choices: { two: ["2"] } }] },
+      {
+        type: "union",
+        members: Array.from({ length: 17 }, (_, index) => ({
+          type: "choice",
+          choices: { [`key${index}`]: [`key${index}`] },
+        })),
+      },
+      {
+        type: "union",
+        members: [
+          { type: "letter" },
+          { type: "union", members: [{ type: "digit", min: 0, max: 0 }, { type: "union", members: [
+            { type: "choice", choices: { home: ["home"] } },
+            { type: "union", members: [{ type: "choice", choices: { end: ["end"] } }, { type: "union", members: [
+              { type: "choice", choices: { up: ["up"] } },
+              { type: "choice", choices: { down: ["down"] } },
+            ] }] },
+          ] }] },
+        ],
+      },
+      oversizedUnion,
+    ]) {
+      expect(() => prepareConfig({
+        commands: {
+          bad: {
+            phrases: ["move {direction}"],
+            captures: { direction: descriptor },
+            run: () => undefined,
+          },
+        },
+      }), JSON.stringify(descriptor)).toThrow()
+    }
   })
 
   it("rejects unbounded captures", async () => {
@@ -259,6 +584,15 @@ describe("command host", () => {
     expect(() => prepareConfig({
       commands: { bad: { phrases: ["bad"], run: { type: "openUrl", url: "file:///tmp/example" } } },
     })).toThrow("must use http or https")
+    expect(() => prepareConfig({
+      commands: {
+        bad: {
+          phrases: ["control {number}"],
+          captures: { number: digit() },
+          run: openUrl("https://example.com"),
+        },
+      },
+    })).toThrow("capture descriptors require a handler run")
     expect(() => prepareConfig({
       commands: { bad: { phrases: ["bad"], action: { type: "press", key: "x", modifiers: ["meta"] } } },
     })).toThrow("unsupported modifier")

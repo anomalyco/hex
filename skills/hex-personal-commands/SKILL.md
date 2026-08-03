@@ -23,6 +23,14 @@ Use HEX's managed command workspace rather than creating an independent package.
 5. Keep command phrases unambiguous and use only the capabilities required by
    the request. Treat config and dependencies as trusted executable code with
    the user's filesystem, network, environment, and subprocess authority.
+    Use `digit()` for zero through nine, `digit({ min, max })` for a restricted
+    range, `choice(["left", "right"] as const)` for exact choices, an object-form
+     `choice()` to normalize one-word aliases to canonical keys,
+     `union(letter(), digit(), choice([...]))` for disjoint bounded one-token
+     alternatives, and trailing `text()` for explicit text captures. `letter()` accepts literal, common
+    spoken, and NATO letter names and returns lowercase `"a" | ... | "z"`;
+    every phrase alias must bind the
+    declared names once.
 6. Run `bun run check` in `~/.config/hex`. Do not finish until it passes. HEX
    watches valid changes automatically and reports runtime reload failures in
    the Commands pane.

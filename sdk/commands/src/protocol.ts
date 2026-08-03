@@ -1,4 +1,4 @@
-import type { DictationProtocolConfig, HandlerContext, NativeAction } from "./model.js"
+import type { CaptureSchema, DictationProtocolConfig, HandlerContext, NativeAction, UntypedCaptures } from "./model.js"
 
 export interface RegistrationCommand {
   readonly id: string
@@ -6,6 +6,7 @@ export interface RegistrationCommand {
   readonly group?: string
   readonly description?: string
   readonly when?: { readonly application: string } | { readonly browserHost: string }
+  readonly captures?: CaptureSchema
   readonly execution:
     | { readonly type: "native"; readonly action: NativeAction }
     | { readonly type: "handler" }
@@ -19,7 +20,7 @@ export interface RegistrationTransformation {
 
 export interface Registration {
   readonly type: "registration"
-  readonly protocolVersion: 1
+  readonly protocolVersion: typeof import("./model.js").PROTOCOL_VERSION
   readonly dictation?: DictationProtocolConfig
   readonly transformations: readonly RegistrationTransformation[]
   readonly commands: readonly RegistrationCommand[]
@@ -38,7 +39,7 @@ export type HostInput =
     readonly invocationId: string
     readonly commandId: string
     readonly context: HandlerContext
-    readonly captures: Readonly<Record<string, string>>
+    readonly captures: UntypedCaptures
   }
   | {
     readonly type: "toolResult"

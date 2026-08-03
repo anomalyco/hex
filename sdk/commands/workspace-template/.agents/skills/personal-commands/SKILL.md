@@ -92,6 +92,84 @@ Saying "search amazon for wool socks" opens the Amazon search for
 "wool socks". A capture phrase conflicts with any coexisting phrase that
 shares its literal prefix, and the capture is bounded (24 words / 512 bytes).
 
+Use an explicit schema for typed, composable captures. Every alias must bind
+the same names exactly once. `digit()` captures one spoken digit as a number
+and may appear anywhere; `text()` captures normalized trailing words as a
+string and must be last:
+
+```ts
+import { defineHexConfig, digit } from "@hex/commands"
+
+export default defineHexConfig({
+  commands: {
+    "control-number": {
+      phrases: ["control {number}"],
+      captures: { number: digit({ min: 1, max: 3 }) },
+      run: ({ hex, captures }) =>
+        hex.press({ key: String(captures.number), modifiers: ["control"] }),
+    },
+  },
+})
+```
+
+Import `text` and declare `query: text()` when explicit trailing text should
+compose with digit captures. Schema-bearing commands always require `run`.
+
+Use `choice()` for bounded one-word alternatives. An array returns the spoken
+value itself; object keys are canonical values and each array contains spoken
+aliases:
+
+```ts
+import { choice, defineHexConfig } from "@hex/commands"
+
+export default defineHexConfig({
+  commands: {
+    move: {
+      phrases: ["move {direction}"],
+      captures: {
+        direction: choice({
+          left: ["left", "back"],
+          right: ["right", "forward"],
+        } as const),
+      },
+      run: ({ hex, captures }) => hex.press(captures.direction),
+    },
+  },
+})
+```
+
+The handler sees `"left" | "right"`; saying "back" produces `"left"`.
+
+Use `union()` to compose disjoint bounded one-token captures. Members may be
+`letter()`, `digit()`, `choice()`, or nested unions; nested unions are flattened.
+`text()` is rejected, as are members whose spoken alternatives overlap:
+
+```ts
+import { choice, digit, letter, union } from "@hex/commands"
+
+const key = union(letter(), digit(), choice(["home", "end", "escape"] as const))
+// captures.key is Letter | number | "home" | "end" | "escape"
+```
+
+Use `letter()` for a single keyboard letter. Literal letters, common spoken
+names such as "bee", and one-word NATO names such as "bravo" all arrive as the
+canonical lowercase `"a" | ... | "z"` union:
+
+```ts
+import { defineHexConfig, letter } from "@hex/commands"
+
+export default defineHexConfig({
+  commands: {
+    "control-letter": {
+      phrases: ["control {key}"],
+      captures: { key: letter() },
+      run: ({ hex, captures }) =>
+        hex.press({ key: captures.key, modifiers: ["control"] }),
+    },
+  },
+})
+```
+
 Effect handlers use the Effect entrypoint and may be values or functions:
 
 ```ts

@@ -1,3 +1,4 @@
+use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
 
 use crate::commands::{Action, CommandError, CommandInfo, CommandScope};
@@ -60,12 +61,23 @@ impl CapturedCount {
     }
 }
 
-/// Free text captured by a trailing `{name}` placeholder in a personal
-/// command phrase. The text is the normalized spoken remainder.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct CapturedPhrase {
-    pub name: String,
-    pub text: String,
+pub enum CapturedValue {
+    Digit(u8),
+    Letter(char),
+    Choice(String),
+    Text(String),
+}
+
+pub type CapturedValues = BTreeMap<String, CapturedValue>;
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum PersonalCapture {
+    Digit { min: u8, max: u8 },
+    Letter,
+    Choice { choices: BTreeMap<String, String> },
+    Union { members: Vec<PersonalCapture> },
+    Text,
 }
 
 /// Longest normalized capture accepted from one completed command line.
@@ -75,7 +87,14 @@ pub(crate) const MAX_CAPTURE_BYTES: usize = 512;
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum PatternToken {
     Literal(String),
-    Digit,
+    Digit {
+        min: u8,
+        max: u8,
+    },
+    Letter,
+    /// Normalized spoken word to canonical output value.
+    Choice(BTreeMap<String, String>),
+    Union(Vec<PatternToken>),
     Direction,
     Count,
     /// One or more trailing free-text words captured verbatim.
@@ -91,9 +110,30 @@ impl PatternToken {
                 slot.accepts_literal(literal)
             }
             (Self::Direction, Self::Direction) => true,
-            (Self::Digit, Self::Digit | Self::Count) | (Self::Count, Self::Digit | Self::Count) => {
-                true
+            (Self::Letter, Self::Letter) => true,
+            (Self::Choice(left), Self::Choice(right)) => {
+                left.keys().any(|word| right.contains_key(word))
             }
+            (Self::Choice(choices), slot) | (slot, Self::Choice(choices)) => {
+                choices.keys().any(|word| slot.accepts_literal(word))
+            }
+            (Self::Union(members), token) | (token, Self::Union(members)) => {
+                members.iter().any(|member| member.overlaps(token))
+            }
+            (
+                Self::Digit {
+                    min: left_min,
+                    max: left_max,
+                },
+                Self::Digit {
+                    min: right_min,
+                    max: right_max,
+                },
+            ) => left_min <= right_max && right_min <= left_max,
+            (Self::Digit { max, .. }, Self::Count) | (Self::Count, Self::Digit { max, .. }) => {
+                *max >= 1
+            }
+            (Self::Count, Self::Count) => true,
             _ => false,
         }
     }
@@ -101,10 +141,49 @@ impl PatternToken {
     fn accepts_literal(&self, literal: &str) -> bool {
         match self {
             Self::Literal(expected) => expected == literal,
-            Self::Digit => literal.len() == 1 && literal.as_bytes()[0].is_ascii_digit(),
+            Self::Digit { min, max } => {
+                parse_digit(literal).is_some_and(|digit| digit >= *min && digit <= *max)
+            }
             Self::Direction => parse_direction(literal).is_some(),
             Self::Count => parse_count(literal).is_some(),
+            Self::Letter => parse_letter(literal).is_some(),
+            Self::Choice(choices) => choices.contains_key(literal),
+            Self::Union(members) => members.iter().any(|member| member.accepts_literal(literal)),
             Self::Rest => true,
+        }
+    }
+}
+
+impl PersonalCapture {
+    pub(crate) fn overlaps(&self, other: &Self) -> bool {
+        self.pattern_token().overlaps(&other.pattern_token())
+    }
+
+    fn pattern_token(&self) -> PatternToken {
+        match self {
+            Self::Digit { min, max } => PatternToken::Digit {
+                min: *min,
+                max: *max,
+            },
+            Self::Letter => PatternToken::Letter,
+            Self::Choice { choices } => PatternToken::Choice(choices.clone()),
+            Self::Union { members } => {
+                PatternToken::Union(members.iter().map(Self::pattern_token).collect())
+            }
+            Self::Text => PatternToken::Rest,
+        }
+    }
+
+    fn parse_word(&self, word: &str) -> Option<CapturedValue> {
+        match self {
+            Self::Digit { min, max } => {
+                let digit = parse_digit(word)?;
+                (digit >= *min && digit <= *max).then_some(CapturedValue::Digit(digit))
+            }
+            Self::Letter => parse_letter(word).map(CapturedValue::Letter),
+            Self::Choice { choices } => choices.get(word).cloned().map(CapturedValue::Choice),
+            Self::Union { members } => members.iter().find_map(|member| member.parse_word(word)),
+            Self::Text => None,
         }
     }
 }
@@ -215,17 +294,17 @@ fn digit_pattern(literals: &[&'static str]) -> TypedPattern<CapturedDigit> {
         .iter()
         .cloned()
         .map(PatternToken::Literal)
-        .chain([PatternToken::Digit])
+        .chain([PatternToken::Digit { min: 0, max: 9 }])
         .collect();
     TypedPattern {
         display,
         signatures: vec![signature],
         parse: Box::new(move |words| {
             let (digit, heard_literals) = words.split_last()?;
-            (heard_literals == literals && digit.len() == 1)
-                .then(|| digit.as_bytes()[0])
-                .filter(u8::is_ascii_digit)
-                .map(|digit| CapturedDigit(digit - b'0'))
+            (heard_literals == literals)
+                .then(|| parse_digit(digit))
+                .flatten()
+                .map(CapturedDigit)
         }),
     }
 }
@@ -285,20 +364,7 @@ pub(crate) fn phrase_placeholder(phrase: &str) -> Result<Option<String>, String>
         return Err("the {capture} placeholder must end the phrase".into());
     }
     let name = &phrase[open + 1..close];
-    let mut characters = name.chars();
-    let starts_lowercase = characters
-        .next()
-        .is_some_and(|first| first.is_ascii_lowercase());
-    if !starts_lowercase
-        || !name
-            .chars()
-            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
-    {
-        return Err(
-            "capture names start with a lowercase letter and use lowercase letters, digits, and underscores"
-                .into(),
-        );
-    }
+    validate_capture_name(name)?;
     if normalize(&phrase[..open]).is_empty() {
         return Err(
             "a capture phrase needs at least one spoken word before the placeholder".into(),
@@ -308,7 +374,7 @@ pub(crate) fn phrase_placeholder(phrase: &str) -> Result<Option<String>, String>
 }
 
 /// Compile a personal phrase that may end in a `{name}` capture placeholder.
-fn capture_pattern(phrase: String) -> Result<TypedPattern<Option<CapturedPhrase>>, String> {
+fn capture_pattern(phrase: String) -> Result<TypedPattern<CapturedValues>, String> {
     let Some(name) = phrase_placeholder(&phrase)? else {
         let words = normalize(&phrase)
             .split_whitespace()
@@ -318,7 +384,7 @@ fn capture_pattern(phrase: String) -> Result<TypedPattern<Option<CapturedPhrase>
         return Ok(TypedPattern {
             display: phrase,
             signatures: vec![signature],
-            parse: Box::new(move |heard| (heard == words).then_some(None)),
+            parse: Box::new(move |heard| (heard == words).then_some(BTreeMap::new())),
         });
     };
     let open = phrase.find('{').expect("placeholder was validated");
@@ -347,12 +413,285 @@ fn capture_pattern(phrase: String) -> Result<TypedPattern<Option<CapturedPhrase>
             if text.len() > MAX_CAPTURE_BYTES {
                 return None;
             }
-            Some(Some(CapturedPhrase {
-                name: name.clone(),
-                text,
-            }))
+            Some(BTreeMap::from([(name.clone(), CapturedValue::Text(text))]))
         }),
     })
+}
+
+fn schema_capture_pattern(
+    phrase: String,
+    captures: &BTreeMap<String, PersonalCapture>,
+) -> Result<TypedPattern<CapturedValues>, String> {
+    let mut tokens = Vec::new();
+    let mut names = HashSet::new();
+    for raw in phrase.split_whitespace() {
+        if raw.starts_with('{') || raw.ends_with('}') {
+            if !(raw.starts_with('{')
+                && raw.ends_with('}')
+                && raw.matches('{').count() == 1
+                && raw.matches('}').count() == 1)
+            {
+                return Err("capture placeholders must be standalone {name} words".into());
+            }
+            let name = &raw[1..raw.len() - 1];
+            validate_capture_name(name)?;
+            let Some(capture) = captures.get(name) else {
+                return Err(format!("phrase references undeclared capture {{{name}}}"));
+            };
+            if !names.insert(name.to_string()) {
+                return Err(format!("capture {{{name}}} must appear exactly once"));
+            }
+            tokens.push(capture.pattern_token());
+        } else {
+            tokens.extend(
+                normalize(raw)
+                    .split_whitespace()
+                    .map(|word| PatternToken::Literal(word.to_string())),
+            );
+        }
+    }
+    if names.len() != captures.len() {
+        let missing = captures
+            .keys()
+            .find(|name| !names.contains(*name))
+            .expect("capture count differs");
+        return Err(format!("capture {{{missing}}} must appear exactly once"));
+    }
+    if tokens.is_empty() {
+        return Err("a command phrase must contain a spoken word".into());
+    }
+    if let Some(index) = tokens
+        .iter()
+        .position(|token| matches!(token, PatternToken::Rest))
+        && index + 1 != tokens.len()
+    {
+        return Err("text() captures must be trailing".into());
+    }
+    let parse_captures = captures.clone();
+    Ok(TypedPattern {
+        display: phrase.trim().to_string(),
+        signatures: vec![tokens],
+        parse: Box::new(move |heard| {
+            let mut values = BTreeMap::new();
+            let mut word_index = 0;
+            let phrase_parts = phrase.split_whitespace().collect::<Vec<_>>();
+            for part in phrase_parts {
+                if part.starts_with('{') {
+                    let name = &part[1..part.len() - 1];
+                    match parse_captures.get(name)? {
+                        capture @ (PersonalCapture::Digit { .. }
+                        | PersonalCapture::Letter
+                        | PersonalCapture::Choice { .. }
+                        | PersonalCapture::Union { .. }) => {
+                            let value = capture.parse_word(heard.get(word_index)?)?;
+                            values.insert(name.to_string(), value);
+                            word_index += 1;
+                        }
+                        PersonalCapture::Text => {
+                            let rest = heard.get(word_index..)?;
+                            if rest.is_empty() || rest.len() > MAX_CAPTURE_WORDS {
+                                return None;
+                            }
+                            let text = rest.join(" ");
+                            if text.len() > MAX_CAPTURE_BYTES {
+                                return None;
+                            }
+                            values.insert(name.to_string(), CapturedValue::Text(text));
+                            word_index = heard.len();
+                        }
+                    }
+                } else {
+                    for literal in normalize(part).split_whitespace() {
+                        if heard.get(word_index).copied() != Some(literal) {
+                            return None;
+                        }
+                        word_index += 1;
+                    }
+                }
+            }
+            (word_index == heard.len()).then_some(values)
+        }),
+    })
+}
+
+fn validate_capture_name(name: &str) -> Result<(), String> {
+    let mut characters = name.chars();
+    if !characters
+        .next()
+        .is_some_and(|first| first.is_ascii_lowercase())
+        || !name.chars().all(|character| {
+            character.is_ascii_lowercase() || character.is_ascii_digit() || character == '_'
+        })
+    {
+        return Err("capture names start with a lowercase letter and use lowercase letters, digits, and underscores".into());
+    }
+    Ok(())
+}
+
+fn parse_digit(word: &str) -> Option<u8> {
+    match word {
+        "zero" | "0" => Some(0),
+        "one" | "1" => Some(1),
+        "two" | "2" => Some(2),
+        "three" | "3" => Some(3),
+        "four" | "4" => Some(4),
+        "five" | "5" => Some(5),
+        "six" | "6" => Some(6),
+        "seven" | "7" => Some(7),
+        "eight" | "8" => Some(8),
+        "nine" | "9" => Some(9),
+        _ => None,
+    }
+}
+
+const LETTER_ALIASES: &[(&str, char)] = &[
+    ("a", 'a'),
+    ("ay", 'a'),
+    ("alpha", 'a'),
+    ("b", 'b'),
+    ("bee", 'b'),
+    ("bravo", 'b'),
+    ("c", 'c'),
+    ("see", 'c'),
+    ("charlie", 'c'),
+    ("d", 'd'),
+    ("dee", 'd'),
+    ("delta", 'd'),
+    ("e", 'e'),
+    ("echo", 'e'),
+    ("f", 'f'),
+    ("ef", 'f'),
+    ("foxtrot", 'f'),
+    ("g", 'g'),
+    ("gee", 'g'),
+    ("golf", 'g'),
+    ("h", 'h'),
+    ("aitch", 'h'),
+    ("hotel", 'h'),
+    ("i", 'i'),
+    ("eye", 'i'),
+    ("india", 'i'),
+    ("j", 'j'),
+    ("jay", 'j'),
+    ("juliett", 'j'),
+    ("k", 'k'),
+    ("kay", 'k'),
+    ("kilo", 'k'),
+    ("l", 'l'),
+    ("el", 'l'),
+    ("lima", 'l'),
+    ("m", 'm'),
+    ("em", 'm'),
+    ("mike", 'm'),
+    ("n", 'n'),
+    ("en", 'n'),
+    ("november", 'n'),
+    ("o", 'o'),
+    ("oh", 'o'),
+    ("oscar", 'o'),
+    ("p", 'p'),
+    ("pee", 'p'),
+    ("papa", 'p'),
+    ("q", 'q'),
+    ("cue", 'q'),
+    ("quebec", 'q'),
+    ("r", 'r'),
+    ("are", 'r'),
+    ("romeo", 'r'),
+    ("s", 's'),
+    ("ess", 's'),
+    ("sierra", 's'),
+    ("t", 't'),
+    ("tee", 't'),
+    ("tango", 't'),
+    ("u", 'u'),
+    ("you", 'u'),
+    ("uniform", 'u'),
+    ("v", 'v'),
+    ("vee", 'v'),
+    ("victor", 'v'),
+    ("w", 'w'),
+    ("whiskey", 'w'),
+    ("x", 'x'),
+    ("xray", 'x'),
+    ("y", 'y'),
+    ("why", 'y'),
+    ("yankee", 'y'),
+    ("z", 'z'),
+    ("zee", 'z'),
+    ("zed", 'z'),
+    ("zulu", 'z'),
+];
+
+fn parse_letter(word: &str) -> Option<char> {
+    LETTER_ALIASES
+        .iter()
+        .find_map(|(alias, letter)| (*alias == word).then_some(*letter))
+}
+
+#[cfg(test)]
+mod letter_tests {
+    use super::*;
+
+    #[test]
+    fn letter_aliases_are_unique_normalized_words_and_cover_the_alphabet() {
+        let mut aliases = HashSet::new();
+        let mut letters = HashSet::new();
+        for (alias, letter) in LETTER_ALIASES {
+            assert_eq!(crate::spoken_text::normalize(alias), *alias);
+            assert_eq!(alias.split_whitespace().count(), 1);
+            assert!(aliases.insert(*alias), "duplicate letter alias {alias}");
+            letters.insert(*letter);
+        }
+        assert_eq!(letters, ('a'..='z').collect());
+    }
+
+    #[test]
+    fn letter_aliases_parse_to_canonical_lowercase_letters() {
+        for (alias, expected) in LETTER_ALIASES {
+            assert_eq!(parse_letter(alias), Some(*expected), "alias {alias}");
+            if alias.len() == 1 {
+                assert_eq!(parse_letter(&alias.to_ascii_uppercase()), None);
+            }
+        }
+        assert_eq!(parse_letter("juliet"), None);
+        assert_eq!(parse_letter("x-ray"), None);
+    }
+
+    #[test]
+    fn letters_overlap_literals_choices_letters_and_text_but_not_digits() {
+        let letter = PatternToken::Letter;
+        assert!(letter.overlaps(&PatternToken::Literal("alpha".into())));
+        assert!(letter.overlaps(&PatternToken::Choice(BTreeMap::from([(
+            "bee".into(),
+            "insect".into(),
+        )]))));
+        assert!(letter.overlaps(&PatternToken::Letter));
+        assert!(letter.overlaps(&PatternToken::Rest));
+        assert!(!letter.overlaps(&PatternToken::Digit { min: 0, max: 9 }));
+    }
+
+    #[test]
+    fn unions_overlap_every_token_kind_through_their_members() {
+        let union = PatternToken::Union(vec![
+            PatternToken::Digit { min: 0, max: 2 },
+            PatternToken::Letter,
+            PatternToken::Choice(BTreeMap::from([("left".into(), "left".into())])),
+        ]);
+        assert!(union.overlaps(&PatternToken::Literal("alpha".into())));
+        assert!(union.overlaps(&PatternToken::Digit { min: 2, max: 4 }));
+        assert!(union.overlaps(&PatternToken::Letter));
+        assert!(union.overlaps(&PatternToken::Choice(BTreeMap::from([(
+            "left".into(),
+            "other".into(),
+        )]))));
+        assert!(union.overlaps(&PatternToken::Direction));
+        assert!(union.overlaps(&PatternToken::Count));
+        assert!(union.overlaps(&PatternToken::Rest));
+        assert!(union.overlaps(&PatternToken::Union(vec![PatternToken::Letter])));
+        assert!(!union.overlaps(&PatternToken::Literal("home".into())));
+        assert!(!union.overlaps(&PatternToken::Digit { min: 3, max: 9 }));
+    }
 }
 
 fn parse_direction(word: &str) -> Option<CapturedDirection> {
@@ -563,13 +902,19 @@ impl ConfiguredCommand {
         description: impl Into<String>,
         phrases: impl IntoIterator<Item = impl Into<String>>,
         context: ContextSelector,
-        action: impl Fn(Option<CapturedPhrase>) -> Action + Send + Sync + 'static,
+        captures: Option<BTreeMap<String, PersonalCapture>>,
+        action: impl Fn(CapturedValues) -> Action + Send + Sync + 'static,
         group: Option<String>,
     ) -> Result<Self, CommandError> {
         let id = id.into();
         let mut patterns = Vec::new();
         for phrase in phrases {
-            match capture_pattern(phrase.into()) {
+            let phrase = phrase.into();
+            let pattern = match &captures {
+                Some(captures) => schema_capture_pattern(phrase, captures),
+                None => capture_pattern(phrase),
+            };
+            match pattern {
                 Ok(pattern) => patterns.push(pattern),
                 Err(message) => return Err(CommandError::InvalidCapture { id, message }),
             }

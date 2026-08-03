@@ -590,8 +590,8 @@ impl MetalRenderer {
                 self.editing = true;
             }
             DictationIndicatorEvent::Meter { average, peak } => {
-                self.target_average = (average * 7.0).clamp(0.0, 1.0);
-                self.target_peak = (peak * 2.5).clamp(0.0, 1.0);
+                self.target_average = (average * 9.0).clamp(0.0, 1.0);
+                self.target_peak = (peak * 3.0).clamp(0.0, 1.0);
             }
             DictationIndicatorEvent::Submitted { job_id } => {
                 self.capturing = false;
@@ -769,8 +769,8 @@ impl MetalRenderer {
             0.0
         };
 
-        self.average.step_critical(self.target_average, dt, 16.0);
-        self.peak.step_critical(self.target_peak, dt, 19.0);
+        self.average.step_critical(self.target_average, dt, 22.0);
+        self.peak.step_critical(self.target_peak, dt, 26.0);
         self.width
             .step_critical(target_width, dt, GEOMETRY_ANGULAR_FREQUENCY);
         self.height

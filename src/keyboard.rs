@@ -132,16 +132,23 @@ pub fn initialize_layout() -> Result<()> {
         return Err(eyre!("active keyboard layout has no Unicode mapping"));
     }
     let layout = unsafe { CFDataGetBytePtr(layout_data) };
-    let codes = (0..128)
-        .filter_map(|key_code| {
-            let translated = translate(layout, key_code)?;
-            let character = translated.chars().next()?.to_ascii_lowercase();
-            Some((character, key_code))
-        })
-        .collect();
+    let codes = collect_key_codes((0..128).filter_map(|key_code| {
+        let translated = translate(layout, key_code)?;
+        let character = translated.chars().next()?.to_ascii_lowercase();
+        Some((character, key_code))
+    }));
     unsafe { CFRelease(source) };
     let _ = KEY_CODES.set(codes);
     Ok(())
+}
+
+fn collect_key_codes(entries: impl IntoIterator<Item = (char, u16)>) -> HashMap<char, u16> {
+    entries
+        .into_iter()
+        .fold(HashMap::new(), |mut codes, (character, key_code)| {
+            codes.entry(character).or_insert(key_code);
+            codes
+        })
 }
 
 pub fn post_command(character: char) -> Result<()> {
@@ -198,17 +205,33 @@ pub fn post_repeated_shortcut(key: Key, modifiers: Modifiers, count: u8) -> Resu
 }
 
 fn post_key_code(key_code: u16, modifiers: &[(u64, u16)], count: u8) -> Result<()> {
-    let flags = modifiers.iter().fold(0, |flags, (flag, _)| flags | flag);
-    let specs = modifiers
-        .iter()
-        .map(|(_, key)| (*key, true, 0))
-        .chain((0..count).flat_map(|_| [(key_code, true, flags), (key_code, false, flags)]))
-        .chain(modifiers.iter().rev().map(|(_, key)| (*key, false, 0)));
+    let specs = shortcut_event_specs(key_code, modifiers, count);
     let events = specs.map(KeyboardEvent::new).collect::<Result<Vec<_>>>()?;
     for event in events {
         event.post();
     }
     Ok(())
+}
+
+fn shortcut_event_specs(
+    key_code: u16,
+    modifiers: &[(u64, u16)],
+    count: u8,
+) -> impl Iterator<Item = (u16, bool, u64)> {
+    let flags = modifiers.iter().fold(0, |flags, (flag, _)| flags | flag);
+    let mut active_flags = 0;
+    let mut remaining_flags = flags;
+    modifiers
+        .iter()
+        .map(move |(flag, key)| {
+            active_flags |= flag;
+            (*key, true, active_flags)
+        })
+        .chain((0..count).flat_map(move |_| [(key_code, true, flags), (key_code, false, flags)]))
+        .chain(modifiers.iter().rev().map(move |(flag, key)| {
+            remaining_flags &= !flag;
+            (*key, false, remaining_flags)
+        }))
 }
 
 struct KeyboardEvent(EventRef);
@@ -279,4 +302,32 @@ fn translate(layout: *const u8, key_code: u16) -> Option<String> {
     (status == 0 && length > 0)
         .then(|| String::from_utf16(&output[..length as usize]).ok())
         .flatten()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn layout_cache_prefers_the_first_key_that_produces_a_character() {
+        let codes = collect_key_codes([('2', 19), ('2', 84)]);
+
+        assert_eq!(codes.get(&'2'), Some(&19));
+    }
+
+    #[test]
+    fn shortcut_modifier_events_track_physical_flag_transitions() {
+        let events =
+            shortcut_event_specs(19, &[(CONTROL_FLAG, CONTROL_KEY_CODE)], 1).collect::<Vec<_>>();
+
+        assert_eq!(
+            events,
+            vec![
+                (CONTROL_KEY_CODE, true, CONTROL_FLAG),
+                (19, true, CONTROL_FLAG),
+                (19, false, CONTROL_FLAG),
+                (CONTROL_KEY_CODE, false, 0),
+            ]
+        );
+    }
 }

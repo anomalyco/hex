@@ -13,7 +13,8 @@ use color_eyre::eyre::{Result, WrapErr, eyre};
 use serde::{Deserialize, Serialize};
 
 use crate::commands::{
-    Action, ActionOutcome, CapturedPhrase, CommandConfig, ConfiguredCommand, ContextPredicate,
+    Action, ActionOutcome, CapturedValue, CapturedValues, CommandConfig, ConfiguredCommand,
+    ContextPredicate, PersonalCapture,
 };
 use crate::context::ContextSnapshot;
 use crate::dictation::DictationProtocol;
@@ -28,6 +29,14 @@ const MAX_COMMANDS: usize = 512;
 const MAX_TRANSFORMATIONS: usize = 128;
 const MAX_TRANSFORMATIONS_PER_INVOCATION: usize = 32;
 const MAX_PHRASES: usize = 16;
+const MAX_CAPTURE_ENTRIES: usize = 8;
+const MAX_CHOICE_VALUES: usize = 64;
+const MAX_CHOICE_ALIASES: usize = 16;
+const MAX_CHOICE_VALUE_BYTES: usize = 128;
+const MAX_CHOICE_WORD_BYTES: usize = 64;
+const MAX_UNION_MEMBERS: usize = 16;
+const MAX_UNION_DEPTH: usize = 4;
+const MAX_UNION_SERIALIZED_BYTES: usize = 16 * 1024;
 const MAX_REPEAT: u8 = 100;
 const MAX_PENDING_INVOCATIONS: usize = 1024;
 const MAX_PENDING_TOOL_CALLS: usize = 1024;
@@ -589,7 +598,7 @@ struct Invocation {
     command_id: String,
     heard: String,
     context: ContextSnapshot,
-    capture: Option<CapturedPhrase>,
+    captures: CapturedValues,
 }
 
 enum Request {
@@ -718,7 +727,26 @@ struct RegistrationCommand {
     group: Option<String>,
     description: Option<String>,
     when: Option<When>,
+    #[serde(default)]
+    captures: BTreeMap<String, CaptureDescriptor>,
     execution: Execution,
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(tag = "type", rename_all = "camelCase", deny_unknown_fields)]
+enum CaptureDescriptor {
+    Digit {
+        min: u8,
+        max: u8,
+    },
+    Letter,
+    Choice {
+        choices: BTreeMap<String, Vec<String>>,
+    },
+    Union {
+        members: Vec<CaptureDescriptor>,
+    },
+    Text,
 }
 
 #[derive(Deserialize)]
@@ -809,7 +837,7 @@ enum HostInput {
         command_id: String,
         context: InvocationContext,
         #[serde(skip_serializing_if = "BTreeMap::is_empty")]
-        captures: BTreeMap<String, String>,
+        captures: BTreeMap<String, WireCaptureValue>,
     },
     Transform {
         invocation_id: String,
@@ -823,6 +851,13 @@ enum HostInput {
         result: WireResult,
     },
     Shutdown,
+}
+
+#[derive(Serialize)]
+#[serde(untagged)]
+enum WireCaptureValue {
+    Number(u8),
+    Text(String),
 }
 
 #[derive(Serialize)]
@@ -937,7 +972,7 @@ impl PersonalCommands {
         command_id: impl Into<String>,
         heard: &str,
         context: ContextSnapshot,
-        capture: Option<CapturedPhrase>,
+        captures: CapturedValues,
     ) -> Result<(), &'static str> {
         self.requests
             .try_send(Request::Invoke(Box::new(Invocation {
@@ -945,7 +980,7 @@ impl PersonalCommands {
                 command_id: command_id.into(),
                 heard: heard.into(),
                 context,
-                capture,
+                captures,
             })))
             .map_err(|error| match error {
                 TrySendError::Full(_) => "personal command host queue is full",
@@ -1163,21 +1198,22 @@ fn run_worker(
                 };
                 next_invocation += 1;
                 let invocation_id = format!("{}-{next_invocation}", invocation.generation);
-                let context = InvocationContext {
-                    application: invocation.context.application.clone(),
-                    browser_host: invocation.context.browser_host().map(Into::into),
-                    browser_url: invocation
-                        .context
-                        .browser_url
-                        .as_ref()
-                        .map(ToString::to_string),
-                    window_title: invocation.context.window_title.clone(),
-                };
+                let context = invocation_context(&invocation.context);
                 let captures = invocation
-                    .capture
-                    .as_ref()
-                    .map(|capture| BTreeMap::from([(capture.name.clone(), capture.text.clone())]))
-                    .unwrap_or_default();
+                    .captures
+                    .iter()
+                    .map(|(name, value)| {
+                        let value = match value {
+                            CapturedValue::Digit(value) => WireCaptureValue::Number(*value),
+                            CapturedValue::Letter(value) => {
+                                WireCaptureValue::Text(value.to_string())
+                            }
+                            CapturedValue::Choice(value) => WireCaptureValue::Text(value.clone()),
+                            CapturedValue::Text(value) => WireCaptureValue::Text(value.clone()),
+                        };
+                        (name.clone(), value)
+                    })
+                    .collect();
                 let input = HostInput::Invoke {
                     invocation_id: invocation_id.clone(),
                     command_id: invocation.command_id.clone(),
@@ -1777,6 +1813,102 @@ fn accept_tool_call(
     true
 }
 
+fn compile_capture_descriptor(
+    command_id: &str,
+    descriptor: &CaptureDescriptor,
+    depth: usize,
+) -> Result<PersonalCapture> {
+    match descriptor {
+        CaptureDescriptor::Digit { min, max } => {
+            if min > max || *max > 9 {
+                return Err(eyre!(
+                    "{command_id}: digit capture ranges must be within 0 through 9"
+                ));
+            }
+            Ok(PersonalCapture::Digit {
+                min: *min,
+                max: *max,
+            })
+        }
+        CaptureDescriptor::Letter => Ok(PersonalCapture::Letter),
+        CaptureDescriptor::Choice { choices } => {
+            if choices.is_empty() || choices.len() > MAX_CHOICE_VALUES {
+                return Err(eyre!(
+                    "{command_id}: choice captures must contain 1 through {MAX_CHOICE_VALUES} values"
+                ));
+            }
+            let mut spoken = BTreeMap::new();
+            for (value, aliases) in choices {
+                validate_text(value, "choice canonical value", MAX_CHOICE_VALUE_BYTES)?;
+                if aliases.is_empty() || aliases.len() > MAX_CHOICE_ALIASES {
+                    return Err(eyre!(
+                        "{command_id}: each choice value must contain 1 through {MAX_CHOICE_ALIASES} aliases"
+                    ));
+                }
+                for alias in aliases {
+                    validate_text(alias, "choice spoken alias", MAX_CHOICE_WORD_BYTES)?;
+                    let normalized = crate::spoken_text::normalize(alias);
+                    if normalized.split_whitespace().count() != 1 {
+                        return Err(eyre!(
+                            "{command_id}: choice aliases must normalize to exactly one spoken word"
+                        ));
+                    }
+                    if spoken.insert(normalized.clone(), value.clone()).is_some() {
+                        return Err(eyre!(
+                            "{command_id}: duplicate spoken choice alias {normalized}"
+                        ));
+                    }
+                }
+            }
+            Ok(PersonalCapture::Choice { choices: spoken })
+        }
+        CaptureDescriptor::Union { members } => {
+            if depth >= MAX_UNION_DEPTH {
+                return Err(eyre!(
+                    "{command_id}: union capture nesting may not exceed {MAX_UNION_DEPTH}"
+                ));
+            }
+            if members.len() < 2 {
+                return Err(eyre!(
+                    "{command_id}: union captures must contain at least two members"
+                ));
+            }
+            if serde_json::to_vec(descriptor)?.len() > MAX_UNION_SERIALIZED_BYTES {
+                return Err(eyre!(
+                    "{command_id}: union capture exceeds {MAX_UNION_SERIALIZED_BYTES} serialized bytes"
+                ));
+            }
+            let mut flattened = Vec::new();
+            for member in members {
+                match compile_capture_descriptor(command_id, member, depth + 1)? {
+                    PersonalCapture::Text => {
+                        return Err(eyre!("{command_id}: union captures do not accept text()"));
+                    }
+                    PersonalCapture::Union { members } => flattened.extend(members),
+                    member => flattened.push(member),
+                }
+            }
+            if flattened.len() > MAX_UNION_MEMBERS {
+                return Err(eyre!(
+                    "{command_id}: union captures may contain at most {MAX_UNION_MEMBERS} flattened members"
+                ));
+            }
+            for (index, left) in flattened.iter().enumerate() {
+                if flattened[index + 1..]
+                    .iter()
+                    .any(|right| left.overlaps(right))
+                {
+                    return Err(eyre!(
+                        "{command_id}: union capture members have overlapping spoken alternatives"
+                    ));
+                }
+            }
+            Ok(PersonalCapture::Union { members: flattened })
+        }
+        CaptureDescriptor::Text => Ok(PersonalCapture::Text),
+    }
+}
+
 fn compile_registration(
     base: &CommandConfig,
     generation: u64,
@@ -1785,7 +1917,7 @@ fn compile_registration(
     transformations: Vec<RegistrationTransformation>,
     commands: Vec<RegistrationCommand>,
 ) -> Result<RuntimeSnapshot> {
-    if protocol_version != 1 {
+    if protocol_version != 2 {
         return Err(eyre!(
             "unsupported personal command protocol version {protocol_version}"
         ));
@@ -1842,8 +1974,29 @@ fn compile_registration(
             validate_text(group, "command group", 1024)?;
         }
         let group = Some(command.group.unwrap_or_else(|| "Other".into()));
+        if command.captures.len() > MAX_CAPTURE_ENTRIES {
+            return Err(eyre!(
+                "{}: commands may contain at most {MAX_CAPTURE_ENTRIES} captures",
+                command.id
+            ));
+        }
+        let captures = command
+            .captures
+            .iter()
+            .map(|(name, descriptor)| {
+                validate_text(name, "capture name", 64)?;
+                let capture = compile_capture_descriptor(&command.id, descriptor, 0)?;
+                Ok((name.clone(), capture))
+            })
+            .collect::<Result<BTreeMap<_, _>>>()?;
         let configured = match command.execution {
             Execution::Native { action } => {
+                if !captures.is_empty() {
+                    return Err(eyre!(
+                        "{}: capture descriptors require a handler command (use run instead of action)",
+                        command.id
+                    ));
+                }
                 for phrase in &command.phrases {
                     match crate::commands::phrase_placeholder(phrase) {
                         Ok(None) => {}
@@ -1870,9 +2023,10 @@ fn compile_registration(
                 description,
                 command.phrases,
                 context,
-                move |capture| Action::InvokeHandler {
+                (!captures.is_empty()).then_some(captures),
+                move |captures| Action::InvokeHandler {
                     generation,
-                    capture,
+                    captures,
                 },
                 group,
             )?,
@@ -2344,7 +2498,7 @@ mod tests {
     #[test]
     fn registration_compiles_native_and_handler_commands() {
         let registration: HostOutput = serde_json::from_str(
-            r#"{"type":"registration","protocolVersion":1,"commands":[{"id":"native","phrases":["open example"],"execution":{"type":"native","action":{"type":"openUrl","url":"https://example.com"}}},{"id":"handled","phrases":["do work"],"group":"Work","when":{"application":"Slack"},"execution":{"type":"handler"}}]}"#,
+            r#"{"type":"registration","protocolVersion":2,"commands":[{"id":"native","phrases":["open example"],"execution":{"type":"native","action":{"type":"openUrl","url":"https://example.com"}}},{"id":"handled","phrases":["do work"],"group":"Work","when":{"application":"Slack"},"execution":{"type":"handler"}}]}"#,
         )
         .unwrap();
         let HostOutput::Registration {
@@ -2381,9 +2535,9 @@ mod tests {
                 id: "handled",
                 action: Action::InvokeHandler {
                     generation: 7,
-                    capture: None,
+                    captures,
                 },
-            }
+            } if captures.is_empty()
         ));
         assert_eq!(
             compiled
@@ -2408,7 +2562,7 @@ mod tests {
     #[test]
     fn capture_phrases_compile_for_handlers_and_carry_the_spoken_remainder() {
         let registration: HostOutput = serde_json::from_str(
-            r#"{"type":"registration","protocolVersion":1,"commands":[{"id":"search","phrases":["search amazon for {query}"],"execution":{"type":"handler"}}]}"#,
+            r#"{"type":"registration","protocolVersion":2,"commands":[{"id":"search","phrases":["search amazon for {query}"],"execution":{"type":"handler"}}]}"#,
         )
         .unwrap();
         let HostOutput::Registration {
@@ -2439,11 +2593,13 @@ mod tests {
                 action:
                     Action::InvokeHandler {
                         generation: 7,
-                        capture: Some(capture),
+                        captures,
                     },
             } => {
-                assert_eq!(capture.name, "query");
-                assert_eq!(capture.text, "wool socks");
+                assert_eq!(
+                    captures.get("query"),
+                    Some(&CapturedValue::Text("wool socks".into()))
+                );
             }
             _ => panic!("expected the capture command to execute"),
         }
@@ -2458,9 +2614,446 @@ mod tests {
     }
 
     #[test]
+    fn typed_capture_phrases_resolve_multiple_digits_and_trailing_text() {
+        let command: RegistrationCommand = serde_json::from_str(
+            r#"{"id":"move","phrases":["move {from} to {to} named {label}"],"captures":{"from":{"type":"digit","min":1,"max":3},"to":{"type":"digit","min":4,"max":6},"label":{"type":"text"}},"execution":{"type":"handler"}}"#,
+        )
+        .unwrap();
+        let compiled =
+            compile_registration(&CommandConfig::new(), 9, 2, None, vec![], vec![command]).unwrap();
+
+        match compiled.commands.resolve(
+            Mode::Listening,
+            "move two to 5 named important item",
+            &ContextSnapshot::default(),
+        ) {
+            Decision::Execute {
+                action: Action::InvokeHandler { captures, .. },
+                ..
+            } => {
+                assert_eq!(captures.get("from"), Some(&CapturedValue::Digit(2)));
+                assert_eq!(captures.get("to"), Some(&CapturedValue::Digit(5)));
+                assert_eq!(
+                    captures.get("label"),
+                    Some(&CapturedValue::Text("important item".into()))
+                );
+            }
+            _ => panic!("expected typed capture command"),
+        }
+        assert!(matches!(
+            compiled.commands.resolve(
+                Mode::Listening,
+                "move four to 5 named important item",
+                &ContextSnapshot::default()
+            ),
+            Decision::Ignore
+        ));
+    }
+
+    #[test]
+    fn choice_captures_resolve_aliases_to_canonical_values() {
+        let command: RegistrationCommand = serde_json::from_str(
+            r#"{"id":"move","phrases":["move {direction} to {edge}"],"captures":{"direction":{"type":"choice","choices":{"left":["left","back"],"right":["right","forward"]}},"edge":{"type":"choice","choices":{"top":["top"],"bottom":["bottom"]}}},"execution":{"type":"handler"}}"#,
+        )
+        .unwrap();
+        let compiled =
+            compile_registration(&CommandConfig::new(), 9, 2, None, vec![], vec![command]).unwrap();
+
+        match compiled.commands.resolve(
+            Mode::Listening,
+            "move back to bottom",
+            &ContextSnapshot::default(),
+        ) {
+            Decision::Execute {
+                action: Action::InvokeHandler { captures, .. },
+                ..
+            } => {
+                assert_eq!(
+                    captures.get("direction"),
+                    Some(&CapturedValue::Choice("left".into()))
+                );
+                assert_eq!(
+                    captures.get("edge"),
+                    Some(&CapturedValue::Choice("bottom".into()))
+                );
+            }
+            _ => panic!("expected choice capture command"),
+        }
+    }
+
+    #[test]
+    fn letter_captures_resolve_spoken_and_nato_aliases_to_lowercase() {
+        let command: RegistrationCommand = serde_json::from_str(
+            r#"{"id":"control","phrases":["control {key}"],"captures":{"key":{"type":"letter"}},"execution":{"type":"handler"}}"#,
+        )
+        .unwrap();
+        let compiled =
+            compile_registration(&CommandConfig::new(), 9, 2, None, vec![], vec![command]).unwrap();
+
+        for (heard, expected) in [
+            ("control A", 'a'),
+            ("control ay", 'a'),
+            ("control alpha", 'a'),
+            ("control bee", 'b'),
+            ("control echo", 'e'),
+            ("control aitch", 'h'),
+            ("control juliett", 'j'),
+            ("control cue", 'q'),
+            ("control whiskey", 'w'),
+            ("control xray", 'x'),
+            ("control why", 'y'),
+            ("control zed", 'z'),
+            ("control zulu", 'z'),
+        ] {
+            match compiled
+                .commands
+                .resolve(Mode::Listening, heard, &ContextSnapshot::default())
+            {
+                Decision::Execute {
+                    action: Action::InvokeHandler { captures, .. },
+                    ..
+                } => assert_eq!(captures.get("key"), Some(&CapturedValue::Letter(expected))),
+                _ => panic!("expected {heard} to resolve"),
+            }
+        }
+    }
+
+    #[test]
+    fn union_captures_resolve_each_kind_and_multiple_capture_positions() {
+        let command: RegistrationCommand = serde_json::from_str(
+            r#"{"id":"keys","phrases":["key {first} then {second}"],"captures":{"first":{"type":"union","members":[{"type":"letter"},{"type":"digit","min":0,"max":9},{"type":"choice","choices":{"home":["home"],"escape":["escape","cancel"]}}]},"second":{"type":"union","members":[{"type":"digit","min":0,"max":9},{"type":"choice","choices":{"enter":["enter"]}}]}},"execution":{"type":"handler"}}"#,
+        )
+        .unwrap();
+        let compiled =
+            compile_registration(&CommandConfig::new(), 9, 2, None, vec![], vec![command]).unwrap();
+
+        for (heard, first, second) in [
+            (
+                "key alpha then 2",
+                CapturedValue::Letter('a'),
+                CapturedValue::Digit(2),
+            ),
+            (
+                "key 7 then enter",
+                CapturedValue::Digit(7),
+                CapturedValue::Choice("enter".into()),
+            ),
+            (
+                "key cancel then 4",
+                CapturedValue::Choice("escape".into()),
+                CapturedValue::Digit(4),
+            ),
+        ] {
+            match compiled
+                .commands
+                .resolve(Mode::Listening, heard, &ContextSnapshot::default())
+            {
+                Decision::Execute {
+                    action: Action::InvokeHandler { captures, .. },
+                    ..
+                } => {
+                    assert_eq!(captures.get("first"), Some(&first));
+                    assert_eq!(captures.get("second"), Some(&second));
+                }
+                _ => panic!("expected {heard} to resolve"),
+            }
+        }
+    }
+
+    #[test]
+    fn nested_unions_flatten_and_invalid_unions_are_rejected_transactionally() {
+        let valid: RegistrationCommand = serde_json::from_str(
+            r#"{"id":"key","phrases":["key {key}"],"captures":{"key":{"type":"union","members":[{"type":"letter"},{"type":"union","members":[{"type":"digit","min":0,"max":9},{"type":"choice","choices":{"home":["home"]}}]}]}},"execution":{"type":"handler"}}"#,
+        )
+        .unwrap();
+        assert!(
+            compile_registration(&CommandConfig::new(), 1, 2, None, vec![], vec![valid]).is_ok()
+        );
+
+        for input in [
+            r#"{"id":"bad","phrases":["key {key}"],"captures":{"key":{"type":"union","members":[{"type":"letter"}]}},"execution":{"type":"handler"}}"#,
+            r#"{"id":"bad","phrases":["key {key}"],"captures":{"key":{"type":"union","members":[{"type":"letter"},{"type":"text"}]}},"execution":{"type":"handler"}}"#,
+            r#"{"id":"bad","phrases":["key {key}"],"captures":{"key":{"type":"union","members":[{"type":"digit","min":0,"max":9},{"type":"choice","choices":{"two":["2"]}}]}},"execution":{"type":"handler"}}"#,
+            r#"{"id":"bad","phrases":["key {key}"],"captures":{"key":{"type":"union","members":[{"type":"letter"},{"type":"choice","choices":{"a":["alpha"]}}]}},"execution":{"type":"handler"}}"#,
+            r#"{"id":"bad","phrases":["key {key}"],"captures":{"key":{"type":"union","members":[{"type":"letter"},{"type":"union","members":[{"type":"digit","min":0,"max":0},{"type":"union","members":[{"type":"choice","choices":{"home":["home"]}},{"type":"union","members":[{"type":"choice","choices":{"end":["end"]}},{"type":"union","members":[{"type":"choice","choices":{"up":["up"]}},{"type":"choice","choices":{"down":["down"]}}]}]}]}]}]}},"execution":{"type":"handler"}}"#,
+        ] {
+            let command = serde_json::from_str(input).unwrap();
+            assert!(
+                compile_registration(&CommandConfig::new(), 1, 2, None, vec![], vec![command])
+                    .is_err(),
+                "union should be rejected: {input}"
+            );
+        }
+
+        let members = (0..=MAX_UNION_MEMBERS)
+            .map(|index| CaptureDescriptor::Choice {
+                choices: BTreeMap::from([(format!("key{index}"), vec![format!("key{index}")])]),
+            })
+            .collect();
+        let command = RegistrationCommand {
+            id: "bad".into(),
+            phrases: vec!["key {key}".into()],
+            group: None,
+            description: None,
+            when: None,
+            captures: BTreeMap::from([("key".into(), CaptureDescriptor::Union { members })]),
+            execution: Execution::Handler,
+        };
+        assert!(
+            compile_registration(&CommandConfig::new(), 1, 2, None, vec![], vec![command]).is_err()
+        );
+
+        let large_choice = |prefix: &str| CaptureDescriptor::Choice {
+            choices: (0..16)
+                .map(|value| {
+                    (
+                        format!("{prefix}{value}"),
+                        (0..16)
+                            .map(|alias| format!("{prefix}-{value}-{alias}-{}", "x".repeat(40)))
+                            .collect(),
+                    )
+                })
+                .collect(),
+        };
+        let command = RegistrationCommand {
+            id: "bad".into(),
+            phrases: vec!["key {key}".into()],
+            group: None,
+            description: None,
+            when: None,
+            captures: BTreeMap::from([(
+                "key".into(),
+                CaptureDescriptor::Union {
+                    members: vec![large_choice("left"), large_choice("right")],
+                },
+            )]),
+            execution: Execution::Handler,
+        };
+        assert!(
+            compile_registration(&CommandConfig::new(), 1, 2, None, vec![], vec![command]).is_err()
+        );
+    }
+
+    #[test]
+    fn union_overlap_checks_all_existing_token_kinds() {
+        let compile_pair = |right: &str| {
+            let union = serde_json::from_str(
+                r#"{"id":"union","phrases":["press {key}"],"captures":{"key":{"type":"union","members":[{"type":"digit","min":0,"max":2},{"type":"choice","choices":{"home":["home"]}}]}},"execution":{"type":"handler"}}"#,
+            )
+            .unwrap();
+            compile_registration(
+                &CommandConfig::new(),
+                1,
+                2,
+                None,
+                vec![],
+                vec![union, serde_json::from_str(right).unwrap()],
+            )
+        };
+
+        for right in [
+            r#"{"id":"literal","phrases":["press home"],"execution":{"type":"handler"}}"#,
+            r#"{"id":"digit","phrases":["press {key}"],"captures":{"key":{"type":"digit","min":2,"max":4}},"execution":{"type":"handler"}}"#,
+            r#"{"id":"choice","phrases":["press {key}"],"captures":{"key":{"type":"choice","choices":{"house":["home"]}}},"execution":{"type":"handler"}}"#,
+            r#"{"id":"text","phrases":["press {key}"],"captures":{"key":{"type":"text"}},"execution":{"type":"handler"}}"#,
+            r#"{"id":"union2","phrases":["press {key}"],"captures":{"key":{"type":"union","members":[{"type":"letter"},{"type":"choice","choices":{"house":["home"]}}]}},"execution":{"type":"handler"}}"#,
+        ] {
+            assert!(compile_pair(right).is_err(), "expected overlap: {right}");
+        }
+        assert!(compile_pair(
+            r#"{"id":"disjoint","phrases":["press {key}"],"captures":{"key":{"type":"union","members":[{"type":"digit","min":3,"max":5},{"type":"choice","choices":{"end":["end"]}}]}},"execution":{"type":"handler"}}"#
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn letter_overlap_checks_literals_choices_letters_digits_and_text() {
+        let compile_pair = |right: &str| {
+            let letter = serde_json::from_str(
+                r#"{"id":"letter","phrases":["press {key}"],"captures":{"key":{"type":"letter"}},"execution":{"type":"handler"}}"#,
+            )
+            .unwrap();
+            let right = serde_json::from_str(right).unwrap();
+            compile_registration(
+                &CommandConfig::new(),
+                1,
+                2,
+                None,
+                vec![],
+                vec![letter, right],
+            )
+        };
+
+        assert!(
+            compile_pair(
+                r#"{"id":"literal","phrases":["press alpha"],"execution":{"type":"handler"}}"#
+            )
+            .is_err()
+        );
+        assert!(compile_pair(r#"{"id":"choice","phrases":["press {key}"],"captures":{"key":{"type":"choice","choices":{"insect":["bee"]}}},"execution":{"type":"handler"}}"#).is_err());
+        assert!(compile_pair(r#"{"id":"letter-2","phrases":["press {key}"],"captures":{"key":{"type":"letter"}},"execution":{"type":"handler"}}"#).is_err());
+        assert!(compile_pair(r#"{"id":"text","phrases":["press {key}"],"captures":{"key":{"type":"text"}},"execution":{"type":"handler"}}"#).is_err());
+        assert!(compile_pair(r#"{"id":"digit","phrases":["press {key}"],"captures":{"key":{"type":"digit","min":0,"max":9}},"execution":{"type":"handler"}}"#).is_ok());
+    }
+
+    #[test]
+    fn invalid_choice_descriptors_are_rejected() {
+        for input in [
+            r#"{"id":"bad","phrases":["move {direction}"],"captures":{"direction":{"type":"choice","choices":{}}},"execution":{"type":"handler"}}"#,
+            r#"{"id":"bad","phrases":["move {direction}"],"captures":{"direction":{"type":"choice","choices":{"left":[]}}},"execution":{"type":"handler"}}"#,
+            r#"{"id":"bad","phrases":["move {direction}"],"captures":{"direction":{"type":"choice","choices":{"left":["two words"]}}},"execution":{"type":"handler"}}"#,
+            r#"{"id":"bad","phrases":["move {direction}"],"captures":{"direction":{"type":"choice","choices":{"left":["LEFT"],"other":["left!"]}}},"execution":{"type":"handler"}}"#,
+            r#"{"id":"bad","phrases":["move {direction}"],"captures":{"direction":{"type":"choice","choices":{"left":["left"]},"extra":true}},"execution":{"type":"handler"}}"#,
+        ] {
+            let command = serde_json::from_str(input);
+            if let Ok(command) = command {
+                assert!(
+                    compile_registration(&CommandConfig::new(), 1, 2, None, vec![], vec![command])
+                        .is_err(),
+                    "descriptor should be rejected: {input}"
+                );
+            }
+        }
+
+        let command = |choices| RegistrationCommand {
+            id: "bad".into(),
+            phrases: vec!["move {direction}".into()],
+            group: None,
+            description: None,
+            when: None,
+            captures: BTreeMap::from([("direction".into(), CaptureDescriptor::Choice { choices })]),
+            execution: Execution::Handler,
+        };
+        let oversized_values = (0..=MAX_CHOICE_VALUES)
+            .map(|index| (format!("value{index}"), vec![format!("word{index}")]))
+            .collect();
+        for choices in [
+            BTreeMap::from([("x".repeat(MAX_CHOICE_VALUE_BYTES + 1), vec!["left".into()])]),
+            BTreeMap::from([("left".into(), vec!["x".repeat(MAX_CHOICE_WORD_BYTES + 1)])]),
+            BTreeMap::from([(
+                "left".into(),
+                (0..=MAX_CHOICE_ALIASES)
+                    .map(|index| format!("word{index}"))
+                    .collect(),
+            )]),
+            oversized_values,
+        ] {
+            assert!(
+                compile_registration(
+                    &CommandConfig::new(),
+                    1,
+                    2,
+                    None,
+                    vec![],
+                    vec![command(choices)]
+                )
+                .is_err()
+            );
+        }
+    }
+
+    #[test]
+    fn choice_overlap_checks_literals_digits_choices_and_text() {
+        let compile_pair = |left: &str, right: &str| {
+            let left = serde_json::from_str(left).unwrap();
+            let right = serde_json::from_str(right).unwrap();
+            compile_registration(&CommandConfig::new(), 1, 2, None, vec![], vec![left, right])
+        };
+        let choice = r#"{"id":"choice","phrases":["press {value}"],"captures":{"value":{"type":"choice","choices":{"left":["left"],"second":["two"]}}},"execution":{"type":"handler"}}"#;
+
+        assert!(
+            compile_pair(
+                choice,
+                r#"{"id":"literal","phrases":["press left"],"execution":{"type":"handler"}}"#
+            )
+            .is_err()
+        );
+        assert!(compile_pair(
+            choice,
+            r#"{"id":"digit","phrases":["press {value}"],"captures":{"value":{"type":"digit","min":1,"max":2}},"execution":{"type":"handler"}}"#
+        )
+        .is_err());
+        assert!(compile_pair(
+            choice,
+            r#"{"id":"other-choice","phrases":["press {value}"],"captures":{"value":{"type":"choice","choices":{"backward":["left"]}}},"execution":{"type":"handler"}}"#
+        )
+        .is_err());
+        assert!(compile_pair(
+            choice,
+            r#"{"id":"text","phrases":["press {value}"],"captures":{"value":{"type":"text"}},"execution":{"type":"handler"}}"#
+        )
+        .is_err());
+        assert!(compile_pair(
+            choice,
+            r#"{"id":"disjoint-digit","phrases":["press {value}"],"captures":{"value":{"type":"digit","min":3,"max":5}},"execution":{"type":"handler"}}"#
+        )
+        .is_ok());
+        assert!(compile_pair(
+            choice,
+            r#"{"id":"disjoint-choice","phrases":["press {value}"],"captures":{"value":{"type":"choice","choices":{"right":["right"]}}},"execution":{"type":"handler"}}"#
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn typed_capture_aliases_and_ranges_are_validated() {
+        for input in [
+            r#"{"id":"bad","phrases":["move {from} to {to}","move {from}"],"captures":{"from":{"type":"digit","min":1,"max":3},"to":{"type":"digit","min":4,"max":6}},"execution":{"type":"handler"}}"#,
+            r#"{"id":"bad","phrases":["say {words} now"],"captures":{"words":{"type":"text"}},"execution":{"type":"handler"}}"#,
+            r#"{"id":"bad","phrases":["press {number}"],"captures":{"number":{"type":"digit","min":3,"max":10}},"execution":{"type":"handler"}}"#,
+        ] {
+            let command = serde_json::from_str(input).unwrap();
+            assert!(
+                compile_registration(&CommandConfig::new(), 1, 2, None, vec![], vec![command])
+                    .is_err()
+            );
+        }
+
+        let first = serde_json::from_str(
+            r#"{"id":"first","phrases":["press {number}"],"captures":{"number":{"type":"digit","min":1,"max":3}},"execution":{"type":"handler"}}"#,
+        )
+        .unwrap();
+        let disjoint = serde_json::from_str(
+            r#"{"id":"disjoint","phrases":["press {number}"],"captures":{"number":{"type":"digit","min":4,"max":6}},"execution":{"type":"handler"}}"#,
+        )
+        .unwrap();
+        assert!(
+            compile_registration(
+                &CommandConfig::new(),
+                1,
+                2,
+                None,
+                vec![],
+                vec![first, disjoint]
+            )
+            .is_ok()
+        );
+
+        let first = serde_json::from_str(
+            r#"{"id":"first","phrases":["press {number}"],"captures":{"number":{"type":"digit","min":1,"max":3}},"execution":{"type":"handler"}}"#,
+        )
+        .unwrap();
+        let overlapping = serde_json::from_str(
+            r#"{"id":"overlapping","phrases":["press {number}"],"captures":{"number":{"type":"digit","min":3,"max":5}},"execution":{"type":"handler"}}"#,
+        )
+        .unwrap();
+        assert!(
+            compile_registration(
+                &CommandConfig::new(),
+                1,
+                2,
+                None,
+                vec![],
+                vec![first, overlapping]
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
     fn capture_phrases_are_rejected_for_native_commands() {
         let registration: HostOutput = serde_json::from_str(
-            r#"{"type":"registration","protocolVersion":1,"commands":[{"id":"search","phrases":["search amazon for {query}"],"execution":{"type":"native","action":{"type":"openUrl","url":"https://example.com"}}}]}"#,
+            r#"{"type":"registration","protocolVersion":2,"commands":[{"id":"search","phrases":["search amazon for {query}"],"execution":{"type":"native","action":{"type":"openUrl","url":"https://example.com"}}}]}"#,
         )
         .unwrap();
         let HostOutput::Registration {
@@ -2498,7 +3091,10 @@ mod tests {
             invocation_id: "7-1".into(),
             command_id: "search".into(),
             context,
-            captures: BTreeMap::from([("query".to_string(), "wool socks".to_string())]),
+            captures: BTreeMap::from([(
+                "query".to_string(),
+                WireCaptureValue::Text("wool socks".to_string()),
+            )]),
         };
         let json = serde_json::to_string(&with_capture).unwrap();
         assert!(json.contains(r#""captures":{"query":"wool socks"}"#));
@@ -2646,7 +3242,7 @@ mod tests {
         )
         .unwrap();
 
-        assert!(compile_registration(&base, 1, 1, None, vec![], vec![command]).is_err());
+        assert!(compile_registration(&base, 1, 2, None, vec![], vec![command]).is_err());
         assert!(matches!(
             base.resolve(
                 Mode::Listening,
@@ -2662,7 +3258,7 @@ mod tests {
         let configured = compile_registration(
             &CommandConfig::new(),
             1,
-            1,
+            2,
             Some(RegistrationDictationProtocol {
                 start: vec!["begin note".into()],
                 stop: vec!["finish note".into()],
@@ -2687,7 +3283,7 @@ mod tests {
         );
 
         let fallback =
-            compile_registration(&CommandConfig::new(), 1, 1, None, vec![], vec![]).unwrap();
+            compile_registration(&CommandConfig::new(), 1, 2, None, vec![], vec![]).unwrap();
         assert!(
             fallback
                 .dictation
@@ -2713,7 +3309,7 @@ mod tests {
             compile_registration(
                 &CommandConfig::new(),
                 1,
-                1,
+                2,
                 Some(protocol),
                 vec![],
                 vec![command]
@@ -2733,7 +3329,7 @@ mod tests {
             r#"{"id":"personal","phrases":["go to sleep"],"execution":{"type":"handler"}}"#,
         ] {
             let command = serde_json::from_str(input).unwrap();
-            assert!(compile_registration(&base, 1, 1, None, vec![], vec![command]).is_err());
+            assert!(compile_registration(&base, 1, 2, None, vec![], vec![command]).is_err());
         }
     }
 
@@ -2744,7 +3340,7 @@ mod tests {
         )
         .unwrap();
         assert!(
-            compile_registration(&CommandConfig::new(), 1, 1, None, vec![], vec![command]).is_err()
+            compile_registration(&CommandConfig::new(), 1, 2, None, vec![], vec![command]).is_err()
         );
 
         let context = ContextSnapshot {

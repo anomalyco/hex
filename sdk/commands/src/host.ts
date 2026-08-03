@@ -1,7 +1,7 @@
 import { pathToFileURL } from "node:url"
 import { Cause, Deferred, Effect, Exit, Fiber } from "effect"
 import { Hex, ToolCallError } from "./effect.js"
-import type { EffectHandler, HexService } from "./effect.js"
+import type { HexService } from "./effect.js"
 import {
   openApplication,
   openPath,
@@ -11,13 +11,16 @@ import {
   typeText,
 } from "./model.js"
 import type {
-  Handler,
+  HandlerArguments,
+  CaptureDescriptor,
+  CaptureSchema,
   HexCapabilities,
   HexConfig,
   Modifier,
   NativeAction,
   PromiseHex,
   Transformation,
+  UntypedCaptures,
 } from "./model.js"
 import type {
   HostInput,
@@ -44,10 +47,18 @@ const MAX_PENDING_TOOL_CALLS = 1024
 const MAX_CAPTURE_ENTRIES = 8
 const MAX_CAPTURE_NAME_BYTES = 64
 const MAX_CAPTURE_TEXT_BYTES = 1024
+const MAX_CHOICE_VALUES = 64
+const MAX_CHOICE_ALIASES = 16
+const MAX_CHOICE_VALUE_BYTES = 128
+const MAX_CHOICE_WORD_BYTES = 64
+const MAX_UNION_MEMBERS = 16
+const MAX_UNION_DEPTH = 4
+const MAX_UNION_SERIALIZED_BYTES = 16 * 1024
 const SHUTDOWN_TIMEOUT_MS = 2_000
 
-type HostHandler = Handler | EffectHandler
-type HostHandlerFunction = Exclude<HostHandler, Effect.Effect<void, unknown, Hex>>
+type HostHandlerFunction = (arguments_: HandlerArguments<UntypedCaptures>) =>
+  void | Promise<void> | Effect.Effect<void, unknown, Hex>
+type HostHandler = HostHandlerFunction | Effect.Effect<void, unknown, Hex>
 
 const utf8Length = (value: string): number => Buffer.byteLength(value, "utf8")
 
@@ -68,6 +79,186 @@ const isFunction = (value: unknown): value is HostHandlerFunction =>
 
 const isTransformation = (value: unknown): value is Transformation =>
   typeof value === "function"
+
+const captureName = /^[a-z][a-z0-9_]*$/
+const spokenDigits: Readonly<Record<string, string>> = {
+  zero: "0", one: "1", two: "2", three: "3", four: "4",
+  five: "5", six: "6", seven: "7", eight: "8", nine: "9",
+}
+const letterAliases = new Set([
+  "a", "ay", "alpha", "b", "bee", "bravo", "c", "see", "charlie", "d", "dee", "delta",
+  "e", "echo", "f", "ef", "foxtrot", "g", "gee", "golf", "h", "aitch", "hotel", "i", "eye",
+  "india", "j", "jay", "juliett", "k", "kay", "kilo", "l", "el", "lima", "m", "em", "mike",
+  "n", "en", "november", "o", "oh", "oscar", "p", "pee", "papa", "q", "cue", "quebec",
+  "r", "are", "romeo", "s", "ess", "sierra", "t", "tee", "tango", "u", "you", "uniform",
+  "v", "vee", "victor", "w", "whiskey", "x", "xray", "y", "why", "yankee", "z", "zee", "zed", "zulu",
+])
+
+const normalizeSpokenWord = (value: string): string => {
+  return value.split(/\s+/u).flatMap((word) => {
+    const trimmed = word.replace(
+      /^[\x21-\x2f\x3a-\x40\x5b-\x60\x7b-\x7e]+|[\x21-\x2f\x3a-\x40\x5b-\x60\x7b-\x7e]+$/g,
+      "",
+    )
+    if (trimmed.length === 0) return []
+    const normalized = trimmed.replace(/[A-Z]/g, (character) => character.toLowerCase())
+    return [spokenDigits[normalized] ?? normalized]
+  }).join(" ")
+}
+
+const phraseCaptureNames = (phrase: string): readonly string[] => {
+  const names: string[] = []
+  for (const word of phrase.split(/\s+/)) {
+    if (!word.includes("{") && !word.includes("}")) continue
+    const match = /^\{([a-z][a-z0-9_]*)\}$/.exec(word)
+    if (match?.[1] === undefined) throw new Error("capture placeholders must be standalone {name} words")
+    names.push(match[1])
+  }
+  return names
+}
+
+const descriptorWords = (descriptor: Exclude<CaptureDescriptor, { readonly type: "text" }>): ReadonlySet<string> => {
+  if (descriptor.type === "digit") {
+    return new Set(Array.from({ length: descriptor.max - descriptor.min + 1 }, (_, index) => String(descriptor.min + index)))
+  }
+  if (descriptor.type === "letter") return letterAliases
+  if (descriptor.type === "choice") return new Set(Object.values(descriptor.choices).flat())
+  return new Set(descriptor.members.flatMap((member) => [...descriptorWords(member)]))
+}
+
+const captureValueMatches = (descriptor: CaptureDescriptor, value: string | number): boolean => {
+  if (descriptor.type === "digit") {
+    return typeof value === "number" && value >= descriptor.min && value <= descriptor.max
+  }
+  if (descriptor.type === "letter") return typeof value === "string" && /^[a-z]$/.test(value)
+  if (descriptor.type === "choice") return typeof value === "string" && Object.hasOwn(descriptor.choices, value)
+  if (descriptor.type === "text") return typeof value === "string"
+  return descriptor.members.some((member) => captureValueMatches(member, value))
+}
+
+const validateCaptureDescriptor = (
+  rawDescriptor: unknown,
+  label: string,
+  depth = 0,
+): CaptureDescriptor => {
+  const descriptor = record(rawDescriptor)
+  if (descriptor?.type === "digit") {
+    const { min, max } = descriptor
+    if (typeof min !== "number" || typeof max !== "number"
+      || !Number.isInteger(min) || !Number.isInteger(max)
+      || min < 0 || max > 9 || min > max) {
+      throw new Error(`${label} digit range must be within 0 through 9`)
+    }
+    if (Object.keys(descriptor).some((key) => !["type", "min", "max"].includes(key))) {
+      throw new Error(`${label} contains unsupported fields`)
+    }
+    return Object.freeze({ type: "digit", min, max })
+  }
+  if (descriptor?.type === "letter") {
+    if (Object.keys(descriptor).length !== 1) throw new Error(`${label} contains unsupported fields`)
+    return Object.freeze({ type: "letter" })
+  }
+  if (descriptor?.type === "text") {
+    if (Object.keys(descriptor).length !== 1) throw new Error(`${label} contains unsupported fields`)
+    return Object.freeze({ type: "text" })
+  }
+  if (descriptor?.type === "choice") {
+    if (Object.keys(descriptor).some((key) => !["type", "choices"].includes(key))) {
+      throw new Error(`${label} contains unsupported fields`)
+    }
+    const rawChoices = record(descriptor.choices)
+    const entries = rawChoices === undefined ? [] : Object.entries(rawChoices)
+    if (entries.length === 0 || entries.length > MAX_CHOICE_VALUES) {
+      throw new Error(`${label} choice must contain 1 through ${MAX_CHOICE_VALUES} values`)
+    }
+    const validatedChoices: Array<readonly [string, readonly string[]]> = []
+    const spoken = new Set<string>()
+    for (const [value, rawAliases] of entries) {
+      boundedString(value, `${label} choice value`, MAX_CHOICE_VALUE_BYTES)
+      if (!Array.isArray(rawAliases) || rawAliases.length === 0 || rawAliases.length > MAX_CHOICE_ALIASES) {
+        throw new Error(`${label}.${value} must contain 1 through ${MAX_CHOICE_ALIASES} aliases`)
+      }
+      const aliases = rawAliases.map((alias, index) => {
+        const bounded = boundedString(alias, `${label}.${value}[${index}]`, MAX_CHOICE_WORD_BYTES)
+        const normalized = normalizeSpokenWord(bounded)
+        if (normalized.length === 0 || normalized.includes(" ") || utf8Length(normalized) > MAX_CHOICE_WORD_BYTES) {
+          throw new Error(`${label} aliases must normalize to exactly one spoken word`)
+        }
+        if (spoken.has(normalized)) throw new Error(`${label} contains duplicate spoken alias ${normalized}`)
+        spoken.add(normalized)
+        return normalized
+      })
+      validatedChoices.push([value, Object.freeze(aliases)])
+    }
+    return Object.freeze({ type: "choice", choices: Object.freeze(Object.fromEntries(validatedChoices)) })
+  }
+  if (descriptor?.type === "union") {
+    if (depth >= MAX_UNION_DEPTH) throw new Error(`${label} union nesting may not exceed ${MAX_UNION_DEPTH}`)
+    if (Object.keys(descriptor).some((key) => !["type", "members"].includes(key))) {
+      throw new Error(`${label} contains unsupported fields`)
+    }
+    if (!Array.isArray(descriptor.members) || descriptor.members.length < 2) {
+      throw new Error(`${label} union must contain at least two members`)
+    }
+    let serialized: string
+    try {
+      serialized = JSON.stringify(descriptor)
+    } catch {
+      throw new Error(`${label} union must be serializable`)
+    }
+    if (utf8Length(serialized) > MAX_UNION_SERIALIZED_BYTES) {
+      throw new Error(`${label} union exceeds ${MAX_UNION_SERIALIZED_BYTES} serialized bytes`)
+    }
+    const members = descriptor.members.flatMap((member, index) => {
+      const validated = validateCaptureDescriptor(member, `${label}.members[${index}]`, depth + 1)
+      if (validated.type === "text") throw new Error(`${label} union does not accept text()`)
+      return validated.type === "union" ? validated.members : [validated]
+    })
+    if (members.length > MAX_UNION_MEMBERS) {
+      throw new Error(`${label} union may contain at most ${MAX_UNION_MEMBERS} flattened members`)
+    }
+    const spoken = new Set<string>()
+    for (const member of members) {
+      for (const word of descriptorWords(member)) {
+        if (spoken.has(word)) throw new Error(`${label} union members overlap on spoken word ${word}`)
+        spoken.add(word)
+      }
+    }
+    return Object.freeze({ type: "union", members: Object.freeze(members) })
+  }
+  throw new Error(`${label} must be digit(), letter(), choice(), text(), or union()`)
+}
+
+const validateCaptureSchema = (
+  value: unknown,
+  id: string,
+  phrases: readonly string[],
+): CaptureSchema | undefined => {
+  if (value === undefined) return undefined
+  const raw = record(value)
+  if (raw === undefined || Object.keys(raw).length === 0 || Object.keys(raw).length > MAX_CAPTURE_ENTRIES) {
+    throw new Error(`commands.${id}.captures must contain 1 through ${MAX_CAPTURE_ENTRIES} descriptors`)
+  }
+  const captures: Record<string, CaptureDescriptor> = {}
+  for (const [name, rawDescriptor] of Object.entries(raw)) {
+    if (!captureName.test(name) || utf8Length(name) > MAX_CAPTURE_NAME_BYTES) {
+      throw new Error(`commands.${id}.captures contains an invalid capture name`)
+    }
+    captures[name] = validateCaptureDescriptor(rawDescriptor, `commands.${id}.captures.${name}`)
+  }
+  const expected = Object.keys(captures).sort()
+  for (const [index, phrase] of phrases.entries()) {
+    const names = [...phraseCaptureNames(phrase)].sort()
+    if (names.length !== expected.length || names.some((name, nameIndex) => name !== expected[nameIndex])) {
+      throw new Error(`commands.${id}.phrases[${index}] must bind every declared capture exactly once`)
+    }
+    const textName = Object.entries(captures).find(([, descriptor]) => descriptor.type === "text")?.[0]
+    if (textName !== undefined && !phrase.trimEnd().endsWith(`{${textName}}`)) {
+      throw new Error(`commands.${id}.phrases[${index}] text() capture must be trailing`)
+    }
+  }
+  return Object.freeze(captures)
+}
 
 // Bound and normalize host input; Rust independently validates every registered action.
 const validateNativeAction = (value: unknown, label: string): NativeAction | undefined => {
@@ -147,6 +338,7 @@ const adaptCapabilities = <Result>(
 interface PreparedConfig {
   readonly registration: Registration
   readonly handlers: ReadonlyMap<string, HostHandler>
+  readonly captureSchemas: ReadonlyMap<string, CaptureSchema | undefined>
   readonly transformations: ReadonlyMap<string, Transformation>
 }
 
@@ -158,6 +350,7 @@ export const prepareConfig = (value: unknown): PreparedConfig => {
   if (entries.length > MAX_COMMANDS) throw new Error(`A config may register at most ${MAX_COMMANDS} commands`)
 
   const handlers = new Map<string, HostHandler>()
+  const captureSchemas = new Map<string, CaptureSchema | undefined>()
   const transformations = new Map<string, Transformation>()
   const rawTransformations = config?.transformations === undefined
     ? {}
@@ -213,6 +406,8 @@ export const prepareConfig = (value: unknown): PreparedConfig => {
     }
     const validatedPhrases = phrases.map((phrase, index) =>
       boundedString(phrase, `commands.${id}.phrases[${index}]`, 256))
+    const captures = validateCaptureSchema(definition.captures, id, validatedPhrases)
+    captureSchemas.set(id, captures)
     const group = definition.group === undefined
       ? undefined
       : boundedString(definition.group, `commands.${id}.group`, MAX_LABEL_BYTES)
@@ -235,8 +430,14 @@ export const prepareConfig = (value: unknown): PreparedConfig => {
     const hasAction = definition.action !== undefined
     const hasRun = definition.run !== undefined
     if (hasAction === hasRun) throw new Error(`commands.${id} must contain exactly one of action or run`)
+    if (captures !== undefined && hasAction) {
+      throw new Error(`commands.${id} capture descriptors require run`)
+    }
     const candidate = hasAction ? definition.action : definition.run
-    const action = validateNativeAction(candidate, `commands.${id}.action`)
+    const action = validateNativeAction(candidate, `commands.${id}.${hasAction ? "action" : "run"}`)
+    if (captures !== undefined && action !== undefined) {
+      throw new Error(`commands.${id} capture descriptors require a handler run`)
+    }
     if (action === undefined && !isFunction(candidate) && !Effect.isEffect(candidate)) {
       throw new Error(`commands.${id} has an unsupported execution value`)
     }
@@ -251,6 +452,7 @@ export const prepareConfig = (value: unknown): PreparedConfig => {
       ...(group === undefined ? {} : { group }),
       ...(description === undefined ? {} : { description }),
       ...(validatedWhen === undefined ? {} : { when: validatedWhen }),
+      ...(captures === undefined ? {} : { captures }),
       execution: action === undefined
         ? { type: "handler" }
         : { type: "native", action },
@@ -267,7 +469,7 @@ export const prepareConfig = (value: unknown): PreparedConfig => {
   if (utf8Length(JSON.stringify(registration)) > MAX_REGISTRATION_BYTES) {
     throw new Error(`The serialized registration exceeds ${MAX_REGISTRATION_BYTES} bytes`)
   }
-  return { registration, handlers, transformations }
+  return { registration, handlers, captureSchemas, transformations }
 }
 
 export const evaluateConfig = async (entrypoint: string): Promise<unknown> => {
@@ -312,10 +514,13 @@ const decodeInput = (line: string): HostInput => {
       if (captureEntries.length > MAX_CAPTURE_ENTRIES) {
         throw new Error(`invoke.captures must contain at most ${MAX_CAPTURE_ENTRIES} entries`)
       }
-      const captures = Object.freeze(Object.fromEntries(captureEntries.map(([name, text]) => [
-        boundedString(name, "invoke.captures name", MAX_CAPTURE_NAME_BYTES),
-        boundedString(text, `invoke.captures.${name}`, MAX_CAPTURE_TEXT_BYTES),
-      ])))
+      const captures: UntypedCaptures = Object.freeze(Object.fromEntries(captureEntries.map(([name, value]) => {
+        const validatedName = boundedString(name, "invoke.captures name", MAX_CAPTURE_NAME_BYTES)
+        if (typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= 9) {
+          return [validatedName, value]
+        }
+        return [validatedName, boundedString(value, `invoke.captures.${name}`, MAX_CAPTURE_TEXT_BYTES)]
+      })))
       return {
         type: "invoke",
         invocationId: boundedString(input.invocationId, "invoke.invocationId", MAX_ID_BYTES),
@@ -472,7 +677,7 @@ export const runHost = async ({ config, input, write }: HostOptions): Promise<vo
   const makeHex = (
     invocationId: string,
     context: Extract<HostInput, { readonly type: "invoke" }>["context"],
-    captures: Readonly<Record<string, string>>,
+    captures: UntypedCaptures,
   ): HexService => ({
     context,
     captures,
@@ -503,7 +708,7 @@ export const runHost = async ({ config, input, write }: HostOptions): Promise<vo
     invocationId: string,
     commandId: string,
     context: Extract<HostInput, { readonly type: "invoke" }>["context"],
-    captures: Readonly<Record<string, string>>,
+    captures: UntypedCaptures,
   ): void => {
     if (fibers.has(invocationId)) {
       void send({
@@ -519,6 +724,26 @@ export const runHost = async ({ config, input, write }: HostOptions): Promise<vo
         type: "invocationResult",
         invocationId,
         result: { type: "failure", message: `Command ${commandId} has no host handler` },
+      }).catch(() => undefined)
+      return
+    }
+    const schema = prepared.captureSchemas.get(commandId)
+    const expectedNames = schema === undefined ? undefined : Object.keys(schema).sort()
+    const actualNames = Object.keys(captures).sort()
+    const capturesValid = expectedNames === undefined
+      ? Object.values(captures).every((value) => typeof value === "string")
+      : expectedNames.length === actualNames.length
+        && expectedNames.every((name, index) => name === actualNames[index])
+        && expectedNames.every((name) => {
+          const descriptor = schema?.[name]
+          const value = captures[name]
+          return descriptor !== undefined && value !== undefined && captureValueMatches(descriptor, value)
+        })
+    if (!capturesValid) {
+      void send({
+        type: "invocationResult",
+        invocationId,
+        result: { type: "failure", message: `Command ${commandId} received invalid captures` },
       }).catch(() => undefined)
       return
     }

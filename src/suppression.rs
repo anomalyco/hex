@@ -32,6 +32,7 @@ const EVENT_SOURCE_USER_DATA: u32 = 42;
 const HID_EVENT_TAP: u32 = 0;
 const HEAD_INSERT_EVENT_TAP: u32 = 0;
 const DEFAULT_EVENT_TAP: u32 = 0;
+const LISTEN_ONLY_EVENT_TAP: u32 = 1;
 #[cfg(test)]
 const OPTION_KEY_MASK: u64 = 1 << 19;
 #[cfg(test)]
@@ -251,7 +252,8 @@ struct EventTapContext {
     sender: Sender<ObservedInputEvent>,
     activity: InputActivity,
     escape_cancels: Arc<AtomicBool>,
-    tap: AtomicPtr<c_void>,
+    key_tap: AtomicPtr<c_void>,
+    observation_tap: AtomicPtr<c_void>,
     shortcut_suppression: Mutex<ShortcutSuppression>,
     pending: PendingInputEvents,
     next_sequence: AtomicU64,
@@ -270,33 +272,35 @@ fn run_event_tap(
         sender,
         activity,
         escape_cancels,
-        tap: AtomicPtr::new(ptr::null_mut()),
+        key_tap: AtomicPtr::new(ptr::null_mut()),
+        observation_tap: AtomicPtr::new(ptr::null_mut()),
         shortcut_suppression: Mutex::new(ShortcutSuppression::default()),
         pending,
         next_sequence: AtomicU64::new(0),
     }));
-    let mask = [
+    let key_mask = [EVENT_KEY_DOWN, EVENT_KEY_UP]
+        .into_iter()
+        .fold(0, |mask, event| mask | 1_u64 << event);
+    let observation_mask = [
         EVENT_LEFT_MOUSE_DOWN,
         EVENT_RIGHT_MOUSE_DOWN,
-        EVENT_KEY_DOWN,
-        EVENT_KEY_UP,
         EVENT_FLAGS_CHANGED,
         EVENT_OTHER_MOUSE_DOWN,
     ]
     .into_iter()
     .fold(0, |mask, event| mask | 1_u64 << event);
     // SAFETY: The callback context remains allocated until this run loop stops.
-    let tap = unsafe {
+    let key_tap = unsafe {
         CGEventTapCreate(
             HID_EVENT_TAP,
             HEAD_INSERT_EVENT_TAP,
             DEFAULT_EVENT_TAP,
-            mask,
+            key_mask,
             event_callback,
             context.cast(),
         )
     };
-    if tap.is_null() {
+    if key_tap.is_null() {
         // SAFETY: No callback can run because tap creation failed.
         unsafe { drop(Box::from_raw(context)) };
         let _ = ready.send(Err(eyre!(
@@ -304,18 +308,55 @@ fn run_event_tap(
         )));
         return;
     }
-    // SAFETY: `context` remains owned by this event-tap thread.
-    unsafe { (*context).tap.store(tap, Ordering::Release) };
-    // SAFETY: `tap` is a valid CFMachPort returned above.
-    let source = unsafe { CFMachPortCreateRunLoopSource(ptr::null(), tap, 0) };
-    if source.is_null() {
-        // SAFETY: The source was not created, so the tap cannot be attached to a run loop.
+    // A modifying tap disrupts Finder's Option-driven alternate menu items even when it returns
+    // flagsChanged events unchanged. Observe modifiers and mouse clicks with a passive tap.
+    let observation_tap = unsafe {
+        CGEventTapCreate(
+            HID_EVENT_TAP,
+            HEAD_INSERT_EVENT_TAP,
+            LISTEN_ONLY_EVENT_TAP,
+            observation_mask,
+            event_callback,
+            context.cast(),
+        )
+    };
+    if observation_tap.is_null() {
+        // SAFETY: The observation tap was not created, so no callback can use the context.
         unsafe {
-            CGEventTapEnable(tap, false);
-            CFRelease(tap.cast_const());
+            CGEventTapEnable(key_tap, false);
+            CFRelease(key_tap.cast_const());
             drop(Box::from_raw(context));
         }
-        let _ = ready.send(Err(eyre!("could not create keyboard run-loop source")));
+        let _ = ready.send(Err(eyre!("could not create input observation event tap")));
+        return;
+    }
+    // SAFETY: `context` remains owned by this event-tap thread.
+    unsafe {
+        (*context).key_tap.store(key_tap, Ordering::Release);
+        (*context)
+            .observation_tap
+            .store(observation_tap, Ordering::Release);
+    }
+    // SAFETY: Both taps are valid CFMachPorts returned above.
+    let key_source = unsafe { CFMachPortCreateRunLoopSource(ptr::null(), key_tap, 0) };
+    let observation_source =
+        unsafe { CFMachPortCreateRunLoopSource(ptr::null(), observation_tap, 0) };
+    if key_source.is_null() || observation_source.is_null() {
+        // SAFETY: Neither source has been attached to the run loop yet.
+        unsafe {
+            if !key_source.is_null() {
+                CFRelease(key_source.cast_const());
+            }
+            if !observation_source.is_null() {
+                CFRelease(observation_source.cast_const());
+            }
+            CGEventTapEnable(key_tap, false);
+            CGEventTapEnable(observation_tap, false);
+            CFRelease(key_tap.cast_const());
+            CFRelease(observation_tap.cast_const());
+            drop(Box::from_raw(context));
+        }
+        let _ = ready.send(Err(eyre!("could not create input run-loop sources")));
         return;
     }
     // SAFETY: This is the dedicated event-tap thread's current run loop.
@@ -323,22 +364,28 @@ fn run_event_tap(
     run_loop.store(current_run_loop, Ordering::Release);
     // SAFETY: All values belong to this thread and remain alive while the run loop runs.
     unsafe {
-        CFRunLoopAddSource(current_run_loop, source, kCFRunLoopCommonModes);
-        CGEventTapEnable(tap, true);
+        CFRunLoopAddSource(current_run_loop, key_source, kCFRunLoopCommonModes);
+        CFRunLoopAddSource(current_run_loop, observation_source, kCFRunLoopCommonModes);
+        CGEventTapEnable(key_tap, true);
+        CGEventTapEnable(observation_tap, true);
     }
     let _ = ready.send(Ok(()));
     // SAFETY: This dedicated thread exists solely to dispatch the event tap.
     unsafe { CFRunLoopRun() };
     // SAFETY: Disable the tap before releasing its callback context.
     unsafe {
-        CGEventTapEnable(tap, false);
-        CFRunLoopRemoveSource(current_run_loop, source, kCFRunLoopCommonModes);
+        CGEventTapEnable(key_tap, false);
+        CGEventTapEnable(observation_tap, false);
+        CFRunLoopRemoveSource(current_run_loop, key_source, kCFRunLoopCommonModes);
+        CFRunLoopRemoveSource(current_run_loop, observation_source, kCFRunLoopCommonModes);
     }
     run_loop.store(ptr::null_mut(), Ordering::Release);
     // SAFETY: The source is detached and the tap is disabled, so no callback can use context.
     unsafe {
-        CFRelease(source.cast_const());
-        CFRelease(tap.cast_const());
+        CFRelease(key_source.cast_const());
+        CFRelease(observation_source.cast_const());
+        CFRelease(key_tap.cast_const());
+        CFRelease(observation_tap.cast_const());
         drop(Box::from_raw(context));
     }
 }
@@ -358,10 +405,12 @@ unsafe extern "C" fn event_callback(
         event_type,
         EVENT_TAP_DISABLED_BY_TIMEOUT | EVENT_TAP_DISABLED_BY_USER_INPUT
     ) {
-        let tap = context.tap.load(Ordering::Acquire);
-        if !tap.is_null() {
-            // SAFETY: `tap` is the CFMachPort returned by `CGEventTapCreate`.
-            unsafe { CGEventTapEnable(tap, true) };
+        for tap in [&context.key_tap, &context.observation_tap] {
+            let tap = tap.load(Ordering::Acquire);
+            if !tap.is_null() {
+                // SAFETY: `tap` is a CFMachPort returned by `CGEventTapCreate`.
+                unsafe { CGEventTapEnable(tap, true) };
+            }
         }
         send_input(context, InputEvent::TapDisabled, CaptureInstant::ZERO);
         return event;
@@ -443,14 +492,12 @@ fn send_input(context: &EventTapContext, event: InputEvent, capture_at: CaptureI
 #[derive(Default)]
 struct ShortcutSuppression {
     shortcut_keys_pressed: HashSet<u16>,
-    modifier_shortcut_pressed: bool,
     escape_pressed: bool,
 }
 
 impl ShortcutSuppression {
     fn reset(&mut self) {
         self.shortcut_keys_pressed.clear();
-        self.modifier_shortcut_pressed = false;
         self.escape_pressed = false;
     }
 
@@ -462,26 +509,6 @@ impl ShortcutSuppression {
             hotkeys.paste_meeting,
         ];
         match input {
-            InputEvent::Flags(flags)
-                if delivered
-                    && bindings.iter().flatten().any(|hotkey| {
-                        hotkey.key_code.is_none()
-                            && !hotkey.is_empty()
-                            && hotkey.exact_modifiers(flags)
-                    }) =>
-            {
-                self.modifier_shortcut_pressed = true;
-                true
-            }
-            InputEvent::Flags(flags)
-                if self.modifier_shortcut_pressed
-                    && !bindings.iter().flatten().any(|hotkey| {
-                        !hotkey.is_empty() && hotkey.required_modifiers_down(flags)
-                    }) =>
-            {
-                self.modifier_shortcut_pressed = false;
-                true
-            }
             InputEvent::Key {
                 code,
                 down: true,
@@ -965,12 +992,16 @@ mod tests {
     }
 
     #[test]
-    fn standalone_function_modifier_is_suppressed_after_delivery() {
-        let mut suppression = ShortcutSuppression::default();
+    fn modifier_only_shortcuts_pass_through_after_delivery() {
+        for (flags, binding) in [
+            (OPTION_KEY_MASK, option_binding()),
+            (FUNCTION, function_binding()),
+        ] {
+            let mut suppression = ShortcutSuppression::default();
 
-        assert!(suppression.process(InputEvent::Flags(FUNCTION), 47, function_binding(), true));
-        assert!(suppression.process(InputEvent::Flags(NO_FLAGS), 47, function_binding(), true));
-        assert!(!suppression.modifier_shortcut_pressed);
+            assert!(!suppression.process(InputEvent::Flags(flags), 47, binding, true));
+            assert!(!suppression.process(InputEvent::Flags(NO_FLAGS), 47, binding, true));
+        }
     }
 
     fn test_hotkey(trigger_down: bool, now: CaptureInstant) -> DictationHotkey {

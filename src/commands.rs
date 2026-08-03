@@ -8,8 +8,9 @@ use color_eyre::eyre::{Result, WrapErr, eyre};
 pub(crate) use crate::command_grammar::phrase_placeholder;
 #[allow(unused_imports)]
 pub use crate::command_grammar::{
-    CapturedCount, CapturedDigit, CapturedDirection, CapturedPhrase, Command, CommandBuilder,
-    ConfiguredCommand, Count, Digit, Direction, OptionalCount, PatternSpec, TypedPattern,
+    CapturedCount, CapturedDigit, CapturedDirection, CapturedValue, CapturedValues, Command,
+    CommandBuilder, ConfiguredCommand, Count, Digit, Direction, OptionalCount, PatternSpec,
+    PersonalCapture, TypedPattern,
 };
 pub use crate::context::ContextSelector as ContextPredicate;
 use crate::context::ContextSnapshot;
@@ -29,7 +30,7 @@ pub enum Action {
     StopMeeting,
     InvokeHandler {
         generation: u64,
-        capture: Option<CapturedPhrase>,
+        captures: CapturedValues,
     },
     OpenApplication(String),
     OpenUrl(String),
@@ -494,7 +495,7 @@ pub fn execute(action: Action) -> Result<()> {
             return crate::keyboard::type_text(&text);
         }
         Action::Keystroke { key, modifiers } => {
-            return application_keystroke(key, modifiers);
+            return crate::keyboard::post_shortcut(key, modifiers);
         }
         Action::RepeatedKeystroke {
             key,
@@ -505,10 +506,6 @@ pub fn execute(action: Action) -> Result<()> {
         }
     }
     checked_status(&mut command, "macOS open")
-}
-
-fn application_keystroke(key: Key, modifiers: Modifiers) -> Result<()> {
-    crate::keyboard::post_shortcut(key, modifiers)
 }
 
 fn checked_status(command: &mut ProcessCommand, operation: &str) -> Result<()> {
@@ -632,9 +629,10 @@ mod tests {
             "Capture test",
             [phrase],
             ContextPredicate::Always,
-            |capture| Action::InvokeHandler {
+            None,
+            |captures| Action::InvokeHandler {
                 generation: 3,
-                capture,
+                captures,
             },
             None,
         )
@@ -658,11 +656,13 @@ mod tests {
                 action:
                     Action::InvokeHandler {
                         generation: 3,
-                        capture: Some(capture),
+                        captures,
                     },
             } => {
-                assert_eq!(capture.name, "query");
-                assert_eq!(capture.text, "wool socks");
+                assert_eq!(
+                    captures.get("query"),
+                    Some(&CapturedValue::Text("wool socks".into()))
+                );
             }
             _ => panic!("expected the capture command to execute"),
         }
@@ -702,9 +702,10 @@ mod tests {
             "Capture test",
             ["open amazon", "search amazon for {query}"],
             ContextPredicate::Always,
-            |capture| Action::InvokeHandler {
+            None,
+            |captures| Action::InvokeHandler {
                 generation: 3,
-                capture,
+                captures,
             },
             None,
         )
@@ -715,9 +716,9 @@ mod tests {
         assert!(matches!(
             commands.resolve(Mode::Listening, "open amazon", &no_context()),
             Decision::Execute {
-                action: Action::InvokeHandler { capture: None, .. },
+                action: Action::InvokeHandler { captures, .. },
                 ..
-            }
+            } if captures.is_empty()
         ));
     }
 
@@ -736,9 +737,10 @@ mod tests {
                 "Capture test",
                 [phrase],
                 ContextPredicate::Always,
-                |capture| Action::InvokeHandler {
+                None,
+                |captures| Action::InvokeHandler {
                     generation: 3,
-                    capture,
+                    captures,
                 },
                 None,
             );

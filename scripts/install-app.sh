@@ -8,11 +8,11 @@ installed_bundle="$install_dir/$(basename "$source_bundle")"
 
 stop_bundle() {
   bundle="$1"
-  [ -d "$bundle" ] || return
+  [ -d "$bundle" ] || return 0
   executable_name=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$bundle/Contents/Info.plist")
   executable="$bundle/Contents/MacOS/$executable_name"
   if ! pgrep -f "$executable" >/dev/null; then
-    return
+    return 0
   fi
   pkill -TERM -f "$executable" || true
   attempts=30

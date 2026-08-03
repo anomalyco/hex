@@ -26,13 +26,27 @@ files and third-party dependencies.
   protocol changes are rejected together with command changes, preserving the
   last valid native snapshot.
 - `when` accepts exactly one of `application` or `browserHost`.
-- A phrase may end in one `{name}` capture placeholder, e.g.
+- Without a `captures` schema, a phrase may end in one `{name}` placeholder, e.g.
   `"search amazon for {query}"`. It requires at least one spoken word before
   the placeholder and one or more words after the prefix; the normalized
   remainder arrives as `captures.name` in the handler (and on the Effect `Hex`
   service). Capture phrases require `run`; they cannot use a native `action`.
   A capture phrase conflicts with any coexisting phrase that shares its
   literal prefix.
+- Import `digit`, `letter`, `choice`, `union`, or `text` to define typed captures. `digit()`
+  accepts zero through nine; `digit({ min, max })` restricts that range. Digit
+  captures may appear multiple times anywhere in every alias and arrive as
+  numbers. `choice(["left", "right"] as const)` returns those exact strings;
+  `choice({ left: ["left", "back"], right: ["right", "forward"] } as const)`
+  normalizes spoken aliases to its canonical keys. Choice aliases are one word.
+  `letter()` accepts literal, common spoken, and NATO alphabet names and returns
+  the canonical lowercase `"a" | ... | "z"` letter.
+  `union(letter(), digit(), choice(["home", "end"] as const))` composes bounded
+  one-token captures and infers the union of their canonical values. Union
+  members must not overlap; `text()` is not allowed in a union.
+  `text()` arrives as a string and must be trailing. Every alias must
+  bind every declared capture exactly once. Schema-bearing commands require
+  `run`.
 - Capabilities are `openUrl`, `openApplication`, `openPath`, `press`, and
   `typeText`.
 - Structured native action descriptors are available for fixed single actions,

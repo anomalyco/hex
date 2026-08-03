@@ -146,20 +146,21 @@ fragment float4 indicator_fragment(
 
     // Match the original Hex recording stack: a padded red fill, a nearly
     // full-width white beam, and a broad peak-driven red glow.
-    float red_fill_distance = rounded_box(point, float2(22.0, 2.0), 2.0);
-    float red_fill = exp2(-pow(max(red_fill_distance, 0.0) / 2.0, 2.0)) * shape;
+    float2 beam_point = point - float2(0.0, -0.5);
+    float red_fill_distance = rounded_box(beam_point, float2(22.0, 2.0), 2.0);
+    float red_fill = glow(red_fill_distance, 2.0) * shape;
     screen(result, red_accent, red_fill * average_activation * recording * detail_clarity);
 
-    float white_beam_distance = rounded_box(point, float2(21.0, 1.0), 1.0);
-    float white_beam = exp2(-pow(max(white_beam_distance, 0.0) / 1.0, 2.0)) * shape;
+    float white_beam_distance = rounded_box(beam_point, float2(21.0, 1.0), 1.0);
+    float white_beam = glow(white_beam_distance, 1.0) * shape;
     screen(
         result,
         float3(1.0),
         white_beam * average_activation * 0.56 * recording * detail_clarity);
 
     float peak_half_width = 22.0 * min(peak_power + 0.6, 1.0);
-    float peak_distance = rounded_box(point, float2(peak_half_width, 2.0), 2.0);
-    float peak_beam = exp2(-pow(max(peak_distance, 0.0) / 4.0, 2.0)) * shape;
+    float peak_distance = rounded_box(beam_point, float2(peak_half_width, 2.0), 2.0);
+    float peak_beam = glow(peak_distance, 4.0) * shape;
     screen(
         result,
         red_accent,
@@ -247,8 +248,7 @@ fragment float4 indicator_fragment(
         float3 shine_color = mix(float3(0.66, 0.84, 1.0), float3(0.92, 0.72, 1.0), post_processing);
         float shine_strength = mix(0.16, 0.68, clamp(uniforms.line_glow, 0.0, 1.0));
         float surface_wrap = orb_mask * mix(0.28, 1.0, normal_z);
-        float rim_spill = (1.0 - orb_mask)
-            * exp2(-pow(max(orb_distance, 0.0) / 2.2, 2.0));
+        float rim_spill = (1.0 - orb_mask) * glow(orb_distance, 2.2);
         composite(
             result,
             shine_color,

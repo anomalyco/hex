@@ -1251,13 +1251,13 @@ fn handle_command(
             action:
                 Action::InvokeHandler {
                     generation,
-                    capture,
+                    captures,
                 },
         } => {
             let outcome = personal_commands
                 .ok_or("personal command host is unavailable")
                 .and_then(|runtime| {
-                    runtime.invoke(generation, id, heard, context.clone(), capture)
+                    runtime.invoke(generation, id, heard, context.clone(), captures)
                 });
             match outcome {
                 Ok(()) => (Some(id.into()), CommandOutcome::Submitted),

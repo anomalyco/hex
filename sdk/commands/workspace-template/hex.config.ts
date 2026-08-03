@@ -1,4 +1,4 @@
-import { defineHexConfig } from "@hex/commands"
+import { choice, defineHexConfig, digit, letter, union } from "@hex/commands"
 
 export default defineHexConfig({
   // Transformations appear as optional final steps in every dictation mode.
@@ -31,6 +31,15 @@ export default defineHexConfig({
       description: "Search Amazon for the spoken words",
       run: ({ hex, captures }) =>
         hex.openUrl(`https://www.amazon.com/s?k=${encodeURIComponent(captures.query ?? "")}`),
+    },
+    // Explicit descriptors compose multiple captures and infer exact handler types.
+    "control-key": {
+      phrases: ["control {key}"],
+      captures: { key: union(letter(), digit(), choice(["home", "end"] as const)) },
+      group: "Keyboard",
+      description: "Press Control plus a letter, digit, Home, or End",
+      run: ({ hex, captures }) =>
+        hex.press({ key: String(captures.key), modifiers: ["control"] }),
     },
   },
 })
