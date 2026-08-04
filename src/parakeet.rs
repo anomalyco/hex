@@ -930,7 +930,7 @@ fn prepare_meeting_delta(
 
 pub(crate) fn default_model_path() -> Result<std::path::PathBuf> {
     model_path(crate::transcription_models::definition(
-        crate::transcription_models::TranscriptionModelId::ParakeetV2,
+        crate::transcription_models::TranscriptionModelId::default(),
     ))
 }
 

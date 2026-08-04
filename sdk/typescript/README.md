@@ -26,14 +26,14 @@ const host = await create()
 
 try {
   const models = await host.client.models.list()
-  await host.client.models.prepare("parakeet_v2", {
+  await host.client.models.prepare("parakeet_unified_en", {
     language: "en",
     onProgress: console.log,
   })
 
   const result = await host.client.transcribe({
     audio: { data: wav, contentType: "audio/wav" },
-    model: "parakeet_v2",
+    model: "parakeet_unified_en",
     language: "en",
   })
   console.log(result.transcript)
@@ -58,13 +58,13 @@ import * as Hex from "@hex-ai/client/effect"
 const program = Effect.scoped(Effect.gen(function* () {
   const host = yield* Hex.create()
 
-  yield* host.client.models.prepare("parakeet_v2", {
+  yield* host.client.models.prepare("parakeet_unified_en", {
     language: "en",
   }).pipe(Stream.runForEach((progress) => Effect.logInfo(progress)))
 
   return yield* host.client.transcribe({
     audio: { data: wav, contentType: "audio/wav" },
-    model: "parakeet_v2",
+    model: "parakeet_unified_en",
     language: "en",
   })
 }))

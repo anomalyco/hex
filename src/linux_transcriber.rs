@@ -18,7 +18,7 @@ pub struct LinuxTranscriber {
 }
 
 pub fn default_model() -> &'static ModelDefinition {
-    definition(TranscriptionModelId::ParakeetV2)
+    definition(TranscriptionModelId::default())
 }
 
 pub fn install_default(canceled: &AtomicBool) -> Result<()> {

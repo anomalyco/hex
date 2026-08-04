@@ -93,7 +93,7 @@ models=$(curl --fail --silent --show-error \
 jq -e '.apiVersion == "1" and .version != null' >/dev/null <<EOF
 $health
 EOF
-jq -e 'length > 0 and .[0].id == "parakeet_v2"' >/dev/null <<EOF
+jq -e 'length > 0 and .[0].id == "parakeet_unified_en"' >/dev/null <<EOF
 $models
 EOF
 

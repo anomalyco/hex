@@ -132,6 +132,7 @@ export interface Capabilities {
 
 ```typescript
 export type ModelId =
+  | "parakeet_unified_en"
   | "parakeet_v2"
   | "parakeet_v3"
   | "whisper_large_v3_turbo"
@@ -213,12 +214,12 @@ export interface TranscriptionResult {
 The common host flow is explicit about preparation:
 
 ```typescript
-await client.models.prepare("parakeet_v2", { onProgress });
+await client.models.prepare("parakeet_unified_en", { onProgress });
 
 // The host records, meters, and encodes the clip.
 const result = await client.transcribe({
   audio: { data: wav, contentType: "audio/wav" },
-  model: "parakeet_v2",
+  model: "parakeet_unified_en",
   signal,
 });
 

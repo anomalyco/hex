@@ -16,6 +16,8 @@ use sha2::{Digest, Sha256};
 #[serde(rename_all = "snake_case")]
 pub enum TranscriptionModelId {
     #[default]
+    #[serde(rename = "parakeet_unified_en")]
+    ParakeetUnifiedEnglish,
     ParakeetV2,
     ParakeetV3,
     WhisperLargeV3Turbo,
@@ -28,6 +30,7 @@ pub enum TranscriptionModelId {
 impl TranscriptionModelId {
     pub const fn as_str(self) -> &'static str {
         match self {
+            Self::ParakeetUnifiedEnglish => "parakeet_unified_en",
             Self::ParakeetV2 => "parakeet_v2",
             Self::ParakeetV3 => "parakeet_v3",
             Self::WhisperLargeV3Turbo => "whisper_large_v3_turbo",
@@ -44,6 +47,7 @@ impl FromStr for TranscriptionModelId {
 
     fn from_str(value: &str) -> Result<Self> {
         match value {
+            "parakeet_unified_en" => Ok(Self::ParakeetUnifiedEnglish),
             "parakeet_v2" => Ok(Self::ParakeetV2),
             "parakeet_v3" => Ok(Self::ParakeetV3),
             "whisper_large_v3_turbo" => Ok(Self::WhisperLargeV3Turbo),
@@ -97,7 +101,7 @@ pub struct TranscriptionSelection {
 impl Default for TranscriptionSelection {
     fn default() -> Self {
         Self {
-            model: TranscriptionModelId::ParakeetV2,
+            model: TranscriptionModelId::default(),
             language: "en".into(),
             recognition_hints: String::new(),
         }
@@ -244,6 +248,15 @@ const PARAKEET_V2_ARTIFACT: GgufArtifact = GgufArtifact {
     architecture: "parakeet",
     variant: "tdt-0.6b-v2",
 };
+const PARAKEET_UNIFIED_ENGLISH_ARTIFACT: GgufArtifact = GgufArtifact {
+    filename: "parakeet-unified-en-0.6b-Q8_0.gguf",
+    revision: "7e948f21b7bdbac698d3318db9d350f1096f3b6c",
+    repository: "handy-computer/parakeet-unified-en-0.6b-gguf",
+    bytes: 731_357_568,
+    sha256: "4b50b6dd862bf6e346929aaf4f5eaacec003bfa3f56462d6c874b41ef2f38795",
+    architecture: "parakeet",
+    variant: "unified-en-0.6b",
+};
 const PARAKEET_V3_ARTIFACT: GgufArtifact = GgufArtifact {
     filename: "parakeet-tdt-0.6b-v3-Q8_0.gguf",
     revision: "85ac09ea12fc4b1112fa76810059364bc6adc9de",
@@ -291,6 +304,21 @@ const COHERE_ARTIFACT: GgufArtifact = GgufArtifact {
 };
 
 pub const MODELS: &[ModelDefinition] = &[
+    ModelDefinition {
+        id: TranscriptionModelId::ParakeetUnifiedEnglish,
+        name: "Parakeet Unified English",
+        realtime: "~163x",
+        realtime_context: "published speed · M4 Max",
+        quality: "1.60%",
+        quality_context: "English benchmark",
+        coverage: "English",
+        timestamps: "Token timestamps",
+        runtime: ModelRuntime::Gguf(&PARAKEET_UNIFIED_ENGLISH_ARTIFACT),
+        languages: &["en"],
+        accepts_language_hint: true,
+        supports_language_detection: false,
+        supports_recognition_hints: false,
+    },
     ModelDefinition {
         id: TranscriptionModelId::ParakeetV2,
         name: "Parakeet v2",
@@ -479,7 +507,7 @@ pub(crate) fn choices_for_runtime(language: &str) -> Vec<ModelChoice> {
         ],
         "en" => vec![
             choice(
-                TranscriptionModelId::ParakeetV2,
+                TranscriptionModelId::ParakeetUnifiedEnglish,
                 Recommendation::Recommended,
             ),
             choice(
@@ -853,7 +881,10 @@ mod tests {
     #[test]
     fn recommendations_are_language_specific() {
         let english = choices_for_runtime("en");
-        assert_eq!(english[0].model.id, TranscriptionModelId::ParakeetV2);
+        assert_eq!(
+            english[0].model.id,
+            TranscriptionModelId::ParakeetUnifiedEnglish
+        );
         assert_eq!(english[0].recommendation, Recommendation::Recommended);
         assert_eq!(english[1].model.id, TranscriptionModelId::CohereTranscribe);
         assert_eq!(english[1].recommendation, Recommendation::MostAccurate);
@@ -865,6 +896,10 @@ mod tests {
     #[test]
     fn model_ids_have_explicit_stable_wire_names() {
         for (id, name) in [
+            (
+                TranscriptionModelId::ParakeetUnifiedEnglish,
+                "parakeet_unified_en",
+            ),
             (TranscriptionModelId::ParakeetV2, "parakeet_v2"),
             (TranscriptionModelId::ParakeetV3, "parakeet_v3"),
             (

@@ -1079,7 +1079,7 @@ mod tests {
     }
 
     #[test]
-    fn disabled_apple_speech_selection_migrates_to_parakeet_v2() {
+    fn disabled_apple_speech_selection_migrates_to_the_default_model() {
         let mut settings: AppSettings = serde_json::from_str(
             r#"{"transcription":{"model":"apple_speech","language":"de","recognition_hints":""}}"#,
         )

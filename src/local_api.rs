@@ -1692,7 +1692,7 @@ mod tests {
                 .filter(|model| model.available())
                 .count()
         );
-        assert_eq!(models[0]["id"], "parakeet_v2");
+        assert_eq!(models[0]["id"], "parakeet_unified_en");
         assert!(models[0]["downloadBytes"].is_number());
         assert_eq!(models[0]["supportsLanguageDetection"], false);
         let whisper = models

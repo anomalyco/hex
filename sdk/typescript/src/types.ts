@@ -1,4 +1,5 @@
 export const MODEL_IDS = [
+  "parakeet_unified_en",
   "parakeet_v2",
   "parakeet_v3",
   "whisper_large_v3_turbo",

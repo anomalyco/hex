@@ -4,7 +4,7 @@ set -eu
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 support="$HOME/Library/Application Support/voice-control"
 discovery="$support/local-api.json"
-model=${HEX_SMOKE_MODEL:-parakeet_v2}
+model=${HEX_SMOKE_MODEL:-parakeet_unified_en}
 audio="${TMPDIR:-/tmp}/hex-transcription-smoke.wav"
 events="${TMPDIR:-/tmp}/hex-transcription-prepare.ndjson"
 service_pid=
