@@ -12,8 +12,8 @@ pastes the result into the app you are using.
 2. Drag HEX into Applications, then launch it.
 3. Complete setup:
    - **Microphone** lets HEX record while you dictate.
-   - **Input Monitoring** lets HEX detect its shortcut globally.
-   - **Accessibility** lets HEX paste into the foreground app.
+   - **Input Monitoring** lets HEX detect its shortcut globally. Drag the HEX tile into the list.
+   - **Accessibility** lets HEX paste into the foreground app. Drag the HEX tile into the list.
    - **Transcription model** downloads the speech model that runs locally.
 
 HEX checks for signed updates automatically. Use **HEX > Check for Updates...**

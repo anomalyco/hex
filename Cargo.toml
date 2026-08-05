@@ -6,6 +6,9 @@ default-run = "voice-control"
 license = "MIT"
 repository = "https://github.com/anomalyco/hex"
 
+[build-dependencies]
+cc = "1"
+
 [features]
 onnx-benchmark = ["dep:transcribe-rs"]
 

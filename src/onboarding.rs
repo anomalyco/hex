@@ -164,18 +164,6 @@ pub fn request_microphone() {
     }
 }
 
-pub fn request_input_monitoring() {
-    unsafe {
-        CGRequestListenEventAccess();
-    }
-}
-
-pub fn request_accessibility() {
-    unsafe {
-        CGRequestPostEventAccess();
-    }
-}
-
 pub fn open_permission_settings(permission: &str) {
     let pane = match permission {
         "microphone" => "Privacy_Microphone",
@@ -226,9 +214,7 @@ unsafe extern "C" {
 #[link(name = "CoreGraphics", kind = "framework")]
 unsafe extern "C" {
     safe fn CGPreflightListenEventAccess() -> bool;
-    fn CGRequestListenEventAccess() -> bool;
     safe fn CGPreflightPostEventAccess() -> bool;
-    fn CGRequestPostEventAccess() -> bool;
 }
 
 #[cfg(test)]

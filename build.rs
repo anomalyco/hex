@@ -19,6 +19,7 @@ fn main() {
     let developer_dir = String::from_utf8(output.stdout).expect("Xcode path must be UTF-8");
     compile_apple_speech_bridge();
     compile_indicator_shader();
+    compile_permission_guide();
     println!("cargo:rustc-link-arg=-Wl,-rpath,/usr/lib/swift");
     for runtime in ["swift-5.5/macosx", "swift/macosx"] {
         let swift_runtime = format!(
@@ -27,6 +28,18 @@ fn main() {
         );
         println!("cargo:rustc-link-arg=-Wl,-rpath,{swift_runtime}");
     }
+}
+
+fn compile_permission_guide() {
+    println!("cargo:rerun-if-changed=native/permission_guide.m");
+    println!("cargo:rustc-link-lib=framework=AppKit");
+    println!("cargo:rustc-link-lib=framework=ApplicationServices");
+    println!("cargo:rustc-link-lib=framework=CoreGraphics");
+
+    cc::Build::new()
+        .file("native/permission_guide.m")
+        .flag("-fobjc-arc")
+        .compile("hex_permission_guide");
 }
 
 fn compile_apple_speech_bridge() {

@@ -8531,6 +8531,7 @@ dependencies = [
  "arboard",
  "base64",
  "block2",
+ "cc",
  "clap",
  "color-eyre",
  "core-graphics-types 0.1.3",

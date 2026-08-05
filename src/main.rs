@@ -88,6 +88,8 @@ mod parakeet;
 #[cfg(target_os = "macos")]
 mod paste;
 #[cfg(target_os = "macos")]
+mod permission_guide;
+#[cfg(target_os = "macos")]
 mod personal_commands;
 #[cfg(target_os = "macos")]
 mod recognition;

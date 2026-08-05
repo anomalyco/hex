@@ -2989,7 +2989,7 @@ impl AppWindow {
         }
         Some(
             div()
-                .child(settings_section_label("PERMISSIONS"))
+                .child(settings_section_label("PERMISSIONS NEEDED"))
                 .child(
                     settings_panel().children(warnings.into_iter().map(|warning| {
                         let (name, description) = permission_warning_copy(warning.kind);
@@ -3013,12 +3013,10 @@ impl AppWindow {
                 crate::onboarding::open_permission_settings("microphone");
             }
             PermissionAction::OpenInputMonitoringSettings => {
-                crate::onboarding::request_input_monitoring();
-                crate::onboarding::open_permission_settings("input");
+                crate::permission_guide::show_input_monitoring();
             }
             PermissionAction::OpenAccessibilitySettings => {
-                crate::onboarding::request_accessibility();
-                crate::onboarding::open_permission_settings("accessibility");
+                crate::permission_guide::show_accessibility();
             }
         }
         self.permission_refresh_at = Instant::now() + PERMISSION_REFRESH_INTERVAL;
@@ -3497,32 +3495,52 @@ impl AppWindow {
                 }))
                 .into_any_element(),
         };
-        let input_monitoring = if status.input_monitoring == PermissionState::Ready {
-            setup_ready_badge()
-        } else {
-            compact_button("Open Settings")
+        let mut permission_rows = Vec::new();
+        if status.microphone != PermissionState::Ready {
+            permission_rows.push(setup_row(
+                "Microphone",
+                if self.settings.commands_enabled {
+                    "Hear commands and dictation."
+                } else {
+                    "Record dictation while you hold the shortcut."
+                },
+                microphone,
+            ));
+        }
+        if status.input_monitoring != PermissionState::Ready {
+            let input_monitoring = compact_button("Grant Access")
                 .id("setup-input-monitoring")
                 .bg(rgb(SURFACE_SELECTED))
                 .on_click(cx.listener(|_this, _, _, cx| {
-                    crate::onboarding::request_input_monitoring();
-                    crate::onboarding::open_permission_settings("input");
+                    crate::permission_guide::show_input_monitoring();
                     cx.notify();
                 }))
-                .into_any_element()
-        };
-        let accessibility = if status.accessibility == PermissionState::Ready {
-            setup_ready_badge()
-        } else {
-            compact_button("Open Settings")
+                .into_any_element();
+            permission_rows.push(setup_row(
+                "Input Monitoring",
+                "Recognize the dictation shortcut anywhere.",
+                input_monitoring,
+            ));
+        }
+        if status.accessibility != PermissionState::Ready {
+            let accessibility = compact_button("Grant Access")
                 .id("setup-accessibility")
                 .bg(rgb(SURFACE_SELECTED))
                 .on_click(cx.listener(|_this, _, _, cx| {
-                    crate::onboarding::request_accessibility();
-                    crate::onboarding::open_permission_settings("accessibility");
+                    crate::permission_guide::show_accessibility();
                     cx.notify();
                 }))
-                .into_any_element()
-        };
+                .into_any_element();
+            permission_rows.push(setup_row(
+                "Accessibility",
+                if self.settings.commands_enabled {
+                    "Paste text and run keyboard commands."
+                } else {
+                    "Paste completed dictation into the foreground app."
+                },
+                accessibility,
+            ));
+        }
         let models_ready = status.command_model && status.transcription_model;
         let models = if models_ready {
             setup_ready_badge()
@@ -3583,47 +3601,34 @@ impl AppWindow {
                                     }),
                             ),
                     )
+                    .when(!permission_rows.is_empty(), |setup| {
+                        setup.child(
+                            div()
+                                .mx_7()
+                                .pb_5()
+                                .child(setup_group_label("PERMISSIONS NEEDED"))
+                                .child(div().border_t_1().border_color(rgb(LINE)).children(permission_rows)),
+                        )
+                    })
                     .child(
                         div()
                             .mx_7()
-                            .border_t_1()
-                            .border_color(rgb(LINE))
-                            .child(setup_row(
-                                "Microphone",
-                                if self.settings.commands_enabled {
-                                    "Hear commands and dictation."
-                                } else {
-                                    "Record dictation while you hold the shortcut."
-                                },
-                                microphone,
-                            ))
-                            .child(setup_row(
-                                "Input Monitoring",
-                                "Recognize the dictation shortcut anywhere.",
-                                input_monitoring,
-                            ))
-                            .child(setup_row(
-                                "Accessibility",
-                                if self.settings.commands_enabled {
-                                    "Paste text and run keyboard commands."
-                                } else {
-                                    "Paste completed dictation into the foreground app."
-                                },
-                                accessibility,
-                            ))
-                            .child(setup_row(
-                                if self.settings.commands_enabled {
-                                    "Local speech models"
-                                } else {
-                                    "Local dictation model"
-                                },
-                                if self.settings.commands_enabled {
-                                    "Command recognition and the selected dictation model."
-                                } else {
-                                    "The selected model transcribes speech entirely on this Mac."
-                                },
-                                models,
-                            )),
+                            .child(setup_group_label("LOCAL MODELS"))
+                            .child(
+                                div().border_t_1().border_color(rgb(LINE)).child(setup_row(
+                                    if self.settings.commands_enabled {
+                                        "Local speech models"
+                                    } else {
+                                        "Local dictation model"
+                                    },
+                                    if self.settings.commands_enabled {
+                                        "Command recognition and the selected dictation model."
+                                    } else {
+                                        "The selected model transcribes speech entirely on this Mac."
+                                    },
+                                    models,
+                                )),
+                            ),
                     )
                     .when(crate::DEVELOPER_FEATURES_ENABLED, |setup| {
                         setup.child(
@@ -7807,6 +7812,15 @@ fn setup_row(title: &'static str, description: &'static str, control: AnyElement
         .child(control)
 }
 
+fn setup_group_label(label: &'static str) -> Div {
+    div()
+        .pb_2()
+        .text_size(px(10.0))
+        .font_weight(FontWeight::SEMIBOLD)
+        .text_color(rgb(MUTED))
+        .child(label)
+}
+
 fn setup_ready_badge() -> AnyElement {
     div()
         .h(px(28.0))
@@ -7842,9 +7856,9 @@ const fn permission_warning_copy(kind: PermissionKind) -> (&'static str, &'stati
 const fn permission_action_label(action: PermissionAction) -> &'static str {
     match action {
         PermissionAction::RequestMicrophone => "Allow",
-        PermissionAction::OpenMicrophoneSettings
-        | PermissionAction::OpenInputMonitoringSettings
-        | PermissionAction::OpenAccessibilitySettings => "Open Settings",
+        PermissionAction::OpenMicrophoneSettings => "Open Settings",
+        PermissionAction::OpenInputMonitoringSettings
+        | PermissionAction::OpenAccessibilitySettings => "Grant Access",
     }
 }
 
