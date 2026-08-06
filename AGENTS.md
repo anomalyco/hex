@@ -261,6 +261,32 @@ CoreAudio formats, AppleScript details, or event serialization.
 
 ## Development
 
+### TypeScript SDK Releases
+
+The public TypeScript SDK is `@kitlangton/hex` in `sdk/typescript`. The first
+release, `0.1.0`, was bootstrapped manually; subsequent user-facing SDK changes
+must include a Changeset under `sdk/.changeset/` unless preparing an initial
+unpublished package. Run package commands from the `sdk` workspace root.
+
+Before release, run:
+
+```sh
+cd sdk
+bun install --frozen-lockfile
+cd typescript
+bun run check
+bun run test
+bun run build
+npm pack --dry-run
+```
+
+When exports or packaging change, install the packed tarball in a clean consumer
+and import both `@kitlangton/hex` and `@kitlangton/hex/effect`. The release
+workflow is `.github/workflows/release-typescript.yml`; npm trusted publishing
+authorizes `anomalyco/hex` and that exact workflow filename for `npm publish`.
+Use the configured Changesets release command (`cd sdk && bun run release`), not
+direct `npm publish`, after the bootstrap release.
+
 ```sh
 ./scripts/setup.sh
 ./scripts/setup-parakeet.sh
