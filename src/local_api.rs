@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::fs::{self, File, OpenOptions};
 use std::io::{Cursor, Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
@@ -30,6 +31,8 @@ const MAX_PATH_BYTES: usize = 2 * 1024;
 const MAX_AUDIO_BYTES: usize = 64 * 1024 * 1024;
 const MAX_DEVELOPER_CONTROL_BYTES: usize = 16 * 1024;
 const DEVELOPER_CONTROL_TIMEOUT: Duration = Duration::from_secs(2);
+const DICTATION_CONTROL_TIMEOUT: Duration = Duration::from_secs(120);
+const MAX_DICTATION_SOURCE_BYTES: usize = 128;
 
 type HealthProvider = Arc<dyn Fn() -> HealthResponse + Send + Sync>;
 type ModelPreparer =
@@ -76,9 +79,15 @@ struct HttpRequest {
     method: String,
     path: String,
     authorization: Option<String>,
+    dictation_token: Option<String>,
     content_type: Option<String>,
     content_length: Option<usize>,
     body_prefix: Vec<u8>,
+}
+
+struct DictationLevels {
+    owner_token: String,
+    receiver: Receiver<crate::recognition::DictationLevel>,
 }
 
 struct HttpResponse {
@@ -102,6 +111,8 @@ struct HttpContext {
     shutdown: Arc<AtomicBool>,
     transcription: crate::transcription_service::TranscriptionServiceHandle,
     developer_control: Option<SyncSender<crate::developer_control::DeveloperCall>>,
+    dictation_control: Option<SyncSender<crate::recognition::RecognitionControl>>,
+    dictation_levels: Arc<Mutex<HashMap<u64, DictationLevels>>>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -132,16 +143,34 @@ impl LocalApi {
         Ok(api)
     }
 
-    pub fn start_with_developer_control(
+    pub fn start_with_dictation(
         events: EventLog,
-        developer_control: SyncSender<crate::developer_control::DeveloperCall>,
+        dictation: SyncSender<crate::recognition::RecognitionControl>,
     ) -> Result<Self> {
         let instance = crate::instance::acquire("local-api")?;
-        let mut api = Self::start_bound(
+        let mut api = Self::start_bound_with(
+            Some(crate::app_paths::local_api_discovery_file()?),
+            Arc::new(current_health),
+            events,
+            None,
+            Some(dictation),
+        )?;
+        api._instance = Some(instance);
+        Ok(api)
+    }
+
+    pub fn start_with_developer_control_and_dictation(
+        events: EventLog,
+        developer_control: SyncSender<crate::developer_control::DeveloperCall>,
+        dictation: SyncSender<crate::recognition::RecognitionControl>,
+    ) -> Result<Self> {
+        let instance = crate::instance::acquire("local-api")?;
+        let mut api = Self::start_bound_with(
             Some(crate::app_paths::local_api_discovery_file()?),
             Arc::new(current_health),
             events,
             Some(developer_control),
+            Some(dictation),
         )?;
         api._instance = Some(instance);
         Ok(api)
@@ -165,6 +194,16 @@ impl LocalApi {
         health: HealthProvider,
         events: EventLog,
         developer_control: Option<SyncSender<crate::developer_control::DeveloperCall>>,
+    ) -> Result<Self> {
+        Self::start_bound_with(discovery_path, health, events, developer_control, None)
+    }
+
+    fn start_bound_with(
+        discovery_path: Option<PathBuf>,
+        health: HealthProvider,
+        events: EventLog,
+        developer_control: Option<SyncSender<crate::developer_control::DeveloperCall>>,
+        dictation_control: Option<SyncSender<crate::recognition::RecognitionControl>>,
     ) -> Result<Self> {
         let (transcription_service, transcription) =
             crate::transcription_service::TranscriptionService::start()?;
@@ -205,6 +244,8 @@ impl LocalApi {
             shutdown: worker_shutdown,
             transcription,
             developer_control,
+            dictation_control,
+            dictation_levels: Arc::new(Mutex::new(HashMap::new())),
         };
         let (ready, readiness) = mpsc::sync_channel(1);
         let worker = thread::Builder::new()
@@ -468,6 +509,39 @@ fn http_worker(pending: Arc<Mutex<Receiver<TcpStream>>>, context: Arc<HttpContex
                     tracing::debug!(%error, "developer control client disconnected");
                 }
             }
+            RequestAction::DictationStart {
+                content_length,
+                body_prefix,
+            } => {
+                let response = dictation_start(&mut stream, content_length, body_prefix, &context);
+                if let Err(error) = write_response(&mut stream, response) {
+                    tracing::debug!(%error, "dictation client disconnected");
+                }
+            }
+            RequestAction::DictationFinish { id, owner_token } => {
+                let response = dictation_finish(id, owner_token, &context);
+                if let Err(error) = write_response(&mut stream, response) {
+                    tracing::debug!(%error, "dictation client disconnected");
+                }
+            }
+            RequestAction::DictationCancel { id, owner_token } => {
+                let response = dictation_cancel(id, owner_token, &context);
+                if let Err(error) = write_response(&mut stream, response) {
+                    tracing::debug!(%error, "dictation client disconnected");
+                }
+            }
+            RequestAction::DictationLevels { id, owner_token } => {
+                stream_dictation_levels(&mut stream, id, &owner_token, &context);
+            }
+            RequestAction::DictationAudio { id, owner_token } => {
+                stream_dictation_audio(&mut stream, id, owner_token, &context);
+            }
+            RequestAction::DictationHeartbeat { id, owner_token } => {
+                let response = dictation_heartbeat(id, owner_token, &context);
+                if let Err(error) = write_response(&mut stream, response) {
+                    tracing::debug!(%error, "dictation heartbeat client disconnected");
+                }
+            }
         }
     }
 }
@@ -486,6 +560,40 @@ fn handle_request(request: HttpRequest, context: &HttpContext) -> RequestAction 
     if request.method == "POST" && path == "/dev/control" {
         return developer_control_action(request, context.developer_control.is_some());
     }
+    if request.method == "POST" && path == "/dictations" {
+        return dictation_start_action(request, context.dictation_control.is_some());
+    }
+    if let Some((id, action)) = dictation_path(path) {
+        let Some(owner_token) = request.dictation_token else {
+            return RequestAction::Respond(HttpResponse::json(
+                404,
+                "Not Found",
+                &serde_json::json!({ "code": "dictation-not-found" }),
+            ));
+        };
+        return match (request.method.as_str(), action) {
+            ("POST", "finish") if context.dictation_control.is_some() => {
+                RequestAction::DictationFinish { id, owner_token }
+            }
+            ("POST", "cancel") if context.dictation_control.is_some() => {
+                RequestAction::DictationCancel { id, owner_token }
+            }
+            ("GET", "levels") if context.dictation_control.is_some() => {
+                RequestAction::DictationLevels { id, owner_token }
+            }
+            ("GET", "audio") if context.dictation_control.is_some() => {
+                RequestAction::DictationAudio { id, owner_token }
+            }
+            ("POST", "heartbeat") if context.dictation_control.is_some() => {
+                RequestAction::DictationHeartbeat { id, owner_token }
+            }
+            _ => RequestAction::Respond(HttpResponse::json(
+                404,
+                "Not Found",
+                &serde_json::json!({ "code": "service-capture-unavailable" }),
+            )),
+        };
+    }
 
     let response = match (request.method.as_str(), path) {
         ("GET", "/health") => HttpResponse::json(200, "OK", &(context.health)()),
@@ -495,7 +603,7 @@ fn handle_request(request: HttpRequest, context: &HttpContext) -> RequestAction 
             &CapabilitiesResponse {
                 audio_formats: ["audio/wav"],
                 partial_transcripts: false,
-                service_capture: false,
+                service_capture: context.dictation_control.is_some(),
                 developer_control: context.developer_control.is_some(),
             },
         ),
@@ -666,6 +774,410 @@ fn developer_control_action(request: HttpRequest, available: bool) -> RequestAct
         content_length,
         body_prefix: request.body_prefix,
     }
+}
+
+fn dictation_start_action(request: HttpRequest, available: bool) -> RequestAction {
+    if !available {
+        return RequestAction::Respond(HttpResponse::json(
+            404,
+            "Not Found",
+            &serde_json::json!({ "code": "service-capture-unavailable" }),
+        ));
+    }
+    if request
+        .content_type
+        .as_deref()
+        .and_then(|value| value.split(';').next())
+        != Some("application/json")
+    {
+        return RequestAction::Respond(HttpResponse::json(
+            415,
+            "Unsupported Media Type",
+            &serde_json::json!({ "code": "unsupported-content-type" }),
+        ));
+    }
+    let Some(content_length) = request.content_length else {
+        return RequestAction::Respond(HttpResponse::json(
+            411,
+            "Length Required",
+            &serde_json::json!({ "code": "length-required" }),
+        ));
+    };
+    if content_length > MAX_DICTATION_SOURCE_BYTES + 32 {
+        return RequestAction::Respond(HttpResponse::json(
+            413,
+            "Content Too Large",
+            &serde_json::json!({ "code": "source-too-large" }),
+        ));
+    }
+    RequestAction::DictationStart {
+        content_length,
+        body_prefix: request.body_prefix,
+    }
+}
+
+#[derive(Deserialize)]
+struct DictationStartRequest {
+    source: String,
+}
+
+fn dictation_start(
+    stream: &mut TcpStream,
+    content_length: usize,
+    mut body: Vec<u8>,
+    context: &HttpContext,
+) -> HttpResponse {
+    if let Err(error) = read_body_bounded(
+        stream,
+        content_length,
+        &mut body,
+        &context.shutdown,
+        MAX_DICTATION_SOURCE_BYTES + 32,
+        DEVELOPER_CONTROL_TIMEOUT,
+    ) {
+        return body_read_response(error);
+    }
+    let Ok(request) = serde_json::from_slice::<DictationStartRequest>(&body) else {
+        return HttpResponse::json(
+            400,
+            "Bad Request",
+            &serde_json::json!({ "code": "invalid-request" }),
+        );
+    };
+    if request.source.trim().is_empty() || request.source.len() > MAX_DICTATION_SOURCE_BYTES {
+        return HttpResponse::json(
+            400,
+            "Bad Request",
+            &serde_json::json!({ "code": "invalid-source" }),
+        );
+    }
+    let Some(controls) = &context.dictation_control else {
+        return HttpResponse::json(
+            404,
+            "Not Found",
+            &serde_json::json!({ "code": "service-capture-unavailable" }),
+        );
+    };
+    context
+        .dictation_levels
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .retain(|_, levels| !matches!(levels.receiver.try_recv(), Err(TryRecvError::Disconnected)));
+    let owner_token = match generate_token() {
+        Ok(token) => token,
+        Err(error) => {
+            tracing::error!(%error, "could not generate dictation owner token");
+            return HttpResponse::json(
+                500,
+                "Internal Server Error",
+                &serde_json::json!({ "code": "token-generation-failed" }),
+            );
+        }
+    };
+    let (level_sender, levels) = mpsc::sync_channel(8);
+    let (reply, response) = mpsc::sync_channel(1);
+    if controls
+        .try_send(crate::recognition::RecognitionControl::StartDictation {
+            source: request.source,
+            owner_token: owner_token.clone(),
+            levels: level_sender,
+            reply,
+        })
+        .is_err()
+    {
+        return HttpResponse::json(
+            503,
+            "Service Unavailable",
+            &serde_json::json!({ "code": "service-capture-busy" }),
+        );
+    }
+    match response.recv_timeout(DEVELOPER_CONTROL_TIMEOUT) {
+        Ok(Ok(started)) => {
+            context
+                .dictation_levels
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .insert(
+                    started.id,
+                    DictationLevels {
+                        owner_token: owner_token.clone(),
+                        receiver: levels,
+                    },
+                );
+            HttpResponse::json(
+                201,
+                "Created",
+                &serde_json::json!({
+                    "id": started.id,
+                    "ownerToken": owner_token,
+                    "sampleRate": started.sample_rate,
+                }),
+            )
+        }
+        Ok(Err(code)) => HttpResponse::json(409, "Conflict", &serde_json::json!({ "code": code })),
+        Err(_) => HttpResponse::json(
+            503,
+            "Service Unavailable",
+            &serde_json::json!({ "code": "service-capture-unavailable" }),
+        ),
+    }
+}
+
+fn dictation_finish(id: u64, owner_token: String, context: &HttpContext) -> HttpResponse {
+    let Some(controls) = &context.dictation_control else {
+        return HttpResponse::json(
+            404,
+            "Not Found",
+            &serde_json::json!({ "code": "service-capture-unavailable" }),
+        );
+    };
+    let (reply, response) = mpsc::sync_channel(1);
+    if controls
+        .try_send(crate::recognition::RecognitionControl::FinishDictation {
+            id,
+            owner_token,
+            reply,
+        })
+        .is_err()
+    {
+        return HttpResponse::json(
+            503,
+            "Service Unavailable",
+            &serde_json::json!({ "code": "service-capture-busy" }),
+        );
+    }
+    match response.recv_timeout(DICTATION_CONTROL_TIMEOUT) {
+        Ok(Ok(result)) => HttpResponse::json(
+            200,
+            "OK",
+            &serde_json::json!({
+                "transcript": result.transcript,
+                "durationMs": result.duration_ms,
+            }),
+        ),
+        Ok(Err(code)) => HttpResponse::json(409, "Conflict", &serde_json::json!({ "code": code })),
+        Err(_) => HttpResponse::json(
+            504,
+            "Gateway Timeout",
+            &serde_json::json!({ "code": "dictation-timeout" }),
+        ),
+    }
+}
+
+fn dictation_cancel(id: u64, owner_token: String, context: &HttpContext) -> HttpResponse {
+    let Some(controls) = &context.dictation_control else {
+        return HttpResponse::json(
+            404,
+            "Not Found",
+            &serde_json::json!({ "code": "service-capture-unavailable" }),
+        );
+    };
+    let (reply, response) = mpsc::sync_channel(1);
+    if controls
+        .try_send(crate::recognition::RecognitionControl::CancelDictation {
+            id,
+            owner_token,
+            reply,
+        })
+        .is_err()
+    {
+        return HttpResponse::json(
+            503,
+            "Service Unavailable",
+            &serde_json::json!({ "code": "service-capture-busy" }),
+        );
+    }
+    match response.recv_timeout(DEVELOPER_CONTROL_TIMEOUT) {
+        Ok(Ok(())) => {
+            context
+                .dictation_levels
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .remove(&id);
+            HttpResponse::empty(204, "No Content")
+        }
+        Ok(Err(code)) => HttpResponse::json(409, "Conflict", &serde_json::json!({ "code": code })),
+        Err(_) => HttpResponse::json(
+            503,
+            "Service Unavailable",
+            &serde_json::json!({ "code": "service-capture-unavailable" }),
+        ),
+    }
+}
+
+fn stream_dictation_levels(
+    stream: &mut TcpStream,
+    id: u64,
+    owner_token: &str,
+    context: &HttpContext,
+) {
+    let levels = {
+        let mut levels = context
+            .dictation_levels
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        levels
+            .get(&id)
+            .is_some_and(|levels| levels.owner_token == owner_token)
+            .then(|| {
+                levels
+                    .remove(&id)
+                    .expect("dictation levels were checked")
+                    .receiver
+            })
+    };
+    let Some(levels) = levels else {
+        let _ = write_response(
+            stream,
+            HttpResponse::json(
+                404,
+                "Not Found",
+                &serde_json::json!({ "code": "dictation-not-found" }),
+            ),
+        );
+        return;
+    };
+    if write_sse_headers(stream).is_err() {
+        return;
+    }
+    while !context.shutdown.load(Ordering::Acquire) {
+        match levels.recv_timeout(Duration::from_millis(100)) {
+            Ok(level) => {
+                if write_sse(
+                    stream,
+                    &serde_json::json!({ "rmsDb": level.rms_db, "peakDb": level.peak_db }),
+                )
+                .is_err()
+                {
+                    break;
+                }
+            }
+            Err(RecvTimeoutError::Timeout) => {}
+            Err(RecvTimeoutError::Disconnected) => break,
+        }
+    }
+}
+
+fn stream_dictation_audio(
+    stream: &mut TcpStream,
+    id: u64,
+    owner_token: String,
+    context: &HttpContext,
+) {
+    let Some(controls) = &context.dictation_control else {
+        let _ = write_response(
+            stream,
+            HttpResponse::json(
+                404,
+                "Not Found",
+                &serde_json::json!({ "code": "service-capture-unavailable" }),
+            ),
+        );
+        return;
+    };
+    let (audio, chunks) = mpsc::sync_channel(4);
+    let (reply, response) = mpsc::sync_channel(1);
+    if controls
+        .try_send(
+            crate::recognition::RecognitionControl::AttachDictationAudio {
+                id,
+                owner_token,
+                audio,
+                reply,
+            },
+        )
+        .is_err()
+    {
+        let _ = write_response(
+            stream,
+            HttpResponse::json(
+                503,
+                "Service Unavailable",
+                &serde_json::json!({ "code": "service-capture-busy" }),
+            ),
+        );
+        return;
+    }
+    match response.recv_timeout(DEVELOPER_CONTROL_TIMEOUT) {
+        Ok(Ok(())) => {}
+        Ok(Err(code)) => {
+            let _ = write_response(
+                stream,
+                HttpResponse::json(409, "Conflict", &serde_json::json!({ "code": code })),
+            );
+            return;
+        }
+        Err(_) => {
+            let _ = write_response(
+                stream,
+                HttpResponse::json(
+                    503,
+                    "Service Unavailable",
+                    &serde_json::json!({ "code": "service-capture-unavailable" }),
+                ),
+            );
+            return;
+        }
+    }
+    if write_stream_headers(stream, "application/octet-stream").is_err() {
+        return;
+    }
+    while !context.shutdown.load(Ordering::Acquire) {
+        match chunks.recv_timeout(Duration::from_millis(100)) {
+            Ok(chunk) => {
+                let mut bytes = Vec::with_capacity(chunk.samples.len() * size_of::<f32>());
+                for sample in chunk.samples {
+                    bytes.extend_from_slice(&sample.to_le_bytes());
+                }
+                if stream.write_all(&bytes).is_err() || stream.flush().is_err() {
+                    break;
+                }
+            }
+            Err(RecvTimeoutError::Timeout) => {}
+            Err(RecvTimeoutError::Disconnected) => break,
+        }
+    }
+}
+
+fn dictation_heartbeat(id: u64, owner_token: String, context: &HttpContext) -> HttpResponse {
+    let Some(controls) = &context.dictation_control else {
+        return HttpResponse::json(
+            404,
+            "Not Found",
+            &serde_json::json!({ "code": "service-capture-unavailable" }),
+        );
+    };
+    let (reply, response) = mpsc::sync_channel(1);
+    if controls
+        .try_send(crate::recognition::RecognitionControl::HeartbeatDictation {
+            id,
+            owner_token,
+            reply,
+        })
+        .is_err()
+    {
+        return HttpResponse::json(
+            503,
+            "Service Unavailable",
+            &serde_json::json!({ "code": "service-capture-busy" }),
+        );
+    }
+    match response.recv_timeout(DEVELOPER_CONTROL_TIMEOUT) {
+        Ok(Ok(())) => HttpResponse::empty(204, "No Content"),
+        Ok(Err(code)) => HttpResponse::json(409, "Conflict", &serde_json::json!({ "code": code })),
+        Err(_) => HttpResponse::json(
+            503,
+            "Service Unavailable",
+            &serde_json::json!({ "code": "service-capture-unavailable" }),
+        ),
+    }
+}
+
+fn dictation_path(path: &str) -> Option<(u64, &str)> {
+    let mut parts = path.strip_prefix("/dictations/")?.split('/');
+    let id = parts.next()?.parse().ok()?;
+    let action = parts.next()?;
+    (parts.next().is_none()).then_some((id, action))
 }
 
 fn developer_control(
@@ -1265,8 +1777,13 @@ fn model_prepare_error(code: &str, message: &str) -> serde_json::Value {
 }
 
 fn write_sse_headers(stream: &mut TcpStream) -> std::io::Result<()> {
-    stream.write_all(
-        b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-store\r\nConnection: close\r\nX-Content-Type-Options: nosniff\r\n\r\n",
+    write_stream_headers(stream, "text/event-stream")
+}
+
+fn write_stream_headers(stream: &mut TcpStream, content_type: &str) -> std::io::Result<()> {
+    write!(
+        stream,
+        "HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\nCache-Control: no-store\r\nConnection: close\r\nX-Content-Type-Options: nosniff\r\n\r\n"
     )?;
     stream.flush()
 }
@@ -1347,6 +1864,30 @@ enum RequestAction {
     DeveloperControl {
         content_length: usize,
         body_prefix: Vec<u8>,
+    },
+    DictationStart {
+        content_length: usize,
+        body_prefix: Vec<u8>,
+    },
+    DictationFinish {
+        id: u64,
+        owner_token: String,
+    },
+    DictationCancel {
+        id: u64,
+        owner_token: String,
+    },
+    DictationLevels {
+        id: u64,
+        owner_token: String,
+    },
+    DictationAudio {
+        id: u64,
+        owner_token: String,
+    },
+    DictationHeartbeat {
+        id: u64,
+        owner_token: String,
     },
 }
 
@@ -1435,6 +1976,7 @@ fn read_request_until(
         return Err(RequestReadError::Invalid);
     }
     let mut authorization = None;
+    let mut dictation_token = None;
     let mut content_type = None;
     let mut content_length = None;
     for (index, line) in lines.enumerate() {
@@ -1444,6 +1986,11 @@ fn read_request_until(
         let (name, value) = line.split_once(':').ok_or(RequestReadError::Invalid)?;
         if name.eq_ignore_ascii_case("authorization") {
             authorization = Some(value.trim().to_owned());
+        } else if name.eq_ignore_ascii_case("x-hex-dictation-token") {
+            if dictation_token.is_some() {
+                return Err(RequestReadError::Invalid);
+            }
+            dictation_token = Some(value.trim().to_owned());
         } else if name.eq_ignore_ascii_case("content-type") {
             content_type = Some(value.trim().to_owned());
         } else if name.eq_ignore_ascii_case("content-length") {
@@ -1468,6 +2015,7 @@ fn read_request_until(
         method: method.into(),
         path: path.into(),
         authorization,
+        dictation_token,
         content_type,
         content_length,
         body_prefix,
@@ -1780,6 +2328,171 @@ mod tests {
     }
 
     #[test]
+    fn authenticated_running_app_dictation_streams_observations_and_returns_raw_text() {
+        let directory = temp_directory();
+        let events = EventLog::create(&directory.join("events.ndjson")).unwrap();
+        let (sender, controls) = mpsc::sync_channel(4);
+        let mut api =
+            LocalApi::start_bound_with(None, Arc::new(test_health), events, None, Some(sender))
+                .unwrap();
+        let port = api.document.port;
+        let token = api.document.token.clone();
+        let controller = thread::spawn(move || {
+            let crate::recognition::RecognitionControl::StartDictation {
+                source,
+                owner_token,
+                levels,
+                reply,
+            } = controls.recv().unwrap()
+            else {
+                panic!("expected dictation start")
+            };
+            assert_eq!(source, "tp7");
+            assert!(owner_token.starts_with("hex_"));
+            reply
+                .send(Ok(crate::recognition::ProgrammaticDictationStart {
+                    id: 7,
+                    sample_rate: 48_000,
+                }))
+                .unwrap();
+            levels
+                .send(crate::recognition::DictationLevel {
+                    rms_db: -24.5,
+                    peak_db: -8.0,
+                })
+                .unwrap();
+
+            let crate::recognition::RecognitionControl::HeartbeatDictation {
+                id,
+                owner_token: heartbeat_token,
+                reply,
+            } = controls.recv().unwrap()
+            else {
+                panic!("expected dictation heartbeat")
+            };
+            assert_eq!(id, 7);
+            assert_eq!(heartbeat_token, owner_token);
+            reply.send(Ok(())).unwrap();
+
+            let crate::recognition::RecognitionControl::AttachDictationAudio {
+                id,
+                owner_token: audio_token,
+                audio,
+                reply,
+            } = controls.recv().unwrap()
+            else {
+                panic!("expected dictation audio subscription")
+            };
+            assert_eq!(id, 7);
+            assert_eq!(audio_token, owner_token);
+            reply.send(Ok(())).unwrap();
+            audio
+                .send(crate::recognition::DictationAudioChunk {
+                    samples: vec![0.25, -0.5],
+                })
+                .unwrap();
+
+            let crate::recognition::RecognitionControl::FinishDictation {
+                id,
+                owner_token: finish_token,
+                reply,
+            } = controls.recv().unwrap()
+            else {
+                panic!("expected dictation finish")
+            };
+            assert_eq!(id, 7);
+            assert_eq!(finish_token, owner_token);
+            reply
+                .send(Ok(crate::recognition::ProgrammaticDictationResult {
+                    transcript: "raw words".into(),
+                    duration_ms: 875,
+                }))
+                .unwrap();
+            drop(levels);
+            drop(audio);
+        });
+
+        let body = r#"{"source":"tp7"}"#;
+        let start = raw_request(
+            port,
+            &format!(
+                "POST /dictations HTTP/1.1\r\nAuthorization: Bearer {token}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            ),
+        );
+        assert!(start.starts_with("HTTP/1.1 201"));
+        let started = serde_json::from_str::<serde_json::Value>(response_body(&start)).unwrap();
+        assert_eq!(started["id"], 7);
+        assert_eq!(started["sampleRate"], 48_000);
+        let owner_token = started["ownerToken"].as_str().unwrap().to_owned();
+        assert!(owner_token.starts_with("hex_"));
+
+        let missing_owner = request_with_method(port, Some(&token), "POST", "/dictations/7/finish");
+        assert!(missing_owner.starts_with("HTTP/1.1 404"));
+
+        let heartbeat = request_with_dictation_token(
+            port,
+            &token,
+            &owner_token,
+            "POST",
+            "/dictations/7/heartbeat",
+        );
+        assert!(heartbeat.starts_with("HTTP/1.1 204"));
+
+        let wrong_levels =
+            request_with_dictation_token(port, &token, "hex_wrong", "GET", "/dictations/7/levels");
+        assert!(wrong_levels.starts_with("HTTP/1.1 404"));
+
+        let level_token = token.clone();
+        let level_owner = owner_token.clone();
+        let levels = thread::spawn(move || {
+            request_with_dictation_token(
+                port,
+                &level_token,
+                &level_owner,
+                "GET",
+                "/dictations/7/levels",
+            )
+        });
+        let audio_token = token.clone();
+        let audio_owner = owner_token.clone();
+        let audio = thread::spawn(move || {
+            request_bytes(port, &audio_token, &audio_owner, "/dictations/7/audio")
+        });
+        thread::sleep(Duration::from_millis(20));
+        let finish = request_with_dictation_token(
+            port,
+            &token,
+            &owner_token,
+            "POST",
+            "/dictations/7/finish",
+        );
+        assert!(finish.starts_with("HTTP/1.1 200"));
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(response_body(&finish)).unwrap(),
+            serde_json::json!({ "transcript": "raw words", "durationMs": 875 })
+        );
+        let levels = levels.join().unwrap();
+        assert!(levels.starts_with("HTTP/1.1 200"));
+        assert!(levels.contains(r#""rmsDb":-24.5"#));
+        assert!(levels.contains(r#""peakDb":-8.0"#));
+        let audio = audio.join().unwrap();
+        let body = audio
+            .windows(4)
+            .position(|bytes| bytes == b"\r\n\r\n")
+            .map(|index| &audio[index + 4..])
+            .unwrap();
+        assert_eq!(
+            body,
+            [0.25_f32.to_le_bytes(), (-0.5_f32).to_le_bytes()].concat()
+        );
+
+        controller.join().unwrap();
+        api.shutdown();
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
     fn embedded_server_returns_its_endpoint_without_publishing_discovery() {
         let directory = temp_directory();
         let event_path = directory.join("events.ndjson");
@@ -2020,6 +2733,7 @@ mod tests {
                 method: "POST".into(),
                 path: "/transcriptions?model=parakeet_v2".into(),
                 authorization: None,
+                dictation_token: None,
                 content_type: Some("audio/webm".into()),
                 content_length: Some(10),
                 body_prefix: Vec::new(),
@@ -2036,6 +2750,7 @@ mod tests {
                 method: "POST".into(),
                 path: "/transcriptions?model=parakeet_v2".into(),
                 authorization: None,
+                dictation_token: None,
                 content_type: Some("audio/wav".into()),
                 content_length: Some(MAX_AUDIO_BYTES + 1),
                 body_prefix: Vec::new(),
@@ -2065,12 +2780,15 @@ mod tests {
             shutdown: Arc::new(AtomicBool::new(false)),
             transcription,
             developer_control: None,
+            dictation_control: None,
+            dictation_levels: Arc::new(Mutex::new(HashMap::new())),
         };
         let action = handle_request(
             HttpRequest {
                 method: "POST".into(),
                 path: "/models/parakeet_v2/prepare".into(),
                 authorization: Some("Bearer test-token".into()),
+                dictation_token: None,
                 content_type: None,
                 content_length: None,
                 body_prefix: Vec::new(),
@@ -2180,6 +2898,36 @@ mod tests {
         stream.write_all(request.as_bytes()).unwrap();
         let mut response = String::new();
         stream.read_to_string(&mut response).unwrap();
+        response
+    }
+
+    fn request_with_dictation_token(
+        port: u16,
+        token: &str,
+        owner_token: &str,
+        method: &str,
+        path: &str,
+    ) -> String {
+        raw_request(
+            port,
+            &format!(
+                "{method} {path} HTTP/1.1\r\nAuthorization: Bearer {token}\r\nX-Hex-Dictation-Token: {owner_token}\r\nConnection: close\r\n\r\n"
+            ),
+        )
+    }
+
+    fn request_bytes(port: u16, token: &str, owner_token: &str, path: &str) -> Vec<u8> {
+        let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
+        write!(
+            stream,
+            "GET {path} HTTP/1.1\r\nAuthorization: Bearer {token}\r\nX-Hex-Dictation-Token: {owner_token}\r\nConnection: close\r\n\r\n"
+        )
+        .unwrap();
+        let mut response = Vec::new();
+        stream.read_to_end(&mut response).unwrap();
         response
     }
 

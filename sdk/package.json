@@ -5,5 +5,12 @@
     "commands",
     "typescript",
     "service-*"
-  ]
+  ],
+  "scripts": {
+    "changeset": "changeset",
+    "release": "changeset publish"
+  },
+  "devDependencies": {
+    "@changesets/cli": "^2.29.7"
+  }
 }

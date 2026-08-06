@@ -1,28 +1,58 @@
 # HEX TypeScript Client
 
-> **Status:** Private API preview. `@hex-ai/client` is not published to npm and
-> the repository does not contain a runnable native helper. The examples below
-> require an internally prepared Apple silicon macOS helper artifact.
+`@kitlangton/hex` connects TypeScript applications to the locally installed HEX
+desktop app. HEX owns its warm microphone and local transcription engine; the
+client controls capture and receives transcripts, levels, and optional PCM.
 
 Host the native HEX transcription helper as a direct child process. The host
 application owns microphone capture and settings; HEX owns local model
 preparation and transcription. Model artifacts remain shared per user while the
 helper process and warm model belong to the host.
 
-On Apple Silicon, `@hex-ai/service-darwin-arm64` is installed as an optional
-dependency and selected automatically. The release workflow prepares its
-signed/notarized executable; normal consumers never pass a command or path.
+Alternatively, connect to the running HEX desktop app to use its already-warm
+native microphone and recognition engine:
 
-This document records the intended consumer API. Do not depend on package names,
-versions, or distribution behavior until the first real consumer and clean
-package installation have been validated.
+```ts
+import { connect } from "@kitlangton/hex"
+
+const hex = await connect()
+const recording = await hex.dictation.start({ source: "tp7" })
+
+void (async () => {
+  for await (const { rmsDb, peakDb } of recording.levels) {
+    console.log({ rmsDb, peakDb })
+  }
+})()
+
+// Optional: subscribing activates a bounded best-effort mono Float32 PCM tap.
+void (async () => {
+  for await (const samples of recording.audio) {
+    consumePcm(samples, recording.sampleRate)
+  }
+})()
+
+const { transcript, durationMs } = await recording.finish()
+```
+
+Call `recording.cancel()` to discard instead. Desktop capture returns the raw
+local transcript and never pastes into the focused application. Check
+`capabilities().serviceCapture`: it is true only for a running desktop endpoint,
+and false for the direct-child transcription helper.
+
+The handle maintains a short server lease while capture is active. If its
+process exits, HEX cancels the abandoned capture after lease expiry. Every
+capture operation and observation stream is scoped by the handle's unguessable
+`ownerToken`; callers normally do not need to use it directly.
+
+Embedded hosting is also available for callers that provide an explicit native
+service command. A bundled native helper is not published yet.
 
 ## Promise API
 
 ```ts
-import { create } from "@hex-ai/client"
+import { create } from "@kitlangton/hex"
 
-const host = await create()
+const host = await create({ command: ["/path/to/hex-service", "service", "--embedded"] })
 
 try {
   const models = await host.client.models.list()
@@ -53,10 +83,10 @@ Effect operations, and a progress `Stream`:
 
 ```ts
 import { Effect, Stream } from "effect"
-import * as Hex from "@hex-ai/client/effect"
+import * as Hex from "@kitlangton/hex/effect"
 
 const program = Effect.scoped(Effect.gen(function* () {
-  const host = yield* Hex.create()
+  const host = yield* Hex.create({ command: ["/path/to/hex-service", "service", "--embedded"] })
 
   yield* host.client.models.prepare("parakeet_unified_en", {
     language: "en",
@@ -77,17 +107,15 @@ the helper for the layer's scope.
 
 ## Permissions
 
-The helper needs zero macOS TCC permissions. The host application captures
+The direct-child helper needs zero macOS TCC permissions. The host application captures
 microphone audio itself and sends encoded WAV, so the microphone prompt,
 `NSMicrophoneUsageDescription`, orange-dot indicator, and Privacy & Security
 entry all belong to the host's own bundle and signature. There is no second
 permission identity to sign, prompt for, or keep in sync.
 
-This is a deliberate decomposition: HEX owns model preparation and
-transcription; the host owns capture and consent. A future opt-in mode where
-the helper captures the microphone via TCC responsibility-chain inheritance
-is tracked in https://github.com/anomalyco/hex/issues/18 and is intentionally
-deferred until a real non-web consumer needs it.
+This is a deliberate decomposition: direct-child hosts own capture and consent,
+while clients connected to the desktop app reuse capture owned by HEX's signed
+desktop process. Neither mode opens a second microphone stream.
 
 ## Host Boundary
 

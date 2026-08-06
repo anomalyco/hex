@@ -1,6 +1,8 @@
 import { HexError } from "./errors.js"
 import {
   decodeCapabilities,
+  decodeDictationLevel,
+  decodeDictationStart,
   decodeHealth,
   decodeModels,
   decodeProgress,
@@ -9,11 +11,13 @@ import {
 } from "./protocol.js"
 import type {
   HexClient,
+  DictationLevel,
   ListModelsOptions,
   ModelId,
   PrepareModelOptions,
   RequestOptions,
   TranscriptionRequest,
+  TranscriptionResult,
 } from "./types.js"
 
 const MAX_SSE_EVENT_CHARS = 64 * 1024
@@ -260,5 +264,226 @@ export const makeClient = (
     return decodeTranscription(await json(response))
   }
 
-  return { health, capabilities, models: { list, prepare }, transcribe }
+  const boundedStream = <A>(
+    bufferSize: number,
+    failureMessage: string,
+    consume: (push: (value: A) => void, signal: AbortSignal) => Promise<void>,
+  ): AsyncIterable<A> => {
+    const values: Array<A> = []
+    const controller = new AbortController()
+    let pending: {
+      resolve: (result: IteratorResult<A>) => void
+      reject: (error: unknown) => void
+    } | undefined
+    let iterated = false
+    let ended = false
+    let stopped = false
+    let failure: unknown
+    let running: Promise<void> | undefined
+    const finish = (error?: unknown) => {
+      if (ended) return
+      ended = true
+      failure = error
+      const waiter = pending
+      pending = undefined
+      if (waiter !== undefined) {
+        if (error === undefined) waiter.resolve({ value: undefined, done: true })
+        else waiter.reject(error)
+      }
+    }
+    const push = (value: A) => {
+      if (stopped || ended) return
+      if (pending !== undefined) {
+        const waiter = pending
+        pending = undefined
+        waiter.resolve({ value, done: false })
+        return
+      }
+      if (values.length >= bufferSize) values.shift()
+      values.push(value)
+    }
+    const start = () => {
+      running ??= consume(push, controller.signal).then(
+        () => finish(),
+        (cause) => finish(stopped ? undefined : boundaryError(
+          cause,
+          combineSignals(lifetime, controller.signal),
+          "invalid-response",
+          failureMessage,
+        )),
+      )
+    }
+    return {
+      [Symbol.asyncIterator]: () => {
+        if (iterated) throw new HexError("request-failed", "HEX observation streams support one consumer")
+        iterated = true
+        start()
+        return {
+          next: async () => {
+            const value = values.shift()
+            if (value !== undefined) return { value, done: false }
+            if (failure !== undefined) throw failure
+            if (ended) return { value: undefined, done: true }
+            if (pending !== undefined) {
+              throw new HexError("request-failed", "Concurrent stream reads are not supported")
+            }
+            return new Promise<IteratorResult<A>>((resolve, reject) => {
+              pending = { resolve, reject }
+            })
+          },
+          return: async () => {
+            stopped = true
+            values.length = 0
+            controller.abort("iterator closed")
+            finish()
+            await running
+            return { value: undefined, done: true }
+          },
+        }
+      },
+    }
+  }
+
+  const dictationHeaders = (ownerToken: string) => ({ "x-hex-dictation-token": ownerToken })
+
+  const levelStream = (id: number, ownerToken: string): AsyncIterable<DictationLevel> =>
+    boundedStream(32, "HEX dictation level stream failed", async (push, streamSignal) => {
+      const { response, signal } = await request(
+        `/dictations/${id}/levels`,
+        { headers: dictationHeaders(ownerToken) },
+        streamSignal,
+      )
+      if (!response.headers.get("content-type")?.toLowerCase().startsWith("text/event-stream")) {
+        throw new HexError("invalid-response", "HEX returned an invalid dictation level content type")
+      }
+      if (response.body === null) throw new HexError("invalid-response", "HEX returned no dictation level stream")
+      const reader = response.body.pipeThrough(new TextDecoderStream()).getReader()
+      let buffer = ""
+      try {
+        while (true) {
+          const chunk = await reader.read()
+          if (chunk.done) break
+          if (signal.aborted) throw abortError(signal)
+          buffer += chunk.value
+          if (buffer.length > MAX_SSE_EVENT_CHARS) {
+            throw new HexError("invalid-response", "HEX dictation level stream exceeded its byte limit")
+          }
+          let match = /\r?\n\r?\n/.exec(buffer)
+          while (match !== null) {
+            const event = buffer.slice(0, match.index)
+            buffer = buffer.slice(match.index + match[0].length)
+            const data = event.split(/\r?\n/)
+              .filter((line) => line.startsWith("data:"))
+              .map((line) => line.slice(5).trimStart())
+              .join("\n")
+            if (data !== "") push(decodeDictationLevel(JSON.parse(data)))
+            match = /\r?\n\r?\n/.exec(buffer)
+          }
+        }
+      } finally {
+        if (signal.aborted) await reader.cancel(signal.reason).catch(() => {})
+        reader.releaseLock()
+      }
+    })
+
+  const audioStream = (id: number, ownerToken: string): AsyncIterable<Float32Array> =>
+    boundedStream(8, "HEX dictation audio stream failed", async (push, streamSignal) => {
+      const { response, signal } = await request(
+        `/dictations/${id}/audio`,
+        { headers: dictationHeaders(ownerToken) },
+        streamSignal,
+      )
+      if (!response.headers.get("content-type")?.toLowerCase().startsWith("application/octet-stream")) {
+        throw new HexError("invalid-response", "HEX returned an invalid dictation audio content type")
+      }
+      if (response.body === null) throw new HexError("invalid-response", "HEX returned no dictation audio stream")
+      const reader = response.body.getReader()
+      let pending = new Uint8Array(0)
+      try {
+        while (true) {
+          const chunk = await reader.read()
+          if (chunk.done) break
+          if (signal.aborted) throw abortError(signal)
+          const bytes = new Uint8Array(pending.length + chunk.value.length)
+          bytes.set(pending)
+          bytes.set(chunk.value, pending.length)
+          const sampleBytes = bytes.length - bytes.length % 4
+          if (sampleBytes > 0) {
+            const view = new DataView(bytes.buffer, bytes.byteOffset, sampleBytes)
+            const samples = new Float32Array(sampleBytes / 4)
+            for (let index = 0; index < samples.length; index++) {
+              samples[index] = view.getFloat32(index * 4, true)
+            }
+            push(samples)
+          }
+          pending = bytes.slice(sampleBytes)
+        }
+        if (pending.length !== 0) {
+          throw new HexError("invalid-response", "HEX returned an incomplete Float32 audio sample")
+        }
+      } finally {
+        if (signal.aborted) await reader.cancel(signal.reason).catch(() => {})
+        reader.releaseLock()
+      }
+    })
+
+  const startDictation = async (options: { readonly source: string }) => {
+    const { id, ownerToken, sampleRate } = decodeDictationStart(await json(await request("/dictations", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ source: options.source }),
+    })))
+    const levels = levelStream(id, ownerToken)
+    const audio = audioStream(id, ownerToken)
+    const headers = dictationHeaders(ownerToken)
+    let finished: TranscriptionResult | undefined
+    let cancelled = false
+    let finishInFlight: Promise<TranscriptionResult> | undefined
+    let cancelInFlight: Promise<void> | undefined
+    const heartbeat = setInterval(() => {
+      void request(`/dictations/${id}/heartbeat`, { method: "POST", headers }).catch(() => {
+        // A transient heartbeat failure is retried by the next interval; the server lease is authoritative.
+      })
+    }, 3_000)
+    const stopHeartbeat = () => clearInterval(heartbeat)
+    lifetime.addEventListener("abort", stopHeartbeat, { once: true })
+    return {
+      id,
+      ownerToken,
+      sampleRate,
+      levels,
+      audio,
+      finish: () => {
+        if (finished !== undefined) return Promise.resolve(finished)
+        if (cancelled) return Promise.reject(new HexError("request-failed", "HEX dictation was cancelled"))
+        finishInFlight ??= (async () => {
+          const result = decodeTranscription(await json(await request(
+            `/dictations/${id}/finish`,
+            { method: "POST", headers },
+          )))
+          finished = result
+          stopHeartbeat()
+          return result
+        })().finally(() => {
+          finishInFlight = undefined
+        })
+        return finishInFlight
+      },
+      cancel: () => {
+        if (cancelled || finished !== undefined) return Promise.resolve()
+        cancelInFlight ??= request(
+          `/dictations/${id}/cancel`,
+          { method: "POST", headers },
+        ).then(() => {
+          cancelled = true
+          stopHeartbeat()
+        }).finally(() => {
+          cancelInFlight = undefined
+        })
+        return cancelInFlight
+      },
+    }
+  }
+
+  return { health, capabilities, models: { list, prepare }, transcribe, dictation: { start: startDictation } }
 }

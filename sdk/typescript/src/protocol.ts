@@ -1,6 +1,7 @@
 import { HexError } from "./errors.js"
 import type {
   Capabilities,
+  DictationLevel,
   Health,
   ModelId,
   ModelInfo,
@@ -83,9 +84,39 @@ export const decodeCapabilities = (value: unknown): Capabilities => {
     || input.audioFormats.length !== 1
     || input.audioFormats[0] !== "audio/wav"
     || input.partialTranscripts !== false
-    || input.serviceCapture !== false
+    || typeof input.serviceCapture !== "boolean"
   ) return invalid("capabilities response")
-  return { audioFormats: ["audio/wav"], partialTranscripts: false, serviceCapture: false }
+  return { audioFormats: ["audio/wav"], partialTranscripts: false, serviceCapture: input.serviceCapture }
+}
+
+export const decodeDictationStart = (value: unknown): {
+  readonly id: number
+  readonly ownerToken: string
+  readonly sampleRate: number
+} => {
+  const input = record(value)
+  const id = input && number(input.id)
+  const ownerToken = input && string(input.ownerToken)
+  const sampleRate = input && number(input.sampleRate)
+  if (
+    id === undefined
+    || !Number.isInteger(id)
+    || id <= 0
+    || ownerToken === undefined
+    || ownerToken.length < 32
+    || sampleRate === undefined
+    || !Number.isInteger(sampleRate)
+    || sampleRate <= 0
+  ) return invalid("dictation start response")
+  return { id, ownerToken, sampleRate }
+}
+
+export const decodeDictationLevel = (value: unknown): DictationLevel => {
+  const input = record(value)
+  const rmsDb = input && number(input.rmsDb)
+  const peakDb = input && number(input.peakDb)
+  if (rmsDb === undefined || peakDb === undefined) return invalid("dictation level event")
+  return { rmsDb, peakDb }
 }
 
 export const decodeModels = (value: unknown): readonly ModelInfo[] => {

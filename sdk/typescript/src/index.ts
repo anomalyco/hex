@@ -1,10 +1,14 @@
 export { HexError, isHexError, type HexErrorCode } from "./errors.js"
-export { create } from "./host.js"
+export { connect, create } from "./host.js"
 export { MODEL_IDS } from "./types.js"
 export type {
   AudioClip,
   Capabilities,
+  ConnectOptions,
   CreateOptions,
+  DictationHandle,
+  DictationLevel,
+  DictationStartOptions,
   Health,
   HexClient,
   HexHost,

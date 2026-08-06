@@ -19,7 +19,7 @@ export interface Health {
 export interface Capabilities {
   readonly audioFormats: readonly ["audio/wav"]
   readonly partialTranscripts: false
-  readonly serviceCapture: false
+  readonly serviceCapture: boolean
 }
 
 export interface ModelInfo {
@@ -67,6 +67,28 @@ export interface TranscriptionResult {
   readonly durationMs: number
 }
 
+export interface DictationStartOptions {
+  readonly source: string
+}
+
+export interface DictationLevel {
+  readonly rmsDb: number
+  readonly peakDb: number
+}
+
+export interface DictationHandle {
+  readonly id: number
+  /** Unguessable owner credential required by every operation on this capture. */
+  readonly ownerToken: string
+  /** Source sample rate for the optional mono Float32 PCM audio tap. */
+  readonly sampleRate: number
+  readonly levels: AsyncIterable<DictationLevel>
+  /** Best-effort raw mono PCM from HEX's capture; no work occurs until iterated. */
+  readonly audio: AsyncIterable<Float32Array>
+  finish(): Promise<TranscriptionResult>
+  cancel(): Promise<void>
+}
+
 export interface HexClient {
   health(options?: RequestOptions): Promise<Health>
   capabilities(options?: RequestOptions): Promise<Capabilities>
@@ -75,6 +97,9 @@ export interface HexClient {
     prepare(id: ModelId, options?: PrepareModelOptions): Promise<void>
   }
   transcribe(request: TranscriptionRequest): Promise<TranscriptionResult>
+  readonly dictation: {
+    start(options: DictationStartOptions): Promise<DictationHandle>
+  }
 }
 
 export interface CreateOptions {
@@ -85,6 +110,13 @@ export interface CreateOptions {
   readonly startupTimeoutMs?: number
   readonly shutdownTimeoutMs?: number
   readonly signal?: AbortSignal
+  /** Platform transport override, primarily for tests and Electron adapters. */
+  readonly fetch?: typeof globalThis.fetch
+}
+
+export interface ConnectOptions extends RequestOptions {
+  /** Advanced discovery override for tests or isolated application instances. */
+  readonly discoveryPath?: string
   /** Platform transport override, primarily for tests and Electron adapters. */
   readonly fetch?: typeof globalThis.fetch
 }

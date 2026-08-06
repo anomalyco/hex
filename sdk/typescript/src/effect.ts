@@ -84,7 +84,7 @@ export interface Host {
   readonly client: Interface
 }
 
-export class Service extends Context.Service<Service, Interface>()("@hex-ai/client/Hex") {}
+export class Service extends Context.Service<Service, Interface>()("@kitlangton/hex/Hex") {}
 
 const causeFields = (cause: unknown): { readonly cause?: unknown } =>
   cause === undefined ? {} : { cause }

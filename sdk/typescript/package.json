@@ -1,7 +1,7 @@
 {
-  "name": "@hex-ai/client",
-  "version": "0.0.0",
-  "private": true,
+  "name": "@kitlangton/hex",
+  "version": "0.1.0",
+  "description": "TypeScript client for the HEX local transcription service",
   "license": "MIT",
   "type": "module",
   "sideEffects": false,
@@ -23,10 +23,20 @@
     "dist",
     "README.md"
   ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/anomalyco/hex.git",
+    "directory": "sdk/typescript"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
   "scripts": {
     "build": "rm -rf dist && tsc -p tsconfig.build.json",
     "check": "tsc -p tsconfig.json",
-    "test": "vitest run"
+    "test": "vitest run",
+    "prepublishOnly": "bun run check && bun run test && bun run build"
   },
   "peerDependencies": {
     "effect": ">=4.0.0-beta.97 <5.0.0"
@@ -35,9 +45,6 @@
     "effect": {
       "optional": true
     }
-  },
-  "optionalDependencies": {
-    "@hex-ai/service-darwin-arm64": "0.0.0"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

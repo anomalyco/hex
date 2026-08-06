@@ -1,3 +1,4 @@
+use std::collections::{BTreeMap, VecDeque};
 use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -30,6 +31,8 @@ use crate::suppression::{DictationHotkey, HotkeyAction, InputActivity, InputMoni
 
 const UPDATE_INTERVAL: Duration = Duration::from_millis(200);
 const ACTIVATION_STABILITY_WINDOW: Duration = Duration::from_millis(750);
+const PROGRAMMATIC_LEASE: Duration = Duration::from_secs(10);
+const PROGRAMMATIC_COMPLETION_LIMIT: usize = 16;
 
 #[derive(Default)]
 struct ActivationStability {
@@ -69,9 +72,89 @@ enum FinishResult {
     Rejected(String),
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Debug)]
 pub enum RecognitionControl {
     PasteLast,
+    StartDictation {
+        source: String,
+        owner_token: String,
+        levels: SyncSender<DictationLevel>,
+        reply: SyncSender<Result<ProgrammaticDictationStart, String>>,
+    },
+    AttachDictationAudio {
+        id: u64,
+        owner_token: String,
+        audio: SyncSender<DictationAudioChunk>,
+        reply: SyncSender<Result<(), String>>,
+    },
+    FinishDictation {
+        id: u64,
+        owner_token: String,
+        reply: SyncSender<Result<ProgrammaticDictationResult, String>>,
+    },
+    CancelDictation {
+        id: u64,
+        owner_token: String,
+        reply: SyncSender<Result<(), String>>,
+    },
+    HeartbeatDictation {
+        id: u64,
+        owner_token: String,
+        reply: SyncSender<Result<(), String>>,
+    },
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct DictationLevel {
+    pub rms_db: f32,
+    pub peak_db: f32,
+}
+
+#[derive(Clone, Debug)]
+pub struct ProgrammaticDictationResult {
+    pub transcript: String,
+    pub duration_ms: u64,
+}
+
+#[derive(Debug)]
+pub struct ProgrammaticDictationStart {
+    pub id: u64,
+    pub sample_rate: u32,
+}
+
+#[derive(Debug)]
+pub struct DictationAudioChunk {
+    pub samples: Vec<f32>,
+}
+
+struct ProgrammaticDictation {
+    id: u64,
+    owner_token: String,
+    source: String,
+    levels: SyncSender<DictationLevel>,
+    audio: Option<SyncSender<DictationAudioChunk>>,
+    last_level: Instant,
+    lease_deadline: Instant,
+}
+
+struct FinishingProgrammaticDictation {
+    id: u64,
+    owner_token: String,
+    duration_ms: u64,
+    replies: Vec<SyncSender<Result<ProgrammaticDictationResult, String>>>,
+}
+
+#[derive(Clone)]
+enum ProgrammaticTerminalOutcome {
+    Finished(Result<ProgrammaticDictationResult, String>),
+    Cancelled,
+}
+
+#[derive(Clone)]
+struct ProgrammaticCompletion {
+    id: u64,
+    owner_token: String,
+    outcome: ProgrammaticTerminalOutcome,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -150,6 +233,11 @@ pub fn listen(
             )
         })
         .flatten();
+    let mut next_programmatic_id = 1_u64;
+    let mut programmatic = None::<ProgrammaticDictation>;
+    let mut programmatic_results =
+        BTreeMap::<crate::parakeet::DictationJobId, FinishingProgrammaticDictation>::new();
+    let mut programmatic_completions = VecDeque::<ProgrammaticCompletion>::new();
 
     events.emit(&VoiceEvent::SessionStarted {
         timestamp_ms: now_ms(),
@@ -193,20 +281,266 @@ pub fn listen(
         if let Some(controls) = &controls {
             while let Ok(control) = controls.try_recv() {
                 match control {
-                    RecognitionControl::PasteLast => handle_hotkey_action(
-                        HotkeyAction::PasteLast,
-                        CaptureInstant::now(),
-                        &mut recognizer,
-                        &input,
-                        &dictation_worker,
-                        mode,
-                        &context,
-                        &input.device_name(),
-                        &mut events,
-                        indicator.as_ref(),
-                    )?,
+                    RecognitionControl::PasteLast if programmatic.is_none() => {
+                        handle_hotkey_action(
+                            HotkeyAction::PasteLast,
+                            CaptureInstant::now(),
+                            &mut recognizer,
+                            &input,
+                            &dictation_worker,
+                            mode,
+                            &context,
+                            &input.device_name(),
+                            &mut events,
+                            indicator.as_ref(),
+                        )?
+                    }
+                    RecognitionControl::PasteLast => {}
+                    RecognitionControl::StartDictation {
+                        source,
+                        owner_token,
+                        levels,
+                        reply,
+                    } => {
+                        if programmatic.is_some()
+                            || input.is_recording()
+                            || hotkey.is_recording()
+                            || edit_hotkey.is_recording()
+                            || voice_protocol.is_some()
+                        {
+                            let _ = reply.send(Err("dictation-busy".into()));
+                            continue;
+                        }
+                        let id = next_programmatic_id;
+                        next_programmatic_id = next_programmatic_id.wrapping_add(1).max(1);
+                        let boundary = if microphone_policy.release_while_idle {
+                            CaptureInstant::now()
+                        } else {
+                            input.captured_through()
+                        };
+                        match input.start_programmatic(boundary) {
+                            Ok(()) => {
+                                reset_command_recognizer(&input, &mut recognizer)?;
+                                tracing::info!(
+                                    dictation_id = id,
+                                    source,
+                                    "programmatic dictation started"
+                                );
+                                programmatic = Some(ProgrammaticDictation {
+                                    id,
+                                    owner_token,
+                                    source,
+                                    levels,
+                                    audio: None,
+                                    last_level: Instant::now() - Duration::from_millis(30),
+                                    lease_deadline: Instant::now() + PROGRAMMATIC_LEASE,
+                                });
+                                input_monitor.set_escape_cancels(true);
+                                let _ = reply.send(Ok(ProgrammaticDictationStart {
+                                    id,
+                                    sample_rate: input.sample_rate(),
+                                }));
+                            }
+                            Err(error) => {
+                                let _ = reply.send(Err(error.to_string()));
+                            }
+                        }
+                    }
+                    RecognitionControl::AttachDictationAudio {
+                        id,
+                        owner_token,
+                        audio,
+                        reply,
+                    } => {
+                        let Some(active) = programmatic
+                            .as_mut()
+                            .filter(|active| active.id == id && active.owner_token == owner_token)
+                        else {
+                            let _ = reply.send(Err("dictation-not-active".into()));
+                            continue;
+                        };
+                        if active.audio.is_some() {
+                            let _ = reply.send(Err("audio-already-subscribed".into()));
+                            continue;
+                        }
+                        active.audio = Some(audio);
+                        let _ = reply.send(Ok(()));
+                    }
+                    RecognitionControl::FinishDictation {
+                        id,
+                        owner_token,
+                        reply,
+                    } => {
+                        if let Some(finishing) =
+                            programmatic_results.values_mut().find(|finishing| {
+                                finishing.id == id && finishing.owner_token == owner_token
+                            })
+                        {
+                            finishing.replies.push(reply);
+                            continue;
+                        }
+                        if let Some(completion) =
+                            programmatic_completions.iter().rev().find(|completion| {
+                                completion.id == id && completion.owner_token == owner_token
+                            })
+                        {
+                            let result = match &completion.outcome {
+                                ProgrammaticTerminalOutcome::Finished(result) => result.clone(),
+                                ProgrammaticTerminalOutcome::Cancelled => Err("cancelled".into()),
+                            };
+                            let _ = reply.send(result);
+                            continue;
+                        }
+                        if programmatic.as_ref().is_none_or(|active| {
+                            active.id != id || active.owner_token != owner_token
+                        }) {
+                            let _ = reply.send(Err("dictation-not-active".into()));
+                            continue;
+                        }
+                        let active = programmatic.take().expect("active dictation was checked");
+                        let boundary = if microphone_policy.release_while_idle {
+                            CaptureInstant::now()
+                        } else {
+                            input.captured_through()
+                        };
+                        match input.finish(boundary)? {
+                            Finish::Transcribe(clip) => {
+                                let duration_ms = clip.duration_ms();
+                                match dictation_worker.transcribe(
+                                    clip,
+                                    TranscriptionTarget::Service,
+                                    None,
+                                    ContextSnapshot::default(),
+                                ) {
+                                    Ok(job_id) => {
+                                        programmatic_results.insert(
+                                            job_id,
+                                            FinishingProgrammaticDictation {
+                                                id,
+                                                owner_token,
+                                                duration_ms,
+                                                replies: vec![reply],
+                                            },
+                                        );
+                                        tracing::info!(
+                                            dictation_id = id,
+                                            source = active.source,
+                                            "programmatic dictation submitted"
+                                        );
+                                    }
+                                    Err(error) => {
+                                        let result = Err(error.into());
+                                        let _ = reply.send(result.clone());
+                                        remember_programmatic_completion(
+                                            &mut programmatic_completions,
+                                            ProgrammaticCompletion {
+                                                id,
+                                                owner_token,
+                                                outcome: ProgrammaticTerminalOutcome::Finished(
+                                                    result,
+                                                ),
+                                            },
+                                        );
+                                    }
+                                }
+                            }
+                            Finish::Discard => {
+                                let result = Err("capture-discarded".into());
+                                let _ = reply.send(result.clone());
+                                remember_programmatic_completion(
+                                    &mut programmatic_completions,
+                                    ProgrammaticCompletion {
+                                        id,
+                                        owner_token,
+                                        outcome: ProgrammaticTerminalOutcome::Finished(result),
+                                    },
+                                );
+                            }
+                        }
+                        reset_command_recognizer(&input, &mut recognizer)?;
+                    }
+                    RecognitionControl::CancelDictation {
+                        id,
+                        owner_token,
+                        reply,
+                    } => {
+                        if let Some(completion) =
+                            programmatic_completions.iter().rev().find(|completion| {
+                                completion.id == id && completion.owner_token == owner_token
+                            })
+                            && matches!(completion.outcome, ProgrammaticTerminalOutcome::Cancelled)
+                        {
+                            let _ = reply.send(Ok(()));
+                            continue;
+                        }
+                        if programmatic_results.values().any(|finishing| {
+                            finishing.id == id && finishing.owner_token == owner_token
+                        }) {
+                            let _ = reply.send(Err("dictation-finishing".into()));
+                            continue;
+                        }
+                        if programmatic.as_ref().is_none_or(|active| {
+                            active.id != id || active.owner_token != owner_token
+                        }) {
+                            let _ = reply.send(Err("dictation-not-active".into()));
+                            continue;
+                        }
+                        let active = programmatic.take().expect("active dictation was checked");
+                        input.cancel()?;
+                        reset_command_recognizer(&input, &mut recognizer)?;
+                        tracing::info!(
+                            dictation_id = id,
+                            source = active.source,
+                            "programmatic dictation cancelled"
+                        );
+                        remember_programmatic_completion(
+                            &mut programmatic_completions,
+                            ProgrammaticCompletion {
+                                id,
+                                owner_token,
+                                outcome: ProgrammaticTerminalOutcome::Cancelled,
+                            },
+                        );
+                        let _ = reply.send(Ok(()));
+                    }
+                    RecognitionControl::HeartbeatDictation {
+                        id,
+                        owner_token,
+                        reply,
+                    } => {
+                        let Some(active) = programmatic
+                            .as_mut()
+                            .filter(|active| active.id == id && active.owner_token == owner_token)
+                        else {
+                            let _ = reply.send(Err("dictation-not-active".into()));
+                            continue;
+                        };
+                        active.lease_deadline = Instant::now() + PROGRAMMATIC_LEASE;
+                        let _ = reply.send(Ok(()));
+                    }
                 }
             }
+        }
+        if programmatic
+            .as_ref()
+            .is_some_and(|active| programmatic_lease_expired(active.lease_deadline, Instant::now()))
+        {
+            let expired = programmatic.take().expect("expired dictation was checked");
+            input.cancel()?;
+            reset_command_recognizer(&input, &mut recognizer)?;
+            tracing::warn!(
+                dictation_id = expired.id,
+                source = expired.source,
+                "programmatic dictation lease expired"
+            );
+            remember_programmatic_completion(
+                &mut programmatic_completions,
+                ProgrammaticCompletion {
+                    id: expired.id,
+                    owner_token: expired.owner_token,
+                    outcome: ProgrammaticTerminalOutcome::Cancelled,
+                },
+            );
         }
         while let Ok(next_context) = context_monitor.updates.try_recv() {
             if context != next_context {
@@ -327,6 +661,25 @@ pub fn listen(
             let _acknowledge = input_monitor.acknowledge_after(observed);
             let input_event = observed.event;
             let capture_at = observed.capture_at;
+            if programmatic.is_some() && input_event.is_escape_down() {
+                let cancelled = programmatic
+                    .take()
+                    .expect("programmatic dictation is active");
+                input.cancel()?;
+                reset_command_recognizer(&input, &mut recognizer)?;
+                feedback::play(Tone::Cancel);
+                remember_programmatic_completion(
+                    &mut programmatic_completions,
+                    ProgrammaticCompletion {
+                        id: cancelled.id,
+                        owner_token: cancelled.owner_token,
+                        outcome: ProgrammaticTerminalOutcome::Cancelled,
+                    },
+                );
+                continue;
+            } else if programmatic.is_some() {
+                continue;
+            }
             if hotkey_capture_suspended {
                 continue;
             }
@@ -510,12 +863,63 @@ pub fn listen(
         let mut received_worker_event = false;
         while let Some(event) = dictation_worker.try_recv() {
             received_worker_event = true;
-            handle_dictation_event(event, &mut events, indicator.as_ref())?;
+            match event {
+                WorkerEvent::Completed {
+                    job_id,
+                    target: TranscriptionTarget::Service,
+                    result,
+                    ..
+                } => {
+                    if let Some(finishing) = programmatic_results.remove(&job_id) {
+                        let result = result.map(|transcript| ProgrammaticDictationResult {
+                            transcript,
+                            duration_ms: finishing.duration_ms,
+                        });
+                        for reply in finishing.replies {
+                            let _ = reply.send(result.clone());
+                        }
+                        remember_programmatic_completion(
+                            &mut programmatic_completions,
+                            ProgrammaticCompletion {
+                                id: finishing.id,
+                                owner_token: finishing.owner_token,
+                                outcome: ProgrammaticTerminalOutcome::Finished(result),
+                            },
+                        );
+                    }
+                    continue;
+                }
+                WorkerEvent::Cancelled { job_id } => {
+                    if let Some(finishing) = programmatic_results.remove(&job_id) {
+                        let result = Err("cancelled".into());
+                        for reply in finishing.replies {
+                            let _ = reply.send(result.clone());
+                        }
+                        remember_programmatic_completion(
+                            &mut programmatic_completions,
+                            ProgrammaticCompletion {
+                                id: finishing.id,
+                                owner_token: finishing.owner_token,
+                                outcome: ProgrammaticTerminalOutcome::Finished(result),
+                            },
+                        );
+                        continue;
+                    }
+                    handle_dictation_event(
+                        WorkerEvent::Cancelled { job_id },
+                        &mut events,
+                        indicator.as_ref(),
+                    )?;
+                    continue;
+                }
+                event => handle_dictation_event(event, &mut events, indicator.as_ref())?,
+            }
         }
         input_monitor.set_escape_cancels(
             hotkey.is_recording()
                 || edit_hotkey.is_recording()
                 || voice_protocol.is_some()
+                || programmatic.is_some()
                 || dictation_worker.pending_count() > 0,
         );
         if received_worker_event {
@@ -542,6 +946,7 @@ pub fn listen(
                     if capture_generation != input.capture_generation() {
                         continue;
                     }
+                    programmatic = None;
                     hotkey.suspend();
                     edit_hotkey.suspend();
                     edit_context = None;
@@ -593,6 +998,7 @@ pub fn listen(
                     reset_recognizer(&mut recognizer)?;
                     recognition_origin = None;
                     if was_recording {
+                        programmatic = None;
                         hotkey.suspend();
                         edit_hotkey.suspend();
                         voice_protocol = None;
@@ -632,6 +1038,9 @@ pub fn listen(
                     tracing::debug!(capture_generation, "ignored stale microphone interruption");
                 }
                 DictationAudioEvent::Interrupted { was_recording, .. } => {
+                    if was_recording {
+                        programmatic = None;
+                    }
                     voice_protocol = None;
                     control_stability.reset();
                     edit_context = None;
@@ -665,9 +1074,24 @@ pub fn listen(
         }
 
         let audio = input.recv_timeout(Duration::from_millis(20))?;
+        if let (Some(active), Some(audio)) = (&mut programmatic, &audio) {
+            if active.last_level.elapsed() >= Duration::from_millis(30) {
+                let _ = active.levels.try_send(level_for(&audio.samples));
+                active.last_level = Instant::now();
+            }
+            if let Some(sender) = &active.audio {
+                match sender.try_send(DictationAudioChunk {
+                    samples: audio.samples.clone(),
+                }) {
+                    Ok(()) | Err(TrySendError::Full(_)) => {}
+                    Err(TrySendError::Disconnected(_)) => active.audio = None,
+                }
+            }
+        }
         if let Some(audio) = &audio
             && audio.is_current(input.recognition_generation())
             && recognizer.is_some()
+            && programmatic.is_none()
             && !hotkey.suppresses_recognition()
             && !edit_hotkey.suppresses_recognition()
         {
@@ -690,7 +1114,9 @@ pub fn listen(
                 }
             }
             Some(audio)
-                if hotkey.suppresses_recognition() || edit_hotkey.suppresses_recognition() =>
+                if programmatic.is_some()
+                    || hotkey.suppresses_recognition()
+                    || edit_hotkey.suppresses_recognition() =>
             {
                 if let Some(indicator) = &indicator {
                     indicator.meter(&audio.samples);
@@ -712,6 +1138,7 @@ pub fn listen(
             continue;
         }
         if !input.is_recovering()
+            && programmatic.is_none()
             && !hotkey.suppresses_recognition()
             && !edit_hotkey.suppresses_recognition()
             && last_update.elapsed() >= UPDATE_INTERVAL
@@ -878,6 +1305,45 @@ pub fn listen(
         indicator.send(DictationIndicatorEvent::Discarded);
     }
     Ok(())
+}
+
+fn level_for(samples: &[f32]) -> DictationLevel {
+    let (sum_squares, peak) = samples
+        .iter()
+        .fold((0.0_f64, 0.0_f32), |(sum, peak), sample| {
+            let magnitude = sample.abs();
+            (
+                sum + f64::from(*sample) * f64::from(*sample),
+                peak.max(magnitude),
+            )
+        });
+    let rms = if samples.is_empty() {
+        0.0
+    } else {
+        (sum_squares / samples.len() as f64).sqrt() as f32
+    };
+    DictationLevel {
+        rms_db: amplitude_db(rms),
+        peak_db: amplitude_db(peak),
+    }
+}
+
+fn remember_programmatic_completion(
+    completions: &mut VecDeque<ProgrammaticCompletion>,
+    completion: ProgrammaticCompletion,
+) {
+    completions.push_back(completion);
+    while completions.len() > PROGRAMMATIC_COMPLETION_LIMIT {
+        completions.pop_front();
+    }
+}
+
+fn programmatic_lease_expired(deadline: Instant, now: Instant) -> bool {
+    now >= deadline
+}
+
+fn amplitude_db(amplitude: f32) -> f32 {
+    (20.0 * amplitude.max(0.000_001).log10()).max(-120.0)
 }
 
 fn load_command_recognizer(
@@ -1546,6 +2012,7 @@ fn handle_dictation_event(
             let phase = match target {
                 TranscriptionTarget::VoiceAction => DictationPhase::VoiceAction,
                 TranscriptionTarget::Paste | TranscriptionTarget::Send => DictationPhase::Pasted,
+                TranscriptionTarget::Service => return Ok(()),
             };
             events.processed_dictation(
                 phase,
@@ -1629,6 +2096,42 @@ mod tests {
             vec!["say cancel".into()],
         )
         .unwrap()
+    }
+
+    #[test]
+    fn programmatic_meter_reports_rms_and_peak_in_decibels() {
+        let level = level_for(&[0.5, -0.5, 0.0, 0.0]);
+        assert!((level.rms_db - -9.0309).abs() < 0.001);
+        assert!((level.peak_db - -6.0206).abs() < 0.001);
+        assert_eq!(level_for(&[]).rms_db, -120.0);
+    }
+
+    #[test]
+    fn programmatic_lease_expires_at_its_deadline() {
+        let now = Instant::now();
+        let deadline = now + PROGRAMMATIC_LEASE;
+        assert!(!programmatic_lease_expired(
+            deadline,
+            deadline - Duration::from_millis(1)
+        ));
+        assert!(programmatic_lease_expired(deadline, deadline));
+    }
+
+    #[test]
+    fn programmatic_completion_cache_is_bounded() {
+        let mut completions = VecDeque::new();
+        for id in 0..PROGRAMMATIC_COMPLETION_LIMIT as u64 + 2 {
+            remember_programmatic_completion(
+                &mut completions,
+                ProgrammaticCompletion {
+                    id,
+                    owner_token: format!("owner-{id}"),
+                    outcome: ProgrammaticTerminalOutcome::Cancelled,
+                },
+            );
+        }
+        assert_eq!(completions.len(), PROGRAMMATIC_COMPLETION_LIMIT);
+        assert_eq!(completions.front().map(|completion| completion.id), Some(2));
     }
 
     #[test]

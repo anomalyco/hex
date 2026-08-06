@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest"
-import { create, HexError } from "../src/index.js"
+import { mkdtemp, rm } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import { connect, create, HexError } from "../src/index.js"
 import { helper, options, processIsAlive } from "./support.js"
 
 describe("Promise client", () => {
@@ -67,6 +70,49 @@ describe("Promise client", () => {
     }
   })
 
+  it("owns a running-app dictation handle with live levels and raw completion", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "hex-client-"))
+    const discoveryPath = join(directory, "local-api.json")
+    const host = await create({
+      ...options(),
+      env: {
+        HEX_FAKE_SERVICE_CAPTURE: "1",
+        HEX_FAKE_DISCOVERY_PATH: discoveryPath,
+        HEX_FAKE_FINISH_RETRY: "1",
+      },
+    })
+    try {
+      const hex = await connect({ discoveryPath })
+      expect(await hex.capabilities()).toMatchObject({ serviceCapture: true })
+      const recording = await hex.dictation.start({ source: "tp7" })
+      expect(recording.ownerToken).toMatch(/^hex_capture_/)
+      expect(recording.sampleRate).toBe(48_000)
+      const levelIterator = recording.levels[Symbol.asyncIterator]()
+      const first = await levelIterator.next()
+      expect(first).toEqual({ value: { rmsDb: -24.5, peakDb: -8 }, done: false })
+      const audioIterator = recording.audio[Symbol.asyncIterator]()
+      const audio = await audioIterator.next()
+      expect(audio.done).toBe(false)
+      expect(Array.from(audio.value ?? [])).toEqual([0.25, -0.5])
+      await levelIterator.return?.()
+      await audioIterator.return?.()
+      await expect(recording.finish()).rejects.toMatchObject({
+        code: "request-failed",
+        status: 503,
+      } satisfies Partial<HexError>)
+      expect(await recording.finish()).toEqual({
+        transcript: "running app text",
+        durationMs: 1234,
+      })
+      const cancelled = await hex.dictation.start({ source: "tp7" })
+      await cancelled.cancel()
+      await cancelled.cancel()
+    } finally {
+      await host.close()
+      await rm(directory, { recursive: true, force: true })
+    }
+  })
+
   it("does not let a buffered terminal event overtake cancellation", async () => {
     const host = await create({
       ...options(),
@@ -79,6 +125,26 @@ describe("Promise client", () => {
         onProgress: () => controller.abort("test cancellation"),
       })
       await expect(preparation).rejects.toMatchObject({ code: "cancelled" } satisfies Partial<HexError>)
+    } finally {
+      await host.close()
+    }
+  })
+
+  it("bounds an unconsumed observation stream and cancels it through return", async () => {
+    const host = await create({
+      ...options(),
+      env: { HEX_FAKE_SERVICE_CAPTURE: "1", HEX_FAKE_LEVEL_BURST: "1" },
+    })
+    try {
+      const recording = await host.client.dictation.start({ source: "buffer-test" })
+      const iterator = recording.levels[Symbol.asyncIterator]()
+      await new Promise((resolve) => setTimeout(resolve, 20))
+      expect(await iterator.next()).toEqual({
+        value: { rmsDb: 8, peakDb: 8 },
+        done: false,
+      })
+      await iterator.return?.()
+      await recording.cancel()
     } finally {
       await host.close()
     }

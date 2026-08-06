@@ -574,6 +574,10 @@ impl DictationCapture {
         self.start_from_timeline(occurred_at, PRE_ROLL_DURATION, false)
     }
 
+    pub fn start_programmatic_at(&mut self, occurred_at: CaptureInstant) {
+        self.start_from_timeline(occurred_at, PRE_ROLL_DURATION, true)
+    }
+
     pub fn start_voice_at(&mut self, occurred_at: CaptureInstant) {
         self.start_from_timeline(occurred_at, VOICE_PRE_ROLL_DURATION, true)
     }
@@ -686,7 +690,9 @@ impl DictationCapture {
         let Some(recording) = self.recording.take() else {
             return Finish::Discard;
         };
-        if now.duration_since(recording.started_at) < MINIMUM_HOLD_DURATION {
+        if !recording.intentional
+            && now.duration_since(recording.started_at) < MINIMUM_HOLD_DURATION
+        {
             return Finish::Discard;
         }
 
@@ -718,6 +724,19 @@ mod tests {
             capture.finish(start + Duration::from_millis(100)),
             Finish::Discard
         ));
+    }
+
+    #[test]
+    fn explicit_programmatic_capture_is_not_a_shortcut_tap() {
+        let mut capture = DictationCapture::new(16_000);
+        let start = capture_time();
+        capture.start_programmatic_at(start);
+        capture.ingest(&[0.5; 1_600], start + Duration::from_millis(100));
+
+        let Finish::Transcribe(clip) = capture.finish(start + Duration::from_millis(100)) else {
+            panic!("expected transcription")
+        };
+        assert_eq!(clip.duration_ms(), 100);
     }
 
     #[test]

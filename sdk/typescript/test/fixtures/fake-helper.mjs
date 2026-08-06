@@ -1,4 +1,5 @@
 import http from "node:http"
+import fs from "node:fs"
 
 if (process.env.HEX_FAKE_MODE === "exit-before-ready") process.exit(23)
 if (process.env.HEX_FAKE_MODE === "bad-handshake") {
@@ -17,6 +18,9 @@ if (process.env.HEX_FAKE_MODE === "bad-handshake") {
     languages: ["en"],
     supportsLanguageDetection: false,
   }]
+  const dictations = new Map()
+  const ownerToken = "hex_capture_0000000000000000000000000000000000000000000000000000000000000000"
+  let finishAttempts = 0
   const server = http.createServer((request, response) => {
     if (request.headers.authorization !== `Bearer ${token}`) {
       response.writeHead(401).end()
@@ -33,7 +37,7 @@ if (process.env.HEX_FAKE_MODE === "bad-handshake") {
       response.end(JSON.stringify({
         audioFormats: ["audio/wav"],
         partialTranscripts: false,
-        serviceCapture: false,
+        serviceCapture: process.env.HEX_FAKE_SERVICE_CAPTURE === "1",
       }))
       return
     }
@@ -84,6 +88,66 @@ if (process.env.HEX_FAKE_MODE === "bad-handshake") {
       })
       return
     }
+    if (process.env.HEX_FAKE_SERVICE_CAPTURE === "1" && request.method === "POST" && url.pathname === "/dictations") {
+      const id = 1
+      dictations.set(id, {})
+      response.writeHead(201, { "content-type": "application/json" })
+      response.end(JSON.stringify({ id, ownerToken, sampleRate: 48_000 }))
+      return
+    }
+    if (
+      process.env.HEX_FAKE_SERVICE_CAPTURE === "1"
+      && url.pathname.startsWith("/dictations/1/")
+      && request.headers["x-hex-dictation-token"] !== ownerToken
+    ) {
+      response.writeHead(404, { "content-type": "application/json" })
+      response.end(JSON.stringify({ code: "dictation-not-found" }))
+      return
+    }
+    if (process.env.HEX_FAKE_SERVICE_CAPTURE === "1" && request.method === "GET" && url.pathname === "/dictations/1/levels") {
+      response.writeHead(200, { "content-type": "text/event-stream" })
+      dictations.get(1).levels = response
+      if (process.env.HEX_FAKE_LEVEL_BURST === "1") {
+        for (let index = 0; index < 40; index++) {
+          response.write(`data: {"rmsDb":${index},"peakDb":${index}}\n\n`)
+        }
+      } else {
+        response.write('data: {"rmsDb":-24.5,"peakDb":-8}\n\n')
+      }
+      return
+    }
+    if (process.env.HEX_FAKE_SERVICE_CAPTURE === "1" && request.method === "GET" && url.pathname === "/dictations/1/audio") {
+      response.writeHead(200, { "content-type": "application/octet-stream" })
+      dictations.get(1).audio = response
+      const samples = Buffer.alloc(8)
+      samples.writeFloatLE(0.25, 0)
+      samples.writeFloatLE(-0.5, 4)
+      response.write(samples)
+      return
+    }
+    if (process.env.HEX_FAKE_SERVICE_CAPTURE === "1" && request.method === "POST" && url.pathname === "/dictations/1/finish") {
+      finishAttempts += 1
+      if (process.env.HEX_FAKE_FINISH_RETRY === "1" && finishAttempts === 1) {
+        response.writeHead(503, { "content-type": "application/json" })
+        response.end(JSON.stringify({ code: "service-capture-busy" }))
+        return
+      }
+      dictations.get(1)?.levels?.end()
+      dictations.get(1)?.audio?.end()
+      response.writeHead(200, { "content-type": "application/json" })
+      response.end(JSON.stringify({ transcript: "running app text", durationMs: 1234 }))
+      return
+    }
+    if (process.env.HEX_FAKE_SERVICE_CAPTURE === "1" && request.method === "POST" && url.pathname === "/dictations/1/heartbeat") {
+      response.writeHead(204).end()
+      return
+    }
+    if (process.env.HEX_FAKE_SERVICE_CAPTURE === "1" && request.method === "POST" && url.pathname === "/dictations/1/cancel") {
+      dictations.get(1)?.levels?.end()
+      dictations.get(1)?.audio?.end()
+      response.writeHead(204).end()
+      return
+    }
     response.writeHead(404, { "content-type": "application/json" })
     response.end(JSON.stringify({ code: "not_found" }))
   })
@@ -91,6 +155,14 @@ if (process.env.HEX_FAKE_MODE === "bad-handshake") {
   server.listen(0, "127.0.0.1", () => {
     const address = server.address()
     if (typeof address === "object" && address !== null) {
+      if (process.env.HEX_FAKE_DISCOVERY_PATH) {
+        fs.writeFileSync(process.env.HEX_FAKE_DISCOVERY_PATH, JSON.stringify({
+          port: address.port,
+          token,
+          apiVersion: "1",
+          pid: process.pid,
+        }))
+      }
       process.stdout.write(`${JSON.stringify({
         type: "ready",
         url: `http://127.0.0.1:${address.port}`,

@@ -1,0 +1,31 @@
+name: Release TypeScript SDK
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  id-token: write
+  pull-requests: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sdk
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      - run: npm install --global npm@latest
+      - run: bun install --frozen-lockfile
+      - uses: changesets/action@v1
+        with:
+          cwd: sdk
+          publish: bun run release
+          title: "chore: release TypeScript SDK"

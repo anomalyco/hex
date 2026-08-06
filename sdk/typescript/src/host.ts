@@ -1,9 +1,12 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process"
+import { readFile } from "node:fs/promises"
+import { homedir } from "node:os"
+import { join } from "node:path"
 import { HexError } from "./errors.js"
 import { makeClient } from "./client.js"
 import { resolveCommand } from "./helper.js"
 import { decodeEndpoint } from "./protocol.js"
-import type { CreateOptions, HexHost } from "./types.js"
+import type { ConnectOptions, CreateOptions, HexClient, HexHost } from "./types.js"
 
 const DEFAULT_STARTUP_TIMEOUT_MS = 10_000
 const DEFAULT_SHUTDOWN_TIMEOUT_MS = 5_500
@@ -145,4 +148,30 @@ export const create = async (options: CreateOptions = {}): Promise<HexHost> => {
     }
     throw error
   }
+}
+
+export const connect = async (options: ConnectOptions = {}): Promise<HexClient> => {
+  const discoveryPath = options.discoveryPath
+    ?? join(process.env.HEX_APPLICATION_SUPPORT_DIR ?? join(homedir(), "Library", "Application Support", "voice-control"), "local-api.json")
+  let value: unknown
+  try {
+    value = JSON.parse(await readFile(discoveryPath, "utf8"))
+  } catch (cause) {
+    throw new HexError("startup-failed", "Could not read the running HEX endpoint", { cause })
+  }
+  if (typeof value !== "object" || value === null) {
+    throw new HexError("invalid-handshake", "HEX discovery contained an invalid endpoint")
+  }
+  const input = value as Record<string, unknown>
+  const endpoint = decodeEndpoint(JSON.stringify({
+    type: "ready",
+    url: `http://127.0.0.1:${String(input.port)}`,
+    token: input.token,
+    apiVersion: input.apiVersion,
+    pid: input.pid,
+  }))
+  const lifetime = options.signal ?? new AbortController().signal
+  const client = makeClient(endpoint, options.fetch ?? globalThis.fetch, lifetime)
+  await client.health(options.signal === undefined ? undefined : { signal: options.signal })
+  return client
 }

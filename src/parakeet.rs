@@ -85,6 +85,7 @@ pub enum TranscriptionTarget {
     Paste,
     Send,
     VoiceAction,
+    Service,
 }
 
 struct InferenceJob {
@@ -491,7 +492,11 @@ impl DictationWorker {
                     (transcriber, _) => transcriber.transcribe(&samples),
                 }
                 .map(|text| {
-                    let corrected = prepare_transcript(&text, job.protocol.as_deref());
+                    let corrected = if matches!(job.target, TranscriptionTarget::Service) {
+                        text.clone()
+                    } else {
+                        prepare_transcript(&text, job.protocol.as_deref())
+                    };
                     tracing::debug!(
                         raw_transcript = text,
                         corrected_transcript = corrected,
@@ -778,6 +783,7 @@ fn finish_output(
                         TranscriptionTarget::VoiceAction => paster
                             .paste_standalone(&completed.text)
                             .map_err(|error| error.to_string())?,
+                        TranscriptionTarget::Service => {}
                     }
                     if matches!(
                         target,
@@ -839,6 +845,7 @@ fn record_history(history: &History, target: TranscriptionTarget, completed: &Co
         TranscriptionTarget::Paste => HistoryKind::Dictation,
         TranscriptionTarget::Send => HistoryKind::Send,
         TranscriptionTarget::VoiceAction => HistoryKind::VoiceAction,
+        TranscriptionTarget::Service => return,
     };
     let draft = HistoryDraft {
         kind,

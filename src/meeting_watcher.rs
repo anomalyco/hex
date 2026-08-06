@@ -151,16 +151,21 @@ fn run_with_shell_preview(
         .map(|path| crate::events::EventLog::create(path))
         .transpose()?;
     let (developer_sender, developer_receiver) = mpsc::sync_channel(8);
+    let (recognition_control_sender, recognition_control_receiver) = mpsc::sync_channel(8);
     let local_api = event_log
         .as_ref()
         .map(|events| {
             if crate::DEVELOPER_FEATURES_ENABLED {
-                crate::local_api::LocalApi::start_with_developer_control(
+                crate::local_api::LocalApi::start_with_developer_control_and_dictation(
                     events.clone(),
                     developer_sender.clone(),
+                    recognition_control_sender.clone(),
                 )
             } else {
-                crate::local_api::LocalApi::start(events.clone())
+                crate::local_api::LocalApi::start_with_dictation(
+                    events.clone(),
+                    recognition_control_sender.clone(),
+                )
             }
         })
         .transpose()?;
@@ -176,7 +181,6 @@ fn run_with_shell_preview(
     let (event_sender, event_receiver) = mpsc::sync_channel(32);
     let (command_sender, command_receiver) = mpsc::sync_channel(8);
     let (meeting_request_sender, meeting_request_receiver) = mpsc::sync_channel(8);
-    let (recognition_control_sender, recognition_control_receiver) = mpsc::sync_channel(8);
     let (indicator_sender, indicator_receiver) = dictation_indicator::channel();
     if dictation_preview {
         let preview_sender = indicator_sender.clone();

@@ -90,6 +90,7 @@ enum Command {
     Start {
         at: CaptureInstant,
         voice: bool,
+        programmatic: bool,
         expected_recognition_generation: Option<u64>,
         reply: SyncSender<bool>,
     },
@@ -140,6 +141,7 @@ struct Owner {
 struct PendingCapture {
     at: CaptureInstant,
     voice: bool,
+    programmatic: bool,
     intentional_at: Option<CaptureInstant>,
 }
 
@@ -295,23 +297,30 @@ impl DictationAudio {
     }
 
     pub fn start(&self, at: CaptureInstant) -> Result<()> {
-        let _ = self.start_capture(at, false, None)?;
+        let _ = self.start_capture(at, false, false, None)?;
+        Ok(())
+    }
+
+    pub fn start_programmatic(&self, at: CaptureInstant) -> Result<()> {
+        let _ = self.start_capture(at, false, true, None)?;
         Ok(())
     }
 
     pub fn start_voice(&self, at: CaptureInstant, recognition_generation: u64) -> Result<bool> {
-        self.start_capture(at, true, Some(recognition_generation))
+        self.start_capture(at, true, false, Some(recognition_generation))
     }
 
     fn start_capture(
         &self,
         at: CaptureInstant,
         voice: bool,
+        programmatic: bool,
         expected_recognition_generation: Option<u64>,
     ) -> Result<bool> {
         self.call(|reply| Command::Start {
             at,
             voice,
+            programmatic,
             expected_recognition_generation,
             reply,
         })
@@ -401,6 +410,7 @@ impl Owner {
             Command::Start {
                 at,
                 voice,
+                programmatic,
                 expected_recognition_generation,
                 reply,
             } => {
@@ -420,6 +430,8 @@ impl Owner {
                     self.drain_through(at);
                     if voice {
                         self.capture.start_voice_at(at)
+                    } else if programmatic {
+                        self.capture.start_programmatic_at(at)
                     } else {
                         self.capture.start_at(at)
                     }
@@ -427,6 +439,7 @@ impl Owner {
                     self.pending_capture = Some(PendingCapture {
                         at,
                         voice,
+                        programmatic,
                         intentional_at: None,
                     });
                     self.input.request_open();
@@ -598,6 +611,8 @@ impl Owner {
                 if let Some(pending) = self.pending_capture.take() {
                     if pending.voice {
                         self.capture.start_voice_at(pending.at);
+                    } else if pending.programmatic {
+                        self.capture.start_programmatic_at(pending.at);
                     } else {
                         self.capture.start_at(pending.at);
                     }
@@ -730,6 +745,7 @@ mod tests {
         let mut pending = PendingCapture {
             at: pressed_at,
             voice: false,
+            programmatic: false,
             intentional_at: None,
         };
 
