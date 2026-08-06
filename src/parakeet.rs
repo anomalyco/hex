@@ -23,7 +23,9 @@ use crate::suppression::InputActivity;
 #[cfg(test)]
 use crate::text_replacements::ReplacementSet;
 use crate::transcription::{Transcriber, WarmTranscriber};
-use crate::transcription_models::{TranscriptionSelection, model_path, validate};
+use crate::transcription_models::{
+    TranscriptionModelId, TranscriptionSelection, model_path, validate,
+};
 
 pub struct Parakeet {
     session: Session,
@@ -1100,6 +1102,10 @@ impl Parakeet {
 
     pub(crate) fn matches_selection(&self, selection: &TranscriptionSelection) -> bool {
         self.selection.as_ref() == Some(selection)
+    }
+
+    pub(crate) fn model_id(&self) -> Option<TranscriptionModelId> {
+        self.selection.as_ref().map(|selection| selection.model)
     }
 
     pub fn transcribe(&mut self, samples: &[f32]) -> Result<String> {

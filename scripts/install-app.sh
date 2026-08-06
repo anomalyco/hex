@@ -3,7 +3,7 @@ set -eu
 
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 source_bundle=$("$root/scripts/build-app.sh")
-install_dir="$HOME/Applications"
+install_dir="/Applications"
 installed_bundle="$install_dir/$(basename "$source_bundle")"
 
 stop_bundle() {

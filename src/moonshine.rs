@@ -16,44 +16,44 @@ use sha2::{Digest, Sha256};
 use crate::events::TranscriptPhase;
 
 const HEADER_VERSION: c_int = 20_000;
-const MEDIUM_STREAMING: c_uint = 5;
+const SMALL_STREAMING: c_uint = 4;
 const FORCE_UPDATE: c_uint = 1;
-const MODEL_BASE_URL: &str = "https://download.moonshine.ai/model/medium-streaming-en/quantized";
+const MODEL_BASE_URL: &str = "https://download.moonshine.ai/model/small-streaming-en/quantized";
 const MODEL_COMPONENTS: &[ModelComponent] = &[
     ModelComponent::new(
         "adapter.ort",
-        3_647_712,
-        "16307442b7f4229f2f1511fc51b545cec9616e55872c588f3a297bbc6f4762ea",
+        2_867_424,
+        "d8493e0ac76a198b309a8be6f74b3101e235f773ffe5d6b378278cd7e4177992",
     ),
     ModelComponent::new(
         "cross_kv.ort",
-        11_544_952,
-        "354b9a955caeb768b528f447f0a36ce4b850ca7b4531900165df304d97904fba",
+        5_298_736,
+        "6e57d1361717e00d73336a0c3beafedae784b1e537905ad253dee33db4007466",
     ),
     ModelComponent::new(
         "decoder_kv.ort",
-        146_216_448,
-        "fa67aa87521247f5bf44d3e44d4e4978e58c1f114249c3c6909c882624056715",
+        81_435_904,
+        "d5adfcfaa6e582144791f1568bd0f683852c7bfbb8c79acad97499da05e4ffcf",
     ),
     ModelComponent::new(
         "decoder_kv_with_attention.ort",
-        146_138_304,
-        "40919de95d08690da3a8ff6df14cf55b3220046f3b767b4a4b769e7b32aaf2d2",
+        81_380_336,
+        "2ac12d0b1ab1459ae2572b0d8f0a359a79ac83ad0a5de0b40bdb33c9357048ee",
     ),
     ModelComponent::new(
         "encoder.ort",
-        94_202_872,
-        "a5f11167a62eef61787fe8410453257d6ddb8eba90af461a9604e5f2e93d5322",
+        43_853_224,
+        "3b21d02eff6aa5651524ada4271d37c1d7bba4eb3d256415074f2cfdbaeb526a",
     ),
     ModelComponent::new(
         "frontend.ort",
-        47_467_256,
-        "378fe8a5d7090a1b9ab88bbb1fc95bde010cdd64ec23419350d2d23c675636e9",
+        30_984_200,
+        "e086451043c1c8652a9614e4a4a81d5807221b611584a3cf31f73779d5900003",
     ),
     ModelComponent::new(
         "streaming_config.json",
-        513,
-        "28e83b7a28e91472692a035e0dae3116422ae43aeb2bef5ed822c44ce89b88af",
+        512,
+        "26f02b6afb22d60871a5efd85c3d38e569cc0ddb6c5eb6e93d3260152ae8a47a",
     ),
     ModelComponent::new(
         "tokenizer.bin",
@@ -260,7 +260,7 @@ fn write_verification_receipt(model: &Path) -> Result<()> {
 fn model_path() -> Result<PathBuf> {
     Ok(dirs::cache_dir()
         .ok_or_else(|| eyre!("cache directory is unavailable"))?
-        .join("moonshine_voice/download.moonshine.ai/model/medium-streaming-en/quantized"))
+        .join("moonshine_voice/download.moonshine.ai/model/small-streaming-en/quantized"))
 }
 
 fn verify_component(path: &Path, component: &ModelComponent) -> Result<()> {
@@ -393,7 +393,7 @@ impl Moonshine {
         let moonshine = Self::load_with_config(project_root, 1, config)?;
         tracing::info!(
             moonshine_api_version = HEADER_VERSION,
-            model = "medium-streaming-en-quantized",
+            model = "small-streaming-en-quantized",
             transcription_interval_ms = config.transcription_interval_ms,
             word_timestamps = config.word_timestamps,
             provider = "cpu",
@@ -479,7 +479,7 @@ impl Moonshine {
                 .collect::<Vec<_>>();
             let transcriber = load(
                 path.as_ptr(),
-                MEDIUM_STREAMING,
+                SMALL_STREAMING,
                 options.as_ptr(),
                 options.len() as u64,
                 HEADER_VERSION,
