@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { mkdtemp, rm } from "node:fs/promises"
+import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { connect, create, HexError } from "../src/index.js"
@@ -10,7 +10,7 @@ describe("Promise client", () => {
     const host = await create(options())
     const progress: Array<string> = []
 
-    expect(await host.client.health()).toEqual({ version: "test", apiVersion: "1" })
+    expect(await host.client.health()).toEqual({ version: "test", apiVersion: "2" })
     expect(await host.client.capabilities()).toEqual({
       audioFormats: ["audio/wav"],
       partialTranscripts: false,
@@ -109,6 +109,30 @@ describe("Promise client", () => {
       await cancelled.cancel()
     } finally {
       await host.close()
+      await rm(directory, { recursive: true, force: true })
+    }
+  })
+
+  it("rejects a legacy running app before sending a request", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "hex-client-legacy-"))
+    const discoveryPath = join(directory, "local-api.json")
+    let requested = false
+    try {
+      await writeFile(discoveryPath, JSON.stringify({
+        port: 1,
+        token: "a".repeat(64),
+        apiVersion: "1",
+        pid: process.pid,
+      }))
+      await expect(connect({
+        discoveryPath,
+        fetch: async () => {
+          requested = true
+          throw new Error("legacy app should not receive a request")
+        },
+      })).rejects.toMatchObject({ code: "incompatible-api" } satisfies Partial<HexError>)
+      expect(requested).toBe(false)
+    } finally {
       await rm(directory, { recursive: true, force: true })
     }
   })

@@ -73,7 +73,7 @@ the authenticated API is ready:
   "type": "ready",
   "url": "http://127.0.0.1:49731",
   "token": "hex_a1b2c3...",
-  "apiVersion": "1",
+  "apiVersion": "2",
   "pid": 12345
 }
 ```
@@ -118,7 +118,7 @@ inference may finish internally when it cannot be interrupted safely.
 ```typescript
 export interface Health {
   version: string;
-  apiVersion: "1";
+  apiVersion: "2";
 }
 
 export interface Capabilities {

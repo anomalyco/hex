@@ -29,7 +29,7 @@ if (process.env.HEX_FAKE_MODE === "bad-handshake") {
     const url = new URL(request.url ?? "/", "http://127.0.0.1")
     if (request.method === "GET" && url.pathname === "/health") {
       response.setHeader("content-type", "application/json")
-      response.end(JSON.stringify({ version: "test", apiVersion: "1" }))
+      response.end(JSON.stringify({ version: "test", apiVersion: "2" }))
       return
     }
     if (request.method === "GET" && url.pathname === "/capabilities") {
@@ -159,7 +159,7 @@ if (process.env.HEX_FAKE_MODE === "bad-handshake") {
         fs.writeFileSync(process.env.HEX_FAKE_DISCOVERY_PATH, JSON.stringify({
           port: address.port,
           token,
-          apiVersion: "1",
+          apiVersion: "2",
           pid: process.pid,
         }))
       }
@@ -167,7 +167,7 @@ if (process.env.HEX_FAKE_MODE === "bad-handshake") {
         type: "ready",
         url: `http://127.0.0.1:${address.port}`,
         token,
-        apiVersion: "1",
+        apiVersion: "2",
         pid: process.pid,
       })}\n`)
     }

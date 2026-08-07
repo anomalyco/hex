@@ -21,7 +21,7 @@ describe("Effect client", () => {
     })))
 
     expect(result).toEqual({
-      health: { version: "test", apiVersion: "1" },
+      health: { version: "test", apiVersion: "2" },
       progress: ["downloading", "verifying", "loading"],
       transcript: { transcript: "hello from hex", durationMs: 750 },
     })

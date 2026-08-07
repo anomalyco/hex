@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::events::{EventLog, VoiceEvent, now_ms};
 
-const API_VERSION: &str = "1";
+const API_VERSION: &str = "2";
 const LIVE_PROBE_TIMEOUT: Duration = Duration::from_millis(150);
 const ACCEPT_INTERVAL: Duration = Duration::from_millis(10);
 const CONNECTION_TIMEOUT: Duration = Duration::from_millis(500);
@@ -2222,7 +2222,7 @@ mod tests {
         assert!(first.starts_with("HTTP/1.1 200"));
         assert_eq!(
             serde_json::from_str::<serde_json::Value>(response_body(&first)).unwrap()["apiVersion"],
-            "1"
+            "2"
         );
         let capabilities = request(document.port, Some(&document.token), "/capabilities");
         let capabilities: serde_json::Value =

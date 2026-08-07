@@ -2,6 +2,7 @@ export type HexErrorCode =
   | "startup-failed"
   | "startup-timeout"
   | "invalid-handshake"
+  | "incompatible-api"
   | "service-exited"
   | "cancelled"
   | "request-failed"

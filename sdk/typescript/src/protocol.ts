@@ -14,7 +14,7 @@ export interface EmbeddedEndpoint {
   readonly type: "ready"
   readonly url: string
   readonly token: string
-  readonly apiVersion: "1"
+  readonly apiVersion: "2"
   readonly pid: number
 }
 
@@ -47,9 +47,15 @@ export const decodeEndpoint = (line: string): EmbeddedEndpoint => {
   const url = input && string(input.url)
   const token = input && string(input.token)
   const pid = input && number(input.pid)
+  if (input?.apiVersion !== undefined && input.apiVersion !== "2") {
+    throw new HexError(
+      "incompatible-api",
+      `HEX local API ${String(input?.apiVersion ?? "unknown")} is incompatible with client API 2; install a matching HEX app`,
+    )
+  }
   if (
     input?.type !== "ready"
-    || input.apiVersion !== "1"
+    || input.apiVersion !== "2"
     || url === undefined
     || token === undefined
     || pid === undefined
@@ -67,14 +73,20 @@ export const decodeEndpoint = (line: string): EmbeddedEndpoint => {
   if (parsed.protocol !== "http:" || parsed.hostname !== "127.0.0.1" || parsed.username || parsed.password) {
     throw new HexError("invalid-handshake", "HEX service URL is not an authenticated loopback endpoint")
   }
-  return { type: "ready", url, token, apiVersion: "1", pid }
+  return { type: "ready", url, token, apiVersion: "2", pid }
 }
 
 export const decodeHealth = (value: unknown): Health => {
   const input = record(value)
   const version = input && string(input.version)
-  if (version === undefined || input?.apiVersion !== "1") return invalid("health response")
-  return { version, apiVersion: "1" }
+  if (input?.apiVersion !== "2") {
+    throw new HexError(
+      "incompatible-api",
+      `HEX local API ${String(input?.apiVersion ?? "unknown")} is incompatible with client API 2; install a matching HEX app`,
+    )
+  }
+  if (version === undefined) return invalid("health response")
+  return { version, apiVersion: "2" }
 }
 
 export const decodeCapabilities = (value: unknown): Capabilities => {

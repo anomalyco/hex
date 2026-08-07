@@ -13,7 +13,7 @@ export type ModelId = typeof MODEL_IDS[number]
 
 export interface Health {
   readonly version: string
-  readonly apiVersion: "1"
+  readonly apiVersion: "2"
 }
 
 export interface Capabilities {

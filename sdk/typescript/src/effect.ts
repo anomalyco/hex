@@ -107,6 +107,7 @@ const toHexError = (error: unknown): HexError => {
       return new StartupError(fields)
     case "cancelled":
       return new CancellationError(fields)
+    case "incompatible-api":
     case "invalid-handshake":
     case "invalid-response":
       return new ProtocolError(fields)
