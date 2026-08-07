@@ -284,6 +284,9 @@ When exports or packaging change, install the packed tarball in a clean consumer
 and import both `@kitlangton/hex` and `@kitlangton/hex/effect`. The release
 workflow is `.github/workflows/release-typescript.yml`; npm trusted publishing
 authorizes `anomalyco/hex` and that exact workflow filename for `npm publish`.
+The source repository is private, so npm trusted publishing must not request a
+Sigstore provenance bundle; npm only accepts GitHub provenance from public
+source repositories.
 Use the configured Changesets release command (`cd sdk && bun run release`), not
 direct `npm publish`, after the bootstrap release.
 

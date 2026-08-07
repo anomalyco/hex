@@ -29,8 +29,7 @@
     "directory": "sdk/typescript"
   },
   "publishConfig": {
-    "access": "public",
-    "provenance": true
+    "access": "public"
   },
   "scripts": {
     "build": "rm -rf dist && tsc -p tsconfig.build.json",
