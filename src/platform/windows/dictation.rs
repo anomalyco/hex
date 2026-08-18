@@ -653,13 +653,16 @@ fn process_dictation_job(
     modes: &RwLock<Vec<crate::windows_settings::WindowsMode>>,
 ) -> JobResult {
     let started = Instant::now();
+    // The context read starts now so the UIA walk overlaps inference.
+    let pending_context = crate::windows_context::begin_capture();
     let inference_started = Instant::now();
     let transcription = transcriber
         .transcribe(&job.samples)
         .map(|text| text.trim().to_string())
         .map_err(|error| format!("{error:#}"));
     let inference_ms = inference_started.elapsed().as_millis() as u64;
-    let application = crate::windows_input::foreground_process_stem();
+    let context = pending_context.finish();
+    let application = context.application.clone();
     let result = transcription.and_then(|raw_text| {
         if raw_text.is_empty() {
             return Err("transcription was empty".into());
@@ -669,10 +672,14 @@ fn process_dictation_job(
             .unwrap_or_else(|error| error.into_inner())
             .replace(&raw_text);
         // Mode corrections run after the global replacements, scoped to the
-        // application the text is about to land in.
+        // context the text is about to land in.
         let text = {
             let modes = modes.read().unwrap_or_else(|error| error.into_inner());
-            match crate::windows_settings::mode_for_application(&modes, application.as_deref()) {
+            match crate::windows_settings::mode_for_context(
+                &modes,
+                context.application.as_deref(),
+                context.browser_host.as_deref(),
+            ) {
                 Some(mode) if !mode.corrections.is_empty() => {
                     crate::text_replacements::ReplacementSet::new(&mode.corrections).replace(&text)
                 }
@@ -726,11 +733,13 @@ fn process_voice_action_job(
     voice_action_model: &RwLock<Option<crate::opencode::Model>>,
 ) -> JobResult {
     let started = Instant::now();
+    // The context read starts now so the UIA walk overlaps inference.
+    let pending_context = crate::windows_context::begin_capture();
     let transcription = transcriber
         .transcribe(&job.samples)
         .map(|text| text.trim().to_string())
         .map_err(|error| format!("{error:#}"));
-    let application = crate::windows_input::foreground_process_stem();
+    let context = pending_context.finish();
     let result = transcription.and_then(|instruction| {
         if instruction.is_empty() {
             return Err("the voice instruction was empty".into());
@@ -746,7 +755,8 @@ fn process_voice_action_job(
             .clone();
         let reply = crate::windows_voice_action::fulfil(
             &instruction,
-            application.as_deref(),
+            context.application.as_deref(),
+            context.browser_host.as_deref(),
             selected.as_deref(),
             model.as_ref(),
         )

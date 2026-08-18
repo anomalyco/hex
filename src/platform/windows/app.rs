@@ -158,6 +158,7 @@ struct ReplacementInputs {
 struct ModeInputs {
     name: Entity<TextInput>,
     applications: Entity<TextInput>,
+    websites: Entity<TextInput>,
     corrections: Vec<ReplacementInputs>,
     _subscriptions: Vec<Subscription>,
 }
@@ -1600,8 +1601,13 @@ impl WindowsApp {
                 &mode.applications.join(", "),
             )
         });
+        let websites =
+            cx.new(|cx| TextInput::new(cx, "e.g. x.com, github.com", &mode.websites.join(", ")));
         let name_changed = cx.subscribe(&name, |this, _, _: &TextChanged, cx| this.sync_modes(cx));
         let applications_changed = cx.subscribe(&applications, |this, _, _: &TextChanged, cx| {
+            this.sync_modes(cx)
+        });
+        let websites_changed = cx.subscribe(&websites, |this, _, _: &TextChanged, cx| {
             this.sync_modes(cx)
         });
         let corrections = mode
@@ -1612,8 +1618,9 @@ impl WindowsApp {
         ModeInputs {
             name,
             applications,
+            websites,
             corrections,
-            _subscriptions: vec![name_changed, applications_changed],
+            _subscriptions: vec![name_changed, applications_changed, websites_changed],
         }
     }
 
@@ -1649,6 +1656,14 @@ impl WindowsApp {
                     .split(',')
                     .map(|application| application.trim().to_string())
                     .filter(|application| !application.is_empty())
+                    .collect(),
+                websites: inputs
+                    .websites
+                    .read(cx)
+                    .text()
+                    .split(',')
+                    .map(|website| website.trim().to_string())
+                    .filter(|website| !website.is_empty())
                     .collect(),
                 corrections: inputs
                     .corrections
@@ -2811,7 +2826,11 @@ impl WindowsApp {
                             .child(div().text_size(px(11.0)).text_color(rgb(FAINT)).child(tr(
                                 "Applies when the focused application contains any of these names",
                             )))
-                            .child(inputs.applications.clone()),
+                            .child(inputs.applications.clone())
+                            .child(div().text_size(px(11.0)).text_color(rgb(FAINT)).child(tr(
+                                "Or when the browser is on one of these sites; sites win over applications",
+                            )))
+                            .child(inputs.websites.clone()),
                     )
                     .children(correction_rows)
                     .child(

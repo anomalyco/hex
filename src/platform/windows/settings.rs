@@ -43,6 +43,9 @@ pub struct WindowsMode {
     /// Case-insensitive substrings matched against the focused process's
     /// executable name (e.g. "chrome", "code", "slack").
     pub applications: Vec<String>,
+    /// Exact hosts matched against the focused browser page (e.g.
+    /// "x.com", "github.com"); case-insensitive, trailing dots ignored.
+    pub websites: Vec<String>,
     pub corrections: Vec<crate::text_replacements::TextReplacement>,
 }
 
@@ -54,13 +57,31 @@ impl WindowsMode {
             !candidate.is_empty() && application.contains(&candidate)
         })
     }
+
+    pub fn matches_website(&self, host: &str) -> bool {
+        let host = crate::windows_context::normalize_host(host);
+        self.websites.iter().any(|candidate| {
+            // Entries are stored as typed; pasted URLs, ports, and IDN
+            // text reduce to their host here.
+            crate::windows_context::canonical_host(candidate)
+                .is_some_and(|candidate| candidate == host)
+        })
+    }
 }
 
-/// The first mode whose application rules match the focused application.
-pub fn mode_for_application<'a>(
+/// The first mode matching the focused context. A website rule is more
+/// specific than an application rule, so browser-host matches win, like
+/// the macOS selector ordering.
+pub fn mode_for_context<'a>(
     modes: &'a [WindowsMode],
     application: Option<&str>,
+    browser_host: Option<&str>,
 ) -> Option<&'a WindowsMode> {
+    if let Some(host) = browser_host
+        && let Some(mode) = modes.iter().find(|mode| mode.matches_website(host))
+    {
+        return Some(mode);
+    }
     let application = application?;
     modes
         .iter()
@@ -393,30 +414,63 @@ mod tests {
             WindowsMode {
                 name: "Code".into(),
                 applications: vec!["Code".into(), "rustrover".into()],
-                corrections: Vec::new(),
+                ..WindowsMode::default()
             },
             WindowsMode {
                 name: "Chat".into(),
                 applications: vec!["slack".into()],
-                corrections: Vec::new(),
+                ..WindowsMode::default()
             },
         ];
 
         assert_eq!(
-            mode_for_application(&modes, Some("code")).map(|mode| mode.name.as_str()),
+            mode_for_context(&modes, Some("code"), None).map(|mode| mode.name.as_str()),
             Some("Code")
         );
         assert_eq!(
-            mode_for_application(&modes, Some("slack")).map(|mode| mode.name.as_str()),
+            mode_for_context(&modes, Some("slack"), None).map(|mode| mode.name.as_str()),
             Some("Chat")
         );
         // Substring semantics: "vscode" contains "code".
         assert_eq!(
-            mode_for_application(&modes, Some("vscode")).map(|mode| mode.name.as_str()),
+            mode_for_context(&modes, Some("vscode"), None).map(|mode| mode.name.as_str()),
             Some("Code")
         );
-        assert_eq!(mode_for_application(&modes, Some("notepad")), None);
-        assert_eq!(mode_for_application(&modes, None), None);
+        assert_eq!(mode_for_context(&modes, Some("notepad"), None), None);
+        assert_eq!(mode_for_context(&modes, None, None), None);
+    }
+
+    #[test]
+    fn website_rules_match_exact_hosts_and_beat_application_rules() {
+        let modes = vec![
+            WindowsMode {
+                name: "Browser".into(),
+                applications: vec!["chrome".into()],
+                ..WindowsMode::default()
+            },
+            WindowsMode {
+                name: "X".into(),
+                websites: vec!["X.com".into()],
+                ..WindowsMode::default()
+            },
+        ];
+
+        // The exact-host website rule wins over the earlier application
+        // rule when the page host matches.
+        assert_eq!(
+            mode_for_context(&modes, Some("chrome"), Some("x.com.")).map(|mode| mode.name.as_str()),
+            Some("X")
+        );
+        // Subdomains are different hosts.
+        assert_eq!(
+            mode_for_context(&modes, Some("chrome"), Some("news.x.com"))
+                .map(|mode| mode.name.as_str()),
+            Some("Browser")
+        );
+        assert_eq!(
+            mode_for_context(&modes, Some("chrome"), None).map(|mode| mode.name.as_str()),
+            Some("Browser")
+        );
     }
 
     #[test]
@@ -424,9 +478,13 @@ mod tests {
         let modes = vec![WindowsMode {
             name: "Broken".into(),
             applications: vec!["  ".into(), String::new()],
-            corrections: Vec::new(),
+            websites: vec![" ".into()],
+            ..WindowsMode::default()
         }];
-        assert_eq!(mode_for_application(&modes, Some("anything")), None);
+        assert_eq!(
+            mode_for_context(&modes, Some("anything"), Some("x.com")),
+            None
+        );
     }
 
     #[test]

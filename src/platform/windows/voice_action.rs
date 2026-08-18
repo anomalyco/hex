@@ -16,11 +16,12 @@ pub const GENERATION_DEADLINE: Duration = Duration::from_secs(45);
 pub fn fulfil(
     instruction: &str,
     application: Option<&str>,
+    browser_host: Option<&str>,
     selected_text: Option<&str>,
     model: Option<&Model>,
 ) -> Result<String> {
     let prompt =
-        crate::opencode::voice_action_prompt(instruction, application, None, selected_text);
+        crate::opencode::voice_action_prompt(instruction, application, browser_host, selected_text);
     let reply = crate::opencode::generate(&prompt, model, GENERATION_DEADLINE)?;
     if reply.trim().is_empty() {
         return Err(eyre!("OpenCode returned empty text"));

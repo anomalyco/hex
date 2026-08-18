@@ -169,6 +169,7 @@ const TRANSLATIONS: &[(&str, [&str; 5])] = &[
     ("Models could not be loaded: {}", ["Nie udało się wczytać modeli: {}", "无法加载模型：{}", "モデルを読み込めませんでした: {}", "Modelle konnten nicht geladen werden: {}", "No se pudieron cargar los modelos: {}"]),
     ("Default", ["Domyślny", "默认", "既定", "Standard", "Predeterminado"]),
     ("Last dictation failed: {}", ["Ostatnie dyktowanie nie powiodło się: {}", "上次听写失败：{}", "前回の音声入力に失敗しました: {}", "Letztes Diktat fehlgeschlagen: {}", "El último dictado falló: {}"]),
+    ("Or when the browser is on one of these sites; sites win over applications", ["Albo gdy przeglądarka jest na jednej z tych stron; strony wygrywają z aplikacjami", "或当浏览器位于这些网站之一时；网站优先于应用", "またはブラウザーがこれらのサイトにあるとき。サイトがアプリより優先されます", "Oder wenn der Browser auf einer dieser Seiten ist; Seiten schlagen Anwendungen", "O cuando el navegador está en uno de estos sitios; los sitios ganan a las aplicaciones"]),
     ("While dictating", ["Podczas dyktowania", "听写时", "音声入力中", "Während des Diktats", "Mientras dictas"]),
     ("Release microphone while idle", ["Zwalniaj mikrofon w bezczynności", "空闲时释放麦克风", "待機中はマイクを解放", "Mikrofon im Leerlauf freigeben", "Liberar el micrófono en reposo"]),
     ("Adds first-capture latency and disables audio pre-roll", ["Dodaje opóźnienie pierwszego nagrania i wyłącza pre-roll audio", "会增加首次采集延迟并停用音频预录", "初回キャプチャに遅延が生じ、音声プリロールが無効になります", "Erhöht die Latenz der ersten Aufnahme und deaktiviert den Audio-Pre-Roll", "Añade latencia a la primera captura y desactiva el pre-roll de audio"]),

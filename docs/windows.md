@@ -108,7 +108,7 @@ current-user startup registry, UI Automation, and Windows capture APIs.
 | Release microphone while idle | Implemented; mutually exclusive with audio pre-roll, as documented in Settings |
 | While-dictating audio control (mute other apps or pause media) | Implemented via WASAPI session volumes and GSMTC |
 | Background update checks | Implemented; checks GitHub releases and links to the download — no self-updating installer yet |
-| Web-domain mode rules and application/browser context | Missing; requires a Windows UI Automation adapter |
+| Web-domain mode rules and browser context via UI Automation | Implemented; the page URL comes from the browser's UIA document element, bounded so a hung provider degrades to application-only context |
 | Opt-in voice Commands | Missing; blocked on a Windows streaming command model |
 | Packaged onboarding, signed installer, and automatic self-update | Missing |
 | Developer Meetings, live drafts, and meeting paste | Missing |
@@ -125,7 +125,6 @@ The Windows listener preserves physical press/release timestamps, keeps audio
 capture off the transcription and paste worker, and restores the previous
 clipboard only when no newer clipboard change supersedes it. The optimized
 MSVC release build is verified with GPUI's DirectX shaders. The next parity
-slices are the UI Automation context adapter (web-domain mode rules and richer
-Voice Action context), packaging/updating, the local transcription API host,
-and the developer-only Meetings surface; opt-in Commands wait on a Windows
-streaming command model.
+slices are packaging/updating, the local transcription API host, and the
+developer-only Meetings surface; opt-in Commands wait on a Windows streaming
+command model.

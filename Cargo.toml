@@ -87,5 +87,5 @@ windows-sys = { version = "0.61.2", features = [
   "Win32_UI_Input_KeyboardAndMouse",
   "Win32_UI_WindowsAndMessaging",
 ] }
-windows = { version = "0.62.2", features = ["Media_Control", "Foundation", "Foundation_Collections", "Win32_Media_Audio", "Win32_System_Com"] }
+windows = { version = "0.62.2", features = ["Media_Control", "Foundation", "Foundation_Collections", "Win32_Media_Audio", "Win32_System_Com", "Win32_System_Ole", "Win32_System_Variant", "Win32_UI_Accessibility"] }
 windows-future = "0.3.2"

@@ -38,10 +38,10 @@ pub(crate) use platform::macos::{
 };
 #[cfg(target_os = "windows")]
 pub(crate) use platform::windows::{
-    app as windows_app, audio_control as windows_audio_control, dictation as windows_dictation,
-    i18n as windows_i18n, indicator as windows_indicator, input as windows_input,
-    login_item as windows_login_item, paste as windows_paste, run as windows,
-    settings as windows_settings, ui as windows_ui, updater as windows_updater,
+    app as windows_app, audio_control as windows_audio_control, context as windows_context,
+    dictation as windows_dictation, i18n as windows_i18n, indicator as windows_indicator,
+    input as windows_input, login_item as windows_login_item, paste as windows_paste,
+    run as windows, settings as windows_settings, ui as windows_ui, updater as windows_updater,
     voice_action as windows_voice_action,
 };
 #[cfg(any(target_os = "linux", target_os = "windows"))]
