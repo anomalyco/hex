@@ -102,12 +102,15 @@ current-user startup registry, UI Automation, and Windows capture APIs.
 | History retention, list, detail, copy, delete, and clear | Implemented; text search still needs the Windows field wiring |
 | Text replacements | Implemented in the Windows Modes pane using the shared macOS replacement engine |
 | Resident tray and Launch at login | Implemented |
-| Full mode profiles, corrections, OpenCode rewrite, and TypeScript transformations | Missing |
-| Voice Action and selected-text context | Missing; requires a Windows UI Automation adapter |
-| Opt-in voice Commands and application/browser context | Missing |
-| Release-microphone-while-idle and bounded in-process stream recovery | Missing |
-| Output muting, media pause/resume, and idle-sleep ownership | Missing |
-| Packaged onboarding, signed installer, and automatic updates | Missing |
+| Application modes with per-mode corrections | Implemented; modes match by application name — web-domain rules, OpenCode rewrite, and TypeScript transformations remain |
+| Voice Action with selected-text capture and in-app OpenCode model selection | Implemented; selection is read through a clipboard round trip rather than UI Automation |
+| Recognition hints for Whisper-family models | Implemented |
+| Release microphone while idle | Implemented; mutually exclusive with audio pre-roll, as documented in Settings |
+| While-dictating audio control (mute other apps or pause media) | Implemented via WASAPI session volumes and GSMTC |
+| Background update checks | Implemented; checks GitHub releases and links to the download — no self-updating installer yet |
+| Web-domain mode rules and application/browser context | Missing; requires a Windows UI Automation adapter |
+| Opt-in voice Commands | Missing; blocked on a Windows streaming command model |
+| Packaged onboarding, signed installer, and automatic self-update | Missing |
 | Developer Meetings, live drafts, and meeting paste | Missing |
 | Local transcription API and public TypeScript SDK host lifecycle on Windows | Missing |
 
@@ -122,6 +125,7 @@ The Windows listener preserves physical press/release timestamps, keeps audio
 capture off the transcription and paste worker, and restores the previous
 clipboard only when no newer clipboard change supersedes it. The optimized
 MSVC release build is verified with GPUI's DirectX shaders. The next parity
-slices are full Modes processing, Windows foreground/selected-text context,
-Voice Action, and opt-in Commands, followed by packaging/updating and the
-developer-only Meetings surface.
+slices are the UI Automation context adapter (web-domain mode rules and richer
+Voice Action context), packaging/updating, the local transcription API host,
+and the developer-only Meetings surface; opt-in Commands wait on a Windows
+streaming command model.
