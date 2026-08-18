@@ -138,6 +138,7 @@ struct WindowsApp {
 enum WindowsPane {
     Settings,
     Modes,
+    VoiceAction,
     History,
 }
 
@@ -1818,6 +1819,7 @@ impl WindowsApp {
     fn render_navigation(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let settings_selected = self.pane == WindowsPane::Settings;
         let modes_selected = self.pane == WindowsPane::Modes;
+        let voice_action_selected = self.pane == WindowsPane::VoiceAction;
         let history_selected = self.pane == WindowsPane::History;
         let update = match self.host.updater.state() {
             crate::windows_updater::UpdateCheck::Available { version, url } => Some((version, url)),
@@ -1845,6 +1847,15 @@ impl WindowsApp {
                     .child(tr("Modes"))
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.pane = WindowsPane::Modes;
+                        cx.notify();
+                    })),
+            )
+            .child(
+                navigation_item(NavigationIcon::VoiceAction, voice_action_selected)
+                    .id("windows-nav-voice-action")
+                    .child(tr("Voice Action"))
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.pane = WindowsPane::VoiceAction;
                         cx.notify();
                     })),
             )
@@ -2034,39 +2045,6 @@ impl WindowsApp {
                     .text_color(rgb(TEXT_SOFT))
                     .child(volume_label),
             );
-        let voice_action_enabled = self.host.settings.voice_action_hotkey.is_some();
-        let voice_action_control = div()
-            .flex()
-            .items_center()
-            .gap_3()
-            .when(
-                voice_action_enabled && !crate::windows_voice_action::opencode_installed(),
-                |control| {
-                    control.child(
-                        div()
-                            .text_size(px(11.0))
-                            .text_color(rgb(crate::windows_ui::CRITICAL))
-                            .child(tr("OpenCode not found")),
-                    )
-                },
-            )
-            .when_some(
-                self.host
-                    .settings
-                    .voice_action_hotkey
-                    .as_ref()
-                    .map(crate::windows_settings::WindowsHotkey::keycaps),
-                |control, keycaps| control.child(hotkey_keycaps(keycaps, 1.0)),
-            )
-            .when(!voice_action_enabled, |control| {
-                control.child(
-                    div()
-                        .text_size(px(11.0))
-                        .text_color(rgb(FAINT))
-                        .child(tr("Disabled")),
-                )
-            })
-            .child(toggle(if voice_action_enabled { 1.0 } else { 0.0 }));
         let release_microphone_while_idle = self.host.settings.release_microphone_while_idle;
         let while_dictating = self.host.settings.while_dictating;
         let while_dictating_control = segmented_control().children(
@@ -2432,20 +2410,6 @@ impl WindowsApp {
                                             .on_click(cx.listener(move |this, _, _, cx| {
                                                 this.host.set_paste_last_enabled(
                                                     !paste_last_enabled,
-                                                );
-                                                cx.notify();
-                                            })),
-                                        )
-                                        .child(
-                                            settings_row(
-                                                "Voice action",
-                                                "Hold to speak an instruction; OpenCode's reply pastes at the cursor",
-                                                voice_action_control,
-                                            )
-                                            .id("windows-voice-action")
-                                            .on_click(cx.listener(move |this, _, _, cx| {
-                                                this.host.set_voice_action_enabled(
-                                                    !voice_action_enabled,
                                                 );
                                                 cx.notify();
                                             })),
@@ -2835,6 +2799,106 @@ impl WindowsApp {
                                                 error,
                                             ))
                                         },
+                                    ),
+                            ),
+                        ),
+                ),
+            )
+            .into_any_element()
+    }
+
+    /// The Voice Action pane, mirroring macOS: an explainer, the capture
+    /// shortcut, and the OpenCode processing status.
+    fn render_voice_action(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        let enabled = self.host.settings.voice_action_hotkey.is_some();
+        let opencode_installed = crate::windows_voice_action::opencode_installed();
+        let shortcut_control = div()
+            .flex()
+            .items_center()
+            .gap_3()
+            .when_some(
+                self.host
+                    .settings
+                    .voice_action_hotkey
+                    .as_ref()
+                    .map(crate::windows_settings::WindowsHotkey::keycaps),
+                |control, keycaps| control.child(hotkey_keycaps(keycaps, 1.0)),
+            )
+            .when(!enabled, |control| {
+                control.child(
+                    div()
+                        .text_size(px(11.0))
+                        .text_color(rgb(FAINT))
+                        .child(tr("Disabled")),
+                )
+            })
+            .child(toggle(if enabled { 1.0 } else { 0.0 }));
+        let opencode_status = div()
+            .text_size(px(12.0))
+            .text_color(if opencode_installed {
+                rgb(crate::windows_ui::SUCCESS)
+            } else {
+                rgb(crate::windows_ui::CRITICAL)
+            })
+            .child(if opencode_installed {
+                tr("Installed")
+            } else {
+                tr("OpenCode not found")
+            });
+
+        div()
+            .size_full()
+            .flex()
+            .flex_col()
+            .child(pane_header_with_action("Voice Action", None))
+            .child(
+                pane_body().child(
+                    div()
+                        .id("windows-voice-action-scroll")
+                        .size_full()
+                        .overflow_y_scroll()
+                        .px_8()
+                        .pt_1()
+                        .pb_7()
+                        .child(
+                            div().w_full().flex().justify_center().child(
+                                pane_content()
+                                    .child(
+                                        div()
+                                            .pt(px(20.0))
+                                            .text_size(px(12.0))
+                                            .line_height(px(19.0))
+                                            .text_color(rgb(MUTED))
+                                            .child(tr(
+                                                "Hold the shortcut and speak an instruction. HEX sends it, along with any text you have selected, to OpenCode and pastes the reply at your cursor. If the model returns nothing, nothing is pasted.",
+                                            )),
+                                    )
+                                    .child(settings_section_label("Capture"))
+                                    .child(
+                                        settings_panel().child(
+                                            settings_row(
+                                                "Shortcut",
+                                                "Hold to speak; selected text is included automatically",
+                                                shortcut_control,
+                                            )
+                                            .border_b_0()
+                                            .id("windows-voice-action-shortcut")
+                                            .on_click(cx.listener(move |this, _, _, cx| {
+                                                this.host.set_voice_action_enabled(!enabled);
+                                                cx.notify();
+                                            })),
+                                        ),
+                                    )
+                                    .child(settings_section_label("Processing"))
+                                    .child(
+                                        settings_panel().child(
+                                            settings_row(
+                                                "OpenCode",
+                                                "Voice actions run through your local OpenCode install",
+                                                opencode_status,
+                                            )
+                                            .border_b_0(),
+                                        ),
                                     ),
                             ),
                         ),
@@ -3960,6 +4024,7 @@ impl Render for WindowsApp {
         let content = match self.pane {
             WindowsPane::Settings => self.render_settings(&snapshot, cx),
             WindowsPane::Modes => self.render_modes(cx),
+            WindowsPane::VoiceAction => self.render_voice_action(cx),
             WindowsPane::History => self.render_history(cx),
         };
         let model_picker =
