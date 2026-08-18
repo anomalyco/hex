@@ -218,6 +218,9 @@ pub fn run_with_transcriber(
                     start_pending = true;
                     pending_voice = true;
                     input.request_open();
+                    if let Some(suppressor) = &audio_suppressor {
+                        suppressor.suppress();
+                    }
                     if let Some(indicator) = &indicator {
                         indicator.send(crate::windows_indicator::WindowsIndicatorEvent::Recording);
                     }
@@ -229,6 +232,9 @@ pub fn run_with_transcriber(
                     recording = true;
                     recording_voice = true;
                     recording_feedback_started = false;
+                    if let Some(suppressor) = &audio_suppressor {
+                        suppressor.suppress();
+                    }
                     if let Some(indicator) = &indicator {
                         indicator.send(crate::windows_indicator::WindowsIndicatorEvent::Recording);
                     }
@@ -294,6 +300,16 @@ pub fn run_with_transcriber(
                     )?;
                 }
                 HotkeyAction::VoiceFinish if recording && recording_voice => {
+                    if let Some(suppressor) = &audio_suppressor {
+                        suppressor.restore();
+                    }
+                    if !recording_feedback_started && capture.become_intentional(occurred_at) {
+                        crate::feedback::play(crate::feedback::Tone::DictationStart);
+                        recording_feedback_started = true;
+                    }
+                    if recording_feedback_started {
+                        crate::feedback::play(crate::feedback::Tone::DictationStop);
+                    }
                     recording = false;
                     recording_voice = false;
                     recording_feedback_started = false;
@@ -327,6 +343,12 @@ pub fn run_with_transcriber(
                     }
                 }
                 HotkeyAction::VoiceCancel if recording && recording_voice => {
+                    if let Some(suppressor) = &audio_suppressor {
+                        suppressor.restore();
+                    }
+                    if recording_feedback_started {
+                        crate::feedback::play(crate::feedback::Tone::Cancel);
+                    }
                     recording = false;
                     recording_voice = false;
                     recording_feedback_started = false;
