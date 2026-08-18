@@ -42,10 +42,8 @@ const CAPTION_BUTTON_WIDTH: f32 = 46.0;
 // Fluent dark control fills live in the shared token set; re-exported so
 // Windows-only code keeps its historical paths.
 pub(crate) use crate::desktop_ui::{
-    CONTROL_FILL, CONTROL_FILL_PRESSED, CONTROL_STROKE, DIALOG_STROKE,
+    CONTROL_FILL, CONTROL_FILL_PRESSED, CONTROL_STROKE, CRITICAL, DIALOG_STROKE, SUCCESS,
 };
-pub(crate) const SUCCESS: u32 = 0x6ccb5f;
-pub(crate) const CRITICAL: u32 = 0xff99a4;
 const CLOSE_HOVER: u32 = 0xc42b1c;
 const CLOSE_PRESSED: u32 = 0xb2271a;
 

@@ -26,8 +26,9 @@ use crate::desktop_transcription_picker::{
     transcription_selection_is_active,
 };
 use crate::desktop_ui::{
-    LINE, MUTED, NavigationIcon, SIDEBAR_WIDTH, SURFACE, TEXT_SOFT, compact_button,
-    disclosure_button, hotkey_keycaps, navigation_item, pane_header, settings_panel, settings_row,
+    FAINT, LINE, MUTED, NavigationIcon, SIDEBAR_WIDTH, SUCCESS, SURFACE, TEXT, TEXT_SOFT,
+    compact_button, disclosure_button, error_message, header_button, hotkey_keycaps,
+    navigation_item, pane_content, pane_header, settings_panel, settings_row,
     settings_section_label, sidebar_frame, toggle, window_frame,
 };
 use crate::events::EventReader;
@@ -961,6 +962,35 @@ impl LinuxApp {
             crate::transcription_models::definition(transcription.selection.model).name
         );
         let transcription_language = transcription.selection.language.clone();
+        let listener_label = snapshot
+            .listener
+            .as_ref()
+            .map_or("Ready", |listener| listener.status.as_str())
+            .to_string();
+        let device = snapshot
+            .activity
+            .device
+            .clone()
+            .unwrap_or_else(|| "Automatic microphone".into());
+        let status_hint = format!(
+            "{device} · Hold {} to dictate",
+            snapshot.dictation_shortcut_label
+        );
+        let listener_action = header_button(if running {
+            "Stop listening"
+        } else {
+            "Start listening"
+        })
+        .id("linux-listener-toggle")
+        .on_click(cx.listener(move |this, _, _, cx| {
+            let action = if running {
+                DesktopAction::StopListening
+            } else {
+                DesktopAction::StartListening
+            };
+            let _ = this.host.dispatch(action);
+            cx.notify();
+        }));
 
         div()
             .size_full()
@@ -977,11 +1007,63 @@ impl LinuxApp {
                     .pb_7()
                     .child(
                         div().w_full().flex().justify_center().child(
-                            div()
-                                .w_full()
-                                .max_w(px(788.0))
+                            pane_content()
                                 .relative()
-                                .child(settings_section_label("DICTATION"))
+                                .child(
+                                    div().pt(px(20.0)).child(
+                                        settings_panel().child(
+                                            div()
+                                                .w_full()
+                                                .min_h(px(72.0))
+                                                .px_4()
+                                                .py_3()
+                                                .flex()
+                                                .items_center()
+                                                .justify_between()
+                                                .gap_4()
+                                                .child(
+                                                    div()
+                                                        .min_w(px(0.0))
+                                                        .flex()
+                                                        .items_center()
+                                                        .gap_3()
+                                                        .child(
+                                                            div()
+                                                                .size(px(10.0))
+                                                                .flex_none()
+                                                                .rounded_full()
+                                                                .bg(if running {
+                                                                    rgb(SUCCESS)
+                                                                } else {
+                                                                    rgb(FAINT)
+                                                                }),
+                                                        )
+                                                        .child(
+                                                            div()
+                                                                .min_w(px(0.0))
+                                                                .flex()
+                                                                .flex_col()
+                                                                .gap(px(2.0))
+                                                                .child(
+                                                                    div()
+                                                                        .text_size(px(14.0))
+                                                                        .text_color(rgb(TEXT))
+                                                                        .child(listener_label),
+                                                                )
+                                                                .child(
+                                                                    div()
+                                                                        .text_size(px(12.0))
+                                                                        .text_color(rgb(MUTED))
+                                                                        .truncate()
+                                                                        .child(status_hint),
+                                                                ),
+                                                        ),
+                                                )
+                                                .child(listener_action),
+                                        ),
+                                    ),
+                                )
+                                .child(settings_section_label("Dictation"))
                                 .child(
                                     settings_panel()
                                         .child(settings_row(
@@ -1025,7 +1107,7 @@ impl LinuxApp {
                                             ),
                                         ),
                                 )
-                                .child(settings_section_label("BEHAVIOR"))
+                                .child(settings_section_label("Behavior"))
                                 .child(
                                     settings_panel().child(
                                         settings_row(
@@ -1054,7 +1136,7 @@ impl LinuxApp {
                                         ),
                                     ),
                                 )
-                                .child(settings_section_label("APPLICATION"))
+                                .child(settings_section_label("Application"))
                                 .child(
                                     settings_panel()
                                         .child(settings_row(
@@ -1090,7 +1172,30 @@ impl LinuxApp {
                                                     })),
                                             ))
                                         }),
-                                ),
+                                )
+                                .when_some(snapshot.operation_error.clone(), |content, error| {
+                                    content.child(settings_section_label("Problem")).child(
+                                        settings_panel()
+                                            .child(error_message(
+                                                "HEX could not apply this change.",
+                                                error,
+                                            ))
+                                            .child(
+                                                compact_button("Dismiss")
+                                                    .id("dismiss-linux-error")
+                                                    .mx_4()
+                                                    .mb_4()
+                                                    .border_1()
+                                                    .border_color(rgb(LINE))
+                                                    .on_click(cx.listener(|this, _, _, cx| {
+                                                        let _ = this
+                                                            .host
+                                                            .dispatch(DesktopAction::ClearError);
+                                                        cx.notify();
+                                                    })),
+                                            ),
+                                    )
+                                }),
                         ),
                     ),
             )
