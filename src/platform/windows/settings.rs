@@ -28,7 +28,41 @@ pub struct WindowsSettings {
     pub indicator_position: IndicatorPosition,
     pub history_retention: crate::history::HistoryRetention,
     pub text_replacements: Vec<crate::text_replacements::TextReplacement>,
+    pub modes: Vec<WindowsMode>,
     pub transcription: TranscriptionSelection,
+}
+
+/// A per-application dictation mode: when the focused application matches,
+/// the mode's corrections run after the global text replacements.
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(default)]
+pub struct WindowsMode {
+    pub name: String,
+    /// Case-insensitive substrings matched against the focused process's
+    /// executable name (e.g. "chrome", "code", "slack").
+    pub applications: Vec<String>,
+    pub corrections: Vec<crate::text_replacements::TextReplacement>,
+}
+
+impl WindowsMode {
+    pub fn matches_application(&self, application: &str) -> bool {
+        let application = application.to_lowercase();
+        self.applications.iter().any(|candidate| {
+            let candidate = candidate.trim().to_lowercase();
+            !candidate.is_empty() && application.contains(&candidate)
+        })
+    }
+}
+
+/// The first mode whose application rules match the focused application.
+pub fn mode_for_application<'a>(
+    modes: &'a [WindowsMode],
+    application: Option<&str>,
+) -> Option<&'a WindowsMode> {
+    let application = application?;
+    modes
+        .iter()
+        .find(|mode| mode.matches_application(application))
 }
 
 /// Where the recording HUD pill appears while dictating.
@@ -78,6 +112,7 @@ impl Default for WindowsSettings {
             ui_language: None,
             indicator_position: IndicatorPosition::default(),
             history_retention: crate::history::HistoryRetention::default(),
+            modes: Vec::new(),
             text_replacements: Vec::new(),
             transcription: recommended_selection(&user_language()),
         }
@@ -310,6 +345,48 @@ mod tests {
             WindowsSettings::default().history_retention,
             crate::history::HistoryRetention::Week
         );
+    }
+
+    #[test]
+    fn modes_match_case_insensitive_application_substrings() {
+        let modes = vec![
+            WindowsMode {
+                name: "Code".into(),
+                applications: vec!["Code".into(), "rustrover".into()],
+                corrections: Vec::new(),
+            },
+            WindowsMode {
+                name: "Chat".into(),
+                applications: vec!["slack".into()],
+                corrections: Vec::new(),
+            },
+        ];
+
+        assert_eq!(
+            mode_for_application(&modes, Some("code")).map(|mode| mode.name.as_str()),
+            Some("Code")
+        );
+        assert_eq!(
+            mode_for_application(&modes, Some("slack")).map(|mode| mode.name.as_str()),
+            Some("Chat")
+        );
+        // Substring semantics: "vscode" contains "code".
+        assert_eq!(
+            mode_for_application(&modes, Some("vscode")).map(|mode| mode.name.as_str()),
+            Some("Code")
+        );
+        assert_eq!(mode_for_application(&modes, Some("notepad")), None);
+        assert_eq!(mode_for_application(&modes, None), None);
+    }
+
+    #[test]
+    fn blank_application_rules_never_match() {
+        let modes = vec![WindowsMode {
+            name: "Broken".into(),
+            applications: vec!["  ".into(), String::new()],
+            corrections: Vec::new(),
+        }];
+        assert_eq!(mode_for_application(&modes, Some("anything")), None);
     }
 
     #[test]

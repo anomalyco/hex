@@ -21,6 +21,44 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 use crate::audio::CaptureInstant;
 use crate::windows_settings::WindowsHotkey;
 
+/// The focused application's executable stem (e.g. "chrome"), lowercased,
+/// for per-application dictation modes and history entries.
+pub fn foreground_process_stem() -> Option<String> {
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::Threading::{
+        OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, QueryFullProcessImageNameW,
+    };
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        GetForegroundWindow, GetWindowThreadProcessId,
+    };
+
+    unsafe {
+        let window = GetForegroundWindow();
+        if window.is_null() {
+            return None;
+        }
+        let mut pid = 0_u32;
+        GetWindowThreadProcessId(window, &mut pid);
+        if pid == 0 {
+            return None;
+        }
+        let process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if process.is_null() {
+            return None;
+        }
+        let mut buffer = [0_u16; 1024];
+        let mut length = buffer.len() as u32;
+        let ok = QueryFullProcessImageNameW(process, 0, buffer.as_mut_ptr(), &mut length);
+        CloseHandle(process);
+        if ok == 0 {
+            return None;
+        }
+        let path = String::from_utf16_lossy(&buffer[..length as usize]);
+        let stem = std::path::Path::new(&path).file_stem()?.to_string_lossy();
+        Some(stem.to_lowercase())
+    }
+}
+
 const EVENT_CAPACITY: usize = 16;
 const MAX_EVENT_DELAY_MS: u32 = 60_000;
 const DOUBLE_TAP_WINDOW_MS: u32 = 300;

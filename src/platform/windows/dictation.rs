@@ -55,6 +55,7 @@ pub struct WindowsDictationConfig {
     pub last_dictation: Arc<Mutex<Option<String>>>,
     pub indicator: Option<crate::windows_indicator::WindowsIndicatorSender>,
     pub replacements: Arc<RwLock<crate::text_replacements::ReplacementSet>>,
+    pub modes: Arc<RwLock<Vec<crate::windows_settings::WindowsMode>>>,
     pub fallback_to_default_device: bool,
 }
 
@@ -87,6 +88,7 @@ pub fn run_with_transcriber(
         last_dictation,
         indicator,
         replacements,
+        modes,
         fallback_to_default_device,
     } = config;
     let _indicator_guard = IndicatorGuard(indicator.clone());
@@ -154,6 +156,7 @@ pub fn run_with_transcriber(
                         history.as_ref(),
                         &last_dictation,
                         &replacements,
+                        &modes,
                     ),
                     OutputJob::PasteLast => process_paste_last(&mut paster, &last_dictation),
                 };
@@ -511,6 +514,7 @@ fn process_dictation_job(
     history: Option<&crate::history::History>,
     last_dictation: &Mutex<Option<String>>,
     replacements: &RwLock<crate::text_replacements::ReplacementSet>,
+    modes: &RwLock<Vec<crate::windows_settings::WindowsMode>>,
 ) -> JobResult {
     let started = Instant::now();
     let inference_started = Instant::now();
@@ -519,6 +523,7 @@ fn process_dictation_job(
         .map(|text| text.trim().to_string())
         .map_err(|error| format!("{error:#}"));
     let inference_ms = inference_started.elapsed().as_millis() as u64;
+    let application = crate::windows_input::foreground_process_stem();
     let result = transcription.and_then(|raw_text| {
         if raw_text.is_empty() {
             return Err("transcription was empty".into());
@@ -527,6 +532,17 @@ fn process_dictation_job(
             .read()
             .unwrap_or_else(|error| error.into_inner())
             .replace(&raw_text);
+        // Mode corrections run after the global replacements, scoped to the
+        // application the text is about to land in.
+        let text = {
+            let modes = modes.read().unwrap_or_else(|error| error.into_inner());
+            match crate::windows_settings::mode_for_application(&modes, application.as_deref()) {
+                Some(mode) if !mode.corrections.is_empty() => {
+                    crate::text_replacements::ReplacementSet::new(&mode.corrections).replace(&text)
+                }
+                _ => text,
+            }
+        };
         if text.trim().is_empty() {
             return Err("text replacements produced empty output".into());
         }
@@ -543,7 +559,7 @@ fn process_dictation_job(
                 kind: crate::history::HistoryKind::Dictation,
                 raw_text,
                 final_text: text.clone(),
-                application: None,
+                application: application.clone(),
                 processing: None,
                 audio_ms: job.audio_ms,
                 inference_ms,

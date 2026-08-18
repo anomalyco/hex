@@ -95,6 +95,7 @@ struct WindowsDesktopHost {
     last_dictation: Arc<Mutex<Option<String>>>,
     indicator: crate::windows_indicator::WindowsIndicatorSender,
     replacements: Arc<RwLock<crate::text_replacements::ReplacementSet>>,
+    modes: Arc<RwLock<Vec<crate::windows_settings::WindowsMode>>>,
     prepared_transcriber: Option<crate::local_transcriber::LocalTranscriber>,
     hints_restart_after: Option<Instant>,
     transcription_preparation: Option<TranscriptionPreparation>,
@@ -111,6 +112,7 @@ struct WindowsApp {
     history_clear_armed: bool,
     replacement_inputs: Vec<ReplacementInputs>,
     transcription_picker: TranscriptionPickerState,
+    mode_inputs: Vec<ModeInputs>,
     recognition_hints_input: Entity<TextInput>,
     _recognition_hints_subscription: Subscription,
     model_catalog_language_filter: Option<String>,
@@ -142,6 +144,13 @@ enum WindowsPane {
 struct ReplacementInputs {
     matched_phrase: Entity<TextInput>,
     output: Entity<TextInput>,
+    _subscriptions: Vec<Subscription>,
+}
+
+struct ModeInputs {
+    name: Entity<TextInput>,
+    applications: Entity<TextInput>,
+    corrections: Vec<ReplacementInputs>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -214,6 +223,12 @@ pub fn open(event_path: PathBuf, shutdown: &'static AtomicBool, start_hidden: bo
                             .iter()
                             .map(|replacement| WindowsApp::replacement_inputs(replacement, cx))
                             .collect();
+                        let mode_inputs = host
+                            .settings
+                            .modes
+                            .iter()
+                            .map(|mode| WindowsApp::mode_inputs(mode, cx))
+                            .collect();
                         let recognition_hints_input = cx.new(|cx| {
                             crate::text_input::TextInput::multiline_with_height(
                                 cx,
@@ -241,6 +256,7 @@ pub fn open(event_path: PathBuf, shutdown: &'static AtomicBool, start_hidden: bo
                             history_clear_armed: false,
                             replacement_inputs,
                             transcription_picker: TranscriptionPickerState::Closed,
+                            mode_inputs,
                             model_catalog_language_filter: None,
                             model_catalog_language_dropdown_open: false,
                             model_catalog_language_dropdown_bounds: None,
@@ -612,6 +628,7 @@ impl WindowsDesktopHost {
         let replacements = Arc::new(RwLock::new(crate::text_replacements::ReplacementSet::new(
             &settings.text_replacements,
         )));
+        let modes = Arc::new(RwLock::new(settings.modes.clone()));
         Self {
             event_path,
             event_reader,
@@ -636,6 +653,7 @@ impl WindowsDesktopHost {
             last_dictation: Arc::new(Mutex::new(None)),
             indicator,
             replacements,
+            modes,
             prepared_transcriber: None,
             hints_restart_after: None,
             transcription_preparation: None,
@@ -683,6 +701,7 @@ impl WindowsDesktopHost {
         let last_dictation = self.last_dictation.clone();
         let indicator = self.indicator.clone();
         let replacements = self.replacements.clone();
+        let modes = self.modes.clone();
         let prepared_transcriber = self.prepared_transcriber.take();
         let listener_terminated = self.listener_terminated.clone();
         listener_terminated.store(false, Ordering::Release);
@@ -703,6 +722,7 @@ impl WindowsDesktopHost {
                         last_dictation,
                         indicator: Some(indicator),
                         replacements,
+                        modes,
                         fallback_to_default_device: true,
                     };
                     if let Some(transcriber) = prepared_transcriber {
@@ -996,6 +1016,23 @@ impl WindowsDesktopHost {
             .write()
             .unwrap_or_else(|error| error.into_inner()) =
             crate::text_replacements::ReplacementSet::new(&candidate.text_replacements);
+        self.settings = candidate;
+        self.settings_error = None;
+        Ok(())
+    }
+
+    fn set_modes(&mut self, modes: Vec<crate::windows_settings::WindowsMode>) -> Result<()> {
+        let mut candidate = self.settings.clone();
+        candidate.modes = modes;
+        candidate.save().map_err(|error| {
+            let error = format!("Could not save dictation modes: {error:#}");
+            self.settings_error = Some(error.clone());
+            eyre!(error)
+        })?;
+        *self
+            .modes
+            .write()
+            .unwrap_or_else(|error| error.into_inner()) = candidate.modes.clone();
         self.settings = candidate;
         self.settings_error = None;
         Ok(())
@@ -1412,6 +1449,115 @@ impl WindowsApp {
         if index < self.replacement_inputs.len() {
             self.replacement_inputs.remove(index);
             self.sync_text_replacements(cx);
+        }
+    }
+
+    fn mode_inputs(
+        mode: &crate::windows_settings::WindowsMode,
+        cx: &mut Context<Self>,
+    ) -> ModeInputs {
+        let name = cx.new(|cx| TextInput::new(cx, "e.g. Coding", &mode.name));
+        let applications = cx.new(|cx| {
+            TextInput::new(
+                cx,
+                "e.g. code, chrome, slack",
+                &mode.applications.join(", "),
+            )
+        });
+        let name_changed = cx.subscribe(&name, |this, _, _: &TextChanged, cx| this.sync_modes(cx));
+        let applications_changed = cx.subscribe(&applications, |this, _, _: &TextChanged, cx| {
+            this.sync_modes(cx)
+        });
+        let corrections = mode
+            .corrections
+            .iter()
+            .map(|correction| Self::mode_correction_inputs(correction, cx))
+            .collect();
+        ModeInputs {
+            name,
+            applications,
+            corrections,
+            _subscriptions: vec![name_changed, applications_changed],
+        }
+    }
+
+    fn mode_correction_inputs(
+        correction: &crate::text_replacements::TextReplacement,
+        cx: &mut Context<Self>,
+    ) -> ReplacementInputs {
+        let matched_phrase =
+            cx.new(|cx| TextInput::new(cx, "e.g. open code", &correction.matched_phrase));
+        let output = cx.new(|cx| TextInput::new(cx, "e.g. OpenCode", &correction.output));
+        let matched_changed = cx.subscribe(&matched_phrase, |this, _, _: &TextChanged, cx| {
+            this.sync_modes(cx)
+        });
+        let output_changed =
+            cx.subscribe(&output, |this, _, _: &TextChanged, cx| this.sync_modes(cx));
+        ReplacementInputs {
+            matched_phrase,
+            output,
+            _subscriptions: vec![matched_changed, output_changed],
+        }
+    }
+
+    fn sync_modes(&mut self, cx: &mut Context<Self>) {
+        let modes = self
+            .mode_inputs
+            .iter()
+            .map(|inputs| crate::windows_settings::WindowsMode {
+                name: inputs.name.read(cx).text().to_string(),
+                applications: inputs
+                    .applications
+                    .read(cx)
+                    .text()
+                    .split(',')
+                    .map(|application| application.trim().to_string())
+                    .filter(|application| !application.is_empty())
+                    .collect(),
+                corrections: inputs
+                    .corrections
+                    .iter()
+                    .map(|correction| crate::text_replacements::TextReplacement {
+                        matched_phrase: correction.matched_phrase.read(cx).text().to_string(),
+                        output: correction.output.read(cx).text().to_string(),
+                    })
+                    .collect(),
+            })
+            .collect();
+        let _ = self.host.set_modes(modes);
+        cx.notify();
+    }
+
+    fn add_mode(&mut self, cx: &mut Context<Self>) {
+        self.mode_inputs.push(Self::mode_inputs(
+            &crate::windows_settings::WindowsMode::default(),
+            cx,
+        ));
+        self.sync_modes(cx);
+    }
+
+    fn remove_mode(&mut self, index: usize, cx: &mut Context<Self>) {
+        if index < self.mode_inputs.len() {
+            self.mode_inputs.remove(index);
+            self.sync_modes(cx);
+        }
+    }
+
+    fn add_mode_correction(&mut self, mode_index: usize, cx: &mut Context<Self>) {
+        let correction =
+            Self::mode_correction_inputs(&crate::text_replacements::TextReplacement::default(), cx);
+        if let Some(inputs) = self.mode_inputs.get_mut(mode_index) {
+            inputs.corrections.push(correction);
+            self.sync_modes(cx);
+        }
+    }
+
+    fn remove_mode_correction(&mut self, mode_index: usize, row: usize, cx: &mut Context<Self>) {
+        if let Some(inputs) = self.mode_inputs.get_mut(mode_index)
+            && row < inputs.corrections.len()
+        {
+            inputs.corrections.remove(row);
+            self.sync_modes(cx);
         }
     }
 
@@ -2370,11 +2516,122 @@ impl WindowsApp {
     }
 
     fn render_modes(&mut self, cx: &mut Context<Self>) -> AnyElement {
-        let add = header_button(tr("Add replacement"))
-            .id("windows-add-replacement")
-            .on_click(cx.listener(|this, _, _, cx| this.add_text_replacement(cx)))
+        let add = div()
+            .flex()
+            .items_center()
+            .gap_3()
+            .child(
+                header_button(tr("Add mode"))
+                    .id("windows-add-mode")
+                    .on_click(cx.listener(|this, _, _, cx| this.add_mode(cx))),
+            )
+            .child(
+                header_button(tr("Add replacement"))
+                    .id("windows-add-replacement")
+                    .on_click(cx.listener(|this, _, _, cx| this.add_text_replacement(cx))),
+            )
             .into_any_element();
         let replacement_count = self.replacement_inputs.len();
+        let mode_count = self.mode_inputs.len();
+        let mode_panels: Vec<AnyElement> = self
+            .mode_inputs
+            .iter()
+            .enumerate()
+            .map(|(mode_index, inputs)| {
+                let correction_count = inputs.corrections.len();
+                let correction_rows: Vec<AnyElement> = inputs
+                    .corrections
+                    .iter()
+                    .enumerate()
+                    .map(|(row, correction)| {
+                        div()
+                            .id(("windows-mode-correction", mode_index * 1000 + row))
+                            .w_full()
+                            .p_3()
+                            .flex()
+                            .items_center()
+                            .gap_3()
+                            .when(row + 1 < correction_count, |element| {
+                                element.border_b_1().border_color(rgb(DIVIDER))
+                            })
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w(px(0.0))
+                                    .child(correction.matched_phrase.clone()),
+                            )
+                            .child(
+                                div()
+                                    .flex_none()
+                                    .text_size(px(13.0))
+                                    .text_color(rgb(FAINT))
+                                    .child("→"),
+                            )
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w(px(0.0))
+                                    .child(correction.output.clone()),
+                            )
+                            .child(
+                                compact_button(tr("Remove"))
+                                    .id(("windows-remove-mode-correction", mode_index * 1000 + row))
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        this.remove_mode_correction(mode_index, row, cx);
+                                    })),
+                            )
+                            .into_any_element()
+                    })
+                    .collect();
+                compact_panel()
+                    .mt_3()
+                    .child(
+                        div()
+                            .w_full()
+                            .p_3()
+                            .flex()
+                            .items_center()
+                            .gap_3()
+                            .border_b_1()
+                            .border_color(rgb(DIVIDER))
+                            .child(div().flex_1().min_w(px(0.0)).child(inputs.name.clone()))
+                            .child(
+                                compact_button(tr("Remove mode"))
+                                    .id(("windows-remove-mode", mode_index))
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        this.remove_mode(mode_index, cx);
+                                    })),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .w_full()
+                            .p_3()
+                            .flex()
+                            .flex_col()
+                            .gap_2()
+                            .border_b_1()
+                            .border_color(rgb(DIVIDER))
+                            .child(div().text_size(px(11.0)).text_color(rgb(FAINT)).child(tr(
+                                "Applies when the focused application contains any of these names",
+                            )))
+                            .child(inputs.applications.clone()),
+                    )
+                    .children(correction_rows)
+                    .child(
+                        div().w_full().p_3().flex().child(
+                            compact_button(tr("Add correction"))
+                                .id(("windows-add-mode-correction", mode_index))
+                                .border_1()
+                                .border_color(rgb(LINE))
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.add_mode_correction(mode_index, cx);
+                                })),
+                        ),
+                    )
+                    .into_any_element()
+            })
+            .collect();
         let rows: Vec<AnyElement> = self
             .replacement_inputs
             .iter()
@@ -2449,6 +2706,13 @@ impl WindowsApp {
                                 .border_b_0(),
                             ),
                         )
+                        .child(settings_section_label("Application modes"))
+                        .when(mode_count == 0, |content| {
+                            content.child(compact_panel().child(empty_message(
+                                "No modes yet. Add one to correct text in specific applications.",
+                            )))
+                        })
+                        .children(mode_panels)
                         .child(settings_section_label("Replacements"))
                         .child(
                             compact_panel()
