@@ -3,9 +3,9 @@
 //! current value and items are rebuilt on every open, so app state stays
 //! the single source of truth and no per-callsite popup plumbing exists.
 
-use gpui::{App, ElementId, SharedString, Window, px};
-use gpui_component::button::{Button, DropdownButton};
-use gpui_component::menu::PopupMenuItem;
+use gpui::{App, ElementId, IntoElement, SharedString, Styled, Window, px};
+use gpui_component::button::Button;
+use gpui_component::menu::{DropdownMenu as _, PopupMenuItem};
 
 pub struct ComboItem {
     label: SharedString,
@@ -39,18 +39,21 @@ impl ComboItem {
     }
 }
 
-/// Build the dropdown. `items` runs every time the menu opens, so choices
-/// and check marks always reflect the state at that moment.
+/// Build the dropdown. The whole trigger opens the menu, and `items` runs
+/// every time it opens, so choices and check marks always reflect the state
+/// at that moment.
 pub fn combobox<F>(
     id: impl Into<ElementId>,
     label: impl Into<SharedString>,
     items: F,
-) -> DropdownButton
+) -> impl IntoElement
 where
     F: Fn(&mut Window, &mut App) -> Vec<ComboItem> + 'static,
 {
-    DropdownButton::new(id)
-        .button(Button::new("trigger").label(label))
+    Button::new(id)
+        .label(label)
+        .dropdown_caret(true)
+        .w(px(220.0))
         .dropdown_menu(move |menu, window, cx| {
             items(window, cx).into_iter().fold(
                 menu.min_w(px(220.0)).max_h(px(400.0)).scrollable(true),
