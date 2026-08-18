@@ -2453,6 +2453,40 @@ impl WindowsApp {
                                                     .h(px(0.0)),
                                                 ),
                                         ))
+                                        .child(settings_row(
+                                            "Software updates",
+                                            "Checks the GitHub releases page in the background",
+                                            match self.host.updater.state() {
+                                                crate::windows_updater::UpdateCheck::Checking => {
+                                                    header_button(tr("Checking"))
+                                                        .id("windows-update-check")
+                                                        .into_any_element()
+                                                }
+                                                crate::windows_updater::UpdateCheck::Available {
+                                                    version,
+                                                    url,
+                                                } => header_button(tr_fill(
+                                                    "Update to {}",
+                                                    &version,
+                                                ))
+                                                .id("windows-update-check")
+                                                .text_color(rgb(accent_color()))
+                                                .on_click(cx.listener(move |_, _, _, cx| {
+                                                    cx.open_url(&url);
+                                                }))
+                                                .into_any_element(),
+                                                crate::windows_updater::UpdateCheck::Current
+                                                | crate::windows_updater::UpdateCheck::Failed => {
+                                                    header_button(tr("Check now"))
+                                                        .id("windows-update-check")
+                                                        .on_click(cx.listener(|this, _, _, cx| {
+                                                            this.host.updater.request_check();
+                                                            cx.notify();
+                                                        }))
+                                                        .into_any_element()
+                                                }
+                                            },
+                                        ))
                                         .child(
                                             settings_row(
                                                 "Launch at login",

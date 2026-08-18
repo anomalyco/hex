@@ -27,34 +27,52 @@ pub enum UpdateCheck {
 pub struct WindowsUpdater {
     state: Arc<Mutex<UpdateCheck>>,
     stop: Arc<AtomicBool>,
+    check_now: Arc<AtomicBool>,
 }
 
 impl WindowsUpdater {
     pub fn start() -> Self {
         let state = Arc::new(Mutex::new(UpdateCheck::Checking));
         let stop = Arc::new(AtomicBool::new(false));
+        let check_now = Arc::new(AtomicBool::new(false));
         if std::env::var_os("HEX_MOCK_UPDATE").is_some() {
             *state.lock().unwrap_or_else(|error| error.into_inner()) = UpdateCheck::Available {
                 version: "9.9.9".into(),
                 url: RELEASES_PAGE.into(),
             };
-            return Self { state, stop };
+            return Self {
+                state,
+                stop,
+                check_now,
+            };
         }
         let worker_state = state.clone();
         let worker_stop = stop.clone();
+        let worker_check_now = check_now.clone();
         let _ = thread::Builder::new()
             .name("windows-update-check".into())
             .spawn(move || {
-                sleep_unless_stopped(&worker_stop, STARTUP_DELAY);
+                wait_for_next_check(&worker_stop, &worker_check_now, STARTUP_DELAY);
                 while !worker_stop.load(Ordering::Relaxed) {
+                    worker_check_now.store(false, Ordering::Relaxed);
                     let next = check_latest_release();
                     *worker_state
                         .lock()
                         .unwrap_or_else(|error| error.into_inner()) = next;
-                    sleep_unless_stopped(&worker_stop, CHECK_INTERVAL);
+                    wait_for_next_check(&worker_stop, &worker_check_now, CHECK_INTERVAL);
                 }
             });
-        Self { state, stop }
+        Self {
+            state,
+            stop,
+            check_now,
+        }
+    }
+
+    /// Run a check immediately instead of waiting out the interval.
+    pub fn request_check(&self) {
+        *self.state.lock().unwrap_or_else(|error| error.into_inner()) = UpdateCheck::Checking;
+        self.check_now.store(true, Ordering::Relaxed);
     }
 
     pub fn state(&self) -> UpdateCheck {
@@ -69,9 +87,12 @@ impl WindowsUpdater {
     }
 }
 
-fn sleep_unless_stopped(stop: &AtomicBool, total: Duration) {
+fn wait_for_next_check(stop: &AtomicBool, check_now: &AtomicBool, total: Duration) {
     let mut remaining = total;
-    while !stop.load(Ordering::Relaxed) && remaining > Duration::ZERO {
+    while !stop.load(Ordering::Relaxed)
+        && !check_now.load(Ordering::Relaxed)
+        && remaining > Duration::ZERO
+    {
         let step = remaining.min(Duration::from_millis(500));
         thread::sleep(step);
         remaining = remaining.saturating_sub(step);
