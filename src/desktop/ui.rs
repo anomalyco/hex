@@ -198,11 +198,11 @@ pub(crate) use tokens::{
 /// Translate a UI string on Windows; identity elsewhere until the other
 /// shells grow localization.
 pub(crate) fn tr(text: &'static str) -> &'static str {
-    #[cfg(target_os = "windows")]
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
     {
-        crate::windows_i18n::tr(text)
+        crate::desktop_i18n::tr(text)
     }
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(target_os = "macos")]
     {
         text
     }
@@ -212,11 +212,11 @@ pub(crate) fn tr(text: &'static str) -> &'static str {
 /// English on shells without a translation table.
 #[cfg_attr(target_os = "macos", allow(dead_code))]
 pub(crate) fn tr_fill(template: &'static str, value: &str) -> String {
-    #[cfg(target_os = "windows")]
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
     {
-        crate::windows_i18n::tr_fill(template, value)
+        crate::desktop_i18n::tr_fill(template, value)
     }
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(target_os = "macos")]
     {
         template.replace("{}", value)
     }

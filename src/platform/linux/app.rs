@@ -21,6 +21,7 @@ use crate::desktop_host::{
     DesktopAction, DesktopCapabilities, DesktopHost, DesktopListenerSnapshot, DesktopShortcut,
     DesktopSnapshot, DesktopTranscriptionSnapshot, DesktopUpdateStatus,
 };
+use crate::desktop_i18n::{tr, tr_fill};
 use crate::desktop_transcription_picker::TranscriptionPickerDelegate;
 use crate::desktop_ui::{
     FAINT, LINE, MUTED, NavigationIcon, SIDEBAR_WIDTH, SUCCESS, SURFACE, TEXT, TEXT_SOFT,
@@ -114,6 +115,8 @@ struct LinuxApp {
     dictation_language_dropdown_bounds: Option<Bounds<Pixels>>,
     microphone_dropdown_open: bool,
     microphone_dropdown_bounds: Option<Bounds<Pixels>>,
+    ui_language_dropdown_open: bool,
+    ui_language_dropdown_bounds: Option<Bounds<Pixels>>,
 }
 
 enum TranscriptionPickerState {
@@ -197,6 +200,8 @@ pub fn open(event_path: PathBuf, start_hidden: bool) -> Result<()> {
                         dictation_language_dropdown_bounds: None,
                         microphone_dropdown_open: false,
                         microphone_dropdown_bounds: None,
+                        ui_language_dropdown_open: false,
+                        ui_language_dropdown_bounds: None,
                     })
                 },
             )
@@ -447,6 +452,7 @@ impl LinuxDesktopHost {
         error: Option<String>,
         update: UpdateState,
     ) -> Self {
+        crate::desktop_i18n::apply(settings.ui_language.as_deref());
         let mut event_reader = EventReader::open(&event_path);
         let mut activity = DesktopActivity::default();
         activity.refresh(&mut event_reader);
@@ -716,6 +722,27 @@ impl LinuxDesktopHost {
         crate::linux_updater::relaunch(update)
     }
 
+    /// Persist and apply the interface language; `None` follows the
+    /// system locale.
+    fn set_ui_language(&mut self, code: Option<&'static str>) {
+        if self.settings.ui_language.as_deref() == code {
+            return;
+        }
+        let mut candidate = self.settings.clone();
+        candidate.ui_language = code.map(str::to_string);
+        match candidate.save() {
+            Ok(()) => {
+                self.settings = candidate;
+                self.settings_error = None;
+                crate::desktop_i18n::apply(code);
+            }
+            Err(error) => {
+                self.settings_error =
+                    Some(format!("Could not save the interface language: {error:#}"));
+            }
+        }
+    }
+
     /// Re-enumerate capture devices; the dropdown trigger calls this so
     /// hotplugged microphones and late audio-server startup are visible.
     fn refresh_microphones(&mut self) {
@@ -836,6 +863,56 @@ impl LinuxApp {
         self.transcription_dropdown_open = false;
         self.dictation_language_dropdown_open = false;
         self.microphone_dropdown_open = false;
+        self.ui_language_dropdown_open = false;
+    }
+
+    fn render_ui_language_dropdown(
+        &mut self,
+        viewport_height: Pixels,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let Some(bounds) = self.ui_language_dropdown_bounds else {
+            return div().into_any_element();
+        };
+        let current = self.host.settings.ui_language.clone();
+        let items = crate::desktop_i18n::LANGUAGE_CHOICES
+            .iter()
+            .enumerate()
+            .map(|(index, (code, name))| {
+                let selected = current.as_deref() == *code;
+                let label = if code.is_none() {
+                    tr("System").to_string()
+                } else {
+                    (*name).to_string()
+                };
+                let code = *code;
+                dropdown_item(("linux-ui-language-option", index), label, selected).on_click(
+                    cx.listener(move |this, _, _, cx| {
+                        cx.stop_propagation();
+                        this.host.set_ui_language(code);
+                        this.ui_language_dropdown_open = false;
+                        cx.notify();
+                    }),
+                )
+            });
+        dropdown_backdrop("linux-ui-language-backdrop")
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.ui_language_dropdown_open = false;
+                cx.notify();
+            }))
+            .child(
+                dropdown_panel_with_width(
+                    bounds,
+                    viewport_height,
+                    crate::desktop_i18n::LANGUAGE_CHOICES.len(),
+                    px(240.0),
+                )
+                .id("linux-ui-language-dropdown")
+                .overflow_y_scroll()
+                .on_click(|_, _, cx| cx.stop_propagation())
+                .children(items),
+            )
+            .into_any_element()
     }
 
     fn render_transcription_dropdown(
@@ -856,7 +933,7 @@ impl LinuxApp {
                         crate::transcription_models::AUTO_LANGUAGE,
                     ) && crate::transcription_models::is_verified(model);
                     let state = if installed {
-                        "Installed".to_string()
+                        tr("Installed").to_string()
                     } else {
                         model.size_label()
                     };
@@ -954,7 +1031,7 @@ impl LinuxApp {
             return div().into_any_element();
         };
         let current = self.host.settings.microphone.clone();
-        let mut choices = vec![("Automatic".to_string(), None)];
+        let mut choices = vec![(tr("Automatic").to_string(), None)];
         choices.extend(
             self.host
                 .microphones
@@ -1145,7 +1222,7 @@ impl LinuxApp {
             .child(
                 navigation_item(NavigationIcon::Settings, true)
                     .id("linux-nav-settings")
-                    .child("Settings"),
+                    .child(tr("Settings")),
             )
             .child(div().flex_1())
             .into_any_element()
@@ -1172,7 +1249,7 @@ impl LinuxApp {
                 .border_color(rgb(TEXT_SOFT))
                 .bg(rgb(SURFACE))
                 .text_size(px(11.0))
-                .child("Press a shortcut...")
+                .child(tr("Press a shortcut..."))
                 .into_any_element()
         } else {
             hotkey_keycaps(snapshot.dictation_shortcut.clone(), 1.0)
@@ -1180,16 +1257,16 @@ impl LinuxApp {
         let update_ready = snapshot.update_status == DesktopUpdateStatus::ReadyToRestart;
         let transcription = &snapshot.transcription;
         let model_label = match transcription.preparing {
-            Some(preparing) => format!(
+            Some(preparing) => tr_fill(
                 "Preparing {}",
-                crate::transcription_models::definition(preparing).name
+                crate::transcription_models::definition(preparing).name,
             ),
             None => crate::transcription_models::definition(transcription.selection.model)
                 .name
                 .to_string(),
         };
         let dictation_language_label = if transcription.selection.language == "auto" {
-            "Auto".to_string()
+            tr("Auto").to_string()
         } else {
             crate::transcription_models::language_name(&transcription.selection.language)
                 .to_string()
@@ -1199,7 +1276,11 @@ impl LinuxApp {
             .settings
             .microphone
             .clone()
-            .unwrap_or_else(|| "Automatic".into());
+            .unwrap_or_else(|| tr("Automatic").into());
+        let ui_language_label = match self.host.settings.ui_language.as_deref() {
+            None => tr("System").to_string(),
+            Some(code) => crate::desktop_i18n::choice_name(Some(code)).to_string(),
+        };
         // The catalog dialog shows this error itself while open; the panel
         // row covers dropdown-initiated failures only.
         let transcription_error = transcription
@@ -1211,19 +1292,20 @@ impl LinuxApp {
             .as_ref()
             .map_or("Ready", |listener| listener.status.as_str())
             .to_string();
+        let listener_label = tr(&listener_label).to_string();
         let device = snapshot
             .activity
             .device
             .clone()
-            .unwrap_or_else(|| "Automatic microphone".into());
+            .unwrap_or_else(|| tr("Automatic microphone").into());
         let status_hint = format!(
-            "{device} · Hold {} to dictate",
-            snapshot.dictation_shortcut_label
+            "{device} · {}",
+            tr_fill("Hold {} to dictate", &snapshot.dictation_shortcut_label)
         );
         let listener_action = header_button(if running {
-            "Stop listening"
+            tr("Stop listening")
         } else {
-            "Start listening"
+            tr("Start listening")
         })
         .id("linux-listener-toggle")
         .on_click(cx.listener(move |this, _, _, cx| {
@@ -1317,7 +1399,7 @@ impl LinuxApp {
                                                 .flex()
                                                 .items_center()
                                                 .child(
-                                                    header_button("Browse")
+                                                    header_button(tr("Browse"))
                                                         .id("linux-model-browse")
                                                         .mr_3()
                                                         .when(running, |button| {
@@ -1540,17 +1622,50 @@ impl LinuxApp {
                                 .child(
                                     settings_panel()
                                         .child(settings_row(
+                                            "Interface language",
+                                            "Language of the HEX interface",
+                                            div()
+                                                .relative()
+                                                .child(
+                                                    disclosure_button(ui_language_label)
+                                                        .id("linux-ui-language")
+                                                        .on_click(cx.listener(|this, _, _, cx| {
+                                                            let open =
+                                                                this.ui_language_dropdown_open;
+                                                            this.close_popups();
+                                                            this.ui_language_dropdown_open = !open;
+                                                            cx.notify();
+                                                        })),
+                                                )
+                                                .child(
+                                                    canvas(
+                                                        {
+                                                            let entity = cx.entity();
+                                                            move |bounds, _, cx| {
+                                                                entity.update(cx, |this, _| {
+                                                                    this.ui_language_dropdown_bounds =
+                                                                        Some(bounds);
+                                                                });
+                                                            }
+                                                        },
+                                                        |_, _, _, _| {},
+                                                    )
+                                                    .w_full()
+                                                    .h(px(0.0)),
+                                                ),
+                                        ))
+                                        .child(settings_row(
                                             "HEX",
                                             "Private local dictation for Linux",
                                             div().text_size(px(12.0)).text_color(rgb(MUTED)).child(
-                                                format!("Version {}", env!("CARGO_PKG_VERSION")),
+                                                tr_fill("Version {}", env!("CARGO_PKG_VERSION")),
                                             ),
                                         ))
                                         .when(update_ready, |panel| {
                                             panel.child(settings_row(
                                                 "Update ready",
                                                 "Restart into the verified Linux release.",
-                                                compact_button("Restart")
+                                                compact_button(tr("Restart"))
                                                     .id("restart-update")
                                                     .border_1()
                                                     .border_color(rgb(LINE))
@@ -1581,7 +1696,7 @@ impl LinuxApp {
                                                 error,
                                             ))
                                             .child(
-                                                compact_button("Dismiss")
+                                                compact_button(tr("Dismiss"))
                                                     .id("dismiss-linux-error")
                                                     .mx_4()
                                                     .mb_4()
@@ -1705,12 +1820,16 @@ impl Render for LinuxApp {
         let microphone_dropdown = self
             .microphone_dropdown_open
             .then(|| self.render_microphone_dropdown(viewport.height, cx));
+        let ui_language_dropdown = self
+            .ui_language_dropdown_open
+            .then(|| self.render_ui_language_dropdown(viewport.height, cx));
         window_frame()
             .child(self.render_shared_navigation())
             .child(div().flex_1().h_full().overflow_hidden().child(content))
             .children(transcription_dropdown)
             .children(dictation_language_dropdown)
             .children(microphone_dropdown)
+            .children(ui_language_dropdown)
             .children(model_picker)
             .children(catalog_filter_dropdown)
     }

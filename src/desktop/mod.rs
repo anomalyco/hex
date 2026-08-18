@@ -4,6 +4,8 @@
 pub mod activity;
 pub mod host;
 #[cfg(any(target_os = "linux", target_os = "windows"))]
+pub mod i18n;
+#[cfg(any(target_os = "linux", target_os = "windows"))]
 pub mod model_catalog;
 pub mod transcription_picker;
 pub mod ui;

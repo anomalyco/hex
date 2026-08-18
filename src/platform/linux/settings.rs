@@ -18,6 +18,8 @@ pub struct LinuxSettings {
     pub double_tap_lock: bool,
     /// A preferred capture device name; `None` uses the system default.
     pub microphone: Option<String>,
+    /// The interface language; `None` follows the system locale.
+    pub ui_language: Option<String>,
     pub transcription: crate::transcription_models::TranscriptionSelection,
 }
 
@@ -39,6 +41,7 @@ impl Default for LinuxSettings {
             dictation_hotkey: LinuxHotkey::default(),
             double_tap_lock: true,
             microphone: None,
+            ui_language: None,
             transcription: crate::transcription_models::TranscriptionSelection::default(),
         }
     }

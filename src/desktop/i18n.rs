@@ -1,5 +1,6 @@
-//! UI translations for the Windows shell, keyed by the English source
-//! string. The language follows the Windows user locale; unknown locales and
+//! UI translations for the port shells, keyed by the English source
+//! string. The language follows the system locale unless a persisted
+//! interface-language choice overrides it; unknown locales and
 //! untranslated strings fall back to English. Composite strings are `{}`
 //! templates filled through [`tr_fill`].
 
@@ -8,7 +9,7 @@ use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU8, Ordering};
 
 /// The selectable interface languages: persisted code and native name. The
-/// leading `None` entry follows the Windows display language.
+/// leading `None` entry follows the system display language.
 pub(crate) const LANGUAGE_CHOICES: &[(Option<&str>, &str)] = &[
     (None, "System"),
     (Some("en"), "English"),
@@ -36,13 +37,51 @@ fn column_for_code(code: &str) -> u8 {
 }
 
 /// Resolve and activate the persisted language choice; `None` follows the
-/// Windows user locale. Safe to call again whenever the setting changes.
+/// system locale. Safe to call again whenever the setting changes.
 pub(crate) fn apply(setting: Option<&str>) {
     let code = match setting {
         Some(code) => column_for_code(code),
-        None => column_for_code(&crate::windows_settings::user_language()),
+        None => column_for_code(&system_language()),
     };
     CURRENT.store(code, Ordering::Relaxed);
+}
+
+fn system_language() -> String {
+    #[cfg(target_os = "windows")]
+    {
+        crate::windows_settings::user_language()
+    }
+    #[cfg(target_os = "linux")]
+    {
+        language_from_env(
+            std::env::var("LC_ALL").ok().as_deref(),
+            std::env::var("LC_MESSAGES").ok().as_deref(),
+            std::env::var("LANG").ok().as_deref(),
+        )
+    }
+}
+
+/// The primary language subtag from POSIX locale variables, in their
+/// standard precedence: `pl_PL.UTF-8` yields `pl`.
+#[cfg_attr(target_os = "windows", allow(dead_code))]
+fn language_from_env(
+    lc_all: Option<&str>,
+    lc_messages: Option<&str>,
+    lang: Option<&str>,
+) -> String {
+    [lc_all, lc_messages, lang]
+        .into_iter()
+        .flatten()
+        .map(str::trim)
+        .find(|value| !value.is_empty() && *value != "C" && *value != "POSIX")
+        .map(|value| {
+            value
+                .chars()
+                .take_while(|character| character.is_ascii_alphabetic())
+                .collect::<String>()
+                .to_lowercase()
+        })
+        .unwrap_or_default()
 }
 
 /// The native display name for the persisted choice.
@@ -169,6 +208,18 @@ const TRANSLATIONS: &[(&str, [&str; 5])] = &[
     ("Models could not be loaded: {}", ["Nie udało się wczytać modeli: {}", "无法加载模型：{}", "モデルを読み込めませんでした: {}", "Modelle konnten nicht geladen werden: {}", "No se pudieron cargar los modelos: {}"]),
     ("Default", ["Domyślny", "默认", "既定", "Standard", "Predeterminado"]),
     ("Last dictation failed: {}", ["Ostatnie dyktowanie nie powiodło się: {}", "上次听写失败：{}", "前回の音声入力に失敗しました: {}", "Letztes Diktat fehlgeschlagen: {}", "El último dictado falló: {}"]),
+    ("Preparing {}", ["Przygotowywanie {}", "正在准备 {}", "{} を準備中", "{} wird vorbereitet", "Preparando {}"]),
+    ("Restart", ["Uruchom ponownie", "重启", "再起動", "Neu starten", "Reiniciar"]),
+    ("Version {}", ["Wersja {}", "版本 {}", "バージョン {}", "Version {}", "Versión {}"]),
+    ("Private local dictation for Linux", ["Prywatne lokalne dyktowanie dla Linuksa", "适用于 Linux 的私密本地听写", "Linux のためのプライベートなローカル音声入力", "Privates lokales Diktat für Linux", "Dictado local y privado para Linux"]),
+    ("Hold to dictate, release to transcribe", ["Przytrzymaj, aby dyktować; puść, aby przepisać", "按住听写，松开转写", "押しながら話し、離すと文字起こし", "Halten zum Diktieren, loslassen zum Transkribieren", "Mantén para dictar, suelta para transcribir"]),
+    ("Double-tap the shortcut for hands-free dictation", ["Dwukrotnie naciśnij skrót, aby dyktować bez trzymania", "双击快捷键进行免持听写", "ショートカットを2回押すとハンズフリーで音声入力", "Kürzel zweimal tippen für freihändiges Diktat", "Pulsa dos veces el atajo para dictar sin manos"]),
+    ("Update ready", ["Aktualizacja gotowa", "更新已就绪", "アップデート準備完了", "Update bereit", "Actualización lista"]),
+    ("Restart into the verified Linux release.", ["Uruchom ponownie do zweryfikowanego wydania Linuksa.", "重启进入已验证的 Linux 版本。", "検証済みの Linux リリースへ再起動します。", "In die verifizierte Linux-Version neu starten.", "Reinicia a la versión verificada de Linux."]),
+    ("Uses the selected input or the system default", ["Używa wybranego wejścia lub domyślnego systemowego", "使用所选输入或系统默认设备", "選択した入力またはシステム既定を使用", "Verwendet den gewählten Eingang oder den Systemstandard", "Usa la entrada seleccionada o la predeterminada del sistema"]),
+    ("Press a shortcut...", ["Naciśnij skrót...", "按下快捷键...", "ショートカットを押してください...", "Kürzel drücken...", "Pulsa un atajo..."]),
+    ("The transcription change did not apply.", ["Zmiana transkrypcji nie została zastosowana.", "转写更改未生效。", "文字起こしの変更が適用されませんでした。", "Die Transkriptionsänderung wurde nicht übernommen.", "El cambio de transcripción no se aplicó."]),
+    ("Automatic microphone", ["Automatyczny mikrofon", "自动麦克风", "自動マイク", "Automatisches Mikrofon", "Micrófono automático"]),
     ("Or when the browser is on one of these sites; sites win over applications", ["Albo gdy przeglądarka jest na jednej z tych stron; strony wygrywają z aplikacjami", "或当浏览器位于这些网站之一时；网站优先于应用", "またはブラウザーがこれらのサイトにあるとき。サイトがアプリより優先されます", "Oder wenn der Browser auf einer dieser Seiten ist; Seiten schlagen Anwendungen", "O cuando el navegador está en uno de estos sitios; los sitios ganan a las aplicaciones"]),
     ("While dictating", ["Podczas dyktowania", "听写时", "音声入力中", "Während des Diktats", "Mientras dictas"]),
     ("Release microphone while idle", ["Zwalniaj mikrofon w bezczynności", "空闲时释放麦克风", "待機中はマイクを解放", "Mikrofon im Leerlauf freigeben", "Liberar el micrófono en reposo"]),
@@ -239,6 +290,20 @@ const TRANSLATIONS: &[(&str, [&str; 5])] = &[
 #[cfg(test)]
 mod tests {
     use super::TRANSLATIONS;
+    use super::language_from_env;
+
+    #[test]
+    fn posix_locale_variables_resolve_in_precedence_order() {
+        assert_eq!(language_from_env(Some("pl_PL.UTF-8"), None, None), "pl");
+        assert_eq!(
+            language_from_env(None, Some("de_DE"), Some("es_ES.UTF-8")),
+            "de"
+        );
+        assert_eq!(language_from_env(None, None, Some("ja_JP.UTF-8")), "ja");
+        assert_eq!(language_from_env(Some("C"), None, Some("pl_PL")), "pl");
+        assert_eq!(language_from_env(None, None, Some("POSIX")), "");
+        assert_eq!(language_from_env(None, None, None), "");
+    }
 
     #[test]
     fn templates_keep_their_placeholder_in_every_language() {
