@@ -1,45 +1,24 @@
 use std::fs::{self, File, OpenOptions};
-use std::io::Read;
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt, symlink};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-use base64::Engine;
-use color_eyre::eyre::{Result, WrapErr, bail, eyre};
-use ed25519_dalek::{Signature, VerifyingKey};
+use color_eyre::eyre::{Result, WrapErr, bail};
 use fs2::FileExt;
 use semver::Version;
-use serde::Deserialize;
-use sha2::{Digest, Sha256};
 
-const UPDATE_URL: &str = "https://pub-089d681d41754031a4aefa7017d8c2fb.r2.dev/linux-update.json";
-const RELEASE_ORIGIN: &str = "https://pub-089d681d41754031a4aefa7017d8c2fb.r2.dev/releases/";
-const MAX_FEED_BYTES: u64 = 64 * 1024;
-const MAX_ARTIFACT_BYTES: u64 = 512 * 1024 * 1024;
-const PUBLIC_KEY: [u8; 32] = [
-    0xbf, 0xad, 0x02, 0xe6, 0x22, 0x08, 0xff, 0x14, 0x4b, 0x5c, 0x9d, 0x21, 0xc7, 0xe7, 0x9c, 0x7c,
-    0x16, 0xc6, 0x90, 0x42, 0x99, 0xa4, 0x37, 0xd8, 0x57, 0x30, 0x30, 0x07, 0xcd, 0x4f, 0xf7, 0xd8,
-];
+use crate::self_update::{
+    MAX_FEED_BYTES, Manifest, PUBLIC_KEY, RELEASE_BASE, UpdateTarget, download, read_bounded,
+    validate_manifest, verify_artifact, verify_feed,
+};
+
+const TARGET: UpdateTarget = UpdateTarget {
+    target: "x86_64-unknown-linux-gnu",
+    artifact_suffix: "x86_64-linux",
+};
 
 #[derive(Clone)]
 pub struct InstalledUpdate(PathBuf);
-
-#[derive(Deserialize)]
-struct SignedFeed {
-    payload: String,
-    signature: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct Manifest {
-    schema_version: u32,
-    channel: String,
-    target: String,
-    version: String,
-    artifact: String,
-    bytes: u64,
-    sha256: String,
-}
 
 pub fn managed_install() -> bool {
     // geteuid has no preconditions and does not mutate process state.
@@ -86,11 +65,15 @@ pub fn install_latest() -> Result<Option<InstalledUpdate>> {
     lock.try_lock_exclusive()
         .wrap_err("another Linux update is already in progress")?;
     let feed_path = updates.join("linux-update.json.partial");
-    download(UPDATE_URL, &feed_path, MAX_FEED_BYTES)?;
+    download(
+        &format!("{RELEASE_BASE}/linux-update.json"),
+        &feed_path,
+        MAX_FEED_BYTES,
+    )?;
     let feed = read_bounded(&feed_path, MAX_FEED_BYTES)?;
     let _ = fs::remove_file(&feed_path);
     let manifest = verify_feed(&feed, &PUBLIC_KEY)?;
-    let available = validate_manifest(&manifest)?;
+    let available = validate_manifest(&manifest, &TARGET)?;
     let installed = Version::parse(env!("CARGO_PKG_VERSION"))?;
     if available < installed {
         bail!("Linux update feed attempted a downgrade");
@@ -99,7 +82,7 @@ pub fn install_latest() -> Result<Option<InstalledUpdate>> {
         return Ok(None);
     }
 
-    let artifact_url = format!("{RELEASE_ORIGIN}{}", manifest.artifact);
+    let artifact_url = format!("{RELEASE_BASE}/releases/{}", manifest.artifact);
     let partial = updates.join("update.download");
     download(&artifact_url, &partial, manifest.bytes)?;
     let activation = (|| {
@@ -112,41 +95,6 @@ pub fn install_latest() -> Result<Option<InstalledUpdate>> {
     }
     let executable = activation?;
     Ok(Some(InstalledUpdate(executable)))
-}
-
-fn validate_manifest(manifest: &Manifest) -> Result<Version> {
-    if manifest.schema_version != 1 {
-        bail!(
-            "unsupported Linux update schema {}",
-            manifest.schema_version
-        );
-    }
-    if manifest.channel != "stable" {
-        bail!("unsupported Linux update channel");
-    }
-    if manifest.target != "x86_64-unknown-linux-gnu" {
-        bail!("Linux update targets the wrong platform");
-    }
-    if manifest.bytes == 0 || manifest.bytes > MAX_ARTIFACT_BYTES {
-        bail!("Linux update artifact has an invalid size");
-    }
-    if manifest.sha256.len() != 64
-        || !manifest
-            .sha256
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-    {
-        bail!("Linux update artifact has an invalid checksum");
-    }
-    let version = Version::parse(&manifest.version)
-        .wrap_err("Linux update manifest contains an invalid version")?;
-    if !version.pre.is_empty() {
-        bail!("stable Linux updates cannot be prereleases");
-    }
-    if manifest.artifact != format!("HEX-{version}-{}-x86_64-linux", manifest.sha256) {
-        bail!("Linux update artifact is not content-addressed");
-    }
-    Ok(version)
 }
 
 pub fn relaunch(update: &InstalledUpdate) -> Result<()> {
@@ -167,124 +115,8 @@ pub fn relaunch(update: &InstalledUpdate) -> Result<()> {
     Ok(())
 }
 
-fn verify_feed(bytes: &[u8], public_key: &[u8; 32]) -> Result<Manifest> {
-    let feed: SignedFeed = serde_json::from_slice(bytes).wrap_err("invalid Linux update feed")?;
-    let payload = base64::engine::general_purpose::STANDARD
-        .decode(feed.payload)
-        .wrap_err("invalid Linux update payload encoding")?;
-    let signature = base64::engine::general_purpose::STANDARD
-        .decode(feed.signature)
-        .wrap_err("invalid Linux update signature encoding")?;
-    let signature = Signature::from_slice(&signature).wrap_err("invalid Linux update signature")?;
-    let key = VerifyingKey::from_bytes(public_key).wrap_err("invalid Linux update public key")?;
-    key.verify_strict(&payload, &signature)
-        .wrap_err("Linux update signature verification failed")?;
-    serde_json::from_slice(&payload).wrap_err("invalid signed Linux update manifest")
-}
-
 fn safe_owned_directory(path: &Path, user: u32) -> bool {
     fs::metadata(path).is_ok_and(|metadata| metadata.uid() == user && metadata.mode() & 0o022 == 0)
-}
-
-fn download(url: &str, path: &Path, max_bytes: u64) -> Result<()> {
-    let _ = fs::remove_file(path);
-    let result = (|| {
-        let mut destination = OpenOptions::new()
-            .create_new(true)
-            .write(true)
-            .mode(0o600)
-            .open(path)?;
-        let mut child = Command::new("curl")
-            .args([
-                "--fail",
-                "--location",
-                "--proto",
-                "=https",
-                "--proto-redir",
-                "=https",
-                "--silent",
-                "--connect-timeout",
-                "10",
-                "--max-time",
-                "600",
-            ])
-            .arg(url)
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .spawn()
-            .wrap_err("could not start Linux update download")?;
-        let copied = std::io::copy(
-            &mut child
-                .stdout
-                .take()
-                .ok_or_else(|| eyre!("Linux update download has no output"))?
-                .take(max_bytes + 1),
-            &mut destination,
-        )?;
-        if copied > max_bytes {
-            let _ = child.kill();
-            let _ = child.wait();
-            bail!("Linux update download exceeded its signed size limit");
-        }
-        let status = child.wait()?;
-        if !status.success() {
-            bail!("Linux update download failed with {status}");
-        }
-        destination.sync_all()?;
-        Ok(())
-    })();
-    if result.is_err() {
-        let _ = fs::remove_file(path);
-    }
-    result
-}
-
-fn read_bounded(path: &Path, max_bytes: u64) -> Result<Vec<u8>> {
-    let mut bytes = Vec::new();
-    File::open(path)?
-        .take(max_bytes + 1)
-        .read_to_end(&mut bytes)?;
-    if bytes.len() as u64 > max_bytes {
-        bail!("Linux update feed is too large");
-    }
-    Ok(bytes)
-}
-
-fn verify_artifact(path: &Path, manifest: &Manifest) -> Result<()> {
-    let metadata = fs::metadata(path)?;
-    if metadata.len() != manifest.bytes {
-        bail!(
-            "Linux update has {} bytes, expected {}",
-            metadata.len(),
-            manifest.bytes
-        );
-    }
-    let actual = sha256(path)?;
-    if actual != manifest.sha256 {
-        bail!("Linux update checksum verification failed");
-    }
-    Ok(())
-}
-
-fn sha256(path: &Path) -> Result<String> {
-    let mut file = File::open(path)?;
-    let mut hasher = Sha256::new();
-    let mut buffer = [0_u8; 64 * 1024];
-    loop {
-        let read = file.read(&mut buffer)?;
-        if read == 0 {
-            break;
-        }
-        hasher.update(&buffer[..read]);
-    }
-    const HEX: &[u8; 16] = b"0123456789abcdef";
-    let mut result = String::with_capacity(64);
-    for &byte in hasher.finalize().iter() {
-        result.push(HEX[usize::from(byte >> 4)] as char);
-        result.push(HEX[usize::from(byte & 0x0f)] as char);
-    }
-    Ok(result)
 }
 
 fn validate_executable(path: &Path, version: &str) -> Result<()> {
@@ -348,82 +180,6 @@ fn activate(support: &Path, version: &str, partial: &Path) -> Result<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ed25519_dalek::{Signer, SigningKey};
-
-    fn signed_feed(payload: &[u8]) -> (Vec<u8>, [u8; 32]) {
-        let signing = SigningKey::from_bytes(&[7; 32]);
-        let feed = serde_json::json!({
-            "payload": base64::engine::general_purpose::STANDARD.encode(payload),
-            "signature": base64::engine::general_purpose::STANDARD.encode(signing.sign(payload).to_bytes()),
-        });
-        (
-            serde_json::to_vec(&feed).unwrap(),
-            signing.verifying_key().to_bytes(),
-        )
-    }
-
-    #[test]
-    fn signed_manifest_is_verified_before_parsing() {
-        let payload = br#"{"schema_version":1,"channel":"stable","target":"x86_64-unknown-linux-gnu","version":"2.1.0","artifact":"HEX-2.1.0-x86_64-linux","bytes":3,"sha256":"abc"}"#;
-        let (feed, key) = signed_feed(payload);
-        let manifest = verify_feed(&feed, &key).unwrap();
-        assert_eq!(manifest.version, "2.1.0");
-
-        let parsed: serde_json::Value = serde_json::from_slice(&feed).unwrap();
-        let signature = parsed["signature"].as_str().unwrap();
-        let tampered = serde_json::to_vec(&serde_json::json!({
-            "payload": base64::engine::general_purpose::STANDARD.encode(b"{}"),
-            "signature": signature,
-        }))
-        .unwrap();
-        let error = verify_feed(&tampered, &key).unwrap_err().to_string();
-        assert!(error.contains("signature verification failed"));
-    }
-
-    #[test]
-    fn manifest_rejects_the_wrong_channel_target_and_checksum() {
-        let valid = Manifest {
-            schema_version: 1,
-            channel: "stable".into(),
-            target: "x86_64-unknown-linux-gnu".into(),
-            version: "2.1.0".into(),
-            artifact: format!("HEX-2.1.0-{}-x86_64-linux", "a".repeat(64)),
-            bytes: 3,
-            sha256: "a".repeat(64),
-        };
-        assert!(validate_manifest(&valid).is_ok());
-        assert!(
-            validate_manifest(&Manifest {
-                channel: "nightly".into(),
-                ..valid
-            })
-            .is_err()
-        );
-        assert!(
-            validate_manifest(&Manifest {
-                schema_version: 1,
-                channel: "stable".into(),
-                target: "x86_64-unknown-linux-gnu".into(),
-                version: "2.1.0".into(),
-                artifact: "../hex".into(),
-                bytes: 3,
-                sha256: "a".repeat(64),
-            })
-            .is_err()
-        );
-        assert!(
-            validate_manifest(&Manifest {
-                schema_version: 1,
-                channel: "stable".into(),
-                target: "x86_64-unknown-linux-gnu".into(),
-                version: "2.1.0-beta.1".into(),
-                artifact: format!("HEX-2.1.0-beta.1-{}-x86_64-linux", "a".repeat(64)),
-                bytes: 3,
-                sha256: "a".repeat(64),
-            })
-            .is_err()
-        );
-    }
 
     #[test]
     fn activation_switches_current_without_removing_the_old_version() {
@@ -446,27 +202,5 @@ mod tests {
         assert_eq!(fs::read(root.join("versions/1.0.0/hex")).unwrap(), b"old");
         assert!(!root.join("versions/0.9.0").exists());
         let _ = fs::remove_dir_all(root);
-    }
-
-    #[test]
-    fn artifact_requires_the_signed_size_and_checksum() {
-        let path =
-            std::env::temp_dir().join(format!("hex-updater-artifact-test-{}", std::process::id()));
-        fs::write(&path, b"new").unwrap();
-        let mut manifest = Manifest {
-            schema_version: 1,
-            channel: "stable".into(),
-            target: "x86_64-unknown-linux-gnu".into(),
-            version: "2.1.0".into(),
-            artifact: format!("HEX-2.1.0-{}-x86_64-linux", "a".repeat(64)),
-            bytes: 3,
-            sha256: sha256(&path).unwrap(),
-        };
-        assert!(verify_artifact(&path, &manifest).is_ok());
-        manifest.sha256 = "a".repeat(64);
-        assert!(verify_artifact(&path, &manifest).is_err());
-        manifest.bytes = 4;
-        assert!(verify_artifact(&path, &manifest).is_err());
-        let _ = fs::remove_file(path);
     }
 }

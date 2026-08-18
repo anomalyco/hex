@@ -50,6 +50,22 @@ pub fn set_enabled(enabled: bool) -> Result<()> {
     Ok(())
 }
 
+/// Rewrite an existing startup registration to a new executable, e.g.
+/// after a self-update activates a new version directory. Does nothing
+/// when launch at login is disabled.
+pub fn repoint(executable: &Path) -> Result<()> {
+    if !is_enabled()? {
+        return Ok(());
+    }
+    let current_user = RegKey::predef(HKEY_CURRENT_USER);
+    let (key, _) = current_user
+        .create_subkey(RUN_KEY)
+        .wrap_err("could not open Windows startup applications")?;
+    key.set_value(VALUE_NAME, &startup_command(executable))
+        .wrap_err("could not repoint the HEX startup registration")?;
+    Ok(())
+}
+
 fn startup_command(executable: &Path) -> String {
     format!(r#""{}" app --hidden"#, executable.display())
 }

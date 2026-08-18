@@ -122,6 +122,7 @@ struct WindowsApp {
     history_search: String,
     history_search_input: Entity<TextInput>,
     _history_search_subscription: Subscription,
+    restart_scheduled: bool,
     model_catalog_language_filter: Option<String>,
     model_catalog_language_dropdown_open: bool,
     model_catalog_language_dropdown_bounds: Option<Bounds<Pixels>>,
@@ -272,6 +273,7 @@ pub fn open(event_path: PathBuf, shutdown: &'static AtomicBool, start_hidden: bo
                             history_search: String::new(),
                             history_search_input,
                             _history_search_subscription: history_search_subscription,
+                            restart_scheduled: false,
                             history_entries,
                             selected_history,
                             history_copied: None,
@@ -1515,6 +1517,9 @@ impl DesktopHost for WindowsDesktopHost {
                 crate::windows_updater::UpdateCheck::Available { .. } => {
                     DesktopUpdateStatus::Available
                 }
+                crate::windows_updater::UpdateCheck::ReadyToRestart { .. } => {
+                    DesktopUpdateStatus::ReadyToRestart
+                }
                 crate::windows_updater::UpdateCheck::Failed => DesktopUpdateStatus::Failed,
             },
         }
@@ -2632,7 +2637,7 @@ impl WindowsApp {
                                         ))
                                         .child(settings_row(
                                             "Software updates",
-                                            "Checks the GitHub releases page in the background",
+                                            "Checks for new HEX releases in the background",
                                             match self.host.updater.state() {
                                                 crate::windows_updater::UpdateCheck::Checking => {
                                                     header_button(tr("Checking"))
@@ -2650,6 +2655,41 @@ impl WindowsApp {
                                                 .text_color(rgb(accent_color()))
                                                 .on_click(cx.listener(move |_, _, _, cx| {
                                                     cx.open_url(&url);
+                                                }))
+                                                .into_any_element(),
+                                                crate::windows_updater::UpdateCheck::ReadyToRestart {
+                                                    version,
+                                                    executable,
+                                                } => header_button(tr_fill(
+                                                    "Restart into {}",
+                                                    &version,
+                                                ))
+                                                .id("windows-update-check")
+                                                .text_color(rgb(accent_color()))
+                                                .when(self.restart_scheduled, |button| {
+                                                    button.opacity(0.5)
+                                                })
+                                                .on_click(cx.listener(move |this, _, _, cx| {
+                                                    // One watcher only; a second click while the
+                                                    // quit drains would spawn a second instance.
+                                                    if this.restart_scheduled {
+                                                        return;
+                                                    }
+                                                    match crate::windows_updater::relaunch_at(
+                                                        &executable,
+                                                    ) {
+                                                        Ok(()) => {
+                                                            this.restart_scheduled = true;
+                                                            this.host.stop();
+                                                            cx.quit();
+                                                        }
+                                                        Err(error) => {
+                                                            this.host.settings_error = Some(
+                                                                format!("Could not restart HEX: {error:#}"),
+                                                            );
+                                                            cx.notify();
+                                                        }
+                                                    }
                                                 }))
                                                 .into_any_element(),
                                                 crate::windows_updater::UpdateCheck::Current

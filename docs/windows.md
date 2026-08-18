@@ -107,10 +107,10 @@ current-user startup registry, UI Automation, and Windows capture APIs.
 | Recognition hints for Whisper-family models | Implemented |
 | Release microphone while idle | Implemented; mutually exclusive with audio pre-roll, as documented in Settings |
 | While-dictating audio control (mute other apps or pause media) | Implemented via WASAPI session volumes and GSMTC |
-| Background update checks | Implemented; checks GitHub releases and links to the download — no self-updating installer yet |
+| Signed automatic self-update for managed installs | Implemented; the same ed25519 feed contract as Linux, activating into a user-local versions directory with a restart button — source builds keep the GitHub release link |
 | Web-domain mode rules and browser context via UI Automation | Implemented; the page URL comes from the browser's UIA document element, bounded so a hung provider degrades to application-only context |
 | Opt-in voice Commands | Missing; blocked on a Windows streaming command model |
-| Packaged onboarding, signed installer, and automatic self-update | Missing |
+| Packaged onboarding and an installer that creates the managed layout | Missing; self-update activates only for installs under the user profile's support versions directory, and until the installer provides a stable launcher reading `current-version`, shortcuts pinned to a specific `versions\<v>\hex.exe` go stale after two updates prune it |
 | Developer Meetings, live drafts, and meeting paste | Missing |
 | Local transcription API and public TypeScript SDK host lifecycle on Windows | Missing |
 
@@ -125,6 +125,9 @@ The Windows listener preserves physical press/release timestamps, keeps audio
 capture off the transcription and paste worker, and restores the previous
 clipboard only when no newer clipboard change supersedes it. The optimized
 MSVC release build is verified with GPUI's DirectX shaders. The next parity
-slices are packaging/updating, the local transcription API host, and the
-developer-only Meetings surface; opt-in Commands wait on a Windows streaming
-command model.
+slices are packaged onboarding with an installer that creates the managed
+versions layout, the local transcription API host, and the developer-only
+Meetings surface; opt-in Commands wait on a Windows streaming command model.
+Windows releases are prepared and published with
+[`scripts/release-windows.sh`](../scripts/release-windows.sh), which signs
+the update feed with the same release key as Linux.
