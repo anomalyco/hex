@@ -676,6 +676,7 @@ impl WindowsDesktopHost {
         let paste_last_hotkey = self.settings.paste_last_hotkey.clone();
         let double_tap_lock = self.settings.double_tap_lock;
         let double_tap_only = self.settings.double_tap_only;
+        let while_dictating = self.settings.while_dictating;
         let feedback_volume = self.settings.feedback_volume;
         let history = self.history.clone();
         let last_dictation = self.last_dictation.clone();
@@ -694,6 +695,7 @@ impl WindowsDesktopHost {
                         paste_last_hotkey,
                         double_tap_lock,
                         double_tap_only,
+                        while_dictating,
                         feedback_volume,
                         history,
                         last_dictation,
@@ -869,6 +871,26 @@ impl WindowsDesktopHost {
             }
             Err(error) => {
                 self.settings_error = Some(format!("Could not save double-tap lock: {error:#}"));
+            }
+        }
+    }
+
+    fn set_while_dictating(&mut self, behavior: crate::windows_settings::WhileDictating) {
+        if behavior == self.settings.while_dictating {
+            return;
+        }
+        let mut candidate = self.settings.clone();
+        candidate.while_dictating = behavior;
+        match candidate.save() {
+            Ok(()) => {
+                self.settings = candidate;
+                self.settings_error = None;
+                self.restart_listener_for_settings();
+            }
+            Err(error) => {
+                self.settings_error = Some(format!(
+                    "Could not save the while-dictating setting: {error:#}"
+                ));
             }
         }
     }
@@ -1822,6 +1844,31 @@ impl WindowsApp {
                     .text_color(rgb(TEXT_SOFT))
                     .child(volume_label),
             );
+        let while_dictating = self.host.settings.while_dictating;
+        let while_dictating_control = segmented_control().children(
+            [
+                (crate::windows_settings::WhileDictating::Mute, "Mute"),
+                (
+                    crate::windows_settings::WhileDictating::PauseMedia,
+                    "Pause media",
+                ),
+                (
+                    crate::windows_settings::WhileDictating::DoNothing,
+                    "Do nothing",
+                ),
+            ]
+            .into_iter()
+            .enumerate()
+            .map(|(index, (value, label))| {
+                segmented_item(while_dictating == value)
+                    .id(("windows-while-dictating", index))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.host.set_while_dictating(value);
+                        cx.notify();
+                    }))
+                    .child(tr(label))
+            }),
+        );
         let indicator_position = self.host.settings.indicator_position;
         let indicator_control = segmented_control().children(
             [
@@ -2165,6 +2212,11 @@ impl WindowsApp {
                                                 cx.notify();
                                             })),
                                         )
+                                        .child(settings_row(
+                                            "While dictating",
+                                            "Control other audio while a dictation records",
+                                            while_dictating_control,
+                                        ))
                                         .child(settings_row(
                                             "Recording indicator",
                                             "Show the dictation pill at the top or bottom of the screen",

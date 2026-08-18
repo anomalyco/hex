@@ -21,6 +21,7 @@ pub struct WindowsSettings {
     pub paste_last_hotkey: Option<WindowsHotkey>,
     pub double_tap_lock: bool,
     pub double_tap_only: bool,
+    pub while_dictating: WhileDictating,
     pub feedback_volume: u8,
     pub ui_language: Option<String>,
     pub indicator_position: IndicatorPosition,
@@ -37,6 +38,16 @@ pub enum IndicatorPosition {
     Top,
     Bottom,
     Hidden,
+}
+
+/// What happens to other applications' audio while a dictation records.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WhileDictating {
+    Mute,
+    PauseMedia,
+    #[default]
+    DoNothing,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -60,6 +71,7 @@ impl Default for WindowsSettings {
             paste_last_hotkey: Some(WindowsHotkey::paste_last_default()),
             double_tap_lock: true,
             double_tap_only: false,
+            while_dictating: WhileDictating::default(),
             feedback_volume: 50,
             ui_language: None,
             indicator_position: IndicatorPosition::default(),

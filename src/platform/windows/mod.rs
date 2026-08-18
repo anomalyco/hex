@@ -2,6 +2,7 @@
 //! dictation, global hotkeys, paste, settings, and updater.
 
 pub mod app;
+pub mod audio_control;
 pub mod dictation;
 pub mod i18n;
 pub mod indicator;

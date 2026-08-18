@@ -48,6 +48,7 @@ pub struct WindowsDictationConfig {
     pub paste_last_hotkey: Option<WindowsHotkey>,
     pub double_tap_lock: bool,
     pub double_tap_only: bool,
+    pub while_dictating: crate::windows_settings::WhileDictating,
     pub feedback_volume: u8,
     pub history: Option<crate::history::History>,
     pub last_dictation: Arc<Mutex<Option<String>>>,
@@ -78,6 +79,7 @@ pub fn run_with_transcriber(
         paste_last_hotkey,
         double_tap_lock,
         double_tap_only,
+        while_dictating,
         feedback_volume,
         history,
         last_dictation,
@@ -110,6 +112,7 @@ pub fn run_with_transcriber(
         double_tap_lock,
         double_tap_lock && double_tap_only,
     )?;
+    let audio_suppressor = crate::windows_audio_control::AudioSuppressor::start(while_dictating);
     let (jobs, job_receiver) = mpsc::sync_channel::<OutputJob>(2);
     let (result_sender, results) = mpsc::channel();
     let worker = thread::Builder::new()
@@ -159,6 +162,9 @@ pub fn run_with_transcriber(
                     capture.start_at(occurred_at);
                     recording = true;
                     recording_feedback_started = false;
+                    if let Some(suppressor) = &audio_suppressor {
+                        suppressor.suppress();
+                    }
                     if let Some(indicator) = &indicator {
                         indicator.send(crate::windows_indicator::WindowsIndicatorEvent::Recording);
                     }
@@ -166,6 +172,9 @@ pub fn run_with_transcriber(
                     emit_state(&mut events, VoiceState::Dictating, input.device_name())?;
                 }
                 HotkeyAction::Finish if recording => {
+                    if let Some(suppressor) = &audio_suppressor {
+                        suppressor.restore();
+                    }
                     if !recording_feedback_started && capture.become_intentional(occurred_at) {
                         crate::feedback::play(crate::feedback::Tone::DictationStart);
                         recording_feedback_started = true;
@@ -200,6 +209,9 @@ pub fn run_with_transcriber(
                     )?;
                 }
                 HotkeyAction::Cancel if recording => {
+                    if let Some(suppressor) = &audio_suppressor {
+                        suppressor.restore();
+                    }
                     if recording_feedback_started {
                         crate::feedback::play(crate::feedback::Tone::Cancel);
                     }
