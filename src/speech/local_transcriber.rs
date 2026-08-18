@@ -150,6 +150,16 @@ impl LocalTranscriber {
         let language = definition
             .runtime_language_hint(&selection.language)
             .map(str::to_string);
+        // Recognition hints softly prime Whisper's decoder as its initial
+        // prompt; validate() already rejects hints on unsupported models.
+        let recognition_hints = selection.recognition_hints.trim();
+        let family =
+            (definition.supports_recognition_hints && !recognition_hints.is_empty()).then(|| {
+                transcribe_cpp::RunExtension::Whisper(transcribe_cpp::WhisperRunOptions {
+                    initial_prompt: Some(recognition_hints.to_string()),
+                    ..Default::default()
+                })
+            });
         let device_label = format!("{} ({})", device.description, device.kind);
         tracing::info!(
             backend = device.kind,
@@ -167,6 +177,7 @@ impl LocalTranscriber {
                     TimestampKind::Segment
                 },
                 language,
+                family,
                 ..Default::default()
             },
             device_label,

@@ -100,6 +100,7 @@ const TRANSLATIONS: &[(&str, [&str; 5])] = &[
     ("Speech models", ["Modele mowy", "语音模型", "音声モデル", "Sprachmodelle", "Modelos de voz"]),
     ("All languages", ["Wszystkie języki", "所有语言", "すべての言語", "Alle Sprachen", "Todos los idiomas"]),
     ("Recognition hints", ["Podpowiedzi rozpoznawania", "识别提示", "認識ヒント", "Erkennungshinweise", "Sugerencias de reconocimiento"]),
+    ("Names and terms to softly prime the speech model", ["Nazwy i terminy delikatnie podpowiadane modelowi mowy", "用于轻度引导语音模型的名称和术语", "音声モデルにそっと知らせる名前や用語", "Namen und Begriffe, die das Sprachmodell sanft vorbereiten", "Nombres y términos que orientan suavemente al modelo de voz"]),
     ("Fastest", ["Najszybszy", "最快", "最速", "Am schnellsten", "Más rápido"]),
     ("Most accurate", ["Najdokładniejszy", "最准确", "最高精度", "Am genauesten", "Más preciso"]),
     ("Switches dictation to {}", ["Zmieni język dyktowania na {}", "会将听写语言切换为 {}", "音声入力言語を {} に切り替えます", "Wechselt die Diktiersprache zu {}", "Cambia el dictado a {}"]),

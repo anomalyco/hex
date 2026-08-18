@@ -3,7 +3,7 @@ use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::sync::{Arc, Mutex, RwLock};
 use std::thread::JoinHandle;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use color_eyre::Result;
 use color_eyre::eyre::eyre;
@@ -96,6 +96,7 @@ struct WindowsDesktopHost {
     indicator: crate::windows_indicator::WindowsIndicatorSender,
     replacements: Arc<RwLock<crate::text_replacements::ReplacementSet>>,
     prepared_transcriber: Option<crate::local_transcriber::LocalTranscriber>,
+    hints_restart_after: Option<Instant>,
     transcription_preparation: Option<TranscriptionPreparation>,
     transcription_error: Option<String>,
     updater: crate::windows_updater::WindowsUpdater,
@@ -110,6 +111,8 @@ struct WindowsApp {
     history_clear_armed: bool,
     replacement_inputs: Vec<ReplacementInputs>,
     transcription_picker: TranscriptionPickerState,
+    recognition_hints_input: Entity<TextInput>,
+    _recognition_hints_subscription: Subscription,
     model_catalog_language_filter: Option<String>,
     model_catalog_language_dropdown_open: bool,
     model_catalog_language_dropdown_bounds: Option<Bounds<Pixels>>,
@@ -211,9 +214,27 @@ pub fn open(event_path: PathBuf, shutdown: &'static AtomicBool, start_hidden: bo
                             .iter()
                             .map(|replacement| WindowsApp::replacement_inputs(replacement, cx))
                             .collect();
+                        let recognition_hints_input = cx.new(|cx| {
+                            crate::text_input::TextInput::multiline_with_height(
+                                cx,
+                                "Names and terms Whisper should expect, e.g. OpenCode, Effect...",
+                                &host.settings.transcription.recognition_hints,
+                                px(76.0),
+                            )
+                        });
+                        let recognition_hints_subscription = cx.subscribe(
+                            &recognition_hints_input,
+                            |this: &mut WindowsApp, input, _: &TextChanged, cx| {
+                                let hints = input.read(cx).text().to_string();
+                                this.host.set_recognition_hints(hints);
+                                cx.notify();
+                            },
+                        );
                         WindowsApp {
                             host,
                             pane: WindowsPane::Settings,
+                            recognition_hints_input,
+                            _recognition_hints_subscription: recognition_hints_subscription,
                             history_entries,
                             selected_history,
                             history_copied: None,
@@ -614,6 +635,7 @@ impl WindowsDesktopHost {
             indicator,
             replacements,
             prepared_transcriber: None,
+            hints_restart_after: None,
             transcription_preparation: None,
             transcription_error: None,
             updater: crate::windows_updater::WindowsUpdater::start(),
@@ -647,7 +669,7 @@ impl WindowsDesktopHost {
         let (result_sender, result_receiver) = mpsc::channel();
         let event_path = self.event_path.clone();
         let device = self.settings.microphone.clone();
-        let selection = self.settings.transcription.clone();
+        let selection = self.runtime_selection();
         let hotkey = self.settings.dictation_hotkey.clone();
         let paste_last_hotkey = self.settings.paste_last_hotkey.clone();
         let double_tap_lock = self.settings.double_tap_lock;
@@ -914,6 +936,42 @@ impl WindowsDesktopHost {
         Ok(())
     }
 
+    /// The stored transcription selection with recognition hints stripped
+    /// when the model cannot use them, so validation never rejects a load
+    /// just because hints linger from a Whisper session.
+    fn runtime_selection(&self) -> crate::transcription_models::TranscriptionSelection {
+        let mut selection = self.settings.transcription.clone();
+        if !crate::transcription_models::definition(selection.model).supports_recognition_hints {
+            selection.recognition_hints = String::new();
+        }
+        selection
+    }
+
+    /// Persist edited recognition hints; a running Whisper listener restarts
+    /// after the debounce window in [`Self::refresh`] so they take effect.
+    fn set_recognition_hints(&mut self, hints: String) {
+        if self.settings.transcription.recognition_hints == hints {
+            return;
+        }
+        let mut candidate = self.settings.clone();
+        candidate.transcription.recognition_hints = hints;
+        match candidate.save() {
+            Ok(()) => {
+                self.settings = candidate;
+                self.settings_error = None;
+                if crate::transcription_models::definition(self.settings.transcription.model)
+                    .supports_recognition_hints
+                    && self.is_running()
+                {
+                    self.hints_restart_after = Some(Instant::now());
+                }
+            }
+            Err(error) => {
+                self.settings_error = Some(format!("Could not save recognition hints: {error:#}"));
+            }
+        }
+    }
+
     fn restart_listener_for_settings(&mut self) {
         if !self.is_running() {
             return;
@@ -931,6 +989,13 @@ impl WindowsDesktopHost {
     }
 
     fn refresh(&mut self) {
+        if self
+            .hints_restart_after
+            .is_some_and(|edited| edited.elapsed() >= Duration::from_millis(1200))
+        {
+            self.hints_restart_after = None;
+            self.restart_listener_for_settings();
+        }
         let transcription_result =
             self.transcription_preparation
                 .as_ref()
@@ -959,6 +1024,10 @@ impl WindowsDesktopHost {
                     Ok(prepared) => {
                         let mut candidate = self.settings.clone();
                         candidate.transcription = prepared.selection;
+                        // Hints persist across model switches; models that
+                        // cannot use them get a stripped copy at load time.
+                        candidate.transcription.recognition_hints =
+                            self.settings.transcription.recognition_hints.clone();
                         match candidate.save() {
                             Ok(()) => {
                                 self.settings = candidate;
@@ -1062,7 +1131,13 @@ impl WindowsDesktopHost {
         let selection = crate::transcription_models::TranscriptionSelection {
             model,
             language,
-            recognition_hints: String::new(),
+            recognition_hints: if crate::transcription_models::definition(model)
+                .supports_recognition_hints
+            {
+                self.settings.transcription.recognition_hints.clone()
+            } else {
+                String::new()
+            },
         };
         crate::transcription_models::validate(&selection)?;
         self.restart_listener_for_settings();
@@ -1951,6 +2026,22 @@ impl WindowsApp {
                                                     .h(px(0.0)),
                                                 ),
                                         ))
+                                        .when(
+                                            crate::transcription_models::definition(
+                                                transcription.selection.model,
+                                            )
+                                            .supports_recognition_hints,
+                                            |panel| {
+                                                panel.child(settings_row(
+                                                    "Recognition hints",
+                                                    "Names and terms to softly prime the speech model",
+                                                    div()
+                                                        .w(px(320.0))
+                                                        .py_2()
+                                                        .child(self.recognition_hints_input.clone()),
+                                                ))
+                                            },
+                                        )
                                         .child(settings_row(
                                             "Microphone",
                                             "Uses the selected WASAPI input or the Windows default",
