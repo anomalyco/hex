@@ -59,6 +59,7 @@ pub struct WindowsDictationConfig {
     pub indicator: Option<crate::windows_indicator::WindowsIndicatorSender>,
     pub replacements: Arc<RwLock<crate::text_replacements::ReplacementSet>>,
     pub modes: Arc<RwLock<Vec<crate::windows_settings::WindowsMode>>>,
+    pub voice_action_model: Arc<RwLock<Option<crate::opencode::Model>>>,
     pub fallback_to_default_device: bool,
 }
 
@@ -93,6 +94,7 @@ pub fn run_with_transcriber(
         indicator,
         replacements,
         modes,
+        voice_action_model,
         fallback_to_default_device,
     } = config;
     let _indicator_guard = IndicatorGuard(indicator.clone());
@@ -168,6 +170,7 @@ pub fn run_with_transcriber(
                         &mut transcriber,
                         &mut paster,
                         &last_dictation,
+                        &voice_action_model,
                     ),
                     OutputJob::PasteLast => process_paste_last(&mut paster, &last_dictation),
                 };
@@ -720,6 +723,7 @@ fn process_voice_action_job(
     transcriber: &mut LocalTranscriber,
     paster: &mut Result<WindowsPaster>,
     last_dictation: &Mutex<Option<String>>,
+    voice_action_model: &RwLock<Option<crate::opencode::Model>>,
 ) -> JobResult {
     let started = Instant::now();
     let transcription = transcriber
@@ -736,14 +740,15 @@ fn process_voice_action_job(
             tracing::warn!(%error, "could not copy the selection for the voice action");
             None
         });
-        let prompt = crate::windows_voice_action::voice_action_prompt(
+        let model = voice_action_model
+            .read()
+            .unwrap_or_else(|error| error.into_inner())
+            .clone();
+        let reply = crate::windows_voice_action::fulfil(
             &instruction,
             application.as_deref(),
             selected.as_deref(),
-        );
-        let reply = crate::windows_voice_action::generate(
-            &prompt,
-            crate::windows_voice_action::GENERATION_DEADLINE,
+            model.as_ref(),
         )
         .map_err(|error| format!("{error:#}"))?;
         paster.paste(&reply).map_err(|error| format!("{error:#}"))?;

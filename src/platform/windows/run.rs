@@ -169,6 +169,9 @@ pub fn run(shutdown: &'static AtomicBool) -> Result<()> {
                     crate::text_replacements::ReplacementSet::new(&settings.text_replacements),
                 )),
                 modes: Arc::new(std::sync::RwLock::new(settings.modes.clone())),
+                voice_action_model: Arc::new(std::sync::RwLock::new(
+                    settings.voice_action_model.clone(),
+                )),
                 fallback_to_default_device: false,
             };
             crate::windows_dictation::run(&event_path, &selection.resolve()?, config, shutdown)

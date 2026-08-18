@@ -1,4 +1,4 @@
-use crate::events::{EventReader, TranscriptPhase, VoiceEvent, VoiceState};
+use crate::events::{DictationPhase, EventReader, TranscriptPhase, VoiceEvent, VoiceState};
 
 const TRANSCRIPT_LIMIT: usize = 8;
 
@@ -9,6 +9,9 @@ pub(crate) struct DesktopActivity {
     pub(crate) device: Option<String>,
     pub(crate) transcripts: Vec<String>,
     pub(crate) error: Option<String>,
+    /// The newest dictation failure, cleared by any later completed
+    /// transcript, so silent failures still reach the settings window.
+    pub(crate) last_failure: Option<String>,
 }
 
 impl DesktopActivity {
@@ -49,6 +52,12 @@ impl DesktopActivity {
                     ..
                 } if activity.transcripts.len() < TRANSCRIPT_LIMIT && !text.trim().is_empty() => {
                     activity.transcripts.push(text.clone());
+                }
+                VoiceEvent::Dictation {
+                    phase: DictationPhase::Failed(error),
+                    ..
+                } if activity.last_failure.is_none() && activity.transcripts.is_empty() => {
+                    activity.last_failure = Some(error.clone());
                 }
                 _ => {}
             }
@@ -103,6 +112,31 @@ mod tests {
         assert_eq!(activity.transcripts.len(), TRANSCRIPT_LIMIT);
         assert_eq!(activity.transcripts[0], "Transcript 9");
         assert_eq!(activity.transcripts[7], "Transcript 2");
+    }
+
+    #[test]
+    fn newest_failure_surfaces_until_a_later_transcript_completes() {
+        let failed = VoiceEvent::Dictation {
+            timestamp_ms: 2,
+            phase: DictationPhase::Failed("OpenCode generation failed".into()),
+            text: String::new(),
+            processing: None,
+        };
+        let completed = VoiceEvent::Transcript {
+            timestamp_ms: 3,
+            phase: TranscriptPhase::Completed,
+            latency_ms: 10,
+            text: "Recovered".into(),
+        };
+
+        let visible = DesktopActivity::from_events([failed.clone()].iter().rev());
+        assert_eq!(
+            visible.last_failure.as_deref(),
+            Some("OpenCode generation failed")
+        );
+
+        let recovered = DesktopActivity::from_events([failed, completed].iter().rev());
+        assert_eq!(recovered.last_failure, None);
     }
 
     #[test]

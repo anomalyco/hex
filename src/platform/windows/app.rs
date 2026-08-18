@@ -96,6 +96,10 @@ struct WindowsDesktopHost {
     indicator: crate::windows_indicator::WindowsIndicatorSender,
     replacements: Arc<RwLock<crate::text_replacements::ReplacementSet>>,
     modes: Arc<RwLock<Vec<crate::windows_settings::WindowsMode>>>,
+    voice_action_model: Arc<RwLock<Option<crate::opencode::Model>>>,
+    opencode_catalog: Option<crate::opencode::ModelCatalog>,
+    opencode_catalog_rx: Option<std::sync::mpsc::Receiver<Result<crate::opencode::ModelCatalog>>>,
+    opencode_catalog_error: Option<String>,
     prepared_transcriber: Option<crate::local_transcriber::LocalTranscriber>,
     hints_restart_after: Option<Instant>,
     transcription_preparation: Option<TranscriptionPreparation>,
@@ -113,6 +117,8 @@ struct WindowsApp {
     replacement_inputs: Vec<ReplacementInputs>,
     transcription_picker: TranscriptionPickerState,
     mode_inputs: Vec<ModeInputs>,
+    voice_model_dropdown_open: bool,
+    voice_model_dropdown_bounds: Option<Bounds<Pixels>>,
     recognition_hints_input: Entity<TextInput>,
     _recognition_hints_subscription: Subscription,
     model_catalog_language_filter: Option<String>,
@@ -258,6 +264,8 @@ pub fn open(event_path: PathBuf, shutdown: &'static AtomicBool, start_hidden: bo
                             replacement_inputs,
                             transcription_picker: TranscriptionPickerState::Closed,
                             mode_inputs,
+                            voice_model_dropdown_open: false,
+                            voice_model_dropdown_bounds: None,
                             model_catalog_language_filter: None,
                             model_catalog_language_dropdown_open: false,
                             model_catalog_language_dropdown_bounds: None,
@@ -630,7 +638,8 @@ impl WindowsDesktopHost {
             &settings.text_replacements,
         )));
         let modes = Arc::new(RwLock::new(settings.modes.clone()));
-        Self {
+        let voice_action_model = Arc::new(RwLock::new(settings.voice_action_model.clone()));
+        let mut host = Self {
             event_path,
             event_reader,
             activity,
@@ -655,12 +664,25 @@ impl WindowsDesktopHost {
             indicator,
             replacements,
             modes,
+            voice_action_model,
+            opencode_catalog: None,
+            opencode_catalog_rx: None,
+            opencode_catalog_error: None,
             prepared_transcriber: None,
             hints_restart_after: None,
             transcription_preparation: None,
             transcription_error: None,
             updater: crate::windows_updater::WindowsUpdater::start(),
+        };
+        // A configured voice-action hotkey with no chosen model adopts the
+        // OpenCode default without a visit to the Voice Action tab.
+        if host.settings.voice_action_hotkey.is_some()
+            && host.settings.voice_action_model.is_none()
+            && crate::windows_voice_action::opencode_installed()
+        {
+            host.request_opencode_catalog();
         }
+        host
     }
 
     fn model_ready(&self) -> bool {
@@ -704,6 +726,7 @@ impl WindowsDesktopHost {
         let indicator = self.indicator.clone();
         let replacements = self.replacements.clone();
         let modes = self.modes.clone();
+        let voice_action_model = self.voice_action_model.clone();
         let prepared_transcriber = self.prepared_transcriber.take();
         let listener_terminated = self.listener_terminated.clone();
         listener_terminated.store(false, Ordering::Release);
@@ -726,6 +749,7 @@ impl WindowsDesktopHost {
                         indicator: Some(indicator),
                         replacements,
                         modes,
+                        voice_action_model,
                         fallback_to_default_device: true,
                     };
                     if let Some(transcriber) = prepared_transcriber {
@@ -915,6 +939,79 @@ impl WindowsDesktopHost {
             Err(error) => {
                 self.settings_error =
                     Some(format!("Could not save the microphone setting: {error:#}"));
+            }
+        }
+    }
+
+    fn set_voice_action_model(&mut self, model: Option<crate::opencode::Model>) {
+        if model == self.settings.voice_action_model {
+            return;
+        }
+        let mut candidate = self.settings.clone();
+        candidate.voice_action_model = model;
+        match candidate.save() {
+            Ok(()) => {
+                *self
+                    .voice_action_model
+                    .write()
+                    .unwrap_or_else(|error| error.into_inner()) =
+                    candidate.voice_action_model.clone();
+                self.settings = candidate;
+                self.settings_error = None;
+            }
+            Err(error) => {
+                self.settings_error =
+                    Some(format!("Could not save the voice action model: {error:#}"));
+            }
+        }
+    }
+
+    /// Fetch the OpenCode model catalog on a worker thread; the refresh
+    /// loop polls the receiver.
+    fn request_opencode_catalog(&mut self) {
+        if self.opencode_catalog_rx.is_some() {
+            return;
+        }
+        let (sender, receiver) = std::sync::mpsc::channel();
+        self.opencode_catalog_rx = Some(receiver);
+        let _ = std::thread::Builder::new()
+            .name("windows-opencode-catalog".into())
+            .spawn(move || {
+                let _ = sender.send(crate::opencode::load_model_catalog());
+            });
+    }
+
+    fn poll_opencode_catalog(&mut self) -> bool {
+        let Some(receiver) = &self.opencode_catalog_rx else {
+            return false;
+        };
+        match receiver.try_recv() {
+            Ok(Ok(catalog)) => {
+                // First load with nothing configured adopts the default.
+                if self.settings.voice_action_model.is_none()
+                    && let Some(default) = catalog
+                        .default_key
+                        .as_ref()
+                        .and_then(|key| catalog.models.iter().find(|choice| &choice.key == key))
+                {
+                    self.set_voice_action_model(Some(default.model()));
+                }
+                self.opencode_catalog = Some(catalog);
+                self.opencode_catalog_error = None;
+                self.opencode_catalog_rx = None;
+                true
+            }
+            Ok(Err(error)) => {
+                self.opencode_catalog_error = Some(format!("{error:#}"));
+                self.opencode_catalog_rx = None;
+                true
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => false,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                self.opencode_catalog_error =
+                    Some("the OpenCode catalog worker stopped unexpectedly".into());
+                self.opencode_catalog_rx = None;
+                true
             }
         }
     }
@@ -1115,6 +1212,7 @@ impl WindowsDesktopHost {
     }
 
     fn refresh(&mut self) {
+        self.poll_opencode_catalog();
         if self
             .hints_restart_after
             .is_some_and(|edited| edited.elapsed() >= Duration::from_millis(1200))
@@ -1617,6 +1715,7 @@ impl WindowsApp {
     fn close_popups(&mut self) {
         self.transcription_picker = TranscriptionPickerState::Closed;
         self.model_catalog_language_dropdown_open = false;
+        self.voice_model_dropdown_open = false;
         self.microphone_picker_open = false;
         self.hotkey_picker_open = false;
         self.transcription_dropdown_open = false;
@@ -1856,6 +1955,9 @@ impl WindowsApp {
                     .child(tr("Voice Action"))
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.pane = WindowsPane::VoiceAction;
+                        if crate::windows_voice_action::opencode_installed() {
+                            this.host.request_opencode_catalog();
+                        }
                         cx.notify();
                     })),
             )
@@ -2181,6 +2283,28 @@ impl WindowsApp {
                                                                         .text_color(rgb(MUTED))
                                                                         .truncate()
                                                                         .child(status_hint),
+                                                                )
+                                                                .when_some(
+                                                                    snapshot
+                                                                        .activity
+                                                                        .last_failure
+                                                                        .clone(),
+                                                                    |column, failure| {
+                                                                        column.child(
+                                                                            div()
+                                                                                .text_size(px(
+                                                                                    12.0,
+                                                                                ))
+                                                                                .text_color(rgb(
+                                                                                    CRITICAL,
+                                                                                ))
+                                                                                .truncate()
+                                                                                .child(tr_fill(
+                                                                                    "Last dictation failed: {}",
+                                                                                    &failure,
+                                                                                )),
+                                                                        )
+                                                                    },
                                                                 ),
                                                         ),
                                                 )
@@ -2833,6 +2957,52 @@ impl WindowsApp {
                 )
             })
             .child(toggle(if enabled { 1.0 } else { 0.0 }));
+        let current_model = self.host.settings.voice_action_model.clone();
+        let model_label = match (&current_model, &self.host.opencode_catalog) {
+            (Some(model), Some(catalog)) => {
+                let key = format!("{}/{}", model.provider, model.id);
+                catalog
+                    .models
+                    .iter()
+                    .find(|choice| choice.key == key)
+                    .map_or_else(|| model.id.clone(), |choice| choice.name.clone())
+            }
+            (Some(model), None) => model.id.clone(),
+            (None, _) if self.host.opencode_catalog_rx.is_some() => {
+                tr("Loading models").to_string()
+            }
+            (None, _) => tr("Choose a model").to_string(),
+        };
+        let model_control = div()
+            .relative()
+            .child(
+                disclosure_button(model_label)
+                    .id("windows-voice-model")
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        let open = this.voice_model_dropdown_open;
+                        this.close_popups();
+                        this.voice_model_dropdown_open = !open;
+                        if this.voice_model_dropdown_open && this.host.opencode_catalog.is_none() {
+                            this.host.request_opencode_catalog();
+                        }
+                        cx.notify();
+                    })),
+            )
+            .child(
+                canvas(
+                    {
+                        let entity = cx.entity();
+                        move |bounds, _, cx| {
+                            entity.update(cx, |this, _| {
+                                this.voice_model_dropdown_bounds = Some(bounds);
+                            });
+                        }
+                    },
+                    |_, _, _, _| {},
+                )
+                .w_full()
+                .h(px(0.0)),
+            );
         let opencode_status = div()
             .text_size(px(12.0))
             .text_color(if opencode_installed {
@@ -2891,14 +3061,22 @@ impl WindowsApp {
                                     )
                                     .child(settings_section_label("Processing"))
                                     .child(
-                                        settings_panel().child(
-                                            settings_row(
-                                                "OpenCode",
-                                                "Voice actions run through your local OpenCode install",
-                                                opencode_status,
-                                            )
-                                            .border_b_0(),
-                                        ),
+                                        settings_panel()
+                                            .when(opencode_installed, |panel| {
+                                                panel.child(settings_row(
+                                                    "Model",
+                                                    "Fulfils each voice action; served by OpenCode",
+                                                    model_control,
+                                                ))
+                                            })
+                                            .child(
+                                                settings_row(
+                                                    "OpenCode",
+                                                    "Voice actions run through your local OpenCode install",
+                                                    opencode_status,
+                                                )
+                                                .border_b_0(),
+                                            ),
                                     ),
                             ),
                         ),
@@ -3376,6 +3554,82 @@ impl WindowsApp {
                 .overflow_y_scroll()
                 .on_click(|_, _, cx| cx.stop_propagation())
                 .children(items),
+            )
+            .into_any_element()
+    }
+
+    fn render_voice_model_dropdown(
+        &mut self,
+        viewport_height: Pixels,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let Some(bounds) = self.voice_model_dropdown_bounds else {
+            return div().into_any_element();
+        };
+        let backdrop = dropdown_backdrop("windows-voice-model-backdrop").on_click(cx.listener(
+            |this, _, _, cx| {
+                this.voice_model_dropdown_open = false;
+                cx.notify();
+            },
+        ));
+        let width = px(320.0);
+        let Some(catalog) = self.host.opencode_catalog.clone() else {
+            let message = self.host.opencode_catalog_error.clone().map_or_else(
+                || tr("Loading models").to_string(),
+                |error| tr_fill("Models could not be loaded: {}", &error),
+            );
+            return backdrop
+                .child(
+                    dropdown_panel_with_width(bounds, viewport_height, 1, width)
+                        .id("windows-voice-model-dropdown")
+                        .on_click(|_, _, cx| cx.stop_propagation())
+                        .child(
+                            div()
+                                .px_3()
+                                .py_2()
+                                .text_size(px(12.0))
+                                .text_color(rgb(MUTED))
+                                .child(message),
+                        ),
+                )
+                .into_any_element();
+        };
+        let current_key = self
+            .host
+            .settings
+            .voice_action_model
+            .as_ref()
+            .map(|model| format!("{}/{}", model.provider, model.id));
+        let panel_rows = catalog.models.len().max(1);
+        let items = catalog
+            .models
+            .iter()
+            .enumerate()
+            .map(|(index, choice)| {
+                let selected = current_key.as_deref() == Some(choice.key.as_str());
+                let label = if catalog.default_key.as_ref() == Some(&choice.key) {
+                    format!("{} — {}", choice.name, tr("Default"))
+                } else {
+                    choice.name.clone()
+                };
+                let model = choice.model();
+                dropdown_item(("windows-voice-model-option", index), label, selected).on_click(
+                    cx.listener(move |this, _, _, cx| {
+                        cx.stop_propagation();
+                        this.host.set_voice_action_model(Some(model.clone()));
+                        this.voice_model_dropdown_open = false;
+                        cx.notify();
+                    }),
+                )
+            })
+            .collect::<Vec<_>>();
+        backdrop
+            .child(
+                dropdown_panel_with_width(bounds, viewport_height, panel_rows, width)
+                    .id("windows-voice-model-dropdown")
+                    .overflow_y_scroll()
+                    .on_click(|_, _, cx| cx.stop_propagation())
+                    .children(items),
             )
             .into_any_element()
     }
@@ -4045,6 +4299,9 @@ impl Render for WindowsApp {
         let model_catalog_language_dropdown = self
             .model_catalog_language_dropdown_open
             .then(|| self.render_model_catalog_language_dropdown(viewport.height, cx));
+        let voice_model_dropdown = self
+            .voice_model_dropdown_open
+            .then(|| self.render_voice_model_dropdown(viewport.height, cx));
         let microphone_dropdown = self
             .microphone_picker_open
             .then(|| self.render_microphone_dropdown(viewport.height, cx));
@@ -4071,6 +4328,7 @@ impl Render for WindowsApp {
             )
             .children(model_picker)
             .children(model_catalog_language_dropdown)
+            .children(voice_model_dropdown)
             .children(microphone_dropdown)
             .children(transcription_dropdown)
             .children(dictation_language_dropdown)
