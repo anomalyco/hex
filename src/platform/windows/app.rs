@@ -491,6 +491,9 @@ fn create_tray(commands: mpsc::Sender<TrayCommand>) -> Result<TrayIcon> {
         .with_tooltip("HEX Dictation")
         .with_icon(tray_icon()?)
         .with_menu(Box::new(menu))
+        // Left click shows the window (handled above); only right click
+        // opens the menu. The crate default menus on both buttons.
+        .with_menu_on_left_click(false)
         .build()?)
 }
 
