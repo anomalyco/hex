@@ -495,11 +495,10 @@ fn create_tray(commands: mpsc::Sender<TrayCommand>) -> Result<TrayIcon> {
 }
 
 fn tray_icon() -> Result<Icon> {
-    const SIZE: u32 = 32;
     Ok(Icon::from_rgba(
-        crate::windows_ui::tray_icon_rgba(SIZE),
-        SIZE,
-        SIZE,
+        crate::windows_ui::tray_icon_rgba(),
+        crate::windows_ui::TRAY_ICON_SIZE,
+        crate::windows_ui::TRAY_ICON_SIZE,
     )?)
 }
 

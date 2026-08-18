@@ -65,16 +65,6 @@ fn read_accent_light2() -> Option<u32> {
     Some(u32::from(light2[0]) << 16 | u32::from(light2[1]) << 8 | u32::from(light2[2]))
 }
 
-/// Whether the taskbar and system tray use the light theme; tray icon pixels
-/// must invert to stay visible.
-pub(crate) fn tray_uses_light_theme() -> bool {
-    RegKey::predef(HKEY_CURRENT_USER)
-        .open_subkey(r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize")
-        .and_then(|key| key.get_value::<u32, _>("SystemUsesLightTheme"))
-        .map(|value| value != 0)
-        .unwrap_or(false)
-}
-
 /// Give the main window the branded app icon for the taskbar, Alt-Tab, and
 /// the caption. The exe embeds no icon resource, so without this Windows
 /// shows the generic window glyph. PNG bytes are valid modern icon resources.
@@ -146,50 +136,13 @@ pub(crate) fn disable_window_tint(hwnd: HWND) {
     }
 }
 
-/// Anti-aliased monochrome brand glyph for the system tray: the favicon "H"
-/// without its tile, white on the default dark taskbar and near-black when
-/// the taskbar uses the light theme.
-pub(crate) fn tray_icon_rgba(size: u32) -> Vec<u8> {
-    // The H strokes as capsules in the favicon's 64-unit design space,
-    // enlarged to fill the tray canvas.
-    const SEGMENTS: [((f32, f32), (f32, f32)); 3] = [
-        ((14.0, 8.0), (14.0, 56.0)),
-        ((50.0, 8.0), (50.0, 56.0)),
-        ((14.0, 32.0), (50.0, 32.0)),
-    ];
-    const STROKE_RADIUS: f32 = 4.5;
-    let color: [u8; 3] = if tray_uses_light_theme() {
-        [0x1a, 0x1a, 0x1a]
-    } else {
-        [0xff, 0xff, 0xff]
-    };
-    let scale = size as f32 / 64.0;
-    let edge = 1.0 / scale;
-    let mut data = vec![0_u8; (size * size * 4) as usize];
-    for y in 0..size {
-        for x in 0..size {
-            let point_x = (x as f32 + 0.5) / scale;
-            let point_y = (y as f32 + 0.5) / scale;
-            let distance = SEGMENTS
-                .iter()
-                .map(|(a, b)| segment_distance(point_x, point_y, *a, *b))
-                .fold(f32::MAX, f32::min);
-            let coverage = ((STROKE_RADIUS - distance) / edge + 0.5).clamp(0.0, 1.0);
-            if coverage > 0.0 {
-                let index = ((y * size + x) * 4) as usize;
-                data[index..index + 3].copy_from_slice(&color);
-                data[index + 3] = (coverage * 255.0) as u8;
-            }
-        }
-    }
-    data
-}
+/// The 32×32 system-tray icon: the app icon pre-rendered to raw RGBA at
+/// build time from app/AppIcon.icon/Assets/Image.png (full color, so both
+/// taskbar themes use the same pixels).
+pub(crate) const TRAY_ICON_SIZE: u32 = 32;
 
-fn segment_distance(x: f32, y: f32, a: (f32, f32), b: (f32, f32)) -> f32 {
-    let (dx, dy) = (b.0 - a.0, b.1 - a.1);
-    let t = (((x - a.0) * dx + (y - a.1) * dy) / (dx * dx + dy * dy)).clamp(0.0, 1.0);
-    let (nearest_x, nearest_y) = (a.0 + t * dx, a.1 + t * dy);
-    ((x - nearest_x).powi(2) + (y - nearest_y).powi(2)).sqrt()
+pub(crate) fn tray_icon_rgba() -> Vec<u8> {
+    include_bytes!("../../../resources/windows/tray-32.rgba").to_vec()
 }
 
 /// One Segoe Fluent Icons glyph, tinted and sized like text.
