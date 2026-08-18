@@ -39,12 +39,11 @@ pub(crate) fn icon_font() -> &'static str {
 pub(crate) const CAPTION_HEIGHT: f32 = 40.0;
 const CAPTION_BUTTON_WIDTH: f32 = 46.0;
 
-/// Fluent dark control fills that sit between the shared theme constants.
-pub(crate) const CONTROL_FILL: u32 = 0x2d2d2d;
-pub(crate) const CONTROL_FILL_HOVER: u32 = 0x323232;
-pub(crate) const CONTROL_FILL_PRESSED: u32 = 0x272727;
-pub(crate) const CONTROL_STROKE: u32 = 0x383838;
-pub(crate) const DIALOG_STROKE: u32 = 0x3a3a3a;
+// Fluent dark control fills live in the shared token set; re-exported so
+// Windows-only code keeps its historical paths.
+pub(crate) use crate::desktop_ui::{
+    CONTROL_FILL, CONTROL_FILL_PRESSED, CONTROL_STROKE, DIALOG_STROKE,
+};
 pub(crate) const SUCCESS: u32 = 0x6ccb5f;
 pub(crate) const CRITICAL: u32 = 0xff99a4;
 const CLOSE_HOVER: u32 = 0xc42b1c;
@@ -206,18 +205,7 @@ pub(crate) fn fluent_icon(glyph: &'static str, size: f32, color: u32) -> AnyElem
         .into_any_element()
 }
 
-/// The 3×16 accent pill Windows 11 places on the left edge of the selected
-/// navigation or list item. Rendered transparent when unselected so layouts
-/// remain stable.
-pub(crate) fn selection_pill(selected: bool) -> AnyElement {
-    div()
-        .flex_none()
-        .w(px(3.0))
-        .h(px(16.0))
-        .rounded(px(1.5))
-        .when(selected, |pill| pill.bg(rgb(accent())))
-        .into_any_element()
-}
+pub(crate) use crate::desktop_ui::selection_pill;
 
 /// The custom caption bar: brand at the left, one OS drag region across, and
 /// native-behaving minimize/maximize/close buttons. gpui routes the buttons

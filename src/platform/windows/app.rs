@@ -37,9 +37,10 @@ use crate::desktop_ui::{
     CANVAS, DIVIDER, FAINT, LINE, MUTED, NavigationIcon, OVERLAY_PANEL, OVERLAY_SMOKE,
     PANE_LIST_WIDTH, PANEL_RADIUS, SIDEBAR_WIDTH, SURFACE, SURFACE_HOVER, SURFACE_SELECTED, TEXT,
     TEXT_ON_ACCENT, TEXT_SOFT, accent_color, compact_button, compact_panel, disclosure_button,
-    empty_message, error_message, header_button, hotkey_keycaps, navigation_item, pane_body,
-    pane_content, pane_header_with_action, section_label, segmented_control, segmented_item,
-    settings_panel, settings_row, settings_section_label, sidebar_frame, toggle, window_frame,
+    dropdown_backdrop, dropdown_item, dropdown_panel, dropdown_panel_with_width, empty_message,
+    error_message, header_button, hotkey_keycaps, navigation_item, pane_body, pane_content,
+    pane_header_with_action, section_label, segmented_control, segmented_item, settings_panel,
+    settings_row, settings_section_label, sidebar_frame, toggle, window_frame,
 };
 use crate::events::EventReader;
 use crate::history::{History, HistoryEntry, HistoryRetention};
@@ -3420,141 +3421,6 @@ impl Render for WindowsApp {
     }
 }
 
-fn dropdown_backdrop(id: &'static str) -> gpui::Stateful<gpui::Div> {
-    div()
-        .id(id)
-        .absolute()
-        .top_0()
-        .left_0()
-        .size_full()
-        .occlude()
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct DropdownPanelLayout {
-    height: Pixels,
-    top: Pixels,
-}
-
-const DROPDOWN_GAP: f32 = 4.0;
-const DROPDOWN_MARGIN: f32 = 8.0;
-const DROPDOWN_MAX_HEIGHT: f32 = 360.0;
-const DROPDOWN_ROW_HEIGHT: f32 = 34.0;
-const DROPDOWN_ROW_GAP: f32 = 2.0;
-const DROPDOWN_PADDING: f32 = 4.0;
-
-fn dropdown_rows_height(rows: usize) -> Pixels {
-    px(DROPDOWN_PADDING * 2.0)
-        + px(DROPDOWN_ROW_HEIGHT) * rows
-        + px(DROPDOWN_ROW_GAP) * rows.saturating_sub(1)
-}
-
-/// The tallest whole-row height that fits `available`, so a clamped panel
-/// never slices a row in half at its scroll edge.
-fn dropdown_fit_height(row_count: usize, available: Pixels) -> Pixels {
-    let content = dropdown_rows_height(row_count);
-    if content <= available {
-        return content;
-    }
-    let usable = f32::from(available) - DROPDOWN_PADDING * 2.0 + DROPDOWN_ROW_GAP;
-    let rows = (usable / (DROPDOWN_ROW_HEIGHT + DROPDOWN_ROW_GAP))
-        .floor()
-        .max(1.0) as usize;
-    dropdown_rows_height(rows.min(row_count))
-}
-
-fn dropdown_panel_layout(
-    anchor_top: Pixels,
-    viewport_height: Pixels,
-    row_count: usize,
-) -> DropdownPanelLayout {
-    let row_count = row_count.max(1);
-    let max_height = px(DROPDOWN_MAX_HEIGHT);
-    let gap = px(DROPDOWN_GAP);
-    let margin = px(DROPDOWN_MARGIN);
-    let downward_top = anchor_top + gap;
-    let below = (viewport_height - margin - downward_top).max(Pixels::ZERO);
-    let above =
-        (anchor_top - gap - px(crate::windows_ui::CAPTION_HEIGHT) - margin).max(Pixels::ZERO);
-
-    if below >= dropdown_fit_height(row_count, max_height) || below >= above {
-        DropdownPanelLayout {
-            height: dropdown_fit_height(row_count, below.min(max_height)),
-            top: downward_top,
-        }
-    } else {
-        let height = dropdown_fit_height(row_count, above.min(max_height));
-        DropdownPanelLayout {
-            height,
-            top: anchor_top - gap - height,
-        }
-    }
-}
-
-/// A viewport-bounded Fluent flyout matching the width of its ComboBox.
-/// Long lists receive a real fixed-height scroll viewport, and a flyout near
-/// the bottom edge opens upward when that gives it more useful space.
-fn dropdown_panel(bounds: Bounds<Pixels>, viewport_height: Pixels, row_count: usize) -> gpui::Div {
-    dropdown_panel_with_width(bounds, viewport_height, row_count, bounds.size.width)
-}
-
-/// A dropdown panel wider than its trigger; the extra width grows leftward
-/// so right-edge triggers keep the panel inside the window.
-fn dropdown_panel_with_width(
-    bounds: Bounds<Pixels>,
-    viewport_height: Pixels,
-    row_count: usize,
-    width: Pixels,
-) -> gpui::Div {
-    let width = width.max(bounds.size.width);
-    let layout = dropdown_panel_layout(bounds.top(), viewport_height, row_count);
-    div()
-        .absolute()
-        .left(bounds.right() - width)
-        .top(layout.top)
-        .w(width)
-        .h(layout.height)
-        .p(px(4.0))
-        .flex()
-        .flex_col()
-        .gap(px(2.0))
-        .rounded(px(8.0))
-        .border_1()
-        .border_color(rgb(DIALOG_STROKE))
-        .bg(rgb(OVERLAY_PANEL))
-        .shadow_lg()
-}
-
-fn dropdown_item(
-    id: impl Into<gpui::ElementId>,
-    label: String,
-    selected: bool,
-) -> gpui::Stateful<gpui::Div> {
-    div()
-        .id(id)
-        .w_full()
-        .h(px(34.0))
-        .flex_none()
-        .pl(px(1.0))
-        .pr_3()
-        .flex()
-        .items_center()
-        .gap_2()
-        .rounded(px(4.0))
-        .when(selected, |item| item.bg(rgb(SURFACE_SELECTED)))
-        .hover(|item| item.bg(rgb(SURFACE_SELECTED)))
-        .child(selection_pill(selected))
-        .child(
-            div()
-                .min_w(px(0.0))
-                .flex_1()
-                .truncate()
-                .text_size(px(13.0))
-                .text_color(rgb(TEXT))
-                .child(label),
-        )
-}
-
 fn windows_model_catalog() -> Vec<&'static crate::transcription_models::ModelDefinition> {
     crate::transcription_models::MODELS
         .iter()
@@ -3672,38 +3538,6 @@ mod tests {
         assert_eq!(
             WindowsApp::language_for_model(TranscriptionModelId::ParakeetV2, "de").as_deref(),
             Some("en")
-        );
-    }
-
-    #[test]
-    fn long_dropdown_flips_up_and_stays_inside_the_viewport() {
-        let viewport_height = px(700.0);
-        let anchor_top = px(500.0);
-
-        let layout = dropdown_panel_layout(anchor_top, viewport_height, 20);
-
-        assert!(layout.top < anchor_top);
-        // The clamp quantizes to whole rows so no row is sliced at the edge.
-        assert_eq!(
-            layout.height,
-            dropdown_fit_height(20, px(DROPDOWN_MAX_HEIGHT))
-        );
-        assert!(layout.height <= px(DROPDOWN_MAX_HEIGHT));
-        let inner = f32::from(layout.height) - DROPDOWN_PADDING * 2.0 + DROPDOWN_ROW_GAP;
-        assert_eq!(inner % (DROPDOWN_ROW_HEIGHT + DROPDOWN_ROW_GAP), 0.0);
-        assert!(layout.top >= px(crate::windows_ui::CAPTION_HEIGHT) + px(DROPDOWN_MARGIN));
-        assert!(layout.top + layout.height <= viewport_height - px(DROPDOWN_MARGIN));
-    }
-
-    #[test]
-    fn short_dropdown_keeps_its_content_height_below_the_control() {
-        let anchor_top = px(100.0);
-        let layout = dropdown_panel_layout(anchor_top, px(700.0), 3);
-
-        assert_eq!(layout.top, anchor_top + px(DROPDOWN_GAP));
-        assert_eq!(
-            layout.height,
-            px(DROPDOWN_PADDING * 2.0 + DROPDOWN_ROW_HEIGHT * 3.0 + DROPDOWN_ROW_GAP * 2.0)
         );
     }
 }
