@@ -92,11 +92,6 @@ fn plus_icon() -> AnyElement {
         .into_any_element()
 }
 
-#[cfg(target_os = "windows")]
-fn disclosure_chevron() -> AnyElement {
-    crate::windows_ui::fluent_icon("\u{E70D}", 10.0, MUTED)
-}
-
 #[cfg(target_os = "linux")]
 fn disclosure_chevron() -> AnyElement {
     div()
@@ -744,35 +739,9 @@ pub(crate) fn compact_section_label(label: impl IntoElement) -> Div {
         .child(label)
 }
 
-#[cfg(target_os = "windows")]
-pub(crate) fn disclosure_button(label: impl IntoElement) -> Div {
-    div()
-        .w(px(220.0))
-        .h(px(CONTROL_HEIGHT))
-        .px_3()
-        .flex_none()
-        .flex()
-        .items_center()
-        .gap_2()
-        .rounded(px(4.0))
-        .border_1()
-        .border_color(rgb(crate::windows_ui::CONTROL_STROKE))
-        .bg(rgb(crate::windows_ui::CONTROL_FILL))
-        .text_size(px(13.0))
-        .text_color(rgb(TEXT))
-        .hover(|button| button.bg(rgb(crate::windows_ui::CONTROL_FILL_HOVER)))
-        .child(div().min_w(px(0.0)).flex_1().truncate().child(label))
-        .child(
-            div()
-                .size(px(10.0))
-                .flex_none()
-                .flex()
-                .items_center()
-                .justify_center()
-                .child(disclosure_chevron()),
-        )
-}
-
+// The Windows disclosure_button fork is gone: Windows comboboxes come from
+// crate::ui::combobox (gpui-component). The not(windows) fork below follows
+// once the macOS and Linux shells adopt the same component.
 #[cfg(not(target_os = "windows"))]
 #[cfg_attr(target_os = "linux", allow(dead_code))]
 pub(crate) fn disclosure_button(label: impl IntoElement) -> Div {

@@ -3,5 +3,6 @@
 //! shells keep their hand-rolled widgets until each one is migrated here.
 
 pub mod assets;
+pub mod combobox;
 pub mod select;
 pub mod theme;
