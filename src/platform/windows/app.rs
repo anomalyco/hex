@@ -677,6 +677,7 @@ impl WindowsDesktopHost {
         let double_tap_lock = self.settings.double_tap_lock;
         let double_tap_only = self.settings.double_tap_only;
         let while_dictating = self.settings.while_dictating;
+        let release_microphone_while_idle = self.settings.release_microphone_while_idle;
         let feedback_volume = self.settings.feedback_volume;
         let history = self.history.clone();
         let last_dictation = self.last_dictation.clone();
@@ -696,6 +697,7 @@ impl WindowsDesktopHost {
                         double_tap_lock,
                         double_tap_only,
                         while_dictating,
+                        release_microphone_while_idle,
                         feedback_volume,
                         history,
                         last_dictation,
@@ -871,6 +873,25 @@ impl WindowsDesktopHost {
             }
             Err(error) => {
                 self.settings_error = Some(format!("Could not save double-tap lock: {error:#}"));
+            }
+        }
+    }
+
+    fn set_release_microphone_while_idle(&mut self, enabled: bool) {
+        if enabled == self.settings.release_microphone_while_idle {
+            return;
+        }
+        let mut candidate = self.settings.clone();
+        candidate.release_microphone_while_idle = enabled;
+        match candidate.save() {
+            Ok(()) => {
+                self.settings = candidate;
+                self.settings_error = None;
+                self.restart_listener_for_settings();
+            }
+            Err(error) => {
+                self.settings_error =
+                    Some(format!("Could not save the microphone setting: {error:#}"));
             }
         }
     }
@@ -1844,6 +1865,7 @@ impl WindowsApp {
                     .text_color(rgb(TEXT_SOFT))
                     .child(volume_label),
             );
+        let release_microphone_while_idle = self.host.settings.release_microphone_while_idle;
         let while_dictating = self.host.settings.while_dictating;
         let while_dictating_control = segmented_control().children(
             [
@@ -2217,6 +2239,24 @@ impl WindowsApp {
                                             "Control other audio while a dictation records",
                                             while_dictating_control,
                                         ))
+                                        .child(
+                                            settings_row(
+                                                "Release microphone while idle",
+                                                "Adds first-capture latency and disables audio pre-roll",
+                                                toggle(if release_microphone_while_idle {
+                                                    1.0
+                                                } else {
+                                                    0.0
+                                                }),
+                                            )
+                                            .id("windows-release-microphone")
+                                            .on_click(cx.listener(move |this, _, _, cx| {
+                                                this.host.set_release_microphone_while_idle(
+                                                    !release_microphone_while_idle,
+                                                );
+                                                cx.notify();
+                                            })),
+                                        )
                                         .child(settings_row(
                                             "Recording indicator",
                                             "Show the dictation pill at the top or bottom of the screen",

@@ -159,6 +159,7 @@ pub fn run(shutdown: &'static AtomicBool) -> Result<()> {
                 double_tap_lock: settings.double_tap_lock,
                 double_tap_only: settings.double_tap_only,
                 while_dictating: settings.while_dictating,
+                release_microphone_while_idle: settings.release_microphone_while_idle,
                 feedback_volume: settings.feedback_volume,
                 history: Some(history),
                 last_dictation: Arc::new(Mutex::new(None)),

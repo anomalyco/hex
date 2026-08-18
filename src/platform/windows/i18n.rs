@@ -150,6 +150,8 @@ const TRANSLATIONS: &[(&str, [&str; 5])] = &[
     ("Paste last dictation", ["Wklej ostatnie dyktowanie", "粘贴上次听写", "前回の音声入力を貼り付け", "Letztes Diktat einfügen", "Pegar último dictado"]),
     ("Insert the most recent completed dictation at the current focus", ["Wstawia ostatnie ukończone dyktowanie w bieżącym miejscu", "在当前光标处插入最近完成的听写", "直近の音声入力を現在のフォーカス位置に挿入", "Fügt das letzte Diktat an der aktuellen Position ein", "Inserta el último dictado completado en el foco actual"]),
     ("While dictating", ["Podczas dyktowania", "听写时", "音声入力中", "Während des Diktats", "Mientras dictas"]),
+    ("Release microphone while idle", ["Zwalniaj mikrofon w bezczynności", "空闲时释放麦克风", "待機中はマイクを解放", "Mikrofon im Leerlauf freigeben", "Liberar el micrófono en reposo"]),
+    ("Adds first-capture latency and disables audio pre-roll", ["Dodaje opóźnienie pierwszego nagrania i wyłącza pre-roll audio", "会增加首次采集延迟并停用音频预录", "初回キャプチャに遅延が生じ、音声プリロールが無効になります", "Erhöht die Latenz der ersten Aufnahme und deaktiviert den Audio-Pre-Roll", "Añade latencia a la primera captura y desactiva el pre-roll de audio"]),
     ("Control other audio while a dictation records", ["Steruj innym dźwiękiem podczas nagrywania dyktowania", "听写录音时控制其他音频", "音声入力の録音中に他のオーディオを制御", "Andere Audioquellen während der Diktataufnahme steuern", "Controla el resto del audio mientras se graba el dictado"]),
     ("Mute", ["Wycisz", "静音", "ミュート", "Stummschalten", "Silenciar"]),
     ("Pause media", ["Wstrzymaj media", "暂停媒体", "メディアを一時停止", "Medien pausieren", "Pausar medios"]),

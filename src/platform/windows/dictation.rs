@@ -49,6 +49,7 @@ pub struct WindowsDictationConfig {
     pub double_tap_lock: bool,
     pub double_tap_only: bool,
     pub while_dictating: crate::windows_settings::WhileDictating,
+    pub release_microphone_while_idle: bool,
     pub feedback_volume: u8,
     pub history: Option<crate::history::History>,
     pub last_dictation: Arc<Mutex<Option<String>>>,
@@ -80,6 +81,7 @@ pub fn run_with_transcriber(
         double_tap_lock,
         double_tap_only,
         while_dictating,
+        release_microphone_while_idle,
         feedback_volume,
         history,
         last_dictation,
@@ -95,11 +97,34 @@ pub fn run_with_transcriber(
     {
         tracing::warn!(%error, "Windows recording feedback is unavailable");
     }
-    let mut input = open_input(device.as_deref(), fallback_to_default_device)?;
+    let release_while_idle = release_microphone_while_idle;
+    let mut input = if release_while_idle {
+        released_input(device.as_deref(), fallback_to_default_device)?
+    } else {
+        open_input(device.as_deref(), fallback_to_default_device)?
+    };
     let mut events = EventLog::create(event_path)?;
-    let mut capture = DictationCapture::new(input.sample_rate());
-    let mut captured_through = prime_microphone(&mut input, &mut capture, shutdown)?;
-    let mut audio_ready = true;
+    // With the microphone released the real sample rate is unknown until the
+    // first open; this placeholder capture is replaced on Reopened.
+    let mut capture = DictationCapture::new(if input.is_open() {
+        input.sample_rate()
+    } else {
+        16_000
+    });
+    let mut captured_through = if release_while_idle {
+        CaptureInstant::ZERO
+    } else {
+        prime_microphone(&mut input, &mut capture, shutdown)?
+    };
+    let mut audio_ready = !release_while_idle;
+    let mut device_label = if input.is_open() {
+        input.device_name().to_string()
+    } else {
+        device.clone().unwrap_or_else(|| "microphone".into())
+    };
+    // A hotkey press that arrived while the released microphone was still
+    // opening; recording begins at the first chunk.
+    let mut start_pending = false;
     if shutdown.load(Ordering::Relaxed) {
         return Ok(());
     }
@@ -144,11 +169,10 @@ pub fn run_with_transcriber(
     events.emit(&VoiceEvent::SessionStarted {
         timestamp_ms: now_ms(),
     })?;
-    emit_state(&mut events, VoiceState::Listening, input.device_name())?;
+    emit_state(&mut events, VoiceState::Listening, &device_label)?;
     println!(
         "HEX is ready on {}. Hold {} to dictate, release to paste; Escape cancels; Ctrl-C stops.",
-        input.device_name(),
-        hotkey_label
+        &device_label, hotkey_label
     );
 
     while !shutdown.load(Ordering::Relaxed) {
@@ -169,7 +193,55 @@ pub fn run_with_transcriber(
                         indicator.send(crate::windows_indicator::WindowsIndicatorEvent::Recording);
                     }
                     events.dictation(DictationPhase::Started, "")?;
-                    emit_state(&mut events, VoiceState::Dictating, input.device_name())?;
+                    emit_state(&mut events, VoiceState::Dictating, &device_label)?;
+                }
+                HotkeyAction::Start if !recording && release_while_idle && !start_pending => {
+                    // The released microphone opens on demand; recording
+                    // begins at the first chunk (no audio pre-roll).
+                    start_pending = true;
+                    input.request_open();
+                    if let Some(suppressor) = &audio_suppressor {
+                        suppressor.suppress();
+                    }
+                    if let Some(indicator) = &indicator {
+                        indicator.send(crate::windows_indicator::WindowsIndicatorEvent::Recording);
+                    }
+                    events.dictation(DictationPhase::Started, "")?;
+                    emit_state(&mut events, VoiceState::Dictating, &device_label)?;
+                }
+                HotkeyAction::Finish | HotkeyAction::Cancel if start_pending => {
+                    // Released before the opening microphone produced audio:
+                    // nothing was captured, so treat it as a discard.
+                    start_pending = false;
+                    if let Some(suppressor) = &audio_suppressor {
+                        suppressor.restore();
+                    }
+                    input.close();
+                    audio_ready = false;
+                    events.dictation(
+                        if event.action == HotkeyAction::Cancel {
+                            DictationPhase::Cancelled
+                        } else {
+                            DictationPhase::Discarded
+                        },
+                        "",
+                    )?;
+                    if let Some(indicator) = &indicator {
+                        indicator.send(if pending > 0 {
+                            crate::windows_indicator::WindowsIndicatorEvent::Processing
+                        } else {
+                            crate::windows_indicator::WindowsIndicatorEvent::Hidden
+                        });
+                    }
+                    emit_state(
+                        &mut events,
+                        if pending > 0 {
+                            VoiceState::Transcribing
+                        } else {
+                            VoiceState::Listening
+                        },
+                        &device_label,
+                    )?;
                 }
                 HotkeyAction::Finish if recording => {
                     if let Some(suppressor) = &audio_suppressor {
@@ -205,8 +277,12 @@ pub fn run_with_transcriber(
                         } else {
                             VoiceState::Listening
                         },
-                        input.device_name(),
+                        &device_label,
                     )?;
+                    if release_while_idle {
+                        input.close();
+                        audio_ready = false;
+                    }
                 }
                 HotkeyAction::Cancel if recording => {
                     if let Some(suppressor) = &audio_suppressor {
@@ -233,12 +309,16 @@ pub fn run_with_transcriber(
                         } else {
                             VoiceState::Listening
                         },
-                        input.device_name(),
+                        &device_label,
                     )?;
+                    if release_while_idle {
+                        input.close();
+                        audio_ready = false;
+                    }
                 }
                 HotkeyAction::PasteLast if !recording => {
                     submit_paste_last(&jobs, &mut events, &mut pending)?;
-                    emit_state(&mut events, VoiceState::Transcribing, input.device_name())?;
+                    emit_state(&mut events, VoiceState::Transcribing, &device_label)?;
                 }
                 _ => {}
             }
@@ -274,7 +354,7 @@ pub fn run_with_transcriber(
                 } else {
                     VoiceState::Listening
                 },
-                input.device_name(),
+                &device_label,
             )?;
             if let Some(indicator) = &indicator
                 && !recording
@@ -297,6 +377,18 @@ pub fn run_with_transcriber(
                     capture = DictationCapture::new(input.sample_rate());
                     capture.keep_warm(&samples);
                     audio_ready = true;
+                    device_label = input.device_name().to_string();
+                    if start_pending {
+                        // The on-demand open finished while the shortcut is
+                        // still held: recording starts here, without the
+                        // pre-roll a held-open microphone would have had.
+                        start_pending = false;
+                        capture.start_at(chunk_captured_through);
+                        recording = true;
+                        recording_feedback_started = false;
+                        emit_state(&mut events, VoiceState::Dictating, &device_label)?;
+                        continue;
+                    }
                     emit_state(
                         &mut events,
                         if pending > 0 {
@@ -304,7 +396,7 @@ pub fn run_with_transcriber(
                         } else {
                             VoiceState::Listening
                         },
-                        input.device_name(),
+                        &device_label,
                     )?;
                     continue;
                 }
@@ -351,15 +443,44 @@ pub fn run_with_transcriber(
                     } else {
                         VoiceState::Listening
                     },
-                    input.device_name(),
+                    &device_label,
                 )?;
             }
             RecoveringAudioInputEvent::Reopened => {
                 capture = DictationCapture::new(input.sample_rate());
                 audio_ready = false;
+                device_label = input.device_name().to_string();
             }
             RecoveringAudioInputEvent::OpenFailed(error) => {
-                return Err(eyre!("could not reopen microphone: {error}"));
+                if !release_while_idle {
+                    return Err(eyre!("could not reopen microphone: {error}"));
+                }
+                // On-demand open failed (device busy or unplugged): report
+                // and stay released rather than killing the listener.
+                start_pending = false;
+                if let Some(suppressor) = &audio_suppressor {
+                    suppressor.restore();
+                }
+                events.dictation(
+                    DictationPhase::Failed(format!("could not open microphone: {error}")),
+                    "",
+                )?;
+                if let Some(indicator) = &indicator {
+                    indicator.send(if pending > 0 {
+                        crate::windows_indicator::WindowsIndicatorEvent::Processing
+                    } else {
+                        crate::windows_indicator::WindowsIndicatorEvent::Hidden
+                    });
+                }
+                emit_state(
+                    &mut events,
+                    if pending > 0 {
+                        VoiceState::Transcribing
+                    } else {
+                        VoiceState::Listening
+                    },
+                    &device_label,
+                )?;
             }
         }
     }
@@ -371,7 +492,7 @@ pub fn run_with_transcriber(
         capture.cancel();
         events.dictation(DictationPhase::Cancelled, "")?;
     }
-    emit_state(&mut events, VoiceState::Stopping, input.device_name())?;
+    emit_state(&mut events, VoiceState::Stopping, &device_label)?;
     drop(hotkey);
     drop(input);
     drop(jobs);
@@ -519,12 +640,32 @@ fn open_input(
     let Some(query) = device else {
         return RecoveringAudioInput::open(None, 0, None);
     };
+    let exact_name = resolve_device_name(query)?;
+    RecoveringAudioInput::open(Some(&exact_name), 0, None)
+}
+
+/// Like [`open_input`], but the microphone stays released; the loop opens it
+/// on demand when a dictation starts.
+fn released_input(
+    device: Option<&str>,
+    fallback_to_default_device: bool,
+) -> Result<RecoveringAudioInput> {
+    if fallback_to_default_device {
+        return Ok(RecoveringAudioInput::closed(None, 0, device));
+    }
+    let Some(query) = device else {
+        return Ok(RecoveringAudioInput::closed(None, 0, None));
+    };
+    let exact_name = resolve_device_name(query)?;
+    Ok(RecoveringAudioInput::closed(Some(&exact_name), 0, None))
+}
+
+fn resolve_device_name(query: &str) -> Result<String> {
     let query_lower = query.to_lowercase();
-    let exact_name = crate::audio::input_device_names()?
+    crate::audio::input_device_names()?
         .into_iter()
         .find(|name| name.to_lowercase().contains(&query_lower))
-        .ok_or_else(|| eyre!("microphone is unavailable: {query}"))?;
-    RecoveringAudioInput::open(Some(&exact_name), 0, None)
+        .ok_or_else(|| eyre!("microphone is unavailable: {query}"))
 }
 
 fn submit_capture(
