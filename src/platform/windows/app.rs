@@ -692,6 +692,7 @@ impl WindowsDesktopHost {
         let selection = self.runtime_selection();
         let hotkey = self.settings.dictation_hotkey.clone();
         let paste_last_hotkey = self.settings.paste_last_hotkey.clone();
+        let voice_action_hotkey = self.settings.voice_action_hotkey.clone();
         let double_tap_lock = self.settings.double_tap_lock;
         let double_tap_only = self.settings.double_tap_only;
         let while_dictating = self.settings.while_dictating;
@@ -713,6 +714,7 @@ impl WindowsDesktopHost {
                         device,
                         hotkey,
                         paste_last_hotkey,
+                        voice_action_hotkey,
                         double_tap_lock,
                         double_tap_only,
                         while_dictating,
@@ -912,6 +914,27 @@ impl WindowsDesktopHost {
             Err(error) => {
                 self.settings_error =
                     Some(format!("Could not save the microphone setting: {error:#}"));
+            }
+        }
+    }
+
+    fn set_voice_action_enabled(&mut self, enabled: bool) {
+        if enabled == self.settings.voice_action_hotkey.is_some() {
+            return;
+        }
+        let mut candidate = self.settings.clone();
+        candidate.voice_action_hotkey =
+            enabled.then(crate::windows_settings::WindowsHotkey::voice_action_default);
+        match candidate.save() {
+            Ok(()) => {
+                self.settings = candidate;
+                self.settings_error = None;
+                self.restart_listener_for_settings();
+            }
+            Err(error) => {
+                self.settings_error = Some(format!(
+                    "Could not save the voice action setting: {error:#}"
+                ));
             }
         }
     }
@@ -2011,6 +2034,39 @@ impl WindowsApp {
                     .text_color(rgb(TEXT_SOFT))
                     .child(volume_label),
             );
+        let voice_action_enabled = self.host.settings.voice_action_hotkey.is_some();
+        let voice_action_control = div()
+            .flex()
+            .items_center()
+            .gap_3()
+            .when(
+                voice_action_enabled && !crate::windows_voice_action::opencode_installed(),
+                |control| {
+                    control.child(
+                        div()
+                            .text_size(px(11.0))
+                            .text_color(rgb(crate::windows_ui::CRITICAL))
+                            .child(tr("OpenCode not found")),
+                    )
+                },
+            )
+            .when_some(
+                self.host
+                    .settings
+                    .voice_action_hotkey
+                    .as_ref()
+                    .map(crate::windows_settings::WindowsHotkey::keycaps),
+                |control, keycaps| control.child(hotkey_keycaps(keycaps, 1.0)),
+            )
+            .when(!voice_action_enabled, |control| {
+                control.child(
+                    div()
+                        .text_size(px(11.0))
+                        .text_color(rgb(FAINT))
+                        .child(tr("Disabled")),
+                )
+            })
+            .child(toggle(if voice_action_enabled { 1.0 } else { 0.0 }));
         let release_microphone_while_idle = self.host.settings.release_microphone_while_idle;
         let while_dictating = self.host.settings.while_dictating;
         let while_dictating_control = segmented_control().children(
@@ -2376,6 +2432,20 @@ impl WindowsApp {
                                             .on_click(cx.listener(move |this, _, _, cx| {
                                                 this.host.set_paste_last_enabled(
                                                     !paste_last_enabled,
+                                                );
+                                                cx.notify();
+                                            })),
+                                        )
+                                        .child(
+                                            settings_row(
+                                                "Voice action",
+                                                "Hold to speak an instruction; OpenCode's reply pastes at the cursor",
+                                                voice_action_control,
+                                            )
+                                            .id("windows-voice-action")
+                                            .on_click(cx.listener(move |this, _, _, cx| {
+                                                this.host.set_voice_action_enabled(
+                                                    !voice_action_enabled,
                                                 );
                                                 cx.notify();
                                             })),

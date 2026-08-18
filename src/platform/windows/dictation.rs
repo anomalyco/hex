@@ -25,12 +25,14 @@ struct Job {
 
 enum OutputJob {
     Dictation(Job),
+    VoiceAction(Job),
     PasteLast,
 }
 
 #[derive(Clone, Copy)]
 enum OutputKind {
     Dictation,
+    VoiceAction,
     Repaste,
 }
 
@@ -46,6 +48,7 @@ pub struct WindowsDictationConfig {
     pub device: Option<String>,
     pub hotkey: WindowsHotkey,
     pub paste_last_hotkey: Option<WindowsHotkey>,
+    pub voice_action_hotkey: Option<WindowsHotkey>,
     pub double_tap_lock: bool,
     pub double_tap_only: bool,
     pub while_dictating: crate::windows_settings::WhileDictating,
@@ -79,6 +82,7 @@ pub fn run_with_transcriber(
         device,
         hotkey,
         paste_last_hotkey,
+        voice_action_hotkey,
         double_tap_lock,
         double_tap_only,
         while_dictating,
@@ -136,6 +140,7 @@ pub fn run_with_transcriber(
     let hotkey = WindowsHotkeyMonitor::start(
         hotkey,
         paste_last_hotkey,
+        voice_action_hotkey,
         double_tap_lock,
         double_tap_lock && double_tap_only,
     )?;
@@ -158,6 +163,12 @@ pub fn run_with_transcriber(
                         &replacements,
                         &modes,
                     ),
+                    OutputJob::VoiceAction(job) => process_voice_action_job(
+                        job,
+                        &mut transcriber,
+                        &mut paster,
+                        &last_dictation,
+                    ),
                     OutputJob::PasteLast => process_paste_last(&mut paster, &last_dictation),
                 };
                 if result_sender.send(result).is_err() {
@@ -167,6 +178,8 @@ pub fn run_with_transcriber(
         })?;
 
     let mut recording = false;
+    let mut recording_voice = false;
+    let mut pending_voice = false;
     let mut recording_feedback_started = false;
     let mut pending = 0_usize;
     events.emit(&VoiceEvent::SessionStarted {
@@ -188,6 +201,7 @@ pub fn run_with_transcriber(
                 HotkeyAction::Start if !recording && audio_ready => {
                     capture.start_at(occurred_at);
                     recording = true;
+                    recording_voice = false;
                     recording_feedback_started = false;
                     if let Some(suppressor) = &audio_suppressor {
                         suppressor.suppress();
@@ -198,10 +212,34 @@ pub fn run_with_transcriber(
                     events.dictation(DictationPhase::Started, "")?;
                     emit_state(&mut events, VoiceState::Dictating, &device_label)?;
                 }
+                HotkeyAction::VoiceStart
+                    if !recording && release_while_idle && !start_pending && !audio_ready =>
+                {
+                    start_pending = true;
+                    pending_voice = true;
+                    input.request_open();
+                    if let Some(indicator) = &indicator {
+                        indicator.send(crate::windows_indicator::WindowsIndicatorEvent::Recording);
+                    }
+                    events.dictation(DictationPhase::Started, "")?;
+                    emit_state(&mut events, VoiceState::Dictating, &device_label)?;
+                }
+                HotkeyAction::VoiceStart if !recording && audio_ready => {
+                    capture.start_at(occurred_at);
+                    recording = true;
+                    recording_voice = true;
+                    recording_feedback_started = false;
+                    if let Some(indicator) = &indicator {
+                        indicator.send(crate::windows_indicator::WindowsIndicatorEvent::Recording);
+                    }
+                    events.dictation(DictationPhase::Started, "")?;
+                    emit_state(&mut events, VoiceState::Dictating, &device_label)?;
+                }
                 HotkeyAction::Start if !recording && release_while_idle && !start_pending => {
                     // The released microphone opens on demand; recording
                     // begins at the first chunk (no audio pre-roll).
                     start_pending = true;
+                    pending_voice = false;
                     input.request_open();
                     if let Some(suppressor) = &audio_suppressor {
                         suppressor.suppress();
@@ -212,7 +250,13 @@ pub fn run_with_transcriber(
                     events.dictation(DictationPhase::Started, "")?;
                     emit_state(&mut events, VoiceState::Dictating, &device_label)?;
                 }
-                HotkeyAction::Finish | HotkeyAction::Cancel if start_pending => {
+                HotkeyAction::Finish
+                | HotkeyAction::Cancel
+                | HotkeyAction::VoiceFinish
+                | HotkeyAction::VoiceCancel
+                    if start_pending =>
+                {
+                    pending_voice = false;
                     // Released before the opening microphone produced audio:
                     // nothing was captured, so treat it as a discard.
                     start_pending = false;
@@ -222,7 +266,10 @@ pub fn run_with_transcriber(
                     input.close();
                     audio_ready = false;
                     events.dictation(
-                        if event.action == HotkeyAction::Cancel {
+                        if matches!(
+                            event.action,
+                            HotkeyAction::Cancel | HotkeyAction::VoiceCancel
+                        ) {
                             DictationPhase::Cancelled
                         } else {
                             DictationPhase::Discarded
@@ -246,25 +293,17 @@ pub fn run_with_transcriber(
                         &device_label,
                     )?;
                 }
-                HotkeyAction::Finish if recording => {
-                    if let Some(suppressor) = &audio_suppressor {
-                        suppressor.restore();
-                    }
-                    if !recording_feedback_started && capture.become_intentional(occurred_at) {
-                        crate::feedback::play(crate::feedback::Tone::DictationStart);
-                        recording_feedback_started = true;
-                    }
-                    if recording_feedback_started {
-                        crate::feedback::play(crate::feedback::Tone::DictationStop);
-                    }
-                    recording_feedback_started = false;
+                HotkeyAction::VoiceFinish if recording && recording_voice => {
                     recording = false;
+                    recording_voice = false;
+                    recording_feedback_started = false;
                     let submitted = submit_capture(
                         &mut capture,
                         occurred_at,
                         &jobs,
                         &mut events,
                         &mut pending,
+                        true,
                     )?;
                     if let Some(indicator) = &indicator {
                         indicator.send(if submitted || pending > 0 {
@@ -287,7 +326,76 @@ pub fn run_with_transcriber(
                         audio_ready = false;
                     }
                 }
-                HotkeyAction::Cancel if recording => {
+                HotkeyAction::VoiceCancel if recording && recording_voice => {
+                    recording = false;
+                    recording_voice = false;
+                    recording_feedback_started = false;
+                    capture.cancel();
+                    if let Some(indicator) = &indicator {
+                        indicator.send(if pending > 0 {
+                            crate::windows_indicator::WindowsIndicatorEvent::Processing
+                        } else {
+                            crate::windows_indicator::WindowsIndicatorEvent::Hidden
+                        });
+                    }
+                    events.dictation(DictationPhase::Cancelled, "")?;
+                    emit_state(
+                        &mut events,
+                        if pending > 0 {
+                            VoiceState::Transcribing
+                        } else {
+                            VoiceState::Listening
+                        },
+                        &device_label,
+                    )?;
+                    if release_while_idle {
+                        input.close();
+                        audio_ready = false;
+                    }
+                }
+                HotkeyAction::Finish if recording && !recording_voice => {
+                    if let Some(suppressor) = &audio_suppressor {
+                        suppressor.restore();
+                    }
+                    if !recording_feedback_started && capture.become_intentional(occurred_at) {
+                        crate::feedback::play(crate::feedback::Tone::DictationStart);
+                        recording_feedback_started = true;
+                    }
+                    if recording_feedback_started {
+                        crate::feedback::play(crate::feedback::Tone::DictationStop);
+                    }
+                    recording_feedback_started = false;
+                    recording = false;
+                    let submitted = submit_capture(
+                        &mut capture,
+                        occurred_at,
+                        &jobs,
+                        &mut events,
+                        &mut pending,
+                        false,
+                    )?;
+                    if let Some(indicator) = &indicator {
+                        indicator.send(if submitted || pending > 0 {
+                            crate::windows_indicator::WindowsIndicatorEvent::Processing
+                        } else {
+                            crate::windows_indicator::WindowsIndicatorEvent::Hidden
+                        });
+                    }
+                    emit_state(
+                        &mut events,
+                        if pending > 0 {
+                            VoiceState::Transcribing
+                        } else {
+                            VoiceState::Listening
+                        },
+                        &device_label,
+                    )?;
+                    if release_while_idle {
+                        input.close();
+                        audio_ready = false;
+                    }
+                }
+                HotkeyAction::Cancel if recording && !recording_voice => {
                     if let Some(suppressor) = &audio_suppressor {
                         suppressor.restore();
                     }
@@ -332,7 +440,7 @@ pub fn run_with_transcriber(
                 Ok(()) => {
                     let text = result.text.unwrap_or_default();
                     match result.kind {
-                        OutputKind::Dictation => {
+                        OutputKind::Dictation | OutputKind::VoiceAction => {
                             events.emit(&VoiceEvent::Transcript {
                                 timestamp_ms: now_ms(),
                                 phase: TranscriptPhase::Completed,
@@ -388,6 +496,8 @@ pub fn run_with_transcriber(
                         start_pending = false;
                         capture.start_at(chunk_captured_through);
                         recording = true;
+                        recording_voice = pending_voice;
+                        pending_voice = false;
                         recording_feedback_started = false;
                         emit_state(&mut events, VoiceState::Dictating, &device_label)?;
                         continue;
@@ -425,6 +535,7 @@ pub fn run_with_transcriber(
                     }
                     recording_feedback_started = false;
                     recording = false;
+                    recording_voice = false;
                     capture.cancel();
                     events.dictation(DictationPhase::Cancelled, "")?;
                 }
@@ -580,6 +691,61 @@ fn process_dictation_job(
     job_result(OutputKind::Dictation, result, latency_ms)
 }
 
+/// Transcribe the held instruction, pair it with the focused application's
+/// selection, ask OpenCode, and paste the reply.
+fn process_voice_action_job(
+    job: Job,
+    transcriber: &mut LocalTranscriber,
+    paster: &mut Result<WindowsPaster>,
+    last_dictation: &Mutex<Option<String>>,
+) -> JobResult {
+    let started = Instant::now();
+    let transcription = transcriber
+        .transcribe(&job.samples)
+        .map(|text| text.trim().to_string())
+        .map_err(|error| format!("{error:#}"));
+    let application = crate::windows_input::foreground_process_stem();
+    let result = transcription.and_then(|instruction| {
+        if instruction.is_empty() {
+            return Err("the voice instruction was empty".into());
+        }
+        let paster = paster.as_mut().map_err(|error| format!("{error:#}"))?;
+        let selected = paster.copy_selected_text().unwrap_or_else(|error| {
+            tracing::warn!(%error, "could not copy the selection for the voice action");
+            None
+        });
+        let prompt = crate::windows_voice_action::voice_action_prompt(
+            &instruction,
+            application.as_deref(),
+            selected.as_deref(),
+        );
+        let reply = crate::windows_voice_action::generate(
+            &prompt,
+            crate::windows_voice_action::GENERATION_DEADLINE,
+        )
+        .map_err(|error| format!("{error:#}"))?;
+        paster.paste(&reply).map_err(|error| format!("{error:#}"))?;
+        *last_dictation
+            .lock()
+            .unwrap_or_else(|error| error.into_inner()) = Some(reply.clone());
+        Ok(reply)
+    });
+    match result {
+        Ok(text) => JobResult {
+            kind: OutputKind::VoiceAction,
+            text: Some(text),
+            latency_ms: started.elapsed().as_millis() as u32,
+            result: Ok(()),
+        },
+        Err(error) => JobResult {
+            kind: OutputKind::VoiceAction,
+            text: None,
+            latency_ms: started.elapsed().as_millis() as u32,
+            result: Err(error),
+        },
+    }
+}
+
 fn process_paste_last(
     paster: &mut Result<WindowsPaster>,
     last_dictation: &Mutex<Option<String>>,
@@ -690,6 +856,7 @@ fn submit_capture(
     jobs: &SyncSender<OutputJob>,
     events: &mut EventLog,
     pending: &mut usize,
+    voice_action: bool,
 ) -> Result<bool> {
     let mut submitted = false;
     match capture.finish(ended_at) {
@@ -700,7 +867,12 @@ fn submit_capture(
                 samples: clip.into_parakeet_samples(),
                 audio_ms,
             };
-            match jobs.try_send(OutputJob::Dictation(job)) {
+            let job = if voice_action {
+                OutputJob::VoiceAction(job)
+            } else {
+                OutputJob::Dictation(job)
+            };
+            match jobs.try_send(job) {
                 Ok(()) => {
                     *pending += 1;
                     submitted = true;

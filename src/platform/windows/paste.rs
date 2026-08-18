@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 use color_eyre::eyre::{Result, WrapErr, eyre};
 use windows_sys::Win32::System::DataExchange::{CountClipboardFormats, GetClipboardSequenceNumber};
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
-    GetAsyncKeyState, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, SendInput,
+    GetAsyncKeyState, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, SendInput, VK_C,
     VK_CONTROL, VK_LWIN, VK_MENU, VK_RWIN, VK_SHIFT, VK_V,
 };
 
@@ -131,6 +131,58 @@ impl WindowsPaster {
             restore_clipboard_generation(&clipboard_restore, generation);
         });
         Ok(())
+    }
+}
+
+impl WindowsPaster {
+    /// Copy the focused application's current selection with a synthesized
+    /// Ctrl+C, then restore the previous clipboard. `None` means the
+    /// application published nothing (no selection).
+    pub fn copy_selected_text(&mut self) -> Result<Option<String>> {
+        let snapshot = ClipboardSnapshot::read(&mut self.clipboard)?;
+        wait_for_modifier_release()?;
+        let before = clipboard_sequence();
+        send_copy_shortcut()?;
+        let deadline = Instant::now() + Duration::from_millis(600);
+        while clipboard_sequence() == before && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(20));
+        }
+        let selected = if clipboard_sequence() == before {
+            None
+        } else {
+            self.clipboard
+                .get_text()
+                .ok()
+                .filter(|text| !text.trim().is_empty())
+        };
+        if let Err(error) = snapshot.restore(&mut self.clipboard) {
+            tracing::warn!(
+                %error,
+                "could not restore the clipboard after copying the selection"
+            );
+        }
+        Ok(selected)
+    }
+}
+
+fn send_copy_shortcut() -> Result<()> {
+    let inputs = [
+        keyboard_input(VK_CONTROL, 0),
+        keyboard_input(VK_C, 0),
+        keyboard_input(VK_C, KEYEVENTF_KEYUP),
+        keyboard_input(VK_CONTROL, KEYEVENTF_KEYUP),
+    ];
+    let sent = unsafe {
+        SendInput(
+            inputs.len() as u32,
+            inputs.as_ptr(),
+            size_of::<INPUT>() as i32,
+        )
+    };
+    if sent == inputs.len() as u32 {
+        Ok(())
+    } else {
+        Err(eyre!("Windows rejected the synthesized Ctrl+C"))
     }
 }
 

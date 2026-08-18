@@ -13,3 +13,4 @@ pub mod run;
 pub mod settings;
 pub mod ui;
 pub mod updater;
+pub mod voice_action;

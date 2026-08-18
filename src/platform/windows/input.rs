@@ -69,6 +69,18 @@ pub enum HotkeyAction {
     Finish,
     Cancel,
     PasteLast,
+    VoiceStart,
+    VoiceFinish,
+    VoiceCancel,
+}
+
+/// Map a capture-state transition onto the voice-action event family.
+fn voice_action_variant(action: HotkeyAction) -> HotkeyAction {
+    match action {
+        HotkeyAction::Start => HotkeyAction::VoiceStart,
+        HotkeyAction::Finish => HotkeyAction::VoiceFinish,
+        _ => HotkeyAction::VoiceCancel,
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -103,9 +115,13 @@ struct CallbackState {
     trigger_vk: Option<u32>,
     paste_last: Option<WindowsHotkey>,
     paste_trigger_vk: Option<u32>,
+    voice_action: Option<WindowsHotkey>,
+    voice_trigger_vk: Option<u32>,
     modifiers: ModifierState,
     trigger_down: bool,
     paste_trigger_down: bool,
+    voice_trigger_down: bool,
+    voice_capture: CaptureState,
     escape_down: bool,
     double_tap_enabled: bool,
     double_tap_only: bool,
@@ -118,6 +134,8 @@ struct HookBindings {
     dictation_trigger_vk: Option<u32>,
     paste_last: Option<WindowsHotkey>,
     paste_trigger_vk: Option<u32>,
+    voice_action: Option<WindowsHotkey>,
+    voice_trigger_vk: Option<u32>,
     double_tap_enabled: bool,
     double_tap_only: bool,
 }
@@ -221,6 +239,7 @@ impl WindowsHotkeyMonitor {
     pub fn start(
         binding: WindowsHotkey,
         paste_last: Option<WindowsHotkey>,
+        voice_action: Option<WindowsHotkey>,
         double_tap_enabled: bool,
         double_tap_only: bool,
     ) -> Result<Self> {
@@ -237,6 +256,17 @@ impl WindowsHotkeyMonitor {
                     .and_then(virtual_key)
             })
             .transpose()?;
+        let voice_trigger_vk = voice_action
+            .as_ref()
+            .map(|binding| {
+                binding.validate()?;
+                binding
+                    .key
+                    .as_deref()
+                    .ok_or_else(|| eyre!("the voice action shortcut requires a non-modifier key"))
+                    .and_then(virtual_key)
+            })
+            .transpose()?;
         let label = binding.label();
         let (event_sender, events) = mpsc::sync_channel(EVENT_CAPACITY);
         let (error_sender, errors) = mpsc::channel();
@@ -250,6 +280,8 @@ impl WindowsHotkeyMonitor {
                         dictation_trigger_vk: trigger_vk,
                         paste_last,
                         paste_trigger_vk,
+                        voice_action,
+                        voice_trigger_vk,
                         double_tap_enabled,
                         double_tap_only,
                     },
@@ -312,9 +344,13 @@ fn run_hook(
             trigger_vk: bindings.dictation_trigger_vk,
             paste_last: bindings.paste_last,
             paste_trigger_vk: bindings.paste_trigger_vk,
+            voice_action: bindings.voice_action,
+            voice_trigger_vk: bindings.voice_trigger_vk,
             modifiers: ModifierState::current(),
             trigger_down: false,
             paste_trigger_down: false,
+            voice_trigger_down: false,
+            voice_capture: CaptureState::default(),
             escape_down: false,
             double_tap_enabled: bindings.double_tap_enabled,
             double_tap_only: bindings.double_tap_only,
@@ -386,6 +422,16 @@ unsafe extern "system" fn keyboard_hook(code: i32, wparam: WPARAM, lparam: LPARA
             .unwrap_or_else(|error| error.into_inner());
         if let Some(state) = guard.as_mut() {
             let modifier_event = state.modifiers.update(event.vkCode, is_down);
+            let voice_event = state.voice_trigger_vk == Some(event.vkCode)
+                && (state.voice_trigger_down
+                    || (is_down
+                        && !state.capture.active
+                        && !state.capture.locked
+                        && !state.dirty
+                        && state
+                            .voice_action
+                            .as_ref()
+                            .is_some_and(|binding| state.modifiers.matches(binding))));
             let paste_event = state.paste_trigger_vk == Some(event.vkCode)
                 && (state.paste_trigger_down
                     || (is_down
@@ -396,7 +442,20 @@ unsafe extern "system" fn keyboard_hook(code: i32, wparam: WPARAM, lparam: LPARA
                             .paste_last
                             .as_ref()
                             .is_some_and(|binding| state.modifiers.matches(binding))));
-            if paste_event {
+            if voice_event {
+                suppressed = true;
+                if is_down && !state.voice_trigger_down {
+                    state.voice_trigger_down = true;
+                    if let Some(action) = state.voice_capture.press(false, false, event.time) {
+                        send_event(state, voice_action_variant(action), event.time);
+                    }
+                } else if is_up && state.voice_trigger_down {
+                    state.voice_trigger_down = false;
+                    if let Some(action) = state.voice_capture.release(false, event.time) {
+                        send_event(state, voice_action_variant(action), event.time);
+                    }
+                }
+            } else if paste_event {
                 suppressed = true;
                 if is_down && !state.paste_trigger_down {
                     state.paste_trigger_down = true;
@@ -408,7 +467,10 @@ unsafe extern "system" fn keyboard_hook(code: i32, wparam: WPARAM, lparam: LPARA
                 if is_down {
                     if state.trigger_down {
                         suppressed = true;
-                    } else if !state.dirty && state.modifiers.matches(&state.binding) {
+                    } else if !state.dirty
+                        && !state.voice_capture.active
+                        && state.modifiers.matches(&state.binding)
+                    {
                         state.trigger_down = true;
                         suppressed = true;
                         let was_locked = state.capture.locked;
@@ -436,19 +498,35 @@ unsafe extern "system" fn keyboard_hook(code: i32, wparam: WPARAM, lparam: LPARA
                     }
                 }
             } else if event.vkCode == u32::from(VK_ESCAPE) {
-                if is_down && (state.capture.active || state.capture.locked) {
+                if is_down
+                    && (state.capture.active || state.capture.locked || state.voice_capture.active)
+                {
                     state.dirty = true;
                     state.escape_down = true;
                     suppressed = true;
                     if let Some(action) = state.capture.cancel() {
                         send_event(state, action, event.time);
                     }
+                    if let Some(action) = state.voice_capture.cancel() {
+                        state.voice_trigger_down = false;
+                        send_event(state, voice_action_variant(action), event.time);
+                    }
                 } else if is_up && state.escape_down {
                     state.escape_down = false;
                     suppressed = true;
                 }
             } else if modifier_event {
-                if state.capture.locked
+                if state.voice_capture.active
+                    && !state
+                        .voice_action
+                        .as_ref()
+                        .is_some_and(|binding| state.modifiers.matches(binding))
+                {
+                    if let Some(action) = state.voice_capture.release(false, event.time) {
+                        state.voice_trigger_down = false;
+                        send_event(state, voice_action_variant(action), event.time);
+                    }
+                } else if state.capture.locked
                     && !state.dirty
                     && is_down
                     && state.modifiers.matches(&state.binding)
@@ -471,6 +549,7 @@ unsafe extern "system" fn keyboard_hook(code: i32, wparam: WPARAM, lparam: LPARA
                 } else if state.trigger_vk.is_none()
                     && !state.capture.active
                     && !state.capture.locked
+                    && !state.voice_capture.active
                     && !state.dirty
                     && is_down
                     && state.modifiers.matches(&state.binding)

@@ -19,6 +19,7 @@ pub struct WindowsSettings {
     pub listen_on_launch: bool,
     pub dictation_hotkey: WindowsHotkey,
     pub paste_last_hotkey: Option<WindowsHotkey>,
+    pub voice_action_hotkey: Option<WindowsHotkey>,
     pub double_tap_lock: bool,
     pub double_tap_only: bool,
     pub while_dictating: WhileDictating,
@@ -104,6 +105,7 @@ impl Default for WindowsSettings {
             listen_on_launch: true,
             dictation_hotkey: WindowsHotkey::default(),
             paste_last_hotkey: Some(WindowsHotkey::paste_last_default()),
+            voice_action_hotkey: None,
             double_tap_lock: true,
             double_tap_only: false,
             while_dictating: WhileDictating::default(),
@@ -160,6 +162,19 @@ impl WindowsSettings {
                 ));
             }
         }
+        if let Some(voice_action) = &settings.voice_action_hotkey {
+            voice_action.validate()?;
+            if voice_action.key.is_none() {
+                return Err(eyre!(
+                    "the voice action shortcut requires a non-modifier key"
+                ));
+            }
+            if voice_action == &settings.dictation_hotkey
+                || Some(voice_action) == settings.paste_last_hotkey.as_ref()
+            {
+                return Err(eyre!("the voice action shortcut must be unique"));
+            }
+        }
         crate::transcription_models::validate(&settings.transcription)?;
         Ok(settings)
     }
@@ -178,6 +193,19 @@ impl WindowsSettings {
                 return Err(eyre!(
                     "the dictation and Paste Last shortcuts must be different"
                 ));
+            }
+        }
+        if let Some(voice_action) = &self.voice_action_hotkey {
+            voice_action.validate()?;
+            if voice_action.key.is_none() {
+                return Err(eyre!(
+                    "the voice action shortcut requires a non-modifier key"
+                ));
+            }
+            if voice_action == &self.dictation_hotkey
+                || Some(voice_action) == self.paste_last_hotkey.as_ref()
+            {
+                return Err(eyre!("the voice action shortcut must be unique"));
             }
         }
         crate::transcription_models::validate(&self.transcription)?;
@@ -214,6 +242,16 @@ impl WindowsHotkey {
             alt: true,
             shift: false,
             key: Some("v".into()),
+        }
+    }
+
+    pub fn voice_action_default() -> Self {
+        Self {
+            control: true,
+            windows: false,
+            alt: true,
+            shift: false,
+            key: Some("i".into()),
         }
     }
 

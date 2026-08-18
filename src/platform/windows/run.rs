@@ -156,6 +156,7 @@ pub fn run(shutdown: &'static AtomicBool) -> Result<()> {
                 device,
                 hotkey: settings.dictation_hotkey,
                 paste_last_hotkey: settings.paste_last_hotkey,
+                voice_action_hotkey: settings.voice_action_hotkey,
                 double_tap_lock: settings.double_tap_lock,
                 double_tap_only: settings.double_tap_only,
                 while_dictating: settings.while_dictating,
