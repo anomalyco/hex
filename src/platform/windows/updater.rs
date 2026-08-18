@@ -223,10 +223,56 @@ fn install_latest() -> Result<Option<InstalledUpdate>> {
     if let Err(error) = crate::windows_login_item::repoint(&executable) {
         tracing::warn!(%error, "could not repoint Launch at login to the updated HEX");
     }
+    if let Err(error) = repoint_start_menu_shortcut(&executable) {
+        tracing::warn!(%error, "could not repoint the Start Menu shortcut to the updated HEX");
+    }
     Ok(Some(InstalledUpdate {
         version: manifest.version,
         executable,
     }))
+}
+
+/// Retarget the installer-created Start Menu shortcut at the activated
+/// version, so pinned and Start Menu launches follow updates. Only a
+/// shortcut carrying the installer's managed description is touched.
+fn repoint_start_menu_shortcut(executable: &Path) -> Result<()> {
+    let Some(appdata) = dirs::config_dir() else {
+        return Ok(());
+    };
+    let shortcut = appdata.join(r"Microsoft\Windows\Start Menu\Programs\HEX.lnk");
+    if !shortcut.exists() {
+        return Ok(());
+    }
+    let quoted_link = shortcut.display().to_string().replace('\'', "''");
+    let quoted_exe = executable.display().to_string().replace('\'', "''");
+    let working = executable
+        .parent()
+        .map(|parent| parent.display().to_string().replace('\'', "''"))
+        .unwrap_or_default();
+    let status = Command::new("powershell.exe")
+        .args([
+            "-NoProfile",
+            "-WindowStyle",
+            "Hidden",
+            "-Command",
+            &format!(
+                "$s = (New-Object -ComObject WScript.Shell).CreateShortcut('{quoted_link}'); \
+                 if ($s.Description -eq 'HEX managed install') {{ \
+                 $s.TargetPath = '{quoted_exe}'; \
+                 $s.WorkingDirectory = '{working}'; \
+                 $s.Save() }}"
+            ),
+        ])
+        .creation_flags(CREATE_NO_WINDOW)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .wrap_err("could not update the Start Menu shortcut")?;
+    if !status.success() {
+        bail!("the Start Menu shortcut update exited with {status}");
+    }
+    Ok(())
 }
 
 fn validate_executable(path: &Path, version: &str) -> Result<()> {

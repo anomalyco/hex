@@ -110,7 +110,7 @@ current-user startup registry, UI Automation, and Windows capture APIs.
 | Signed automatic self-update for managed installs | Implemented; the same ed25519 feed contract as Linux, activating into a user-local versions directory with a restart button — source builds keep the GitHub release link |
 | Web-domain mode rules and browser context via UI Automation | Implemented; the page URL comes from the browser's UIA document element, bounded so a hung provider degrades to application-only context |
 | Opt-in voice Commands | Missing; blocked on a Windows streaming command model |
-| Packaged onboarding and an installer that creates the managed layout | Missing; self-update activates only for installs under the user profile's support versions directory, and until the installer provides a stable launcher reading `current-version`, shortcuts pinned to a specific `versions\<v>\hex.exe` go stale after two updates prune it |
+| Managed installer with Start Menu integration and clean uninstall | Implemented as `scripts/install-windows.ps1`; it creates the self-updating versions layout, and updates retarget the managed shortcut and Launch-at-login entry — a first-run onboarding flow inside the app remains missing |
 | Developer Meetings, live drafts, and meeting paste | Missing |
 | Local transcription API and public TypeScript SDK host lifecycle on Windows | Missing |
 
@@ -125,9 +125,14 @@ The Windows listener preserves physical press/release timestamps, keeps audio
 capture off the transcription and paste worker, and restores the previous
 clipboard only when no newer clipboard change supersedes it. The optimized
 MSVC release build is verified with GPUI's DirectX shaders. The next parity
-slices are packaged onboarding with an installer that creates the managed
-versions layout, the local transcription API host, and the developer-only
-Meetings surface; opt-in Commands wait on a Windows streaming command model.
-Windows releases are prepared and published with
+slices are in-app first-run onboarding, the local transcription API host,
+and the developer-only Meetings surface; opt-in Commands wait on a Windows
+streaming command model. Windows releases are prepared and published with
 [`scripts/release-windows.sh`](../scripts/release-windows.sh), which signs
-the update feed with the same release key as Linux.
+the update feed with the same release key as Linux and publishes
+[`scripts/install-windows.ps1`](../scripts/install-windows.ps1); users
+install with:
+
+```powershell
+powershell -ExecutionPolicy Bypass -Command "iwr https://pub-089d681d41754031a4aefa7017d8c2fb.r2.dev/install-windows.ps1 -OutFile install-windows.ps1; ./install-windows.ps1"
+```

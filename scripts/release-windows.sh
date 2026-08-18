@@ -14,6 +14,7 @@ dist="$root/dist"
 target_dir=${CARGO_TARGET_DIR:-"$root/target"}
 feed="$dist/windows-update.json"
 prepared_commit="$dist/windows-release-commit"
+installer="$root/scripts/install-windows.ps1"
 expected_public_key=bfad02e62208ff144b5c9d21c7e79c7c16c6904299a437d857303007cd4ff7d8
 public_key_prefix=302a300506032b6570032100
 signing_key=${HEX_RELEASE_SIGNING_KEY:-${HEX_LINUX_SIGNING_KEY:-}}
@@ -45,6 +46,8 @@ if [ -n "$(git -C "$root" status --porcelain)" ]; then
   echo "Commit or remove all working-tree changes before releasing." >&2
   exit 1
 fi
+test -f "$installer"
+powershell -NoProfile -Command "[void][ScriptBlock]::Create((Get-Content -Raw '$installer'))"
 upstream=$(git -C "$root" rev-parse --abbrev-ref '@{upstream}' 2>/dev/null || true)
 if [ -z "$upstream" ] || [ "$(git -C "$root" rev-parse HEAD)" != "$(git -C "$root" rev-parse "$upstream")" ]; then
   echo "Push the release commit to its upstream branch before releasing." >&2
@@ -167,6 +170,17 @@ if [ "$mode" = publish ]; then
     --connect-timeout 10 --max-time 600 \
     "$base_url/releases/$artifact" -o "$remote_artifact"
   cmp -s "$artifact_path" "$remote_artifact"
+  wrangler r2 object put "$bucket/install-windows.ps1" --remote \
+    --file "$installer" \
+    --content-type text/plain \
+    --content-disposition 'attachment; filename="install-windows.ps1"' \
+    --cache-control 'public, max-age=300'
+  remote_installer="$temporary/install-windows.ps1"
+  curl --fail --silent --show-error --proto '=https' --proto-redir '=https' \
+    --connect-timeout 10 --max-time 60 --header 'Cache-Control: no-cache' \
+    "$base_url/install-windows.ps1?commit=$(git -C "$root" rev-parse HEAD)" \
+    -o "$remote_installer"
+  cmp -s "$installer" "$remote_installer"
   # Recheck immediately before publishing the only mutable object.
   require_newer_than_published
   wrangler r2 object put "$bucket/windows-update.json" --remote \
