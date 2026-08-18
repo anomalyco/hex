@@ -2,21 +2,24 @@ mod common;
 mod desktop;
 mod platform;
 mod speech;
-#[cfg(target_os = "windows")]
-mod ui;
 
 // The historical flat module names, re-exported so existing `crate::` paths
 // keep resolving while call sites migrate to the folder tree.
+#[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
+pub(crate) use common::spoken_text;
 pub(crate) use common::{app_paths, audio, dictation, events, history, instance};
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 pub(crate) use common::{feedback, text_replacements};
-#[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
-pub(crate) use common::spoken_text;
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 pub(crate) use desktop::text_input;
 pub(crate) use desktop::{
     activity as desktop_activity, host as desktop_host,
     transcription_picker as desktop_transcription_picker, ui as desktop_ui,
+};
+#[cfg(target_os = "linux")]
+pub(crate) use platform::linux::{
+    app as linux_app, dictation as linux_dictation, input as linux_input, paste as linux_paste,
+    run as linux, settings as linux_settings, updater as linux_updater,
 };
 #[cfg(all(target_os = "macos", debug_assertions))]
 pub(crate) use platform::macos::dashboard;
@@ -29,22 +32,12 @@ pub(crate) use platform::macos::{
     personal_commands, recording_environment, sparkle, status_item, suppression,
     swift_settings_import,
 };
-#[cfg(target_os = "linux")]
-pub(crate) use platform::linux::{
-    app as linux_app, dictation as linux_dictation, input as linux_input, paste as linux_paste,
-    run as linux, settings as linux_settings, updater as linux_updater,
-};
 #[cfg(target_os = "windows")]
 pub(crate) use platform::windows::{
     app as windows_app, dictation as windows_dictation, i18n as windows_i18n,
     indicator as windows_indicator, input as windows_input, login_item as windows_login_item,
     paste as windows_paste, run as windows, settings as windows_settings, ui as windows_ui,
     updater as windows_updater,
-};
-#[cfg(target_os = "macos")]
-pub(crate) use speech::{
-    apple_speech, parakeet, recognition, transcription, transcription_benchmark,
-    transcription_service,
 };
 #[cfg(any(target_os = "linux", target_os = "windows"))]
 pub(crate) use speech::local_transcriber;
@@ -53,6 +46,11 @@ pub(crate) use speech::moonshine;
 #[cfg(all(target_os = "macos", debug_assertions))]
 pub(crate) use speech::moonshine_lab;
 pub(crate) use speech::transcription_models;
+#[cfg(target_os = "macos")]
+pub(crate) use speech::{
+    apple_speech, parakeet, recognition, transcription, transcription_benchmark,
+    transcription_service,
+};
 
 #[cfg(target_os = "macos")]
 use std::fs::{self, OpenOptions};

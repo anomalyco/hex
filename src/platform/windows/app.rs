@@ -36,10 +36,10 @@ use crate::desktop_transcription_picker::{
 use crate::desktop_ui::{
     CANVAS, DIVIDER, FAINT, LINE, MUTED, NavigationIcon, OVERLAY_PANEL, OVERLAY_SMOKE,
     PANE_LIST_WIDTH, PANEL_RADIUS, SIDEBAR_WIDTH, SURFACE, SURFACE_HOVER, SURFACE_SELECTED, TEXT,
-    TEXT_ON_ACCENT, TEXT_SOFT, accent_color, compact_button, compact_panel, empty_message,
-    error_message, header_button, hotkey_keycaps, navigation_item, pane_body, pane_content,
-    pane_header_with_action, section_label, segmented_control, segmented_item, settings_panel,
-    settings_row, settings_section_label, sidebar_frame, toggle, window_frame,
+    TEXT_ON_ACCENT, TEXT_SOFT, accent_color, compact_button, compact_panel, disclosure_button,
+    empty_message, error_message, header_button, hotkey_keycaps, navigation_item, pane_body,
+    pane_content, pane_header_with_action, section_label, segmented_control, segmented_item,
+    settings_panel, settings_row, settings_section_label, sidebar_frame, toggle, window_frame,
 };
 use crate::events::EventReader;
 use crate::history::{History, HistoryEntry, HistoryRetention};
@@ -109,13 +109,22 @@ struct WindowsApp {
     history_clear_armed: bool,
     replacement_inputs: Vec<ReplacementInputs>,
     transcription_picker: TranscriptionPickerState,
-    model_catalog_language_select: Entity<crate::ui::select::OptionalChoiceState>,
-    _model_catalog_select_observation: Subscription,
+    model_catalog_language_filter: Option<String>,
+    model_catalog_language_dropdown_open: bool,
+    model_catalog_language_dropdown_bounds: Option<Bounds<Pixels>>,
+    microphone_picker_open: bool,
     hotkey_picker_open: bool,
     indicator_hwnd: Option<HWND>,
     indicator_scale: f32,
     volume_slider_bounds: Option<Bounds<Pixels>>,
     volume_drag: Option<u8>,
+    microphone_dropdown_bounds: Option<Bounds<Pixels>>,
+    transcription_dropdown_open: bool,
+    transcription_dropdown_bounds: Option<Bounds<Pixels>>,
+    dictation_language_dropdown_open: bool,
+    dictation_language_dropdown_bounds: Option<Bounds<Pixels>>,
+    ui_language_dropdown_open: bool,
+    ui_language_dropdown_bounds: Option<Bounds<Pixels>>,
     history_detail_text: Option<(u64, Entity<TextInput>)>,
 }
 
@@ -166,13 +175,9 @@ pub fn open(event_path: PathBuf, shutdown: &'static AtomicBool, start_hidden: bo
     };
     let listen_on_launch = settings.listen_on_launch;
     let indicator_position = settings.indicator_position;
-    Application::new()
-        .with_assets(crate::ui::assets::HexAssets)
-        .run(move |cx: &mut App| {
-        crate::ui::theme::init(cx);
+    Application::new().run(move |cx: &mut App| {
         cx.bind_keys(crate::text_input::key_bindings());
         let bounds = Bounds::centered(None, size(px(WINDOW_WIDTH), px(WINDOW_HEIGHT)), cx);
-        let mut opened_app = None;
         let window = cx
             .open_window(
                 WindowOptions {
@@ -186,17 +191,8 @@ pub fn open(event_path: PathBuf, shutdown: &'static AtomicBool, start_hidden: bo
                     app_id: Some("com.kitlangton.Hex".into()),
                     ..Default::default()
                 },
-                |window, cx| {
-                    let model_catalog_language_select = cx.new(|cx| {
-                        gpui_component::select::SelectState::new(
-                            model_catalog_language_options(),
-                            Some(gpui_component::IndexPath::default()),
-                            window,
-                            cx,
-                        )
-                        .searchable(true)
-                    });
-                    let app = cx.new(|cx| {
+                |_, cx| {
+                    cx.new(|cx| {
                         let host = WindowsDesktopHost::new(
                             event_path.clone(),
                             settings.clone(),
@@ -214,8 +210,6 @@ pub fn open(event_path: PathBuf, shutdown: &'static AtomicBool, start_hidden: bo
                             .iter()
                             .map(|replacement| WindowsApp::replacement_inputs(replacement, cx))
                             .collect();
-                        let model_catalog_select_observation =
-                            cx.observe(&model_catalog_language_select, |_, _, cx| cx.notify());
                         WindowsApp {
                             host,
                             pane: WindowsPane::Settings,
@@ -225,24 +219,29 @@ pub fn open(event_path: PathBuf, shutdown: &'static AtomicBool, start_hidden: bo
                             history_clear_armed: false,
                             replacement_inputs,
                             transcription_picker: TranscriptionPickerState::Closed,
-                            model_catalog_language_select: model_catalog_language_select.clone(),
-                            _model_catalog_select_observation: model_catalog_select_observation,
+                            model_catalog_language_filter: None,
+                            model_catalog_language_dropdown_open: false,
+                            model_catalog_language_dropdown_bounds: None,
+                            microphone_picker_open: false,
                             hotkey_picker_open: false,
                             indicator_hwnd: None,
                             indicator_scale: 1.0,
                             volume_slider_bounds: None,
                             volume_drag: None,
+                            microphone_dropdown_bounds: None,
+                            transcription_dropdown_open: false,
+                            transcription_dropdown_bounds: None,
+                            dictation_language_dropdown_open: false,
+                            dictation_language_dropdown_bounds: None,
+                            ui_language_dropdown_open: false,
+                            ui_language_dropdown_bounds: None,
                             history_detail_text: None,
                         }
-                    });
-                    opened_app = Some(app.clone());
-                    cx.new(|cx| {
-                        gpui_component::Root::new(gpui::AnyView::from(app), window, cx)
                     })
                 },
             )
             .expect("could not open the HEX Windows window");
-        let app = opened_app.expect("window builder ran");
+        let app = window.update(cx, |_, _, cx| cx.entity()).unwrap();
         let (indicator, indicator_hwnd, indicator_scale) = match cx
             .open_window(crate::windows_indicator::window_options(cx), |_, cx| {
                 cx.new(|_| crate::windows_indicator::WindowsIndicator::new())
@@ -1306,7 +1305,12 @@ impl WindowsApp {
 
     fn close_popups(&mut self) {
         self.transcription_picker = TranscriptionPickerState::Closed;
+        self.model_catalog_language_dropdown_open = false;
+        self.microphone_picker_open = false;
         self.hotkey_picker_open = false;
+        self.transcription_dropdown_open = false;
+        self.dictation_language_dropdown_open = false;
+        self.ui_language_dropdown_open = false;
     }
 
     fn set_ui_language(&mut self, code: Option<&'static str>) {
@@ -1355,28 +1359,6 @@ impl WindowsApp {
     /// or no filter when dictation detects the language automatically.
     fn catalog_filter_for_language(language: &str) -> Option<String> {
         (language != crate::transcription_models::AUTO_LANGUAGE).then(|| language.to_string())
-    }
-
-    /// The model browser's current language filter, read from the header's
-    /// select control; `None` means every language.
-    fn model_catalog_filter(&self, cx: &App) -> Option<String> {
-        self.model_catalog_language_select
-            .read(cx)
-            .selected_value()
-            .cloned()
-            .flatten()
-    }
-
-    fn reset_model_catalog_filter(
-        &mut self,
-        language: &str,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let filter = Self::catalog_filter_for_language(language);
-        self.model_catalog_language_select.update(cx, |select, cx| {
-            select.set_selected_value(&filter, window, cx);
-        });
     }
 
     fn set_indicator_position(&mut self, position: IndicatorPosition) {
@@ -1496,8 +1478,9 @@ impl WindowsApp {
             let language = snapshot.transcription.selection.language.clone();
             return header_button(tr("Install model"))
                 .id("install-model")
-                .on_click(cx.listener(move |this, _, window, cx| {
-                    this.reset_model_catalog_filter(&language, window, cx);
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.model_catalog_language_filter =
+                        Self::catalog_filter_for_language(&language);
                     this.transcription_picker =
                         TranscriptionPickerState::Choosing(language.clone());
                     cx.notify();
@@ -1883,58 +1866,123 @@ impl WindowsApp {
                                                     .rounded_none()
                                                     .rounded_l(px(4.0))
                                                     .border_r_0()
-                                                    .on_click(cx.listener(
-                                                        move |this, _, window, cx| {
-                                                            this.close_popups();
-                                                            this.reset_model_catalog_filter(
+                                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                                        this.close_popups();
+                                                        this.model_catalog_language_filter =
+                                                            Self::catalog_filter_for_language(
                                                                 &transcription_language,
-                                                                window,
-                                                                cx,
                                                             );
-                                                            this.transcription_picker =
-                                                                TranscriptionPickerState::Choosing(
-                                                                    transcription_language.clone(),
-                                                                );
-                                                            cx.notify();
-                                                        },
-                                                    )),
+                                                        this.transcription_picker =
+                                                            TranscriptionPickerState::Choosing(
+                                                                transcription_language.clone(),
+                                                            );
+                                                        cx.notify();
+                                                    })),
                                                 )
-                                                .child({
-                                                    let entity = cx.entity();
-                                                    crate::ui::combobox::combobox(
-                                                        "windows-transcription-setting",
-                                                        transcription_label,
-                                                        move |_, cx| {
-                                                            transcription_model_items(&entity, cx)
-                                                        },
-                                                    )
-                                                }),
+                                                .child(
+                                                    div()
+                                                        .relative()
+                                                        .child(
+                                                            disclosure_button(transcription_label)
+                                                                .id("windows-transcription-setting")
+                                                                .rounded_none()
+                                                                .rounded_r(px(4.0))
+                                                                .on_click(cx.listener(
+                                                                    |this, _, _, cx| {
+                                                                        let open = this
+                                                                            .transcription_dropdown_open;
+                                                                        this.close_popups();
+                                                                        this.transcription_dropdown_open =
+                                                                            !open;
+                                                                        cx.notify();
+                                                                    },
+                                                                )),
+                                                        )
+                                                        .child(
+                                                            canvas(
+                                                                {
+                                                                    let entity = cx.entity();
+                                                                    move |bounds, _, cx| {
+                                                                        entity.update(cx, |this, _| {
+                                                                            this.transcription_dropdown_bounds =
+                                                                                Some(bounds);
+                                                                        });
+                                                                    }
+                                                                },
+                                                                |_, _, _, _| {},
+                                                            )
+                                                            .w_full()
+                                                            .h(px(0.0)),
+                                                        ),
+                                                ),
                                         ))
                                         .child(settings_row(
                                             "Language",
                                             "The language you dictate in; Auto detects it",
-                                            {
-                                                let entity = cx.entity();
-                                                crate::ui::combobox::combobox(
-                                                    "windows-dictation-language",
-                                                    dictation_language_label,
-                                                    move |_, cx| {
-                                                        dictation_language_items(&entity, cx)
-                                                    },
+                                            div()
+                                                .relative()
+                                                .child(
+                                                    disclosure_button(dictation_language_label)
+                                                        .id("windows-dictation-language")
+                                                        .on_click(cx.listener(|this, _, _, cx| {
+                                                            let open = this
+                                                                .dictation_language_dropdown_open;
+                                                            this.close_popups();
+                                                            this.dictation_language_dropdown_open =
+                                                                !open;
+                                                            cx.notify();
+                                                        })),
                                                 )
-                                            },
+                                                .child(
+                                                    canvas(
+                                                        {
+                                                            let entity = cx.entity();
+                                                            move |bounds, _, cx| {
+                                                                entity.update(cx, |this, _| {
+                                                                    this.dictation_language_dropdown_bounds =
+                                                                        Some(bounds);
+                                                                });
+                                                            }
+                                                        },
+                                                        |_, _, _, _| {},
+                                                    )
+                                                    .w_full()
+                                                    .h(px(0.0)),
+                                                ),
                                         ))
                                         .child(settings_row(
                                             "Microphone",
                                             "Uses the selected WASAPI input or the Windows default",
-                                            {
-                                                let entity = cx.entity();
-                                                crate::ui::combobox::combobox(
-                                                    "windows-microphone-setting",
-                                                    microphone_label,
-                                                    move |_, cx| microphone_items(&entity, cx),
+                                            div()
+                                                .relative()
+                                                .child(
+                                                    disclosure_button(microphone_label)
+                                                        .id("windows-microphone-setting")
+                                                        .on_click(cx.listener(|this, _, _, cx| {
+                                                            let open =
+                                                                this.microphone_picker_open;
+                                                            this.close_popups();
+                                                            this.host.refresh_microphones();
+                                                            this.microphone_picker_open = !open;
+                                                            cx.notify();
+                                                        })),
                                                 )
-                                            },
+                                                .child(
+                                                    canvas(
+                                                        {
+                                                            let entity = cx.entity();
+                                                            move |bounds, _, cx| {
+                                                                entity.update(cx, |this, _| {
+                                                                    this.microphone_dropdown_bounds =
+                                                                        Some(bounds);
+                                                                });
+                                                            }
+                                                        },
+                                                        |_, _, _, _| {},
+                                                    )
+                                                    .w_full()
+                                                    .h(px(0.0)),
+                                                ),
                                         ))
                                         .child(
                                             settings_row(
@@ -1951,6 +1999,7 @@ impl WindowsApp {
                                             .on_click(cx.listener(|this, _, _, cx| {
                                                 this.transcription_picker =
                                                     TranscriptionPickerState::Closed;
+                                                this.microphone_picker_open = false;
                                                 this.hotkey_picker_open = true;
                                                 cx.notify();
                                             })),
@@ -2002,14 +2051,35 @@ impl WindowsApp {
                                         .child(settings_row(
                                             "Interface language",
                                             "Language of the HEX interface",
-                                            {
-                                                let entity = cx.entity();
-                                                crate::ui::combobox::combobox(
-                                                    "windows-ui-language",
-                                                    ui_language_label,
-                                                    move |_, cx| ui_language_items(&entity, cx),
+                                            div()
+                                                .relative()
+                                                .child(
+                                                    disclosure_button(ui_language_label)
+                                                        .id("windows-ui-language")
+                                                        .on_click(cx.listener(|this, _, _, cx| {
+                                                            let open =
+                                                                this.ui_language_dropdown_open;
+                                                            this.close_popups();
+                                                            this.ui_language_dropdown_open = !open;
+                                                            cx.notify();
+                                                        })),
                                                 )
-                                            },
+                                                .child(
+                                                    canvas(
+                                                        {
+                                                            let entity = cx.entity();
+                                                            move |bounds, _, cx| {
+                                                                entity.update(cx, |this, _| {
+                                                                    this.ui_language_dropdown_bounds =
+                                                                        Some(bounds);
+                                                                });
+                                                            }
+                                                        },
+                                                        |_, _, _, _| {},
+                                                    )
+                                                    .w_full()
+                                                    .h(px(0.0)),
+                                                ),
                                         ))
                                         .child(
                                             settings_row(
@@ -2441,6 +2511,267 @@ impl WindowsApp {
             .into_any_element()
     }
 
+    fn render_microphone_dropdown(
+        &mut self,
+        viewport_height: Pixels,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let Some(bounds) = self.microphone_dropdown_bounds else {
+            return div().into_any_element();
+        };
+        let current = self.host.settings.microphone.clone();
+        let mut choices = vec![(tr("Automatic").to_string(), None)];
+        choices.extend(
+            self.host
+                .microphones
+                .iter()
+                .cloned()
+                .map(|microphone| (microphone.clone(), Some(microphone))),
+        );
+        let panel_rows = choices.len() + usize::from(self.host.microphone_error.is_some()) * 2;
+        let items = choices
+            .into_iter()
+            .enumerate()
+            .map(|(index, (label, selection))| {
+                let selected = selection == current;
+                dropdown_item(("windows-microphone-option", index), label, selected).on_click(
+                    cx.listener(move |this, _, _, cx| {
+                        cx.stop_propagation();
+                        if this.host.set_microphone(selection.clone()).is_ok() {
+                            this.microphone_picker_open = false;
+                        }
+                        cx.notify();
+                    }),
+                )
+            });
+        dropdown_backdrop("windows-microphone-dropdown-backdrop")
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.microphone_picker_open = false;
+                cx.notify();
+            }))
+            .child(
+                dropdown_panel_with_width(bounds, viewport_height, panel_rows, px(360.0))
+                    .id("windows-microphone-dropdown")
+                    .overflow_y_scroll()
+                    .on_click(|_, _, cx| cx.stop_propagation())
+                    .children(items)
+                    .when_some(self.host.microphone_error.clone(), |list, error| {
+                        list.child(error_message("Microphones could not be enumerated.", error))
+                    }),
+            )
+            .into_any_element()
+    }
+
+    fn render_transcription_dropdown(
+        &mut self,
+        viewport_height: Pixels,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let Some(bounds) = self.transcription_dropdown_bounds else {
+            return div().into_any_element();
+        };
+        let selection = self.host.settings.transcription.clone();
+        let models: Vec<(String, crate::transcription_models::TranscriptionModelId)> =
+            windows_model_catalog()
+                .into_iter()
+                .map(|model| {
+                    let installed = crate::transcription_models::is_installed(
+                        model,
+                        crate::transcription_models::AUTO_LANGUAGE,
+                    ) && crate::transcription_models::is_verified(model);
+                    let state = if installed {
+                        tr("Installed").to_string()
+                    } else {
+                        model.size_label()
+                    };
+                    (format!("{} · {state}", model.name), model.id)
+                })
+                .collect();
+        let panel_rows = models.len();
+        let items = models
+            .into_iter()
+            .enumerate()
+            .map(|(index, (label, model))| {
+                let selected = selection.model == model;
+                let preferred = selection.language.clone();
+                dropdown_item(("windows-model-option", index), label, selected).on_click(
+                    cx.listener(move |this, _, _, cx| {
+                        cx.stop_propagation();
+                        if let Some(language) = Self::language_for_model(model, &preferred)
+                            && this.host.choose_transcription(model, language).is_ok()
+                        {
+                            this.transcription_dropdown_open = false;
+                        }
+                        cx.notify();
+                    }),
+                )
+            });
+        dropdown_backdrop("windows-transcription-dropdown-backdrop")
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.transcription_dropdown_open = false;
+                cx.notify();
+            }))
+            .child(
+                dropdown_panel_with_width(bounds, viewport_height, panel_rows, px(300.0))
+                    .id("windows-transcription-dropdown")
+                    .overflow_y_scroll()
+                    .on_click(|_, _, cx| cx.stop_propagation())
+                    .children(items),
+            )
+            .into_any_element()
+    }
+
+    fn render_dictation_language_dropdown(
+        &mut self,
+        viewport_height: Pixels,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let Some(bounds) = self.dictation_language_dropdown_bounds else {
+            return div().into_any_element();
+        };
+        let selection = self.host.settings.transcription.clone();
+        let model = selection.model;
+        let definition = crate::transcription_models::definition(model);
+        let languages: Vec<(String, String)> = crate::transcription_models::LANGUAGES
+            .iter()
+            .filter(|(code, _)| definition.supports_language(code))
+            .map(|(code, name)| {
+                let name = if *code == "auto" {
+                    tr("Auto").to_string()
+                } else {
+                    (*name).to_string()
+                };
+                ((*code).to_string(), name)
+            })
+            .collect();
+        let panel_rows = languages.len();
+        let items = languages
+            .into_iter()
+            .enumerate()
+            .map(|(index, (code, name))| {
+                let selected = selection.language == code;
+                dropdown_item(("windows-dictation-language-option", index), name, selected)
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        cx.stop_propagation();
+                        if this.host.choose_transcription(model, code.clone()).is_ok() {
+                            this.dictation_language_dropdown_open = false;
+                        }
+                        cx.notify();
+                    }))
+            });
+        dropdown_backdrop("windows-dictation-language-backdrop")
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.dictation_language_dropdown_open = false;
+                cx.notify();
+            }))
+            .child(
+                dropdown_panel(bounds, viewport_height, panel_rows)
+                    .id("windows-dictation-language-dropdown")
+                    .overflow_y_scroll()
+                    .on_click(|_, _, cx| cx.stop_propagation())
+                    .children(items),
+            )
+            .into_any_element()
+    }
+
+    fn render_ui_language_dropdown(
+        &mut self,
+        viewport_height: Pixels,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let Some(bounds) = self.ui_language_dropdown_bounds else {
+            return div().into_any_element();
+        };
+        let current = self.host.settings.ui_language.clone();
+        let items = crate::windows_i18n::LANGUAGE_CHOICES
+            .iter()
+            .enumerate()
+            .map(|(index, (code, name))| {
+                let selected = current.as_deref() == *code;
+                let label = if code.is_none() {
+                    tr("System").to_string()
+                } else {
+                    (*name).to_string()
+                };
+                let code = *code;
+                dropdown_item(("windows-ui-language-option", index), label, selected).on_click(
+                    cx.listener(move |this, _, _, cx| {
+                        cx.stop_propagation();
+                        this.set_ui_language(code);
+                        this.ui_language_dropdown_open = false;
+                        cx.notify();
+                    }),
+                )
+            });
+        dropdown_backdrop("windows-ui-language-backdrop")
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.ui_language_dropdown_open = false;
+                cx.notify();
+            }))
+            .child(
+                dropdown_panel(
+                    bounds,
+                    viewport_height,
+                    crate::windows_i18n::LANGUAGE_CHOICES.len(),
+                )
+                .id("windows-ui-language-dropdown")
+                .overflow_y_scroll()
+                .on_click(|_, _, cx| cx.stop_propagation())
+                .children(items),
+            )
+            .into_any_element()
+    }
+
+    fn render_model_catalog_language_dropdown(
+        &mut self,
+        viewport_height: Pixels,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let Some(bounds) = self.model_catalog_language_dropdown_bounds else {
+            return div().into_any_element();
+        };
+        let selected_language = self.model_catalog_language_filter.clone();
+        let mut languages: Vec<(&str, &str)> = crate::transcription_models::LANGUAGES
+            .iter()
+            .filter(|(code, _)| *code != crate::transcription_models::AUTO_LANGUAGE)
+            .copied()
+            .collect();
+        languages.sort_by_key(|(_, name)| *name);
+        let choices = std::iter::once((None, tr("All languages").to_string())).chain(
+            languages
+                .into_iter()
+                .map(|(code, name)| (Some(code.to_string()), name.to_string())),
+        );
+        let items = choices.enumerate().map(|(index, (code, name))| {
+            let selected = code == selected_language;
+            dropdown_item(
+                ("windows-model-language-filter-option", index),
+                name,
+                selected,
+            )
+            .on_click(cx.listener(move |this, _, _, cx| {
+                cx.stop_propagation();
+                this.model_catalog_language_filter = code.clone();
+                this.model_catalog_language_dropdown_open = false;
+                cx.notify();
+            }))
+        });
+        let panel_rows = crate::transcription_models::LANGUAGES.len();
+        dropdown_backdrop("windows-model-language-filter-backdrop")
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.model_catalog_language_dropdown_open = false;
+                cx.notify();
+            }))
+            .child(
+                dropdown_panel_with_width(bounds, viewport_height, panel_rows, px(230.0))
+                    .id("windows-model-language-filter-dropdown")
+                    .overflow_y_scroll()
+                    .on_click(|_, _, cx| cx.stop_propagation())
+                    .children(items),
+            )
+            .into_any_element()
+    }
+
     /// The Windows model browser: the full runtime catalog with install
     /// state, independent of the active dictation language. Installing keeps
     /// the current language when the model supports it, otherwise Auto.
@@ -2452,8 +2783,10 @@ impl WindowsApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let selection = transcription.selection.clone();
-        let recommendation_language = self.model_catalog_filter(cx);
+        let recommendation_language = self.model_catalog_language_filter.clone();
         let catalog = filtered_windows_model_catalog(recommendation_language.as_deref());
+        let filter_label =
+            model_catalog_language_filter_label(self.model_catalog_language_filter.as_deref());
         let dialog_width = px(640.0).min(viewport_width - px(40.0));
         let dialog_height =
             px(640.0).min(viewport_height - px(crate::windows_ui::CAPTION_HEIGHT) - px(32.0));
@@ -2769,13 +3102,32 @@ impl WindowsApp {
                                     .items_center()
                                     .gap_2()
                                     .child(
-                                        div().w(px(220.0)).child(
-                                            gpui_component::select::Select::new(
-                                                &self.model_catalog_language_select,
+                                        div()
+                                            .relative()
+                                            .child(
+                                                disclosure_button(filter_label)
+                                                    .id("windows-model-language-filter")
+                                                    .on_click(cx.listener(|this, _, _, cx| {
+                                                        this.model_catalog_language_dropdown_open =
+                                                            !this.model_catalog_language_dropdown_open;
+                                                        cx.notify();
+                                                    })),
                                             )
-                                            .menu_width(px(230.0))
-                                            .search_placeholder(tr("All languages")),
-                                        ),
+                                            .child(
+                                                canvas(
+                                                    {
+                                                        let entity = cx.entity();
+                                                        move |bounds, _, cx| {
+                                                            entity.update(cx, |this, _| {
+                                                                this.model_catalog_language_dropdown_bounds = Some(bounds);
+                                                            });
+                                                        }
+                                                    },
+                                                    |_, _, _, _| {},
+                                                )
+                                                .w_full()
+                                                .h(px(0.0)),
+                                            ),
                                     )
                                     .child(
                                         header_button(crate::windows_ui::fluent_icon(
@@ -2991,6 +3343,7 @@ impl TranscriptionPickerDelegate for WindowsApp {
 
     fn dismiss_transcription_picker(&mut self, cx: &mut Context<Self>) {
         self.transcription_picker = TranscriptionPickerState::Closed;
+        self.model_catalog_language_dropdown_open = false;
         cx.notify();
     }
 
@@ -3030,6 +3383,21 @@ impl Render for WindowsApp {
         let hotkey_picker = self
             .hotkey_picker_open
             .then(|| self.render_hotkey_picker(cx));
+        let model_catalog_language_dropdown = self
+            .model_catalog_language_dropdown_open
+            .then(|| self.render_model_catalog_language_dropdown(viewport.height, cx));
+        let microphone_dropdown = self
+            .microphone_picker_open
+            .then(|| self.render_microphone_dropdown(viewport.height, cx));
+        let transcription_dropdown = self
+            .transcription_dropdown_open
+            .then(|| self.render_transcription_dropdown(viewport.height, cx));
+        let dictation_language_dropdown = self
+            .dictation_language_dropdown_open
+            .then(|| self.render_dictation_language_dropdown(viewport.height, cx));
+        let ui_language_dropdown = self
+            .ui_language_dropdown_open
+            .then(|| self.render_ui_language_dropdown(viewport.height, cx));
         window_frame()
             .flex_col()
             .child(caption_bar(window))
@@ -3043,8 +3411,148 @@ impl Render for WindowsApp {
                     .child(div().flex_1().h_full().overflow_hidden().child(content)),
             )
             .children(model_picker)
+            .children(model_catalog_language_dropdown)
+            .children(microphone_dropdown)
+            .children(transcription_dropdown)
+            .children(dictation_language_dropdown)
+            .children(ui_language_dropdown)
             .children(hotkey_picker)
     }
+}
+
+fn dropdown_backdrop(id: &'static str) -> gpui::Stateful<gpui::Div> {
+    div()
+        .id(id)
+        .absolute()
+        .top_0()
+        .left_0()
+        .size_full()
+        .occlude()
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct DropdownPanelLayout {
+    height: Pixels,
+    top: Pixels,
+}
+
+const DROPDOWN_GAP: f32 = 4.0;
+const DROPDOWN_MARGIN: f32 = 8.0;
+const DROPDOWN_MAX_HEIGHT: f32 = 360.0;
+const DROPDOWN_ROW_HEIGHT: f32 = 34.0;
+const DROPDOWN_ROW_GAP: f32 = 2.0;
+const DROPDOWN_PADDING: f32 = 4.0;
+
+fn dropdown_rows_height(rows: usize) -> Pixels {
+    px(DROPDOWN_PADDING * 2.0)
+        + px(DROPDOWN_ROW_HEIGHT) * rows
+        + px(DROPDOWN_ROW_GAP) * rows.saturating_sub(1)
+}
+
+/// The tallest whole-row height that fits `available`, so a clamped panel
+/// never slices a row in half at its scroll edge.
+fn dropdown_fit_height(row_count: usize, available: Pixels) -> Pixels {
+    let content = dropdown_rows_height(row_count);
+    if content <= available {
+        return content;
+    }
+    let usable = f32::from(available) - DROPDOWN_PADDING * 2.0 + DROPDOWN_ROW_GAP;
+    let rows = (usable / (DROPDOWN_ROW_HEIGHT + DROPDOWN_ROW_GAP))
+        .floor()
+        .max(1.0) as usize;
+    dropdown_rows_height(rows.min(row_count))
+}
+
+fn dropdown_panel_layout(
+    anchor_top: Pixels,
+    viewport_height: Pixels,
+    row_count: usize,
+) -> DropdownPanelLayout {
+    let row_count = row_count.max(1);
+    let max_height = px(DROPDOWN_MAX_HEIGHT);
+    let gap = px(DROPDOWN_GAP);
+    let margin = px(DROPDOWN_MARGIN);
+    let downward_top = anchor_top + gap;
+    let below = (viewport_height - margin - downward_top).max(Pixels::ZERO);
+    let above =
+        (anchor_top - gap - px(crate::windows_ui::CAPTION_HEIGHT) - margin).max(Pixels::ZERO);
+
+    if below >= dropdown_fit_height(row_count, max_height) || below >= above {
+        DropdownPanelLayout {
+            height: dropdown_fit_height(row_count, below.min(max_height)),
+            top: downward_top,
+        }
+    } else {
+        let height = dropdown_fit_height(row_count, above.min(max_height));
+        DropdownPanelLayout {
+            height,
+            top: anchor_top - gap - height,
+        }
+    }
+}
+
+/// A viewport-bounded Fluent flyout matching the width of its ComboBox.
+/// Long lists receive a real fixed-height scroll viewport, and a flyout near
+/// the bottom edge opens upward when that gives it more useful space.
+fn dropdown_panel(bounds: Bounds<Pixels>, viewport_height: Pixels, row_count: usize) -> gpui::Div {
+    dropdown_panel_with_width(bounds, viewport_height, row_count, bounds.size.width)
+}
+
+/// A dropdown panel wider than its trigger; the extra width grows leftward
+/// so right-edge triggers keep the panel inside the window.
+fn dropdown_panel_with_width(
+    bounds: Bounds<Pixels>,
+    viewport_height: Pixels,
+    row_count: usize,
+    width: Pixels,
+) -> gpui::Div {
+    let width = width.max(bounds.size.width);
+    let layout = dropdown_panel_layout(bounds.top(), viewport_height, row_count);
+    div()
+        .absolute()
+        .left(bounds.right() - width)
+        .top(layout.top)
+        .w(width)
+        .h(layout.height)
+        .p(px(4.0))
+        .flex()
+        .flex_col()
+        .gap(px(2.0))
+        .rounded(px(8.0))
+        .border_1()
+        .border_color(rgb(DIALOG_STROKE))
+        .bg(rgb(OVERLAY_PANEL))
+        .shadow_lg()
+}
+
+fn dropdown_item(
+    id: impl Into<gpui::ElementId>,
+    label: String,
+    selected: bool,
+) -> gpui::Stateful<gpui::Div> {
+    div()
+        .id(id)
+        .w_full()
+        .h(px(34.0))
+        .flex_none()
+        .pl(px(1.0))
+        .pr_3()
+        .flex()
+        .items_center()
+        .gap_2()
+        .rounded(px(4.0))
+        .when(selected, |item| item.bg(rgb(SURFACE_SELECTED)))
+        .hover(|item| item.bg(rgb(SURFACE_SELECTED)))
+        .child(selection_pill(selected))
+        .child(
+            div()
+                .min_w(px(0.0))
+                .flex_1()
+                .truncate()
+                .text_size(px(13.0))
+                .text_color(rgb(TEXT))
+                .child(label),
+        )
 }
 
 fn windows_model_catalog() -> Vec<&'static crate::transcription_models::ModelDefinition> {
@@ -3063,161 +3571,11 @@ fn filtered_windows_model_catalog(
         .collect()
 }
 
-/// Menu items for the transcription-model combobox: every catalogue model
-/// with its install state, check-marked on the active model.
-fn transcription_model_items(
-    entity: &Entity<WindowsApp>,
-    cx: &mut App,
-) -> Vec<crate::ui::combobox::ComboItem> {
-    let selection = entity.read(cx).host.settings.transcription.clone();
-    windows_model_catalog()
-        .into_iter()
-        .map(|model| {
-            let installed = crate::transcription_models::is_installed(
-                model,
-                crate::transcription_models::AUTO_LANGUAGE,
-            ) && crate::transcription_models::is_verified(model);
-            let state = if installed {
-                tr("Installed").to_string()
-            } else {
-                model.size_label()
-            };
-            let id = model.id;
-            let preferred = selection.language.clone();
-            let entity = entity.clone();
-            crate::ui::combobox::ComboItem::new(
-                format!("{} · {state}", model.name),
-                selection.model == id,
-                move |_, cx| {
-                    entity.update(cx, |this, cx| {
-                        if let Some(language) = WindowsApp::language_for_model(id, &preferred) {
-                            let _ = this.host.choose_transcription(id, language);
-                        }
-                        cx.notify();
-                    });
-                },
-            )
-        })
-        .collect()
-}
-
-/// Menu items for the dictation-language combobox: the languages the active
-/// model supports, with Auto translated.
-fn dictation_language_items(
-    entity: &Entity<WindowsApp>,
-    cx: &mut App,
-) -> Vec<crate::ui::combobox::ComboItem> {
-    let selection = entity.read(cx).host.settings.transcription.clone();
-    let model = selection.model;
-    let definition = crate::transcription_models::definition(model);
-    crate::transcription_models::LANGUAGES
-        .iter()
-        .filter(|(code, _)| definition.supports_language(code))
-        .map(|(code, name)| {
-            let label = if *code == crate::transcription_models::AUTO_LANGUAGE {
-                tr("Auto").to_string()
-            } else {
-                (*name).to_string()
-            };
-            let code = (*code).to_string();
-            let checked = selection.language == code;
-            let entity = entity.clone();
-            crate::ui::combobox::ComboItem::new(label, checked, move |_, cx| {
-                entity.update(cx, |this, cx| {
-                    let _ = this.host.choose_transcription(model, code.clone());
-                    cx.notify();
-                });
-            })
-        })
-        .collect()
-}
-
-/// Menu items for the microphone combobox. Devices are re-enumerated on
-/// every open; an enumeration error appears as a non-interactive note.
-fn microphone_items(
-    entity: &Entity<WindowsApp>,
-    cx: &mut App,
-) -> Vec<crate::ui::combobox::ComboItem> {
-    entity.update(cx, |this, _| this.host.refresh_microphones());
-    let this = entity.read(cx);
-    let current = this.host.settings.microphone.clone();
-    let error = this.host.microphone_error.clone();
-    let mut choices = vec![(tr("Automatic").to_string(), None)];
-    choices.extend(
-        this.host
-            .microphones
-            .iter()
-            .cloned()
-            .map(|microphone| (microphone.clone(), Some(microphone))),
-    );
-    let mut items: Vec<crate::ui::combobox::ComboItem> = choices
-        .into_iter()
-        .map(|(label, selection)| {
-            let checked = selection == current;
-            let entity = entity.clone();
-            crate::ui::combobox::ComboItem::new(label, checked, move |_, cx| {
-                entity.update(cx, |this, cx| {
-                    let _ = this.host.set_microphone(selection.clone());
-                    cx.notify();
-                });
-            })
-        })
-        .collect();
-    if let Some(error) = error {
-        items.push(crate::ui::combobox::ComboItem::note(format!(
-            "{} {error}",
-            tr("Microphones could not be enumerated.")
-        )));
+fn model_catalog_language_filter_label(filter: Option<&str>) -> String {
+    match filter {
+        None => tr("All languages").to_string(),
+        Some(language) => crate::transcription_models::language_name(language).to_string(),
     }
-    items
-}
-
-/// Menu items for the interface-language combobox.
-fn ui_language_items(
-    entity: &Entity<WindowsApp>,
-    cx: &mut App,
-) -> Vec<crate::ui::combobox::ComboItem> {
-    let current = entity.read(cx).host.settings.ui_language.clone();
-    crate::windows_i18n::LANGUAGE_CHOICES
-        .iter()
-        .map(|(code, name)| {
-            let checked = current.as_deref() == *code;
-            let label = if code.is_none() {
-                tr("System").to_string()
-            } else {
-                (*name).to_string()
-            };
-            let code = *code;
-            let entity = entity.clone();
-            crate::ui::combobox::ComboItem::new(label, checked, move |_, cx| {
-                entity.update(cx, |this, cx| {
-                    this.set_ui_language(code);
-                    cx.notify();
-                });
-            })
-        })
-        .collect()
-}
-
-/// The model browser's language choices: "All languages" first, then every
-/// dictation language alphabetically by display name.
-fn model_catalog_language_options() -> Vec<crate::ui::select::SelectOption<Option<String>>> {
-    let mut languages: Vec<(&str, &str)> = crate::transcription_models::LANGUAGES
-        .iter()
-        .filter(|(code, _)| *code != crate::transcription_models::AUTO_LANGUAGE)
-        .copied()
-        .collect();
-    languages.sort_by_key(|(_, name)| *name);
-    std::iter::once(crate::ui::select::SelectOption::new(
-        tr("All languages"),
-        None,
-    ))
-    .chain(
-        languages
-            .into_iter()
-            .map(|(code, name)| crate::ui::select::SelectOption::new(name, Some(code.to_string()))),
-    )
-    .collect()
 }
 
 fn detail_placeholder(message: &'static str) -> AnyElement {
@@ -3314,6 +3672,38 @@ mod tests {
         assert_eq!(
             WindowsApp::language_for_model(TranscriptionModelId::ParakeetV2, "de").as_deref(),
             Some("en")
+        );
+    }
+
+    #[test]
+    fn long_dropdown_flips_up_and_stays_inside_the_viewport() {
+        let viewport_height = px(700.0);
+        let anchor_top = px(500.0);
+
+        let layout = dropdown_panel_layout(anchor_top, viewport_height, 20);
+
+        assert!(layout.top < anchor_top);
+        // The clamp quantizes to whole rows so no row is sliced at the edge.
+        assert_eq!(
+            layout.height,
+            dropdown_fit_height(20, px(DROPDOWN_MAX_HEIGHT))
+        );
+        assert!(layout.height <= px(DROPDOWN_MAX_HEIGHT));
+        let inner = f32::from(layout.height) - DROPDOWN_PADDING * 2.0 + DROPDOWN_ROW_GAP;
+        assert_eq!(inner % (DROPDOWN_ROW_HEIGHT + DROPDOWN_ROW_GAP), 0.0);
+        assert!(layout.top >= px(crate::windows_ui::CAPTION_HEIGHT) + px(DROPDOWN_MARGIN));
+        assert!(layout.top + layout.height <= viewport_height - px(DROPDOWN_MARGIN));
+    }
+
+    #[test]
+    fn short_dropdown_keeps_its_content_height_below_the_control() {
+        let anchor_top = px(100.0);
+        let layout = dropdown_panel_layout(anchor_top, px(700.0), 3);
+
+        assert_eq!(layout.top, anchor_top + px(DROPDOWN_GAP));
+        assert_eq!(
+            layout.height,
+            px(DROPDOWN_PADDING * 2.0 + DROPDOWN_ROW_HEIGHT * 3.0 + DROPDOWN_ROW_GAP * 2.0)
         );
     }
 }
