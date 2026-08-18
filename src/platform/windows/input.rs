@@ -70,6 +70,7 @@ struct CallbackState {
     paste_trigger_down: bool,
     escape_down: bool,
     double_tap_enabled: bool,
+    double_tap_only: bool,
     capture: CaptureState,
     dirty: bool,
 }
@@ -80,6 +81,7 @@ struct HookBindings {
     paste_last: Option<WindowsHotkey>,
     paste_trigger_vk: Option<u32>,
     double_tap_enabled: bool,
+    double_tap_only: bool,
 }
 
 #[derive(Default)]
@@ -87,13 +89,20 @@ struct CaptureState {
     active: bool,
     locked: bool,
     second_tap: bool,
+    recording: bool,
     last_release_ms: Option<u32>,
 }
 
 impl CaptureState {
-    fn press(&mut self, double_tap_enabled: bool, timestamp_ms: u32) -> Option<HotkeyAction> {
+    fn press(
+        &mut self,
+        double_tap_enabled: bool,
+        double_tap_only: bool,
+        timestamp_ms: u32,
+    ) -> Option<HotkeyAction> {
         if self.locked {
             self.locked = false;
+            self.recording = false;
             self.last_release_ms = None;
             return Some(HotkeyAction::Finish);
         }
@@ -106,6 +115,13 @@ impl CaptureState {
                 .last_release_ms
                 .take()
                 .is_some_and(|released| timestamp_ms.wrapping_sub(released) < DOUBLE_TAP_WINDOW_MS);
+        if double_tap_only && !self.second_tap {
+            // Double-tap-only: the first tap arms the window silently;
+            // recording waits for the second tap.
+            self.recording = false;
+            return None;
+        }
+        self.recording = true;
         Some(HotkeyAction::Start)
     }
 
@@ -121,6 +137,11 @@ impl CaptureState {
             return None;
         }
         self.last_release_ms = double_tap_enabled.then_some(timestamp_ms);
+        if !self.recording {
+            // Releasing an armed-but-silent first tap emits nothing.
+            return None;
+        }
+        self.recording = false;
         Some(HotkeyAction::Finish)
     }
 
@@ -131,6 +152,7 @@ impl CaptureState {
         self.active = false;
         self.locked = false;
         self.second_tap = false;
+        self.recording = false;
         self.last_release_ms = None;
         Some(HotkeyAction::Cancel)
     }
@@ -162,6 +184,7 @@ impl WindowsHotkeyMonitor {
         binding: WindowsHotkey,
         paste_last: Option<WindowsHotkey>,
         double_tap_enabled: bool,
+        double_tap_only: bool,
     ) -> Result<Self> {
         binding.validate()?;
         let trigger_vk = binding.key.as_deref().map(virtual_key).transpose()?;
@@ -190,6 +213,7 @@ impl WindowsHotkeyMonitor {
                         paste_last,
                         paste_trigger_vk,
                         double_tap_enabled,
+                        double_tap_only,
                     },
                     event_sender,
                     error_sender,
@@ -255,6 +279,7 @@ fn run_hook(
             paste_trigger_down: false,
             escape_down: false,
             double_tap_enabled: bindings.double_tap_enabled,
+            double_tap_only: bindings.double_tap_only,
             capture: CaptureState::default(),
             dirty: false,
         });
@@ -349,9 +374,11 @@ unsafe extern "system" fn keyboard_hook(code: i32, wparam: WPARAM, lparam: LPARA
                         state.trigger_down = true;
                         suppressed = true;
                         let was_locked = state.capture.locked;
-                        if let Some(action) =
-                            state.capture.press(state.double_tap_enabled, event.time)
-                        {
+                        if let Some(action) = state.capture.press(
+                            state.double_tap_enabled,
+                            state.double_tap_only,
+                            event.time,
+                        ) {
                             if was_locked {
                                 state.dirty = true;
                             }
@@ -388,8 +415,11 @@ unsafe extern "system" fn keyboard_hook(code: i32, wparam: WPARAM, lparam: LPARA
                     && is_down
                     && state.modifiers.matches(&state.binding)
                 {
-                    if let Some(action) = state.capture.press(state.double_tap_enabled, event.time)
-                    {
+                    if let Some(action) = state.capture.press(
+                        state.double_tap_enabled,
+                        state.double_tap_only,
+                        event.time,
+                    ) {
                         state.dirty = true;
                         send_event(state, action, event.time);
                     }
@@ -406,7 +436,11 @@ unsafe extern "system" fn keyboard_hook(code: i32, wparam: WPARAM, lparam: LPARA
                     && !state.dirty
                     && is_down
                     && state.modifiers.matches(&state.binding)
-                    && let Some(action) = state.capture.press(state.double_tap_enabled, event.time)
+                    && let Some(action) = state.capture.press(
+                        state.double_tap_enabled,
+                        state.double_tap_only,
+                        event.time,
+                    )
                 {
                     send_event(state, action, event.time);
                 }
@@ -567,21 +601,21 @@ mod tests {
     #[test]
     fn second_tap_locks_until_the_shortcut_is_pressed_again() {
         let mut state = CaptureState::default();
-        assert_eq!(state.press(true, 100), Some(HotkeyAction::Start));
+        assert_eq!(state.press(true, false, 100), Some(HotkeyAction::Start));
         assert_eq!(state.release(true, 140), Some(HotkeyAction::Finish));
-        assert_eq!(state.press(true, 250), Some(HotkeyAction::Start));
+        assert_eq!(state.press(true, false, 250), Some(HotkeyAction::Start));
         assert_eq!(state.release(true, 290), None);
         assert!(state.locked);
-        assert_eq!(state.press(true, 500), Some(HotkeyAction::Finish));
+        assert_eq!(state.press(true, false, 500), Some(HotkeyAction::Finish));
         assert!(!state.locked);
     }
 
     #[test]
     fn escape_cancels_a_locked_capture() {
         let mut state = CaptureState::default();
-        state.press(true, 100);
+        state.press(true, false, 100);
         state.release(true, 120);
-        state.press(true, 200);
+        state.press(true, false, 200);
         state.release(true, 220);
         assert_eq!(state.cancel(), Some(HotkeyAction::Cancel));
         assert!(!state.active);
@@ -591,10 +625,38 @@ mod tests {
     #[test]
     fn disabled_double_tap_keeps_both_taps_as_hold_captures() {
         let mut state = CaptureState::default();
-        assert_eq!(state.press(false, 100), Some(HotkeyAction::Start));
+        assert_eq!(state.press(false, false, 100), Some(HotkeyAction::Start));
         assert_eq!(state.release(false, 120), Some(HotkeyAction::Finish));
-        assert_eq!(state.press(false, 200), Some(HotkeyAction::Start));
+        assert_eq!(state.press(false, false, 200), Some(HotkeyAction::Start));
         assert_eq!(state.release(false, 220), Some(HotkeyAction::Finish));
+        assert!(!state.locked);
+    }
+
+    #[test]
+    fn double_tap_only_arms_silently_and_records_from_the_second_tap() {
+        let mut state = CaptureState::default();
+        // A lone hold must not record.
+        assert_eq!(state.press(true, true, 100), None);
+        assert_eq!(state.release(true, 900), None);
+        // First tap of a double tap arms; the second starts hands-free.
+        assert_eq!(state.press(true, true, 2_000), None);
+        assert_eq!(state.release(true, 2_040), None);
+        assert_eq!(state.press(true, true, 2_150), Some(HotkeyAction::Start));
+        assert_eq!(state.release(true, 2_190), None);
+        assert!(state.locked);
+        // The next press finishes the locked capture.
+        assert_eq!(state.press(true, true, 3_000), Some(HotkeyAction::Finish));
+        assert!(!state.locked);
+    }
+
+    #[test]
+    fn double_tap_only_taps_outside_the_window_never_record() {
+        let mut state = CaptureState::default();
+        assert_eq!(state.press(true, true, 100), None);
+        assert_eq!(state.release(true, 140), None);
+        // Too late for the double-tap window: arms again instead of starting.
+        assert_eq!(state.press(true, true, 1_000), None);
+        assert_eq!(state.release(true, 1_040), None);
         assert!(!state.locked);
     }
 }

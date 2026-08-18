@@ -673,6 +673,7 @@ impl WindowsDesktopHost {
         let hotkey = self.settings.dictation_hotkey.clone();
         let paste_last_hotkey = self.settings.paste_last_hotkey.clone();
         let double_tap_lock = self.settings.double_tap_lock;
+        let double_tap_only = self.settings.double_tap_only;
         let feedback_volume = self.settings.feedback_volume;
         let history = self.history.clone();
         let last_dictation = self.last_dictation.clone();
@@ -690,6 +691,7 @@ impl WindowsDesktopHost {
                         hotkey,
                         paste_last_hotkey,
                         double_tap_lock,
+                        double_tap_only,
                         feedback_volume,
                         history,
                         last_dictation,
@@ -865,6 +867,24 @@ impl WindowsDesktopHost {
             }
             Err(error) => {
                 self.settings_error = Some(format!("Could not save double-tap lock: {error:#}"));
+            }
+        }
+    }
+
+    fn set_double_tap_only(&mut self, enabled: bool) {
+        if enabled == self.settings.double_tap_only {
+            return;
+        }
+        let mut candidate = self.settings.clone();
+        candidate.double_tap_only = enabled;
+        match candidate.save() {
+            Ok(()) => {
+                self.settings = candidate;
+                self.settings_error = None;
+                self.restart_listener_for_settings();
+            }
+            Err(error) => {
+                self.settings_error = Some(format!("Could not save double-tap only: {error:#}"));
             }
         }
     }
@@ -1237,7 +1257,7 @@ impl DesktopHost for WindowsDesktopHost {
             dictation_shortcut: self.settings.dictation_hotkey.keycaps(),
             dictation_shortcut_label: self.settings.dictation_hotkey.label(),
             double_tap_lock: self.settings.double_tap_lock,
-            double_tap_only: false,
+            double_tap_only: self.settings.double_tap_only,
             paste_last_shortcut: self
                 .settings
                 .paste_last_hotkey
@@ -1708,6 +1728,7 @@ impl WindowsApp {
         let listen_on_launch = self.host.settings.listen_on_launch;
         let launch_at_login = self.host.launch_at_login;
         let double_tap_lock = self.host.settings.double_tap_lock;
+        let double_tap_only = self.host.settings.double_tap_only;
         let feedback_volume = self
             .volume_drag
             .unwrap_or(self.host.settings.feedback_volume);
@@ -2109,6 +2130,25 @@ impl WindowsApp {
                                                 cx.notify();
                                             })),
                                         )
+                                        .when(double_tap_lock, |panel| {
+                                            panel.child(
+                                                settings_row(
+                                                    "Double-tap only",
+                                                    "Wait for two complete shortcut taps before recording",
+                                                    toggle(if double_tap_only {
+                                                        1.0
+                                                    } else {
+                                                        0.0
+                                                    }),
+                                                )
+                                                .id("windows-double-tap-only")
+                                                .on_click(cx.listener(move |this, _, _, cx| {
+                                                    this.host
+                                                        .set_double_tap_only(!double_tap_only);
+                                                    cx.notify();
+                                                })),
+                                            )
+                                        })
                                         .child(
                                             settings_row(
                                                 "Paste last dictation",

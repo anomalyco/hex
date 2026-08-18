@@ -47,6 +47,7 @@ pub struct WindowsDictationConfig {
     pub hotkey: WindowsHotkey,
     pub paste_last_hotkey: Option<WindowsHotkey>,
     pub double_tap_lock: bool,
+    pub double_tap_only: bool,
     pub feedback_volume: u8,
     pub history: Option<crate::history::History>,
     pub last_dictation: Arc<Mutex<Option<String>>>,
@@ -76,6 +77,7 @@ pub fn run_with_transcriber(
         hotkey,
         paste_last_hotkey,
         double_tap_lock,
+        double_tap_only,
         feedback_volume,
         history,
         last_dictation,
@@ -100,7 +102,14 @@ pub fn run_with_transcriber(
         return Ok(());
     }
     let hotkey_label = hotkey.label();
-    let hotkey = WindowsHotkeyMonitor::start(hotkey, paste_last_hotkey, double_tap_lock)?;
+    // Double-tap-only depends on the double-tap window; without the lock
+    // there is no second tap to wait for.
+    let hotkey = WindowsHotkeyMonitor::start(
+        hotkey,
+        paste_last_hotkey,
+        double_tap_lock,
+        double_tap_lock && double_tap_only,
+    )?;
     let (jobs, job_receiver) = mpsc::sync_channel::<OutputJob>(2);
     let (result_sender, results) = mpsc::channel();
     let worker = thread::Builder::new()
