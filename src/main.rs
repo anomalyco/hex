@@ -1,148 +1,58 @@
-#[cfg(target_os = "macos")]
-mod accessibility;
-mod app_paths;
-#[cfg(target_os = "macos")]
-mod app_settings;
-#[cfg(target_os = "macos")]
-mod app_window;
-#[cfg(target_os = "macos")]
-mod apple_speech;
-#[cfg(target_os = "macos")]
-mod application_catalog;
-#[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
-mod audio;
-#[cfg(target_os = "macos")]
-mod command_grammar;
-#[cfg(target_os = "macos")]
-mod commands;
-#[cfg(target_os = "macos")]
-mod config;
-#[cfg(target_os = "macos")]
-mod context;
-#[cfg(all(debug_assertions, target_os = "macos"))]
-mod dashboard;
-#[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
-mod desktop_activity;
-#[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
-mod desktop_host;
-#[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
-mod desktop_transcription_picker;
-#[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
-mod desktop_ui;
-#[cfg(target_os = "macos")]
-mod developer_control;
-#[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
-mod dictation;
-#[cfg(target_os = "macos")]
-mod dictation_audio;
-#[cfg(target_os = "macos")]
-mod dictation_diagnostics;
-#[cfg(target_os = "macos")]
-mod dictation_indicator;
-#[cfg(target_os = "macos")]
-pub mod dictation_processor;
-#[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
-mod events;
-#[cfg(any(target_os = "macos", target_os = "windows"))]
-mod feedback;
-#[cfg_attr(target_os = "windows", allow(dead_code))]
-mod history;
-mod instance;
-#[cfg(target_os = "macos")]
-mod keyboard;
-#[cfg(target_os = "linux")]
-mod linux;
-#[cfg(target_os = "linux")]
-mod linux_app;
-#[cfg(target_os = "linux")]
-mod linux_dictation;
-#[cfg(target_os = "linux")]
-mod linux_input;
-#[cfg(target_os = "linux")]
-mod linux_paste;
-#[cfg(target_os = "linux")]
-mod linux_settings;
-#[cfg(target_os = "linux")]
-mod linux_updater;
-#[cfg(target_os = "macos")]
-mod local_api;
-#[cfg(any(target_os = "linux", target_os = "windows"))]
-#[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
-mod local_transcriber;
-#[cfg(target_os = "macos")]
-mod login_item;
-#[cfg(target_os = "macos")]
-mod meeting;
-#[cfg(target_os = "macos")]
-mod meeting_detection;
-#[cfg(target_os = "macos")]
-mod meeting_watcher;
-#[cfg(target_os = "macos")]
-mod microphone_activity;
-#[cfg(any(target_os = "macos", target_os = "linux"))]
-mod moonshine;
-#[cfg(all(target_os = "macos", debug_assertions))]
-mod moonshine_lab;
-#[cfg(target_os = "macos")]
-mod onboarding;
-#[cfg(target_os = "macos")]
-mod parakeet;
-#[cfg(target_os = "macos")]
-mod paste;
-#[cfg(target_os = "macos")]
-mod permission_guide;
-#[cfg(target_os = "macos")]
-mod personal_commands;
-#[cfg(target_os = "macos")]
-mod recognition;
-#[cfg(target_os = "macos")]
-mod recording_environment;
-#[cfg(target_os = "macos")]
-mod sparkle;
-#[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
-mod spoken_text;
-#[cfg(target_os = "macos")]
-mod status_item;
-#[cfg(target_os = "macos")]
-mod suppression;
-#[cfg(target_os = "macos")]
-mod swift_settings_import;
-#[cfg(any(target_os = "macos", target_os = "windows"))]
-mod text_input;
-#[cfg(any(target_os = "macos", target_os = "windows"))]
-mod text_replacements;
-#[cfg(target_os = "macos")]
-mod transcription;
-#[cfg(target_os = "macos")]
-mod transcription_benchmark;
-#[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
-mod transcription_models;
-#[cfg(target_os = "macos")]
-mod transcription_service;
-#[cfg(target_os = "windows")]
-mod windows;
-#[cfg(target_os = "windows")]
-mod windows_app;
-#[cfg(target_os = "windows")]
-mod windows_dictation;
-#[cfg(target_os = "windows")]
-mod windows_i18n;
-#[cfg(target_os = "windows")]
-mod windows_indicator;
-#[cfg(target_os = "windows")]
-mod windows_input;
-#[cfg(target_os = "windows")]
-mod windows_login_item;
-#[cfg(target_os = "windows")]
-mod windows_paste;
-#[cfg(target_os = "windows")]
-mod windows_settings;
-#[cfg(target_os = "windows")]
-mod windows_ui;
-#[cfg(target_os = "windows")]
-mod windows_updater;
+mod common;
+mod desktop;
+mod platform;
+mod speech;
 #[cfg(target_os = "windows")]
 mod ui;
+
+// The historical flat module names, re-exported so existing `crate::` paths
+// keep resolving while call sites migrate to the folder tree.
+pub(crate) use common::{app_paths, audio, dictation, events, history, instance};
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+pub(crate) use common::{feedback, text_replacements};
+#[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
+pub(crate) use common::spoken_text;
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+pub(crate) use desktop::text_input;
+pub(crate) use desktop::{
+    activity as desktop_activity, host as desktop_host,
+    transcription_picker as desktop_transcription_picker, ui as desktop_ui,
+};
+#[cfg(all(target_os = "macos", debug_assertions))]
+pub(crate) use platform::macos::dashboard;
+#[cfg(target_os = "macos")]
+pub(crate) use platform::macos::{
+    accessibility, app_settings, app_window, application_catalog, command_grammar, commands,
+    config, context, developer_control, dictation_audio, dictation_diagnostics,
+    dictation_indicator, dictation_processor, keyboard, local_api, login_item, meeting,
+    meeting_detection, meeting_watcher, microphone_activity, onboarding, paste, permission_guide,
+    personal_commands, recording_environment, sparkle, status_item, suppression,
+    swift_settings_import,
+};
+#[cfg(target_os = "linux")]
+pub(crate) use platform::linux::{
+    app as linux_app, dictation as linux_dictation, input as linux_input, paste as linux_paste,
+    run as linux, settings as linux_settings, updater as linux_updater,
+};
+#[cfg(target_os = "windows")]
+pub(crate) use platform::windows::{
+    app as windows_app, dictation as windows_dictation, i18n as windows_i18n,
+    indicator as windows_indicator, input as windows_input, login_item as windows_login_item,
+    paste as windows_paste, run as windows, settings as windows_settings, ui as windows_ui,
+    updater as windows_updater,
+};
+#[cfg(target_os = "macos")]
+pub(crate) use speech::{
+    apple_speech, parakeet, recognition, transcription, transcription_benchmark,
+    transcription_service,
+};
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+pub(crate) use speech::local_transcriber;
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+pub(crate) use speech::moonshine;
+#[cfg(all(target_os = "macos", debug_assertions))]
+pub(crate) use speech::moonshine_lab;
+pub(crate) use speech::transcription_models;
 
 #[cfg(target_os = "macos")]
 use std::fs::{self, OpenOptions};

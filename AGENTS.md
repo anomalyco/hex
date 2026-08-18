@@ -378,7 +378,7 @@ all Windows targets. See `docs/windows.md` for the desktop/listener smoke test
 and the live macOS-parity matrix.
 
 Automatic microphone selection follows the compiled preference order in
-`src/config.rs`, then falls back to the macOS default. A saved microphone takes
+`src/platform/macos/config.rs`, then falls back to the macOS default. A saved microphone takes
 precedence while available; override everything with `--device`. The app bundle
 build requires Xcode 26 for Icon Composer compilation and a Developer ID signing
 identity. `scripts/release-app.sh` prepares a notarized and stapled DMG plus its

@@ -1,0 +1,19 @@
+//! Cross-platform application foundation: paths, settings-adjacent state,
+//! audio capture, the dictation pipeline, and durable user data.
+
+pub mod app_paths;
+#[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
+pub mod audio;
+#[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
+pub mod dictation;
+#[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
+pub mod events;
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+pub mod feedback;
+#[cfg_attr(target_os = "windows", allow(dead_code))]
+pub mod history;
+pub mod instance;
+#[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
+pub mod spoken_text;
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+pub mod text_replacements;

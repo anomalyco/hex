@@ -85,8 +85,8 @@ pub(crate) fn apply_window_icon(hwnd: Option<HWND>) {
     let Some(hwnd) = hwnd else {
         return;
     };
-    const SMALL: &[u8] = include_bytes!("../resources/windows/icon-32.png");
-    const BIG: &[u8] = include_bytes!("../resources/windows/icon-64.png");
+    const SMALL: &[u8] = include_bytes!("../../../resources/windows/icon-32.png");
+    const BIG: &[u8] = include_bytes!("../../../resources/windows/icon-64.png");
     for (bytes, size, kind) in [(SMALL, 16, ICON_SMALL), (BIG, 32, ICON_BIG)] {
         unsafe {
             let icon = CreateIconFromResourceEx(
@@ -294,7 +294,7 @@ fn brand_logo() -> AnyElement {
     let image = LOGO.get_or_init(|| {
         Arc::new(Image::from_bytes(
             ImageFormat::Png,
-            include_bytes!("../resources/windows/icon-64.png").to_vec(),
+            include_bytes!("../../../resources/windows/icon-64.png").to_vec(),
         ))
     });
     img(image.clone()).size(px(16.0)).into_any_element()

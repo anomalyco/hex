@@ -50,14 +50,14 @@ impl NavigationIcon {
     #[cfg(target_os = "linux")]
     fn heroicon(self) -> &'static str {
         match self {
-            Self::Settings => include_str!("../assets/icons/settings.svg"),
-            Self::Modes => include_str!("../assets/icons/modes.svg"),
-            Self::VoiceAction => include_str!("../assets/icons/voice-action.svg"),
-            Self::Commands => include_str!("../assets/icons/commands.svg"),
-            Self::History => include_str!("../assets/icons/history.svg"),
-            Self::Meetings => include_str!("../assets/icons/meetings.svg"),
-            Self::Activity => include_str!("../assets/icons/activity.svg"),
-            Self::HudLab => include_str!("../assets/icons/hud-lab.svg"),
+            Self::Settings => include_str!("../../assets/icons/settings.svg"),
+            Self::Modes => include_str!("../../assets/icons/modes.svg"),
+            Self::VoiceAction => include_str!("../../assets/icons/voice-action.svg"),
+            Self::Commands => include_str!("../../assets/icons/commands.svg"),
+            Self::History => include_str!("../../assets/icons/history.svg"),
+            Self::Meetings => include_str!("../../assets/icons/meetings.svg"),
+            Self::Activity => include_str!("../../assets/icons/activity.svg"),
+            Self::HudLab => include_str!("../../assets/icons/hud-lab.svg"),
         }
     }
 }
