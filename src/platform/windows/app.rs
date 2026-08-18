@@ -119,6 +119,9 @@ struct WindowsApp {
     voice_model_dropdown_bounds: Option<Bounds<Pixels>>,
     recognition_hints_input: Entity<TextInput>,
     _recognition_hints_subscription: Subscription,
+    history_search: String,
+    history_search_input: Entity<TextInput>,
+    _history_search_subscription: Subscription,
     model_catalog_language_filter: Option<String>,
     model_catalog_language_dropdown_open: bool,
     model_catalog_language_dropdown_bounds: Option<Bounds<Pixels>>,
@@ -250,11 +253,24 @@ pub fn open(event_path: PathBuf, shutdown: &'static AtomicBool, start_hidden: bo
                                 cx.notify();
                             },
                         );
+                        let history_search_input =
+                            cx.new(|cx| crate::text_input::TextInput::new(cx, "Search", ""));
+                        let history_search_subscription = cx.subscribe(
+                            &history_search_input,
+                            |this: &mut WindowsApp, input, _: &TextChanged, cx| {
+                                this.history_search = input.read(cx).text().to_string();
+                                this.reload_history();
+                                cx.notify();
+                            },
+                        );
                         WindowsApp {
                             host,
                             pane: WindowsPane::Settings,
                             recognition_hints_input,
                             _recognition_hints_subscription: recognition_hints_subscription,
+                            history_search: String::new(),
+                            history_search_input,
+                            _history_search_subscription: history_search_subscription,
                             history_entries,
                             selected_history,
                             history_copied: None,
@@ -1687,7 +1703,7 @@ impl WindowsApp {
             self.selected_history = None;
             return;
         };
-        self.history_entries = history.search("");
+        self.history_entries = history.search(&self.history_search);
         if self
             .selected_history
             .is_some_and(|id| !self.history_entries.iter().any(|entry| entry.id == id))
@@ -3106,6 +3122,7 @@ impl WindowsApp {
             .flex()
             .items_center()
             .gap_3()
+            .child(div().w(px(180.0)).child(self.history_search_input.clone()))
             .child(retention_control)
             .child(clear)
             .into_any_element();

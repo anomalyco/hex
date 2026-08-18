@@ -99,7 +99,7 @@ current-user startup registry, UI Automation, and Windows capture APIs.
 | Double-tap lock and Paste Last Dictation | Implemented |
 | Clipboard preservation and generation-safe restoration | Implemented |
 | Recording tones and click-through recording/processing HUD | Implemented; the renderer is native GPUI/DirectX rather than the macOS Metal shader |
-| History retention, list, detail, copy, delete, and clear | Implemented; text search still needs the Windows field wiring |
+| History retention, list, detail, search, copy, delete, and clear | Implemented |
 | Text replacements | Implemented in the Windows Modes pane using the shared macOS replacement engine |
 | Resident tray and Launch at login | Implemented |
 | Application modes with per-mode corrections | Implemented; modes match by application name — web-domain rules, OpenCode rewrite, and TypeScript transformations remain |
