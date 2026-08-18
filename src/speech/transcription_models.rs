@@ -485,6 +485,30 @@ pub fn language_name(code: &str) -> &str {
         .unwrap_or(code)
 }
 
+/// Every model offered on desktop platforms.
+#[cfg_attr(target_os = "macos", allow(dead_code))]
+pub fn available_models() -> Vec<&'static ModelDefinition> {
+    MODELS.iter().filter(|model| model.available()).collect()
+}
+
+/// The language a newly chosen model dictates in: the current preference
+/// when supported, otherwise automatic detection, otherwise the model's
+/// first supported language.
+#[cfg_attr(target_os = "macos", allow(dead_code))]
+pub fn language_for_model(model: TranscriptionModelId, preferred: &str) -> Option<String> {
+    let definition = definition(model);
+    if definition.supports_language(preferred) {
+        return Some(preferred.to_string());
+    }
+    if definition.supports_language(AUTO_LANGUAGE) {
+        return Some(AUTO_LANGUAGE.to_string());
+    }
+    LANGUAGES
+        .iter()
+        .find(|(code, _)| definition.supports_language(code))
+        .map(|(code, _)| (*code).to_string())
+}
+
 pub(crate) fn choices_for_runtime(language: &str) -> Vec<ModelChoice> {
     let choice = |id, recommendation| ModelChoice {
         model: definition(id),

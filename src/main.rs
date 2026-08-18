@@ -12,6 +12,8 @@ pub(crate) use common::spoken_text;
 pub(crate) use common::{app_paths, audio, dictation, events, history, instance};
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 pub(crate) use common::{feedback, text_replacements};
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+pub(crate) use desktop::model_catalog as desktop_model_catalog;
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 pub(crate) use desktop::text_input;
 pub(crate) use desktop::{

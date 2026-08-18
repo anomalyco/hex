@@ -11,7 +11,7 @@ use crate::transcription_models::{
     ModelChoice, ModelDefinition, TranscriptionModelId, TranscriptionSelection, language_name,
 };
 
-#[cfg_attr(target_os = "windows", allow(dead_code))]
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub(crate) fn transcription_selection_is_active(
     selection: &TranscriptionSelection,
     model: &ModelDefinition,
@@ -22,6 +22,7 @@ pub(crate) fn transcription_selection_is_active(
 }
 
 #[derive(Clone)]
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub(crate) struct TranscriptionPickerModel {
     pub(crate) choice: ModelChoice,
     pub(crate) status: TranscriptionPickerStatus,
@@ -46,6 +47,7 @@ pub(crate) enum TranscriptionPickerProgress {
 }
 
 #[derive(Clone)]
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub(crate) struct TranscriptionPickerView {
     pub(crate) error: Option<String>,
     pub(crate) language: String,
@@ -61,10 +63,13 @@ pub(crate) trait TranscriptionPickerDelegate: Sized + 'static {
         cx: &mut Context<Self>,
     );
     fn dismiss_transcription_picker(&mut self, cx: &mut Context<Self>);
+    // The old picker's language rail calls this; the shells on the shared
+    // model catalog filter by language instead.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     fn select_transcription_language(&mut self, language: String, cx: &mut Context<Self>);
 }
 
-#[cfg_attr(target_os = "windows", allow(dead_code))]
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub(crate) fn render_transcription_picker<T: TranscriptionPickerDelegate>(
     view: TranscriptionPickerView,
     cx: &mut Context<T>,
@@ -414,7 +419,7 @@ pub(crate) fn render_transcription_picker<T: TranscriptionPickerDelegate>(
 }
 
 /// The progress-bar fill: system accent on Windows, neutral elsewhere.
-#[cfg_attr(target_os = "windows", allow(dead_code))]
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 fn progress_fill() -> u32 {
     #[cfg(target_os = "windows")]
     {
@@ -427,6 +432,7 @@ fn progress_fill() -> u32 {
 }
 
 #[cfg(not(target_os = "windows"))]
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 fn model_metric(label: impl IntoElement, value: impl IntoElement) -> gpui::Div {
     div()
         .flex_1()

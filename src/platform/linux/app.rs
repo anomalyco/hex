@@ -6,9 +6,10 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use color_eyre::Result;
+use color_eyre::eyre::eyre;
 use gpui::{
-    AnyElement, App, Application, Bounds, Context, Keystroke, Timer, TitlebarOptions, Window,
-    WindowBounds, WindowKind, WindowOptions, div, prelude::*, px, rgb, size,
+    AnyElement, App, Application, Bounds, Context, Keystroke, Pixels, Timer, TitlebarOptions,
+    Window, WindowBounds, WindowKind, WindowOptions, canvas, div, prelude::*, px, rgb, size,
 };
 use tray_icon::menu::{Menu, MenuEvent, MenuItem};
 use tray_icon::{Icon, MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
@@ -20,16 +21,12 @@ use crate::desktop_host::{
     DesktopAction, DesktopCapabilities, DesktopHost, DesktopListenerSnapshot, DesktopShortcut,
     DesktopSnapshot, DesktopTranscriptionSnapshot, DesktopUpdateStatus,
 };
-use crate::desktop_transcription_picker::{
-    TranscriptionPickerDelegate, TranscriptionPickerModel, TranscriptionPickerProgress,
-    TranscriptionPickerStatus, TranscriptionPickerView, render_transcription_picker,
-    transcription_selection_is_active,
-};
+use crate::desktop_transcription_picker::TranscriptionPickerDelegate;
 use crate::desktop_ui::{
     FAINT, LINE, MUTED, NavigationIcon, SIDEBAR_WIDTH, SUCCESS, SURFACE, TEXT, TEXT_SOFT,
-    compact_button, disclosure_button, error_message, header_button, hotkey_keycaps,
-    navigation_item, pane_content, pane_header, settings_panel, settings_row,
-    settings_section_label, sidebar_frame, toggle, window_frame,
+    compact_button, disclosure_button, dropdown_backdrop, dropdown_item, dropdown_panel_with_width,
+    error_message, header_button, hotkey_keycaps, navigation_item, pane_content, pane_header,
+    settings_panel, settings_row, settings_section_label, sidebar_frame, toggle, window_frame,
 };
 use crate::events::EventReader;
 use crate::linux_updater::InstalledUpdate;
@@ -96,6 +93,8 @@ struct LinuxDesktopHost {
     error: Option<String>,
     settings_error: Option<String>,
     settings: crate::linux_settings::LinuxSettings,
+    microphones: Vec<String>,
+    microphone_error: Option<String>,
     prepared_transcriber: Option<crate::local_transcriber::LocalTranscriber>,
     transcription_preparation: Option<TranscriptionPreparation>,
     transcription_error: Option<String>,
@@ -106,6 +105,15 @@ struct LinuxApp {
     host: LinuxDesktopHost,
     capturing_hotkey: bool,
     transcription_picker: TranscriptionPickerState,
+    catalog_language_filter: Option<String>,
+    catalog_filter_dropdown_open: bool,
+    catalog_filter_dropdown_bounds: Option<Bounds<Pixels>>,
+    transcription_dropdown_open: bool,
+    transcription_dropdown_bounds: Option<Bounds<Pixels>>,
+    dictation_language_dropdown_open: bool,
+    dictation_language_dropdown_bounds: Option<Bounds<Pixels>>,
+    microphone_dropdown_open: bool,
+    microphone_dropdown_bounds: Option<Bounds<Pixels>>,
 }
 
 enum TranscriptionPickerState {
@@ -180,6 +188,15 @@ pub fn open(event_path: PathBuf, start_hidden: bool) -> Result<()> {
                         ),
                         capturing_hotkey: false,
                         transcription_picker: TranscriptionPickerState::Closed,
+                        catalog_language_filter: None,
+                        catalog_filter_dropdown_open: false,
+                        catalog_filter_dropdown_bounds: None,
+                        transcription_dropdown_open: false,
+                        transcription_dropdown_bounds: None,
+                        dictation_language_dropdown_open: false,
+                        dictation_language_dropdown_bounds: None,
+                        microphone_dropdown_open: false,
+                        microphone_dropdown_bounds: None,
                     })
                 },
             )
@@ -415,17 +432,11 @@ fn spawn_tray(commands: mpsc::Sender<TrayCommand>) -> Result<TrayRuntime> {
 }
 
 fn tray_icon() -> Result<Icon> {
-    const SIZE: u32 = 22;
-    let mut data = vec![0_u8; (SIZE * SIZE * 4) as usize];
-    for y in 3..19 {
-        for x in 4..18 {
-            if matches!(x, 4..=7 | 14..=17) || (9..=12).contains(&y) {
-                let index = ((y * SIZE + x) * 4) as usize;
-                data[index..index + 4].copy_from_slice(&[0xd9, 0xff, 0x68, 0xff]);
-            }
-        }
-    }
-    Ok(Icon::from_rgba(data, SIZE, SIZE)?)
+    // Pre-rendered from app/AppIcon.icon/Assets/Image.png so the tray
+    // matches the branded app icon on every shell.
+    const SIZE: u32 = 32;
+    const DATA: &[u8] = include_bytes!("../../../resources/linux/tray-32.rgba");
+    Ok(Icon::from_rgba(DATA.to_vec(), SIZE, SIZE)?)
 }
 
 impl LinuxDesktopHost {
@@ -439,6 +450,13 @@ impl LinuxDesktopHost {
         let mut event_reader = EventReader::open(&event_path);
         let mut activity = DesktopActivity::default();
         activity.refresh(&mut event_reader);
+        let (microphones, microphone_error) = match crate::audio::input_device_names() {
+            Ok(microphones) => (microphones, None),
+            Err(error) => (
+                Vec::new(),
+                Some(format!("Could not enumerate microphones: {error:#}")),
+            ),
+        };
         Self {
             event_reader,
             event_path,
@@ -453,6 +471,8 @@ impl LinuxDesktopHost {
             error: None,
             settings_error: error,
             settings,
+            microphones,
+            microphone_error,
             prepared_transcriber: None,
             transcription_preparation: None,
             transcription_error: None,
@@ -696,6 +716,44 @@ impl LinuxDesktopHost {
         crate::linux_updater::relaunch(update)
     }
 
+    /// Re-enumerate capture devices; the dropdown trigger calls this so
+    /// hotplugged microphones and late audio-server startup are visible.
+    fn refresh_microphones(&mut self) {
+        match crate::audio::input_device_names() {
+            Ok(microphones) => {
+                self.microphones = microphones;
+                self.microphone_error = None;
+            }
+            Err(error) => {
+                self.microphone_error = Some(format!("Could not enumerate microphones: {error:#}"));
+            }
+        }
+    }
+
+    /// Persist the microphone choice; the listener opens its input once at
+    /// start, so changes require a stopped listener like the model and
+    /// language.
+    fn set_microphone(&mut self, microphone: Option<String>) -> Result<()> {
+        if microphone == self.settings.microphone {
+            return Ok(());
+        }
+        if self.is_running() {
+            let error = "Stop listening before changing the microphone".to_string();
+            self.error = Some(error.clone());
+            return Err(eyre!(error));
+        }
+        let mut candidate = self.settings.clone();
+        candidate.microphone = microphone;
+        if let Err(error) = candidate.save() {
+            self.error = Some(format!("Could not save the microphone choice: {error:#}"));
+            return Err(error);
+        }
+        self.settings = candidate;
+        self.error = None;
+        self.settings_error = None;
+        Ok(())
+    }
+
     fn choose_transcription(
         &mut self,
         model: crate::transcription_models::TranscriptionModelId,
@@ -773,6 +831,171 @@ impl LinuxDesktopHost {
 }
 
 impl LinuxApp {
+    fn close_popups(&mut self) {
+        self.catalog_filter_dropdown_open = false;
+        self.transcription_dropdown_open = false;
+        self.dictation_language_dropdown_open = false;
+        self.microphone_dropdown_open = false;
+    }
+
+    fn render_transcription_dropdown(
+        &mut self,
+        viewport_height: Pixels,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let Some(bounds) = self.transcription_dropdown_bounds else {
+            return div().into_any_element();
+        };
+        let selection = self.host.settings.transcription.clone();
+        let models: Vec<(String, crate::transcription_models::TranscriptionModelId)> =
+            crate::transcription_models::available_models()
+                .into_iter()
+                .map(|model| {
+                    let installed = crate::transcription_models::is_installed(
+                        model,
+                        crate::transcription_models::AUTO_LANGUAGE,
+                    ) && crate::transcription_models::is_verified(model);
+                    let state = if installed {
+                        "Installed".to_string()
+                    } else {
+                        model.size_label()
+                    };
+                    (format!("{} · {state}", model.name), model.id)
+                })
+                .collect();
+        let panel_rows = models.len();
+        let items = models
+            .into_iter()
+            .enumerate()
+            .map(|(index, (label, model))| {
+                let selected = selection.model == model;
+                let preferred = selection.language.clone();
+                dropdown_item(("linux-model-option", index), label, selected).on_click(cx.listener(
+                    move |this, _, _, cx| {
+                        cx.stop_propagation();
+                        if let Some(language) =
+                            crate::transcription_models::language_for_model(model, &preferred)
+                            && this.host.choose_transcription(model, language).is_ok()
+                        {
+                            this.transcription_dropdown_open = false;
+                        }
+                        cx.notify();
+                    },
+                ))
+            });
+        dropdown_backdrop("linux-transcription-dropdown-backdrop")
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.transcription_dropdown_open = false;
+                cx.notify();
+            }))
+            .child(
+                dropdown_panel_with_width(bounds, viewport_height, panel_rows, px(300.0))
+                    .id("linux-transcription-dropdown")
+                    .overflow_y_scroll()
+                    .on_click(|_, _, cx| cx.stop_propagation())
+                    .children(items),
+            )
+            .into_any_element()
+    }
+
+    fn render_dictation_language_dropdown(
+        &mut self,
+        viewport_height: Pixels,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let Some(bounds) = self.dictation_language_dropdown_bounds else {
+            return div().into_any_element();
+        };
+        let selection = self.host.settings.transcription.clone();
+        let model = selection.model;
+        let definition = crate::transcription_models::definition(model);
+        let languages: Vec<(String, String)> = crate::transcription_models::LANGUAGES
+            .iter()
+            .filter(|(code, _)| definition.supports_language(code))
+            .map(|(code, name)| ((*code).to_string(), (*name).to_string()))
+            .collect();
+        let panel_rows = languages.len();
+        let items = languages
+            .into_iter()
+            .enumerate()
+            .map(|(index, (code, name))| {
+                let selected = selection.language == code;
+                dropdown_item(("linux-dictation-language-option", index), name, selected).on_click(
+                    cx.listener(move |this, _, _, cx| {
+                        cx.stop_propagation();
+                        if this.host.choose_transcription(model, code.clone()).is_ok() {
+                            this.dictation_language_dropdown_open = false;
+                        }
+                        cx.notify();
+                    }),
+                )
+            });
+        dropdown_backdrop("linux-dictation-language-backdrop")
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.dictation_language_dropdown_open = false;
+                cx.notify();
+            }))
+            .child(
+                dropdown_panel_with_width(bounds, viewport_height, panel_rows, px(260.0))
+                    .id("linux-dictation-language-dropdown")
+                    .overflow_y_scroll()
+                    .on_click(|_, _, cx| cx.stop_propagation())
+                    .children(items),
+            )
+            .into_any_element()
+    }
+
+    fn render_microphone_dropdown(
+        &mut self,
+        viewport_height: Pixels,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let Some(bounds) = self.microphone_dropdown_bounds else {
+            return div().into_any_element();
+        };
+        let current = self.host.settings.microphone.clone();
+        let mut choices = vec![("Automatic".to_string(), None)];
+        choices.extend(
+            self.host
+                .microphones
+                .iter()
+                .cloned()
+                .map(|microphone| (microphone.clone(), Some(microphone))),
+        );
+        let panel_rows = choices.len() + usize::from(self.host.microphone_error.is_some()) * 2;
+        let items = choices
+            .into_iter()
+            .enumerate()
+            .map(|(index, (label, selection))| {
+                let selected = selection == current;
+                dropdown_item(("linux-microphone-option", index), label, selected).on_click(
+                    cx.listener(move |this, _, _, cx| {
+                        cx.stop_propagation();
+                        if this.host.set_microphone(selection.clone()).is_ok() {
+                            this.microphone_dropdown_open = false;
+                        }
+                        cx.notify();
+                    }),
+                )
+            });
+        dropdown_backdrop("linux-microphone-dropdown-backdrop")
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.microphone_dropdown_open = false;
+                cx.notify();
+            }))
+            .child(
+                dropdown_panel_with_width(bounds, viewport_height, panel_rows, px(360.0))
+                    .id("linux-microphone-dropdown")
+                    .overflow_y_scroll()
+                    .on_click(|_, _, cx| cx.stop_propagation())
+                    .children(items)
+                    .when_some(self.host.microphone_error.clone(), |list, error| {
+                        list.child(error_message("Microphones could not be enumerated.", error))
+                    }),
+            )
+            .into_any_element()
+    }
+
     fn capture_hotkey(&mut self, keystroke: &Keystroke) -> bool {
         if !self.capturing_hotkey {
             return false;
@@ -956,12 +1179,33 @@ impl LinuxApp {
         };
         let update_ready = snapshot.update_status == DesktopUpdateStatus::ReadyToRestart;
         let transcription = &snapshot.transcription;
-        let transcription_label = format!(
-            "{} · {}",
-            crate::transcription_models::language_name(&transcription.selection.language),
-            crate::transcription_models::definition(transcription.selection.model).name
-        );
-        let transcription_language = transcription.selection.language.clone();
+        let model_label = match transcription.preparing {
+            Some(preparing) => format!(
+                "Preparing {}",
+                crate::transcription_models::definition(preparing).name
+            ),
+            None => crate::transcription_models::definition(transcription.selection.model)
+                .name
+                .to_string(),
+        };
+        let dictation_language_label = if transcription.selection.language == "auto" {
+            "Auto".to_string()
+        } else {
+            crate::transcription_models::language_name(&transcription.selection.language)
+                .to_string()
+        };
+        let microphone_label = self
+            .host
+            .settings
+            .microphone
+            .clone()
+            .unwrap_or_else(|| "Automatic".into());
+        // The catalog dialog shows this error itself while open; the panel
+        // row covers dropdown-initiated failures only.
+        let transcription_error = transcription
+            .error
+            .clone()
+            .filter(|_| matches!(self.transcription_picker, TranscriptionPickerState::Closed));
         let listener_label = snapshot
             .listener
             .as_ref()
@@ -1067,23 +1311,179 @@ impl LinuxApp {
                                 .child(
                                     settings_panel()
                                         .child(settings_row(
-                                            "Local transcription",
-                                            "Language and on-device speech model",
-                                            disclosure_button(transcription_label)
-                                                .id("transcription-model-setting")
-                                                .on_click(cx.listener(move |this, _, _, cx| {
-                                                    this.transcription_picker =
-                                                        TranscriptionPickerState::Choosing(
-                                                            transcription_language.clone(),
-                                                        );
-                                                    cx.notify();
-                                                })),
+                                            "Model",
+                                            "Choose any on-device speech model",
+                                            div()
+                                                .flex()
+                                                .items_center()
+                                                .child(
+                                                    header_button("Browse")
+                                                        .id("linux-model-browse")
+                                                        .mr_3()
+                                                        .when(running, |button| {
+                                                            button.opacity(0.5)
+                                                        })
+                                                        .on_click(cx.listener(
+                                                            move |this, _, _, cx| {
+                                                                if running {
+                                                                    return;
+                                                                }
+                                                                this.close_popups();
+                                                                let language = this
+                                                                    .host
+                                                                    .settings
+                                                                    .transcription
+                                                                    .language
+                                                                    .clone();
+                                                                this.catalog_language_filter =
+                                                                    crate::desktop_model_catalog::catalog_filter_for_language(
+                                                                        &language,
+                                                                    );
+                                                                this.transcription_picker =
+                                                                    TranscriptionPickerState::Choosing(
+                                                                        language,
+                                                                    );
+                                                                cx.notify();
+                                                            },
+                                                        )),
+                                                )
+                                                .child(
+                                                    div()
+                                                        .relative()
+                                                        .child(
+                                                            disclosure_button(model_label)
+                                                                .id("linux-model-setting")
+                                                .when(running, |button| {
+                                                    button.opacity(0.5)
+                                                })
+                                                                .on_click(cx.listener(
+                                                                    move |this, _, _, cx| {
+                                                                        if running {
+                                                                            return;
+                                                                        }
+                                                                        let open = this
+                                                                            .transcription_dropdown_open;
+                                                                        this.close_popups();
+                                                                        this.transcription_dropdown_open =
+                                                                            !open;
+                                                                        cx.notify();
+                                                                    },
+                                                                )),
+                                                        )
+                                                        .child(
+                                                            canvas(
+                                                                {
+                                                                    let entity = cx.entity();
+                                                                    move |bounds, _, cx| {
+                                                                        entity.update(cx, |this, _| {
+                                                                            this.transcription_dropdown_bounds =
+                                                                                Some(bounds);
+                                                                        });
+                                                                    }
+                                                                },
+                                                                |_, _, _, _| {},
+                                                            )
+                                                            .w_full()
+                                                            .h(px(0.0)),
+                                                        ),
+                                                ),
+                                        ))
+                                        .child(settings_row(
+                                            "Language",
+                                            "The language you dictate in; Auto detects it",
+                                            div()
+                                                .relative()
+                                                .child(
+                                                    disclosure_button(dictation_language_label)
+                                                        .id("linux-dictation-language")
+                                                .when(running, |button| {
+                                                    button.opacity(0.5)
+                                                })
+                                                        .on_click(cx.listener(
+                                                            move |this, _, _, cx| {
+                                                                if running {
+                                                                    return;
+                                                                }
+                                                                let open = this
+                                                                    .dictation_language_dropdown_open;
+                                                                this.close_popups();
+                                                                this.dictation_language_dropdown_open =
+                                                                    !open;
+                                                                cx.notify();
+                                                            },
+                                                        )),
+                                                )
+                                                .child(
+                                                    canvas(
+                                                        {
+                                                            let entity = cx.entity();
+                                                            move |bounds, _, cx| {
+                                                                entity.update(cx, |this, _| {
+                                                                    this.dictation_language_dropdown_bounds =
+                                                                        Some(bounds);
+                                                                });
+                                                            }
+                                                        },
+                                                        |_, _, _, _| {},
+                                                    )
+                                                    .w_full()
+                                                    .h(px(0.0)),
+                                                ),
                                         ))
                                         .child(settings_row(
                                             "Microphone",
-                                            "Automatically chooses the preferred available input",
-                                            disclosure_button("Automatic"),
+                                            "Uses the selected input or the system default",
+                                            div()
+                                                .relative()
+                                                .child(
+                                                    disclosure_button(microphone_label)
+                                                        .id("linux-microphone-setting")
+                                                .when(running, |button| {
+                                                    button.opacity(0.5)
+                                                })
+                                                        .on_click(cx.listener(
+                                                            move |this, _, _, cx| {
+                                                                if running {
+                                                                    return;
+                                                                }
+                                                                let open =
+                                                                    this.microphone_dropdown_open;
+                                                                this.close_popups();
+                                                                if !open {
+                                                                    this.host.refresh_microphones();
+                                                                }
+                                                                this.microphone_dropdown_open =
+                                                                    !open;
+                                                                cx.notify();
+                                                            },
+                                                        )),
+                                                )
+                                                .child(
+                                                    canvas(
+                                                        {
+                                                            let entity = cx.entity();
+                                                            move |bounds, _, cx| {
+                                                                entity.update(cx, |this, _| {
+                                                                    this.microphone_dropdown_bounds =
+                                                                        Some(bounds);
+                                                                });
+                                                            }
+                                                        },
+                                                        |_, _, _, _| {},
+                                                    )
+                                                    .w_full()
+                                                    .h(px(0.0)),
+                                                ),
                                         ))
+                                        .when_some(
+                                            transcription_error,
+                                            |panel, error| {
+                                                panel.child(error_message(
+                                                    "The transcription change did not apply.",
+                                                    error,
+                                                ))
+                                            },
+                                        )
                                         .child(
                                             settings_row(
                                                 "Dictation shortcut",
@@ -1201,62 +1601,35 @@ impl LinuxApp {
             )
             .into_any_element()
     }
+}
 
-    fn transcription_picker_view(
-        &self,
-        language: String,
-        transcription: &DesktopTranscriptionSnapshot,
-    ) -> TranscriptionPickerView {
-        let models = crate::transcription_models::choices_for_runtime(&language)
-            .into_iter()
-            .map(|choice| {
-                let model = choice.model;
-                let installed = crate::transcription_models::is_installed(model, &language);
-                let downloading = transcription.preparing == Some(model.id);
-                let active = transcription_selection_is_active(
-                    &transcription.selection,
-                    model,
-                    &language,
-                    installed,
-                );
-                let progress = if downloading {
-                    model.download_bytes().map_or(0.0, |bytes| {
-                        (transcription.downloaded_bytes as f32 / bytes as f32).clamp(0.0, 1.0)
-                    })
-                } else {
-                    0.0
-                };
-                let status = if downloading {
-                    let stage = transcription
-                        .preparation_stage
-                        .unwrap_or(crate::transcription_models::ModelPreparationStage::Downloading);
-                    let (label, progress) = match stage {
-                        crate::transcription_models::ModelPreparationStage::Downloading => (
-                            format!("Downloading {:.0}%", progress * 100.0),
-                            Some(TranscriptionPickerProgress::Downloading(progress)),
-                        ),
-                        crate::transcription_models::ModelPreparationStage::Verifying => {
-                            ("Verifying model".into(), None)
-                        }
-                        crate::transcription_models::ModelPreparationStage::Loading => (
-                            "Loading model".into(),
-                            Some(TranscriptionPickerProgress::Loading(0.25)),
-                        ),
-                    };
-                    TranscriptionPickerStatus::Preparing { label, progress }
-                } else if active {
-                    TranscriptionPickerStatus::Active
-                } else {
-                    TranscriptionPickerStatus::Available { installed }
-                };
-                TranscriptionPickerModel { choice, status }
-            })
-            .collect();
-        TranscriptionPickerView {
-            error: transcription.error.clone(),
-            language,
-            models,
-        }
+impl crate::desktop_model_catalog::ModelCatalogDelegate for LinuxApp {
+    fn catalog_language_filter(&self) -> Option<String> {
+        self.catalog_language_filter.clone()
+    }
+
+    fn set_catalog_language_filter(&mut self, filter: Option<String>) {
+        self.catalog_language_filter = filter;
+    }
+
+    fn catalog_filter_dropdown_open(&self) -> bool {
+        self.catalog_filter_dropdown_open
+    }
+
+    fn set_catalog_filter_dropdown_open(&mut self, open: bool) {
+        self.catalog_filter_dropdown_open = open;
+    }
+
+    fn catalog_filter_dropdown_bounds(&self) -> Option<Bounds<Pixels>> {
+        self.catalog_filter_dropdown_bounds
+    }
+
+    fn set_catalog_filter_dropdown_bounds(&mut self, bounds: Bounds<Pixels>) {
+        self.catalog_filter_dropdown_bounds = Some(bounds);
+    }
+
+    fn report_transcription_error(&mut self, error: String) {
+        self.host.transcription_error = Some(error);
     }
 }
 
@@ -1301,22 +1674,44 @@ impl TranscriptionPickerDelegate for LinuxApp {
 }
 
 impl Render for LinuxApp {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let viewport = window.viewport_size();
         let snapshot = self.host.snapshot();
         let content = self.render_shared_settings(&snapshot, cx);
-        let model_picker =
-            self.transcription_picker
-                .language()
-                .map(str::to_owned)
-                .map(|language| {
-                    render_transcription_picker(
-                        self.transcription_picker_view(language, &snapshot.transcription),
-                        cx,
-                    )
-                });
+        let model_picker = if self.transcription_picker.language().is_some() {
+            Some(crate::desktop_model_catalog::render_model_catalog(
+                self,
+                &snapshot.transcription,
+                viewport.width,
+                viewport.height,
+                cx,
+            ))
+        } else {
+            None
+        };
+        let catalog_filter_dropdown = self.catalog_filter_dropdown_open.then(|| {
+            crate::desktop_model_catalog::render_model_catalog_filter_dropdown(
+                self,
+                viewport.height,
+                cx,
+            )
+        });
+        let transcription_dropdown = self
+            .transcription_dropdown_open
+            .then(|| self.render_transcription_dropdown(viewport.height, cx));
+        let dictation_language_dropdown = self
+            .dictation_language_dropdown_open
+            .then(|| self.render_dictation_language_dropdown(viewport.height, cx));
+        let microphone_dropdown = self
+            .microphone_dropdown_open
+            .then(|| self.render_microphone_dropdown(viewport.height, cx));
         window_frame()
             .child(self.render_shared_navigation())
             .child(div().flex_1().h_full().overflow_hidden().child(content))
+            .children(transcription_dropdown)
+            .children(dictation_language_dropdown)
+            .children(microphone_dropdown)
             .children(model_picker)
+            .children(catalog_filter_dropdown)
     }
 }

@@ -49,9 +49,23 @@ fn run_with_settings(
     settings: crate::linux_settings::LinuxSettings,
     transcriber: LocalTranscriber,
 ) -> Result<()> {
-    let input = match device {
-        Some(name) => AudioInput::open_matching(name)?,
-        None => AudioInput::open(&[])?,
+    // A CLI device override stays a strict substring query; the settings
+    // choice is an exact enumerated name and falls back to automatic
+    // selection when the device is missing, like other platforms.
+    let input = match (device, settings.microphone.as_deref()) {
+        (Some(name), _) => AudioInput::open_matching(name)?,
+        (None, Some(name)) => match AudioInput::open_named(name) {
+            Ok(input) => input,
+            Err(error) => {
+                tracing::warn!(
+                    %error,
+                    device = name,
+                    "selected microphone is unavailable; using automatic selection"
+                );
+                AudioInput::open(&[])?
+            }
+        },
+        (None, None) => AudioInput::open(&[])?,
     };
     let hotkey_label = settings.dictation_hotkey.label();
     let hotkey = X11HotkeyMonitor::start(settings.dictation_hotkey, settings.double_tap_lock)?;

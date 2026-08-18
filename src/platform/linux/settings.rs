@@ -16,6 +16,8 @@ pub struct LinuxSettings {
     pub platform: String,
     pub dictation_hotkey: LinuxHotkey,
     pub double_tap_lock: bool,
+    /// A preferred capture device name; `None` uses the system default.
+    pub microphone: Option<String>,
     pub transcription: crate::transcription_models::TranscriptionSelection,
 }
 
@@ -36,6 +38,7 @@ impl Default for LinuxSettings {
             platform: "x11".into(),
             dictation_hotkey: LinuxHotkey::default(),
             double_tap_lock: true,
+            microphone: None,
             transcription: crate::transcription_models::TranscriptionSelection::default(),
         }
     }

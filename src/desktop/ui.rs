@@ -197,7 +197,7 @@ pub(crate) use tokens::{
 
 /// Translate a UI string on Windows; identity elsewhere until the other
 /// shells grow localization.
-fn tr(text: &'static str) -> &'static str {
+pub(crate) fn tr(text: &'static str) -> &'static str {
     #[cfg(target_os = "windows")]
     {
         crate::windows_i18n::tr(text)
@@ -205,6 +205,20 @@ fn tr(text: &'static str) -> &'static str {
     #[cfg(not(target_os = "windows"))]
     {
         text
+    }
+}
+
+/// Translate a `{}` template and substitute the dynamic value; identity
+/// English on shells without a translation table.
+#[cfg_attr(target_os = "macos", allow(dead_code))]
+pub(crate) fn tr_fill(template: &'static str, value: &str) -> String {
+    #[cfg(target_os = "windows")]
+    {
+        crate::windows_i18n::tr_fill(template, value)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        template.replace("{}", value)
     }
 }
 const SEGMENTED_ITEM_HOVER: u32 = 0x262626;
