@@ -8,6 +8,7 @@ use objc2::MainThreadMarker;
 use objc2_app_kit::{NSApplication, NSApplicationActivationPolicy};
 use serde::{Deserialize, Serialize};
 
+pub use crate::text_replacements::TextReplacement;
 use crate::transcription_models::TranscriptionSelection;
 
 static RECORDING_AUDIO_BEHAVIOR: AtomicU8 = AtomicU8::new(0);
@@ -469,13 +470,6 @@ impl Default for VoiceActionSettings {
             deadline_seconds: 60,
         }
     }
-}
-
-#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(default)]
-pub struct TextReplacement {
-    pub matched_phrase: String,
-    pub output: String,
 }
 
 impl Default for DictationPostProcessing {

@@ -1,8 +1,14 @@
 use std::sync::OnceLock;
 
 use regex::{Regex, RegexBuilder};
+use serde::{Deserialize, Serialize};
 
-use crate::app_settings::TextReplacement;
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(default)]
+pub struct TextReplacement {
+    pub matched_phrase: String,
+    pub output: String,
+}
 
 #[derive(Clone)]
 struct CompiledRule {

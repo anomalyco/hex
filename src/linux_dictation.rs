@@ -12,7 +12,7 @@ use crate::dictation::{DictationCapture, Finish};
 use crate::events::{DictationPhase, EventLog, TranscriptPhase, VoiceEvent, VoiceState, now_ms};
 use crate::linux_input::{HotkeyEvent, X11HotkeyMonitor};
 use crate::linux_paste::X11Paster;
-use crate::linux_transcriber::LinuxTranscriber;
+use crate::local_transcriber::LocalTranscriber;
 
 const UPDATE_INTERVAL: Duration = Duration::from_millis(20);
 
@@ -28,7 +28,7 @@ struct JobResult {
 
 pub fn run(event_path: &Path, device: Option<&str>, shutdown: &AtomicBool) -> Result<()> {
     let settings = crate::linux_settings::LinuxSettings::load()?;
-    let transcriber = LinuxTranscriber::load(&settings.transcription)?;
+    let transcriber = LocalTranscriber::load(&settings.transcription)?;
     run_with_settings(event_path, device, shutdown, settings, transcriber)
 }
 
@@ -36,7 +36,7 @@ pub fn run_with_transcriber(
     event_path: &Path,
     device: Option<&str>,
     shutdown: &AtomicBool,
-    transcriber: LinuxTranscriber,
+    transcriber: LocalTranscriber,
 ) -> Result<()> {
     let settings = crate::linux_settings::LinuxSettings::load()?;
     run_with_settings(event_path, device, shutdown, settings, transcriber)
@@ -47,7 +47,7 @@ fn run_with_settings(
     device: Option<&str>,
     shutdown: &AtomicBool,
     settings: crate::linux_settings::LinuxSettings,
-    transcriber: LinuxTranscriber,
+    transcriber: LocalTranscriber,
 ) -> Result<()> {
     let input = match device {
         Some(name) => AudioInput::open_matching(name)?,

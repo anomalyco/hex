@@ -10,7 +10,7 @@ use crate::transcription_models::{
     download_with_progress, model_path, validate,
 };
 
-pub struct LinuxTranscriber {
+pub struct LocalTranscriber {
     session: Session,
     options: RunOptions,
     device_label: String,
@@ -21,8 +21,8 @@ pub fn default_model() -> &'static ModelDefinition {
     definition(TranscriptionModelId::default())
 }
 
-pub fn install_default(canceled: &AtomicBool) -> Result<()> {
-    let model = default_model();
+pub fn install(selection: &TranscriptionSelection, canceled: &AtomicBool) -> Result<()> {
+    let model = validate(selection)?;
     let downloaded = AtomicU64::new(0);
     println!("Installing {} ({})...", model.name, model.size_label());
     let path = download_with_progress(model, canceled, &downloaded)?;
@@ -59,6 +59,13 @@ pub fn devices() -> Result<Vec<String>> {
 }
 
 pub fn transcribe_wav(path: &Path) -> Result<String> {
+    transcribe_wav_with_selection(path, &TranscriptionSelection::default())
+}
+
+pub fn transcribe_wav_with_selection(
+    path: &Path,
+    selection: &TranscriptionSelection,
+) -> Result<String> {
     let mut reader = hound::WavReader::open(path)
         .wrap_err_with(|| format!("could not open {}", path.display()))?;
     let spec = reader.spec();
@@ -82,10 +89,10 @@ pub fn transcribe_wav(path: &Path) -> Result<String> {
         .collect::<Vec<_>>();
     let mut samples = crate::dictation::resample_for_parakeet(&mono, spec.sample_rate);
     crate::dictation::pad_for_parakeet(&mut samples);
-    LinuxTranscriber::load_default()?.transcribe(&samples)
+    LocalTranscriber::load(selection)?.transcribe(&samples)
 }
 
-impl LinuxTranscriber {
+impl LocalTranscriber {
     pub fn load_default() -> Result<Self> {
         Self::load(&TranscriptionSelection::default())
     }
@@ -95,10 +102,14 @@ impl LinuxTranscriber {
         transcribe_cpp::init_backends_default()
             .wrap_err("could not initialize transcription backends")?;
         let definition = validate(selection)?;
-        if !crate::transcription_models::is_installed(definition, &selection.language) {
+        if !crate::transcription_models::is_installed(definition, &selection.language)
+            || !crate::transcription_models::is_verified(definition)
+        {
             return Err(eyre!(
-                "{} is not installed; run `cargo run -- model install`",
-                definition.name
+                "{} is not installed and checksum-verified; install model {} for language {}",
+                definition.name,
+                selection.model.as_str(),
+                selection.language,
             ));
         }
         let path = model_path(definition)?;
@@ -144,7 +155,7 @@ impl LinuxTranscriber {
             backend = device.kind,
             device = device.description,
             variant,
-            "loaded Linux transcription model"
+            "loaded local transcription model"
         );
         let session = model.session()?;
         let mut transcriber = Self {
@@ -166,7 +177,7 @@ impl LinuxTranscriber {
         transcriber.transcribe(&vec![0.0; 24_000])?;
         tracing::info!(
             prewarm_ms = started.elapsed().as_millis(),
-            "prewarmed Linux transcription model"
+            "prewarmed local transcription model"
         );
         Ok(transcriber)
     }

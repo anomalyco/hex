@@ -8,6 +8,12 @@ meetings remain a developer prototype until their product surface is redesigned.
 An x86_64 Arch/i3 X11 beta now provides hotkey dictation, automatic paste, a
 GPUI shell, and signed user-local updates; it does not yet include commands,
 meetings, native Wayland support, or a package-manager channel.
+The Windows source-build alpha now has the native GPUI shell and complete global
+hold-to-dictate loop: timestamped Win32 input, WASAPI capture, checksum-pinned
+local models, generation-safe paste, live settings, double-tap lock, Paste Last,
+History, replacements, tones, click-through HUD, tray residency, and Launch at
+login. Its optimized MSVC/DirectX build passes; full processing modes, Voice
+Action, commands/context, packaging/updates, and developer Meetings remain.
 The authenticated local transcription service now implements discovery,
 direct-child embedding, model preparation, and bounded host-audio transcription;
 Promise and Effect TypeScript wrappers pass fake-helper tests. Signed helper
@@ -62,6 +68,30 @@ product shell without merging their lifecycle or platform behavior. Follow
 [`docs/plans/shared-desktop-ui.md`](docs/plans/shared-desktop-ui.md); preserve
 both settings formats and delete the duplicate Linux render tree only after the
 shared Settings and Activity slices work on both hosts.
+
+## Establish The Windows Alpha
+
+The source-build product loop and desktop host are implemented. Physically
+smoke-test the new double-tap lock, Paste Last, live microphone switching,
+clipboard restoration, recording tones, click-through HUD, close-to-tray, and
+Launch at login on Windows 10 and 11. Add bounded automatic stream recovery and
+the mutually exclusive release-microphone-while-idle policy without moving
+capture or paste work onto the UI thread.
+
+Continue toward macOS product parity in complete vertical slices. Extend the
+existing Windows Modes pane from shared text replacements to corrections,
+OpenCode rewriting, mode activation, and TypeScript transformations. Then add a
+Windows foreground/selected-text adapter using UI Automation, Voice Action, and
+the persisted opt-in command engine. Follow with packaged onboarding, a signed
+installer/update contract, the authenticated local transcription host, and
+developer-only Meetings. The detailed live matrix is in
+[`docs/windows.md`](docs/windows.md).
+
+Do not advertise a missing capability merely because its macOS pane can be
+drawn. Each Windows pane must own its real platform behavior and validation
+contract. Keep DirectML, CUDA, and other accelerators out of the baseline until
+the CPU backend and one real accelerated backend can be compared on supported
+hardware.
 
 ## Harden The Real-Time Boundary
 
@@ -166,7 +196,7 @@ Keep protected lifecycle commands and typed captures in compiled Rust. Ordinary
 literal commands and dictation control phrases already use the explicit
 TypeScript user config. Do not generalize that config into a plugin framework.
 
-Do not generalize the concrete macOS and Linux X11 adapters into a platform
-framework. Add seams only when a second implemented adapter requires one.
+Do not generalize the concrete macOS, Linux X11, and Windows adapters into a
+platform framework. Add seams only when implemented adapters require one.
 Follow the remaining capability contracts and exit criteria in
 [`docs/plans/linux.md`](docs/plans/linux.md).

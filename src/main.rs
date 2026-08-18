@@ -9,7 +9,7 @@ mod app_window;
 mod apple_speech;
 #[cfg(target_os = "macos")]
 mod application_catalog;
-#[cfg_attr(target_os = "linux", allow(dead_code))]
+#[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
 mod audio;
 #[cfg(target_os = "macos")]
 mod command_grammar;
@@ -21,17 +21,17 @@ mod config;
 mod context;
 #[cfg(all(debug_assertions, target_os = "macos"))]
 mod dashboard;
-#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
 mod desktop_activity;
-#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
 mod desktop_host;
-#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
 mod desktop_transcription_picker;
-#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
 mod desktop_ui;
 #[cfg(target_os = "macos")]
 mod developer_control;
-#[cfg_attr(target_os = "linux", allow(dead_code))]
+#[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
 mod dictation;
 #[cfg(target_os = "macos")]
 mod dictation_audio;
@@ -41,10 +41,11 @@ mod dictation_diagnostics;
 mod dictation_indicator;
 #[cfg(target_os = "macos")]
 pub mod dictation_processor;
-#[cfg_attr(target_os = "linux", allow(dead_code))]
+#[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
 mod events;
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 mod feedback;
+#[cfg_attr(target_os = "windows", allow(dead_code))]
 mod history;
 mod instance;
 #[cfg(target_os = "macos")]
@@ -62,11 +63,12 @@ mod linux_paste;
 #[cfg(target_os = "linux")]
 mod linux_settings;
 #[cfg(target_os = "linux")]
-mod linux_transcriber;
-#[cfg(target_os = "linux")]
 mod linux_updater;
 #[cfg(target_os = "macos")]
 mod local_api;
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+#[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
+mod local_transcriber;
 #[cfg(target_os = "macos")]
 mod login_item;
 #[cfg(target_os = "macos")]
@@ -77,7 +79,7 @@ mod meeting_detection;
 mod meeting_watcher;
 #[cfg(target_os = "macos")]
 mod microphone_activity;
-#[cfg_attr(target_os = "linux", allow(dead_code))]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 mod moonshine;
 #[cfg(all(target_os = "macos", debug_assertions))]
 mod moonshine_lab;
@@ -97,7 +99,7 @@ mod recognition;
 mod recording_environment;
 #[cfg(target_os = "macos")]
 mod sparkle;
-#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
 mod spoken_text;
 #[cfg(target_os = "macos")]
 mod status_item;
@@ -105,18 +107,42 @@ mod status_item;
 mod suppression;
 #[cfg(target_os = "macos")]
 mod swift_settings_import;
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 mod text_input;
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 mod text_replacements;
 #[cfg(target_os = "macos")]
 mod transcription;
 #[cfg(target_os = "macos")]
 mod transcription_benchmark;
-#[cfg_attr(target_os = "linux", allow(dead_code))]
+#[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
 mod transcription_models;
 #[cfg(target_os = "macos")]
 mod transcription_service;
+#[cfg(target_os = "windows")]
+mod windows;
+#[cfg(target_os = "windows")]
+mod windows_app;
+#[cfg(target_os = "windows")]
+mod windows_dictation;
+#[cfg(target_os = "windows")]
+mod windows_i18n;
+#[cfg(target_os = "windows")]
+mod windows_indicator;
+#[cfg(target_os = "windows")]
+mod windows_input;
+#[cfg(target_os = "windows")]
+mod windows_login_item;
+#[cfg(target_os = "windows")]
+mod windows_paste;
+#[cfg(target_os = "windows")]
+mod windows_settings;
+#[cfg(target_os = "windows")]
+mod windows_ui;
+#[cfg(target_os = "windows")]
+mod windows_updater;
+#[cfg(target_os = "windows")]
+mod ui;
 
 #[cfg(target_os = "macos")]
 use std::fs::{self, OpenOptions};
@@ -705,4 +731,9 @@ mod tests {
 #[cfg(target_os = "linux")]
 fn main() -> Result<()> {
     linux::run(&SHUTDOWN)
+}
+
+#[cfg(target_os = "windows")]
+fn main() -> Result<()> {
+    windows::run(&SHUTDOWN)
 }

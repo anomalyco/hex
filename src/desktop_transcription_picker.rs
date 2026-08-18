@@ -3,13 +3,15 @@ use gpui::{
 };
 
 use crate::desktop_ui::{
-    ACCENT, CANVAS, FAINT, LINE, MUTED, PANEL_RADIUS, SIDEBAR, SURFACE, SURFACE_HOVER,
-    SURFACE_SELECTED, TEXT, TEXT_SOFT, error_message,
+    CANVAS, FAINT, LINE, MUTED, OVERLAY_PANEL, OVERLAY_RADIUS, OVERLAY_SMOKE, OVERLAY_STROKE,
+    OVERLAY_TOP_INSET, PANEL_RADIUS, SIDEBAR, SURFACE, SURFACE_HOVER, SURFACE_SELECTED, TEXT,
+    TEXT_ON_ACCENT, TEXT_SOFT, accent_color, error_message,
 };
 use crate::transcription_models::{
     ModelChoice, ModelDefinition, TranscriptionModelId, TranscriptionSelection, language_name,
 };
 
+#[cfg_attr(target_os = "windows", allow(dead_code))]
 pub(crate) fn transcription_selection_is_active(
     selection: &TranscriptionSelection,
     model: &ModelDefinition,
@@ -62,6 +64,7 @@ pub(crate) trait TranscriptionPickerDelegate: Sized + 'static {
     fn select_transcription_language(&mut self, language: String, cx: &mut Context<Self>);
 }
 
+#[cfg_attr(target_os = "windows", allow(dead_code))]
 pub(crate) fn render_transcription_picker<T: TranscriptionPickerDelegate>(
     view: TranscriptionPickerView,
     cx: &mut Context<T>,
@@ -73,20 +76,35 @@ pub(crate) fn render_transcription_picker<T: TranscriptionPickerDelegate>(
         .map(|(index, (code, name))| {
             let selected = *code == selected_language;
             let code = (*code).to_string();
-            div()
+            let row = div()
                 .id(("transcription-language", index))
+                .flex()
+                .items_center();
+            #[cfg(target_os = "windows")]
+            let row = row
+                .h(px(36.0))
+                .my(px(1.0))
+                .pl(px(1.0))
+                .pr_3()
+                .gap_1()
+                .rounded(px(4.0))
+                .text_size(px(14.0))
+                .text_color(if selected { rgb(TEXT) } else { rgb(TEXT_SOFT) })
+                .when(selected, |row| row.bg(rgb(SURFACE_SELECTED)))
+                .hover(|row| row.bg(rgb(SURFACE_SELECTED)).text_color(rgb(TEXT)))
+                .child(crate::windows_ui::selection_pill(selected));
+            #[cfg(not(target_os = "windows"))]
+            let row = row
                 .h(px(34.0))
                 .px_3()
-                .flex()
-                .items_center()
                 .rounded(px(6.0))
                 .text_size(px(13.0))
                 .text_color(if selected { rgb(TEXT) } else { rgb(MUTED) })
                 .when(selected, |row| row.bg(rgb(SURFACE_SELECTED)))
                 .when(!selected, |row| {
                     row.hover(|row| row.bg(rgb(0x2a2a2a)).text_color(rgb(TEXT_SOFT)))
-                })
-                .child(*name)
+                });
+            row.child(*name)
                 .on_click(cx.listener(move |this, _, _, cx| {
                     cx.stop_propagation();
                     this.select_transcription_language(code.clone(), cx);
@@ -130,9 +148,9 @@ pub(crate) fn render_transcription_picker<T: TranscriptionPickerDelegate>(
             .map(|badge| {
                 if active {
                     badge
-                        .bg(rgb(ACCENT))
+                        .bg(rgb(accent_color()))
                         .font_weight(FontWeight::SEMIBOLD)
-                        .text_color(rgb(TEXT))
+                        .text_color(rgb(TEXT_ON_ACCENT))
                 } else if preparing {
                     badge.bg(rgb(SURFACE_SELECTED)).text_color(rgb(TEXT_SOFT))
                 } else {
@@ -150,7 +168,18 @@ pub(crate) fn render_transcription_picker<T: TranscriptionPickerDelegate>(
             .mb_3()
             .rounded(px(PANEL_RADIUS))
             .border_1()
-            .border_color(if active { rgb(TEXT_SOFT) } else { rgb(LINE) })
+            .border_color(if active {
+                #[cfg(target_os = "windows")]
+                {
+                    rgb(accent_color())
+                }
+                #[cfg(not(target_os = "windows"))]
+                {
+                    rgb(TEXT_SOFT)
+                }
+            } else {
+                rgb(LINE)
+            })
             .bg(rgb(SURFACE))
             .when(!active, |card| {
                 card.cursor_pointer()
@@ -169,34 +198,53 @@ pub(crate) fn render_transcription_picker<T: TranscriptionPickerDelegate>(
                     )
                     .child(badge),
             )
-            .child(
-                div()
-                    .pt_3()
-                    .flex()
-                    .gap_2()
-                    .child(model_metric(
-                        definition.realtime_context.to_uppercase(),
-                        definition.realtime,
-                    ))
-                    .child(model_metric("SIZE", definition.size_label()))
-                    .child(model_metric(
-                        "ERROR RATE · LOWER IS BETTER",
-                        definition.quality,
-                    )),
-            )
+            .child({
+                #[cfg(target_os = "windows")]
+                {
+                    div()
+                        .pt_2()
+                        .text_size(px(12.0))
+                        .text_color(rgb(MUTED))
+                        .child(format!(
+                            "{} {} · {} · {} error rate",
+                            definition.realtime,
+                            definition.realtime_context.to_lowercase(),
+                            definition.size_label(),
+                            definition.quality
+                        ))
+                        .into_any_element()
+                }
+                #[cfg(not(target_os = "windows"))]
+                {
+                    div()
+                        .pt_3()
+                        .flex()
+                        .gap_2()
+                        .child(model_metric(
+                            definition.realtime_context.to_uppercase(),
+                            definition.realtime,
+                        ))
+                        .child(model_metric("SIZE", definition.size_label()))
+                        .child(model_metric(
+                            "ERROR RATE · LOWER IS BETTER",
+                            definition.quality,
+                        ))
+                        .into_any_element()
+                }
+            })
             .when_some(progress, |card, progress| {
                 let indicator = match progress {
                     TranscriptionPickerProgress::Downloading(progress) => div()
                         .h_full()
                         .w(relative(progress))
                         .rounded_sm()
-                        .bg(rgb(TEXT_SOFT)),
+                        .bg(rgb(progress_fill())),
                     TranscriptionPickerProgress::Loading(progress) => div()
                         .ml(relative(progress * 0.75))
                         .h_full()
                         .w(relative(0.25))
                         .rounded_sm()
-                        .bg(rgb(TEXT_SOFT)),
+                        .bg(rgb(progress_fill())),
                 };
                 card.child(
                     div().pt_3().child(
@@ -236,6 +284,20 @@ pub(crate) fn render_transcription_picker<T: TranscriptionPickerDelegate>(
                                 .text_size(px(11.0))
                                 .text_color(rgb(TEXT_SOFT))
                                 .hover(|button| button.bg(rgb(SURFACE_HOVER)).text_color(rgb(TEXT)))
+                                .map(|chip| {
+                                    #[cfg(target_os = "windows")]
+                                    {
+                                        chip.rounded(px(4.0))
+                                            .border_color(rgb(crate::windows_ui::CONTROL_STROKE))
+                                            .bg(rgb(crate::windows_ui::CONTROL_FILL))
+                                            .text_size(px(12.0))
+                                            .text_color(rgb(TEXT))
+                                    }
+                                    #[cfg(not(target_os = "windows"))]
+                                    {
+                                        chip
+                                    }
+                                })
                                 .child(action),
                         )
                     }),
@@ -254,14 +316,14 @@ pub(crate) fn render_transcription_picker<T: TranscriptionPickerDelegate>(
     div()
         .id("transcription-picker-backdrop")
         .absolute()
-        .top_0()
+        .top(px(OVERLAY_TOP_INSET))
         .left_0()
         .size_full()
         .occlude()
         .flex()
         .items_center()
         .justify_center()
-        .bg(rgba(0x000000bb))
+        .bg(rgba(OVERLAY_SMOKE))
         .on_click(cx.listener(|this, _, _, cx| {
             this.dismiss_transcription_picker(cx);
         }))
@@ -272,10 +334,20 @@ pub(crate) fn render_transcription_picker<T: TranscriptionPickerDelegate>(
                 .h(px(520.0))
                 .flex()
                 .flex_col()
-                .rounded(px(PANEL_RADIUS + 2.0))
+                .rounded(px(OVERLAY_RADIUS))
                 .border_1()
-                .border_color(rgb(LINE))
-                .bg(rgb(CANVAS))
+                .border_color(rgb(OVERLAY_STROKE))
+                .bg(rgb(OVERLAY_PANEL))
+                .map(|panel| {
+                    #[cfg(target_os = "windows")]
+                    {
+                        panel.shadow_2xl()
+                    }
+                    #[cfg(not(target_os = "windows"))]
+                    {
+                        panel
+                    }
+                })
                 .overflow_hidden()
                 .on_click(|_, _, cx| cx.stop_propagation())
                 .child(
@@ -284,12 +356,16 @@ pub(crate) fn render_transcription_picker<T: TranscriptionPickerDelegate>(
                         .py_5()
                         .border_b_1()
                         .border_color(rgb(LINE))
-                        .child(
+                        .child({
+                            #[cfg(target_os = "windows")]
+                            const TITLE_SIZE: f32 = 20.0;
+                            #[cfg(not(target_os = "windows"))]
+                            const TITLE_SIZE: f32 = 18.0;
                             div()
-                                .text_size(px(18.0))
+                                .text_size(px(TITLE_SIZE))
                                 .font_weight(FontWeight::SEMIBOLD)
-                                .child("Choose local transcription"),
-                        )
+                                .child("Choose local transcription")
+                        })
                         .child(
                             div()
                                 .pt_1()
@@ -337,6 +413,20 @@ pub(crate) fn render_transcription_picker<T: TranscriptionPickerDelegate>(
         .into_any_element()
 }
 
+/// The progress-bar fill: system accent on Windows, neutral elsewhere.
+#[cfg_attr(target_os = "windows", allow(dead_code))]
+fn progress_fill() -> u32 {
+    #[cfg(target_os = "windows")]
+    {
+        accent_color()
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        TEXT_SOFT
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
 fn model_metric(label: impl IntoElement, value: impl IntoElement) -> gpui::Div {
     div()
         .flex_1()

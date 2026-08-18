@@ -105,6 +105,7 @@ Diagnostics are stored at:
 
 - macOS: `~/Library/Application Support/voice-control/logs/`
 - Linux: `~/.local/share/voice-control/logs/`, or under `XDG_DATA_HOME`
+- Windows: `%APPDATA%\voice-control\logs\`
 
 ## Linux X11 Beta
 
@@ -115,6 +116,18 @@ package-manager install.
 
 See the [Linux installation guide](docs/linux.md) for the verified user-local
 installer, source-build fallback, requirements, and limitations.
+
+## Windows Alpha
+
+The source-build Windows alpha now includes a native GPUI desktop app, WASAPI
+capture, local model installation and validation, global hold-to-dictate,
+double-tap lock, automatic paste, Paste Last, live microphone/settings changes,
+History, replacements, tones/HUD, a resident tray, and Launch at login. Its
+default shortcut is `Ctrl+Win`. Full processing modes, Voice Action, commands,
+packaged installation/updates, and meetings are not yet implemented.
+
+See the [Windows alpha guide](docs/windows.md) for environment setup, smoke
+tests, Polish model selection, and the current port boundary.
 
 ## Contributing
 

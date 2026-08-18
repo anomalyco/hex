@@ -15,6 +15,7 @@ pub fn logs_dir() -> Result<PathBuf> {
     Ok(support_dir()?.join("logs"))
 }
 
+#[cfg(target_os = "macos")]
 pub fn opencode_workspace() -> Result<PathBuf> {
     Ok(support_dir()?.join("opencode"))
 }

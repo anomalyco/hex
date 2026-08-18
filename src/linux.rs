@@ -109,7 +109,7 @@ pub fn run(shutdown: &'static AtomicBool) -> Result<()> {
         Command::Status { lines } => print_status(&event_path, lines),
         Command::Model { command } => match command {
             ModelCommand::Status => {
-                let model = crate::linux_transcriber::default_model();
+                let model = crate::local_transcriber::default_model();
                 println!(
                     "{}\t{}\t{}",
                     if crate::transcription_models::is_installed(model, "en") {
@@ -123,22 +123,25 @@ pub fn run(shutdown: &'static AtomicBool) -> Result<()> {
                 Ok(())
             }
             ModelCommand::Install => {
-                crate::linux_transcriber::install_default(shutdown)?;
+                crate::local_transcriber::install(
+                    &crate::transcription_models::TranscriptionSelection::default(),
+                    shutdown,
+                )?;
                 Ok(())
             }
             ModelCommand::Devices => {
-                for device in crate::linux_transcriber::devices()? {
+                for device in crate::local_transcriber::devices()? {
                     println!("{device}");
                 }
                 Ok(())
             }
             ModelCommand::Check => {
-                let transcriber = crate::linux_transcriber::LinuxTranscriber::load_default()?;
+                let transcriber = crate::local_transcriber::LocalTranscriber::load_default()?;
                 println!("ready\t{}", transcriber.device_label());
                 Ok(())
             }
             ModelCommand::Transcribe { wav } => {
-                println!("{}", crate::linux_transcriber::transcribe_wav(&wav)?);
+                println!("{}", crate::local_transcriber::transcribe_wav(&wav)?);
                 Ok(())
             }
         },

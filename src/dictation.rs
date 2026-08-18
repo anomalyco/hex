@@ -330,7 +330,7 @@ impl DictationClip {
         self.samples.len() as u64 * 1_000 / u64::from(PARAKEET_SAMPLE_RATE)
     }
 
-    #[cfg(any(test, target_os = "linux"))]
+    #[cfg(any(test, target_os = "linux", target_os = "windows"))]
     pub fn into_parakeet_samples(self) -> Vec<f32> {
         let mut samples = self.samples;
         pad_for_parakeet(&mut samples);
@@ -533,7 +533,7 @@ impl DictationCapture {
         self.recording_environment = Some(controller);
     }
 
-    #[cfg(any(test, target_os = "linux"))]
+    #[cfg(any(test, target_os = "linux", target_os = "windows"))]
     pub fn keep_warm(&mut self, samples: &[f32]) {
         self.keep_warm_for(samples, TIMELINE_BUFFER_DURATION);
     }
@@ -560,7 +560,7 @@ impl DictationCapture {
         self.recording.is_some()
     }
 
-    #[cfg(any(test, target_os = "linux"))]
+    #[cfg(any(test, target_os = "linux", target_os = "windows"))]
     pub fn start(&mut self, now: CaptureInstant) {
         self.start_with_pre_roll(now, PRE_ROLL_DURATION, false);
     }
@@ -641,7 +641,7 @@ impl DictationCapture {
         became_intentional
     }
 
-    #[cfg(any(test, target_os = "linux"))]
+    #[cfg(any(test, target_os = "linux", target_os = "windows"))]
     pub fn ingest(&mut self, samples: &[f32], captured_through: CaptureInstant) -> bool {
         self.ingest_with_pending(samples, captured_through, None)
     }

@@ -1,4 +1,4 @@
-use std::fs::{self, File};
+use std::fs::{self, File, OpenOptions};
 use std::io::{ErrorKind, Read};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -490,7 +490,7 @@ pub(crate) fn choices_for_runtime(language: &str) -> Vec<ModelChoice> {
         model: definition(id),
         recommendation,
     };
-    match language {
+    let mut choices = match language {
         AUTO_LANGUAGE => vec![
             choice(
                 TranscriptionModelId::WhisperLargeV3Turbo,
@@ -509,10 +509,6 @@ pub(crate) fn choices_for_runtime(language: &str) -> Vec<ModelChoice> {
             choice(
                 TranscriptionModelId::ParakeetUnifiedEnglish,
                 Recommendation::Recommended,
-            ),
-            choice(
-                TranscriptionModelId::CohereTranscribe,
-                Recommendation::MostAccurate,
             ),
             choice(
                 TranscriptionModelId::WhisperLargeV3Turbo,
@@ -557,7 +553,20 @@ pub(crate) fn choices_for_runtime(language: &str) -> Vec<ModelChoice> {
             TranscriptionModelId::WhisperLargeV3Turbo,
             Recommendation::Recommended,
         )],
+    };
+    // Cohere Transcribe (03-2026) leads the Open ASR Leaderboard for every
+    // language it covers, so it earns the accuracy pick wherever it applies;
+    // it cannot detect languages, so Auto stays detection-only.
+    if language != AUTO_LANGUAGE && COHERE_LANGUAGES.contains(&language) {
+        choices.insert(
+            choices.len().min(1),
+            choice(
+                TranscriptionModelId::CohereTranscribe,
+                Recommendation::MostAccurate,
+            ),
+        );
     }
+    choices
 }
 
 pub fn validate(selection: &TranscriptionSelection) -> Result<&'static ModelDefinition> {
@@ -614,6 +623,21 @@ pub fn is_verified(model: &ModelDefinition) -> bool {
         return false;
     };
     verification_receipt_matches(&path, model)
+}
+
+/// Remove a downloaded model and its verification receipt from disk.
+/// Callers keep the active selection out of reach; a model still held
+/// open by the runtime surfaces the sharing violation as the error.
+pub fn uninstall(model: &ModelDefinition) -> Result<()> {
+    let path = model_path(model)?;
+    let _ = fs::remove_file(verification_receipt_path(&path));
+    match fs::remove_file(&path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == ErrorKind::NotFound => Ok(()),
+        Err(error) => {
+            Err(error).wrap_err_with(|| format!("could not remove {} from disk", model.name))
+        }
+    }
 }
 
 fn verification_receipt_matches(path: &Path, model: &ModelDefinition) -> bool {
@@ -703,9 +727,9 @@ pub fn download_with_stage_progress(
         ModelPreparationStage::Verifying.store(stage);
         match verify_file_with_cancel(&partial, model, canceled) {
             Ok(()) => {
-                File::open(&partial)?.sync_all()?;
-                fs::rename(&partial, &destination)?;
-                File::open(&directory)?.sync_all()?;
+                sync_file(&partial)?;
+                atomic_replace(&partial, &destination)?;
+                sync_directory(&directory)?;
                 write_verification_receipt(&destination, model)?;
                 downloaded_bytes.store(artifact.bytes, Ordering::Relaxed);
                 return Ok(destination);
@@ -719,7 +743,12 @@ pub fn download_with_stage_progress(
         }
     }
     ModelPreparationStage::Downloading.store(stage);
-    let mut child = Command::new("curl")
+    let mut command = Command::new("curl");
+    // Without this flag the console host pops a terminal window over the
+    // app for the whole download.
+    #[cfg(target_os = "windows")]
+    std::os::windows::process::CommandExt::creation_flags(&mut command, 0x0800_0000);
+    let mut child = command
         .args([
             "--fail",
             "--location",
@@ -772,9 +801,9 @@ pub fn download_with_stage_progress(
         }
         return Err(error);
     }
-    File::open(&partial)?.sync_all()?;
-    fs::rename(&partial, &destination)?;
-    File::open(&directory)?.sync_all()?;
+    sync_file(&partial)?;
+    atomic_replace(&partial, &destination)?;
+    sync_directory(&directory)?;
     write_verification_receipt(&destination, model)?;
     downloaded_bytes.store(artifact.bytes, Ordering::Relaxed);
     Ok(destination)
@@ -809,13 +838,72 @@ fn write_verification_receipt(path: &Path, model: &ModelDefinition) -> Result<()
     let destination = verification_receipt_path(path);
     let temporary = destination.with_extension("json.tmp");
     fs::write(&temporary, serde_json::to_vec(&receipt)?)?;
-    File::open(&temporary)?.sync_all()?;
-    fs::rename(temporary, destination)?;
-    File::open(
+    sync_file(&temporary)?;
+    atomic_replace(&temporary, &destination)?;
+    sync_directory(
         path.parent()
             .ok_or_else(|| color_eyre::eyre::eyre!("model path has no parent"))?,
-    )?
-    .sync_all()?;
+    )?;
+    Ok(())
+}
+
+#[cfg(unix)]
+fn sync_directory(path: &Path) -> Result<()> {
+    File::open(path)?.sync_all()?;
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn sync_directory(_path: &Path) -> Result<()> {
+    // Windows does not let std::fs::File open a directory. The model and
+    // receipt files themselves are flushed before their atomic rename.
+    Ok(())
+}
+
+fn sync_file(path: &Path) -> Result<()> {
+    OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(path)?
+        .sync_all()?;
+    Ok(())
+}
+
+#[cfg(not(target_os = "windows"))]
+pub(crate) fn atomic_replace(source: &Path, destination: &Path) -> Result<()> {
+    fs::rename(source, destination)?;
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+pub(crate) fn atomic_replace(source: &Path, destination: &Path) -> Result<()> {
+    use std::iter;
+    use std::os::windows::ffi::OsStrExt;
+
+    use windows_sys::Win32::Storage::FileSystem::{
+        MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,
+    };
+
+    let source = source
+        .as_os_str()
+        .encode_wide()
+        .chain(iter::once(0))
+        .collect::<Vec<_>>();
+    let destination = destination
+        .as_os_str()
+        .encode_wide()
+        .chain(iter::once(0))
+        .collect::<Vec<_>>();
+    let replaced = unsafe {
+        MoveFileExW(
+            source.as_ptr(),
+            destination.as_ptr(),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+        )
+    };
+    if replaced == 0 {
+        return Err(std::io::Error::last_os_error().into());
+    }
     Ok(())
 }
 
@@ -850,7 +938,10 @@ fn verify_file_with_cancel(
     }
     let mut file = File::open(path)?;
     let mut digest = Sha256::new();
-    let mut buffer = [0_u8; 1024 * 1024];
+    // A one-megabyte stack allocation exhausts the default Windows main-thread
+    // stack before verification begins. Keep the bounded hashing buffer on the
+    // heap so CLI installs and GUI preparation use the same safe path.
+    let mut buffer = vec![0_u8; 1024 * 1024];
     loop {
         check_canceled(canceled)?;
         let read = file.read(&mut buffer)?;
@@ -890,7 +981,26 @@ mod tests {
         assert_eq!(english[1].recommendation, Recommendation::MostAccurate);
         let mandarin = choices_for_runtime("zh");
         assert_eq!(mandarin[0].model.id, TranscriptionModelId::Qwen3Asr06B);
-        assert_eq!(mandarin[1].model.id, TranscriptionModelId::SenseVoiceSmall);
+        assert_eq!(mandarin[1].model.id, TranscriptionModelId::CohereTranscribe);
+        assert_eq!(mandarin[2].model.id, TranscriptionModelId::SenseVoiceSmall);
+    }
+
+    #[test]
+    fn cohere_is_the_accuracy_pick_exactly_where_it_has_coverage() {
+        for language in COHERE_LANGUAGES {
+            let cohere = choices_for_runtime(language)
+                .into_iter()
+                .find(|choice| choice.model.id == TranscriptionModelId::CohereTranscribe)
+                .expect("Cohere Transcribe is offered for every language it supports");
+            assert_eq!(cohere.recommendation, Recommendation::MostAccurate);
+        }
+        for language in ["yue", "uk", "hi", AUTO_LANGUAGE] {
+            assert!(
+                choices_for_runtime(language)
+                    .iter()
+                    .all(|choice| choice.model.id != TranscriptionModelId::CohereTranscribe)
+            );
+        }
     }
 
     #[test]
@@ -1089,6 +1199,25 @@ mod tests {
         assert!(!verification_receipt_matches(&path, &model));
         let _ = fs::remove_file(verification_receipt_path(&path));
         let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn atomic_replace_overwrites_an_existing_file() {
+        let base = std::env::temp_dir().join(format!(
+            "hex-atomic-replace-{}-{}",
+            std::process::id(),
+            NEXT_TEMP_FILE.fetch_add(1, Ordering::Relaxed)
+        ));
+        let source = base.with_extension("source");
+        let destination = base.with_extension("destination");
+        fs::write(&source, b"new").unwrap();
+        fs::write(&destination, b"old").unwrap();
+
+        atomic_replace(&source, &destination).unwrap();
+
+        assert_eq!(fs::read(&destination).unwrap(), b"new");
+        assert!(!source.exists());
+        let _ = fs::remove_file(destination);
     }
 
     #[test]

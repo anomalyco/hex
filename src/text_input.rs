@@ -11,8 +11,30 @@ use unicode_segmentation::UnicodeSegmentation;
 
 use crate::desktop_ui::{CANVAS, LINE, MULTILINE_INPUT_HEIGHT, MUTED, TEXT, TEXT_INPUT_HEIGHT};
 
-const FOCUS: u32 = 0x5a86c8;
-const SELECTION: u32 = 0x4776b866;
+/// Focused-border color: the system accent on Windows, the compiled blue
+/// elsewhere.
+fn focus_color() -> u32 {
+    #[cfg(target_os = "windows")]
+    {
+        crate::windows_ui::accent()
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        0x5a86c8
+    }
+}
+
+/// Selection highlight as 0xRRGGBBAA.
+fn selection_color() -> u32 {
+    #[cfg(target_os = "windows")]
+    {
+        (crate::windows_ui::accent() << 8) | 0x59
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        0x4776b866
+    }
+}
 
 actions!(
     text_input,
@@ -59,12 +81,13 @@ actions!(
 /// Emitted after keyboard, clipboard, or input-method editing changes the text.
 pub struct Changed;
 pub struct Submitted;
+#[cfg_attr(target_os = "windows", allow(dead_code))]
 pub struct Navigate(pub i32);
 pub struct Dismissed;
 
 /// Key bindings required by [`TextInput`].
 pub fn key_bindings() -> Vec<KeyBinding> {
-    vec![
+    let mut bindings = vec![
         KeyBinding::new("backspace", Backspace, Some("TextInput")),
         KeyBinding::new("delete", Delete, Some("TextInput")),
         KeyBinding::new("left", Left, Some("TextInput")),
@@ -81,14 +104,6 @@ pub fn key_bindings() -> Vec<KeyBinding> {
         KeyBinding::new("shift-alt-right", SelectWordRight, Some("TextInput")),
         KeyBinding::new("cmd-left", LineStart, Some("TextInput")),
         KeyBinding::new("cmd-right", LineEnd, Some("TextInput")),
-        KeyBinding::new("ctrl-a", LineStart, Some("TextInput")),
-        KeyBinding::new("ctrl-e", LineEnd, Some("TextInput")),
-        KeyBinding::new("ctrl-b", Left, Some("TextInput")),
-        KeyBinding::new("ctrl-f", Right, Some("TextInput")),
-        KeyBinding::new("ctrl-p", Up, Some("TextInput")),
-        KeyBinding::new("ctrl-n", Down, Some("TextInput")),
-        KeyBinding::new("ctrl-d", Delete, Some("TextInput")),
-        KeyBinding::new("ctrl-h", Backspace, Some("TextInput")),
         KeyBinding::new("shift-cmd-left", SelectLineStart, Some("TextInput")),
         KeyBinding::new("shift-cmd-right", SelectLineEnd, Some("TextInput")),
         KeyBinding::new("cmd-up", DocumentStart, Some("TextInput")),
@@ -109,7 +124,41 @@ pub fn key_bindings() -> Vec<KeyBinding> {
         KeyBinding::new("cmd-z", Undo, Some("TextInput")),
         KeyBinding::new("shift-cmd-z", Redo, Some("TextInput")),
         KeyBinding::new("ctrl-cmd-space", ShowCharacterPalette, Some("TextInput")),
-    ]
+    ];
+    #[cfg(not(target_os = "windows"))]
+    bindings.extend([
+        KeyBinding::new("ctrl-a", LineStart, Some("TextInput")),
+        KeyBinding::new("ctrl-e", LineEnd, Some("TextInput")),
+        KeyBinding::new("ctrl-b", Left, Some("TextInput")),
+        KeyBinding::new("ctrl-f", Right, Some("TextInput")),
+        KeyBinding::new("ctrl-p", Up, Some("TextInput")),
+        KeyBinding::new("ctrl-n", Down, Some("TextInput")),
+        KeyBinding::new("ctrl-d", Delete, Some("TextInput")),
+        KeyBinding::new("ctrl-h", Backspace, Some("TextInput")),
+    ]);
+    #[cfg(target_os = "windows")]
+    bindings.extend([
+        KeyBinding::new("ctrl-a", SelectAll, Some("TextInput")),
+        KeyBinding::new("ctrl-v", Paste, Some("TextInput")),
+        KeyBinding::new("ctrl-c", Copy, Some("TextInput")),
+        KeyBinding::new("ctrl-x", Cut, Some("TextInput")),
+        KeyBinding::new("ctrl-z", Undo, Some("TextInput")),
+        KeyBinding::new("ctrl-y", Redo, Some("TextInput")),
+        KeyBinding::new("shift-ctrl-z", Redo, Some("TextInput")),
+        KeyBinding::new("ctrl-left", WordLeft, Some("TextInput")),
+        KeyBinding::new("ctrl-right", WordRight, Some("TextInput")),
+        KeyBinding::new("shift-ctrl-left", SelectWordLeft, Some("TextInput")),
+        KeyBinding::new("shift-ctrl-right", SelectWordRight, Some("TextInput")),
+        KeyBinding::new("ctrl-backspace", DeleteWordBackward, Some("TextInput")),
+        KeyBinding::new("ctrl-delete", DeleteWordForward, Some("TextInput")),
+        KeyBinding::new("ctrl-home", DocumentStart, Some("TextInput")),
+        KeyBinding::new("ctrl-end", DocumentEnd, Some("TextInput")),
+        KeyBinding::new("shift-home", SelectLineStart, Some("TextInput")),
+        KeyBinding::new("shift-end", SelectLineEnd, Some("TextInput")),
+        KeyBinding::new("shift-ctrl-home", SelectDocumentStart, Some("TextInput")),
+        KeyBinding::new("shift-ctrl-end", SelectDocumentEnd, Some("TextInput")),
+    ]);
+    bindings
 }
 
 /// A native GPUI text input with single-line and wrapped multiline modes.
@@ -130,6 +179,7 @@ pub struct TextInput {
     multiline: bool,
     height: Pixels,
     picker: bool,
+    read_only: bool,
     undo_stack: Vec<EditState>,
     redo_stack: Vec<EditState>,
 }
@@ -200,6 +250,7 @@ impl MultilineLayout {
     }
 }
 
+#[cfg_attr(target_os = "windows", allow(dead_code))]
 impl TextInput {
     pub fn new(
         cx: &mut Context<Self>,
@@ -236,6 +287,20 @@ impl TextInput {
         input
     }
 
+    /// A selectable, copyable text region that cannot be edited. Renders as
+    /// plain text rather than an input box.
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+    pub fn read_only_multiline(
+        cx: &mut Context<Self>,
+        text: impl AsRef<str>,
+        height: Pixels,
+    ) -> Self {
+        let mut input = Self::with_mode(cx, "", text.as_ref(), true, false);
+        input.height = height;
+        input.read_only = true;
+        input
+    }
+
     fn with_mode(
         cx: &mut Context<Self>,
         placeholder: impl Into<SharedString>,
@@ -266,6 +331,7 @@ impl TextInput {
                 TEXT_INPUT_HEIGHT
             }),
             picker,
+            read_only: false,
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
         }
@@ -793,6 +859,9 @@ impl TextInput {
         marked_selection_utf16: Option<Range<usize>>,
         cx: &mut Context<Self>,
     ) {
+        if self.read_only {
+            return;
+        }
         let range = range_utf16
             .as_ref()
             .map(|range| self.range_from_utf16(range))
@@ -1102,7 +1171,7 @@ impl Element for TextElement {
                 scroll_y = caret.y + layout.line_height - bounds.size.height + margin;
             }
             scroll_y = scroll_y.min((layout.size().height - bounds.size.height).max(px(0.)));
-            let cursor = selected_range.is_empty().then(|| {
+            let cursor = (!input.read_only && selected_range.is_empty()).then(|| {
                 fill(
                     Bounds::new(
                         point(bounds.left() + caret.x, bounds.top() + caret.y - scroll_y),
@@ -1142,16 +1211,18 @@ impl Element for TextElement {
         let (selections, cursor) = if selected_range.is_empty() {
             (
                 Vec::new(),
-                Some(fill(
-                    Bounds::new(
-                        point(
-                            bounds.left() + line.x_for_index(input.cursor_offset()) - scroll_x,
-                            bounds.top(),
+                (!input.read_only).then(|| {
+                    fill(
+                        Bounds::new(
+                            point(
+                                bounds.left() + line.x_for_index(input.cursor_offset()) - scroll_x,
+                                bounds.top(),
+                            ),
+                            size(px(1.), bounds.bottom() - bounds.top()),
                         ),
-                        size(px(1.), bounds.bottom() - bounds.top()),
-                    ),
-                    rgb(TEXT),
-                )),
+                        rgb(TEXT),
+                    )
+                }),
             )
         } else {
             (
@@ -1166,7 +1237,7 @@ impl Element for TextElement {
                             bounds.bottom(),
                         ),
                     ),
-                    rgba(SELECTION),
+                    rgba(selection_color()),
                 )],
                 None,
             )
@@ -1265,7 +1336,7 @@ fn multiline_selection_quads(
                 point(bounds.left() + start.x, top + start.y),
                 point(bounds.left() + end.x, top + start.y + layout.line_height),
             ),
-            rgba(SELECTION),
+            rgba(selection_color()),
         )];
     }
     let mut quads = vec![fill(
@@ -1273,7 +1344,7 @@ fn multiline_selection_quads(
             point(bounds.left() + start.x, top + start.y),
             point(bounds.right(), top + start.y + layout.line_height),
         ),
-        rgba(SELECTION),
+        rgba(selection_color()),
     )];
     let middle_top = start.y + layout.line_height;
     if end.y > middle_top {
@@ -1282,7 +1353,7 @@ fn multiline_selection_quads(
                 point(bounds.left(), top + middle_top),
                 point(bounds.right(), top + end.y),
             ),
-            rgba(SELECTION),
+            rgba(selection_color()),
         ));
     }
     quads.push(fill(
@@ -1290,7 +1361,7 @@ fn multiline_selection_quads(
             point(bounds.left(), top + end.y),
             point(bounds.left() + end.x, top + end.y + layout.line_height),
         ),
-        rgba(SELECTION),
+        rgba(selection_color()),
     ));
     quads
 }
@@ -1298,7 +1369,7 @@ fn multiline_selection_quads(
 impl Render for TextInput {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let border = if self.focus_handle.is_focused(window) {
-            FOCUS
+            focus_color()
         } else {
             LINE
         };
@@ -1348,13 +1419,20 @@ impl Render for TextInput {
             .on_mouse_move(cx.listener(Self::on_mouse_move))
             .w_full()
             .h(self.height)
-            .px(px(10.))
-            .py(px(7.))
+            .map(|element| {
+                if self.read_only {
+                    element
+                } else {
+                    element
+                        .px(px(10.))
+                        .py(px(7.))
+                        .rounded_sm()
+                        .border_1()
+                        .border_color(rgb(border))
+                        .bg(rgb(CANVAS))
+                }
+            })
             .overflow_hidden()
-            .rounded_sm()
-            .border_1()
-            .border_color(rgb(border))
-            .bg(rgb(CANVAS))
             .text_color(rgb(TEXT))
             .text_size(px(14.))
             .line_height(px(20.))

@@ -53,6 +53,22 @@ impl DesktopCapabilities {
             voice_action: false,
         }
     }
+
+    #[cfg(target_os = "windows")]
+    pub(crate) const fn windows() -> Self {
+        Self {
+            activity: true,
+            commands: false,
+            history: true,
+            hud_lab: false,
+            meetings: false,
+            modes: false,
+            replacements: true,
+            listener_control: true,
+            update_restart: false,
+            voice_action: false,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -86,13 +102,13 @@ pub(crate) struct DesktopListenerSnapshot {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-#[cfg_attr(target_os = "macos", allow(dead_code))]
+#[cfg_attr(any(target_os = "macos", target_os = "windows"), allow(dead_code))]
 pub(crate) enum DesktopUpdateStatus {
     Unavailable,
     Checking,
     Current,
     Failed,
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
     Available,
     ReadyToRestart,
 }
@@ -108,7 +124,7 @@ pub(crate) struct DesktopShortcut {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-#[cfg_attr(target_os = "macos", allow(dead_code))]
+#[cfg_attr(any(target_os = "macos", target_os = "windows"), allow(dead_code))]
 pub(crate) enum DesktopAction {
     ClearError,
     RestartIntoUpdate,

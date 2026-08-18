@@ -44,7 +44,7 @@ type PreparationResult = std::result::Result<PreparedTranscription, String>;
 
 struct PreparedTranscription {
     selection: crate::transcription_models::TranscriptionSelection,
-    transcriber: crate::linux_transcriber::LinuxTranscriber,
+    transcriber: crate::local_transcriber::LocalTranscriber,
 }
 
 struct TranscriptionPreparation {
@@ -95,7 +95,7 @@ struct LinuxDesktopHost {
     error: Option<String>,
     settings_error: Option<String>,
     settings: crate::linux_settings::LinuxSettings,
-    prepared_transcriber: Option<crate::linux_transcriber::LinuxTranscriber>,
+    prepared_transcriber: Option<crate::local_transcriber::LocalTranscriber>,
     transcription_preparation: Option<TranscriptionPreparation>,
     transcription_error: Option<String>,
     update: UpdateState,
@@ -739,7 +739,7 @@ impl LinuxDesktopHost {
                     return Err(color_eyre::eyre::eyre!("model activation canceled"));
                 }
                 crate::transcription_models::ModelPreparationStage::Loading.store(&worker_stage);
-                let transcriber = crate::linux_transcriber::LinuxTranscriber::load(&selection)?;
+                let transcriber = crate::local_transcriber::LocalTranscriber::load(&selection)?;
                 if worker_canceled.load(Ordering::Relaxed) {
                     return Err(color_eyre::eyre::eyre!("model activation canceled"));
                 }
