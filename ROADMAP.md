@@ -78,12 +78,14 @@ Launch at login on Windows 10 and 11. Add bounded automatic stream recovery and
 the mutually exclusive release-microphone-while-idle policy without moving
 capture or paste work onto the UI thread.
 
-Continue toward macOS product parity in complete vertical slices. Extend the
-existing Windows Modes pane from shared text replacements to corrections,
-OpenCode rewriting, mode activation, and TypeScript transformations. Then add a
-Windows foreground/selected-text adapter using UI Automation, Voice Action, and
-the persisted opt-in command engine. Follow with packaged onboarding, a signed
-installer/update contract, the authenticated local transcription host, and
+Continue toward macOS product parity in complete vertical slices. Modes with
+per-application and web-domain corrections, Voice Action with in-app OpenCode
+model selection, the UI Automation browser-context adapter, the signed
+installer/update contract, and shared interface translations now ship; the
+Linux shell renders the same shared settings surface and model catalog.
+Remaining slices are in-app onboarding, OpenCode mode rewriting with
+TypeScript transformations, the persisted opt-in command engine (waiting on a
+Windows streaming model), the authenticated local transcription host, and
 developer-only Meetings. The detailed live matrix is in
 [`docs/windows.md`](docs/windows.md).
 
