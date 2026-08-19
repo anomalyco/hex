@@ -38,12 +38,12 @@ pub(crate) use desktop::i18n as desktop_i18n;
 pub(crate) use desktop::model_catalog as desktop_model_catalog;
 #[cfg(any(target_os = "linux", target_os = "windows"))]
 pub(crate) use desktop::onboarding as desktop_onboarding;
-#[cfg(any(target_os = "macos", target_os = "windows"))]
-pub(crate) use desktop::text_input;
 pub(crate) use desktop::{
     activity as desktop_activity, host as desktop_host, shell as desktop_shell,
     transcription_picker as desktop_transcription_picker, ui as desktop_ui,
 };
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+pub(crate) use desktop::{history_pane as desktop_history_pane, text_input};
 #[cfg(target_os = "linux")]
 pub(crate) use platform::linux::{
     app as linux_app, command_executor as linux_command_executor, dictation as linux_dictation,

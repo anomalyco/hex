@@ -26,6 +26,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 };
 
 use crate::desktop_activity::DesktopActivity;
+use crate::desktop_history_pane::HistoryPaneState;
 use crate::desktop_host::{
     DesktopAction, DesktopCapabilities, DesktopHost, DesktopListenerSnapshot,
     DesktopMicrophoneSnapshot, DesktopShortcut, DesktopSnapshot, DesktopTranscriptionSnapshot,
@@ -42,7 +43,7 @@ use crate::desktop_ui::{
     settings_section_label, sidebar_frame, toggle, window_frame,
 };
 use crate::events::EventReader;
-use crate::history::{History, HistoryEntry, HistoryRetention};
+use crate::history::{History, HistoryRetention};
 use crate::text_input::{Changed as TextChanged, TextInput};
 use crate::windows_i18n::{tr, tr_fill};
 use crate::windows_settings::IndicatorPosition;
@@ -90,7 +91,6 @@ struct WindowsDesktopHost {
     launch_at_login: bool,
     login_item_error: Option<String>,
     history: Option<History>,
-    history_error: Option<String>,
     last_dictation: Arc<Mutex<Option<String>>>,
     indicator: crate::windows_indicator::WindowsIndicatorSender,
     replacements: Arc<RwLock<crate::text_replacements::ReplacementSet>>,
@@ -110,10 +110,7 @@ struct WindowsApp {
     host: WindowsDesktopHost,
     pane: DesktopPane,
     hud_lab: crate::desktop_hud_lab::HudLabState,
-    history_entries: Vec<HistoryEntry>,
-    selected_history: Option<u64>,
-    history_copied: Option<u64>,
-    history_clear_armed: bool,
+    history_pane: HistoryPaneState,
     replacement_inputs: Vec<ReplacementInputs>,
     transcription_picker: TranscriptionPickerState,
     mode_inputs: Vec<ModeInputs>,
@@ -121,7 +118,6 @@ struct WindowsApp {
     voice_model_dropdown_bounds: Option<Bounds<Pixels>>,
     recognition_hints_input: Entity<TextInput>,
     _recognition_hints_subscription: Subscription,
-    history_search: String,
     history_search_input: Entity<TextInput>,
     _history_search_subscription: Subscription,
     restart_scheduled: bool,
@@ -235,17 +231,14 @@ pub fn open(event_path: PathBuf, shutdown: &'static AtomicBool, start_hidden: bo
                 },
                 |_, cx| {
                     cx.new(|cx| {
-                        let host = WindowsDesktopHost::new(
+                        let (host, history_error) = WindowsDesktopHost::new(
                             event_path.clone(),
                             settings.clone(),
                             settings_error.clone(),
                             indicator_sender.clone(),
                         );
-                        let history_entries = host
-                            .history
-                            .as_ref()
-                            .map_or_else(Vec::new, |history| history.search(""));
-                        let selected_history = history_entries.first().map(|entry| entry.id);
+                        let history_pane =
+                            HistoryPaneState::new(host.history.clone(), history_error);
                         let replacement_inputs = host
                             .settings
                             .text_replacements
@@ -279,8 +272,8 @@ pub fn open(event_path: PathBuf, shutdown: &'static AtomicBool, start_hidden: bo
                         let history_search_subscription = cx.subscribe(
                             &history_search_input,
                             |this: &mut WindowsApp, input, _: &TextChanged, cx| {
-                                this.history_search = input.read(cx).text().to_string();
-                                this.reload_history();
+                                this.history_pane
+                                    .set_query(input.read(cx).text().to_string());
                                 cx.notify();
                             },
                         );
@@ -289,9 +282,9 @@ pub fn open(event_path: PathBuf, shutdown: &'static AtomicBool, start_hidden: bo
                             host,
                             pane: DesktopPane::Settings,
                             hud_lab: crate::desktop_hud_lab::HudLabState::new(),
+                            history_pane,
                             recognition_hints_input,
                             _recognition_hints_subscription: recognition_hints_subscription,
-                            history_search: String::new(),
                             history_search_input,
                             _history_search_subscription: history_search_subscription,
                             restart_scheduled: false,
@@ -299,10 +292,6 @@ pub fn open(event_path: PathBuf, shutdown: &'static AtomicBool, start_hidden: bo
                             onboarding_selection,
                             onboarding_language_dropdown_open: false,
                             onboarding_language_dropdown_bounds: None,
-                            history_entries,
-                            selected_history,
-                            history_copied: None,
-                            history_clear_armed: false,
                             replacement_inputs,
                             transcription_picker: TranscriptionPickerState::Closed,
                             mode_inputs,
@@ -655,7 +644,7 @@ impl WindowsDesktopHost {
         settings: crate::windows_settings::WindowsSettings,
         settings_error: Option<String>,
         indicator: crate::windows_indicator::WindowsIndicatorSender,
-    ) -> Self {
+    ) -> (Self, Option<String>) {
         crate::windows_i18n::apply(settings.ui_language.as_deref());
         let mut event_reader = EventReader::open(&event_path);
         let mut activity = DesktopActivity::default();
@@ -706,7 +695,6 @@ impl WindowsDesktopHost {
             launch_at_login,
             login_item_error,
             history,
-            history_error,
             last_dictation: Arc::new(Mutex::new(None)),
             indicator,
             replacements,
@@ -729,7 +717,7 @@ impl WindowsDesktopHost {
         {
             host.request_opencode_catalog();
         }
-        host
+        (host, history_error)
     }
 
     fn model_ready(&self) -> bool {
@@ -946,14 +934,6 @@ impl WindowsDesktopHost {
         })?;
         self.settings = candidate;
         self.settings_error = None;
-        if let Some(history) = &self.history {
-            history.set_retention(retention).map_err(|error| {
-                let error = format!("Could not apply history retention: {error}");
-                self.history_error = Some(error.clone());
-                eyre!(error)
-            })?;
-        }
-        self.history_error = None;
         Ok(())
     }
 
@@ -1850,31 +1830,13 @@ impl WindowsApp {
     }
 
     fn reload_history(&mut self) {
-        let Some(history) = &self.host.history else {
-            self.history_entries.clear();
-            self.selected_history = None;
-            return;
-        };
-        self.history_entries = history.search(&self.history_search);
-        if self
-            .selected_history
-            .is_some_and(|id| !self.history_entries.iter().any(|entry| entry.id == id))
-        {
-            self.selected_history = self.history_entries.first().map(|entry| entry.id);
-        } else if self.selected_history.is_none() {
-            self.selected_history = self.history_entries.first().map(|entry| entry.id);
-        }
-        if self
-            .history_copied
-            .is_some_and(|id| !self.history_entries.iter().any(|entry| entry.id == id))
-        {
-            self.history_copied = None;
-        }
+        self.history_pane.reload();
     }
 
     fn set_history_retention(&mut self, retention: HistoryRetention) {
-        if self.host.set_history_retention(retention).is_ok() {
-            self.reload_history();
+        match self.host.set_history_retention(retention) {
+            Ok(()) => self.history_pane.set_retention(retention),
+            Err(error) => self.history_pane.set_error(Some(error.to_string())),
         }
     }
 
@@ -2069,10 +2031,7 @@ impl WindowsApp {
     /// Keep one selectable read-only text entity in sync with the selected
     /// history entry so text selection survives the periodic history reloads.
     fn sync_history_detail_text(&mut self, cx: &mut Context<Self>) {
-        let entry = self
-            .selected_history
-            .and_then(|id| self.history_entries.iter().find(|entry| entry.id == id));
-        let Some(entry) = entry else {
+        let Some(entry) = self.history_pane.selected_entry() else {
             self.history_detail_text = None;
             return;
         };
@@ -2090,43 +2049,15 @@ impl WindowsApp {
     }
 
     fn copy_history_entry(&mut self, id: u64) {
-        let Some(entry) = self.history_entries.iter().find(|entry| entry.id == id) else {
-            return;
-        };
-        match arboard::Clipboard::new()
-            .and_then(|mut clipboard| clipboard.set_text(entry.final_text.clone()))
-        {
-            Ok(()) => {
-                self.history_copied = Some(id);
-                self.host.history_error = None;
-            }
-            Err(error) => self.host.history_error = Some(error.to_string()),
-        }
+        self.history_pane.copy(id);
     }
 
     fn delete_history_entry(&mut self, id: u64) {
-        if let Some(history) = &self.host.history {
-            match history.delete(id) {
-                Ok(_) => self.host.history_error = None,
-                Err(error) => self.host.history_error = Some(error.to_string()),
-            }
-            self.reload_history();
-        }
+        self.history_pane.delete(id);
     }
 
     fn clear_history(&mut self) {
-        if !self.history_clear_armed {
-            self.history_clear_armed = true;
-            return;
-        }
-        self.history_clear_armed = false;
-        if let Some(history) = &self.host.history {
-            match history.clear() {
-                Ok(()) => self.host.history_error = None,
-                Err(error) => self.host.history_error = Some(error.to_string()),
-            }
-            self.reload_history();
-        }
+        self.history_pane.clear();
     }
 
     fn listener_action(
@@ -2173,14 +2104,12 @@ impl WindowsApp {
         debug_assert!(DesktopPane::available(self.host.capabilities()).contains(&pane));
         self.close_popups();
         self.pane = pane;
+        self.history_pane.disarm_clear();
         match pane {
             DesktopPane::VoiceAction if crate::windows_voice_action::opencode_installed() => {
                 self.host.request_opencode_catalog();
             }
-            DesktopPane::History => {
-                self.history_clear_armed = false;
-                self.reload_history();
-            }
+            DesktopPane::History => self.reload_history(),
             DesktopPane::Settings
             | DesktopPane::Modes
             | DesktopPane::Commands
@@ -3456,13 +3385,13 @@ impl WindowsApp {
                 cx.notify();
             }))
             .into_any_element();
-        let clear = header_button(if self.history_clear_armed {
+        let clear = header_button(if self.history_pane.clear_armed() {
             tr("Really clear all?")
         } else {
             tr("Clear all")
         })
         .id("windows-history-clear")
-        .when(self.history_clear_armed, |button| {
+        .when(self.history_pane.clear_armed(), |button| {
             button.text_color(rgb(CRITICAL))
         })
         .on_click(cx.listener(|this, _, _, cx| {
@@ -3479,12 +3408,13 @@ impl WindowsApp {
             .child(clear)
             .into_any_element();
         let rows: Vec<AnyElement> = self
-            .history_entries
+            .history_pane
+            .entries()
             .iter()
             .enumerate()
             .map(|(index, entry)| {
                 let id = entry.id;
-                let selected = self.selected_history == Some(id);
+                let selected = self.history_pane.selected_id() == Some(id);
                 let age = event_age(entry.timestamp_ms);
                 let preview = entry.final_text.replace('\n', " ");
                 let meta = entry
@@ -3530,8 +3460,7 @@ impl WindowsApp {
                             .child(age),
                     )
                     .on_click(cx.listener(move |this, _, _, cx| {
-                        this.selected_history = Some(id);
-                        this.history_clear_armed = false;
+                        this.history_pane.select(id);
                         cx.notify();
                     }))
                     .into_any_element()
@@ -3562,13 +3491,19 @@ impl WindowsApp {
                                 })
                                 .when(
                                     !retention_off
-                                        && self.history_entries.is_empty()
-                                        && self.host.history_error.is_none(),
+                                        && self.history_pane.entries().is_empty()
+                                        && self.history_pane.error().is_none(),
                                     |list| list.child(empty_message("No dictations retained yet.")),
                                 )
-                                .when_some(self.host.history_error.clone(), |list, error| {
-                                    list.child(error_message("History could not be loaded.", error))
-                                })
+                                .when_some(
+                                    self.history_pane.error().map(str::to_string),
+                                    |list, error| {
+                                        list.child(error_message(
+                                            "History could not be loaded.",
+                                            error,
+                                        ))
+                                    },
+                                )
                                 .child(
                                     div()
                                         .w(px(PANE_LIST_WIDTH - 2.0))
@@ -3594,14 +3529,11 @@ impl WindowsApp {
     }
 
     fn render_history_detail(&self, cx: &mut Context<Self>) -> AnyElement {
-        let Some(entry) = self
-            .selected_history
-            .and_then(|id| self.history_entries.iter().find(|entry| entry.id == id))
-        else {
+        let Some(entry) = self.history_pane.selected_entry() else {
             return detail_placeholder("Select a history entry.");
         };
         let id = entry.id;
-        let copied = self.history_copied == Some(id);
+        let copied = self.history_pane.copied_id() == Some(id);
         let show_raw = entry.raw_text.trim() != entry.final_text.trim();
         let action_button = |label: &'static str, id: &'static str| header_button(label).id(id);
         let mut caption = event_age(entry.timestamp_ms);

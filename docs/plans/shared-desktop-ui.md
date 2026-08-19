@@ -1,28 +1,28 @@
-# Share The Desktop UI Across macOS And Linux
+# Share The Desktop UI Across macOS, Linux, And Windows
 
 **Status:** In progress. The shared visual vocabulary and transcription picker
-are implemented. macOS and Linux both render with GPUI, but they still use
+are implemented. All three desktop targets render with GPUI, but they still use
 separate root entities. This plan converges them on one product shell while
-keeping platform behavior in the existing macOS and X11 hosts.
+keeping platform behavior in the existing macOS, X11, and Win32 hosts.
 
 ## One Product Shell Should Represent The Same Product Concepts
 
-macOS renders the full `AppWindow` from `src/app_window.rs`. Linux renders a
-second, smaller `LinuxApp` tree from `src/linux_app.rs`. The duplicate tree makes
-shared concepts such as listener state, shortcuts, settings, updates, and
-activity look and behave differently even though both applications use GPUI.
+macOS renders the full `AppWindow`; Linux and Windows each render another root
+tree. Those duplicate trees make shared concepts such as listener state,
+shortcuts, settings, updates, and activity look and behave differently even
+though all three applications use GPUI.
 
 The target is one shared `AppWindow` for navigation, layout, controls, and
-presentation. The macOS and Linux hosts continue to own behavior that actually
-varies by platform.
+presentation. The macOS, Linux, and Windows hosts continue to own behavior that
+actually varies by platform.
 
 ```text
 macOS lifecycle ----\
-                     +-- shared GPUI AppWindow -- desktop actions
-Linux lifecycle ----/                              |
-                              +--------------------+--------------------+
-                              |                                         |
-                        macOS adapter                              Linux adapter
+Linux lifecycle -----+-- shared GPUI AppWindow -- desktop actions
+Windows lifecycle --/                              |
+                           +-----------------------+-----------------------+
+                           |                       |                       |
+                     macOS adapter            Linux adapter         Windows adapter
 ```
 
 The shared UI must depend on product capabilities such as `meetings` or
@@ -58,8 +58,10 @@ The outer application hosts remain separate:
   coordinator.
 - The Linux host owns the GTK tray, X11 map and unmap behavior, close-to-tray,
   X11 shortcut registration, listener lifecycle, and signed direct updates.
+- The Windows host owns the Win32 tray and caption lifecycle, global shortcut
+  hook, listener process, startup registration, and signed update restart.
 
-Both hosts open the shared `AppWindow`. The Linux host stops implementing its
+All three hosts open the shared `AppWindow`. The Linux host stops implementing its
 own `Render` tree.
 
 Use one real seam between the shared window and the two existing hosts. The
@@ -95,6 +97,7 @@ The initial set should cover only behavior that currently varies:
 struct DesktopCapabilities {
     activity: bool,
     commands: bool,
+    history: bool,
     hud_lab: bool,
     meetings: bool,
     modes: bool,
@@ -187,12 +190,16 @@ stable pane identity, order, label, icon, and capability filter consumed by all
 three roots, plus the one renderer for navigation rows and selection callbacks.
 The current roots retain only their native frame/footer and pane-selection side
 effects. Linux no longer advertises a Commands catalog pane merely because its
-developer-only runtime toggle exists. Periodic refresh and the remaining render
-state still need to move into one root entity.
+developer-only runtime toggle exists. `src/desktop/history_pane.rs` now owns the
+History store handle, bounded search snapshot, selection reconciliation,
+copy/delete behavior, and confirmed-clear transition for macOS and Windows.
+Their platform-styled History render trees remain separate, so the pane is not
+yet a complete shared renderer. Periodic refresh and the remaining render state
+still need to move into one root entity.
 
 - Move `AppWindow` and its portable dependencies out of macOS-only module gates.
 - Have the macOS lifecycle coordinator and Linux tray host construct their
-  adapters and open the same GPUI entity.
+  adapters alongside the Windows lifecycle host and open the same GPUI entity.
 - Keep native menus, Dock and tray behavior outside the shared window.
 
 ### 5. Delete The Duplicate Linux Render Tree
@@ -224,10 +231,10 @@ Linux Settings composition disappears when the shared root extraction lands.
 
 ## Completion Criteria
 
-- macOS and Linux open the same production `AppWindow` GPUI entity.
+- macOS, Linux, and Windows open the same production `AppWindow` GPUI entity.
 - The repository has one production `Render` implementation for the main
   desktop window.
-- Settings and Activity use the same layout and controls on both platforms.
+- Settings and Activity use the same layout and controls on all supporting platforms.
 - Platform-only panes and rows derive from semantic capabilities.
 - Linux retains working tray, close-to-tray, shortcut registration, listener,
   automatic paste, updates, and XDG persistence.
@@ -238,8 +245,8 @@ Linux Settings composition disappears when the shared root extraction lands.
 
 ## Rejected Directions
 
-- Do not maintain separate macOS and Linux render trees with shared colors.
+- Do not maintain separate platform render trees with shared colors.
 - Do not scatter `#[cfg(target_os = ...)]` through shared rendering.
 - Do not let platform adapters return arbitrary GPUI elements.
 - Do not create no-op adapters for unsupported features.
-- Do not generalize beyond the implemented macOS and X11 hosts.
+- Do not generalize beyond the implemented macOS, X11, and Win32 hosts.

@@ -23,6 +23,7 @@ use crate::app_settings::{
 use crate::application_catalog::InstalledApplication;
 use crate::commands::{CommandConfig, CommandInfo, CommandScope};
 use crate::desktop_activity::DesktopActivity;
+use crate::desktop_history_pane::HistoryPaneState;
 use crate::desktop_host::{
     DesktopAction, DesktopCapabilities, DesktopHost, DesktopMicrophoneSnapshot, DesktopSnapshot,
     DesktopTranscriptionSnapshot, DesktopUpdateStatus,
@@ -49,7 +50,7 @@ use crate::dictation_processor::{ModelCatalog, ModelChoice};
 use crate::events::{
     CommandOutcome, DictationPhase, EventReader, TranscriptPhase, VoiceEvent, VoiceState, now_ms,
 };
-use crate::history::{History, HistoryEntry, HistoryKind, HistoryRetention};
+use crate::history::{History, HistoryKind, HistoryRetention};
 use crate::login_item::LoginItemStatus;
 use crate::meeting::{self, MeetingManifest, MeetingRequest, MeetingStatus};
 use crate::onboarding::{
@@ -115,7 +116,7 @@ pub fn open_or_focus(
                 this.meeting_requests = meeting_requests.clone();
                 this.indicator = indicator.clone();
                 this.recognition_start = recognition_start.clone();
-                this.history = history.clone();
+                this.history_pane.replace_history(history.clone(), None);
                 this.refresh(cx);
                 window.activate_window();
             })
@@ -745,13 +746,8 @@ pub struct AppWindow {
     current_context: (Option<String>, Option<String>),
     events_error: Option<String>,
     selected_event: Option<usize>,
-    history: Option<History>,
     history_search: ProcessingInput,
-    history_entries: Vec<HistoryEntry>,
-    selected_history: Option<u64>,
-    history_error: Option<String>,
-    history_clear_armed: bool,
-    history_copied: Option<u64>,
+    history_pane: HistoryPaneState,
 }
 
 impl AppWindow {
@@ -780,7 +776,7 @@ impl AppWindow {
                         let login_item_changed = window.poll_login_item();
                         let personal_commands_changed = window.poll_personal_commands();
                         let personal_workspace_changed = window.poll_personal_workspace();
-                        let history_changed = window.poll_history(cx);
+                        let history_changed = window.poll_history();
                         let update_status = crate::sparkle::status();
                         let update_status_changed = window.update_status != update_status;
                         if update_status_changed {
@@ -1024,6 +1020,7 @@ impl AppWindow {
         } else {
             history
         };
+        let history_pane = HistoryPaneState::new(history, None);
         let history_search = Self::history_search_input(cx);
         let command_search = Self::command_search_input(cx);
         let mut window = Self {
@@ -1182,13 +1179,8 @@ impl AppWindow {
             current_context: (None, None),
             events_error: None,
             selected_event: None,
-            history,
             history_search,
-            history_entries: Vec::new(),
-            selected_history: None,
-            history_error: None,
-            history_clear_armed: false,
-            history_copied: None,
+            history_pane,
         };
         if !window.preview {
             if crate::DEVELOPER_FEATURES_ENABLED {
@@ -1199,10 +1191,7 @@ impl AppWindow {
             }
             window.reload_events();
         }
-        window.reload_history(cx);
-        if window.preview {
-            window.selected_history = window.history_entries.first().map(|entry| entry.id);
-        }
+        window.reload_history();
         if window.pane == DesktopPane::Modes {
             window.ensure_application_catalog_load();
         }
@@ -1221,7 +1210,7 @@ impl AppWindow {
             }
             self.reload_events();
         }
-        self.reload_history(cx);
+        self.reload_history();
         if self.pane == DesktopPane::Modes {
             self.ensure_application_catalog_load();
         }
@@ -1233,11 +1222,12 @@ impl AppWindow {
     fn select_pane(&mut self, pane: DesktopPane, cx: &mut Context<Self>) {
         self.pane = pane;
         self.mode_context_menu = None;
+        self.history_pane.disarm_clear();
         match pane {
             DesktopPane::HudLab => self.apply_hud_lab(),
             DesktopPane::Meetings => self.reload_meetings(),
             DesktopPane::Commands | DesktopPane::Activity => self.reload_events(),
-            DesktopPane::History => self.reload_history(cx),
+            DesktopPane::History => self.reload_history(),
             DesktopPane::Modes => self.ensure_application_catalog_load(),
             DesktopPane::VoiceAction => {}
             DesktopPane::Settings => self.permission_refresh_at = Instant::now(),
@@ -1789,8 +1779,9 @@ impl AppWindow {
 
     fn history_search_input(cx: &mut Context<Self>) -> ProcessingInput {
         let entity = cx.new(|cx| TextInput::picker(cx, "Search history", ""));
-        let changed = cx.subscribe(&entity, |this, _, _: &TextChanged, cx| {
-            this.reload_history(cx);
+        let changed = cx.subscribe(&entity, |this, input, _: &TextChanged, cx| {
+            this.history_pane
+                .set_query(input.read(cx).text().to_string());
             cx.notify();
         });
         ProcessingInput {
@@ -1800,31 +1791,17 @@ impl AppWindow {
     }
 
     /// Refresh the bounded history snapshot for the current search query.
-    fn reload_history(&mut self, cx: &App) {
-        let Some(history) = &self.history else {
-            self.history_entries.clear();
-            self.selected_history = None;
-            return;
-        };
-        let query = self.history_search.entity.read(cx).text().to_string();
-        self.history_entries = history.search(&query);
-        if self
-            .selected_history
-            .is_some_and(|id| !self.history_entries.iter().any(|entry| entry.id == id))
-        {
-            self.selected_history = None;
-        }
+    fn reload_history(&mut self) {
+        self.history_pane.reload();
     }
 
     /// Refresh the visible history while the pane is open so entries recorded
     /// by the recognition side appear without reopening the pane.
-    fn poll_history(&mut self, cx: &App) -> bool {
-        if self.preview || self.pane != DesktopPane::History || self.history.is_none() {
+    fn poll_history(&mut self) -> bool {
+        if self.preview || self.pane != DesktopPane::History {
             return false;
         }
-        let previous = std::mem::take(&mut self.history_entries);
-        self.reload_history(cx);
-        self.history_entries != previous
+        self.history_pane.reload()
     }
 
     fn set_history_retention(&mut self, retention: HistoryRetention, cx: &mut Context<Self>) {
@@ -1832,55 +1809,23 @@ impl AppWindow {
             return;
         }
         self.settings.history_retention = retention;
-        if let Some(history) = &self.history
-            && let Err(error) = history.set_retention(retention)
-        {
-            self.history_error = Some(error.to_string());
-        }
+        self.history_pane.set_retention(retention);
         self.save_settings(cx);
-        self.reload_history(cx);
         cx.notify();
     }
 
     fn copy_history_entry(&mut self, id: u64, cx: &mut Context<Self>) {
-        let Some(entry) = self.history_entries.iter().find(|entry| entry.id == id) else {
-            return;
-        };
-        match arboard::Clipboard::new()
-            .and_then(|mut clipboard| clipboard.set_text(entry.final_text.clone()))
-        {
-            Ok(()) => {
-                self.history_copied = Some(id);
-                self.history_error = None;
-            }
-            Err(error) => self.history_error = Some(error.to_string()),
-        }
+        self.history_pane.copy(id);
         cx.notify();
     }
 
     fn delete_history_entry(&mut self, id: u64, cx: &mut Context<Self>) {
-        if let Some(history) = &self.history {
-            if let Err(error) = history.delete(id) {
-                self.history_error = Some(error.to_string());
-            }
-            self.reload_history(cx);
-        }
+        self.history_pane.delete(id);
         cx.notify();
     }
 
     fn clear_history(&mut self, cx: &mut Context<Self>) {
-        if !self.history_clear_armed {
-            self.history_clear_armed = true;
-            cx.notify();
-            return;
-        }
-        self.history_clear_armed = false;
-        if let Some(history) = &self.history {
-            if let Err(error) = history.clear() {
-                self.history_error = Some(error.to_string());
-            }
-            self.reload_history(cx);
-        }
+        self.history_pane.clear();
         cx.notify();
     }
 
@@ -1899,13 +1844,13 @@ impl AppWindow {
                 this.set_history_retention(next, cx);
             }))
             .into_any_element();
-        let clear = header_button(if self.history_clear_armed {
+        let clear = header_button(if self.history_pane.clear_armed() {
             "Really clear all?"
         } else {
             "Clear all"
         })
         .id("history-clear")
-        .when(self.history_clear_armed, |button| {
+        .when(self.history_pane.clear_armed(), |button| {
             button.text_color(rgb(0xff8a80))
         })
         .on_click(cx.listener(|this, _, _, cx| this.clear_history(cx)))
@@ -1919,12 +1864,13 @@ impl AppWindow {
             .child(clear)
             .into_any_element();
         let rows: Vec<AnyElement> = self
-            .history_entries
+            .history_pane
+            .entries()
             .iter()
             .enumerate()
             .map(|(index, entry)| {
                 let id = entry.id;
-                let selected = self.selected_history == Some(id);
+                let selected = self.history_pane.selected_id() == Some(id);
                 let age = event_age(entry.timestamp_ms);
                 let preview = entry.final_text.replace('\n', " ");
                 let mut meta = entry.kind.label().to_string();
@@ -1971,8 +1917,7 @@ impl AppWindow {
                             .child(age),
                     )
                     .on_click(cx.listener(move |this, _, _, cx| {
-                        this.selected_history = Some(id);
-                        this.history_clear_armed = false;
+                        this.history_pane.select(id);
                         cx.notify();
                     }))
                     .into_any_element()
@@ -2003,13 +1948,19 @@ impl AppWindow {
                                 })
                                 .when(
                                     !retention_off
-                                        && self.history_entries.is_empty()
-                                        && self.history_error.is_none(),
+                                        && self.history_pane.entries().is_empty()
+                                        && self.history_pane.error().is_none(),
                                     |list| list.child(empty_message("No dictations retained yet.")),
                                 )
-                                .when_some(self.history_error.clone(), |list, error| {
-                                    list.child(error_message("History could not be loaded.", error))
-                                })
+                                .when_some(
+                                    self.history_pane.error().map(str::to_string),
+                                    |list, error| {
+                                        list.child(error_message(
+                                            "History could not be loaded.",
+                                            error,
+                                        ))
+                                    },
+                                )
                                 .child(
                                     div()
                                         .w(px(PANE_LIST_WIDTH - 2.0))
@@ -2033,14 +1984,11 @@ impl AppWindow {
     }
 
     fn render_history_detail(&self, cx: &mut Context<Self>) -> AnyElement {
-        let Some(entry) = self
-            .selected_history
-            .and_then(|id| self.history_entries.iter().find(|entry| entry.id == id))
-        else {
+        let Some(entry) = self.history_pane.selected_entry() else {
             return detail_placeholder("Select a history entry.");
         };
         let id = entry.id;
-        let copied = self.history_copied == Some(id);
+        let copied = self.history_pane.copied_id() == Some(id);
         let show_raw = entry.raw_text.trim() != entry.final_text.trim();
         let action_button = |label: &'static str, id_suffix: &'static str| {
             div()
