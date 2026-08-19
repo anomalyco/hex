@@ -20,6 +20,10 @@ pub struct LinuxSettings {
     pub microphone: Option<String>,
     /// The interface language; `None` follows the system locale.
     pub ui_language: Option<String>,
+    /// Opt-in streaming voice commands through the Moonshine runtime.
+    /// This persisted prototype is honored only by developer builds until
+    /// the Linux release bundles Moonshine and gains physical X11 validation.
+    pub commands_enabled: bool,
     pub transcription: crate::transcription_models::TranscriptionSelection,
 }
 
@@ -42,6 +46,7 @@ impl Default for LinuxSettings {
             double_tap_lock: true,
             microphone: None,
             ui_language: None,
+            commands_enabled: false,
             transcription: crate::transcription_models::TranscriptionSelection::default(),
         }
     }
@@ -214,5 +219,6 @@ mod tests {
             settings.transcription,
             crate::transcription_models::TranscriptionSelection::default()
         );
+        assert!(!settings.commands_enabled);
     }
 }

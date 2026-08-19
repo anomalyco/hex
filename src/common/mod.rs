@@ -16,7 +16,7 @@ pub mod dictation;
 pub mod events;
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 pub mod feedback;
-#[cfg_attr(target_os = "windows", allow(dead_code))]
+#[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
 pub mod history;
 pub mod instance;
 #[cfg(any(target_os = "linux", target_os = "windows"))]

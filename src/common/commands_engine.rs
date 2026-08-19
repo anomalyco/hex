@@ -3,6 +3,8 @@
 //! macOS engine; macOS keeps its original module until its shell port
 //! unifies on this one.
 
+#![cfg_attr(target_os = "linux", allow(dead_code))]
+
 use std::process::{Command as ProcessCommand, Stdio};
 use std::sync::mpsc::{self, Receiver, SyncSender, TrySendError};
 use std::thread;
@@ -178,6 +180,17 @@ pub struct ActionExecutor {
 #[cfg_attr(target_os = "windows", allow(dead_code))]
 impl ActionExecutor {
     pub fn start() -> Self {
+        Self::start_with(execute)
+    }
+
+    /// Start the bounded action worker with a platform executor. The
+    /// default worker calls [`execute`]; desktop adapters that own native
+    /// key synthesis can intercept those actions without moving them back
+    /// onto the audio-consumption loop.
+    pub fn start_with<F>(mut execute_action: F) -> Self
+    where
+        F: FnMut(Action) -> Result<()> + Send + 'static,
+    {
         let (requests, request_receiver) = mpsc::sync_channel::<ActionRequest>(1);
         let (outcome_sender, outcomes) = mpsc::channel();
         thread::spawn(move || {
@@ -187,7 +200,7 @@ impl ActionExecutor {
                         id: action.id,
                         heard: request.heard.clone(),
                         context: request.context.clone(),
-                        result: execute(action.action).map_err(|error| error.to_string()),
+                        result: execute_action(action.action).map_err(|error| error.to_string()),
                     };
                     if outcome_sender.send(outcome).is_err() {
                         return;
@@ -603,6 +616,7 @@ fn matches_phrase(heard: &str, phrases: &[String]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Duration;
 
     fn no_context() -> ContextSnapshot {
         ContextSnapshot::default()
@@ -629,6 +643,40 @@ mod tests {
                     modifiers: Modifiers::COMMAND,
                 }),
         )
+    }
+
+    #[test]
+    fn platform_executor_runs_actions_and_preserves_outcome_metadata() {
+        let (seen_sender, seen_receiver) = mpsc::channel();
+        let executor = ActionExecutor::start_with(move |action| {
+            let Action::TypeText(text) = action else {
+                panic!("unexpected action")
+            };
+            seen_sender.send(text).unwrap();
+            Ok(())
+        });
+
+        executor
+            .submit(
+                "type.reply",
+                Action::TypeText("hello".into()),
+                "type hello",
+                "terminal".into(),
+            )
+            .unwrap();
+
+        assert_eq!(
+            seen_receiver.recv_timeout(Duration::from_secs(1)).unwrap(),
+            "hello"
+        );
+        let outcome = executor
+            .outcomes
+            .recv_timeout(Duration::from_secs(1))
+            .unwrap();
+        assert_eq!(outcome.id, "type.reply");
+        assert_eq!(outcome.heard, "type hello");
+        assert_eq!(outcome.context, "terminal");
+        assert!(outcome.result.is_ok());
     }
 
     #[test]

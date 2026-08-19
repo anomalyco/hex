@@ -18,6 +18,7 @@ pub mod model_catalog;
 #[cfg(any(target_os = "linux", target_os = "windows"))]
 pub mod onboarding;
 pub mod transcription_picker;
+#[cfg_attr(target_os = "linux", allow(dead_code))]
 pub mod ui;
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]

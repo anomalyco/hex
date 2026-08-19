@@ -42,7 +42,7 @@ impl DesktopCapabilities {
     pub(crate) const fn linux_x11() -> Self {
         Self {
             activity: true,
-            commands: false,
+            commands: crate::DEVELOPER_FEATURES_ENABLED,
             history: false,
             hud_lab: crate::DEVELOPER_FEATURES_ENABLED,
             meetings: false,
@@ -124,7 +124,7 @@ pub(crate) struct DesktopShortcut {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-#[cfg_attr(any(target_os = "macos", target_os = "windows"), allow(dead_code))]
+#[allow(dead_code)]
 pub(crate) enum DesktopAction {
     ClearError,
     RestartIntoUpdate,
@@ -190,13 +190,13 @@ mod tests {
     #[test]
     fn linux_exposes_only_implemented_product_capabilities() {
         // Activity shipped on Linux in the 2026-08 port wave. HUD Lab is
-        // visible only in developer builds; commands remain unavailable
-        // until their runtime slice satisfies the Linux release contract.
+        // visible only in developer builds; the command prototype remains
+        // developer-only until its runtime satisfies the Linux release contract.
         assert_eq!(
             DesktopCapabilities::linux_x11(),
             DesktopCapabilities {
                 activity: true,
-                commands: false,
+                commands: crate::DEVELOPER_FEATURES_ENABLED,
                 history: false,
                 hud_lab: crate::DEVELOPER_FEATURES_ENABLED,
                 meetings: false,

@@ -7,6 +7,7 @@ pub mod apple_speech;
 #[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
 pub mod local_transcriber;
 #[cfg(any(target_os = "macos", target_os = "linux"))]
+#[cfg_attr(target_os = "linux", allow(dead_code))]
 pub mod moonshine;
 #[cfg(all(target_os = "macos", debug_assertions))]
 pub mod moonshine_lab;

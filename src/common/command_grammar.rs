@@ -3,6 +3,8 @@
 //! commands. Adapted from the macOS grammar; macOS keeps its original
 //! module until its shell port unifies on this one.
 
+#![cfg_attr(target_os = "linux", allow(dead_code))]
+
 use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
 

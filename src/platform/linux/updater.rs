@@ -8,7 +8,7 @@ use fs2::FileExt;
 use semver::Version;
 
 use crate::self_update::{
-    MAX_FEED_BYTES, Manifest, PUBLIC_KEY, RELEASE_BASE, UpdateTarget, download, read_bounded,
+    MAX_FEED_BYTES, PUBLIC_KEY, RELEASE_BASE, UpdateTarget, download, read_bounded,
     validate_manifest, verify_artifact, verify_feed,
 };
 

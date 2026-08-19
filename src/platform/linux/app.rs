@@ -105,12 +105,14 @@ struct LinuxDesktopHost {
 #[derive(Clone, Copy, Eq, PartialEq)]
 enum LinuxPane {
     Settings,
+    HudLab,
     Activity,
 }
 
 struct LinuxApp {
     host: LinuxDesktopHost,
     pane: LinuxPane,
+    hud_lab: crate::desktop_hud_lab::HudLabState,
     capturing_hotkey: bool,
     transcription_picker: TranscriptionPickerState,
     catalog_language_filter: Option<String>,
@@ -204,6 +206,7 @@ pub fn open(event_path: PathBuf, start_hidden: bool) -> Result<()> {
                             update,
                         ),
                         pane: LinuxPane::Settings,
+                        hud_lab: crate::desktop_hud_lab::HudLabState::new(),
                         onboarding,
                         // A fresh run offers the locale's recommendation,
                         // like the Windows first-run default.
@@ -774,6 +777,26 @@ impl LinuxDesktopHost {
         }
     }
 
+    /// Persist the opt-in voice-command flag; the listener reads it when
+    /// it starts.
+    fn set_commands_enabled(&mut self, enabled: bool) {
+        if enabled == self.settings.commands_enabled {
+            return;
+        }
+        let mut candidate = self.settings.clone();
+        candidate.commands_enabled = enabled;
+        match candidate.save() {
+            Ok(()) => {
+                self.settings = candidate;
+                self.settings_error = None;
+            }
+            Err(error) => {
+                self.settings_error =
+                    Some(format!("Could not save the commands setting: {error:#}"));
+            }
+        }
+    }
+
     /// Re-enumerate capture devices; the dropdown trigger calls this so
     /// hotplugged microphones and late audio-server startup are visible.
     fn refresh_microphones(&mut self) {
@@ -1244,6 +1267,7 @@ impl LinuxApp {
     fn render_shared_navigation(&self, cx: &mut Context<Self>) -> AnyElement {
         debug_assert!(self.host.capabilities().listener_control);
         let settings_selected = self.pane == LinuxPane::Settings;
+        let hud_lab_selected = self.pane == LinuxPane::HudLab;
         let activity_selected = self.pane == LinuxPane::Activity;
         sidebar_frame()
             .w(px(SIDEBAR_WIDTH))
@@ -1261,6 +1285,19 @@ impl LinuxApp {
                         cx.notify();
                     })),
             )
+            .when(crate::DEVELOPER_FEATURES_ENABLED, |sidebar| {
+                sidebar.child(
+                    // Between Settings and Activity, matching the macOS
+                    // sidebar's pane order.
+                    navigation_item(NavigationIcon::HudLab, hud_lab_selected)
+                        .id("linux-nav-hud-lab")
+                        .child(tr("HUD Lab"))
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.pane = LinuxPane::HudLab;
+                            cx.notify();
+                        })),
+                )
+            })
             .child(
                 navigation_item(NavigationIcon::Activity, activity_selected)
                     .id("linux-nav-activity")
@@ -1327,6 +1364,7 @@ impl LinuxApp {
             None => tr("System").to_string(),
             Some(code) => crate::desktop_i18n::choice_name(Some(code)).to_string(),
         };
+        let commands_enabled = self.host.settings.commands_enabled;
         // The catalog dialog shows this error itself while open; the panel
         // row covers dropdown-initiated failures only.
         let transcription_error = transcription
@@ -1637,32 +1675,58 @@ impl LinuxApp {
                                 )
                                 .child(settings_section_label("Behavior"))
                                 .child(
-                                    settings_panel().child(
-                                        settings_row(
-                                            "Double-tap to lock",
-                                            "Double-tap the shortcut for hands-free dictation",
-                                            toggle(if snapshot.double_tap_lock {
-                                                1.0
-                                            } else {
-                                                0.0
-                                            }),
+                                    settings_panel()
+                                        .child(
+                                            settings_row(
+                                                "Double-tap to lock",
+                                                "Double-tap the shortcut for hands-free dictation",
+                                                toggle(if snapshot.double_tap_lock {
+                                                    1.0
+                                                } else {
+                                                    0.0
+                                                }),
+                                            )
+                                            .id("double-tap-setting")
+                                            .when(!crate::DEVELOPER_FEATURES_ENABLED, |row| {
+                                                row.border_b_0()
+                                            })
+                                            .when(running, |row| row.opacity(0.5))
+                                            .on_click(
+                                                cx.listener(move |this, _, _, cx| {
+                                                    if !running {
+                                                        let enabled =
+                                                            !this.host.snapshot().double_tap_lock;
+                                                        let _ = this.host.dispatch(
+                                                            DesktopAction::SetDoubleTapLock(
+                                                                enabled,
+                                                            ),
+                                                        );
+                                                        cx.notify();
+                                                    }
+                                                }),
+                                            ),
                                         )
-                                        .border_b_0()
-                                        .id("double-tap-setting")
-                                        .when(running, |row| row.opacity(0.5))
-                                        .on_click(
-                                            cx.listener(move |this, _, _, cx| {
-                                                if !running {
-                                                    let enabled =
-                                                        !this.host.snapshot().double_tap_lock;
-                                                    let _ = this.host.dispatch(
-                                                        DesktopAction::SetDoubleTapLock(enabled),
-                                                    );
-                                                    cx.notify();
-                                                }
-                                            }),
-                                        ),
-                                    ),
+                                        .when(crate::DEVELOPER_FEATURES_ENABLED, |panel| {
+                                            panel.child(
+                                                settings_row(
+                                                    "Voice commands",
+                                                    "Opt-in wake-word commands through the local Moonshine model; applies when listening starts",
+                                                    toggle(if commands_enabled { 1.0 } else { 0.0 }),
+                                                )
+                                                .border_b_0()
+                                                .id("linux-commands-setting")
+                                                .on_click(cx.listener(
+                                                    move |this, _, _, cx| {
+                                                        let enabled = !this
+                                                            .host
+                                                            .settings
+                                                            .commands_enabled;
+                                                        this.host.set_commands_enabled(enabled);
+                                                        cx.notify();
+                                                    },
+                                                )),
+                                            )
+                                        }),
                                 )
                                 .child(settings_section_label("Application"))
                                 .child(
@@ -1828,6 +1892,22 @@ impl crate::desktop_onboarding::OnboardingDelegate for LinuxApp {
     }
 }
 
+impl crate::desktop_hud_lab::HudLabDelegate for LinuxApp {
+    fn hud_lab(&self) -> &crate::desktop_hud_lab::HudLabState {
+        &self.hud_lab
+    }
+
+    fn hud_lab_mut(&mut self) -> &mut crate::desktop_hud_lab::HudLabState {
+        &mut self.hud_lab
+    }
+
+    fn configure_platform_hud(&mut self, _tuning: crate::desktop_hud_lab::HudTuning) {
+        // Linux has no dictation HUD yet, so the lab only drives its
+        // embedded preview; deliver the tuning here once the Linux shell
+        // grows a HUD window.
+    }
+}
+
 impl crate::desktop_model_catalog::ModelCatalogDelegate for LinuxApp {
     fn catalog_language_filter(&self) -> Option<String> {
         self.catalog_language_filter.clone()
@@ -1904,6 +1984,7 @@ impl Render for LinuxApp {
         let snapshot = self.host.snapshot();
         let content = match self.pane {
             LinuxPane::Settings => self.render_shared_settings(&snapshot, cx),
+            LinuxPane::HudLab => crate::desktop_hud_lab::render_hud_lab_pane(self, window, cx),
             LinuxPane::Activity => crate::desktop_activity_pane::render_activity_pane(&snapshot),
         };
         let model_picker = if self.transcription_picker.language().is_some() {

@@ -8,8 +8,14 @@ use color_eyre::Result;
 use color_eyre::eyre::eyre;
 
 use crate::audio::{AudioInput, AudioInputEvent, CaptureInstant};
+use crate::command_context::ContextSnapshot;
+use crate::commands_engine::{
+    Action, ActionExecutor, Command, CommandConfig, ConfiguredCommand, Decision, Mode,
+};
 use crate::dictation::{DictationCapture, Finish};
-use crate::events::{DictationPhase, EventLog, TranscriptPhase, VoiceEvent, VoiceState, now_ms};
+use crate::events::{
+    CommandOutcome, DictationPhase, EventLog, TranscriptPhase, VoiceEvent, VoiceState, now_ms,
+};
 use crate::linux_input::{HotkeyEvent, X11HotkeyMonitor};
 use crate::linux_paste::X11Paster;
 use crate::local_transcriber::LocalTranscriber;
@@ -19,6 +25,357 @@ const UPDATE_INTERVAL: Duration = Duration::from_millis(20);
 struct Job {
     samples: Vec<f32>,
     audio_ms: u64,
+}
+
+/// The opt-in streaming command loop: Moonshine hears idle-time audio,
+/// the shared engine resolves wake, sleep, and command phrases, and the
+/// X11 executor performs keystrokes. Dictation-start commands hand
+/// control back to the listener's ordinary capture path.
+const COMMAND_AUDIO_SLICE_MS: usize = 100;
+const COMMAND_AUDIO_QUEUE_SLICES: usize = 10;
+
+struct CommandAudio {
+    generation: u64,
+    samples: Vec<f32>,
+    sample_rate: u32,
+}
+
+enum CommandRecognition {
+    Ready,
+    Failed(String),
+    Woke {
+        generation: u64,
+        heard: String,
+    },
+    Slept {
+        generation: u64,
+        heard: String,
+    },
+    StartDictation {
+        generation: u64,
+        heard: String,
+        id: String,
+    },
+    Execute {
+        generation: u64,
+        heard: String,
+        commands: Vec<(String, Action)>,
+    },
+}
+
+struct CommandRuntime {
+    audio: SyncSender<CommandAudio>,
+    recognition: mpsc::Receiver<CommandRecognition>,
+    executor: ActionExecutor,
+    generation: u64,
+    pressure_invalidated: bool,
+}
+
+impl CommandRuntime {
+    fn start() -> Result<Self> {
+        let x11 = crate::linux_command_executor::X11CommandExecutor::new()?;
+        let project_root = Path::new(env!("CARGO_MANIFEST_DIR")).to_path_buf();
+        let (audio, audio_receiver) = mpsc::sync_channel(COMMAND_AUDIO_QUEUE_SLICES);
+        let (recognition_sender, recognition) = mpsc::channel();
+        thread::Builder::new()
+            .name("linux-command-recognition".into())
+            .spawn(move || {
+                command_recognition_worker(project_root, audio_receiver, recognition_sender)
+            })?;
+        Ok(Self {
+            audio,
+            recognition,
+            executor: ActionExecutor::start_with(move |action| match action {
+                Action::Keystroke { key, modifiers } => x11.keystroke(key, modifiers),
+                Action::RepeatedKeystroke {
+                    key,
+                    modifiers,
+                    count,
+                } => x11.repeated_keystroke(key, modifiers, count),
+                other => crate::commands_engine::execute(other),
+            }),
+            generation: 0,
+            pressure_invalidated: false,
+        })
+    }
+
+    /// Drop any partial phrase; dictation audio must not leak into the
+    /// command stream.
+    fn reset(&mut self) {
+        self.generation = self.generation.wrapping_add(1);
+        self.pressure_invalidated = false;
+    }
+
+    /// Project at most one second of idle audio to the command worker.
+    /// Pressure invalidates that recognition generation without touching
+    /// authoritative dictation capture.
+    fn ingest(&mut self, samples: &[f32], sample_rate: u32, events: &mut EventLog) -> Result<bool> {
+        let mut start_dictation = self.drain(events)?;
+        let slice_samples = ((sample_rate as usize * COMMAND_AUDIO_SLICE_MS) / 1_000).max(1);
+        for slice in samples.chunks(slice_samples) {
+            let message = CommandAudio {
+                generation: self.generation,
+                samples: slice.to_vec(),
+                sample_rate,
+            };
+            match self.audio.try_send(message) {
+                Ok(()) => self.pressure_invalidated = false,
+                Err(TrySendError::Full(_)) => {
+                    if !self.pressure_invalidated {
+                        self.generation = self.generation.wrapping_add(1);
+                        self.pressure_invalidated = true;
+                        tracing::warn!(
+                            "command audio pressure invalidated the recognition generation"
+                        );
+                    }
+                    break;
+                }
+                Err(TrySendError::Disconnected(_)) => {
+                    return Err(eyre!("voice command recognizer is unavailable"));
+                }
+            }
+        }
+        start_dictation |= self.drain(events)?;
+        Ok(start_dictation)
+    }
+
+    fn drain(&self, events: &mut EventLog) -> Result<bool> {
+        let mut start_dictation = false;
+        while let Ok(update) = self.recognition.try_recv() {
+            match update {
+                CommandRecognition::Ready => {
+                    tracing::info!("Linux voice command model loaded");
+                }
+                CommandRecognition::Failed(error) => return Err(eyre!(error)),
+                CommandRecognition::Woke { generation, heard } if generation == self.generation => {
+                    log_command(events, &heard, None, CommandOutcome::Woke)?;
+                }
+                CommandRecognition::Slept { generation, heard }
+                    if generation == self.generation =>
+                {
+                    log_command(events, &heard, None, CommandOutcome::Slept)?;
+                }
+                CommandRecognition::StartDictation {
+                    generation,
+                    heard,
+                    id,
+                } if generation == self.generation => {
+                    log_command(events, &heard, Some(&id), CommandOutcome::Executed)?;
+                    start_dictation = true;
+                }
+                CommandRecognition::Execute {
+                    generation,
+                    heard,
+                    commands,
+                } if generation == self.generation => {
+                    let ids: Vec<String> = commands.iter().map(|(id, _)| id.clone()).collect();
+                    if let Err(error) =
+                        self.executor
+                            .submit_sequence(commands, &heard, String::new())
+                    {
+                        tracing::warn!(%error, "voice command queue rejected an action");
+                        for id in ids {
+                            log_command(
+                                events,
+                                &heard,
+                                Some(&id),
+                                CommandOutcome::Failed(error.into()),
+                            )?;
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        while let Some(outcome) = self.executor.try_recv() {
+            match outcome.result {
+                Ok(()) => log_command(
+                    events,
+                    &outcome.heard,
+                    Some(&outcome.id),
+                    CommandOutcome::Executed,
+                )?,
+                Err(error) => {
+                    tracing::warn!(%error, command = %outcome.id, "voice command failed");
+                    log_command(
+                        events,
+                        &outcome.heard,
+                        Some(&outcome.id),
+                        CommandOutcome::Failed(error),
+                    )?;
+                }
+            }
+        }
+        Ok(start_dictation)
+    }
+}
+
+fn command_recognition_worker(
+    project_root: std::path::PathBuf,
+    audio: mpsc::Receiver<CommandAudio>,
+    updates: mpsc::Sender<CommandRecognition>,
+) {
+    let mut moonshine = match crate::moonshine::Moonshine::load(&project_root) {
+        Ok(moonshine) => moonshine,
+        Err(error) => {
+            let _ = updates.send(CommandRecognition::Failed(format!("{error:#}")));
+            return;
+        }
+    };
+    if updates.send(CommandRecognition::Ready).is_err() {
+        return;
+    }
+    let config = command_config();
+    let mut mode = Mode::Sleeping;
+    let mut generation = None;
+    let mut last_completed_line = None;
+    while let Ok(chunk) = audio.recv() {
+        if generation != Some(chunk.generation) {
+            if let Err(error) = moonshine.reset_stream() {
+                let _ = updates.send(CommandRecognition::Failed(format!("{error:#}")));
+                return;
+            }
+            generation = Some(chunk.generation);
+            last_completed_line = None;
+        }
+        if let Err(error) = moonshine.add_audio(&chunk.samples, chunk.sample_rate) {
+            let _ = updates.send(CommandRecognition::Failed(format!("{error:#}")));
+            return;
+        }
+        let recognized = match moonshine.update() {
+            Ok(recognized) => recognized,
+            Err(error) => {
+                let _ = updates.send(CommandRecognition::Failed(format!("{error:#}")));
+                return;
+            }
+        };
+        for update in recognized {
+            if update.phase != TranscriptPhase::Completed
+                || last_completed_line.is_some_and(|line| update.line_id <= line)
+            {
+                continue;
+            }
+            last_completed_line = Some(update.line_id);
+            let heard = update.text.trim().to_string();
+            if heard.is_empty() {
+                continue;
+            }
+            let message = match config.resolve(mode, &heard, &ContextSnapshot::empty()) {
+                Decision::Ignore => continue,
+                Decision::Wake => {
+                    mode = Mode::Listening;
+                    CommandRecognition::Woke {
+                        generation: chunk.generation,
+                        heard,
+                    }
+                }
+                Decision::Sleep => {
+                    mode = Mode::Sleeping;
+                    CommandRecognition::Slept {
+                        generation: chunk.generation,
+                        heard,
+                    }
+                }
+                Decision::Execute {
+                    id,
+                    action: Action::StartDictation,
+                } => CommandRecognition::StartDictation {
+                    generation: chunk.generation,
+                    heard,
+                    id: id.to_string(),
+                },
+                Decision::Execute { id, action } => CommandRecognition::Execute {
+                    generation: chunk.generation,
+                    heard,
+                    commands: vec![(id.to_string(), action)],
+                },
+                Decision::ExecuteSequence { commands } => CommandRecognition::Execute {
+                    generation: chunk.generation,
+                    heard,
+                    commands: commands
+                        .into_iter()
+                        .map(|command| (command.id.to_string(), command.action))
+                        .collect(),
+                },
+            };
+            if updates.send(message).is_err() {
+                return;
+            }
+        }
+    }
+}
+
+fn log_command(
+    events: &mut EventLog,
+    heard: &str,
+    command: Option<&str>,
+    outcome: CommandOutcome,
+) -> Result<()> {
+    events.emit(&VoiceEvent::Command {
+        timestamp_ms: now_ms(),
+        heard: heard.into(),
+        command: command.map(str::to_string),
+        outcome,
+        context: String::new(),
+    })?;
+    Ok(())
+}
+
+/// The built-in Linux command set, mirroring the macOS taxonomy minus
+/// Meetings; TypeScript personal commands arrive with a later slice.
+fn command_config() -> CommandConfig {
+    use crate::commands_engine::Digit;
+    use crate::keys::{Key, Modifiers};
+
+    CommandConfig::new()
+        .wake_with(["voice control", "wake up", "start voice control"])
+        .sleep_with(["go to sleep", "stop voice control"])
+        .command(
+            Command::new("dictation.start", "Start dictation")
+                .phrases(["start dictation", "take dictation", "start typing"])
+                .protected()
+                .action(|()| Action::StartDictation),
+        )
+        .command(
+            Command::new("shortcut.command-number", "Use keyboard shortcut")
+                .spoken(("command", Digit))
+                .spoken(("key", "command", Digit))
+                .spoken(("terminal", Digit))
+                .spoken(("tab", Digit))
+                .action(|digit| Action::Keystroke {
+                    key: Key::Character(digit.as_char()),
+                    modifiers: Modifiers::COMMAND,
+                }),
+        )
+        .command(directional_command(
+            "edit.move",
+            "Move the cursor",
+            "go",
+            Modifiers::NONE,
+        ))
+        .command(directional_command(
+            "edit.select",
+            "Extend the selection",
+            "select",
+            Modifiers::SHIFT,
+        ))
+}
+
+fn directional_command(
+    id: &'static str,
+    description: &'static str,
+    verb: &'static str,
+    modifiers: crate::keys::Modifiers,
+) -> ConfiguredCommand {
+    use crate::commands_engine::{Count, Direction};
+
+    Command::new(id, description)
+        .spoken((verb, Direction, Count.optional()))
+        .action(move |(direction, count)| Action::RepeatedKeystroke {
+            key: direction.key(),
+            modifiers,
+            count: count.map_or(1, |count| count.get()),
+        })
 }
 
 struct JobResult {
@@ -69,6 +426,20 @@ fn run_with_settings(
     };
     let hotkey_label = settings.dictation_hotkey.label();
     let hotkey = X11HotkeyMonitor::start(settings.dictation_hotkey, settings.double_tap_lock)?;
+    let mut commands = if crate::DEVELOPER_FEATURES_ENABLED && settings.commands_enabled {
+        match CommandRuntime::start() {
+            Ok(runtime) => {
+                println!("Voice commands are loading; dictation is already ready.");
+                Some(runtime)
+            }
+            Err(error) => {
+                tracing::warn!(%error, "voice commands are unavailable");
+                None
+            }
+        }
+    } else {
+        None
+    };
     let (jobs, job_receiver) = mpsc::sync_channel::<Job>(2);
     let (result_sender, results) = mpsc::channel();
     let worker = thread::spawn(move || {
@@ -133,6 +504,9 @@ fn run_with_settings(
         while let Ok(action) = hotkey.events.try_recv() {
             match action {
                 HotkeyEvent::Start if !recording => {
+                    if let Some(runtime) = &mut commands {
+                        runtime.reset();
+                    }
                     capture.start(captured_through);
                     recording = true;
                     events.dictation(DictationPhase::Started, "")?;
@@ -212,6 +586,29 @@ fn run_with_settings(
             capture.become_intentional(captured_through);
         } else {
             capture.keep_warm(&chunk);
+            let mut disable_commands = false;
+            let mut start_dictation = false;
+            if let Some(runtime) = &mut commands {
+                match runtime.ingest(&chunk, input.sample_rate, &mut events) {
+                    Ok(requested) => start_dictation = requested,
+                    Err(error) => {
+                        tracing::warn!(%error, "voice commands stopped");
+                        disable_commands = true;
+                    }
+                }
+            }
+            if disable_commands {
+                commands = None;
+            }
+            if start_dictation {
+                if let Some(runtime) = &mut commands {
+                    runtime.reset();
+                }
+                capture.start_voice_at(captured_through);
+                recording = true;
+                events.dictation(DictationPhase::Started, "")?;
+                emit_state(&mut events, VoiceState::Dictating, &input.device_name)?;
+            }
         }
     }
 
