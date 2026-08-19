@@ -13,6 +13,21 @@ const DEFAULT_SHUTDOWN_TIMEOUT_MS = 5_500
 const MAX_HANDSHAKE_BYTES = 16 * 1024
 const MAX_STDERR_BYTES = 16 * 1024
 
+export const defaultDiscoveryPath = (
+  platform: NodeJS.Platform = process.platform,
+  environment: NodeJS.ProcessEnv = process.env,
+  home: string = homedir(),
+): string => {
+  const override = environment.HEX_APPLICATION_SUPPORT_DIR
+  if (override !== undefined) return join(override, "local-api.json")
+  const support = platform === "win32"
+    ? join(environment.APPDATA ?? join(home, "AppData", "Roaming"), "voice-control")
+    : platform === "darwin"
+      ? join(home, "Library", "Application Support", "voice-control")
+      : join(environment.XDG_DATA_HOME ?? join(home, ".local", "share"), "voice-control")
+  return join(support, "local-api.json")
+}
+
 const waitForExit = async (child: ChildProcessWithoutNullStreams, timeoutMs: number): Promise<boolean> => {
   if (child.exitCode !== null || child.signalCode !== null) return true
   return new Promise((resolve) => {
@@ -151,8 +166,7 @@ export const create = async (options: CreateOptions = {}): Promise<HexHost> => {
 }
 
 export const connect = async (options: ConnectOptions = {}): Promise<HexClient> => {
-  const discoveryPath = options.discoveryPath
-    ?? join(process.env.HEX_APPLICATION_SUPPORT_DIR ?? join(homedir(), "Library", "Application Support", "voice-control"), "local-api.json")
+  const discoveryPath = options.discoveryPath ?? defaultDiscoveryPath()
   let value: unknown
   try {
     value = JSON.parse(await readFile(discoveryPath, "utf8"))

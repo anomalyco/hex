@@ -21,5 +21,5 @@ pub mod transcription;
 pub mod transcription_benchmark;
 #[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
 pub mod transcription_models;
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
 pub mod transcription_service;

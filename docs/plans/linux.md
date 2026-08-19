@@ -15,6 +15,7 @@ HEX currently supports one Linux beta contract:
 | Desktop | i3 on X11 |
 | Audio | CPAL through ALSA, typically backed by PipeWire |
 | Inference | Vulkan with CPU fallback |
+| Local API | Authenticated loopback service with owner-only XDG discovery or SDK-owned direct-child handoff |
 | Shortcut | Configurable key-containing chord; default `Alt+Space` |
 | Insertion | X11 clipboard and synthetic paste |
 | UI | GPUI settings shell and tray |
@@ -30,6 +31,8 @@ contract. XWayland is not native Wayland support.
 - Global hold/release dictation, Escape cancellation, and double-tap lock.
 - Configurable persisted shortcut binding.
 - Local model installation and transcription.
+- Shared local transcription service with bounded WAV admission, explicit model
+  preparation, owner-only discovery, and stdin-owned embedded lifecycle.
 - Automatic clipboard insertion and restoration.
 - CLI microphone override.
 - GPUI shell, tray integration, desktop launcher, and autostart entry.
@@ -39,6 +42,11 @@ contract. XWayland is not native Wayland support.
 
 The update path is implemented but is not yet proven by a complete signed
 cross-version update on the supported Arch/i3 host.
+
+The local API passes its portable server suite and source-build standalone and
+direct-child lifecycle smokes under Linux. A signed architecture-specific SDK
+helper package and physical Arch/i3 validation remain distribution work, not a
+second service implementation.
 
 The direct installer is published as `install-linux.sh`. It verifies the same
 signed feed and content-addressed artifact as the in-app updater, creates the

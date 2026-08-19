@@ -48,6 +48,12 @@ enum Command {
         #[arg(long, default_value_t = 40)]
         lines: usize,
     },
+    /// Run the authenticated local transcription service.
+    Service {
+        /// Run as a direct child whose stdin is owned by the host application.
+        #[arg(long)]
+        embedded: bool,
+    },
     /// Install, inspect, and validate the local dictation model.
     Model {
         #[command(subcommand)]
@@ -107,6 +113,23 @@ pub fn run(shutdown: &'static AtomicBool) -> Result<()> {
             Ok(())
         }
         Command::Status { lines } => print_status(&event_path, lines),
+        Command::Service { embedded } => {
+            shutdown.store(false, Ordering::Relaxed);
+            let service_event_path = if embedded {
+                log_dir.join(format!("embedded-{}.ndjson", std::process::id()))
+            } else {
+                event_path
+            };
+            let events = EventLog::create(&service_event_path)?;
+            let result = crate::local_api::run_until_shutdown(events, embedded, shutdown);
+            if embedded
+                && let Err(error) = fs::remove_file(&service_event_path)
+                && error.kind() != std::io::ErrorKind::NotFound
+            {
+                tracing::warn!(%error, "could not remove embedded service event log");
+            }
+            result
+        }
         Command::Model { command } => match command {
             ModelCommand::Status => {
                 let model = crate::local_transcriber::default_model();
@@ -220,4 +243,19 @@ fn print_status(path: &Path, limit: usize) -> Result<()> {
         println!("{line}");
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn embedded_service_command_is_exposed_on_linux() {
+        let cli = Cli::try_parse_from(["voice-control", "service", "--embedded"]).unwrap();
+
+        assert!(matches!(
+            cli.command,
+            Some(Command::Service { embedded: true })
+        ));
+    }
 }

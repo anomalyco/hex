@@ -3,9 +3,25 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { connect, create, HexError } from "../src/index.js"
+import { defaultDiscoveryPath } from "../src/host.js"
 import { helper, options, processIsAlive } from "./support.js"
 
 describe("Promise client", () => {
+  it("resolves per-user discovery paths on each desktop platform", () => {
+    expect(defaultDiscoveryPath("darwin", {}, "/Users/hex")).toBe(
+      join("/Users/hex", "Library", "Application Support", "voice-control", "local-api.json"),
+    )
+    expect(defaultDiscoveryPath("win32", { APPDATA: "C:\\Users\\hex\\AppData\\Roaming" }, "C:\\Users\\hex")).toBe(
+      join("C:\\Users\\hex\\AppData\\Roaming", "voice-control", "local-api.json"),
+    )
+    expect(defaultDiscoveryPath("linux", { XDG_DATA_HOME: "/data/hex" }, "/home/hex")).toBe(
+      join("/data/hex", "voice-control", "local-api.json"),
+    )
+    expect(defaultDiscoveryPath("win32", { HEX_APPLICATION_SUPPORT_DIR: "D:\\hex-data" }, "C:\\Users\\hex")).toBe(
+      join("D:\\hex-data", "local-api.json"),
+    )
+  })
+
   it("owns the helper and exercises the complete protocol", async () => {
     const host = await create(options())
     const progress: Array<string> = []

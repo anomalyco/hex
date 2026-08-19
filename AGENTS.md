@@ -39,11 +39,13 @@ only in debug builds.
 - `transcription`: runtime selection and transactional warm-model activation.
 - `transcription_models`: the compiled model catalog, language recommendations,
   pinned artifact verification, and lazy installation.
-- `transcription_service`: bounded host-audio admission, hostile WAV validation,
-  normalization, cancellation, and warm inference ownership.
+- `transcription_service`: shared macOS/Linux/Windows bounded host-audio
+  admission, hostile WAV validation, normalization, cancellation, and
+  target-native warm inference ownership.
 - `local_api`: authenticated loopback discovery or direct-child endpoint
   handoff, bounded HTTP parsing, model preparation progress, and raw
-  transcription routes.
+  transcription routes shared by macOS, Linux, and Windows. Desktop capture
+  and developer control remain capability-backed macOS routes.
 - `sdk/typescript`: Promise and Effect v4 host wrappers for direct-child
   lifecycle, authenticated model preparation, and host-audio transcription.
 - `developer_control`: the typed debug-only command/reply protocol the local
@@ -445,12 +447,12 @@ seam once there are two real adapters or a current test requires substitution.
 
 `ROADMAP.md` is the authoritative work list. Keep these constraints visible:
 
-- Validate public onboarding from a clean macOS account and signed Linux updates
-  on the supported Arch/i3 host.
+- Validate public onboarding from a clean macOS account and signed Linux
+  updates plus the local API/SDK lifecycle on the supported Arch/i3 host.
 - Physically validate the Windows global loop, live settings, lock/Paste Last,
   History/replacements, Modes/transformations, HUD/tones, tray, login startup,
-  installer, and signed updates; then add the local API, Commands after a real
-  streaming model, and Meetings.
+  local API/SDK lifecycle, installer, and signed updates; then add Commands
+  after a real streaming model and Meetings after the ordinary matrix is green.
 - Add a second real browser adapter before generalizing browser context.
 - Do not turn concrete macOS, Linux X11, or command modules into hypothetical
   platform or plugin frameworks.

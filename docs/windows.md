@@ -8,7 +8,9 @@ Paste Last Dictation, recording tones, a click-through HUD, retained History,
 text replacements, a resident system tray, and per-user Launch at login.
 Global and contextual Modes can also rewrite completed dictation through the
 same deadline-bounded OpenCode processing policy as macOS, then run ordered
-built-in or user-defined TypeScript transformations.
+built-in or user-defined TypeScript transformations. The Windows CLI also
+hosts the shared authenticated local transcription API as a standalone process
+or an SDK-owned direct child.
 
 The default shortcut is `Ctrl+Win`: hold both keys while speaking and release
 either one to transcribe and paste. Tap the shortcut twice within 300 ms to
@@ -108,6 +110,35 @@ preserves the previous pipeline output. Use **Retry** in the card after fixing a
 Bun, dependency, or config error. Literal voice commands in the same config
 remain unavailable on Windows until a real streaming command recognizer lands.
 
+## Local Transcription Service
+
+Run a discoverable per-user service from a source build with:
+
+```powershell
+cargo run -- service
+```
+
+It binds only an ephemeral loopback port, requires a generated bearer token on
+every route, and publishes discovery under `%APPDATA%\voice-control`. The
+TypeScript client's `connect()` resolves that Windows location automatically.
+The service never opens a microphone or persists submitted audio; callers own
+capture and send bounded PCM WAV data for raw local transcription.
+
+SDK hosts can instead own an isolated helper process:
+
+```typescript
+const host = await create({
+  command: ["C:\\path\\to\\voice-control.exe", "service", "--embedded"],
+})
+```
+
+Embedded mode publishes no discovery file, returns its authenticated endpoint
+as one JSON line on stdout, and exits when the host closes stdin. macOS, Linux,
+and Windows share the HTTP server, request bounds, model-progress stream, WAV
+validation, inference admission, and lease lifecycle; each target retains its
+real warm-model backend. Automatic helper selection still awaits a signed
+Windows platform package.
+
 ## macOS Parity
 
 The target is product and visual parity with macOS, using native Windows
@@ -139,7 +170,7 @@ current-user startup registry, UI Automation, and Windows capture APIs.
 | First-run onboarding | Implemented; a fresh install picks a dictation language, downloads its recommended model with live progress, and starts listening only after the dialog closes — shared with the Linux shell |
 | Activity pane with the live session and recent transcripts | Implemented; one shared read-only pane on both port shells |
 | Developer Meetings, live drafts, and meeting paste | Missing |
-| Local transcription API and public TypeScript SDK host lifecycle on Windows | Missing |
+| Local transcription API and public TypeScript SDK host lifecycle on Windows | Implemented for source builds through the shared standalone and direct-child service; native authentication, discovery, SDK lifecycle, WAV upload, and Parakeet v3 inference smokes pass — automatic helper selection awaits a signed Windows platform package |
 
 The shared visual tokens, navigation, pane scaffold, transcription picker,
 History presentation, mode processing and transformation cards, and text input
@@ -152,11 +183,12 @@ empty look-alike screens do not count as parity.
 The Windows listener preserves physical press/release timestamps, keeps audio
 capture off the transcription and paste worker, and restores the previous
 clipboard only when no newer clipboard change supersedes it. The optimized
-MSVC release build is verified with GPUI's DirectX shaders. The next parity
-slices are the local transcription API host and developer-only Meetings
-surface; opt-in Commands wait on a Windows streaming command model. Shared
-first-run onboarding, complete OpenCode mode rewriting controls, and the bounded
-TypeScript transformation host already ship. Windows releases are
+MSVC release build is verified with GPUI's DirectX shaders. The remaining code
+parity slice is the developer-only Meetings surface after the physical matrix
+is green; opt-in Commands wait on a Windows streaming command model. Shared
+first-run onboarding, complete OpenCode mode rewriting controls, the bounded
+TypeScript transformation host, and the local transcription API already ship
+in source builds. Windows releases are
 prepared and published with
 [`scripts/release-windows.sh`](../scripts/release-windows.sh), which signs
 the update feed with the same release key as Linux and publishes

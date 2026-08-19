@@ -23,6 +23,8 @@ pub mod history;
 pub mod instance;
 #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
 pub mod keys;
+#[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
+pub mod local_api;
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 pub mod opencode;
 #[cfg(any(target_os = "macos", target_os = "windows"))]

@@ -19,6 +19,8 @@ pub(crate) use common::commands_engine;
 pub(crate) use common::dictation_processing;
 #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
 pub(crate) use common::keys;
+#[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
+pub(crate) use common::local_api;
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 pub(crate) use common::opencode;
 #[cfg(any(target_os = "macos", target_os = "windows"))]
@@ -64,9 +66,9 @@ pub(crate) use platform::macos::dashboard;
 pub(crate) use platform::macos::{
     accessibility, app_settings, app_window, application_catalog, config, context,
     developer_control, dictation_audio, dictation_diagnostics, dictation_indicator,
-    dictation_processor, keyboard, local_api, login_item, meeting, meeting_detection,
-    meeting_watcher, microphone_activity, onboarding, paste, permission_guide,
-    recording_environment, sparkle, status_item, suppression, swift_settings_import,
+    dictation_processor, keyboard, login_item, meeting, meeting_detection, meeting_watcher,
+    microphone_activity, onboarding, paste, permission_guide, recording_environment, sparkle,
+    status_item, suppression, swift_settings_import,
 };
 // The Windows shell's historical i18n path; the table itself is shared.
 #[cfg(target_os = "windows")]
@@ -86,16 +88,15 @@ pub(crate) use speech::moonshine;
 #[cfg(all(target_os = "macos", debug_assertions))]
 pub(crate) use speech::moonshine_lab;
 pub(crate) use speech::transcription_models;
+#[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
+pub(crate) use speech::transcription_service;
 #[cfg(target_os = "macos")]
 pub(crate) use speech::{
     apple_speech, parakeet, recognition, transcription, transcription_benchmark,
-    transcription_service,
 };
 
 #[cfg(target_os = "macos")]
 use std::fs::{self, OpenOptions};
-#[cfg(target_os = "macos")]
-use std::io::{Read, Write};
 #[cfg(target_os = "macos")]
 use std::path::PathBuf;
 #[cfg(target_os = "macos")]
@@ -490,46 +491,7 @@ fn main() -> Result<()> {
                 event_path
             };
             let events = events::EventLog::create(&service_event_path)?;
-            let local_api = if embedded {
-                let api = local_api::LocalApi::start_embedded(events)?;
-                std::thread::Builder::new()
-                    .name("embedded-host-lease".into())
-                    .spawn(|| {
-                        let mut stdin = std::io::stdin().lock();
-                        let mut buffer = [0_u8; 1];
-                        loop {
-                            match stdin.read(&mut buffer) {
-                                Ok(0) => {
-                                    SHUTDOWN.store(true, Ordering::Release);
-                                    std::thread::sleep(std::time::Duration::from_secs(5));
-                                    tracing::warn!(
-                                        "forcing embedded service shutdown after host lease closed"
-                                    );
-                                    std::process::exit(0);
-                                }
-                                Ok(_) => {}
-                                Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
-                                Err(error) => {
-                                    tracing::warn!(%error, "embedded host lease failed");
-                                    SHUTDOWN.store(true, Ordering::Release);
-                                    break;
-                                }
-                            }
-                        }
-                    })?;
-                let mut stdout = std::io::stdout().lock();
-                serde_json::to_writer(&mut stdout, &api.embedded_endpoint())?;
-                stdout.write_all(b"\n")?;
-                stdout.flush()?;
-                drop(stdout);
-                api
-            } else {
-                local_api::LocalApi::start(events)?
-            };
-            while !SHUTDOWN.load(Ordering::Relaxed) {
-                std::thread::sleep(std::time::Duration::from_millis(100));
-            }
-            drop(local_api);
+            local_api::run_until_shutdown(events, embedded, &SHUTDOWN)?;
             if embedded
                 && let Err(error) = fs::remove_file(&service_event_path)
                 && error.kind() != std::io::ErrorKind::NotFound

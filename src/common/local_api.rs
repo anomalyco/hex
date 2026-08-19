@@ -1,11 +1,17 @@
+#[cfg(target_os = "macos")]
 use std::collections::HashMap;
-use std::fs::{self, File, OpenOptions};
+#[cfg(unix)]
+use std::fs::File;
+use std::fs::{self, OpenOptions};
 use std::io::{Cursor, Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
+#[cfg(unix)]
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
-use std::sync::mpsc::{self, Receiver, RecvTimeoutError, SyncSender, TryRecvError, TrySendError};
+use std::sync::mpsc::{self, Receiver, TryRecvError, TrySendError};
+#[cfg(target_os = "macos")]
+use std::sync::mpsc::{RecvTimeoutError, SyncSender};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
@@ -29,9 +35,13 @@ const MAX_HEADER_BYTES: usize = 16 * 1024;
 const MAX_HEADERS: usize = 64;
 const MAX_PATH_BYTES: usize = 2 * 1024;
 const MAX_AUDIO_BYTES: usize = 64 * 1024 * 1024;
+#[cfg(target_os = "macos")]
 const MAX_DEVELOPER_CONTROL_BYTES: usize = 16 * 1024;
+#[cfg(target_os = "macos")]
 const DEVELOPER_CONTROL_TIMEOUT: Duration = Duration::from_secs(2);
+#[cfg(target_os = "macos")]
 const DICTATION_CONTROL_TIMEOUT: Duration = Duration::from_secs(120);
+#[cfg(target_os = "macos")]
 const MAX_DICTATION_SOURCE_BYTES: usize = 128;
 
 type HealthProvider = Arc<dyn Fn() -> HealthResponse + Send + Sync>;
@@ -79,12 +89,14 @@ struct HttpRequest {
     method: String,
     path: String,
     authorization: Option<String>,
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     dictation_token: Option<String>,
     content_type: Option<String>,
     content_length: Option<usize>,
     body_prefix: Vec<u8>,
 }
 
+#[cfg(target_os = "macos")]
 struct DictationLevels {
     owner_token: String,
     receiver: Receiver<crate::recognition::DictationLevel>,
@@ -110,9 +122,44 @@ struct HttpContext {
     model_preparing: Arc<AtomicBool>,
     shutdown: Arc<AtomicBool>,
     transcription: crate::transcription_service::TranscriptionServiceHandle,
+    #[cfg(target_os = "macos")]
     developer_control: Option<SyncSender<crate::developer_control::DeveloperCall>>,
+    #[cfg(target_os = "macos")]
     dictation_control: Option<SyncSender<crate::recognition::RecognitionControl>>,
+    #[cfg(target_os = "macos")]
     dictation_levels: Arc<Mutex<HashMap<u64, DictationLevels>>>,
+}
+
+#[derive(Default)]
+struct PlatformControls {
+    #[cfg(target_os = "macos")]
+    developer_control: Option<SyncSender<crate::developer_control::DeveloperCall>>,
+    #[cfg(target_os = "macos")]
+    dictation_control: Option<SyncSender<crate::recognition::RecognitionControl>>,
+}
+
+impl HttpContext {
+    fn developer_control_available(&self) -> bool {
+        #[cfg(target_os = "macos")]
+        {
+            self.developer_control.is_some()
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            false
+        }
+    }
+
+    fn service_capture_available(&self) -> bool {
+        #[cfg(target_os = "macos")]
+        {
+            self.dictation_control.is_some()
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            false
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -143,34 +190,40 @@ impl LocalApi {
         Ok(api)
     }
 
+    #[cfg(target_os = "macos")]
     pub fn start_with_dictation(
         events: EventLog,
         dictation: SyncSender<crate::recognition::RecognitionControl>,
     ) -> Result<Self> {
         let instance = crate::instance::acquire("local-api")?;
-        let mut api = Self::start_bound_with(
+        let mut api = Self::start_core(
             Some(crate::app_paths::local_api_discovery_file()?),
             Arc::new(current_health),
             events,
-            None,
-            Some(dictation),
+            PlatformControls {
+                developer_control: None,
+                dictation_control: Some(dictation),
+            },
         )?;
         api._instance = Some(instance);
         Ok(api)
     }
 
+    #[cfg(target_os = "macos")]
     pub fn start_with_developer_control_and_dictation(
         events: EventLog,
         developer_control: SyncSender<crate::developer_control::DeveloperCall>,
         dictation: SyncSender<crate::recognition::RecognitionControl>,
     ) -> Result<Self> {
         let instance = crate::instance::acquire("local-api")?;
-        let mut api = Self::start_bound_with(
+        let mut api = Self::start_core(
             Some(crate::app_paths::local_api_discovery_file()?),
             Arc::new(current_health),
             events,
-            Some(developer_control),
-            Some(dictation),
+            PlatformControls {
+                developer_control: Some(developer_control),
+                dictation_control: Some(dictation),
+            },
         )?;
         api._instance = Some(instance);
         Ok(api)
@@ -182,13 +235,19 @@ impl LocalApi {
 
     fn start_at(discovery_path: PathBuf, health: HealthProvider, events: EventLog) -> Result<Self> {
         prepare_discovery_path(&discovery_path)?;
-        Self::start_bound(Some(discovery_path), health, events, None)
+        Self::start_core(
+            Some(discovery_path),
+            health,
+            events,
+            PlatformControls::default(),
+        )
     }
 
     fn start_without_discovery(health: HealthProvider, events: EventLog) -> Result<Self> {
-        Self::start_bound(None, health, events, None)
+        Self::start_core(None, health, events, PlatformControls::default())
     }
 
+    #[cfg(target_os = "macos")]
     fn start_bound(
         discovery_path: Option<PathBuf>,
         health: HealthProvider,
@@ -198,12 +257,30 @@ impl LocalApi {
         Self::start_bound_with(discovery_path, health, events, developer_control, None)
     }
 
+    #[cfg(target_os = "macos")]
     fn start_bound_with(
         discovery_path: Option<PathBuf>,
         health: HealthProvider,
         events: EventLog,
         developer_control: Option<SyncSender<crate::developer_control::DeveloperCall>>,
         dictation_control: Option<SyncSender<crate::recognition::RecognitionControl>>,
+    ) -> Result<Self> {
+        Self::start_core(
+            discovery_path,
+            health,
+            events,
+            PlatformControls {
+                developer_control,
+                dictation_control,
+            },
+        )
+    }
+
+    fn start_core(
+        discovery_path: Option<PathBuf>,
+        health: HealthProvider,
+        events: EventLog,
+        controls: PlatformControls,
     ) -> Result<Self> {
         let (transcription_service, transcription) =
             crate::transcription_service::TranscriptionService::start()?;
@@ -235,6 +312,8 @@ impl LocalApi {
         let stop_observed = Arc::new(AtomicBool::new(false));
         let worker_stop_observed = stop_observed.clone();
         let unexpected_shutdown = worker_shutdown.clone();
+        #[cfg(not(target_os = "macos"))]
+        let _ = controls;
         let http_context = HttpContext {
             token: token.into(),
             health,
@@ -243,8 +322,11 @@ impl LocalApi {
             model_preparing: Arc::new(AtomicBool::new(false)),
             shutdown: worker_shutdown,
             transcription,
-            developer_control,
-            dictation_control,
+            #[cfg(target_os = "macos")]
+            developer_control: controls.developer_control,
+            #[cfg(target_os = "macos")]
+            dictation_control: controls.dictation_control,
+            #[cfg(target_os = "macos")]
             dictation_levels: Arc::new(Mutex::new(HashMap::new())),
         };
         let (ready, readiness) = mpsc::sync_channel(1);
@@ -319,6 +401,54 @@ impl LocalApi {
         observe_stopped(&self.events, &self.stop_observed);
         tracing::info!("local API stopped");
     }
+}
+
+pub fn run_until_shutdown(
+    events: EventLog,
+    embedded: bool,
+    shutdown: &'static AtomicBool,
+) -> Result<()> {
+    let local_api = if embedded {
+        let api = LocalApi::start_embedded(events)?;
+        thread::Builder::new()
+            .name("embedded-host-lease".into())
+            .spawn(move || {
+                let mut stdin = std::io::stdin().lock();
+                let mut buffer = [0_u8; 1];
+                loop {
+                    match stdin.read(&mut buffer) {
+                        Ok(0) => {
+                            shutdown.store(true, Ordering::Release);
+                            thread::sleep(Duration::from_secs(5));
+                            tracing::warn!(
+                                "forcing embedded service shutdown after host lease closed"
+                            );
+                            std::process::exit(0);
+                        }
+                        Ok(_) => {}
+                        Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
+                        Err(error) => {
+                            tracing::warn!(%error, "embedded host lease failed");
+                            shutdown.store(true, Ordering::Release);
+                            break;
+                        }
+                    }
+                }
+            })?;
+        let mut stdout = std::io::stdout().lock();
+        serde_json::to_writer(&mut stdout, &api.embedded_endpoint())?;
+        stdout.write_all(b"\n")?;
+        stdout.flush()?;
+        drop(stdout);
+        api
+    } else {
+        LocalApi::start(events)?
+    };
+    while !shutdown.load(Ordering::Relaxed) {
+        thread::sleep(Duration::from_millis(100));
+    }
+    drop(local_api);
+    Ok(())
 }
 
 impl Drop for LocalApi {
@@ -494,6 +624,7 @@ fn http_worker(pending: Arc<Mutex<Receiver<TcpStream>>>, context: Arc<HttpContex
                     tracing::debug!(%error, "transcription client disconnected");
                 }
             }
+            #[cfg(target_os = "macos")]
             RequestAction::DeveloperControl {
                 content_length,
                 body_prefix,
@@ -509,6 +640,7 @@ fn http_worker(pending: Arc<Mutex<Receiver<TcpStream>>>, context: Arc<HttpContex
                     tracing::debug!(%error, "developer control client disconnected");
                 }
             }
+            #[cfg(target_os = "macos")]
             RequestAction::DictationStart {
                 content_length,
                 body_prefix,
@@ -518,24 +650,29 @@ fn http_worker(pending: Arc<Mutex<Receiver<TcpStream>>>, context: Arc<HttpContex
                     tracing::debug!(%error, "dictation client disconnected");
                 }
             }
+            #[cfg(target_os = "macos")]
             RequestAction::DictationFinish { id, owner_token } => {
                 let response = dictation_finish(id, owner_token, &context);
                 if let Err(error) = write_response(&mut stream, response) {
                     tracing::debug!(%error, "dictation client disconnected");
                 }
             }
+            #[cfg(target_os = "macos")]
             RequestAction::DictationCancel { id, owner_token } => {
                 let response = dictation_cancel(id, owner_token, &context);
                 if let Err(error) = write_response(&mut stream, response) {
                     tracing::debug!(%error, "dictation client disconnected");
                 }
             }
+            #[cfg(target_os = "macos")]
             RequestAction::DictationLevels { id, owner_token } => {
                 stream_dictation_levels(&mut stream, id, &owner_token, &context);
             }
+            #[cfg(target_os = "macos")]
             RequestAction::DictationAudio { id, owner_token } => {
                 stream_dictation_audio(&mut stream, id, owner_token, &context);
             }
+            #[cfg(target_os = "macos")]
             RequestAction::DictationHeartbeat { id, owner_token } => {
                 let response = dictation_heartbeat(id, owner_token, &context);
                 if let Err(error) = write_response(&mut stream, response) {
@@ -557,12 +694,30 @@ fn handle_request(request: HttpRequest, context: &HttpContext) -> RequestAction 
     if request.method == "POST" && path == "/transcriptions" {
         return transcription_action(request, &context.transcription);
     }
+    if request.method == "POST" && path == "/dev/control" && !context.developer_control_available()
+    {
+        return RequestAction::Respond(HttpResponse::json(
+            404,
+            "Not Found",
+            &serde_json::json!({ "code": "developer-control-unavailable" }),
+        ));
+    }
+    #[cfg(target_os = "macos")]
     if request.method == "POST" && path == "/dev/control" {
         return developer_control_action(request, context.developer_control.is_some());
     }
+    if request.method == "POST" && path == "/dictations" && !context.service_capture_available() {
+        return RequestAction::Respond(HttpResponse::json(
+            404,
+            "Not Found",
+            &serde_json::json!({ "code": "service-capture-unavailable" }),
+        ));
+    }
+    #[cfg(target_os = "macos")]
     if request.method == "POST" && path == "/dictations" {
         return dictation_start_action(request, context.dictation_control.is_some());
     }
+    #[cfg(target_os = "macos")]
     if let Some((id, action)) = dictation_path(path) {
         let Some(owner_token) = request.dictation_token else {
             return RequestAction::Respond(HttpResponse::json(
@@ -603,8 +758,8 @@ fn handle_request(request: HttpRequest, context: &HttpContext) -> RequestAction 
             &CapabilitiesResponse {
                 audio_formats: ["audio/wav"],
                 partial_transcripts: false,
-                service_capture: context.dictation_control.is_some(),
-                developer_control: context.developer_control.is_some(),
+                service_capture: context.service_capture_available(),
+                developer_control: context.developer_control_available(),
             },
         ),
         ("GET", "/models") => match model_infos(&request.path) {
@@ -736,6 +891,7 @@ fn transcription_action(
     }
 }
 
+#[cfg(target_os = "macos")]
 fn developer_control_action(request: HttpRequest, available: bool) -> RequestAction {
     if !available {
         return RequestAction::Respond(HttpResponse::json(
@@ -776,6 +932,7 @@ fn developer_control_action(request: HttpRequest, available: bool) -> RequestAct
     }
 }
 
+#[cfg(target_os = "macos")]
 fn dictation_start_action(request: HttpRequest, available: bool) -> RequestAction {
     if !available {
         return RequestAction::Respond(HttpResponse::json(
@@ -816,11 +973,13 @@ fn dictation_start_action(request: HttpRequest, available: bool) -> RequestActio
     }
 }
 
+#[cfg(target_os = "macos")]
 #[derive(Deserialize)]
 struct DictationStartRequest {
     source: String,
 }
 
+#[cfg(target_os = "macos")]
 fn dictation_start(
     stream: &mut TcpStream,
     content_length: usize,
@@ -923,6 +1082,7 @@ fn dictation_start(
     }
 }
 
+#[cfg(target_os = "macos")]
 fn dictation_finish(id: u64, owner_token: String, context: &HttpContext) -> HttpResponse {
     let Some(controls) = &context.dictation_control else {
         return HttpResponse::json(
@@ -964,6 +1124,7 @@ fn dictation_finish(id: u64, owner_token: String, context: &HttpContext) -> Http
     }
 }
 
+#[cfg(target_os = "macos")]
 fn dictation_cancel(id: u64, owner_token: String, context: &HttpContext) -> HttpResponse {
     let Some(controls) = &context.dictation_control else {
         return HttpResponse::json(
@@ -1005,6 +1166,7 @@ fn dictation_cancel(id: u64, owner_token: String, context: &HttpContext) -> Http
     }
 }
 
+#[cfg(target_os = "macos")]
 fn stream_dictation_levels(
     stream: &mut TcpStream,
     id: u64,
@@ -1058,6 +1220,7 @@ fn stream_dictation_levels(
     }
 }
 
+#[cfg(target_os = "macos")]
 fn stream_dictation_audio(
     stream: &mut TcpStream,
     id: u64,
@@ -1139,6 +1302,7 @@ fn stream_dictation_audio(
     }
 }
 
+#[cfg(target_os = "macos")]
 fn dictation_heartbeat(id: u64, owner_token: String, context: &HttpContext) -> HttpResponse {
     let Some(controls) = &context.dictation_control else {
         return HttpResponse::json(
@@ -1173,6 +1337,7 @@ fn dictation_heartbeat(id: u64, owner_token: String, context: &HttpContext) -> H
     }
 }
 
+#[cfg(target_os = "macos")]
 fn dictation_path(path: &str) -> Option<(u64, &str)> {
     let mut parts = path.strip_prefix("/dictations/")?.split('/');
     let id = parts.next()?.parse().ok()?;
@@ -1180,6 +1345,7 @@ fn dictation_path(path: &str) -> Option<(u64, &str)> {
     (parts.next().is_none()).then_some((id, action))
 }
 
+#[cfg(target_os = "macos")]
 fn developer_control(
     stream: &mut TcpStream,
     content_length: usize,
@@ -1244,6 +1410,7 @@ fn developer_control(
     }
 }
 
+#[cfg(target_os = "macos")]
 fn body_read_response(error: BodyReadError) -> HttpResponse {
     match error {
         BodyReadError::ResourceExhausted => HttpResponse::json(
@@ -1861,30 +2028,37 @@ enum RequestAction {
         body_prefix: Vec<u8>,
         admission: crate::transcription_service::AudioAdmission,
     },
+    #[cfg(target_os = "macos")]
     DeveloperControl {
         content_length: usize,
         body_prefix: Vec<u8>,
     },
+    #[cfg(target_os = "macos")]
     DictationStart {
         content_length: usize,
         body_prefix: Vec<u8>,
     },
+    #[cfg(target_os = "macos")]
     DictationFinish {
         id: u64,
         owner_token: String,
     },
+    #[cfg(target_os = "macos")]
     DictationCancel {
         id: u64,
         owner_token: String,
     },
+    #[cfg(target_os = "macos")]
     DictationLevels {
         id: u64,
         owner_token: String,
     },
+    #[cfg(target_os = "macos")]
     DictationAudio {
         id: u64,
         owner_token: String,
     },
+    #[cfg(target_os = "macos")]
     DictationHeartbeat {
         id: u64,
         owner_token: String,
@@ -2045,6 +2219,7 @@ fn current_health() -> HealthResponse {
     }
 }
 
+#[cfg(target_os = "macos")]
 pub fn call_developer(
     command: &crate::developer_control::DeveloperCommand,
 ) -> Result<crate::developer_control::DeveloperReply> {
@@ -2155,27 +2330,33 @@ fn write_discovery(path: &Path, document: &DiscoveryDocument) -> Result<()> {
     let parent = path
         .parent()
         .ok_or_else(|| eyre!("local API discovery path has no parent"))?;
+    #[cfg(target_os = "windows")]
+    let _ = parent;
     let temporary = path.with_extension(format!("json.{}.tmp", std::process::id()));
     if let Err(error) = fs::remove_file(&temporary)
         && error.kind() != std::io::ErrorKind::NotFound
     {
         return Err(error.into());
     }
-    let mut file = OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
-        .open(&temporary)?;
+    let mut options = OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    options.mode(0o600);
+    let mut file = options.open(&temporary)?;
     let mut data = serde_json::to_vec(document)?;
     data.push(b'\n');
     file.write_all(&data)?;
     file.sync_all()?;
+    #[cfg(unix)]
     fs::set_permissions(&temporary, fs::Permissions::from_mode(0o600))?;
-    fs::rename(&temporary, path)?;
+    drop(file);
+    crate::transcription_models::atomic_replace(&temporary, path)?;
+    #[cfg(unix)]
     File::open(parent)?.sync_all()?;
     Ok(())
 }
 
+#[cfg(unix)]
 fn process_is_alive(pid: u32) -> bool {
     let Ok(pid) = i32::try_from(pid) else {
         return false;
@@ -2183,8 +2364,28 @@ fn process_is_alive(pid: u32) -> bool {
     unsafe { kill(pid, 0) == 0 }
 }
 
+#[cfg(unix)]
 unsafe extern "C" {
     fn kill(pid: i32, signal: i32) -> i32;
+}
+
+#[cfg(target_os = "windows")]
+fn process_is_alive(pid: u32) -> bool {
+    use windows_sys::Win32::Foundation::{CloseHandle, STILL_ACTIVE};
+    use windows_sys::Win32::System::Threading::{
+        GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+    };
+
+    let process = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
+    if process.is_null() {
+        return false;
+    }
+    let mut exit_code = 0;
+    let queried = unsafe { GetExitCodeProcess(process, &mut exit_code) } != 0;
+    unsafe {
+        CloseHandle(process);
+    }
+    queried && exit_code == STILL_ACTIVE as u32
 }
 
 #[cfg(test)]
@@ -2231,6 +2432,14 @@ mod tests {
         assert_eq!(capabilities["serviceCapture"], false);
         assert_eq!(capabilities["developerControl"], false);
         assert_eq!(capabilities["audioFormats"][0], "audio/wav");
+        let unavailable_dictation =
+            request_with_method(document.port, Some(&document.token), "POST", "/dictations");
+        assert!(unavailable_dictation.starts_with("HTTP/1.1 404"));
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(response_body(&unavailable_dictation))
+                .unwrap()["code"],
+            "service-capture-unavailable"
+        );
         let models = request(document.port, Some(&document.token), "/models");
         let models: Vec<serde_json::Value> = serde_json::from_str(response_body(&models)).unwrap();
         assert_eq!(
@@ -2289,6 +2498,7 @@ mod tests {
         fs::remove_dir_all(directory).unwrap();
     }
 
+    #[cfg(target_os = "macos")]
     #[test]
     fn authenticated_developer_control_is_bounded_and_typed() {
         let directory = temp_directory();
@@ -2327,6 +2537,7 @@ mod tests {
         fs::remove_dir_all(directory).unwrap();
     }
 
+    #[cfg(target_os = "macos")]
     #[test]
     fn authenticated_running_app_dictation_streams_observations_and_returns_raw_text() {
         let directory = temp_directory();
@@ -2585,8 +2796,13 @@ mod tests {
         let events = EventLog::create(&directory.join("events.ndjson")).unwrap();
         let api =
             LocalApi::start_at(discovery_path.clone(), Arc::new(test_health), events).unwrap();
-        let mode = fs::metadata(&discovery_path).unwrap().permissions().mode() & 0o777;
-        assert_eq!(mode, 0o600);
+        #[cfg(unix)]
+        {
+            let mode = fs::metadata(&discovery_path).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, 0o600);
+        }
+        #[cfg(target_os = "windows")]
+        assert!(fs::metadata(&discovery_path).unwrap().is_file());
         drop(api);
         assert!(!discovery_path.exists());
         fs::remove_dir_all(directory).unwrap();
@@ -2779,8 +2995,11 @@ mod tests {
             model_preparing: preparing,
             shutdown: Arc::new(AtomicBool::new(false)),
             transcription,
+            #[cfg(target_os = "macos")]
             developer_control: None,
+            #[cfg(target_os = "macos")]
             dictation_control: None,
+            #[cfg(target_os = "macos")]
             dictation_levels: Arc::new(Mutex::new(HashMap::new())),
         };
         let action = handle_request(
@@ -2901,6 +3120,7 @@ mod tests {
         response
     }
 
+    #[cfg(target_os = "macos")]
     fn request_with_dictation_token(
         port: u16,
         token: &str,
@@ -2916,6 +3136,7 @@ mod tests {
         )
     }
 
+    #[cfg(target_os = "macos")]
     fn request_bytes(port: u16, token: &str, owner_token: &str, path: &str) -> Vec<u8> {
         let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
         stream

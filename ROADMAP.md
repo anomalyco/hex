@@ -9,7 +9,8 @@ An x86_64 Arch/i3 X11 beta now provides hotkey dictation, automatic paste, a
 GPUI shell, and signed user-local updates. Developer builds have the first
 bounded Moonshine command prototype, but release builds do not yet claim
 commands, context, meetings, native Wayland support, or a package-manager
-channel.
+channel. The shared authenticated local transcription host is available as a
+standalone Linux service or an SDK-owned direct child.
 The Windows source-build alpha now has the native GPUI shell and complete global
 hold-to-dictate loop: timestamped Win32 input, WASAPI capture, checksum-pinned
 local models, generation-safe paste, live settings, double-tap lock, Paste Last,
@@ -19,11 +20,13 @@ onboarding, managed signed updates, and global/per-mode OpenCode rewriting are
 implemented. The bounded TypeScript transformation host, embedded managed SDK,
 and shared ordered Modes editor are also implemented. OpenCode reasoning
 variants and deadlines are editable on Windows through the same contract as
-macOS. Streaming commands, the local API host, and developer Meetings remain.
-The authenticated local transcription service now implements discovery,
-direct-child embedding, model preparation, and bounded host-audio transcription;
-Promise and Effect TypeScript wrappers pass fake-helper tests. Signed helper
-package validation, an Electron bridge, and a first real consumer remain.
+macOS. The shared authenticated local transcription host and direct-child SDK
+handoff now run on Windows as well. Streaming commands and developer Meetings
+remain. The local transcription service implements discovery, direct-child
+embedding, model preparation, and bounded host-audio transcription on macOS,
+Linux, and Windows; Promise and Effect TypeScript wrappers pass fake-helper
+tests plus native Linux and Windows source-build smokes. Signed helper package
+validation, an Electron bridge, and a first real consumer remain.
 
 ## Cross-Platform Convergence Plan
 
@@ -44,7 +47,7 @@ below.
 | HUD | Product Metal HUD using the shared state model | Embedded developer lab only | Product GPUI/DirectX HUD using the same shared state model |
 | Packaging and updates | Sparkle flow implemented; clean-account validation remains | Signed direct-install flow implemented; real cross-version update remains | Managed installer and signed update flow implemented; signed-host validation remains |
 | Meetings | Developer-only implementation | Not implemented | Not implemented |
-| Local transcription API | Implemented | Not implemented | Not implemented |
+| Local transcription API | Shared implementation with native warm-model activation | Shared implementation; owner-only XDG discovery and direct-child lifecycle pass a target-native source-build smoke, while a signed automatic helper package remains | Shared implementation; standalone discovery, direct-child lifecycle, and real transcribe.cpp inference pass a target-native source-build smoke, while a signed automatic helper package remains |
 
 ### Phase 1: Make macOS A Consumer Of The Portable Core
 
@@ -63,6 +66,11 @@ below.
 - [x] Share processing-pipeline policy—corrections, OpenCode rewriting, and
   TypeScript transformations—without moving platform context, selection, or
   paste I/O into the portable layer.
+- [x] Move authenticated local API parsing, discovery, direct-child lifecycle,
+  audio admission, and model-preparation streaming into one implementation;
+  macOS, Linux, and Windows retain their concrete warm-model activation
+  backends, and only macOS exposes its real desktop
+  capture/developer-control capabilities.
 
 Exit gate: the macOS release behavior is unchanged, duplicate semantic engines
 are gone, command overlap/catalog tests run against the one implementation, and
@@ -114,8 +122,9 @@ hosts, and no shared renderer branches on an operating-system name.
   and pressure/recovery tests; only then enable Commands in release builds.
 - [ ] Add History and replacements before Modes; add full mode processing before
   Voice Action so each new pane owns real behavior.
-- [ ] Add the authenticated local transcription host before advertising SDK
-  lifecycle support on Linux.
+- [x] Add the authenticated local transcription host and SDK-owned direct-child
+  lifecycle on Linux using the shared server and concrete `LocalTranscriber`;
+  owner-only XDG discovery and native source-build lifecycle smokes pass.
 - [ ] Keep PipeWire meetings and native Wayland as later explicit contracts from
   `docs/plans/linux.md`; neither blocks the supported X11 beta.
 
@@ -134,7 +143,9 @@ hosts, and no shared renderer branches on an operating-system name.
   ordered transformation editing used by the same portable processing policy.
 - [ ] Add opt-in Commands only after selecting and measuring a real Windows
   streaming recognizer; do not introduce a placeholder model abstraction.
-- [ ] Port the authenticated local transcription host and direct-child handoff.
+- [x] Port the authenticated local transcription host and direct-child handoff;
+  the Windows CLI now consumes the shared service, the TypeScript client resolves
+  per-user Windows discovery, and native source-build/inference smokes pass.
 - [ ] Add developer Meetings only after the ordinary dictation and distribution
   matrix is physically green.
 
@@ -224,8 +235,10 @@ well, as do ordered built-in and TypeScript transformations through the shared
 bounded host and Modes editor. Reasoning variants and rewrite deadlines are now
 editable on Windows through the same portable settings contract. Remaining
 slices are the persisted opt-in command engine (waiting on a Windows streaming
-model), authenticated local transcription host, and developer-only Meetings.
-The detailed live matrix is in [`docs/windows.md`](docs/windows.md).
+model) and developer-only Meetings after the physical parity matrix is green.
+The signed automatic Windows helper package remains part of the private SDK
+distribution work rather than the source-build port. The detailed live matrix
+is in [`docs/windows.md`](docs/windows.md).
 
 Do not advertise a missing capability merely because its macOS pane can be
 drawn. Each Windows pane must own its real platform behavior and validation

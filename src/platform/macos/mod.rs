@@ -15,7 +15,6 @@ pub mod dictation_diagnostics;
 pub mod dictation_indicator;
 pub mod dictation_processor;
 pub mod keyboard;
-pub mod local_api;
 pub mod login_item;
 pub mod meeting;
 pub mod meeting_detection;

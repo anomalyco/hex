@@ -8,8 +8,41 @@ use std::time::Duration;
 use color_eyre::eyre::Result;
 use hound::{Sample, SampleFormat, WavReader};
 
-use crate::transcription::WarmTranscriber;
 use crate::transcription_models::TranscriptionSelection;
+
+#[cfg(target_os = "macos")]
+use crate::transcription::WarmTranscriber;
+
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+#[derive(Default)]
+struct WarmTranscriber {
+    active: Option<(
+        TranscriptionSelection,
+        crate::local_transcriber::LocalTranscriber,
+    )>,
+}
+
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+impl WarmTranscriber {
+    fn activate(
+        &mut self,
+        selection: &TranscriptionSelection,
+    ) -> Result<&mut crate::local_transcriber::LocalTranscriber> {
+        if !self
+            .active
+            .as_ref()
+            .is_some_and(|(active, _)| active == selection)
+        {
+            let candidate = crate::local_transcriber::LocalTranscriber::load(selection)?;
+            self.active = Some((selection.clone(), candidate));
+        }
+        Ok(&mut self
+            .active
+            .as_mut()
+            .expect("activated transcriber must be available")
+            .1)
+    }
+}
 
 const COMMAND_CAPACITY: usize = 1;
 const MIN_SAMPLE_RATE: u32 = 8_000;
@@ -285,6 +318,7 @@ where
 }
 
 fn run(commands: Receiver<Command>) {
+    #[cfg(target_os = "macos")]
     crate::parakeet::prioritize_inference_thread();
     let mut active = WarmTranscriber::default();
     while let Ok(command) = commands.recv() {
@@ -334,7 +368,14 @@ fn transcribe(
     if canceled.load(Ordering::Acquire) {
         return Err(TranscriptionServiceError::Cancelled);
     }
+    #[cfg(target_os = "macos")]
     let samples = model.prepare_samples(clip.samples);
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
+    let samples = {
+        let mut samples = clip.samples;
+        crate::dictation::pad_for_parakeet(&mut samples);
+        samples
+    };
     let transcript = model
         .transcribe(&samples)
         .map_err(|error| TranscriptionServiceError::Inference(error.to_string()))?;
