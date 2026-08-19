@@ -29,6 +29,8 @@ pub mod shell;
 pub mod transcription_picker;
 #[cfg_attr(target_os = "linux", allow(dead_code))]
 pub mod ui;
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+pub mod voice_action_pane;
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 pub mod text_input;

@@ -46,6 +46,7 @@ pub(crate) use desktop::{
 pub(crate) use desktop::{
     history_pane as desktop_history_pane, mode_basics as desktop_mode_basics,
     mode_list as desktop_mode_list, replacement_editor as desktop_replacement_editor, text_input,
+    voice_action_pane as desktop_voice_action_pane,
 };
 #[cfg(target_os = "linux")]
 pub(crate) use platform::linux::{

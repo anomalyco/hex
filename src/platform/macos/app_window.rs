@@ -61,6 +61,11 @@ use crate::desktop_ui::{
     settings_copy, settings_panel, settings_row, settings_section_label, sidebar_frame, toggle,
     window_frame,
 };
+use crate::desktop_voice_action_pane::{
+    OPENCODE_SETUP_URL, VoiceActionError, VoiceActionPaneAction, VoiceActionPaneDelegate,
+    VoiceActionReadyView, VoiceActionSettingRow, VoiceActionUnavailableView, VoiceActionView,
+    render_voice_action_pane as render_shared_voice_action_pane,
+};
 use crate::dictation_indicator::{DictationIndicatorEvent, DictationIndicatorSender, HudTuning};
 use crate::dictation_processor::{ModelCatalog, ModelChoice};
 use crate::events::{
@@ -92,7 +97,6 @@ const OPENCODE_INSTALL_RETRY_INTERVAL: Duration = Duration::from_secs(60);
 const PERMISSION_REFRESH_INTERVAL: Duration = Duration::from_secs(5);
 const MAX_OPENCODE_ERROR_BYTES: usize = 4 * 1024;
 const ACTIVITY_LIMIT: usize = 100;
-const OPENCODE_BETA_DOCS_URL: &str = "https://v2.opencode.ai/";
 
 actions!(
     hex,
@@ -3177,128 +3181,31 @@ impl AppWindow {
     }
 
     fn render_voice_action(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        if let Some(copy) = opencode_unavailable_copy(&self.model_catalog) {
-            let error = copy.error.map(str::to_owned);
-            let show_actions = copy.can_retry || copy.can_open_setup;
-            let retry_label = copy.retry_label;
-            let actions = div()
-                .mt_4()
-                .flex()
-                .gap_2()
-                .when(copy.can_retry, |actions| {
-                    actions.child(header_button(retry_label).id("retry-opencode").on_click(
-                        cx.listener(|this, _, _, cx| {
-                            this.reload_model_catalog();
-                            cx.notify();
-                        }),
-                    ))
-                })
-                .when(copy.can_open_setup, |actions| {
-                    actions.child(
-                        header_button("Open OpenCode setup")
-                            .id("open-opencode-setup")
-                            .on_click(|_, _, _| open_opencode_beta_docs()),
-                    )
-                });
-            return div()
-                .size_full()
-                .flex()
-                .flex_col()
-                .child(pane_header("Voice Action"))
-                .child(
-                    div().flex_1().flex().items_center().justify_center().child(
-                        div()
-                            .w(px(420.0))
-                            .p_5()
-                            .rounded_md()
-                            .border_1()
-                            .border_color(rgb(LINE))
-                            .bg(rgb(SURFACE))
-                            .child(settings_copy(copy.title, copy.description))
-                            .when_some(error, |card, error| {
-                                card.child(
-                                    div()
-                                        .mt_3()
-                                        .rounded_sm()
-                                        .border_1()
-                                        .border_color(rgb(0x613b3b))
-                                        .bg(rgb(0x271b1b))
-                                        .child(error_message("OpenCode reported:", error)),
-                                )
-                            })
-                            .when(show_actions, |card| card.child(actions)),
-                    ),
-                )
-                .into_any_element();
-        }
-        let compact = window.viewport_size().width < px(980.0);
-        let hotkey = self.render_hotkey_setting_control(HotkeyKind::Edit, window, cx);
-        let processing = self.render_voice_action_processing(window, cx);
-        div()
-            .size_full()
-            .flex()
-            .flex_col()
-            .child(pane_header("Voice Action"))
-            .child(
-                div()
-                    .id("voice-action-scroll")
-                    .flex_1()
-                    .overflow_y_scroll()
-                    .px(if compact { px(20.0) } else { px(32.0) })
-                    .py(px(22.0))
-                    .flex()
-                    .justify_center()
-                    .child(
-                        div()
-                            .w_full()
-                            .max_w(px(PANE_CONTENT_WIDTH))
-                            .flex()
-                            .flex_col()
-                            .gap(px(18.0))
-                            .child(
-                                div()
-                                    .px_1()
-                                    .pt_1()
-                                    .text_size(px(11.0))
-                                    .line_height(px(17.0))
-                                    .text_color(rgb(MUTED))
-                                    .child(
-                                        "Hold the shortcut and speak an instruction. HEX sends \
-                                         it, along with any text you have selected, to the model \
-                                         below and pastes the reply at your cursor. If the model \
-                                         returns nothing, nothing is pasted.",
-                                    ),
-                            )
-                            .child(
-                                div()
-                                    .flex()
-                                    .flex_col()
-                                    .gap_2()
-                                    .child(compact_section_label("CAPTURE"))
-                                    .child(
-                                        compact_panel().child(
-                                            voice_action_setting_row(
-                                                "Shortcut",
-                                                "Hold to speak; selected text is included automatically",
-                                                hotkey,
-                                                false,
-                                                compact,
-                                            )
-                                            .id("voice-action-hotkey-setting"),
-                                        ),
-                                    ),
-                            )
-                            .child(
-                                div()
-                                    .flex()
-                                    .flex_col()
-                                    .gap_2()
-                                    .child(compact_section_label("PROCESSING"))
-                                    .child(processing),
-                            ),
-                    ),
-            )
-            .into_any_element()
+        let view = if let Some(copy) = opencode_unavailable_copy(&self.model_catalog) {
+            VoiceActionView::Unavailable(VoiceActionUnavailableView {
+                title: copy.title,
+                description: copy.description,
+                error: copy.error.map(|error| VoiceActionError {
+                    title: "OpenCode reported:",
+                    detail: error.to_owned(),
+                }),
+                retry_label: copy.can_retry.then_some(copy.retry_label),
+                setup_label: copy.can_open_setup.then_some("Open OpenCode setup"),
+            })
+        } else {
+            let hotkey = self.render_hotkey_setting_control(HotkeyKind::Edit, window, cx);
+            let processing = self.voice_action_processing_rows(window, cx);
+            VoiceActionView::Ready(Box::new(VoiceActionReadyView {
+                shortcut: VoiceActionSettingRow::translated(
+                    "Shortcut",
+                    "Hold to speak; selected text is included automatically",
+                    hotkey,
+                ),
+                processing,
+                error: None,
+            }))
+        };
+        render_shared_voice_action_pane(view, window, cx)
     }
 
     fn save_settings(&mut self, cx: &mut Context<Self>) {
@@ -4604,15 +4511,14 @@ impl AppWindow {
         }
     }
 
-    /// The Voice Action processing panel: the shared model and thinking
-    /// pickers presented in the pane's setting-row language. The processing
-    /// deadline is not configurable here; Voice Action uses the persisted
-    /// default.
-    fn render_voice_action_processing(
+    /// Native OpenCode model and thinking controls projected into the shared
+    /// Voice Action setting-row contract. The processing deadline is not
+    /// configurable here; Voice Action uses the persisted default.
+    fn voice_action_processing_rows(
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) -> AnyElement {
+    ) -> Vec<VoiceActionSettingRow> {
         let compact = window.viewport_size().width < px(980.0);
         let model = self.voice_action_inputs.model.entity.clone();
         let ProcessingPicker {
@@ -4635,24 +4541,19 @@ impl AppWindow {
                     .when_some(refresh_control, |row, refresh| row.child(refresh)),
             )
             .when_some(suggestions, |field, suggestions| field.child(suggestions));
-        compact_panel()
-            .child(voice_action_setting_row(
-                "OpenCode model",
-                catalog_status,
-                model_field,
-                has_variants,
-                compact,
-            ))
-            .when(has_variants, |panel| {
-                panel.child(voice_action_setting_row(
-                    "Thinking",
-                    "Choose how much reasoning the model should use",
-                    div().w(px(160.0)).flex_none().child(variant_control),
-                    false,
-                    compact,
-                ))
-            })
-            .into_any_element()
+        let mut rows = vec![VoiceActionSettingRow::dynamic(
+            "OpenCode model",
+            catalog_status,
+            model_field,
+        )];
+        if has_variants {
+            rows.push(VoiceActionSettingRow::translated(
+                "Thinking",
+                "Choose how much reasoning the model should use",
+                div().w(px(160.0)).flex_none().child(variant_control),
+            ));
+        }
+        rows
     }
 
     fn render_processing_settings(
@@ -6265,6 +6166,23 @@ impl HistoryPaneDelegate for AppWindow {
     }
 }
 
+impl VoiceActionPaneDelegate for AppWindow {
+    fn handle_voice_action_pane_action(
+        &mut self,
+        action: VoiceActionPaneAction,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match action {
+            VoiceActionPaneAction::RetryOpenCode => {
+                self.reload_model_catalog();
+                cx.notify();
+            }
+            VoiceActionPaneAction::OpenOpenCodeSetup => open_opencode_beta_docs(),
+        }
+    }
+}
+
 impl ModeBasicsDelegate for AppWindow {
     fn handle_mode_basics_action(
         &mut self,
@@ -6722,51 +6640,6 @@ fn preview_history() -> Option<History> {
     Some(History::new(store))
 }
 
-fn voice_action_setting_row(
-    title: &'static str,
-    description: impl Into<SharedString>,
-    control: impl IntoElement,
-    divider: bool,
-    compact: bool,
-) -> Div {
-    div()
-        .w_full()
-        .min_h(px(64.0))
-        .px_3()
-        .py_3()
-        .flex()
-        .when(compact, |row| row.flex_col().items_start().gap_3())
-        .when(!compact, |row| row.items_center().justify_between().gap_4())
-        .when(divider, |row| row.border_b_1().border_color(rgb(LINE)))
-        .child(
-            div()
-                .min_w(px(0.0))
-                .flex()
-                .flex_col()
-                .gap_1()
-                .child(
-                    div()
-                        .text_size(px(12.0))
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .text_color(rgb(TEXT))
-                        .child(title),
-                )
-                .child(
-                    div()
-                        .text_size(px(10.0))
-                        .line_height(px(14.0))
-                        .text_color(rgb(MUTED))
-                        .child(description.into()),
-                ),
-        )
-        .child(
-            div()
-                .when(compact, |field| field.w_full())
-                .when(!compact, |field| field.flex_none())
-                .child(control),
-        )
-}
-
 fn hotkey_idle_width(keycap_count: usize) -> f32 {
     (112.0 + hotkey_keycaps_width(keycap_count)).max(HOTKEY_MIN_WIDTH)
 }
@@ -6878,9 +6751,9 @@ fn sound_volume_index(settings: &AppSettings) -> usize {
 }
 
 fn open_opencode_beta_docs() {
-    if let Err(error) = crate::commands::execute(crate::commands::Action::OpenUrl(
-        OPENCODE_BETA_DOCS_URL.into(),
-    )) {
+    if let Err(error) =
+        crate::commands::execute(crate::commands::Action::OpenUrl(OPENCODE_SETUP_URL.into()))
+    {
         tracing::error!(%error, "could not open the OpenCode beta documentation");
     }
 }

@@ -48,9 +48,9 @@ systems behind a nominally shared shell.
 Settings and Activity established the shared vocabulary. History now has one
 behavior-complete pane. Modes now shares its collection identity, selection,
 activation badges, list renderer, basic matching card, and replacement/
-correction editor. The rest of Modes, Voice Action, Commands, and Meetings can
-use the same shell, but each pane appears on a platform only when its underlying
-behavior is implemented there.
+correction editor. Voice Action also has one pane contract on macOS and Windows.
+The rest of Modes, Commands, and Meetings can use the same shell, but each pane
+appears on a platform only when its underlying behavior is implemented there.
 
 ## Desktop Hosts Own Consequential Behavior
 
@@ -213,6 +213,14 @@ name/application/site card. Its catalog-backed and free-form application-rule
 variants represent the two real behaviors explicitly, so macOS retains its
 installed-app picker while Windows retains process-substring inputs. Periodic
 refresh and the remaining render state still need to move into one root entity.
+
+`src/desktop/voice_action_pane.rs` owns the Voice Action scaffold, explanatory
+copy, responsive setting rows, processing panel, persistence error, and
+OpenCode-unavailable card. Native roots still own hotkey capture, selected-text
+access, OpenCode discovery, model controls, settings, and execution. macOS can
+therefore supply its searchable model and reasoning controls while Windows
+supplies its native dropdown and installation status without duplicating the
+pane or branching on an operating-system name.
 
 - Move `AppWindow` and its portable dependencies out of macOS-only module gates.
 - Have the macOS lifecycle coordinator and Linux tray host construct their

@@ -57,6 +57,11 @@ use crate::desktop_ui::{
     segmented_control, segmented_item, settings_panel, settings_row, settings_section_label,
     sidebar_frame, toggle, window_frame,
 };
+use crate::desktop_voice_action_pane::{
+    OPENCODE_SETUP_URL, VoiceActionError, VoiceActionPaneAction, VoiceActionPaneDelegate,
+    VoiceActionReadyView, VoiceActionSettingRow, VoiceActionView,
+    render_voice_action_pane as render_shared_voice_action_pane,
+};
 use crate::events::EventReader;
 use crate::history::{History, HistoryRetention};
 use crate::text_input::{Changed as TextChanged, TextInput};
@@ -3047,7 +3052,7 @@ impl WindowsApp {
 
     /// The Voice Action pane, mirroring macOS: an explainer, the capture
     /// shortcut, and the OpenCode processing status.
-    fn render_voice_action(&mut self, cx: &mut Context<Self>) -> AnyElement {
+    fn render_voice_action(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let enabled = self.host.settings.voice_action_hotkey.is_some();
         let opencode_installed = crate::windows_voice_action::opencode_installed();
         let capturing_voice_action =
@@ -3165,77 +3170,36 @@ impl WindowsApp {
                 tr("OpenCode not found")
             });
 
-        div()
-            .size_full()
-            .flex()
-            .flex_col()
-            .child(pane_header_with_action("Voice Action", None))
-            .child(
-                pane_body().child(
-                    div()
-                        .id("windows-voice-action-scroll")
-                        .size_full()
-                        .overflow_y_scroll()
-                        .px_8()
-                        .pt_1()
-                        .pb_7()
-                        .child(
-                            div().w_full().flex().justify_center().child(
-                                pane_content()
-                                    .child(
-                                        div()
-                                            .pt(px(20.0))
-                                            .text_size(px(12.0))
-                                            .line_height(px(19.0))
-                                            .text_color(rgb(MUTED))
-                                            .child(tr(
-                                                "Hold the shortcut and speak an instruction. HEX sends it, along with any text you have selected, to OpenCode and pastes the reply at your cursor. If the model returns nothing, nothing is pasted.",
-                                            )),
-                                    )
-                                    .child(settings_section_label("Capture"))
-                                    .child(
-                                        settings_panel().child(
-                                            settings_row(
-                                                "Shortcut",
-                                                "Hold to speak; selected text is included automatically",
-                                                shortcut_control,
-                                            )
-                                            .border_b_0(),
-                                        ),
-                                    )
-                                    .child(settings_section_label("Processing"))
-                                    .child(
-                                        settings_panel()
-                                            .when(opencode_installed, |panel| {
-                                                panel.child(settings_row(
-                                                    "Model",
-                                                    "Fulfils each voice action; served by OpenCode",
-                                                    model_control,
-                                                ))
-                                            })
-                                            .child(
-                                                settings_row(
-                                                    "OpenCode",
-                                                    "Voice actions run through your local OpenCode install",
-                                                    opencode_status,
-                                                )
-                                                .border_b_0(),
-                                            ),
-                                    )
-                                    .when_some(
-                                        self.host.settings_error.clone(),
-                                        |content, error| {
-                                            content.child(error_message(
-                                                "The shortcut could not be saved.",
-                                                error,
-                                            ))
-                                        },
-                                    ),
-                            ),
-                        ),
-                ),
-            )
-            .into_any_element()
+        let mut processing = Vec::with_capacity(2);
+        if opencode_installed {
+            processing.push(VoiceActionSettingRow::translated(
+                "Model",
+                "Fulfils each voice action; served by OpenCode",
+                model_control,
+            ));
+        }
+        processing.push(VoiceActionSettingRow::translated(
+            "OpenCode",
+            "Voice actions run through your local OpenCode install",
+            opencode_status,
+        ));
+        let view = VoiceActionView::Ready(Box::new(VoiceActionReadyView {
+            shortcut: VoiceActionSettingRow::translated(
+                "Shortcut",
+                "Hold to speak; selected text is included automatically",
+                shortcut_control,
+            ),
+            processing,
+            error: self
+                .host
+                .settings_error
+                .clone()
+                .map(|error| VoiceActionError {
+                    title: "The shortcut could not be saved.",
+                    detail: error,
+                }),
+        }));
+        render_shared_voice_action_pane(view, window, cx)
     }
 
     fn render_history(&mut self, cx: &mut Context<Self>) -> AnyElement {
@@ -3837,6 +3801,27 @@ impl HistoryPaneDelegate for WindowsApp {
     }
 }
 
+impl VoiceActionPaneDelegate for WindowsApp {
+    fn handle_voice_action_pane_action(
+        &mut self,
+        action: VoiceActionPaneAction,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match action {
+            VoiceActionPaneAction::RetryOpenCode => self.host.request_opencode_catalog(),
+            VoiceActionPaneAction::OpenOpenCodeSetup => {
+                if let Err(error) = crate::commands_engine::execute(
+                    crate::commands_engine::Action::OpenUrl(OPENCODE_SETUP_URL.into()),
+                ) {
+                    tracing::error!(%error, "could not open the OpenCode beta documentation");
+                }
+            }
+        }
+        cx.notify();
+    }
+}
+
 impl Render for WindowsApp {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         debug_assert!(self.host.capabilities().listener_control);
@@ -3848,7 +3833,7 @@ impl Render for WindowsApp {
             DesktopPane::Settings => self.render_settings(&snapshot, cx),
             DesktopPane::Activity => crate::desktop_activity_pane::render_activity_pane(&snapshot),
             DesktopPane::Modes => self.render_modes(cx),
-            DesktopPane::VoiceAction => self.render_voice_action(cx),
+            DesktopPane::VoiceAction => self.render_voice_action(window, cx),
             DesktopPane::History => self.render_history(cx),
             DesktopPane::HudLab => crate::desktop_hud_lab::render_hud_lab_pane(self, window, cx),
             DesktopPane::Commands | DesktopPane::Meetings => {
