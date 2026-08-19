@@ -23,7 +23,10 @@ use crate::app_settings::{
 use crate::application_catalog::InstalledApplication;
 use crate::commands::{CommandConfig, CommandInfo, CommandScope};
 use crate::desktop_activity::DesktopActivity;
-use crate::desktop_history_pane::HistoryPaneState;
+use crate::desktop_history_pane::{
+    HistoryPaneAction, HistoryPaneDelegate, HistoryPaneState,
+    render_history_pane as render_shared_history_pane,
+};
 use crate::desktop_host::{
     DesktopAction, DesktopCapabilities, DesktopHost, DesktopMicrophoneSnapshot, DesktopSnapshot,
     DesktopTranscriptionSnapshot, DesktopUpdateStatus,
@@ -1811,312 +1814,28 @@ impl AppWindow {
         self.settings.history_retention = retention;
         self.history_pane.set_retention(retention);
         self.save_settings(cx);
-        cx.notify();
     }
 
-    fn copy_history_entry(&mut self, id: u64, cx: &mut Context<Self>) {
+    fn copy_history_entry(&mut self, id: u64) {
         self.history_pane.copy(id);
-        cx.notify();
     }
 
-    fn delete_history_entry(&mut self, id: u64, cx: &mut Context<Self>) {
+    fn delete_history_entry(&mut self, id: u64) {
         self.history_pane.delete(id);
-        cx.notify();
     }
 
-    fn clear_history(&mut self, cx: &mut Context<Self>) {
+    fn clear_history(&mut self) {
         self.history_pane.clear();
-        cx.notify();
     }
 
     fn render_history(&mut self, cx: &mut Context<Self>) -> AnyElement {
-        let retention = self.settings.history_retention;
-        let search = div().w(px(220.0)).child(self.history_search.entity.clone());
-        let retention_control = header_button(format!("Keep: {}", retention.label()))
-            .id("history-retention")
-            .on_click(cx.listener(move |this, _, _, cx| {
-                let all = HistoryRetention::ALL;
-                let index = all
-                    .iter()
-                    .position(|choice| *choice == this.settings.history_retention)
-                    .unwrap_or(0);
-                let next = all[(index + 1) % all.len()];
-                this.set_history_retention(next, cx);
-            }))
-            .into_any_element();
-        let clear = header_button(if self.history_pane.clear_armed() {
-            "Really clear all?"
-        } else {
-            "Clear all"
-        })
-        .id("history-clear")
-        .when(self.history_pane.clear_armed(), |button| {
-            button.text_color(rgb(0xff8a80))
-        })
-        .on_click(cx.listener(|this, _, _, cx| this.clear_history(cx)))
-        .into_any_element();
-        let header_action = div()
-            .flex()
-            .items_center()
-            .gap_3()
-            .child(search)
-            .child(retention_control)
-            .child(clear)
-            .into_any_element();
-        let rows: Vec<AnyElement> = self
-            .history_pane
-            .entries()
-            .iter()
-            .enumerate()
-            .map(|(index, entry)| {
-                let id = entry.id;
-                let selected = self.history_pane.selected_id() == Some(id);
-                let age = event_age(entry.timestamp_ms);
-                let preview = entry.final_text.replace('\n', " ");
-                let mut meta = entry.kind.label().to_string();
-                if let Some(application) = &entry.application {
-                    meta.push_str(" · ");
-                    meta.push_str(application);
-                }
-                div()
-                    .id(("history-entry", index))
-                    .w_full()
-                    .px_4()
-                    .py_3()
-                    .flex()
-                    .items_start()
-                    .justify_between()
-                    .gap_4()
-                    .border_b_1()
-                    .border_color(rgb(LINE))
-                    .when(selected, |row| row.bg(rgb(SURFACE_SELECTED)))
-                    .hover(|row| row.bg(rgb(SURFACE_HOVER)))
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w(px(0.0))
-                            .flex()
-                            .flex_col()
-                            .gap_1()
-                            .child(
-                                div()
-                                    .w_full()
-                                    .text_size(px(12.0))
-                                    .text_color(rgb(TEXT_SOFT))
-                                    .line_height(px(18.0))
-                                    .truncate()
-                                    .child(preview),
-                            )
-                            .child(div().text_size(px(10.0)).text_color(rgb(FAINT)).child(meta)),
-                    )
-                    .child(
-                        div()
-                            .flex_none()
-                            .text_size(px(10.0))
-                            .text_color(rgb(FAINT))
-                            .child(age),
-                    )
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.history_pane.select(id);
-                        cx.notify();
-                    }))
-                    .into_any_element()
-            })
-            .collect();
-        let retention_off = retention.is_off();
-        div()
-            .size_full()
-            .flex()
-            .flex_col()
-            .child(pane_header_with_action("History", Some(header_action)))
-            .child(
-                pane_body().p_5().child(
-                    pane_content()
-                        .flex_row()
-                        .gap_5()
-                        .child(
-                            compact_panel()
-                                .id("history-list")
-                                .w(px(PANE_LIST_WIDTH))
-                                .h_full()
-                                .flex_none()
-                                .overflow_y_scroll()
-                                .when(retention_off, |list| {
-                                    list.child(empty_message(
-                                        "History is off. New dictations are not retained.",
-                                    ))
-                                })
-                                .when(
-                                    !retention_off
-                                        && self.history_pane.entries().is_empty()
-                                        && self.history_pane.error().is_none(),
-                                    |list| list.child(empty_message("No dictations retained yet.")),
-                                )
-                                .when_some(
-                                    self.history_pane.error().map(str::to_string),
-                                    |list, error| {
-                                        list.child(error_message(
-                                            "History could not be loaded.",
-                                            error,
-                                        ))
-                                    },
-                                )
-                                .child(
-                                    div()
-                                        .w(px(PANE_LIST_WIDTH - 2.0))
-                                        .flex()
-                                        .flex_col()
-                                        .children(rows),
-                                ),
-                        )
-                        .child(
-                            compact_panel()
-                                .flex_1()
-                                .min_w(px(0.0))
-                                .h_full()
-                                .flex()
-                                .flex_col()
-                                .child(self.render_history_detail(cx)),
-                        ),
-                ),
-            )
-            .into_any_element()
-    }
-
-    fn render_history_detail(&self, cx: &mut Context<Self>) -> AnyElement {
-        let Some(entry) = self.history_pane.selected_entry() else {
-            return detail_placeholder("Select a history entry.");
-        };
-        let id = entry.id;
-        let copied = self.history_pane.copied_id() == Some(id);
-        let show_raw = entry.raw_text.trim() != entry.final_text.trim();
-        let action_button = |label: &'static str, id_suffix: &'static str| {
-            div()
-                .id(SharedString::from(format!("history-action-{id_suffix}")))
-                .h(px(30.0))
-                .px_3()
-                .flex()
-                .items_center()
-                .rounded_sm()
-                .bg(rgb(SURFACE))
-                .text_size(px(12.0))
-                .text_color(rgb(TEXT_SOFT))
-                .hover(|button| button.bg(rgb(SURFACE_HOVER)).text_color(rgb(TEXT)))
-                .child(label)
-        };
-        let mut latency = format!(
-            "{} ms audio · {} ms inference",
-            entry.audio_ms, entry.inference_ms
+        let view = self.history_pane.view(
+            self.settings.history_retention,
+            self.history_search.entity.clone(),
+            cx,
         );
-        if entry.total_ms > 0 {
-            latency.push_str(&format!(" · {} ms total", entry.total_ms));
-        }
-        div()
-            .id("history-detail")
-            .flex_1()
-            .min_w(px(0.0))
-            .h_full()
-            .overflow_y_scroll()
-            .px_6()
-            .py_6()
-            .child(
-                div()
-                    .w_full()
-                    .flex()
-                    .flex_col()
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap_3()
-                            .child(
-                                div()
-                                    .text_size(px(18.0))
-                                    .font_weight(FontWeight::SEMIBOLD)
-                                    .child(entry.kind.label()),
-                            )
-                            .child(
-                                div()
-                                    .text_size(px(11.0))
-                                    .text_color(rgb(FAINT))
-                                    .child(event_age(entry.timestamp_ms)),
-                            ),
-                    )
-                    .child(
-                        div()
-                            .pt_4()
-                            .flex()
-                            .items_center()
-                            .gap_3()
-                            .child(
-                                action_button(if copied { "Copied" } else { "Copy" }, "copy")
-                                    .on_click(cx.listener(move |this, _, _, cx| {
-                                        this.copy_history_entry(id, cx)
-                                    })),
-                            )
-                            .child(action_button("Delete", "delete").on_click(cx.listener(
-                                move |this, _, _, cx| this.delete_history_entry(id, cx),
-                            ))),
-                    )
-                    .child(
-                        div()
-                            .mt_5()
-                            .pt_5()
-                            .border_t_1()
-                            .border_color(rgb(LINE))
-                            .child(section_label("Final text"))
-                            .child(
-                                div()
-                                    .pt_3()
-                                    .text_size(px(12.0))
-                                    .line_height(px(19.0))
-                                    .text_color(rgb(TEXT))
-                                    .child(entry.final_text.clone()),
-                            ),
-                    )
-                    .when(show_raw, |detail| {
-                        detail.child(
-                            div()
-                                .mt_5()
-                                .pt_5()
-                                .border_t_1()
-                                .border_color(rgb(LINE))
-                                .child(section_label("Raw transcript"))
-                                .child(
-                                    div()
-                                        .pt_3()
-                                        .text_size(px(12.0))
-                                        .line_height(px(19.0))
-                                        .text_color(rgb(MUTED))
-                                        .child(entry.raw_text.clone()),
-                                ),
-                        )
-                    })
-                    .child(
-                        div()
-                            .mt_5()
-                            .pt_5()
-                            .border_t_1()
-                            .border_color(rgb(LINE))
-                            .when_some(entry.application.clone(), |detail, application| {
-                                detail.child(detail_row("Application", application))
-                            })
-                            .when_some(entry.processing.clone(), |detail, processing| {
-                                let mut summary = format!(
-                                    "{} · {} ms",
-                                    processing.profile, processing.latency_ms
-                                );
-                                if let Some(fallback) = &processing.fallback {
-                                    summary.push_str(&format!(" · fell back: {fallback}"));
-                                }
-                                detail.child(detail_row("Processing", summary))
-                            })
-                            .child(detail_row("Latency", latency)),
-                    ),
-            )
-            .into_any_element()
+        render_shared_history_pane(view, cx)
     }
-
     fn render_navigation(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let items = render_navigation_items(
             self.pane,
@@ -6843,6 +6562,19 @@ impl TranscriptionPickerDelegate for AppWindow {
             self.transcription_picker_error = None;
             cx.notify();
         }
+    }
+}
+
+impl HistoryPaneDelegate for AppWindow {
+    fn handle_history_action(&mut self, action: HistoryPaneAction, cx: &mut Context<Self>) {
+        match action {
+            HistoryPaneAction::SetRetention(retention) => self.set_history_retention(retention, cx),
+            HistoryPaneAction::Select(id) => self.history_pane.select(id),
+            HistoryPaneAction::Copy(id) => self.copy_history_entry(id),
+            HistoryPaneAction::Delete(id) => self.delete_history_entry(id),
+            HistoryPaneAction::Clear => self.clear_history(),
+        }
+        cx.notify();
     }
 }
 

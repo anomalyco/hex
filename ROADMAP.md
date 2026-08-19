@@ -72,9 +72,11 @@ native macOS tests plus authoritative release previews pass.
   behind the existing deep `DesktopHost` seam.
 - [ ] Have macOS and Linux open the same production GPUI root, then remove the
   remaining Linux Settings/render composition.
-- [ ] Extract each behavior-complete History, Modes, Replacements, Voice Action,
-  Commands, and onboarding pane once; Windows should consume those pane modules
-  rather than grow parallel render trees.
+- [x] Extract the behavior-complete History pane once; macOS and Windows consume
+  the same state, actions, selectable detail model, and renderer.
+- [ ] Extract Modes, Replacements, Voice Action, Commands, and onboarding once;
+  Windows should consume those pane modules rather than grow parallel render
+  trees.
 - [ ] Keep native lifecycle outside the shared root: AppKit/Dock/Sparkle on
   macOS, GTK tray/X11/updater on Linux, and Win32 tray/caption/startup on
   Windows.

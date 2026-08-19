@@ -192,10 +192,11 @@ The current roots retain only their native frame/footer and pane-selection side
 effects. Linux no longer advertises a Commands catalog pane merely because its
 developer-only runtime toggle exists. `src/desktop/history_pane.rs` now owns the
 History store handle, bounded search snapshot, selection reconciliation,
-copy/delete behavior, and confirmed-clear transition for macOS and Windows.
-Their platform-styled History render trees remain separate, so the pane is not
-yet a complete shared renderer. Periodic refresh and the remaining render state
-still need to move into one root entity.
+copy/delete behavior, confirmed-clear transition, selectable detail text, and
+the complete list-and-detail renderer for macOS and Windows. The native roots
+now provide only the search entity, retention setting, and one typed action
+delegate while retaining platform settings persistence. Periodic refresh and
+the remaining render state still need to move into one root entity.
 
 - Move `AppWindow` and its portable dependencies out of macOS-only module gates.
 - Have the macOS lifecycle coordinator and Linux tray host construct their

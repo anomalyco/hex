@@ -26,7 +26,10 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 };
 
 use crate::desktop_activity::DesktopActivity;
-use crate::desktop_history_pane::HistoryPaneState;
+use crate::desktop_history_pane::{
+    HistoryPaneAction, HistoryPaneDelegate, HistoryPaneState,
+    render_history_pane as render_shared_history_pane,
+};
 use crate::desktop_host::{
     DesktopAction, DesktopCapabilities, DesktopHost, DesktopListenerSnapshot,
     DesktopMicrophoneSnapshot, DesktopShortcut, DesktopSnapshot, DesktopTranscriptionSnapshot,
@@ -35,19 +38,19 @@ use crate::desktop_host::{
 use crate::desktop_shell::{DesktopPane, render_navigation_items};
 use crate::desktop_transcription_picker::TranscriptionPickerDelegate;
 use crate::desktop_ui::{
-    DIVIDER, FAINT, LINE, MUTED, PANE_LIST_WIDTH, SIDEBAR_WIDTH, SURFACE_SELECTED, TEXT,
-    TEXT_ON_ACCENT, TEXT_SOFT, accent_color, compact_button, compact_panel, disclosure_button,
-    dropdown_backdrop, dropdown_item, dropdown_panel, dropdown_panel_with_width, empty_message,
-    error_message, header_button, hotkey_keycaps, pane_body, pane_content, pane_header_with_action,
-    section_label, segmented_control, segmented_item, settings_panel, settings_row,
-    settings_section_label, sidebar_frame, toggle, window_frame,
+    DIVIDER, FAINT, LINE, MUTED, SIDEBAR_WIDTH, TEXT, TEXT_ON_ACCENT, TEXT_SOFT, accent_color,
+    compact_button, compact_panel, disclosure_button, dropdown_backdrop, dropdown_item,
+    dropdown_panel, dropdown_panel_with_width, empty_message, error_message, header_button,
+    hotkey_keycaps, pane_body, pane_content, pane_header_with_action, segmented_control,
+    segmented_item, settings_panel, settings_row, settings_section_label, sidebar_frame, toggle,
+    window_frame,
 };
 use crate::events::EventReader;
 use crate::history::{History, HistoryRetention};
 use crate::text_input::{Changed as TextChanged, TextInput};
 use crate::windows_i18n::{tr, tr_fill};
 use crate::windows_settings::IndicatorPosition;
-use crate::windows_ui::{CRITICAL, SUCCESS, caption_bar, selection_pill};
+use crate::windows_ui::{CRITICAL, SUCCESS, caption_bar};
 
 const WINDOW_WIDTH: f32 = 1040.0;
 const WINDOW_HEIGHT: f32 = 700.0;
@@ -142,7 +145,6 @@ struct WindowsApp {
     dictation_language_dropdown_bounds: Option<Bounds<Pixels>>,
     ui_language_dropdown_open: bool,
     ui_language_dropdown_bounds: Option<Bounds<Pixels>>,
-    history_detail_text: Option<(u64, Entity<TextInput>)>,
 }
 
 /// Which shortcut a settings row is re-recording.
@@ -313,7 +315,6 @@ pub fn open(event_path: PathBuf, shutdown: &'static AtomicBool, start_hidden: bo
                             dictation_language_dropdown_bounds: None,
                             ui_language_dropdown_open: false,
                             ui_language_dropdown_bounds: None,
-                            history_detail_text: None,
                         }
                     })
                 },
@@ -2028,26 +2029,6 @@ impl WindowsApp {
         cx.notify();
     }
 
-    /// Keep one selectable read-only text entity in sync with the selected
-    /// history entry so text selection survives the periodic history reloads.
-    fn sync_history_detail_text(&mut self, cx: &mut Context<Self>) {
-        let Some(entry) = self.history_pane.selected_entry() else {
-            self.history_detail_text = None;
-            return;
-        };
-        let stale = match &self.history_detail_text {
-            Some((id, input)) => *id != entry.id || input.read(cx).text() != entry.final_text,
-            None => true,
-        };
-        if stale {
-            let text = entry.final_text.clone();
-            self.history_detail_text = Some((
-                entry.id,
-                cx.new(|cx| TextInput::read_only_multiline(cx, &text, px(220.0))),
-            ));
-        }
-    }
-
     fn copy_history_entry(&mut self, id: u64) {
         self.history_pane.copy(id);
     }
@@ -3371,271 +3352,13 @@ impl WindowsApp {
     }
 
     fn render_history(&mut self, cx: &mut Context<Self>) -> AnyElement {
-        self.sync_history_detail_text(cx);
-        let retention = self.host.settings.history_retention;
-        let retention_control = header_button(format!("{}: {}", tr("Keep"), tr(retention.label())))
-            .id("windows-history-retention")
-            .on_click(cx.listener(|this, _, _, cx| {
-                let all = HistoryRetention::ALL;
-                let index = all
-                    .iter()
-                    .position(|choice| *choice == this.host.settings.history_retention)
-                    .unwrap_or(0);
-                this.set_history_retention(all[(index + 1) % all.len()]);
-                cx.notify();
-            }))
-            .into_any_element();
-        let clear = header_button(if self.history_pane.clear_armed() {
-            tr("Really clear all?")
-        } else {
-            tr("Clear all")
-        })
-        .id("windows-history-clear")
-        .when(self.history_pane.clear_armed(), |button| {
-            button.text_color(rgb(CRITICAL))
-        })
-        .on_click(cx.listener(|this, _, _, cx| {
-            this.clear_history();
-            cx.notify();
-        }))
-        .into_any_element();
-        let header_action = div()
-            .flex()
-            .items_center()
-            .gap_3()
-            .child(div().w(px(180.0)).child(self.history_search_input.clone()))
-            .child(retention_control)
-            .child(clear)
-            .into_any_element();
-        let rows: Vec<AnyElement> = self
-            .history_pane
-            .entries()
-            .iter()
-            .enumerate()
-            .map(|(index, entry)| {
-                let id = entry.id;
-                let selected = self.history_pane.selected_id() == Some(id);
-                let age = event_age(entry.timestamp_ms);
-                let preview = entry.final_text.replace('\n', " ");
-                let meta = entry
-                    .application
-                    .clone()
-                    .unwrap_or_else(|| tr(entry.kind.label()).to_string());
-                div()
-                    .id(("windows-history-entry", index))
-                    .w_full()
-                    .pl(px(1.0))
-                    .pr_3()
-                    .py_2()
-                    .flex()
-                    .items_center()
-                    .gap_2()
-                    .rounded(px(4.0))
-                    .when(selected, |row| row.bg(rgb(SURFACE_SELECTED)))
-                    .hover(|row| row.bg(rgb(SURFACE_SELECTED)))
-                    .child(selection_pill(selected))
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w(px(0.0))
-                            .flex()
-                            .flex_col()
-                            .gap_1()
-                            .child(
-                                div()
-                                    .w_full()
-                                    .text_size(px(12.0))
-                                    .text_color(rgb(TEXT_SOFT))
-                                    .line_height(px(18.0))
-                                    .truncate()
-                                    .child(preview),
-                            )
-                            .child(div().text_size(px(10.0)).text_color(rgb(FAINT)).child(meta)),
-                    )
-                    .child(
-                        div()
-                            .flex_none()
-                            .text_size(px(10.0))
-                            .text_color(rgb(FAINT))
-                            .child(age),
-                    )
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.history_pane.select(id);
-                        cx.notify();
-                    }))
-                    .into_any_element()
-            })
-            .collect();
-        let retention_off = retention.is_off();
-        div()
-            .size_full()
-            .flex()
-            .flex_col()
-            .child(pane_header_with_action("History", Some(header_action)))
-            .child(
-                pane_body().px_8().pt_5().pb_7().child(
-                    pane_content()
-                        .flex_row()
-                        .gap_5()
-                        .child(
-                            compact_panel()
-                                .id("windows-history-list")
-                                .w(px(PANE_LIST_WIDTH))
-                                .h_full()
-                                .flex_none()
-                                .overflow_y_scroll()
-                                .when(retention_off, |list| {
-                                    list.child(empty_message(
-                                        "History is off. New dictations are not retained.",
-                                    ))
-                                })
-                                .when(
-                                    !retention_off
-                                        && self.history_pane.entries().is_empty()
-                                        && self.history_pane.error().is_none(),
-                                    |list| list.child(empty_message("No dictations retained yet.")),
-                                )
-                                .when_some(
-                                    self.history_pane.error().map(str::to_string),
-                                    |list, error| {
-                                        list.child(error_message(
-                                            "History could not be loaded.",
-                                            error,
-                                        ))
-                                    },
-                                )
-                                .child(
-                                    div()
-                                        .w(px(PANE_LIST_WIDTH - 2.0))
-                                        .p(px(4.0))
-                                        .flex()
-                                        .flex_col()
-                                        .gap(px(2.0))
-                                        .children(rows),
-                                ),
-                        )
-                        .child(
-                            compact_panel()
-                                .flex_1()
-                                .min_w(px(0.0))
-                                .h_full()
-                                .flex()
-                                .flex_col()
-                                .child(self.render_history_detail(cx)),
-                        ),
-                ),
-            )
-            .into_any_element()
+        let view = self.history_pane.view(
+            self.host.settings.history_retention,
+            self.history_search_input.clone(),
+            cx,
+        );
+        render_shared_history_pane(view, cx)
     }
-
-    fn render_history_detail(&self, cx: &mut Context<Self>) -> AnyElement {
-        let Some(entry) = self.history_pane.selected_entry() else {
-            return detail_placeholder("Select a history entry.");
-        };
-        let id = entry.id;
-        let copied = self.history_pane.copied_id() == Some(id);
-        let show_raw = entry.raw_text.trim() != entry.final_text.trim();
-        let action_button = |label: &'static str, id: &'static str| header_button(label).id(id);
-        let mut caption = event_age(entry.timestamp_ms);
-        if let Some(application) = &entry.application {
-            caption.push_str(" · ");
-            caption.push_str(application);
-        }
-        div()
-            .id("windows-history-detail")
-            .flex_1()
-            .min_w(px(0.0))
-            .h_full()
-            .overflow_y_scroll()
-            .px_6()
-            .py_6()
-            .child(
-                div()
-                    .w_full()
-                    .flex()
-                    .flex_col()
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap_3()
-                            .child(
-                                div()
-                                    .text_size(px(18.0))
-                                    .font_weight(FontWeight::SEMIBOLD)
-                                    .child(tr(entry.kind.label())),
-                            )
-                            .child(
-                                div()
-                                    .text_size(px(12.0))
-                                    .text_color(rgb(FAINT))
-                                    .child(caption),
-                            ),
-                    )
-                    .child(
-                        div()
-                            .pt_4()
-                            .flex()
-                            .items_center()
-                            .gap_3()
-                            .child(
-                                action_button(
-                                    if copied { tr("Copied") } else { tr("Copy") },
-                                    "windows-history-copy",
-                                )
-                                .when(copied, |button| button.text_color(rgb(SUCCESS)))
-                                .on_click(cx.listener(
-                                    move |this, _, _, cx| {
-                                        this.copy_history_entry(id);
-                                        cx.notify();
-                                    },
-                                )),
-                            )
-                            .child(
-                                action_button(tr("Delete"), "windows-history-delete").on_click(
-                                    cx.listener(move |this, _, _, cx| {
-                                        this.delete_history_entry(id);
-                                        cx.notify();
-                                    }),
-                                ),
-                            ),
-                    )
-                    .child(
-                        div()
-                            .mt_5()
-                            .pt_5()
-                            .border_t_1()
-                            .border_color(rgb(DIVIDER))
-                            .when_some(
-                                self.history_detail_text
-                                    .as_ref()
-                                    .filter(|(text_id, _)| *text_id == id)
-                                    .map(|(_, input)| input.clone()),
-                                |detail, input| detail.child(input),
-                            ),
-                    )
-                    .when(show_raw, |detail| {
-                        detail.child(
-                            div()
-                                .mt_5()
-                                .pt_5()
-                                .border_t_1()
-                                .border_color(rgb(DIVIDER))
-                                .child(section_label("Raw transcript"))
-                                .child(
-                                    div()
-                                        .pt_3()
-                                        .text_size(px(12.0))
-                                        .line_height(px(19.0))
-                                        .text_color(rgb(MUTED))
-                                        .child(entry.raw_text.clone()),
-                                ),
-                        )
-                    }),
-            )
-            .into_any_element()
-    }
-
     fn render_microphone_dropdown(
         &mut self,
         viewport_height: Pixels,
@@ -4120,6 +3843,19 @@ impl crate::desktop_hud_lab::HudLabDelegate for WindowsApp {
     }
 }
 
+impl HistoryPaneDelegate for WindowsApp {
+    fn handle_history_action(&mut self, action: HistoryPaneAction, cx: &mut Context<Self>) {
+        match action {
+            HistoryPaneAction::SetRetention(retention) => self.set_history_retention(retention),
+            HistoryPaneAction::Select(id) => self.history_pane.select(id),
+            HistoryPaneAction::Copy(id) => self.copy_history_entry(id),
+            HistoryPaneAction::Delete(id) => self.delete_history_entry(id),
+            HistoryPaneAction::Clear => self.clear_history(),
+        }
+        cx.notify();
+    }
+}
+
 impl Render for WindowsApp {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         debug_assert!(self.host.capabilities().listener_control);
@@ -4217,31 +3953,6 @@ impl Render for WindowsApp {
 
 fn windows_model_catalog() -> Vec<&'static crate::transcription_models::ModelDefinition> {
     crate::transcription_models::available_models()
-}
-
-fn detail_placeholder(message: &'static str) -> AnyElement {
-    let message = tr(message);
-    div()
-        .flex_1()
-        .h_full()
-        .flex()
-        .items_center()
-        .justify_center()
-        .text_size(px(12.0))
-        .text_color(rgb(FAINT))
-        .child(message)
-        .into_any_element()
-}
-
-fn event_age(timestamp_ms: u64) -> String {
-    let seconds = crate::history::now_ms().saturating_sub(timestamp_ms) / 1_000;
-    let (template, value) = match seconds {
-        0..=59 => ("{}s ago", seconds),
-        60..=3_599 => ("{}m ago", seconds / 60),
-        3_600..=86_399 => ("{}h ago", seconds / 3_600),
-        _ => ("{}d ago", seconds / 86_400),
-    };
-    tr_fill(template, &value.to_string())
 }
 
 #[cfg(test)]
