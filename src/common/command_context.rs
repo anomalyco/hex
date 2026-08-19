@@ -1,18 +1,20 @@
-//! Platform-neutral command context: which application or browser page
-//! the user is focused on, and the selectors commands scope themselves
-//! with. macOS keeps its richer capture pipeline; the port shells fill
-//! this from their own foreground readers, and an empty snapshot matches
-//! only `Always`-scoped commands.
+//! Platform-neutral foreground context and the selectors that commands and
+//! processing modes use to scope themselves. Native adapters populate this
+//! snapshot; an empty snapshot matches only `Always`-scoped commands.
 //!
-//! This is a shared vocabulary: only the shells with voice Commands wired
-//! up (Linux today) construct selectors, so per-platform dead-code
-//! analysis stays quiet here.
+//! Full URLs and selected text are ephemeral input context. Persistence owners
+//! remain responsible for retaining only their explicitly bounded metadata.
 #![allow(dead_code)]
+
+use url::Url;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct ContextSnapshot {
     pub application: Option<String>,
-    pub browser_host: Option<String>,
+    pub browser_url: Option<Url>,
+    pub window_title: Option<String>,
+    pub selected_text: Option<String>,
+    pub input_revision: Option<u64>,
 }
 
 impl ContextSnapshot {
@@ -21,7 +23,7 @@ impl ContextSnapshot {
     }
 
     pub fn browser_host(&self) -> Option<&str> {
-        self.browser_host.as_deref()
+        self.browser_url.as_ref().and_then(Url::host_str)
     }
 
     pub fn browser_host_is(&self, host: &str) -> bool {
@@ -33,6 +35,14 @@ impl ContextSnapshot {
         self.application
             .as_deref()
             .is_some_and(|current| application_names_equal(current, application))
+    }
+
+    pub fn label(&self) -> String {
+        match (&self.application, self.browser_host()) {
+            (Some(application), Some(host)) => format!("{application} · {host}"),
+            (Some(application), None) => application.clone(),
+            _ => "unknown context".into(),
+        }
     }
 }
 
@@ -50,6 +60,10 @@ impl ContextSelector {
 
     pub fn browser_host(host: impl Into<String>) -> Self {
         Self::BrowserHost(normalize_browser_host(&host.into()))
+    }
+
+    pub fn is_browser(&self) -> bool {
+        matches!(self, Self::BrowserHost(_))
     }
 
     pub fn matches(&self, context: &ContextSnapshot) -> bool {
@@ -81,7 +95,7 @@ impl ContextSelector {
 }
 
 fn normalize_browser_host(host: &str) -> String {
-    host.trim_end_matches('.').to_lowercase()
+    host.trim_end_matches('.').to_ascii_lowercase()
 }
 
 fn application_names_equal(left: &str, right: &str) -> bool {
@@ -101,7 +115,8 @@ mod tests {
     fn selectors_match_their_scope_and_nothing_narrower() {
         let context = ContextSnapshot {
             application: Some("firefox".into()),
-            browser_host: Some("x.com".into()),
+            browser_url: Some(Url::parse("https://x.com/home").unwrap()),
+            ..ContextSnapshot::default()
         };
         assert!(ContextSelector::Always.matches(&context));
         assert!(ContextSelector::application("Firefox").matches(&context));

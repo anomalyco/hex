@@ -5,11 +5,15 @@ mod speech;
 
 // The historical flat module names, re-exported so existing `crate::` paths
 // keep resolving while call sites migrate to the folder tree.
-#[cfg(any(target_os = "linux", target_os = "windows"))]
+#[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
 pub(crate) use common::command_context;
-#[cfg(any(target_os = "linux", target_os = "windows"))]
+#[cfg(target_os = "macos")]
+pub(crate) use common::command_grammar;
+#[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
 pub(crate) use common::command_grammar as command_grammar_common;
-#[cfg(any(target_os = "linux", target_os = "windows"))]
+#[cfg(target_os = "macos")]
+pub(crate) use common::commands_engine as commands;
+#[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
 pub(crate) use common::commands_engine;
 #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
 pub(crate) use common::keys;
@@ -48,12 +52,11 @@ pub(crate) use platform::linux::{
 pub(crate) use platform::macos::dashboard;
 #[cfg(target_os = "macos")]
 pub(crate) use platform::macos::{
-    accessibility, app_settings, app_window, application_catalog, command_grammar, commands,
-    config, context, developer_control, dictation_audio, dictation_diagnostics,
-    dictation_indicator, dictation_processor, keyboard, local_api, login_item, meeting,
-    meeting_detection, meeting_watcher, microphone_activity, onboarding, paste, permission_guide,
-    personal_commands, recording_environment, sparkle, status_item, suppression,
-    swift_settings_import,
+    accessibility, app_settings, app_window, application_catalog, config, context,
+    developer_control, dictation_audio, dictation_diagnostics, dictation_indicator,
+    dictation_processor, keyboard, local_api, login_item, meeting, meeting_detection,
+    meeting_watcher, microphone_activity, onboarding, paste, permission_guide, personal_commands,
+    recording_environment, sparkle, status_item, suppression, swift_settings_import,
 };
 // The Windows shell's historical i18n path; the table itself is shared.
 #[cfg(target_os = "windows")]

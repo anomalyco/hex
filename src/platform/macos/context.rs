@@ -8,72 +8,16 @@ use std::time::{Duration, Instant};
 use color_eyre::eyre::{Result, WrapErr, eyre};
 use url::Url;
 
+pub use crate::command_context::{ContextSelector, ContextSnapshot};
+
 #[cfg(target_os = "macos")]
 use objc2::rc::autoreleasepool;
 #[cfg(target_os = "macos")]
 use objc2_app_kit::NSWorkspace;
 
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct ContextSnapshot {
-    pub application: Option<String>,
-    pub browser_url: Option<Url>,
-    pub window_title: Option<String>,
-    pub selected_text: Option<String>,
-    pub input_revision: Option<u64>,
-}
-
 pub struct ContextMonitor {
     pub updates: Receiver<ContextSnapshot>,
     stop: Arc<AtomicBool>,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum ContextSelector {
-    Always,
-    BrowserHost(String),
-    Application(String),
-}
-
-impl ContextSelector {
-    pub fn application(application: impl Into<String>) -> Self {
-        Self::Application(application.into())
-    }
-
-    pub fn browser_host(host: impl Into<String>) -> Self {
-        Self::BrowserHost(normalize_browser_host(&host.into()))
-    }
-
-    pub fn matches(&self, context: &ContextSnapshot) -> bool {
-        match self {
-            Self::Always => true,
-            Self::BrowserHost(host) => context.browser_host_is(host),
-            Self::Application(application) => context.application_is(application),
-        }
-    }
-
-    pub fn is_browser(&self) -> bool {
-        matches!(self, Self::BrowserHost(_))
-    }
-
-    pub(crate) fn specificity(&self) -> u8 {
-        match self {
-            Self::Always => 0,
-            Self::Application(_) => 1,
-            Self::BrowserHost(_) => 2,
-        }
-    }
-
-    pub(crate) fn can_coexist_with(&self, other: &Self) -> bool {
-        match (self, other) {
-            (Self::Always, _) | (_, Self::Always) => true,
-            (Self::BrowserHost(left), Self::BrowserHost(right)) => browser_hosts_equal(left, right),
-            (Self::Application(left), Self::Application(right)) => {
-                application_names_equal(left, right)
-            }
-            (Self::BrowserHost(_), Self::Application(_))
-            | (Self::Application(_), Self::BrowserHost(_)) => true,
-        }
-    }
 }
 
 impl ContextMonitor {
@@ -149,33 +93,6 @@ impl ContextSnapshot {
     pub fn capture() -> Result<Self> {
         Ok(Self::default())
     }
-
-    pub fn browser_host(&self) -> Option<&str> {
-        self.browser_url.as_ref().and_then(Url::host_str)
-    }
-
-    pub fn browser_host_is(&self, host: &str) -> bool {
-        // Brave is the first browser adapter. Command semantics intentionally
-        // depend on browser host, not this application name.
-        self.application.as_deref() == Some("Brave Browser")
-            && self
-                .browser_host()
-                .is_some_and(|current| browser_hosts_equal(current, host))
-    }
-
-    pub fn application_is(&self, application: &str) -> bool {
-        self.application
-            .as_deref()
-            .is_some_and(|current| application_names_equal(current, application))
-    }
-
-    pub fn label(&self) -> String {
-        match (&self.application, self.browser_host()) {
-            (Some(application), Some(host)) => format!("{application} · {host}"),
-            (Some(application), None) => application.clone(),
-            _ => "unknown context".into(),
-        }
-    }
 }
 
 #[cfg(target_os = "macos")]
@@ -240,19 +157,6 @@ fn capture_brave_url() -> Result<Option<Url>> {
     }
     let url = String::from_utf8_lossy(&output.stdout);
     Ok(Url::parse(url.trim()).ok())
-}
-
-fn normalize_browser_host(host: &str) -> String {
-    host.trim_end_matches('.').to_ascii_lowercase()
-}
-
-fn application_names_equal(left: &str, right: &str) -> bool {
-    left.eq_ignore_ascii_case(right)
-}
-
-fn browser_hosts_equal(left: &str, right: &str) -> bool {
-    left.trim_end_matches('.')
-        .eq_ignore_ascii_case(right.trim_end_matches('.'))
 }
 
 #[cfg(target_os = "macos")]

@@ -1,7 +1,6 @@
-//! Spoken command grammar shared by the port shells: typed pattern
+//! Spoken command grammar shared by the desktop shells: typed pattern
 //! compilation, capture parsing, and overlap detection for configured
-//! commands. Adapted from the macOS grammar; macOS keeps its original
-//! module until its shell port unifies on this one.
+//! commands.
 
 #![cfg_attr(target_os = "linux", allow(dead_code))]
 

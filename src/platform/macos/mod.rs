@@ -5,8 +5,6 @@ pub mod accessibility;
 pub mod app_settings;
 pub mod app_window;
 pub mod application_catalog;
-pub mod command_grammar;
-pub mod commands;
 pub mod config;
 pub mod context;
 #[cfg(debug_assertions)]

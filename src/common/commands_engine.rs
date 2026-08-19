@@ -1,7 +1,6 @@
-//! Voice command engine shared by the port shells: command configuration,
-//! utterance resolution, and queued action execution. Adapted from the
-//! macOS engine; macOS keeps its original module until its shell port
-//! unifies on this one.
+//! Voice command engine shared by the desktop shells: command configuration,
+//! utterance resolution, and queued action execution. Native adapters retain
+//! action execution and recognition ownership.
 
 #![cfg_attr(target_os = "linux", allow(dead_code))]
 
@@ -971,7 +970,8 @@ mod tests {
             );
         let browser = ContextSnapshot {
             application: Some("Brave Browser".into()),
-            browser_host: Some("x.com".into()),
+            browser_url: Some(url::Url::parse("https://x.com/home").unwrap()),
+            ..ContextSnapshot::default()
         };
 
         assert!(matches!(
@@ -1316,7 +1316,8 @@ mod tests {
         ));
         let x = ContextSnapshot {
             application: Some("Brave Browser".into()),
-            browser_host: Some("x.com".into()),
+            browser_url: Some(url::Url::parse("https://x.com/home").unwrap()),
+            ..ContextSnapshot::default()
         };
         assert!(matches!(
             config.resolve(Mode::Listening, "go to chat", &x),
@@ -1341,7 +1342,7 @@ mod tests {
         ));
         let slack = ContextSnapshot {
             application: Some("Slack".into()),
-            browser_host: None,
+            ..ContextSnapshot::default()
         };
         assert!(matches!(
             config.resolve(Mode::Listening, "go to console", &slack),
@@ -1385,7 +1386,7 @@ mod tests {
 
         let slack = ContextSnapshot {
             application: Some("Slack".into()),
-            browser_host: None,
+            ..ContextSnapshot::default()
         };
         let slack_commands = config.available_catalog(Mode::Listening, &slack);
         assert!(
