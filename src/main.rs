@@ -43,7 +43,10 @@ pub(crate) use desktop::{
     transcription_picker as desktop_transcription_picker, ui as desktop_ui,
 };
 #[cfg(any(target_os = "macos", target_os = "windows"))]
-pub(crate) use desktop::{history_pane as desktop_history_pane, text_input};
+pub(crate) use desktop::{
+    history_pane as desktop_history_pane, replacement_editor as desktop_replacement_editor,
+    text_input,
+};
 #[cfg(target_os = "linux")]
 pub(crate) use platform::linux::{
     app as linux_app, command_executor as linux_command_executor, dictation as linux_dictation,

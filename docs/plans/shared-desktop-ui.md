@@ -45,9 +45,11 @@ Shared rendering decides how every common concept looks. Platform adapters must
 not inject arbitrary GPUI elements because that would preserve two visual
 systems behind a nominally shared shell.
 
-The first shared panes are Settings and Activity. Replacements, Modes, Voice
-Action, Commands, and Meetings can use the same shell immediately, but each pane
-appears on Linux only when its underlying behavior is implemented there.
+Settings and Activity established the shared vocabulary. History now has one
+behavior-complete pane, and the reusable replacement/correction editor is the
+first extracted piece of Modes. The rest of Modes, Voice Action, Commands, and
+Meetings can use the same shell, but each pane appears on a platform only when
+its underlying behavior is implemented there.
 
 ## Desktop Hosts Own Consequential Behavior
 
@@ -195,8 +197,13 @@ History store handle, bounded search snapshot, selection reconciliation,
 copy/delete behavior, confirmed-clear transition, selectable detail text, and
 the complete list-and-detail renderer for macOS and Windows. The native roots
 now provide only the search entity, retention setting, and one typed action
-delegate while retaining platform settings persistence. Periodic refresh and
-the remaining render state still need to move into one root entity.
+delegate while retaining platform settings persistence.
+`src/desktop/replacement_editor.rs` likewise owns the phrase/output inputs,
+add/remove action contract, focus behavior, and complete editor card used by
+macOS mode corrections plus both Windows replacement collections. Each root
+still decides which collection a target names and persists through its existing
+schema. Periodic refresh and the remaining render state still need to move into
+one root entity.
 
 - Move `AppWindow` and its portable dependencies out of macOS-only module gates.
 - Have the macOS lifecycle coordinator and Linux tray host construct their

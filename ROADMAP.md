@@ -35,7 +35,7 @@ below.
 | Surface | macOS | Linux X11 | Windows |
 | --- | --- | --- | --- |
 | Dictation loop | Product implementation; physical timestamp regression recheck remains | Beta implementation; Arch/i3 smoke test remains | Alpha implementation; Windows 10/11 smoke matrix remains |
-| Desktop presentation | Full root still owns macOS composition | Shared primitives and panes, but a separate Linux root remains | Shared primitives and several panes, but a separate Windows root remains |
+| Desktop presentation | Full root still owns macOS composition; History and replacement editing are shared | Shared primitives and panes, but a separate Linux root remains | Shared primitives plus History and replacement editing, but a separate Windows root remains |
 | Commands | Persisted release opt-in | Bounded developer-only prototype; no packaged/context-complete release contract | Unavailable until a real streaming command model exists |
 | Modes and replacements | Full ordered pipeline on the shared processing policy | Not implemented | Corrections, replacements, and web-domain selection use the shared policy; OpenCode settings and TypeScript transformation hosting remain |
 | Voice Action | Implemented | Not implemented | Implemented with clipboard-backed selected-text capture |
@@ -70,13 +70,17 @@ native macOS tests plus authoritative release previews pass.
 
 - [x] Finish portable microphone, update, shortcut, error, and listener actions
   behind the existing deep `DesktopHost` seam.
-- [ ] Have macOS and Linux open the same production GPUI root, then remove the
-  remaining Linux Settings/render composition.
+- [ ] Have macOS, Linux, and Windows open the same production GPUI root, then
+  remove the remaining Linux and Windows Settings/render composition.
 - [x] Extract the behavior-complete History pane once; macOS and Windows consume
   the same state, actions, selectable detail model, and renderer.
-- [ ] Extract Modes, Replacements, Voice Action, Commands, and onboarding once;
-  Windows should consume those pane modules rather than grow parallel render
-  trees.
+- [x] Extract the paired replacement/correction input, actions, and renderer;
+  macOS mode corrections and Windows global/per-mode rules consume it while
+  their existing settings schemas and runtime projection remain native.
+- [ ] Extract the rest of Modes around the shared processing policy: mode list,
+  matching rules, OpenCode configuration, and ordered transformation editing.
+- [ ] Extract Voice Action, Commands, and onboarding once; each platform should
+  consume those pane modules only when its real capability exists.
 - [ ] Keep native lifecycle outside the shared root: AppKit/Dock/Sparkle on
   macOS, GTK tray/X11/updater on Linux, and Win32 tray/caption/startup on
   Windows.

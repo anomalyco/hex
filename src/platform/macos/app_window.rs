@@ -31,6 +31,11 @@ use crate::desktop_host::{
     DesktopAction, DesktopCapabilities, DesktopHost, DesktopMicrophoneSnapshot, DesktopSnapshot,
     DesktopTranscriptionSnapshot, DesktopUpdateStatus,
 };
+use crate::desktop_replacement_editor::{
+    ReplacementEditorAction, ReplacementEditorDelegate, ReplacementEditorInput,
+    ReplacementEditorTarget, ReplacementEditorView,
+    render_replacement_editor as render_shared_replacement_editor,
+};
 use crate::desktop_shell::{DesktopPane, render_navigation_items};
 use crate::desktop_transcription_picker::{
     TranscriptionPickerDelegate, TranscriptionPickerModel, TranscriptionPickerProgress,
@@ -386,7 +391,7 @@ struct ModeInputs {
     model: ProcessingInput,
     deadline: ProcessingInput,
     processing_toggle: ToggleSpring,
-    replacements: Vec<ReplacementInputs>,
+    replacements: Vec<ReplacementEditorInput>,
 }
 
 struct ProcessingInputs {
@@ -396,11 +401,6 @@ struct ProcessingInputs {
 
 struct VoiceActionInputs {
     model: ProcessingInput,
-}
-
-struct ReplacementInputs {
-    matched_phrase: ProcessingInput,
-    output: ProcessingInput,
 }
 
 #[derive(Clone)]
@@ -2336,89 +2336,19 @@ impl AppWindow {
         selection: ModeSelection,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let replacement_count = self.mode_inputs_for(selection).replacements.len();
-        let replacement_rows = self
-            .mode_inputs_for(selection)
-            .replacements
-            .iter()
-            .enumerate()
-            .map(|(index, inputs)| {
-                div()
-                    .id(("text-replacement", index))
-                    .w_full()
-                    .px_3()
-                    .py_2()
-                    .flex()
-                    .items_end()
-                    .gap_2()
-                    .when(index + 1 < replacement_count, |row| {
-                        row.border_b_1().border_color(rgb(LINE))
-                    })
-                    .child(compact_mode_field(
-                        "Transcription",
-                        inputs.matched_phrase.entity.clone(),
-                    ))
-                    .child(
-                        div()
-                            .h(px(34.0))
-                            .flex()
-                            .items_center()
-                            .text_size(px(11.0))
-                            .text_color(rgb(FAINT))
-                            .child("→"),
-                    )
-                    .child(compact_mode_field("Output", inputs.output.entity.clone()))
-                    .child(
-                        compact_button("×")
-                            .id(("remove-text-replacement", index))
-                            .size(px(34.0))
-                            .px_0()
-                            .justify_center()
-                            .flex_none()
-                            .text_size(px(14.0))
-                            .text_color(rgb(MUTED))
-                            .hover(|button| {
-                                button.bg(rgb(SURFACE_HOVER)).text_color(rgb(TEXT_SOFT))
-                            })
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.mode_inputs_mut(selection).replacements.remove(index);
-                                this.mode_settings_mut(selection).replacements.remove(index);
-                                this.save_settings(cx);
-                            })),
-                    )
-                    .into_any_element()
-            })
-            .collect::<Vec<_>>();
-
-        let add = compact_header_plus_button()
-            .id("add-mode-replacement")
-            .on_click(cx.listener(move |this, _, window, cx| {
-                let replacement = TextReplacement::default();
-                let inputs = Self::replacement_inputs(&replacement, cx);
-                let focus = inputs.matched_phrase.entity.focus_handle(cx);
-                this.mode_inputs_mut(selection).replacements.push(inputs);
-                this.mode_settings_mut(selection)
-                    .replacements
-                    .push(replacement);
-                this.save_settings(cx);
-                focus.focus(window);
-            }))
-            .into_any_element();
-
-        compact_panel()
-            .child(compact_panel_header("Corrections", Some(add)))
-            .when(replacement_count == 0, |panel| {
-                panel.child(
-                    div()
-                        .px_3()
-                        .py_3()
-                        .text_size(px(11.0))
-                        .text_color(rgb(MUTED))
-                        .child("No corrections in this mode."),
-                )
-            })
-            .children(replacement_rows)
-            .into_any_element()
+        let target = match selection {
+            ModeSelection::Default => ReplacementEditorTarget::Global,
+            ModeSelection::Custom(index) => ReplacementEditorTarget::Mode(index),
+        };
+        render_shared_replacement_editor(
+            ReplacementEditorView {
+                target,
+                title: "Corrections",
+                empty_message: "No corrections in this mode.",
+                rows: &self.mode_inputs_for(selection).replacements,
+            },
+            cx,
+        )
     }
 
     fn transcription_picker_view(&mut self, selected_language: &str) -> TranscriptionPickerView {
@@ -3391,31 +3321,6 @@ impl AppWindow {
         Self::synchronized_processing_input(entity, cx)
     }
 
-    fn replacement_inputs(
-        replacement: &TextReplacement,
-        cx: &mut Context<Self>,
-    ) -> ReplacementInputs {
-        let matched_phrase =
-            cx.new(|cx| TextInput::new(cx, "e.g. open code", &replacement.matched_phrase));
-        let output = cx.new(|cx| TextInput::new(cx, "e.g. OpenCode", &replacement.output));
-        let matched_subscription = cx.subscribe(&matched_phrase, |this, _, _: &TextChanged, cx| {
-            this.sync_processing_settings(cx)
-        });
-        let output_subscription = cx.subscribe(&output, |this, _, _: &TextChanged, cx| {
-            this.sync_processing_settings(cx)
-        });
-        ReplacementInputs {
-            matched_phrase: ProcessingInput {
-                entity: matched_phrase,
-                _subscriptions: vec![matched_subscription],
-            },
-            output: ProcessingInput {
-                entity: output,
-                _subscriptions: vec![output_subscription],
-            },
-        }
-    }
-
     fn transcription_hints_input(initial: &str, cx: &mut Context<Self>) -> ProcessingInput {
         let entity = cx.new(|cx| {
             TextInput::multiline(
@@ -3591,7 +3496,9 @@ impl AppWindow {
             replacements: mode
                 .replacements
                 .iter()
-                .map(|replacement| Self::replacement_inputs(replacement, cx))
+                .map(|replacement| {
+                    ReplacementEditorInput::new(replacement, Self::sync_processing_settings, cx)
+                })
                 .collect(),
         }
     }
@@ -6578,6 +6485,54 @@ impl HistoryPaneDelegate for AppWindow {
     }
 }
 
+impl ReplacementEditorDelegate for AppWindow {
+    fn handle_replacement_editor_action(
+        &mut self,
+        action: ReplacementEditorAction,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let target = match action {
+            ReplacementEditorAction::Add(target)
+            | ReplacementEditorAction::Remove { target, .. } => target,
+        };
+        let selection = match target {
+            ReplacementEditorTarget::Global => ModeSelection::Default,
+            ReplacementEditorTarget::Mode(index)
+                if index < self.processing_inputs.modes.len()
+                    && index < self.settings.dictation_processing.modes.len() =>
+            {
+                ModeSelection::Custom(index)
+            }
+            ReplacementEditorTarget::Mode(_) => return,
+        };
+
+        match action {
+            ReplacementEditorAction::Add(_) => {
+                let replacement = TextReplacement::default();
+                let inputs =
+                    ReplacementEditorInput::new(&replacement, Self::sync_processing_settings, cx);
+                let focus = inputs.matched_phrase_focus(cx);
+                self.mode_inputs_mut(selection).replacements.push(inputs);
+                self.mode_settings_mut(selection)
+                    .replacements
+                    .push(replacement);
+                self.save_settings(cx);
+                focus.focus(window);
+            }
+            ReplacementEditorAction::Remove { index, .. } => {
+                if index < self.mode_inputs_for(selection).replacements.len()
+                    && index < self.mode_settings(selection).replacements.len()
+                {
+                    self.mode_inputs_mut(selection).replacements.remove(index);
+                    self.mode_settings_mut(selection).replacements.remove(index);
+                    self.save_settings(cx);
+                }
+            }
+        }
+    }
+}
+
 impl DesktopHost for AppWindow {
     fn capabilities(&self) -> DesktopCapabilities {
         DesktopCapabilities::macos(crate::DEVELOPER_FEATURES_ENABLED)
@@ -7339,17 +7294,6 @@ fn settings_input(
     settings_control(label, description, input)
 }
 
-fn compact_mode_field(label: &'static str, control: impl IntoElement) -> Div {
-    div()
-        .flex_1()
-        .min_w(px(0.0))
-        .flex()
-        .flex_col()
-        .gap_1()
-        .child(div().text_size(px(9.0)).text_color(rgb(FAINT)).child(label))
-        .child(control)
-}
-
 fn settings_control(
     label: &'static str,
     description: impl Into<String>,
@@ -7435,10 +7379,11 @@ fn apply_mode_inputs(inputs: &ModeInputs, mode: &mut DictationMode, is_default: 
     } else {
         browser_hosts(&input_text(&inputs.browser_hosts, cx))
     };
-    for (inputs, replacement) in inputs.replacements.iter().zip(&mut mode.replacements) {
-        replacement.matched_phrase = inputs.matched_phrase.entity.read(cx).text().to_string();
-        replacement.output = inputs.output.entity.read(cx).text().to_string();
-    }
+    mode.replacements = inputs
+        .replacements
+        .iter()
+        .map(|inputs| inputs.value(cx))
+        .collect();
     mode.post_processing.enabled = inputs.processing_toggle.enabled();
     mode.post_processing.prompt = input_text(&inputs.prompt, cx);
     mode.post_processing.deadline_seconds = input_text(&inputs.deadline, cx)

@@ -35,6 +35,11 @@ use crate::desktop_host::{
     DesktopMicrophoneSnapshot, DesktopShortcut, DesktopSnapshot, DesktopTranscriptionSnapshot,
     DesktopUpdateStatus,
 };
+use crate::desktop_replacement_editor::{
+    ReplacementEditorAction, ReplacementEditorDelegate, ReplacementEditorInput,
+    ReplacementEditorTarget, ReplacementEditorView,
+    render_replacement_editor as render_shared_replacement_editor,
+};
 use crate::desktop_shell::{DesktopPane, render_navigation_items};
 use crate::desktop_transcription_picker::TranscriptionPickerDelegate;
 use crate::desktop_ui::{
@@ -114,7 +119,7 @@ struct WindowsApp {
     pane: DesktopPane,
     hud_lab: crate::desktop_hud_lab::HudLabState,
     history_pane: HistoryPaneState,
-    replacement_inputs: Vec<ReplacementInputs>,
+    replacement_inputs: Vec<ReplacementEditorInput>,
     transcription_picker: TranscriptionPickerState,
     mode_inputs: Vec<ModeInputs>,
     voice_model_dropdown_open: bool,
@@ -164,17 +169,11 @@ impl HotkeyTarget {
     }
 }
 
-struct ReplacementInputs {
-    matched_phrase: Entity<TextInput>,
-    output: Entity<TextInput>,
-    _subscriptions: Vec<Subscription>,
-}
-
 struct ModeInputs {
     name: Entity<TextInput>,
     applications: Entity<TextInput>,
     websites: Entity<TextInput>,
-    corrections: Vec<ReplacementInputs>,
+    corrections: Vec<ReplacementEditorInput>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -245,7 +244,13 @@ pub fn open(event_path: PathBuf, shutdown: &'static AtomicBool, start_hidden: bo
                             .settings
                             .text_replacements
                             .iter()
-                            .map(|replacement| WindowsApp::replacement_inputs(replacement, cx))
+                            .map(|replacement| {
+                                ReplacementEditorInput::new(
+                                    replacement,
+                                    WindowsApp::sync_text_replacements,
+                                    cx,
+                                )
+                            })
                             .collect();
                         let mode_inputs = host
                             .settings
@@ -1664,52 +1669,14 @@ fn windows_hotkey(shortcut: DesktopShortcut) -> Result<crate::windows_settings::
 }
 
 impl WindowsApp {
-    fn replacement_inputs(
-        replacement: &crate::text_replacements::TextReplacement,
-        cx: &mut Context<Self>,
-    ) -> ReplacementInputs {
-        let matched_phrase =
-            cx.new(|cx| TextInput::new(cx, "e.g. open code", &replacement.matched_phrase));
-        let output = cx.new(|cx| TextInput::new(cx, "e.g. OpenCode", &replacement.output));
-        let matched_changed = cx.subscribe(&matched_phrase, |this, _, _: &TextChanged, cx| {
-            this.sync_text_replacements(cx)
-        });
-        let output_changed = cx.subscribe(&output, |this, _, _: &TextChanged, cx| {
-            this.sync_text_replacements(cx)
-        });
-        ReplacementInputs {
-            matched_phrase,
-            output,
-            _subscriptions: vec![matched_changed, output_changed],
-        }
-    }
-
     fn sync_text_replacements(&mut self, cx: &mut Context<Self>) {
         let replacements = self
             .replacement_inputs
             .iter()
-            .map(|inputs| crate::text_replacements::TextReplacement {
-                matched_phrase: inputs.matched_phrase.read(cx).text().to_string(),
-                output: inputs.output.read(cx).text().to_string(),
-            })
+            .map(|inputs| inputs.value(cx))
             .collect();
         let _ = self.host.set_text_replacements(replacements);
         cx.notify();
-    }
-
-    fn add_text_replacement(&mut self, cx: &mut Context<Self>) {
-        self.replacement_inputs.push(Self::replacement_inputs(
-            &crate::text_replacements::TextReplacement::default(),
-            cx,
-        ));
-        self.sync_text_replacements(cx);
-    }
-
-    fn remove_text_replacement(&mut self, index: usize, cx: &mut Context<Self>) {
-        if index < self.replacement_inputs.len() {
-            self.replacement_inputs.remove(index);
-            self.sync_text_replacements(cx);
-        }
     }
 
     fn mode_inputs(
@@ -1731,7 +1698,7 @@ impl WindowsApp {
         let corrections = mode
             .corrections
             .iter()
-            .map(|correction| Self::mode_correction_inputs(correction, cx))
+            .map(|correction| ReplacementEditorInput::new(correction, Self::sync_modes, cx))
             .collect();
         ModeInputs {
             name,
@@ -1739,25 +1706,6 @@ impl WindowsApp {
             websites,
             corrections,
             _subscriptions: vec![name_changed, applications_changed, websites_changed],
-        }
-    }
-
-    fn mode_correction_inputs(
-        correction: &crate::text_replacements::TextReplacement,
-        cx: &mut Context<Self>,
-    ) -> ReplacementInputs {
-        let matched_phrase =
-            cx.new(|cx| TextInput::new(cx, "e.g. open code", &correction.matched_phrase));
-        let output = cx.new(|cx| TextInput::new(cx, "e.g. OpenCode", &correction.output));
-        let matched_changed = cx.subscribe(&matched_phrase, |this, _, _: &TextChanged, cx| {
-            this.sync_modes(cx)
-        });
-        let output_changed =
-            cx.subscribe(&output, |this, _, _: &TextChanged, cx| this.sync_modes(cx));
-        ReplacementInputs {
-            matched_phrase,
-            output,
-            _subscriptions: vec![matched_changed, output_changed],
         }
     }
 
@@ -1786,10 +1734,7 @@ impl WindowsApp {
                 corrections: inputs
                     .corrections
                     .iter()
-                    .map(|correction| crate::text_replacements::TextReplacement {
-                        matched_phrase: correction.matched_phrase.read(cx).text().to_string(),
-                        output: correction.output.read(cx).text().to_string(),
-                    })
+                    .map(|correction| correction.value(cx))
                     .collect(),
             })
             .collect();
@@ -1808,24 +1753,6 @@ impl WindowsApp {
     fn remove_mode(&mut self, index: usize, cx: &mut Context<Self>) {
         if index < self.mode_inputs.len() {
             self.mode_inputs.remove(index);
-            self.sync_modes(cx);
-        }
-    }
-
-    fn add_mode_correction(&mut self, mode_index: usize, cx: &mut Context<Self>) {
-        let correction =
-            Self::mode_correction_inputs(&crate::text_replacements::TextReplacement::default(), cx);
-        if let Some(inputs) = self.mode_inputs.get_mut(mode_index) {
-            inputs.corrections.push(correction);
-            self.sync_modes(cx);
-        }
-    }
-
-    fn remove_mode_correction(&mut self, mode_index: usize, row: usize, cx: &mut Context<Self>) {
-        if let Some(inputs) = self.mode_inputs.get_mut(mode_index)
-            && row < inputs.corrections.len()
-        {
-            inputs.corrections.remove(row);
             self.sync_modes(cx);
         }
     }
@@ -2931,20 +2858,9 @@ impl WindowsApp {
     }
 
     fn render_modes(&mut self, cx: &mut Context<Self>) -> AnyElement {
-        let add = div()
-            .flex()
-            .items_center()
-            .gap_3()
-            .child(
-                header_button(tr("Add mode"))
-                    .id("windows-add-mode")
-                    .on_click(cx.listener(|this, _, _, cx| this.add_mode(cx))),
-            )
-            .child(
-                header_button(tr("Add replacement"))
-                    .id("windows-add-replacement")
-                    .on_click(cx.listener(|this, _, _, cx| this.add_text_replacement(cx))),
-            )
+        let add = header_button(tr("Add mode"))
+            .id("windows-add-mode")
+            .on_click(cx.listener(|this, _, _, cx| this.add_mode(cx)))
             .into_any_element();
         let replacement_count = self.replacement_inputs.len();
         let mode_count = self.mode_inputs.len();
@@ -2953,52 +2869,7 @@ impl WindowsApp {
             .iter()
             .enumerate()
             .map(|(mode_index, inputs)| {
-                let correction_count = inputs.corrections.len();
-                let correction_rows: Vec<AnyElement> = inputs
-                    .corrections
-                    .iter()
-                    .enumerate()
-                    .map(|(row, correction)| {
-                        div()
-                            .id(("windows-mode-correction", mode_index * 1000 + row))
-                            .w_full()
-                            .p_3()
-                            .flex()
-                            .items_center()
-                            .gap_3()
-                            .when(row + 1 < correction_count, |element| {
-                                element.border_b_1().border_color(rgb(DIVIDER))
-                            })
-                            .child(
-                                div()
-                                    .flex_1()
-                                    .min_w(px(0.0))
-                                    .child(correction.matched_phrase.clone()),
-                            )
-                            .child(
-                                div()
-                                    .flex_none()
-                                    .text_size(px(13.0))
-                                    .text_color(rgb(FAINT))
-                                    .child("→"),
-                            )
-                            .child(
-                                div()
-                                    .flex_1()
-                                    .min_w(px(0.0))
-                                    .child(correction.output.clone()),
-                            )
-                            .child(
-                                compact_button(tr("Remove"))
-                                    .id(("windows-remove-mode-correction", mode_index * 1000 + row))
-                                    .on_click(cx.listener(move |this, _, _, cx| {
-                                        this.remove_mode_correction(mode_index, row, cx);
-                                    })),
-                            )
-                            .into_any_element()
-                    })
-                    .collect();
-                compact_panel()
+                let details = compact_panel()
                     .mt_3()
                     .child(
                         div()
@@ -3036,60 +2907,35 @@ impl WindowsApp {
                             )))
                             .child(inputs.websites.clone()),
                     )
-                    .children(correction_rows)
-                    .child(
-                        div().w_full().p_3().flex().child(
-                            compact_button(tr("Add correction"))
-                                .id(("windows-add-mode-correction", mode_index))
-                                .border_1()
-                                .border_color(rgb(LINE))
-                                .on_click(cx.listener(move |this, _, _, cx| {
-                                    this.add_mode_correction(mode_index, cx);
-                                })),
-                        ),
-                    )
-                    .into_any_element()
-            })
-            .collect();
-        let rows: Vec<AnyElement> = self
-            .replacement_inputs
-            .iter()
-            .enumerate()
-            .map(|(index, inputs)| {
+                    .into_any_element();
+                let corrections = render_shared_replacement_editor(
+                    ReplacementEditorView {
+                        target: ReplacementEditorTarget::Mode(mode_index),
+                        title: "Corrections",
+                        empty_message: "No corrections in this mode.",
+                        rows: &inputs.corrections,
+                    },
+                    cx,
+                );
                 div()
-                    .id(("windows-replacement", index))
                     .w_full()
-                    .p_3()
                     .flex()
-                    .items_center()
+                    .flex_col()
                     .gap_3()
-                    .when(index + 1 < replacement_count, |row| {
-                        row.border_b_1().border_color(rgb(DIVIDER))
-                    })
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w(px(0.0))
-                            .child(inputs.matched_phrase.clone()),
-                    )
-                    .child(
-                        div()
-                            .flex_none()
-                            .text_size(px(13.0))
-                            .text_color(rgb(FAINT))
-                            .child("→"),
-                    )
-                    .child(div().flex_1().min_w(px(0.0)).child(inputs.output.clone()))
-                    .child(
-                        compact_button(tr("Remove"))
-                            .id(("windows-remove-replacement", index))
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.remove_text_replacement(index, cx);
-                            })),
-                    )
+                    .child(details)
+                    .child(corrections)
                     .into_any_element()
             })
             .collect();
+        let replacements = render_shared_replacement_editor(
+            ReplacementEditorView {
+                target: ReplacementEditorTarget::Global,
+                title: "Replacements",
+                empty_message: "No replacements yet. Add one to correct recurring phrases.",
+                rows: &self.replacement_inputs,
+            },
+            cx,
+        );
 
         div()
             .size_full()
@@ -3109,39 +2955,31 @@ impl WindowsApp {
                             div().w_full().flex().justify_center().child(
                                 pane_content()
                                     .child(settings_section_label("Default mode"))
-                        .child(
-                            settings_panel().child(
-                                settings_row(
-                                    "Text replacements",
-                                    "Exact phrase-boundary corrections run before every Windows paste",
-                                    div()
-                                        .text_size(px(12.0))
-                                        .text_color(rgb(TEXT_SOFT))
-                                        .child(tr_fill(
-                                            "{} rules",
-                                            &replacement_count.to_string(),
-                                        )),
-                                )
-                                .border_b_0(),
-                            ),
-                        )
-                        .child(settings_section_label("Application modes"))
-                        .when(mode_count == 0, |content| {
-                            content.child(compact_panel().child(empty_message(
-                                "No modes yet. Add one to correct text in specific applications.",
-                            )))
-                        })
-                        .children(mode_panels)
-                        .child(settings_section_label("Replacements"))
-                        .child(
-                            compact_panel()
-                                .when(replacement_count == 0, |panel| {
-                                    panel.child(empty_message(
-                                        "No replacements yet. Add one to correct recurring phrases.",
-                                    ))
-                                })
-                                .children(rows),
-                        )
+                                    .child(
+                                        settings_panel().child(
+                                            settings_row(
+                                                "Text replacements",
+                                                "Exact phrase-boundary corrections run before every Windows paste",
+                                                div()
+                                                    .text_size(px(12.0))
+                                                    .text_color(rgb(TEXT_SOFT))
+                                                    .child(tr_fill(
+                                                        "{} rules",
+                                                        &replacement_count.to_string(),
+                                                    )),
+                                            )
+                                            .border_b_0(),
+                                        ),
+                                    )
+                                    .child(settings_section_label("Application modes"))
+                                    .when(mode_count == 0, |content| {
+                                        content.child(compact_panel().child(empty_message(
+                                            "No modes yet. Add one to correct text in specific applications.",
+                                        )))
+                                    })
+                                    .children(mode_panels)
+                                    .child(settings_section_label("Replacements"))
+                                    .child(replacements)
                                     .when_some(
                                         self.host.settings_error.clone(),
                                         |content, error| {
@@ -3840,6 +3678,63 @@ impl crate::desktop_hud_lab::HudLabDelegate for WindowsApp {
             .send(crate::windows_indicator::WindowsIndicatorEvent::Configure(
                 tuning,
             ));
+    }
+}
+
+impl ReplacementEditorDelegate for WindowsApp {
+    fn handle_replacement_editor_action(
+        &mut self,
+        action: ReplacementEditorAction,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match action {
+            ReplacementEditorAction::Add(ReplacementEditorTarget::Global) => {
+                let input = ReplacementEditorInput::new(
+                    &crate::text_replacements::TextReplacement::default(),
+                    Self::sync_text_replacements,
+                    cx,
+                );
+                let focus = input.matched_phrase_focus(cx);
+                self.replacement_inputs.push(input);
+                self.sync_text_replacements(cx);
+                focus.focus(window);
+            }
+            ReplacementEditorAction::Add(ReplacementEditorTarget::Mode(mode_index)) => {
+                if mode_index >= self.mode_inputs.len() {
+                    return;
+                }
+                let input = ReplacementEditorInput::new(
+                    &crate::text_replacements::TextReplacement::default(),
+                    Self::sync_modes,
+                    cx,
+                );
+                let focus = input.matched_phrase_focus(cx);
+                self.mode_inputs[mode_index].corrections.push(input);
+                self.sync_modes(cx);
+                focus.focus(window);
+            }
+            ReplacementEditorAction::Remove {
+                target: ReplacementEditorTarget::Global,
+                index,
+            } => {
+                if index < self.replacement_inputs.len() {
+                    self.replacement_inputs.remove(index);
+                    self.sync_text_replacements(cx);
+                }
+            }
+            ReplacementEditorAction::Remove {
+                target: ReplacementEditorTarget::Mode(mode_index),
+                index,
+            } => {
+                if let Some(mode) = self.mode_inputs.get_mut(mode_index)
+                    && index < mode.corrections.len()
+                {
+                    mode.corrections.remove(index);
+                    self.sync_modes(cx);
+                }
+            }
+        }
     }
 }
 
