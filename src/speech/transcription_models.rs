@@ -593,6 +593,28 @@ pub(crate) fn choices_for_runtime(language: &str) -> Vec<ModelChoice> {
     choices
 }
 
+/// The best starting selection for a dictation language: its first
+/// recommended runtime model. Unknown languages fall back to English.
+pub fn recommended_selection(language: &str) -> TranscriptionSelection {
+    let language = LANGUAGES
+        .iter()
+        .find(|(code, _)| *code == language)
+        .map(|(code, _)| *code)
+        .unwrap_or("en");
+    let choices = choices_for_runtime(language);
+    let model = choices
+        .iter()
+        .find(|choice| matches!(choice.recommendation, Recommendation::Recommended))
+        .or_else(|| choices.first())
+        .map(|choice| choice.model.id)
+        .unwrap_or(TranscriptionModelId::ParakeetUnifiedEnglish);
+    TranscriptionSelection {
+        model,
+        language: language.into(),
+        recognition_hints: String::new(),
+    }
+}
+
 pub fn validate(selection: &TranscriptionSelection) -> Result<&'static ModelDefinition> {
     if !LANGUAGES
         .iter()

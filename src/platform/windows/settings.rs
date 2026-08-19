@@ -6,7 +6,7 @@ use color_eyre::eyre::{Result, WrapErr, eyre};
 use serde::{Deserialize, Serialize};
 use windows_sys::Win32::Globalization::GetUserDefaultLocaleName;
 
-use crate::transcription_models::{TranscriptionModelId, TranscriptionSelection};
+use crate::transcription_models::TranscriptionSelection;
 
 const LOCALE_NAME_CAPACITY: usize = 85;
 
@@ -338,20 +338,13 @@ impl WindowsHotkey {
 }
 
 pub fn recommended_selection(language: &str) -> TranscriptionSelection {
-    let language = if language.eq_ignore_ascii_case("pl") {
-        "pl"
-    } else {
-        "en"
-    };
-    TranscriptionSelection {
-        model: if language == "pl" {
-            TranscriptionModelId::ParakeetV3
-        } else {
-            TranscriptionModelId::ParakeetUnifiedEnglish
-        },
-        language: language.into(),
-        recognition_hints: String::new(),
-    }
+    crate::transcription_models::recommended_selection(&language.to_ascii_lowercase())
+}
+
+/// Whether a persisted settings file exists; a first run has none, and
+/// the app then offers onboarding.
+pub fn exists() -> bool {
+    settings_path().is_ok_and(|path| path.exists())
 }
 
 pub(crate) fn user_language() -> String {
@@ -375,6 +368,7 @@ fn settings_path() -> Result<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::transcription_models::TranscriptionModelId;
 
     #[test]
     fn polish_uses_the_multilingual_model() {
@@ -384,8 +378,15 @@ mod tests {
     }
 
     #[test]
-    fn other_languages_fall_back_to_english() {
+    fn supported_languages_keep_their_recommended_model() {
         let selection = recommended_selection("de");
+        assert_eq!(selection.model, TranscriptionModelId::ParakeetV3);
+        assert_eq!(selection.language, "de");
+    }
+
+    #[test]
+    fn unknown_languages_fall_back_to_english() {
+        let selection = recommended_selection("tlh");
         assert_eq!(
             selection.model,
             TranscriptionModelId::ParakeetUnifiedEnglish

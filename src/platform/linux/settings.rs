@@ -150,6 +150,12 @@ impl LinuxHotkey {
     }
 }
 
+/// Whether a persisted settings file exists; a first run has none, and
+/// the app then offers onboarding.
+pub fn exists() -> bool {
+    settings_path().is_ok_and(|path| path.exists())
+}
+
 fn settings_path() -> Result<PathBuf> {
     Ok(crate::app_paths::support_dir()?.join("linux-settings.json"))
 }
