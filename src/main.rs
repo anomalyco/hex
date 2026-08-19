@@ -23,6 +23,8 @@ pub(crate) use common::{feedback, text_replacements};
 #[cfg(any(target_os = "linux", target_os = "windows"))]
 pub(crate) use desktop::activity_pane as desktop_activity_pane;
 #[cfg(any(target_os = "linux", target_os = "windows"))]
+pub(crate) use desktop::hud_lab as desktop_hud_lab;
+#[cfg(any(target_os = "linux", target_os = "windows"))]
 pub(crate) use desktop::i18n as desktop_i18n;
 #[cfg(any(target_os = "linux", target_os = "windows"))]
 pub(crate) use desktop::model_catalog as desktop_model_catalog;
@@ -104,7 +106,6 @@ struct Cli {
 }
 
 static SHUTDOWN: AtomicBool = AtomicBool::new(false);
-#[cfg(target_os = "macos")]
 pub(crate) const DEVELOPER_FEATURES_ENABLED: bool = cfg!(debug_assertions);
 
 #[cfg(target_os = "macos")]

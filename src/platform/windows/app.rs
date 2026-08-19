@@ -8,9 +8,9 @@ use std::time::{Duration, Instant};
 use color_eyre::Result;
 use color_eyre::eyre::eyre;
 use gpui::{
-    AnyElement, App, Application, Bounds, Context, Entity, FontWeight, MouseButton, MouseDownEvent,
-    MouseMoveEvent, Pixels, Point, Subscription, Timer, TitlebarOptions, Window, WindowBounds,
-    WindowOptions, canvas, div, prelude::*, px, relative, rgb, rgba, size,
+    AnyElement, App, Application, Bounds, Context, Div, Entity, FontWeight, MouseButton,
+    MouseDownEvent, MouseMoveEvent, Pixels, Point, Subscription, Timer, TitlebarOptions, Window,
+    WindowBounds, WindowOptions, canvas, div, prelude::*, px, relative, rgb, size,
 };
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use tray_icon::menu::{Menu, MenuEvent, MenuItem};
@@ -32,20 +32,19 @@ use crate::desktop_host::{
 };
 use crate::desktop_transcription_picker::TranscriptionPickerDelegate;
 use crate::desktop_ui::{
-    DIVIDER, FAINT, LINE, MUTED, NavigationIcon, OVERLAY_PANEL, OVERLAY_SMOKE, PANE_LIST_WIDTH,
-    PANEL_RADIUS, SIDEBAR_WIDTH, SURFACE, SURFACE_HOVER, SURFACE_SELECTED, TEXT, TEXT_ON_ACCENT,
-    TEXT_SOFT, accent_color, compact_button, compact_panel, disclosure_button, dropdown_backdrop,
-    dropdown_item, dropdown_panel, dropdown_panel_with_width, empty_message, error_message,
-    header_button, hotkey_keycaps, navigation_item, pane_body, pane_content,
-    pane_header_with_action, section_label, segmented_control, segmented_item, settings_panel,
-    settings_row, settings_section_label, sidebar_frame, toggle, window_frame,
+    DIVIDER, FAINT, LINE, MUTED, NavigationIcon, PANE_LIST_WIDTH, SIDEBAR_WIDTH, SURFACE_SELECTED,
+    TEXT, TEXT_ON_ACCENT, TEXT_SOFT, accent_color, compact_button, compact_panel,
+    disclosure_button, dropdown_backdrop, dropdown_item, dropdown_panel, dropdown_panel_with_width,
+    empty_message, error_message, header_button, hotkey_keycaps, navigation_item, pane_body,
+    pane_content, pane_header_with_action, section_label, segmented_control, segmented_item,
+    settings_panel, settings_row, settings_section_label, sidebar_frame, toggle, window_frame,
 };
 use crate::events::EventReader;
 use crate::history::{History, HistoryEntry, HistoryRetention};
 use crate::text_input::{Changed as TextChanged, TextInput};
 use crate::windows_i18n::{tr, tr_fill};
 use crate::windows_settings::IndicatorPosition;
-use crate::windows_ui::{CRITICAL, DIALOG_STROKE, SUCCESS, caption_bar, selection_pill};
+use crate::windows_ui::{CRITICAL, SUCCESS, caption_bar, selection_pill};
 
 const WINDOW_WIDTH: f32 = 1040.0;
 const WINDOW_HEIGHT: f32 = 700.0;
@@ -108,6 +107,7 @@ struct WindowsDesktopHost {
 struct WindowsApp {
     host: WindowsDesktopHost,
     pane: WindowsPane,
+    hud_lab: crate::desktop_hud_lab::HudLabState,
     history_entries: Vec<HistoryEntry>,
     selected_history: Option<u64>,
     history_copied: Option<u64>,
@@ -131,7 +131,8 @@ struct WindowsApp {
     model_catalog_language_dropdown_open: bool,
     model_catalog_language_dropdown_bounds: Option<Bounds<Pixels>>,
     microphone_picker_open: bool,
-    hotkey_picker_open: bool,
+    /// Which shortcut row is recording the user's next chord, if any.
+    hotkey_capture: Option<(HotkeyTarget, crate::windows_input::ChordCapture)>,
     indicator_hwnd: Option<HWND>,
     indicator_scale: f32,
     volume_slider_bounds: Option<Bounds<Pixels>>,
@@ -153,6 +154,24 @@ enum WindowsPane {
     Modes,
     VoiceAction,
     History,
+    HudLab,
+}
+
+/// Which shortcut a settings row is re-recording.
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum HotkeyTarget {
+    Dictation,
+    PasteLast,
+    VoiceAction,
+}
+
+impl HotkeyTarget {
+    /// Paste Last and Voice Action chords need a regular key (the hook
+    /// cannot distinguish a modifier-only tap from ordinary typing), so a
+    /// modifier-only capture keeps recording for them.
+    fn requires_key(self) -> bool {
+        matches!(self, Self::PasteLast | Self::VoiceAction)
+    }
 }
 
 struct ReplacementInputs {
@@ -277,6 +296,7 @@ pub fn open(event_path: PathBuf, shutdown: &'static AtomicBool, start_hidden: bo
                         WindowsApp {
                             host,
                             pane: WindowsPane::Settings,
+                            hud_lab: crate::desktop_hud_lab::HudLabState::new(),
                             recognition_hints_input,
                             _recognition_hints_subscription: recognition_hints_subscription,
                             history_search: String::new(),
@@ -300,7 +320,7 @@ pub fn open(event_path: PathBuf, shutdown: &'static AtomicBool, start_hidden: bo
                             model_catalog_language_dropdown_open: false,
                             model_catalog_language_dropdown_bounds: None,
                             microphone_picker_open: false,
-                            hotkey_picker_open: false,
+                            hotkey_capture: None,
                             indicator_hwnd: None,
                             indicator_scale: 1.0,
                             volume_slider_bounds: None,
@@ -367,6 +387,12 @@ pub fn open(event_path: PathBuf, shutdown: &'static AtomicBool, start_hidden: bo
         }
         let indicator_app = app.clone();
         cx.spawn(async move |cx| {
+            // The pump is the HUD's display link: it forwards dictation
+            // events, steps the springs once per tick, and keeps the OS
+            // window on screen exactly while the model says the HUD is
+            // visible — through transcription and the exit animation,
+            // like the macOS indicator.
+            let mut shown = false;
             loop {
                 Timer::after(Duration::from_millis(16)).await;
                 while let Ok(event) = indicator_events.try_recv() {
@@ -374,32 +400,28 @@ pub fn open(event_path: PathBuf, shutdown: &'static AtomicBool, start_hidden: bo
                         continue;
                     };
                     if indicator
-                        .update(cx, |indicator, cx| indicator.handle(event, cx))
+                        .update(cx, |indicator, _| indicator.handle(event))
                         .is_err()
                     {
                         return;
                     }
-                    let position = indicator_app
-                        .update(cx, |app, _| app.host.settings.indicator_position)
-                        .unwrap_or_default();
-                    // The pill is visible only while audio is being captured;
-                    // it leaves as soon as the shortcut is released instead of
-                    // lingering through transcription.
-                    let show = position != IndicatorPosition::Hidden
-                        && matches!(
-                            event,
-                            crate::windows_indicator::WindowsIndicatorEvent::Recording
-                                | crate::windows_indicator::WindowsIndicatorEvent::Meter(_)
-                        );
-                    if show
-                        && matches!(
-                            event,
-                            crate::windows_indicator::WindowsIndicatorEvent::Recording
-                        )
-                    {
+                }
+                let Some(indicator) = &indicator else {
+                    continue;
+                };
+                let Ok(visible) = indicator.update(cx, |indicator, cx| indicator.tick(cx)) else {
+                    return;
+                };
+                let position = indicator_app
+                    .update(cx, |app, _| app.host.settings.indicator_position)
+                    .unwrap_or_default();
+                let show = visible && position != IndicatorPosition::Hidden;
+                if show != shown {
+                    if show {
                         position_indicator_window(indicator_hwnd, indicator_scale, position);
                     }
                     set_window_visible(indicator_hwnd, show);
+                    shown = show;
                 }
             }
         })
@@ -592,6 +614,7 @@ fn configure_indicator_window(hwnd: Option<HWND>, scale_factor: f32, position: I
         ShowWindow(hwnd, SW_HIDE);
     }
     crate::windows_ui::disable_window_tint(hwnd);
+    crate::windows_ui::strip_popup_chrome(hwnd);
     position_indicator_window(Some(hwnd), scale_factor, position);
 }
 
@@ -896,7 +919,11 @@ impl WindowsDesktopHost {
         &mut self,
         hotkey: crate::windows_settings::WindowsHotkey,
     ) -> Result<()> {
-        hotkey.validate()?;
+        hotkey.validate().map_err(|error| {
+            let error = format!("That chord cannot be a dictation shortcut: {error:#}");
+            self.settings_error = Some(error.clone());
+            eyre!(error)
+        })?;
         if hotkey == self.settings.dictation_hotkey {
             self.settings_error = None;
             return Ok(());
@@ -1069,6 +1096,34 @@ impl WindowsDesktopHost {
         }
     }
 
+    /// Persists a Voice Action binding; choosing one while the feature is
+    /// disabled enables it with that binding.
+    fn set_voice_action_hotkey(
+        &mut self,
+        hotkey: crate::windows_settings::WindowsHotkey,
+    ) -> Result<()> {
+        hotkey.validate().map_err(|error| {
+            let error = format!("That chord cannot be a voice action shortcut: {error:#}");
+            self.settings_error = Some(error.clone());
+            eyre!(error)
+        })?;
+        if Some(&hotkey) == self.settings.voice_action_hotkey.as_ref() {
+            self.settings_error = None;
+            return Ok(());
+        }
+        let mut candidate = self.settings.clone();
+        candidate.voice_action_hotkey = Some(hotkey);
+        candidate.save().map_err(|error| {
+            let error = format!("Could not save the voice action shortcut: {error:#}");
+            self.settings_error = Some(error.clone());
+            eyre!(error)
+        })?;
+        self.settings = candidate;
+        self.settings_error = None;
+        self.restart_listener_for_settings();
+        Ok(())
+    }
+
     fn set_while_dictating(&mut self, behavior: crate::windows_settings::WhileDictating) {
         if behavior == self.settings.while_dictating {
             return;
@@ -1124,6 +1179,34 @@ impl WindowsDesktopHost {
                 self.settings_error = Some(format!("Could not save Paste Last: {error:#}"));
             }
         }
+    }
+
+    /// Persists a captured Paste Last binding; capturing one while the
+    /// feature is disabled enables it with that binding.
+    fn set_paste_last_hotkey(
+        &mut self,
+        hotkey: crate::windows_settings::WindowsHotkey,
+    ) -> Result<()> {
+        hotkey.validate().map_err(|error| {
+            let error = format!("That chord cannot be a Paste Last shortcut: {error:#}");
+            self.settings_error = Some(error.clone());
+            eyre!(error)
+        })?;
+        if Some(&hotkey) == self.settings.paste_last_hotkey.as_ref() {
+            self.settings_error = None;
+            return Ok(());
+        }
+        let mut candidate = self.settings.clone();
+        candidate.paste_last_hotkey = Some(hotkey);
+        candidate.save().map_err(|error| {
+            let error = format!("Could not save the Paste Last shortcut: {error:#}");
+            self.settings_error = Some(error.clone());
+            eyre!(error)
+        })?;
+        self.settings = candidate;
+        self.settings_error = None;
+        self.restart_listener_for_settings();
+        Ok(())
     }
 
     fn set_feedback_volume(&mut self, volume: u8) {
@@ -1614,15 +1697,10 @@ impl WindowsApp {
         cx: &mut Context<Self>,
     ) -> ModeInputs {
         let name = cx.new(|cx| TextInput::new(cx, "e.g. Coding", &mode.name));
-        let applications = cx.new(|cx| {
-            TextInput::new(
-                cx,
-                "e.g. code, chrome, slack",
-                &mode.applications.join(", "),
-            )
-        });
+        let applications = cx
+            .new(|cx| TextInput::new(cx, "e.g. code, chrome, slack", mode.applications.join(", ")));
         let websites =
-            cx.new(|cx| TextInput::new(cx, "e.g. x.com, github.com", &mode.websites.join(", ")));
+            cx.new(|cx| TextInput::new(cx, "e.g. x.com, github.com", mode.websites.join(", ")));
         let name_changed = cx.subscribe(&name, |this, _, _: &TextChanged, cx| this.sync_modes(cx));
         let applications_changed = cx.subscribe(&applications, |this, _, _: &TextChanged, cx| {
             this.sync_modes(cx)
@@ -1766,10 +1844,101 @@ impl WindowsApp {
         self.model_catalog_language_dropdown_open = false;
         self.voice_model_dropdown_open = false;
         self.microphone_picker_open = false;
-        self.hotkey_picker_open = false;
+        self.end_hotkey_capture();
         self.transcription_dropdown_open = false;
         self.dictation_language_dropdown_open = false;
         self.ui_language_dropdown_open = false;
+    }
+
+    /// Ends any active chord capture and re-arms the hotkey hook.
+    fn end_hotkey_capture(&mut self) {
+        if self.hotkey_capture.take().is_some() {
+            crate::windows_input::set_capture_inhibited(false);
+        }
+    }
+
+    /// Starts recording the user's next chord for `target` (clicking the
+    /// same binding again cancels). A 30ms poll loop reads the keyboard
+    /// directly, so modifier-only chords work; the loop parks itself when
+    /// the capture ends. While a capture runs the hotkey hook is
+    /// inhibited (no dictation can trigger and no key is suppressed), and
+    /// the capture cancels itself the moment this app loses the
+    /// foreground, so keystrokes typed elsewhere can never rebind.
+    fn toggle_hotkey_capture(&mut self, target: HotkeyTarget, cx: &mut Context<Self>) {
+        if self
+            .hotkey_capture
+            .as_ref()
+            .is_some_and(|(active, _)| *active == target)
+        {
+            self.end_hotkey_capture();
+            cx.notify();
+            return;
+        }
+        self.close_popups();
+        self.hotkey_capture = Some((target, crate::windows_input::ChordCapture::new()));
+        crate::windows_input::set_capture_inhibited(true);
+        cx.notify();
+        cx.spawn(async move |this, cx| {
+            loop {
+                Timer::after(Duration::from_millis(30)).await;
+                let done = this
+                    .update(cx, |this, cx| {
+                        let Some((active, capture)) = this.hotkey_capture.as_mut() else {
+                            return true;
+                        };
+                        if *active != target {
+                            return true;
+                        }
+                        if !crate::windows_input::app_is_foreground() {
+                            this.end_hotkey_capture();
+                            cx.notify();
+                            return true;
+                        }
+                        match capture.poll() {
+                            crate::windows_input::ChordPoll::Pending => false,
+                            crate::windows_input::ChordPoll::Cancelled => {
+                                this.end_hotkey_capture();
+                                cx.notify();
+                                true
+                            }
+                            crate::windows_input::ChordPoll::Captured(hotkey) => {
+                                if target.requires_key() && hotkey.key.is_none() {
+                                    *capture = crate::windows_input::ChordCapture::new();
+                                    return false;
+                                }
+                                this.end_hotkey_capture();
+                                let _ = match target {
+                                    HotkeyTarget::Dictation => {
+                                        this.host.set_dictation_hotkey(hotkey)
+                                    }
+                                    HotkeyTarget::PasteLast => {
+                                        this.host.set_paste_last_hotkey(hotkey)
+                                    }
+                                    HotkeyTarget::VoiceAction => {
+                                        this.host.set_voice_action_hotkey(hotkey)
+                                    }
+                                };
+                                cx.notify();
+                                true
+                            }
+                        }
+                    })
+                    .unwrap_or(true);
+                if done {
+                    return;
+                }
+            }
+        })
+        .detach();
+    }
+
+    /// The accent-colored "recording" hint a shortcut row shows in place
+    /// of its keycaps while a capture is active.
+    fn capture_hint() -> Div {
+        div()
+            .text_size(px(11.0))
+            .text_color(rgb(accent_color()))
+            .child(tr("Press the new shortcut, Esc cancels"))
     }
 
     fn set_ui_language(&mut self, code: Option<&'static str>) {
@@ -1960,6 +2129,7 @@ impl WindowsApp {
         let modes_selected = self.pane == WindowsPane::Modes;
         let voice_action_selected = self.pane == WindowsPane::VoiceAction;
         let history_selected = self.pane == WindowsPane::History;
+        let hud_lab_selected = self.pane == WindowsPane::HudLab;
         let update = match self.host.updater.state() {
             crate::windows_updater::UpdateCheck::Available { version, url } => Some((version, url)),
             _ => None,
@@ -1976,6 +2146,7 @@ impl WindowsApp {
                     .id("windows-nav-settings")
                     .child(tr("Settings"))
                     .on_click(cx.listener(|this, _, _, cx| {
+                        this.close_popups();
                         this.pane = WindowsPane::Settings;
                         cx.notify();
                     })),
@@ -1985,6 +2156,7 @@ impl WindowsApp {
                     .id("windows-nav-modes")
                     .child(tr("Modes"))
                     .on_click(cx.listener(|this, _, _, cx| {
+                        this.close_popups();
                         this.pane = WindowsPane::Modes;
                         cx.notify();
                     })),
@@ -1994,6 +2166,7 @@ impl WindowsApp {
                     .id("windows-nav-voice-action")
                     .child(tr("Voice Action"))
                     .on_click(cx.listener(|this, _, _, cx| {
+                        this.close_popups();
                         this.pane = WindowsPane::VoiceAction;
                         if crate::windows_voice_action::opencode_installed() {
                             this.host.request_opencode_catalog();
@@ -2006,17 +2179,33 @@ impl WindowsApp {
                     .id("windows-nav-history")
                     .child(tr("History"))
                     .on_click(cx.listener(|this, _, _, cx| {
+                        this.close_popups();
                         this.pane = WindowsPane::History;
                         this.history_clear_armed = false;
                         this.reload_history();
                         cx.notify();
                     })),
             )
+            .when(crate::DEVELOPER_FEATURES_ENABLED, |sidebar| {
+                sidebar.child(
+                    // Between History and Activity, matching the macOS
+                    // sidebar's pane order.
+                    navigation_item(NavigationIcon::HudLab, hud_lab_selected)
+                        .id("windows-nav-hud-lab")
+                        .child(tr("HUD Lab"))
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.close_popups();
+                            this.pane = WindowsPane::HudLab;
+                            cx.notify();
+                        })),
+                )
+            })
             .child(
                 navigation_item(NavigationIcon::Activity, activity_selected)
                     .id("windows-nav-activity")
                     .child(tr("Activity"))
                     .on_click(cx.listener(|this, _, _, cx| {
+                        this.close_popups();
                         this.pane = WindowsPane::Activity;
                         cx.notify();
                     })),
@@ -2242,22 +2431,57 @@ impl WindowsApp {
             }),
         );
         let paste_last_enabled = self.host.settings.paste_last_hotkey.is_some();
+        let capturing_dictation = matches!(self.hotkey_capture, Some((HotkeyTarget::Dictation, _)));
+        let capturing_paste_last =
+            matches!(self.hotkey_capture, Some((HotkeyTarget::PasteLast, _)));
         let paste_last_control = div()
             .flex()
             .items_center()
             .gap_3()
-            .when_some(snapshot.paste_last_shortcut.clone(), |control, keycaps| {
-                control.child(hotkey_keycaps(keycaps, 1.0))
-            })
-            .when(!paste_last_enabled, |control| {
-                control.child(
-                    div()
-                        .text_size(px(11.0))
-                        .text_color(rgb(FAINT))
-                        .child(tr("Disabled")),
-                )
-            })
-            .child(toggle(if paste_last_enabled { 1.0 } else { 0.0 }));
+            .child(
+                // Clicking the binding records a new chord; the toggle
+                // below stays its own click target.
+                div()
+                    .id("windows-paste-last-binding")
+                    .cursor_pointer()
+                    .flex()
+                    .items_center()
+                    .gap_3()
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        cx.stop_propagation();
+                        this.toggle_hotkey_capture(HotkeyTarget::PasteLast, cx);
+                    }))
+                    .child(if capturing_paste_last {
+                        Self::capture_hint().into_any_element()
+                    } else {
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_3()
+                            .when_some(snapshot.paste_last_shortcut.clone(), |control, keycaps| {
+                                control.child(hotkey_keycaps(keycaps, 1.0))
+                            })
+                            .when(!paste_last_enabled, |control| {
+                                control.child(
+                                    div()
+                                        .text_size(px(11.0))
+                                        .text_color(rgb(FAINT))
+                                        .child(tr("Disabled")),
+                                )
+                            })
+                            .into_any_element()
+                    }),
+            )
+            .child(
+                div()
+                    .id("windows-paste-last-toggle")
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        cx.stop_propagation();
+                        this.host.set_paste_last_enabled(!paste_last_enabled);
+                        cx.notify();
+                    }))
+                    .child(toggle(if paste_last_enabled { 1.0 } else { 0.0 })),
+            );
         let action = self.listener_action(snapshot, cx);
         let status_hint = format!(
             "{device} · {}",
@@ -2525,21 +2749,25 @@ impl WindowsApp {
                                             settings_row(
                                                 "Dictation shortcut",
                                                 "Hold while speaking; release to transcribe and paste",
-                                                hotkey_keycaps(
-                                                    snapshot.dictation_shortcut.clone(),
-                                                    1.0,
-                                                ),
-                                            )
-                                            .id("windows-dictation-shortcut")
-                                            .cursor_pointer()
-                                            .hover(|row| row.bg(rgb(SURFACE_HOVER)))
-                                            .on_click(cx.listener(|this, _, _, cx| {
-                                                this.transcription_picker =
-                                                    TranscriptionPickerState::Closed;
-                                                this.microphone_picker_open = false;
-                                                this.hotkey_picker_open = true;
-                                                cx.notify();
-                                            })),
+                                                div()
+                                                    .id("windows-dictation-shortcut")
+                                                    .cursor_pointer()
+                                                    .on_click(cx.listener(|this, _, _, cx| {
+                                                        this.toggle_hotkey_capture(
+                                                            HotkeyTarget::Dictation,
+                                                            cx,
+                                                        );
+                                                    }))
+                                                    .child(if capturing_dictation {
+                                                        Self::capture_hint().into_any_element()
+                                                    } else {
+                                                        hotkey_keycaps(
+                                                            snapshot.dictation_shortcut.clone(),
+                                                            1.0,
+                                                        )
+                                                        .into_any_element()
+                                                    }),
+                                            ),
                                         )
                                         .child(
                                             settings_row(
@@ -2573,20 +2801,11 @@ impl WindowsApp {
                                                 })),
                                             )
                                         })
-                                        .child(
-                                            settings_row(
-                                                "Paste last dictation",
-                                                "Insert the most recent completed dictation at the current focus",
-                                                paste_last_control,
-                                            )
-                                            .id("windows-paste-last")
-                                            .on_click(cx.listener(move |this, _, _, cx| {
-                                                this.host.set_paste_last_enabled(
-                                                    !paste_last_enabled,
-                                                );
-                                                cx.notify();
-                                            })),
-                                        )
+                                        .child(settings_row(
+                                            "Paste last dictation",
+                                            "Insert the most recent completed dictation at the current focus",
+                                            paste_last_control,
+                                        ))
                                         .child(settings_row(
                                             "While dictating",
                                             "Control other audio while a dictation records",
@@ -3024,27 +3243,62 @@ impl WindowsApp {
     fn render_voice_action(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let enabled = self.host.settings.voice_action_hotkey.is_some();
         let opencode_installed = crate::windows_voice_action::opencode_installed();
+        let capturing_voice_action =
+            matches!(self.hotkey_capture, Some((HotkeyTarget::VoiceAction, _)));
         let shortcut_control = div()
             .flex()
             .items_center()
             .gap_3()
-            .when_some(
-                self.host
-                    .settings
-                    .voice_action_hotkey
-                    .as_ref()
-                    .map(crate::windows_settings::WindowsHotkey::keycaps),
-                |control, keycaps| control.child(hotkey_keycaps(keycaps, 1.0)),
+            .child(
+                // Clicking the binding records a new chord; the row around
+                // it stays inert.
+                div()
+                    .id("windows-voice-action-binding")
+                    .cursor_pointer()
+                    .flex()
+                    .items_center()
+                    .gap_3()
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.toggle_hotkey_capture(HotkeyTarget::VoiceAction, cx);
+                    }))
+                    .child(if capturing_voice_action {
+                        Self::capture_hint().into_any_element()
+                    } else {
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_3()
+                            .when_some(
+                                self.host
+                                    .settings
+                                    .voice_action_hotkey
+                                    .as_ref()
+                                    .map(crate::windows_settings::WindowsHotkey::keycaps),
+                                |control, keycaps| control.child(hotkey_keycaps(keycaps, 1.0)),
+                            )
+                            .when(!enabled, |control| {
+                                control.child(
+                                    div()
+                                        .text_size(px(11.0))
+                                        .text_color(rgb(FAINT))
+                                        .child(tr("Disabled")),
+                                )
+                            })
+                            .into_any_element()
+                    }),
             )
-            .when(!enabled, |control| {
-                control.child(
-                    div()
-                        .text_size(px(11.0))
-                        .text_color(rgb(FAINT))
-                        .child(tr("Disabled")),
-                )
-            })
-            .child(toggle(if enabled { 1.0 } else { 0.0 }));
+            .child(
+                // The toggle is its own click target: it must flip the
+                // feature without opening the rebind picker underneath.
+                div()
+                    .id("windows-voice-action-toggle")
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        cx.stop_propagation();
+                        this.host.set_voice_action_enabled(!enabled);
+                        cx.notify();
+                    }))
+                    .child(toggle(if enabled { 1.0 } else { 0.0 })),
+            );
         let current_model = self.host.settings.voice_action_model.clone();
         let model_label = match (&current_model, &self.host.opencode_catalog) {
             (Some(model), Some(catalog)) => {
@@ -3139,12 +3393,7 @@ impl WindowsApp {
                                                 "Hold to speak; selected text is included automatically",
                                                 shortcut_control,
                                             )
-                                            .border_b_0()
-                                            .id("windows-voice-action-shortcut")
-                                            .on_click(cx.listener(move |this, _, _, cx| {
-                                                this.host.set_voice_action_enabled(!enabled);
-                                                cx.notify();
-                                            })),
+                                            .border_b_0(),
                                         ),
                                     )
                                     .child(settings_section_label("Processing"))
@@ -3165,6 +3414,15 @@ impl WindowsApp {
                                                 )
                                                 .border_b_0(),
                                             ),
+                                    )
+                                    .when_some(
+                                        self.host.settings_error.clone(),
+                                        |content, error| {
+                                            content.child(error_message(
+                                                "The shortcut could not be saved.",
+                                                error,
+                                            ))
+                                        },
                                     ),
                             ),
                         ),
@@ -3740,154 +3998,6 @@ impl WindowsApp {
             cx,
         )
     }
-
-    fn render_hotkey_picker(&mut self, cx: &mut Context<Self>) -> AnyElement {
-        let current = self.host.settings.dictation_hotkey.clone();
-        let presets = [
-            (
-                "Ctrl + Win",
-                tr("Recommended Windows push-to-talk shortcut"),
-                crate::windows_settings::WindowsHotkey::default(),
-            ),
-            (
-                "Ctrl + Alt + Space",
-                tr("Three-key fallback for keyboards without a Windows key"),
-                crate::windows_settings::WindowsHotkey::ctrl_alt_space(),
-            ),
-        ];
-        let rows = presets
-            .into_iter()
-            .enumerate()
-            .map(|(index, (title, description, binding))| {
-                let selected = binding == current;
-                let keycaps = binding.keycaps();
-                div()
-                    .id(("windows-hotkey-preset", index))
-                    .w_full()
-                    .min_h(px(66.0))
-                    .px_4()
-                    .py_3()
-                    .mb_3()
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .rounded(px(PANEL_RADIUS))
-                    .border_1()
-                    .border_color(if selected {
-                        rgb(accent_color())
-                    } else {
-                        rgb(LINE)
-                    })
-                    .bg(rgb(SURFACE))
-                    .cursor_pointer()
-                    .hover(|row| row.bg(rgb(SURFACE_HOVER)))
-                    .child(
-                        div()
-                            .min_w_0()
-                            .flex_1()
-                            .child(
-                                div()
-                                    .text_size(px(13.0))
-                                    .font_weight(FontWeight::SEMIBOLD)
-                                    .text_color(rgb(TEXT))
-                                    .child(title),
-                            )
-                            .child(
-                                div()
-                                    .pt_1()
-                                    .text_size(px(11.0))
-                                    .text_color(rgb(MUTED))
-                                    .child(description),
-                            ),
-                    )
-                    .child(
-                        div()
-                            .pl_4()
-                            .flex()
-                            .items_center()
-                            .gap_3()
-                            .child(hotkey_keycaps(keycaps, 1.0))
-                            .when(selected, |right| {
-                                right.child(
-                                    div()
-                                        .text_size(px(10.0))
-                                        .font_weight(FontWeight::SEMIBOLD)
-                                        .text_color(rgb(accent_color()))
-                                        .child(tr("Current")),
-                                )
-                            }),
-                    )
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        cx.stop_propagation();
-                        if this.host.set_dictation_hotkey(binding.clone()).is_ok() {
-                            this.hotkey_picker_open = false;
-                        }
-                        cx.notify();
-                    }))
-            });
-
-        div()
-            .id("windows-hotkey-picker-backdrop")
-            .absolute()
-            .top(px(crate::windows_ui::CAPTION_HEIGHT))
-            .left_0()
-            .size_full()
-            .occlude()
-            .flex()
-            .items_center()
-            .justify_center()
-            .bg(rgba(OVERLAY_SMOKE))
-            .on_click(cx.listener(|this, _, _, cx| {
-                this.hotkey_picker_open = false;
-                cx.notify();
-            }))
-            .child(
-                div()
-                    .id("windows-hotkey-picker")
-                    .w(px(560.0))
-                    .flex()
-                    .flex_col()
-                    .rounded(px(8.0))
-                    .border_1()
-                    .border_color(rgb(DIALOG_STROKE))
-                    .bg(rgb(OVERLAY_PANEL))
-                    .shadow_2xl()
-                    .overflow_hidden()
-                    .on_click(|_, _, cx| cx.stop_propagation())
-                    .child(
-                        div()
-                            .px_6()
-                            .py_5()
-                            .border_b_1()
-                            .border_color(rgb(DIVIDER))
-                            .child(
-                                div()
-                                    .text_size(px(20.0))
-                                    .font_weight(FontWeight::SEMIBOLD)
-                                    .child(tr("Choose dictation shortcut")),
-                            )
-                            .child(
-                                div()
-                                    .pt_1()
-                                    .text_size(px(12.0))
-                                    .text_color(rgb(MUTED))
-                                    .child(tr(
-                                        "Hold the shortcut to record; release it to transcribe and paste.",
-                                    )),
-                            ),
-                    )
-                    .child(div().p_5().pb_2().children(rows))
-                    .child(
-                        div()
-                            .px_6()
-                            .pb_5()
-                            .text_size(px(10.0))
-                            .text_color(rgb(FAINT))
-                            .child(tr("Escape still cancels the active recording.")),
-                    ),
-            )
-            .into_any_element()
-    }
 }
 
 impl crate::desktop_onboarding::OnboardingDelegate for WindowsApp {
@@ -4043,6 +4153,24 @@ impl TranscriptionPickerDelegate for WindowsApp {
     }
 }
 
+impl crate::desktop_hud_lab::HudLabDelegate for WindowsApp {
+    fn hud_lab(&self) -> &crate::desktop_hud_lab::HudLabState {
+        &self.hud_lab
+    }
+
+    fn hud_lab_mut(&mut self) -> &mut crate::desktop_hud_lab::HudLabState {
+        &mut self.hud_lab
+    }
+
+    fn configure_platform_hud(&mut self, tuning: crate::desktop_hud_lab::HudTuning) {
+        self.host
+            .indicator
+            .send(crate::windows_indicator::WindowsIndicatorEvent::Configure(
+                tuning,
+            ));
+    }
+}
+
 impl Render for WindowsApp {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         debug_assert!(self.host.capabilities().listener_control);
@@ -4056,6 +4184,7 @@ impl Render for WindowsApp {
             WindowsPane::Modes => self.render_modes(cx),
             WindowsPane::VoiceAction => self.render_voice_action(cx),
             WindowsPane::History => self.render_history(cx),
+            WindowsPane::HudLab => crate::desktop_hud_lab::render_hud_lab_pane(self, window, cx),
         };
         let model_picker =
             self.transcription_picker
@@ -4069,9 +4198,6 @@ impl Render for WindowsApp {
                         cx,
                     )
                 });
-        let hotkey_picker = self
-            .hotkey_picker_open
-            .then(|| self.render_hotkey_picker(cx));
         let model_catalog_language_dropdown =
             self.model_catalog_language_dropdown_open.then(|| {
                 crate::desktop_model_catalog::render_model_catalog_filter_dropdown(
@@ -4132,7 +4258,6 @@ impl Render for WindowsApp {
             .children(transcription_dropdown)
             .children(dictation_language_dropdown)
             .children(ui_language_dropdown)
-            .children(hotkey_picker)
             .children(onboarding)
             .children(onboarding_language_dropdown)
     }

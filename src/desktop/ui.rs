@@ -1,4 +1,6 @@
-use gpui::{AnyElement, Div, FontWeight, IntoElement, Pixels, Rgba, div, prelude::*, px, rgb};
+use gpui::{
+    AnyElement, Div, FontWeight, IntoElement, Pixels, Rgba, div, prelude::*, px, relative, rgb,
+};
 
 #[cfg(any(target_os = "linux", target_os = "windows"))]
 use gpui::{Image, ImageFormat, img};
@@ -519,6 +521,43 @@ pub(crate) fn toggle(position: f32) -> AnyElement {
         .into_any_element()
 }
 
+/// The Fluent slider track: a 4px rail filled to `fraction` with the accent
+/// and a round accent thumb, the styling the Windows volume slider
+/// established. Callers wrap it in an interactive element that owns
+/// hit-testing and the drag math.
+#[cfg_attr(target_os = "macos", allow(dead_code))]
+pub(crate) fn slider_track(fraction: f32) -> Div {
+    let fraction = fraction.clamp(0.0, 1.0);
+    div()
+        .relative()
+        .w_full()
+        .h(px(4.0))
+        .rounded_full()
+        .bg(rgb(0x454545))
+        .child(
+            div()
+                .absolute()
+                .left_0()
+                .top_0()
+                .h_full()
+                .w(relative(fraction))
+                .rounded_full()
+                .bg(rgb(accent_color())),
+        )
+        .child(
+            div()
+                .absolute()
+                .top(px(-5.0))
+                .left(relative(fraction))
+                .ml(px(-7.0))
+                .size(px(14.0))
+                .rounded_full()
+                .border_2()
+                .border_color(rgb(0x1c1c1c))
+                .bg(rgb(accent_color())),
+        )
+}
+
 pub(crate) fn settings_section_label(label: &'static str) -> AnyElement {
     div()
         .pt(px(24.0))
@@ -578,8 +617,13 @@ pub(crate) fn compact_header_plus_button() -> Div {
 }
 
 pub(crate) fn compact_panel() -> Div {
+    // An explicit flex column: rows stretch to the card's width, so a
+    // row's own percent width never decides its extent (percent widths
+    // inside these cards resolve inconsistently between panes).
     div()
         .w_full()
+        .flex()
+        .flex_col()
         .rounded(px(PANEL_RADIUS))
         .border_1()
         .border_color(rgb(LINE))
@@ -662,10 +706,16 @@ pub(crate) fn settings_row(
         .flex()
         .items_center()
         .justify_between()
+        .gap_4()
         .border_b_1()
         .border_color(rgb(DIVIDER))
-        .child(settings_copy(title, description))
-        .child(control)
+        .child(
+            div()
+                .flex_1()
+                .min_w(px(0.0))
+                .child(settings_copy(title, description)),
+        )
+        .child(div().flex_none().child(control))
 }
 
 #[cfg_attr(target_os = "linux", allow(dead_code))]

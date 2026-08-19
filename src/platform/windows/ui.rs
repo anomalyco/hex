@@ -42,7 +42,7 @@ const CAPTION_BUTTON_WIDTH: f32 = 46.0;
 // Fluent dark control fills live in the shared token set; re-exported so
 // Windows-only code keeps its historical paths.
 pub(crate) use crate::desktop_ui::{
-    CONTROL_FILL, CONTROL_FILL_PRESSED, CONTROL_STROKE, CRITICAL, DIALOG_STROKE, SUCCESS,
+    CONTROL_FILL, CONTROL_FILL_PRESSED, CONTROL_STROKE, CRITICAL, SUCCESS,
 };
 const CLOSE_HOVER: u32 = 0xc42b1c;
 const CLOSE_PRESSED: u32 = 0xb2271a;
@@ -96,6 +96,43 @@ pub(crate) fn apply_window_icon(hwnd: Option<HWND>) {
 /// TRANSPARENTGRADIENT accent policy, which paints a faint veil over the
 /// whole window rectangle. DirectComposition already provides per-pixel
 /// alpha, so switch the policy back to disabled for the HUD.
+/// Windows 11 decorates top-level windows with rounded corners, a hairline
+/// border, and a drop shadow; on the mostly transparent HUD popup they all
+/// read as a ghost box floating around the capsule, so turn them off.
+pub(crate) fn strip_popup_chrome(hwnd: HWND) {
+    use windows_sys::Win32::Graphics::Dwm::{
+        DWMNCRP_DISABLED, DWMWA_BORDER_COLOR, DWMWA_NCRENDERING_POLICY,
+        DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_DONOTROUND, DwmSetWindowAttribute,
+    };
+    // DWMWA_COLOR_NONE: no border at all (not merely transparent).
+    const DWMWA_COLOR_NONE: u32 = 0xFFFF_FFFE;
+    unsafe {
+        let corner = DWMWCP_DONOTROUND;
+        DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_WINDOW_CORNER_PREFERENCE as u32,
+            (&raw const corner).cast(),
+            size_of_val(&corner) as u32,
+        );
+        let color = DWMWA_COLOR_NONE;
+        DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_BORDER_COLOR as u32,
+            (&raw const color).cast(),
+            size_of_val(&color) as u32,
+        );
+        // The shadow is non-client rendering; verified live that disabling
+        // it removes the ghost rectangle behind the transparent HUD.
+        let policy = DWMNCRP_DISABLED;
+        DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_NCRENDERING_POLICY as u32,
+            (&raw const policy).cast(),
+            size_of_val(&policy) as u32,
+        );
+    }
+}
+
 pub(crate) fn disable_window_tint(hwnd: HWND) {
     #[repr(C)]
     struct AccentPolicy {

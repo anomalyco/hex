@@ -185,13 +185,18 @@ pub fn run_with_transcriber(
     let mut pending_voice = false;
     let mut recording_feedback_started = false;
     let mut pending = 0_usize;
+    // The worker drains its queue in order, so a FIFO of ids pairs each
+    // result with the HUD job it belongs to. Repaste jobs get ids too (to
+    // keep the queue aligned) but are never announced to the HUD.
+    let mut next_job_id = 0_u64;
+    let mut job_ids = std::collections::VecDeque::new();
     events.emit(&VoiceEvent::SessionStarted {
         timestamp_ms: now_ms(),
     })?;
     emit_state(&mut events, VoiceState::Listening, &device_label)?;
     println!(
         "HEX is ready on {}. Hold {} to dictate, release to paste; Escape cancels; Ctrl-C stops.",
-        &device_label, hotkey_label
+        device_label, hotkey_label
     );
 
     while !shutdown.load(Ordering::Relaxed) {
@@ -210,7 +215,7 @@ pub fn run_with_transcriber(
                         suppressor.suppress();
                     }
                     if let Some(indicator) = &indicator {
-                        indicator.send(crate::windows_indicator::WindowsIndicatorEvent::Recording);
+                        indicator.send(crate::windows_indicator::WindowsIndicatorEvent::Started);
                     }
                     events.dictation(DictationPhase::Started, "")?;
                     emit_state(&mut events, VoiceState::Dictating, &device_label)?;
@@ -225,7 +230,8 @@ pub fn run_with_transcriber(
                         suppressor.suppress();
                     }
                     if let Some(indicator) = &indicator {
-                        indicator.send(crate::windows_indicator::WindowsIndicatorEvent::Recording);
+                        indicator
+                            .send(crate::windows_indicator::WindowsIndicatorEvent::EditingStarted);
                     }
                     events.dictation(DictationPhase::Started, "")?;
                     emit_state(&mut events, VoiceState::Dictating, &device_label)?;
@@ -239,7 +245,8 @@ pub fn run_with_transcriber(
                         suppressor.suppress();
                     }
                     if let Some(indicator) = &indicator {
-                        indicator.send(crate::windows_indicator::WindowsIndicatorEvent::Recording);
+                        indicator
+                            .send(crate::windows_indicator::WindowsIndicatorEvent::EditingStarted);
                     }
                     events.dictation(DictationPhase::Started, "")?;
                     emit_state(&mut events, VoiceState::Dictating, &device_label)?;
@@ -254,7 +261,7 @@ pub fn run_with_transcriber(
                         suppressor.suppress();
                     }
                     if let Some(indicator) = &indicator {
-                        indicator.send(crate::windows_indicator::WindowsIndicatorEvent::Recording);
+                        indicator.send(crate::windows_indicator::WindowsIndicatorEvent::Started);
                     }
                     events.dictation(DictationPhase::Started, "")?;
                     emit_state(&mut events, VoiceState::Dictating, &device_label)?;
@@ -286,11 +293,16 @@ pub fn run_with_transcriber(
                         "",
                     )?;
                     if let Some(indicator) = &indicator {
-                        indicator.send(if pending > 0 {
-                            crate::windows_indicator::WindowsIndicatorEvent::Processing
-                        } else {
-                            crate::windows_indicator::WindowsIndicatorEvent::Hidden
-                        });
+                        indicator.send(
+                            if matches!(
+                                event.action,
+                                HotkeyAction::Cancel | HotkeyAction::VoiceCancel
+                            ) {
+                                crate::windows_indicator::WindowsIndicatorEvent::Cancelled
+                            } else {
+                                crate::windows_indicator::WindowsIndicatorEvent::Discarded
+                            },
+                        );
                     }
                     emit_state(
                         &mut events,
@@ -324,11 +336,17 @@ pub fn run_with_transcriber(
                         &mut pending,
                         true,
                     )?;
+                    if submitted {
+                        next_job_id += 1;
+                        job_ids.push_back(next_job_id);
+                    }
                     if let Some(indicator) = &indicator {
-                        indicator.send(if submitted || pending > 0 {
-                            crate::windows_indicator::WindowsIndicatorEvent::Processing
+                        indicator.send(if submitted {
+                            crate::windows_indicator::WindowsIndicatorEvent::Submitted {
+                                job_id: next_job_id,
+                            }
                         } else {
-                            crate::windows_indicator::WindowsIndicatorEvent::Hidden
+                            crate::windows_indicator::WindowsIndicatorEvent::Discarded
                         });
                     }
                     emit_state(
@@ -357,11 +375,7 @@ pub fn run_with_transcriber(
                     recording_feedback_started = false;
                     capture.cancel();
                     if let Some(indicator) = &indicator {
-                        indicator.send(if pending > 0 {
-                            crate::windows_indicator::WindowsIndicatorEvent::Processing
-                        } else {
-                            crate::windows_indicator::WindowsIndicatorEvent::Hidden
-                        });
+                        indicator.send(crate::windows_indicator::WindowsIndicatorEvent::Cancelled);
                     }
                     events.dictation(DictationPhase::Cancelled, "")?;
                     emit_state(
@@ -399,11 +413,17 @@ pub fn run_with_transcriber(
                         &mut pending,
                         false,
                     )?;
+                    if submitted {
+                        next_job_id += 1;
+                        job_ids.push_back(next_job_id);
+                    }
                     if let Some(indicator) = &indicator {
-                        indicator.send(if submitted || pending > 0 {
-                            crate::windows_indicator::WindowsIndicatorEvent::Processing
+                        indicator.send(if submitted {
+                            crate::windows_indicator::WindowsIndicatorEvent::Submitted {
+                                job_id: next_job_id,
+                            }
                         } else {
-                            crate::windows_indicator::WindowsIndicatorEvent::Hidden
+                            crate::windows_indicator::WindowsIndicatorEvent::Discarded
                         });
                     }
                     emit_state(
@@ -431,11 +451,7 @@ pub fn run_with_transcriber(
                     capture.cancel();
                     recording = false;
                     if let Some(indicator) = &indicator {
-                        indicator.send(if pending > 0 {
-                            crate::windows_indicator::WindowsIndicatorEvent::Processing
-                        } else {
-                            crate::windows_indicator::WindowsIndicatorEvent::Hidden
-                        });
+                        indicator.send(crate::windows_indicator::WindowsIndicatorEvent::Cancelled);
                     }
                     events.dictation(DictationPhase::Cancelled, "")?;
                     emit_state(
@@ -453,7 +469,12 @@ pub fn run_with_transcriber(
                     }
                 }
                 HotkeyAction::PasteLast if !recording => {
+                    let queued = pending;
                     submit_paste_last(&jobs, &mut events, &mut pending)?;
+                    if pending > queued {
+                        next_job_id += 1;
+                        job_ids.push_back(next_job_id);
+                    }
                     emit_state(&mut events, VoiceState::Transcribing, &device_label)?;
                 }
                 _ => {}
@@ -461,6 +482,15 @@ pub fn run_with_transcriber(
         }
         while let Ok(result) = results.try_recv() {
             pending = pending.saturating_sub(1);
+            let job_id = job_ids.pop_front();
+            if let (Some(indicator), Some(job_id)) = (&indicator, job_id) {
+                // Repaste ids were never announced, so the HUD ignores them.
+                indicator.send(if result.result.is_ok() {
+                    crate::windows_indicator::WindowsIndicatorEvent::JobCompleted { job_id }
+                } else {
+                    crate::windows_indicator::WindowsIndicatorEvent::JobFailed { job_id }
+                });
+            }
             match result.result {
                 Ok(()) => {
                     let text = result.text.unwrap_or_default();
@@ -492,15 +522,6 @@ pub fn run_with_transcriber(
                 },
                 &device_label,
             )?;
-            if let Some(indicator) = &indicator
-                && !recording
-            {
-                indicator.send(if pending > 0 {
-                    crate::windows_indicator::WindowsIndicatorEvent::Processing
-                } else {
-                    crate::windows_indicator::WindowsIndicatorEvent::Hidden
-                });
-            }
         }
 
         match input.recv_timeout(UPDATE_INTERVAL, !recording) {
@@ -563,18 +584,14 @@ pub fn run_with_transcriber(
                     recording_voice = false;
                     capture.cancel();
                     events.dictation(DictationPhase::Cancelled, "")?;
+                    if let Some(indicator) = &indicator {
+                        indicator.send(crate::windows_indicator::WindowsIndicatorEvent::Cancelled);
+                    }
                 }
                 events.dictation(
                     DictationPhase::Failed("microphone stream interrupted; reopening".into()),
                     "",
                 )?;
-                if let Some(indicator) = &indicator {
-                    indicator.send(if pending > 0 {
-                        crate::windows_indicator::WindowsIndicatorEvent::Processing
-                    } else {
-                        crate::windows_indicator::WindowsIndicatorEvent::Hidden
-                    });
-                }
                 emit_state(
                     &mut events,
                     if pending > 0 {
@@ -605,11 +622,7 @@ pub fn run_with_transcriber(
                     "",
                 )?;
                 if let Some(indicator) = &indicator {
-                    indicator.send(if pending > 0 {
-                        crate::windows_indicator::WindowsIndicatorEvent::Processing
-                    } else {
-                        crate::windows_indicator::WindowsIndicatorEvent::Hidden
-                    });
+                    indicator.send(crate::windows_indicator::WindowsIndicatorEvent::Failed);
                 }
                 emit_state(
                     &mut events,
@@ -958,7 +971,7 @@ struct IndicatorGuard(Option<crate::windows_indicator::WindowsIndicatorSender>);
 impl Drop for IndicatorGuard {
     fn drop(&mut self) {
         if let Some(indicator) = &self.0 {
-            indicator.send(crate::windows_indicator::WindowsIndicatorEvent::Hidden);
+            indicator.send(crate::windows_indicator::WindowsIndicatorEvent::Reset);
         }
     }
 }

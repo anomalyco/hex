@@ -1,27 +1,34 @@
+//! The Windows dictation HUD: the shared macOS indicator state machine
+//! drives the CPU port of the Metal shader, rendered at the mac's exact
+//! geometry (112x64 logical points at 2x backing scale) into a
+//! transparent click-through popup. Event vocabulary, springs, and
+//! timing are identical to the macOS HUD.
+//!
+//! The app's 16ms pump owns the frame cadence: it forwards events into
+//! [`WindowsIndicator::handle`], steps the model with
+//! [`WindowsIndicator::tick`], and shows or hides the OS window from the
+//! returned visibility — mirroring how the macOS shell drives its Metal
+//! renderer from a display link and orders the window in and out.
+
+use std::sync::Arc;
 use std::sync::mpsc::{self, Receiver, Sender};
-use std::time::Duration;
+use std::time::Instant;
 
 use gpui::{
-    Animation, AnimationExt, App, Bounds, Context, Render, Window, WindowBackgroundAppearance,
-    WindowBounds, WindowKind, WindowOptions, div, point, prelude::*, pulsating_between, px, rgb,
-    rgba, size,
+    App, Bounds, Context, Render, RenderImage, Window, WindowBackgroundAppearance, WindowBounds,
+    WindowKind, WindowOptions, div, img, point, prelude::*, px, size,
 };
 
-// The window is exactly the pill: any larger canvas shows Windows'
-// composition tint as a ghost rectangle around the HUD.
-pub(crate) const WINDOW_WIDTH: f32 = 118.0;
-pub(crate) const WINDOW_HEIGHT: f32 = 32.0;
-pub(crate) const TOP_OFFSET: f32 = 12.0;
-pub(crate) const BOTTOM_OFFSET: f32 = 24.0;
-const BAR_COUNT: usize = 14;
+use crate::desktop::indicator_model::{DictationIndicatorEvent, IndicatorFrame, IndicatorModel};
+use crate::desktop::indicator_shader;
 
-#[derive(Clone, Copy, Debug)]
-pub enum WindowsIndicatorEvent {
-    Recording,
-    Meter(f32),
-    Processing,
-    Hidden,
-}
+pub(crate) const WINDOW_WIDTH: f32 = crate::desktop::indicator_model::WINDOW_WIDTH;
+pub(crate) const WINDOW_HEIGHT: f32 = crate::desktop::indicator_model::WINDOW_HEIGHT;
+pub(crate) const TOP_OFFSET: f32 = crate::desktop::indicator_model::TOP_OFFSET as f32;
+pub(crate) const BOTTOM_OFFSET: f32 = 24.0;
+const BACKING_SCALE: f32 = 2.0;
+
+pub use crate::desktop::indicator_model::DictationIndicatorEvent as WindowsIndicatorEvent;
 
 #[derive(Clone)]
 pub struct WindowsIndicatorSender(Sender<WindowsIndicatorEvent>);
@@ -32,12 +39,9 @@ impl WindowsIndicatorSender {
     }
 
     pub fn meter(&self, samples: &[f32]) {
-        if samples.is_empty() {
-            return;
+        if let Some(event) = DictationIndicatorEvent::meter(samples) {
+            self.send(event);
         }
-        let sum = samples.iter().map(|sample| sample * sample).sum::<f32>();
-        let rms = (sum / samples.len() as f32).sqrt();
-        self.send(WindowsIndicatorEvent::Meter((rms * 8.0).clamp(0.0, 1.0)));
     }
 }
 
@@ -47,120 +51,68 @@ pub fn channel() -> (WindowsIndicatorSender, Receiver<WindowsIndicatorEvent>) {
 }
 
 pub struct WindowsIndicator {
-    recording: bool,
-    level: f32,
+    model: IndicatorModel,
+    frame: Option<IndicatorFrame>,
+    was_visible: bool,
+    /// The previous frame's texture, evicted from the sprite atlas on the
+    /// next paint — without this every frame leaks an atlas tile.
+    last_render_image: Option<Arc<RenderImage>>,
 }
 
 impl WindowsIndicator {
     pub fn new() -> Self {
+        let mut model = IndicatorModel::new();
+        model.set_backing_scale(BACKING_SCALE);
         Self {
-            recording: true,
-            level: 0.0,
+            model,
+            frame: None,
+            was_visible: false,
+            last_render_image: None,
         }
     }
 
-    pub fn handle(&mut self, event: WindowsIndicatorEvent, cx: &mut Context<Self>) {
-        match event {
-            WindowsIndicatorEvent::Recording => {
-                self.recording = true;
-                self.level = 0.0;
-            }
-            WindowsIndicatorEvent::Meter(level) => {
-                self.recording = true;
-                self.level = self.level * 0.65 + level * 0.35;
-            }
-            WindowsIndicatorEvent::Processing => {
-                self.recording = false;
-                self.level = 0.0;
-            }
-            WindowsIndicatorEvent::Hidden => {
-                self.level = 0.0;
-            }
+    pub fn handle(&mut self, event: WindowsIndicatorEvent) {
+        self.model.handle(event);
+    }
+
+    /// Advances the springs one frame and reports whether the HUD window
+    /// should be on screen. Repaints only around visible frames so the
+    /// idle HUD costs a few spring updates per tick and nothing more.
+    pub fn tick(&mut self, cx: &mut Context<Self>) -> bool {
+        let frame = self.model.frame(Instant::now());
+        let visible = frame.visible;
+        self.frame = Some(frame);
+        if visible || self.was_visible {
+            cx.notify();
         }
-        cx.notify();
+        self.was_visible = visible;
+        visible
     }
 }
 
 impl Render for WindowsIndicator {
-    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
-        let accent = crate::windows_ui::accent();
-        let (badge_fill, badge_glyph) = if self.recording {
-            (accent, 0x000000)
-        } else {
-            (0x2d2d2d, 0xcfcfcf)
+    fn render(&mut self, window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+        if let Some(previous) = self.last_render_image.take() {
+            let _ = window.drop_image(previous);
+        }
+        let Some(frame) = self.frame.as_ref().filter(|frame| frame.visible) else {
+            return div().size_full().into_any_element();
         };
-        let content = if self.recording {
-            let level = self.level;
-            div()
-                .h(px(20.0))
-                .flex()
-                .items_center()
-                .gap(px(2.0))
-                .children((0..BAR_COUNT).map(move |index| {
-                    let center = (BAR_COUNT - 1) as f32 / 2.0;
-                    let distance = (index as f32 - center).abs();
-                    let shape = (1.0 - distance * 0.09).max(0.3);
-                    let height = 3.0 + 15.0 * level.max(0.12) * shape;
-                    div()
-                        .w(px(2.5))
-                        .h(px(height))
-                        .rounded_full()
-                        .bg(rgb(accent))
-                }))
-                .into_any_element()
-        } else {
-            div()
-                .h(px(20.0))
-                .flex()
-                .items_center()
-                .gap(px(4.0))
-                .children((0..3_usize).map(|index| {
-                    div()
-                        .size(px(5.0))
-                        .rounded_full()
-                        .bg(rgb(accent))
-                        .with_animation(
-                            ("hud-processing-dot", index as u64),
-                            Animation::new(Duration::from_millis(700 + index as u64 * 160))
-                                .repeat()
-                                .with_easing(pulsating_between(0.25, 1.0)),
-                            |dot, delta| dot.opacity(delta),
-                        )
-                }))
-                .into_any_element()
-        };
+        let width = (WINDOW_WIDTH * BACKING_SCALE) as usize;
+        let height = (WINDOW_HEIGHT * BACKING_SCALE) as usize;
+        let mut bytes = indicator_shader::render(&frame.uniforms, width, height);
+        // gpui's raw frames carry BGRA in an RGBA container.
+        for pixel in bytes.chunks_exact_mut(4) {
+            pixel.swap(0, 2);
+        }
+        let buffer = image::RgbaImage::from_raw(width as u32, height as u32, bytes)
+            .expect("the shader buffer matches its dimensions");
+        let render_image = Arc::new(RenderImage::new(vec![image::Frame::new(buffer)]));
+        self.last_render_image = Some(render_image.clone());
         div()
             .size_full()
-            .pl(px(5.0))
-            .pr(px(10.0))
-            .flex()
-            .items_center()
-            .gap(px(6.0))
-            .rounded_full()
-            .bg(rgba(0x1c1c1cfa))
-            .child(
-                div()
-                    .size(px(22.0))
-                    .flex_none()
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .rounded_full()
-                    .bg(rgb(badge_fill))
-                    .child(crate::windows_ui::fluent_icon(
-                        "\u{E720}",
-                        11.0,
-                        badge_glyph,
-                    )),
-            )
-            .child(
-                div()
-                    .flex_1()
-                    .min_w(px(0.0))
-                    .flex()
-                    .justify_center()
-                    .child(content),
-            )
+            .child(img(render_image).w(px(WINDOW_WIDTH)).h(px(WINDOW_HEIGHT)))
+            .into_any_element()
     }
 }
 

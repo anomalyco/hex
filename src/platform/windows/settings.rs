@@ -248,16 +248,6 @@ impl WindowsSettings {
 }
 
 impl WindowsHotkey {
-    pub fn ctrl_alt_space() -> Self {
-        Self {
-            control: true,
-            windows: false,
-            alt: true,
-            shift: false,
-            key: Some("space".into()),
-        }
-    }
-
     pub fn paste_last_default() -> Self {
         Self {
             control: true,
@@ -527,6 +517,16 @@ mod tests {
             key: Some("d".into()),
         };
         assert!(binding.validate().is_err());
+    }
+
+    #[test]
+    fn voice_action_default_is_valid_and_unique() {
+        let defaults = WindowsSettings::default();
+        let preset = WindowsHotkey::voice_action_default();
+        assert!(preset.validate().is_ok());
+        assert!(preset.key.is_some(), "voice action requires a key");
+        assert_ne!(preset, defaults.dictation_hotkey);
+        assert_ne!(Some(&preset), defaults.paste_last_hotkey.as_ref());
     }
 
     #[test]

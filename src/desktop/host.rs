@@ -41,10 +41,10 @@ impl DesktopCapabilities {
     #[cfg_attr(target_os = "linux", allow(dead_code))]
     pub(crate) const fn linux_x11() -> Self {
         Self {
-            activity: false,
+            activity: true,
             commands: false,
             history: false,
-            hud_lab: false,
+            hud_lab: crate::DEVELOPER_FEATURES_ENABLED,
             meetings: false,
             modes: false,
             replacements: false,
@@ -60,13 +60,13 @@ impl DesktopCapabilities {
             activity: true,
             commands: false,
             history: true,
-            hud_lab: false,
+            hud_lab: crate::DEVELOPER_FEATURES_ENABLED,
             meetings: false,
-            modes: false,
+            modes: true,
             replacements: true,
             listener_control: true,
             update_restart: false,
-            voice_action: false,
+            voice_action: true,
         }
     }
 }
@@ -189,13 +189,16 @@ mod tests {
 
     #[test]
     fn linux_exposes_only_implemented_product_capabilities() {
+        // Activity shipped on Linux in the 2026-08 port wave. HUD Lab is
+        // visible only in developer builds; commands remain unavailable
+        // until their runtime slice satisfies the Linux release contract.
         assert_eq!(
             DesktopCapabilities::linux_x11(),
             DesktopCapabilities {
-                activity: false,
+                activity: true,
                 commands: false,
                 history: false,
-                hud_lab: false,
+                hud_lab: crate::DEVELOPER_FEATURES_ENABLED,
                 meetings: false,
                 modes: false,
                 replacements: false,

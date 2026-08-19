@@ -1,5 +1,6 @@
 use std::ptr;
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, SyncSender, TrySendError};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
@@ -228,6 +229,58 @@ struct ModifierState {
 
 static CALLBACK_STATE: Mutex<Option<CallbackState>> = Mutex::new(None);
 
+/// While a settings-pane chord capture runs, the hook must neither act on
+/// nor suppress anything: acting would fire real dictations/pastes from
+/// the chord being recorded, and suppression would hide the current
+/// binding's keys from `GetAsyncKeyState`, making it impossible to
+/// re-record the same chord. macOS suspends its hotkey handling the same
+/// way during capture.
+static CAPTURE_INHIBIT: AtomicBool = AtomicBool::new(false);
+
+/// Turns hook processing off (true) or back on (false) for the duration
+/// of a chord capture. Entering a capture also cancels any in-flight
+/// dictation or voice-action hold, like the macOS capture flow.
+pub(crate) fn set_capture_inhibited(inhibited: bool) {
+    CAPTURE_INHIBIT.store(inhibited, Ordering::Relaxed);
+    if !inhibited {
+        return;
+    }
+    let mut guard = CALLBACK_STATE
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    if let Some(state) = guard.as_mut() {
+        let now = unsafe { GetTickCount() };
+        state.trigger_down = false;
+        state.paste_trigger_down = false;
+        state.voice_trigger_down = false;
+        if let Some(action) = state.capture.cancel() {
+            send_event(state, action, now);
+        }
+        if let Some(action) = state.voice_capture.cancel() {
+            send_event(state, voice_action_variant(action), now);
+        }
+    }
+}
+
+/// Whether this app owns the foreground window; chord capture only
+/// listens while it does, so keystrokes typed into other applications
+/// can never rebind a shortcut.
+pub(crate) fn app_is_foreground() -> bool {
+    use windows_sys::Win32::System::Threading::GetCurrentProcessId;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        GetForegroundWindow, GetWindowThreadProcessId,
+    };
+    unsafe {
+        let foreground = GetForegroundWindow();
+        if foreground.is_null() {
+            return false;
+        }
+        let mut process_id = 0;
+        GetWindowThreadProcessId(foreground, &mut process_id);
+        process_id == GetCurrentProcessId()
+    }
+}
+
 pub struct WindowsHotkeyMonitor {
     pub events: Receiver<HotkeyEvent>,
     pub errors: Receiver<String>,
@@ -422,6 +475,12 @@ unsafe extern "system" fn keyboard_hook(code: i32, wparam: WPARAM, lparam: LPARA
             .unwrap_or_else(|error| error.into_inner());
         if let Some(state) = guard.as_mut() {
             let modifier_event = state.modifiers.update(event.vkCode, is_down);
+            // During a chord capture the hook only tracks modifier state;
+            // it neither triggers actions nor suppresses keys, so the
+            // capture can observe every key through GetAsyncKeyState.
+            if CAPTURE_INHIBIT.load(Ordering::Relaxed) {
+                return unsafe { CallNextHookEx(ptr::null_mut(), code, wparam, lparam) };
+            }
             let voice_event = state.voice_trigger_vk == Some(event.vkCode)
                 && (state.voice_trigger_down
                     || (is_down
@@ -647,6 +706,148 @@ impl ModifierState {
 
 fn key_down(key: u16) -> bool {
     unsafe { GetAsyncKeyState(i32::from(key)) < 0 }
+}
+
+/// One step of the settings-pane chord capture. The UI polls this on a
+/// timer instead of listening to gpui keystrokes because dictation
+/// bindings can be modifier-only chords (for example Ctrl+Win), which
+/// never produce a keystroke event.
+pub(crate) enum ChordPoll {
+    Pending,
+    Cancelled,
+    Captured(WindowsHotkey),
+}
+
+/// Records the next chord the user presses: modifiers plus a regular key
+/// complete immediately; a modifier-only chord completes when every
+/// accumulated modifier is released; Escape cancels.
+#[derive(Default)]
+pub(crate) struct ChordCapture {
+    seen_control: bool,
+    seen_windows: bool,
+    seen_alt: bool,
+    seen_shift: bool,
+}
+
+/// Non-modifier keys the capture scans, paired with the names
+/// [`virtual_key`] accepts (letters, digits, and function keys are
+/// scanned separately).
+const CAPTURE_NAMED_KEYS: [(u16, &str); 14] = [
+    (VK_SPACE, "space"),
+    (VK_RETURN, "enter"),
+    (VK_TAB, "tab"),
+    (0x08, "backspace"),
+    (0x2e, "delete"),
+    (0x2d, "insert"),
+    (0x24, "home"),
+    (0x23, "end"),
+    (0x21, "pageup"),
+    (0x22, "pagedown"),
+    (0x25, "left"),
+    (0x26, "up"),
+    (0x27, "right"),
+    (0x28, "down"),
+];
+
+impl ChordCapture {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn poll(&mut self) -> ChordPoll {
+        if key_down(VK_ESCAPE) {
+            return ChordPoll::Cancelled;
+        }
+        let control = key_down(VK_CONTROL);
+        let windows = key_down(VK_LWIN) || key_down(VK_RWIN);
+        let alt = key_down(VK_MENU);
+        let shift = key_down(VK_SHIFT);
+        if let Some(key) = pressed_capture_key() {
+            return ChordPoll::Captured(WindowsHotkey {
+                control,
+                windows,
+                alt,
+                shift,
+                key: Some(key),
+            });
+        }
+        if unsupported_key_down() {
+            // A key the bindings cannot express (OEM punctuation, media
+            // keys, ...) is being pressed: forget the chord in progress so
+            // releasing the modifiers cannot record a wrong modifier-only
+            // binding.
+            *self = Self::default();
+            return ChordPoll::Pending;
+        }
+        self.seen_control |= control;
+        self.seen_windows |= windows;
+        self.seen_alt |= alt;
+        self.seen_shift |= shift;
+        let seen_any = self.seen_control || self.seen_windows || self.seen_alt || self.seen_shift;
+        if seen_any && !control && !windows && !alt && !shift {
+            return ChordPoll::Captured(WindowsHotkey {
+                control: self.seen_control,
+                windows: self.seen_windows,
+                alt: self.seen_alt,
+                shift: self.seen_shift,
+                key: None,
+            });
+        }
+        ChordPoll::Pending
+    }
+}
+
+/// Whether any pressed key is one the capture cannot map to a binding
+/// name: everything except mouse buttons, modifiers, lock/IME keys, and
+/// the mappable set.
+fn unsupported_key_down() -> bool {
+    for vk in 0x08..=0xFE_u16 {
+        match vk {
+            // Modifiers (generic + left/right) and the Windows keys.
+            0x10..=0x12 | 0xA0..=0xA5 | 0x5B | 0x5C => continue,
+            // Escape is the cancel key; lock and IME state keys are inert.
+            0x1B | 0x14 | 0x15..=0x1A | 0x90 | 0x91 => continue,
+            _ => {}
+        }
+        if !key_down(vk) {
+            continue;
+        }
+        let mappable = CAPTURE_NAMED_KEYS.iter().any(|(named, _)| *named == vk)
+            || (0x41..=0x5A).contains(&vk)
+            || (0x30..=0x39).contains(&vk)
+            || (0x70..=0x87).contains(&vk);
+        if !mappable {
+            return true;
+        }
+    }
+    false
+}
+
+fn pressed_capture_key() -> Option<String> {
+    for (vk, name) in CAPTURE_NAMED_KEYS {
+        if key_down(vk) {
+            return Some((name).to_string());
+        }
+    }
+    for vk in 0x41..=0x5A_u16 {
+        // A-Z
+        if key_down(vk) {
+            return Some(char::from(vk as u8).to_ascii_lowercase().to_string());
+        }
+    }
+    for vk in 0x30..=0x39_u16 {
+        // 0-9
+        if key_down(vk) {
+            return Some(char::from(vk as u8).to_string());
+        }
+    }
+    for vk in 0x70..=0x87_u16 {
+        // F1-F24
+        if key_down(vk) {
+            return Some(format!("f{}", vk - 0x70 + 1));
+        }
+    }
+    None
 }
 
 pub(crate) fn virtual_key(key: &str) -> Result<u32> {
