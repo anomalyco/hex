@@ -27,8 +27,9 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 
 use crate::desktop_activity::DesktopActivity;
 use crate::desktop_host::{
-    DesktopAction, DesktopCapabilities, DesktopHost, DesktopListenerSnapshot, DesktopSnapshot,
-    DesktopTranscriptionSnapshot, DesktopUpdateStatus,
+    DesktopAction, DesktopCapabilities, DesktopHost, DesktopListenerSnapshot,
+    DesktopMicrophoneSnapshot, DesktopShortcut, DesktopSnapshot, DesktopTranscriptionSnapshot,
+    DesktopUpdateStatus,
 };
 use crate::desktop_transcription_picker::TranscriptionPickerDelegate;
 use crate::desktop_ui::{
@@ -965,22 +966,22 @@ impl WindowsDesktopHost {
         Ok(())
     }
 
-    fn set_double_tap_lock(&mut self, enabled: bool) {
+    fn set_double_tap_lock(&mut self, enabled: bool) -> Result<()> {
         if enabled == self.settings.double_tap_lock {
-            return;
+            self.settings_error = None;
+            return Ok(());
         }
         let mut candidate = self.settings.clone();
         candidate.double_tap_lock = enabled;
-        match candidate.save() {
-            Ok(()) => {
-                self.settings = candidate;
-                self.settings_error = None;
-                self.restart_listener_for_settings();
-            }
-            Err(error) => {
-                self.settings_error = Some(format!("Could not save double-tap lock: {error:#}"));
-            }
-        }
+        candidate.save().map_err(|error| {
+            let error = format!("Could not save double-tap lock: {error:#}");
+            self.settings_error = Some(error.clone());
+            eyre!(error)
+        })?;
+        self.settings = candidate;
+        self.settings_error = None;
+        self.restart_listener_for_settings();
+        Ok(())
     }
 
     fn set_release_microphone_while_idle(&mut self, enabled: bool) {
@@ -1144,22 +1145,22 @@ impl WindowsDesktopHost {
         }
     }
 
-    fn set_double_tap_only(&mut self, enabled: bool) {
+    fn set_double_tap_only(&mut self, enabled: bool) -> Result<()> {
         if enabled == self.settings.double_tap_only {
-            return;
+            self.settings_error = None;
+            return Ok(());
         }
         let mut candidate = self.settings.clone();
         candidate.double_tap_only = enabled;
-        match candidate.save() {
-            Ok(()) => {
-                self.settings = candidate;
-                self.settings_error = None;
-                self.restart_listener_for_settings();
-            }
-            Err(error) => {
-                self.settings_error = Some(format!("Could not save double-tap only: {error:#}"));
-            }
-        }
+        candidate.save().map_err(|error| {
+            let error = format!("Could not save double-tap only: {error:#}");
+            self.settings_error = Some(error.clone());
+            eyre!(error)
+        })?;
+        self.settings = candidate;
+        self.settings_error = None;
+        self.restart_listener_for_settings();
+        Ok(())
     }
 
     fn set_paste_last_enabled(&mut self, enabled: bool) {
@@ -1577,6 +1578,11 @@ impl DesktopHost for WindowsDesktopHost {
             dictation_shortcut_label: self.settings.dictation_hotkey.label(),
             double_tap_lock: self.settings.double_tap_lock,
             double_tap_only: self.settings.double_tap_only,
+            microphone: DesktopMicrophoneSnapshot {
+                devices: self.microphones.clone(),
+                error: self.microphone_error.clone(),
+                selected: self.settings.microphone.clone(),
+            },
             paste_last_shortcut: self
                 .settings
                 .paste_last_hotkey
@@ -1625,22 +1631,64 @@ impl DesktopHost for WindowsDesktopHost {
 
     fn dispatch(&mut self, action: DesktopAction) -> Result<()> {
         match action {
+            DesktopAction::CheckForUpdates => self.updater.request_check(),
             DesktopAction::ClearError => {
                 self.error = None;
                 self.settings_error = None;
                 self.login_item_error = None;
             }
+            DesktopAction::RefreshMicrophones => self.refresh_microphones(),
+            DesktopAction::RestartIntoUpdate => {
+                let crate::windows_updater::UpdateCheck::ReadyToRestart { executable, .. } =
+                    self.updater.state()
+                else {
+                    return Err(eyre!("no installed Windows update is ready"));
+                };
+                crate::windows_updater::relaunch_at(&executable).map_err(|error| {
+                    let message = format!("Could not restart HEX: {error:#}");
+                    self.settings_error = Some(message);
+                    error
+                })?;
+            }
+            DesktopAction::SetDictationShortcut(shortcut) => {
+                self.set_dictation_hotkey(windows_hotkey(shortcut)?)?;
+            }
+            DesktopAction::SetDoubleTapLock(enabled) => {
+                self.set_double_tap_lock(enabled)?;
+            }
+            DesktopAction::SetDoubleTapOnly(enabled) => {
+                self.set_double_tap_only(enabled)?;
+            }
+            DesktopAction::SetMicrophone(microphone) => {
+                self.set_microphone(microphone)?;
+            }
             DesktopAction::StartListening => self.start(),
             DesktopAction::StopListening => self.stop(),
-            DesktopAction::RestartIntoUpdate
-            | DesktopAction::SetDictationShortcut(_)
-            | DesktopAction::SetDoubleTapLock(_)
-            | DesktopAction::SetDoubleTapOnly(_) => {
-                return Err(eyre!("this desktop action is unavailable on Windows"));
-            }
         }
         Ok(())
     }
+}
+
+fn windows_hotkey(shortcut: DesktopShortcut) -> Result<crate::windows_settings::WindowsHotkey> {
+    if shortcut.function {
+        return Err(eyre!("the Fn modifier is unavailable on Windows"));
+    }
+    let key = if shortcut.key == " " {
+        Some("space".into())
+    } else if shortcut.key.trim().is_empty() {
+        None
+    } else {
+        Some(shortcut.key.to_ascii_lowercase())
+    };
+    let hotkey = crate::windows_settings::WindowsHotkey {
+        control: shortcut.control,
+        windows: shortcut.platform,
+        alt: shortcut.alt,
+        shift: shortcut.shift,
+        key,
+    };
+    hotkey.validate()?;
+    Ok(hotkey)
 }
 
 impl WindowsApp {
@@ -1908,9 +1956,16 @@ impl WindowsApp {
                                 }
                                 this.end_hotkey_capture();
                                 let _ = match target {
-                                    HotkeyTarget::Dictation => {
-                                        this.host.set_dictation_hotkey(hotkey)
-                                    }
+                                    HotkeyTarget::Dictation => this.host.dispatch(
+                                        DesktopAction::SetDictationShortcut(DesktopShortcut {
+                                            alt: hotkey.alt,
+                                            control: hotkey.control,
+                                            function: false,
+                                            key: hotkey.key.unwrap_or_default(),
+                                            platform: hotkey.windows,
+                                            shift: hotkey.shift,
+                                        }),
+                                    ),
                                     HotkeyTarget::PasteLast => {
                                         this.host.set_paste_last_hotkey(hotkey)
                                     }
@@ -2264,7 +2319,7 @@ impl WindowsApp {
             .activity
             .device
             .clone()
-            .or_else(|| self.host.settings.microphone.clone())
+            .or_else(|| snapshot.microphone.selected.clone())
             .unwrap_or_else(|| "Automatic microphone".into());
         let transcription = &snapshot.transcription;
         let transcription_label =
@@ -2284,16 +2339,15 @@ impl WindowsApp {
             None => tr("System").to_string(),
             Some(code) => crate::windows_i18n::choice_name(Some(code)).to_string(),
         };
-        let microphone_label = self
-            .host
-            .settings
+        let microphone_label = snapshot
             .microphone
+            .selected
             .clone()
             .unwrap_or_else(|| tr("Automatic").into());
         let listen_on_launch = self.host.settings.listen_on_launch;
         let launch_at_login = self.host.launch_at_login;
-        let double_tap_lock = self.host.settings.double_tap_lock;
-        let double_tap_only = self.host.settings.double_tap_only;
+        let double_tap_lock = snapshot.double_tap_lock;
+        let double_tap_only = snapshot.double_tap_only;
         let feedback_volume = self
             .volume_drag
             .unwrap_or(self.host.settings.feedback_volume);
@@ -2723,7 +2777,9 @@ impl WindowsApp {
                                                             let open =
                                                                 this.microphone_picker_open;
                                                             this.close_popups();
-                                                            this.host.refresh_microphones();
+                                                            let _ = this.host.dispatch(
+                                                                DesktopAction::RefreshMicrophones,
+                                                            );
                                                             this.microphone_picker_open = !open;
                                                             cx.notify();
                                                         })),
@@ -2777,8 +2833,11 @@ impl WindowsApp {
                                             )
                                             .id("windows-double-tap-lock")
                                             .on_click(cx.listener(move |this, _, _, cx| {
-                                                this.host
-                                                    .set_double_tap_lock(!double_tap_lock);
+                                                let _ = this.host.dispatch(
+                                                    DesktopAction::SetDoubleTapLock(
+                                                        !double_tap_lock,
+                                                    ),
+                                                );
                                                 cx.notify();
                                             })),
                                         )
@@ -2795,8 +2854,11 @@ impl WindowsApp {
                                                 )
                                                 .id("windows-double-tap-only")
                                                 .on_click(cx.listener(move |this, _, _, cx| {
-                                                    this.host
-                                                        .set_double_tap_only(!double_tap_only);
+                                                    let _ = this.host.dispatch(
+                                                        DesktopAction::SetDoubleTapOnly(
+                                                            !double_tap_only,
+                                                        ),
+                                                    );
                                                     cx.notify();
                                                 })),
                                             )
@@ -2903,7 +2965,7 @@ impl WindowsApp {
                                                 .into_any_element(),
                                                 crate::windows_updater::UpdateCheck::ReadyToRestart {
                                                     version,
-                                                    executable,
+                                                    ..
                                                 } => header_button(tr_fill(
                                                     "Restart into {}",
                                                     &version,
@@ -2919,18 +2981,17 @@ impl WindowsApp {
                                                     if this.restart_scheduled {
                                                         return;
                                                     }
-                                                    match crate::windows_updater::relaunch_at(
-                                                        &executable,
+                                                    match this.host.dispatch(
+                                                        DesktopAction::RestartIntoUpdate,
                                                     ) {
                                                         Ok(()) => {
                                                             this.restart_scheduled = true;
-                                                            this.host.stop();
+                                                            let _ = this.host.dispatch(
+                                                                DesktopAction::StopListening,
+                                                            );
                                                             cx.quit();
                                                         }
-                                                        Err(error) => {
-                                                            this.host.settings_error = Some(
-                                                                format!("Could not restart HEX: {error:#}"),
-                                                            );
+                                                        Err(_) => {
                                                             cx.notify();
                                                         }
                                                     }
@@ -2941,7 +3002,9 @@ impl WindowsApp {
                                                     header_button(tr("Check now"))
                                                         .id("windows-update-check")
                                                         .on_click(cx.listener(|this, _, _, cx| {
-                                                            this.host.updater.request_check();
+                                                            let _ = this.host.dispatch(
+                                                                DesktopAction::CheckForUpdates,
+                                                            );
                                                             cx.notify();
                                                         }))
                                                         .into_any_element()
@@ -3702,16 +3765,19 @@ impl WindowsApp {
         let Some(bounds) = self.microphone_dropdown_bounds else {
             return div().into_any_element();
         };
-        let current = self.host.settings.microphone.clone();
+        let DesktopMicrophoneSnapshot {
+            devices,
+            error,
+            selected: current,
+        } = self.host.snapshot().microphone;
         let mut choices = vec![(tr("Automatic").to_string(), None)];
         choices.extend(
-            self.host
-                .microphones
+            devices
                 .iter()
                 .cloned()
                 .map(|microphone| (microphone.clone(), Some(microphone))),
         );
-        let panel_rows = choices.len() + usize::from(self.host.microphone_error.is_some()) * 2;
+        let panel_rows = choices.len() + usize::from(error.is_some()) * 2;
         let items = choices
             .into_iter()
             .enumerate()
@@ -3720,7 +3786,11 @@ impl WindowsApp {
                 dropdown_item(("windows-microphone-option", index), label, selected).on_click(
                     cx.listener(move |this, _, _, cx| {
                         cx.stop_propagation();
-                        if this.host.set_microphone(selection.clone()).is_ok() {
+                        if this
+                            .host
+                            .dispatch(DesktopAction::SetMicrophone(selection.clone()))
+                            .is_ok()
+                        {
                             this.microphone_picker_open = false;
                         }
                         cx.notify();
@@ -3738,7 +3808,7 @@ impl WindowsApp {
                     .overflow_y_scroll()
                     .on_click(|_, _, cx| cx.stop_propagation())
                     .children(items)
-                    .when_some(self.host.microphone_error.clone(), |list, error| {
+                    .when_some(error, |list, error| {
                         list.child(error_message("Microphones could not be enumerated.", error))
                     }),
             )
@@ -4343,6 +4413,51 @@ mod tests {
         assert_eq!(
             WindowsApp::language_for_model(TranscriptionModelId::ParakeetV2, "de").as_deref(),
             Some("en")
+        );
+    }
+
+    #[test]
+    fn portable_shortcuts_preserve_windows_modifiers_and_normalize_space() {
+        let hotkey = windows_hotkey(DesktopShortcut {
+            alt: true,
+            control: true,
+            function: false,
+            key: " ".into(),
+            platform: true,
+            shift: false,
+        })
+        .unwrap();
+
+        assert!(hotkey.alt);
+        assert!(hotkey.control);
+        assert!(hotkey.windows);
+        assert!(!hotkey.shift);
+        assert_eq!(hotkey.key.as_deref(), Some("space"));
+    }
+
+    #[test]
+    fn portable_shortcuts_reject_windows_fn_and_unsafe_bare_letters() {
+        assert!(
+            windows_hotkey(DesktopShortcut {
+                alt: false,
+                control: false,
+                function: true,
+                key: "f12".into(),
+                platform: false,
+                shift: false,
+            })
+            .is_err()
+        );
+        assert!(
+            windows_hotkey(DesktopShortcut {
+                alt: false,
+                control: false,
+                function: false,
+                key: "k".into(),
+                platform: false,
+                shift: false,
+            })
+            .is_err()
         );
     }
 }

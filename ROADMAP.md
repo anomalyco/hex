@@ -68,7 +68,7 @@ native macOS tests plus authoritative release previews pass.
 
 ### Phase 2: Converge Desktop Presentation By Capability
 
-- [ ] Finish portable microphone, update, shortcut, error, and listener actions
+- [x] Finish portable microphone, update, shortcut, error, and listener actions
   behind the existing deep `DesktopHost` seam.
 - [ ] Have macOS and Linux open the same production GPUI root, then remove the
   remaining Linux Settings/render composition.

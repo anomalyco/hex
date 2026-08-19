@@ -24,8 +24,8 @@ use crate::application_catalog::InstalledApplication;
 use crate::commands::{CommandConfig, CommandInfo, CommandScope};
 use crate::desktop_activity::DesktopActivity;
 use crate::desktop_host::{
-    DesktopAction, DesktopCapabilities, DesktopHost, DesktopSnapshot, DesktopTranscriptionSnapshot,
-    DesktopUpdateStatus,
+    DesktopAction, DesktopCapabilities, DesktopHost, DesktopMicrophoneSnapshot, DesktopSnapshot,
+    DesktopTranscriptionSnapshot, DesktopUpdateStatus,
 };
 use crate::desktop_transcription_picker::{
     TranscriptionPickerDelegate, TranscriptionPickerModel, TranscriptionPickerProgress,
@@ -2898,8 +2898,13 @@ impl AppWindow {
     }
 
     fn render_microphone_picker(&self, cx: &mut Context<Self>) -> AnyElement {
+        let DesktopMicrophoneSnapshot {
+            devices,
+            error,
+            selected: current,
+        } = self.snapshot().microphone;
         let choices = std::iter::once(None)
-            .chain(self.microphone_devices.iter().cloned().map(Some))
+            .chain(devices.into_iter().map(Some))
             .collect::<Vec<_>>();
         div()
             .id("microphone-picker")
@@ -2916,7 +2921,7 @@ impl AppWindow {
             .bg(rgb(SURFACE))
             .shadow_lg()
             .children(choices.into_iter().enumerate().map(|(index, device)| {
-                let selected = self.settings.microphone == device;
+                let selected = current == device;
                 let label = device.clone().unwrap_or_else(|| "Automatic".into());
                 div()
                     .id(("microphone-choice", index))
@@ -2933,13 +2938,16 @@ impl AppWindow {
                     .hover(|row| row.bg(rgb(SURFACE_HOVER)))
                     .child(label)
                     .on_click(cx.listener(move |this, _, _, cx| {
-                        this.settings.microphone = device.clone();
-                        this.microphone_picker_open = false;
-                        this.microphone_picker_error = None;
-                        this.save_settings(cx);
+                        if this
+                            .dispatch(DesktopAction::SetMicrophone(device.clone()))
+                            .is_ok()
+                        {
+                            this.microphone_picker_open = false;
+                        }
+                        cx.notify();
                     }))
             }))
-            .when_some(self.microphone_picker_error.clone(), |picker, error| {
+            .when_some(error, |picker, error| {
                 picker.child(
                     div()
                         .px_3()
@@ -3023,6 +3031,7 @@ impl AppWindow {
     }
 
     fn render_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        let snapshot = self.snapshot();
         let permission_warnings = self.render_permission_warnings(cx);
         let hotkey_control = self.render_hotkey_setting_control(HotkeyKind::Dictation, window, cx);
         let paste_last_control = self.render_hotkey_control(HotkeyKind::PasteLast, window, cx);
@@ -3051,9 +3060,9 @@ impl AppWindow {
             .clamp(0.0, 1.0);
         let dock_icon_position = self.dock_icon_toggle.render_position(window);
         let launch_at_login_position = self.launch_at_login_toggle.render_position(window);
-        let microphone_label = self
-            .settings
+        let microphone_label = snapshot
             .microphone
+            .selected
             .clone()
             .unwrap_or_else(|| "Automatic".into());
         let microphone_picker = self
@@ -3249,16 +3258,9 @@ impl AppWindow {
                                                 this.microphone_picker_open =
                                                     !this.microphone_picker_open;
                                                 if this.microphone_picker_open {
-                                                    match crate::audio::input_device_names() {
-                                                        Ok(devices) => {
-                                                            this.microphone_devices = devices;
-                                                            this.microphone_picker_error = None;
-                                                        }
-                                                        Err(error) => {
-                                                            this.microphone_picker_error =
-                                                                Some(error.to_string());
-                                                        }
-                                                    }
+                                                    let _ = this.dispatch(
+                                                        DesktopAction::RefreshMicrophones,
+                                                    );
                                                 }
                                                 cx.notify();
                                             })),
@@ -3395,10 +3397,9 @@ impl AppWindow {
                                             .border_color(rgb(LINE))
                                             .bg(rgb(CANVAS))
                                             .on_click(cx.listener(|this, _, _, cx| {
-                                                this.update_status =
-                                                    crate::sparkle::UpdateStatus::Checking;
-                                                this.update_status_changed_at = Instant::now();
-                                                cx.dispatch_action(&CheckForUpdates);
+                                                let _ = this.dispatch(
+                                                    DesktopAction::CheckForUpdates,
+                                                );
                                                 cx.notify();
                                             })),
                                     ))
@@ -6993,6 +6994,11 @@ impl DesktopHost for AppWindow {
             dictation_shortcut,
             double_tap_lock: self.settings.double_tap_lock,
             double_tap_only: self.settings.double_tap_only,
+            microphone: DesktopMicrophoneSnapshot {
+                devices: self.microphone_devices.clone(),
+                error: self.microphone_picker_error.clone(),
+                selected: self.settings.microphone.clone(),
+            },
             paste_last_shortcut: self
                 .settings
                 .paste_last_hotkey
@@ -7014,7 +7020,24 @@ impl DesktopHost for AppWindow {
 
     fn dispatch(&mut self, action: DesktopAction) -> color_eyre::Result<()> {
         match action {
-            DesktopAction::ClearError => {}
+            DesktopAction::CheckForUpdates => {
+                self.update_status = crate::sparkle::UpdateStatus::Checking;
+                self.update_status_changed_at = Instant::now();
+                crate::sparkle::check_for_updates();
+            }
+            DesktopAction::ClearError => {
+                self.settings_load_error = None;
+                self.microphone_picker_error = None;
+            }
+            DesktopAction::RefreshMicrophones => match crate::audio::input_device_names() {
+                Ok(devices) => {
+                    self.microphone_devices = devices;
+                    self.microphone_picker_error = None;
+                }
+                Err(error) => {
+                    self.microphone_picker_error = Some(error.to_string());
+                }
+            },
             DesktopAction::RestartIntoUpdate
             | DesktopAction::StartListening
             | DesktopAction::StopListening => {
@@ -7098,6 +7121,26 @@ impl DesktopHost for AppWindow {
                 self.settings_save_generation = self.settings_save_generation.wrapping_add(1);
                 self.settings_dirty = false;
                 self.settings_load_error = None;
+            }
+            DesktopAction::SetMicrophone(microphone) => {
+                if microphone == self.settings.microphone {
+                    self.microphone_picker_error = None;
+                    return Ok(());
+                }
+                let mut candidate = self.settings.clone();
+                candidate.microphone = microphone;
+                if !self.preview
+                    && let Err(error) = candidate.save()
+                {
+                    self.microphone_picker_error =
+                        Some(format!("Could not save the microphone choice: {error:#}"));
+                    return Err(error);
+                }
+                self.settings = candidate;
+                self.settings_save_generation = self.settings_save_generation.wrapping_add(1);
+                self.settings_dirty = false;
+                self.settings_load_error = None;
+                self.microphone_picker_error = None;
             }
         }
         Ok(())

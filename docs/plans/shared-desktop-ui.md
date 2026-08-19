@@ -158,14 +158,15 @@ shared root window lands.
 
 ### 3. Normalize Core Settings For Presentation
 
-**In progress.** Shortcut keycaps, the double-tap toggle, and the complete local
-transcription picker now use shared GPUI presentation. `DesktopSnapshot` now
-also normalizes shortcut labels, listener status, operation errors, update
-status, observation metadata, and transcription selection/preparation state.
-Shortcut captures cross the host seam as portable values. The shared picker
-delegates model preparation to each current root while macOS and Linux validate,
-prewarm, and persist their native runtime selections independently. Portable
-microphone view state still remains.
+**Implemented.** Shortcut keycaps, the double-tap toggle, and the complete local
+transcription picker now use shared GPUI presentation. `DesktopSnapshot` also
+normalizes shortcut labels, listener status, microphone devices/selection/errors,
+operation errors, update status, observation metadata, and transcription
+selection/preparation state. Shortcut captures, microphone refresh and
+selection, update checks/restarts, error dismissal, and listener control cross
+the host seam as portable actions. The shared picker delegates model preparation
+to each current root while macOS, Linux, and Windows validate, prewarm, persist,
+and apply their native runtime selections independently.
 
 - Introduce portable view state for shortcut, double-tap lock, microphone, and
   transcription controls.
@@ -174,15 +175,15 @@ microphone view state still remains.
 
 ### 4. Open One Shared AppWindow From Both Hosts
 
-**In progress.** `src/desktop_host.rs` now defines semantic capabilities,
-portable activity and shortcut snapshots, and typed actions. Linux product
-state has moved into a contained `LinuxDesktopHost`; its GPUI root now retains
-presentation state and delegates listener lifecycle, update polling, activity,
-shortcut validation, update restart, and settings persistence. Those remaining
-Linux operations now use portable snapshots and typed actions; only periodic
-refresh remains lifecycle-driven. The existing macOS root remains the
-transitional macOS host. macOS navigation derives from capabilities. Moving the
-remaining render state into one root entity is still outstanding.
+**In progress.** `src/desktop/host.rs` now defines semantic capabilities,
+portable activity, microphone, shortcut, transcription, error, listener, and
+update snapshots plus typed actions. Linux product state has moved into a
+contained `LinuxDesktopHost`; its GPUI root now retains presentation state and
+delegates listener lifecycle, update polling, activity, microphone selection,
+shortcut validation, update restart, and settings persistence. Windows and the
+transitional macOS root consume the same core settings actions while keeping
+their native validation and lifecycle. Only periodic refresh and the remaining
+render state still need to move into one root entity.
 
 - Move `AppWindow` and its portable dependencies out of macOS-only module gates.
 - Have the macOS lifecycle coordinator and Linux tray host construct their

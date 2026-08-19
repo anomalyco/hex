@@ -18,8 +18,9 @@ use x11rb::protocol::xproto::ConnectionExt;
 
 use crate::desktop_activity::DesktopActivity;
 use crate::desktop_host::{
-    DesktopAction, DesktopCapabilities, DesktopHost, DesktopListenerSnapshot, DesktopShortcut,
-    DesktopSnapshot, DesktopTranscriptionSnapshot, DesktopUpdateStatus,
+    DesktopAction, DesktopCapabilities, DesktopHost, DesktopListenerSnapshot,
+    DesktopMicrophoneSnapshot, DesktopShortcut, DesktopSnapshot, DesktopTranscriptionSnapshot,
+    DesktopUpdateStatus,
 };
 use crate::desktop_i18n::{tr, tr_fill};
 use crate::desktop_transcription_picker::TranscriptionPickerDelegate;
@@ -1084,16 +1085,19 @@ impl LinuxApp {
         let Some(bounds) = self.microphone_dropdown_bounds else {
             return div().into_any_element();
         };
-        let current = self.host.settings.microphone.clone();
+        let DesktopMicrophoneSnapshot {
+            devices,
+            error,
+            selected: current,
+        } = self.host.snapshot().microphone;
         let mut choices = vec![(tr("Automatic").to_string(), None)];
         choices.extend(
-            self.host
-                .microphones
+            devices
                 .iter()
                 .cloned()
                 .map(|microphone| (microphone.clone(), Some(microphone))),
         );
-        let panel_rows = choices.len() + usize::from(self.host.microphone_error.is_some()) * 2;
+        let panel_rows = choices.len() + usize::from(error.is_some()) * 2;
         let items = choices
             .into_iter()
             .enumerate()
@@ -1102,7 +1106,11 @@ impl LinuxApp {
                 dropdown_item(("linux-microphone-option", index), label, selected).on_click(
                     cx.listener(move |this, _, _, cx| {
                         cx.stop_propagation();
-                        if this.host.set_microphone(selection.clone()).is_ok() {
+                        if this
+                            .host
+                            .dispatch(DesktopAction::SetMicrophone(selection.clone()))
+                            .is_ok()
+                        {
                             this.microphone_dropdown_open = false;
                         }
                         cx.notify();
@@ -1120,7 +1128,7 @@ impl LinuxApp {
                     .overflow_y_scroll()
                     .on_click(|_, _, cx| cx.stop_propagation())
                     .children(items)
-                    .when_some(self.host.microphone_error.clone(), |list, error| {
+                    .when_some(error, |list, error| {
                         list.child(error_message("Microphones could not be enumerated.", error))
                     }),
             )
@@ -1202,6 +1210,11 @@ impl DesktopHost for LinuxDesktopHost {
             dictation_shortcut_label: self.settings.dictation_hotkey.label(),
             double_tap_lock: self.settings.double_tap_lock,
             double_tap_only: false,
+            microphone: DesktopMicrophoneSnapshot {
+                devices: self.microphones.clone(),
+                error: self.microphone_error.clone(),
+                selected: self.settings.microphone.clone(),
+            },
             paste_last_shortcut: None,
             listener: Some(DesktopListenerSnapshot {
                 running: self.is_running(),
@@ -1232,7 +1245,20 @@ impl DesktopHost for LinuxDesktopHost {
 
     fn dispatch(&mut self, action: DesktopAction) -> Result<()> {
         match action {
-            DesktopAction::ClearError => self.error = None,
+            DesktopAction::CheckForUpdates => match &self.update {
+                UpdateState::Unmanaged => {
+                    return Err(eyre!("updates are unavailable for this Linux install"));
+                }
+                UpdateState::Checking(_) | UpdateState::Ready(_) => {}
+                UpdateState::Failed(_) | UpdateState::Waiting(_) => {
+                    self.update = UpdateState::Checking(start_update_check());
+                }
+            },
+            DesktopAction::ClearError => {
+                self.error = None;
+                self.settings_error = None;
+            }
+            DesktopAction::RefreshMicrophones => self.refresh_microphones(),
             DesktopAction::RestartIntoUpdate => {
                 if let Err(error) = self.restart_into_update() {
                     self.error = Some(format!("Could not restart HEX: {error:#}"));
@@ -1255,6 +1281,9 @@ impl DesktopHost for LinuxDesktopHost {
             }
             DesktopAction::SetDoubleTapOnly(_) => {
                 return Err(eyre!("double-tap-only is unavailable on X11"));
+            }
+            DesktopAction::SetMicrophone(microphone) => {
+                self.set_microphone(microphone)?;
             }
             DesktopAction::StartListening => self.start(),
             DesktopAction::StopListening => self.stop(),
@@ -1354,10 +1383,9 @@ impl LinuxApp {
             crate::transcription_models::language_name(&transcription.selection.language)
                 .to_string()
         };
-        let microphone_label = self
-            .host
-            .settings
+        let microphone_label = snapshot
             .microphone
+            .selected
             .clone()
             .unwrap_or_else(|| tr("Automatic").into());
         let ui_language_label = match self.host.settings.ui_language.as_deref() {
@@ -1616,7 +1644,9 @@ impl LinuxApp {
                                                                     this.microphone_dropdown_open;
                                                                 this.close_popups();
                                                                 if !open {
-                                                                    this.host.refresh_microphones();
+                                                                    let _ = this.host.dispatch(
+                                                                        DesktopAction::RefreshMicrophones,
+                                                                    );
                                                                 }
                                                                 this.microphone_dropdown_open =
                                                                     !open;

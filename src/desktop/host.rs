@@ -65,7 +65,7 @@ impl DesktopCapabilities {
             modes: true,
             replacements: true,
             listener_control: true,
-            update_restart: false,
+            update_restart: true,
             voice_action: true,
         }
     }
@@ -78,12 +78,20 @@ pub(crate) struct DesktopSnapshot {
     pub(crate) dictation_shortcut_label: String,
     pub(crate) double_tap_lock: bool,
     pub(crate) double_tap_only: bool,
+    pub(crate) microphone: DesktopMicrophoneSnapshot,
     pub(crate) paste_last_shortcut: Option<Vec<String>>,
     pub(crate) listener: Option<DesktopListenerSnapshot>,
     pub(crate) operation_error: Option<String>,
     pub(crate) observations_path: String,
     pub(crate) transcription: DesktopTranscriptionSnapshot,
     pub(crate) update_status: DesktopUpdateStatus,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct DesktopMicrophoneSnapshot {
+    pub(crate) devices: Vec<String>,
+    pub(crate) error: Option<String>,
+    pub(crate) selected: Option<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -126,11 +134,14 @@ pub(crate) struct DesktopShortcut {
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[allow(dead_code)]
 pub(crate) enum DesktopAction {
+    CheckForUpdates,
     ClearError,
+    RefreshMicrophones,
     RestartIntoUpdate,
     SetDictationShortcut(DesktopShortcut),
     SetDoubleTapLock(bool),
     SetDoubleTapOnly(bool),
+    SetMicrophone(Option<String>),
     StartListening,
     StopListening,
 }
@@ -162,6 +173,11 @@ mod tests {
                 dictation_shortcut_label: String::new(),
                 double_tap_lock: false,
                 double_tap_only: false,
+                microphone: DesktopMicrophoneSnapshot {
+                    devices: Vec::new(),
+                    error: None,
+                    selected: None,
+                },
                 paste_last_shortcut: None,
                 listener: None,
                 operation_error: None,
@@ -207,5 +223,11 @@ mod tests {
                 voice_action: false,
             }
         );
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn windows_exposes_the_managed_update_restart_action() {
+        assert!(DesktopCapabilities::windows().update_restart);
     }
 }
