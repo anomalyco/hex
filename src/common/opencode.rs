@@ -33,9 +33,6 @@ pub struct ModelChoice {
     pub key: String,
     pub name: String,
     pub provider: String,
-    // Variants drive the macOS Thinking selector; Windows has no UI for
-    // them yet.
-    #[cfg_attr(target_os = "windows", allow(dead_code))]
     pub variants: Vec<String>,
 }
 
@@ -63,6 +60,17 @@ pub struct ModelCatalog {
     pub default_key: Option<String>,
     #[cfg_attr(target_os = "windows", allow(dead_code))]
     pub default_name: Option<String>,
+}
+
+impl ModelCatalog {
+    /// Variants for the explicit selection, or for OpenCode's default model
+    /// when the profile deliberately leaves the model unset.
+    pub fn variants_for(&self, selected_key: Option<&str>) -> &[String] {
+        selected_key
+            .or(self.default_key.as_deref())
+            .and_then(|key| self.models.iter().find(|choice| choice.key == key))
+            .map_or(&[], |choice| choice.variants.as_slice())
+    }
 }
 
 #[derive(Deserialize)]
@@ -769,6 +777,32 @@ mod tests {
                 variant: None,
             }
         );
+    }
+
+    #[test]
+    fn model_variants_follow_the_explicit_or_default_selection() {
+        let catalog = ModelCatalog {
+            models: vec![
+                ModelChoice {
+                    key: "openai/fast".into(),
+                    name: "Fast".into(),
+                    provider: "openai".into(),
+                    variants: vec!["low".into(), "high".into()],
+                },
+                ModelChoice {
+                    key: "anthropic/steady".into(),
+                    name: "Steady".into(),
+                    provider: "anthropic".into(),
+                    variants: vec!["medium".into()],
+                },
+            ],
+            default_key: Some("openai/fast".into()),
+            default_name: Some("Fast".into()),
+        };
+
+        assert_eq!(catalog.variants_for(None), ["low", "high"]);
+        assert_eq!(catalog.variants_for(Some("anthropic/steady")), ["medium"]);
+        assert!(catalog.variants_for(Some("missing/model")).is_empty());
     }
 
     #[test]

@@ -127,7 +127,7 @@ current-user startup registry, UI Automation, and Windows capture APIs.
 | History retention, list, detail, search, copy, delete, and clear | Implemented |
 | Text replacements | Implemented in the Windows Modes pane using the shared phrase-boundary replacement engine |
 | Resident tray and Launch at login | Implemented |
-| Application modes with per-mode corrections, OpenCode rewriting, and transformations | Implemented on the shared ordered processing policy; global and contextual profiles persist their own corrections, rewrite settings, and ordered built-in/TypeScript transformations, while modes match by application name — reasoning/deadline controls and physical end-to-end paste/UI validation remain |
+| Application modes with per-mode corrections, OpenCode rewriting, and transformations | Implemented on the shared ordered processing policy; global and contextual profiles persist their own corrections, model, reasoning variant, deadline, and ordered built-in/TypeScript transformations, while modes match by application name — physical end-to-end paste/UI validation remains |
 | Voice Action with selected-text capture and in-app OpenCode model selection | Implemented; selection is read through a clipboard round trip rather than UI Automation |
 | Recognition hints for Whisper-family models | Implemented |
 | Release microphone while idle | Implemented; mutually exclusive with audio pre-roll, as documented in Settings |
@@ -153,10 +153,10 @@ The Windows listener preserves physical press/release timestamps, keeps audio
 capture off the transcription and paste worker, and restores the previous
 clipboard only when no newer clipboard change supersedes it. The optimized
 MSVC release build is verified with GPUI's DirectX shaders. The next parity
-slices are the advanced OpenCode controls, local transcription API host, and
-developer-only Meetings surface; opt-in Commands wait on a Windows streaming
-command model. Shared first-run onboarding, OpenCode mode rewriting, and the
-bounded TypeScript transformation host already ship. Windows releases are
+slices are the local transcription API host and developer-only Meetings
+surface; opt-in Commands wait on a Windows streaming command model. Shared
+first-run onboarding, complete OpenCode mode rewriting controls, and the bounded
+TypeScript transformation host already ship. Windows releases are
 prepared and published with
 [`scripts/release-windows.sh`](../scripts/release-windows.sh), which signs
 the update feed with the same release key as Linux and publishes

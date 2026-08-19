@@ -44,9 +44,35 @@ impl Default for PostProcessingSettings {
     }
 }
 
-/// Platform-owned transformation execution. macOS currently backs this with
-/// the bounded Bun personal-command host; other shells can supply their real
-/// host when that capability is implemented.
+impl PostProcessingSettings {
+    /// Apply a user-edited deadline without letting a transient invalid field
+    /// erase the last persisted value. Both desktop roots use this contract.
+    pub fn update_deadline_from_text(&mut self, text: &str) -> bool {
+        let Ok(seconds) = text.trim().parse::<u64>() else {
+            return false;
+        };
+        let seconds = seconds.max(1);
+        if self.deadline_seconds == seconds {
+            return false;
+        }
+        self.deadline_seconds = seconds;
+        true
+    }
+
+    /// A variant cannot be sent without a concrete provider/model request.
+    /// Pin OpenCode's current default when a user selects a non-default
+    /// variant while the profile still follows the default model.
+    pub fn set_variant(&mut self, variant: Option<String>, default_model: Option<&str>) {
+        if variant.is_some() && self.model.is_none() {
+            self.model = default_model.map(str::to_owned);
+        }
+        self.variant = variant;
+    }
+}
+
+/// Platform-owned transformation execution. macOS and Windows currently back
+/// this with the shared bounded Bun personal-command host; Linux can supply its
+/// real host when that capability is implemented.
 pub trait TransformationExecutor {
     fn transform(
         &self,
@@ -451,6 +477,31 @@ mod tests {
         );
         assert_eq!(profile.deadline, Some(Duration::from_secs(12)));
         assert_eq!(profile.transformations, ["lowercase"]);
+    }
+
+    #[test]
+    fn deadline_edits_preserve_invalid_values_and_clamp_zero() {
+        let mut settings = PostProcessingSettings::default();
+
+        assert!(!settings.update_deadline_from_text("not a number"));
+        assert_eq!(settings.deadline_seconds, 30);
+        assert!(settings.update_deadline_from_text("0"));
+        assert_eq!(settings.deadline_seconds, 1);
+        assert!(settings.update_deadline_from_text(" 15 "));
+        assert_eq!(settings.deadline_seconds, 15);
+        assert!(!settings.update_deadline_from_text("15"));
+    }
+
+    #[test]
+    fn selecting_a_variant_pins_the_current_default_model() {
+        let mut settings = PostProcessingSettings::default();
+
+        settings.set_variant(Some("high".into()), Some("openai/default"));
+        assert_eq!(settings.model.as_deref(), Some("openai/default"));
+        assert_eq!(settings.variant.as_deref(), Some("high"));
+        settings.set_variant(None, Some("anthropic/new-default"));
+        assert_eq!(settings.model.as_deref(), Some("openai/default"));
+        assert!(settings.variant.is_none());
     }
 
     #[test]

@@ -449,8 +449,8 @@ seam once there are two real adapters or a current test requires substitution.
   on the supported Arch/i3 host.
 - Physically validate the Windows global loop, live settings, lock/Paste Last,
   History/replacements, Modes/transformations, HUD/tones, tray, login startup,
-  installer, and signed updates; then add advanced OpenCode controls, the local
-  API, Commands after a real streaming model, and Meetings.
+  installer, and signed updates; then add the local API, Commands after a real
+  streaming model, and Meetings.
 - Add a second real browser adapter before generalizing browser context.
 - Do not turn concrete macOS, Linux X11, or command modules into hypothetical
   platform or plugin frameworks.

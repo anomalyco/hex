@@ -8,8 +8,8 @@ use gpui::{AnyElement, Context, FontWeight, SharedString, Window, div, prelude::
 
 use crate::desktop_mode_list::ModeTarget;
 use crate::desktop_ui::{
-    FAINT, LINE, NEGATIVE, TEXT_SOFT, compact_panel, compact_panel_header, header_button, toggle,
-    tr,
+    FAINT, LINE, NEGATIVE, SURFACE, SURFACE_HOVER, SURFACE_SELECTED, TEXT, TEXT_SOFT,
+    compact_panel, compact_panel_header, disclosure_button, header_button, toggle, tr,
 };
 
 pub(crate) struct ModeProcessingUnavailableView {
@@ -29,9 +29,26 @@ pub(crate) struct ModeProcessingView {
     pub(crate) unavailable: Option<ModeProcessingUnavailableView>,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct ModeVariantPickerView {
+    pub(crate) target: ModeTarget,
+    pub(crate) variants: Vec<String>,
+    pub(crate) selected: Option<String>,
+    pub(crate) open: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum ModeProcessingAction {
-    SetEnabled { target: ModeTarget, enabled: bool },
+    SetEnabled {
+        target: ModeTarget,
+        enabled: bool,
+    },
+    ToggleVariantPicker {
+        target: ModeTarget,
+    },
+    SetVariant {
+        target: ModeTarget,
+        variant: Option<String>,
+    },
     RetryOpenCode,
     OpenOpenCodeSetup,
 }
@@ -43,6 +60,73 @@ pub(crate) trait ModeProcessingDelegate: Sized + 'static {
         window: &mut Window,
         cx: &mut Context<Self>,
     );
+}
+
+pub(crate) fn render_mode_variant_picker<T: ModeProcessingDelegate>(
+    view: ModeVariantPickerView,
+    cx: &mut Context<T>,
+) -> AnyElement {
+    let target = view.target;
+    let selected_label = view.selected.as_deref().unwrap_or("Default").to_string();
+    let choices = std::iter::once(None)
+        .chain(view.variants.into_iter().map(Some))
+        .collect::<Vec<_>>();
+    let list = view.open.then(|| {
+        div()
+            .mt_1()
+            .p_1()
+            .rounded_sm()
+            .border_1()
+            .border_color(rgb(LINE))
+            .bg(rgb(SURFACE))
+            .children(choices.into_iter().enumerate().map(|(index, variant)| {
+                let selected = view.selected == variant;
+                let label = variant.clone().unwrap_or_else(|| tr("Default").to_string());
+                div()
+                    .id(("mode-model-variant", index))
+                    .w_full()
+                    .h(px(28.0))
+                    .px_2()
+                    .flex()
+                    .items_center()
+                    .rounded_sm()
+                    .text_size(px(11.0))
+                    .text_color(rgb(if selected { TEXT } else { TEXT_SOFT }))
+                    .when(selected, |row| row.bg(rgb(SURFACE_SELECTED)))
+                    .hover(|row| row.bg(rgb(SURFACE_HOVER)))
+                    .child(label)
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.handle_mode_processing_action(
+                            ModeProcessingAction::SetVariant {
+                                target,
+                                variant: variant.clone(),
+                            },
+                            window,
+                            cx,
+                        );
+                    }))
+            }))
+    });
+    div()
+        .w(px(160.0))
+        .flex_none()
+        .child(
+            disclosure_button(selected_label)
+                .id(SharedString::from(format!(
+                    "mode-model-variant-trigger-{}",
+                    target.id_fragment()
+                )))
+                .w(px(160.0))
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    this.handle_mode_processing_action(
+                        ModeProcessingAction::ToggleVariantPicker { target },
+                        window,
+                        cx,
+                    );
+                })),
+        )
+        .when_some(list, |control, list| control.child(list))
+        .into_any_element()
 }
 
 pub(crate) fn render_mode_processing<T: ModeProcessingDelegate>(

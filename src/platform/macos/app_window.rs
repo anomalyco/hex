@@ -42,7 +42,8 @@ use crate::desktop_mode_list::{
 };
 use crate::desktop_mode_processing::{
     ModeProcessingAction, ModeProcessingDelegate, ModeProcessingUnavailableView,
-    ModeProcessingView, render_mode_processing as render_shared_mode_processing,
+    ModeProcessingView, ModeVariantPickerView,
+    render_mode_processing as render_shared_mode_processing, render_mode_variant_picker,
 };
 use crate::desktop_mode_transformations::{
     ModeTransformationsAction, ModeTransformationsDelegate, ModeTransformationsView,
@@ -443,7 +444,7 @@ struct ProcessingPicker {
     refresh_control: Option<AnyElement>,
     suggestions: Option<Div>,
     has_variants: bool,
-    variant_control: Div,
+    variant_control: AnyElement,
 }
 
 enum ModelCatalogState {
@@ -4045,7 +4046,7 @@ impl AppWindow {
                     .filter_map(|key| catalog.models.iter().find(|choice| choice.key == key))
                     .cloned()
                     .collect();
-                let variants = model_variants(catalog, selected_model);
+                let variants = catalog.variants_for(selected_model).to_vec();
                 let default_label = choice_keys
                     .first()
                     .is_some_and(Option::is_none)
@@ -4112,56 +4113,77 @@ impl AppWindow {
             });
         let has_variants = !variants.is_empty();
         let variant_open = self.variant_picker_open == Some(target);
-        let variant_list = (has_variants && variant_open).then(|| {
-            let choices = std::iter::once(None)
-                .chain(variants.iter().cloned().map(Some))
-                .collect::<Vec<_>>();
-            div()
-                .mt_1()
-                .p_1()
-                .rounded_sm()
-                .border_1()
-                .border_color(rgb(LINE))
-                .bg(rgb(SURFACE))
-                .children(choices.into_iter().enumerate().map(|(index, variant)| {
-                    let selected = selected_variant == variant.as_deref();
-                    let label = variant.clone().unwrap_or_else(|| "Default".into());
+        let variant_control = match target {
+            ModelPickerTarget::Mode(selection) => {
+                let target = match selection {
+                    ModeSelection::Default => ModeTarget::Global,
+                    ModeSelection::Custom(index) => ModeTarget::Mode(index),
+                };
+                render_mode_variant_picker(
+                    ModeVariantPickerView {
+                        target,
+                        variants,
+                        selected: selected_variant.map(str::to_owned),
+                        open: variant_open,
+                    },
+                    cx,
+                )
+            }
+            ModelPickerTarget::VoiceAction => {
+                let variant_list = (has_variants && variant_open).then(|| {
+                    let choices = std::iter::once(None)
+                        .chain(variants.iter().cloned().map(Some))
+                        .collect::<Vec<_>>();
                     div()
-                        .id(("model-variant", index))
-                        .w_full()
-                        .h(px(28.0))
-                        .px_2()
-                        .flex()
-                        .items_center()
+                        .mt_1()
+                        .p_1()
                         .rounded_sm()
-                        .text_size(px(11.0))
-                        .text_color(if selected { rgb(TEXT) } else { rgb(TEXT_SOFT) })
-                        .when(selected, |row| row.bg(rgb(SURFACE_SELECTED)))
-                        .hover(|row| row.bg(rgb(SURFACE_HOVER)))
-                        .child(label)
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.variant_picker_open = None;
-                            this.set_model_variant(target, variant.clone(), cx);
+                        .border_1()
+                        .border_color(rgb(LINE))
+                        .bg(rgb(SURFACE))
+                        .children(choices.into_iter().enumerate().map(|(index, variant)| {
+                            let selected = selected_variant == variant.as_deref();
+                            let label = variant.clone().unwrap_or_else(|| "Default".into());
+                            div()
+                                .id(("model-variant", index))
+                                .w_full()
+                                .h(px(28.0))
+                                .px_2()
+                                .flex()
+                                .items_center()
+                                .rounded_sm()
+                                .text_size(px(11.0))
+                                .text_color(if selected { rgb(TEXT) } else { rgb(TEXT_SOFT) })
+                                .when(selected, |row| row.bg(rgb(SURFACE_SELECTED)))
+                                .hover(|row| row.bg(rgb(SURFACE_HOVER)))
+                                .child(label)
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.variant_picker_open = None;
+                                    this.set_model_variant(target, variant.clone(), cx);
+                                }))
                         }))
-                }))
-        });
-        let variant_control = div()
-            .w(px(160.0))
-            .flex_none()
-            .child(
-                disclosure_button(selected_variant.unwrap_or("Default").to_string())
-                    .id("model-variant-trigger")
+                });
+                div()
                     .w(px(160.0))
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.variant_picker_open = if this.variant_picker_open == Some(target) {
-                            None
-                        } else {
-                            Some(target)
-                        };
-                        cx.notify();
-                    })),
-            )
-            .when_some(variant_list, |control, list| control.child(list));
+                    .flex_none()
+                    .child(
+                        disclosure_button(selected_variant.unwrap_or("Default").to_string())
+                            .id("model-variant-trigger")
+                            .w(px(160.0))
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.variant_picker_open =
+                                    if this.variant_picker_open == Some(target) {
+                                        None
+                                    } else {
+                                        Some(target)
+                                    };
+                                cx.notify();
+                            })),
+                    )
+                    .when_some(variant_list, |control, list| control.child(list))
+                    .into_any_element()
+            }
+        };
         let model_control = if let Some(presentation) = presentation.filter(|_| !focused) {
             let model_input = model.clone();
             {
@@ -4410,16 +4432,18 @@ impl AppWindow {
         variant: Option<String>,
         cx: &mut Context<Self>,
     ) {
+        let default_model = match &self.model_catalog {
+            ModelCatalogState::Loaded(catalog) => catalog.default_key.clone(),
+            _ => None,
+        };
         match target {
             ModelPickerTarget::Mode(selection) => {
-                self.mode_settings_mut(selection).post_processing.variant = variant.clone();
+                let processing = &mut self.mode_settings_mut(selection).post_processing;
+                processing.set_variant(variant.clone(), default_model.as_deref());
             }
             ModelPickerTarget::VoiceAction => {
-                if variant.is_some()
-                    && self.settings.voice_action.model.is_none()
-                    && let ModelCatalogState::Loaded(catalog) = &self.model_catalog
-                {
-                    self.settings.voice_action.model = catalog.default_key.clone();
+                if variant.is_some() && self.settings.voice_action.model.is_none() {
+                    self.settings.voice_action.model = default_model;
                 }
                 self.settings.voice_action.variant = variant.clone();
             }
@@ -5986,6 +6010,33 @@ impl ModeProcessingDelegate for AppWindow {
                 self.mode_settings_mut(selection).post_processing.enabled = enabled;
                 self.save_settings(cx);
             }
+            ModeProcessingAction::ToggleVariantPicker { target } => {
+                let selection = match target {
+                    ModeTarget::Global => ModeSelection::Default,
+                    ModeTarget::Mode(index) if index < self.processing_inputs.modes.len() => {
+                        ModeSelection::Custom(index)
+                    }
+                    ModeTarget::Mode(_) => return,
+                };
+                let target = ModelPickerTarget::Mode(selection);
+                self.variant_picker_open = if self.variant_picker_open == Some(target) {
+                    None
+                } else {
+                    Some(target)
+                };
+                cx.notify();
+            }
+            ModeProcessingAction::SetVariant { target, variant } => {
+                let selection = match target {
+                    ModeTarget::Global => ModeSelection::Default,
+                    ModeTarget::Mode(index) if index < self.processing_inputs.modes.len() => {
+                        ModeSelection::Custom(index)
+                    }
+                    ModeTarget::Mode(_) => return,
+                };
+                self.variant_picker_open = None;
+                self.set_model_variant(ModelPickerTarget::Mode(selection), variant, cx);
+            }
             ModeProcessingAction::RetryOpenCode => {
                 self.reload_model_catalog();
                 cx.notify();
@@ -6626,13 +6677,6 @@ fn model_presentation(
     })
 }
 
-fn model_variants(catalog: &ModelCatalog, selected_key: Option<&str>) -> Vec<String> {
-    selected_key
-        .or(catalog.default_key.as_deref())
-        .and_then(|key| catalog.models.iter().find(|choice| choice.key == key))
-        .map_or_else(Vec::new, |choice| choice.variants.clone())
-}
-
 fn fallback_model_presentation(key: &str) -> ModelPresentation {
     let provider = key.split_once('/').map_or(key, |(provider, _)| provider);
     ModelPresentation {
@@ -6782,10 +6826,8 @@ fn apply_mode_inputs(inputs: &ModeInputs, mode: &mut DictationMode, is_default: 
         .collect();
     mode.post_processing.enabled = inputs.processing_toggle.enabled();
     mode.post_processing.prompt = input_text(&inputs.prompt, cx);
-    mode.post_processing.deadline_seconds = input_text(&inputs.deadline, cx)
-        .parse::<u64>()
-        .unwrap_or(mode.post_processing.deadline_seconds)
-        .max(1);
+    mode.post_processing
+        .update_deadline_from_text(&input_text(&inputs.deadline, cx));
 }
 
 fn setup_row(title: &'static str, description: &'static str, control: AnyElement) -> Div {

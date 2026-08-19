@@ -17,8 +17,9 @@ History, replacements, tones, click-through HUD, tray residency, and Launch at
 login. Modes with corrections and browser-host selection, Voice Action,
 onboarding, managed signed updates, and global/per-mode OpenCode rewriting are
 implemented. The bounded TypeScript transformation host, embedded managed SDK,
-and shared ordered Modes editor are also implemented; advanced OpenCode
-controls, streaming commands, the local API host, and developer Meetings remain.
+and shared ordered Modes editor are also implemented. OpenCode reasoning
+variants and deadlines are editable on Windows through the same contract as
+macOS. Streaming commands, the local API host, and developer Meetings remain.
 The authenticated local transcription service now implements discovery,
 direct-child embedding, model preparation, and bounded host-audio transcription;
 Promise and Effect TypeScript wrappers pass fake-helper tests. Signed helper
@@ -38,7 +39,7 @@ below.
 | Dictation loop | Product implementation; physical timestamp regression recheck remains | Beta implementation; Arch/i3 smoke test remains | Alpha implementation; Windows 10/11 smoke matrix remains |
 | Desktop presentation | Full root still owns macOS composition; History, Voice Action, and the Modes collection/basics/replacement/processing/transformation UI are shared | Shared primitives and panes, but a separate Linux root remains | Shared primitives plus History, Voice Action, and the shared Modes collection/basics/replacement/processing/transformation UI, but a separate Windows root remains |
 | Commands | Persisted release opt-in | Bounded developer-only prototype; no packaged/context-complete release contract | Unavailable until a real streaming command model exists |
-| Modes and replacements | Full ordered pipeline on the shared processing policy and shared transformation host | Not implemented | Corrections, replacements, web-domain selection, OpenCode rewriting, and ordered built-in/TypeScript transformations use the shared policy; reasoning/deadline controls and physical end-to-end validation remain |
+| Modes and replacements | Full ordered pipeline on the shared processing policy and shared transformation host | Not implemented | Corrections, replacements, web-domain selection, OpenCode model/variant/deadline rewriting, and ordered built-in/TypeScript transformations use the shared policy; physical end-to-end validation remains |
 | Voice Action | Implemented | Not implemented | Implemented with clipboard-backed selected-text capture |
 | HUD | Product Metal HUD using the shared state model | Embedded developer lab only | Product GPUI/DirectX HUD using the same shared state model |
 | Packaging and updates | Sparkle flow implemented; clean-account validation remains | Signed direct-install flow implemented; real cross-version update remains | Managed installer and signed update flow implemented; signed-host validation remains |
@@ -126,8 +127,9 @@ hosts, and no shared renderer branches on an operating-system name.
   signed update restart.
 - [x] Complete global and contextual OpenCode mode rewriting using the same
   persisted profile contract and portable processing policy as macOS.
-- [ ] Expose the remaining OpenCode reasoning-variant and deadline controls in
-  the Windows Modes editor.
+- [x] Expose OpenCode reasoning-variant and deadline controls in the Windows
+  Modes editor; both roots consume the shared variant picker and portable
+  deadline/default-model semantics.
 - [x] Add the bounded TypeScript transformation host, embedded managed SDK, and
   ordered transformation editing used by the same portable processing policy.
 - [ ] Add opt-in Commands only after selecting and measuring a real Windows
@@ -219,8 +221,9 @@ installer/update contract, and shared interface translations now ship; the
 Linux shell renders the same shared settings surface and model catalog.
 Shared first-run onboarding and global/per-mode OpenCode rewriting now ship as
 well, as do ordered built-in and TypeScript transformations through the shared
-bounded host and Modes editor. Remaining slices are the advanced OpenCode
-controls, persisted opt-in command engine (waiting on a Windows streaming
+bounded host and Modes editor. Reasoning variants and rewrite deadlines are now
+editable on Windows through the same portable settings contract. Remaining
+slices are the persisted opt-in command engine (waiting on a Windows streaming
 model), authenticated local transcription host, and developer-only Meetings.
 The detailed live matrix is in [`docs/windows.md`](docs/windows.md).
 

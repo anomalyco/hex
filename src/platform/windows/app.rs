@@ -46,7 +46,8 @@ use crate::desktop_mode_list::{
 };
 use crate::desktop_mode_processing::{
     ModeProcessingAction, ModeProcessingDelegate, ModeProcessingUnavailableView,
-    ModeProcessingView, render_mode_processing as render_shared_mode_processing,
+    ModeProcessingView, ModeVariantPickerView,
+    render_mode_processing as render_shared_mode_processing, render_mode_variant_picker,
 };
 use crate::desktop_mode_transformations::{
     ModeTransformationsAction, ModeTransformationsDelegate, ModeTransformationsView,
@@ -152,9 +153,12 @@ struct WindowsApp {
     mode_inputs: Vec<ModeInputs>,
     global_processing_prompt: Entity<TextInput>,
     _global_processing_prompt_subscription: Subscription,
+    global_processing_deadline: Entity<TextInput>,
+    _global_processing_deadline_subscription: Subscription,
     selected_mode: ModeTarget,
     opencode_model_dropdown: Option<OpenCodeModelTarget>,
     opencode_model_dropdown_bounds: Option<Bounds<Pixels>>,
+    opencode_variant_picker_open: Option<ModeTarget>,
     transformation_picker_open: bool,
     recognition_hints_input: Entity<TextInput>,
     _recognition_hints_subscription: Subscription,
@@ -206,6 +210,7 @@ struct ModeInputs {
     applications: Entity<TextInput>,
     websites: Entity<TextInput>,
     processing_prompt: Entity<TextInput>,
+    processing_deadline: Entity<TextInput>,
     corrections: Vec<ReplacementEditorInput>,
     _subscriptions: Vec<Subscription>,
 }
@@ -323,6 +328,25 @@ pub fn open(event_path: PathBuf, shutdown: &'static AtomicBool, start_hidden: bo
                                 );
                             },
                         );
+                        let global_processing_deadline = cx.new(|cx| {
+                            TextInput::new(
+                                cx,
+                                "Seconds",
+                                host.settings
+                                    .dictation_post_processing
+                                    .deadline_seconds
+                                    .to_string(),
+                            )
+                        });
+                        let global_processing_deadline_subscription = cx.subscribe(
+                            &global_processing_deadline,
+                            |this: &mut WindowsApp, input, _: &TextChanged, cx| {
+                                this.sync_global_processing_deadline(
+                                    input.read(cx).text().to_string(),
+                                    cx,
+                                );
+                            },
+                        );
                         let recognition_hints_input = cx.new(|cx| {
                             crate::text_input::TextInput::multiline_with_height(
                                 cx,
@@ -370,9 +394,13 @@ pub fn open(event_path: PathBuf, shutdown: &'static AtomicBool, start_hidden: bo
                             global_processing_prompt,
                             _global_processing_prompt_subscription:
                                 global_processing_prompt_subscription,
+                            global_processing_deadline,
+                            _global_processing_deadline_subscription:
+                                global_processing_deadline_subscription,
                             selected_mode: ModeTarget::Global,
                             opencode_model_dropdown: None,
                             opencode_model_dropdown_bounds: None,
+                            opencode_variant_picker_open: None,
                             transformation_picker_open: false,
                             model_catalog_language_filter: None,
                             model_catalog_language_dropdown_open: false,
@@ -1963,6 +1991,13 @@ impl WindowsApp {
                 px(92.0),
             )
         });
+        let processing_deadline = cx.new(|cx| {
+            TextInput::new(
+                cx,
+                "Seconds",
+                mode.post_processing.deadline_seconds.to_string(),
+            )
+        });
         let name_changed = cx.subscribe(&name, |this, _, _: &TextChanged, cx| this.sync_modes(cx));
         let applications_changed = cx.subscribe(&applications, |this, _, _: &TextChanged, cx| {
             this.sync_modes(cx)
@@ -1972,6 +2007,10 @@ impl WindowsApp {
         });
         let processing_prompt_changed = cx
             .subscribe(&processing_prompt, |this, _, _: &TextChanged, cx| {
+                this.sync_modes(cx)
+            });
+        let processing_deadline_changed = cx
+            .subscribe(&processing_deadline, |this, _, _: &TextChanged, cx| {
                 this.sync_modes(cx)
             });
         let corrections = mode
@@ -1984,12 +2023,14 @@ impl WindowsApp {
             applications,
             websites,
             processing_prompt,
+            processing_deadline,
             corrections,
             _subscriptions: vec![
                 name_changed,
                 applications_changed,
                 websites_changed,
                 processing_prompt_changed,
+                processing_deadline_changed,
             ],
         }
     }
@@ -2000,6 +2041,16 @@ impl WindowsApp {
         let _ = self
             .host
             .set_mode_post_processing(ModeTarget::Global, processing);
+        cx.notify();
+    }
+
+    fn sync_global_processing_deadline(&mut self, deadline: String, cx: &mut Context<Self>) {
+        let mut processing = self.host.settings.dictation_post_processing.clone();
+        if processing.update_deadline_from_text(&deadline) {
+            let _ = self
+                .host
+                .set_mode_post_processing(ModeTarget::Global, processing);
+        }
         cx.notify();
     }
 
@@ -2043,6 +2094,8 @@ impl WindowsApp {
                         .get(index)
                         .map_or_else(Default::default, |mode| mode.post_processing.clone());
                     processing.prompt = inputs.processing_prompt.read(cx).text().to_string();
+                    processing
+                        .update_deadline_from_text(inputs.processing_deadline.read(cx).text());
                     processing
                 },
                 transformations: self
@@ -2107,6 +2160,7 @@ impl WindowsApp {
         self.transcription_picker = TranscriptionPickerState::Closed;
         self.model_catalog_language_dropdown_open = false;
         self.opencode_model_dropdown = None;
+        self.opencode_variant_picker_open = None;
         self.microphone_picker_open = false;
         self.end_hotkey_capture();
         self.transcription_dropdown_open = false;
@@ -3607,6 +3661,19 @@ impl WindowsApp {
         }
     }
 
+    fn set_mode_variant(&mut self, target: ModeTarget, variant: Option<String>) {
+        let Some(mut processing) = self.mode_post_processing(target).cloned() else {
+            return;
+        };
+        let default_model = self
+            .host
+            .opencode_catalog
+            .as_ref()
+            .and_then(|catalog| catalog.default_key.as_deref());
+        processing.set_variant(variant, default_model);
+        let _ = self.host.set_mode_post_processing(target, processing);
+    }
+
     fn render_windows_mode_processing(
         &mut self,
         target: ModeTarget,
@@ -3625,6 +3692,27 @@ impl WindowsApp {
                 ModeTarget::Global => self.global_processing_prompt.clone(),
                 ModeTarget::Mode(index) => self.mode_inputs[index].processing_prompt.clone(),
             };
+            let deadline = match target {
+                ModeTarget::Global => self.global_processing_deadline.clone(),
+                ModeTarget::Mode(index) => self.mode_inputs[index].processing_deadline.clone(),
+            };
+            let variants = self
+                .host
+                .opencode_catalog
+                .as_ref()
+                .map(|catalog| catalog.variants_for(settings.model.as_deref()).to_vec())
+                .unwrap_or_default();
+            let variant_control = (!variants.is_empty()).then(|| {
+                render_mode_variant_picker(
+                    ModeVariantPickerView {
+                        target,
+                        variants,
+                        selected: settings.variant.clone(),
+                        open: self.opencode_variant_picker_open == Some(target),
+                    },
+                    cx,
+                )
+            });
             Some(
                 div()
                     .pt_4()
@@ -3647,6 +3735,35 @@ impl WindowsApp {
                                     .child(model_control),
                             ),
                     )
+                    .child(
+                        div()
+                            .flex()
+                            .when(compact, |row| row.flex_col().items_start().gap_3())
+                            .when(!compact, |row| row.items_center().justify_between().gap_4())
+                            .child(div().flex_1().min_w(px(0.0)).child(settings_copy(
+                                "Deadline",
+                                "Maximum time OpenCode may spend on one rewrite",
+                            )))
+                            .child(
+                                div()
+                                    .when(!compact, |control| control.w(px(120.0)).flex_none())
+                                    .when(compact, |control| control.w_full())
+                                    .child(deadline),
+                            ),
+                    )
+                    .when_some(variant_control, |processing, variant_control| {
+                        processing.child(
+                            div()
+                                .flex()
+                                .when(compact, |row| row.flex_col().items_start().gap_3())
+                                .when(!compact, |row| row.items_start().justify_between().gap_4())
+                                .child(div().flex_1().min_w(px(0.0)).child(settings_copy(
+                                    "Thinking",
+                                    "Choose how much reasoning the model should use",
+                                )))
+                                .child(variant_control),
+                        )
+                    })
                     .child(
                         div()
                             .flex()
@@ -4536,6 +4653,18 @@ impl ModeProcessingDelegate for WindowsApp {
                 {
                     self.host.request_opencode_catalog();
                 }
+            }
+            ModeProcessingAction::ToggleVariantPicker { target } => {
+                self.opencode_variant_picker_open =
+                    if self.opencode_variant_picker_open == Some(target) {
+                        None
+                    } else {
+                        Some(target)
+                    };
+            }
+            ModeProcessingAction::SetVariant { target, variant } => {
+                self.opencode_variant_picker_open = None;
+                self.set_mode_variant(target, variant);
             }
             ModeProcessingAction::RetryOpenCode => self.host.request_opencode_catalog(),
             ModeProcessingAction::OpenOpenCodeSetup => {
