@@ -4,6 +4,12 @@
 pub mod app_paths;
 #[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
 pub mod audio;
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+pub mod command_context;
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+pub mod command_grammar;
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+pub mod commands_engine;
 #[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
 pub mod dictation;
 #[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
@@ -13,6 +19,8 @@ pub mod feedback;
 #[cfg_attr(target_os = "windows", allow(dead_code))]
 pub mod history;
 pub mod instance;
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+pub mod keys;
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 pub mod opencode;
 #[cfg(any(target_os = "linux", target_os = "windows"))]
