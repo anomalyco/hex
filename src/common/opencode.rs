@@ -579,6 +579,11 @@ fn opencode_executable() -> PathBuf {
     .unwrap_or_else(|| "opencode2".into())
 }
 
+/// Binary names the CLI ships under, newest first: `@opencode-ai/cli`
+/// installs `opencode2`, the original package installs `opencode`. A full
+/// discovery pass runs per name, so any `opencode2` beats every `opencode`.
+const OPENCODE_BINARY_NAMES: [&str; 2] = ["opencode2", "opencode"];
+
 fn find_opencode_executable(
     configured: Option<PathBuf>,
     path: Option<&OsStr>,
@@ -588,73 +593,88 @@ fn find_opencode_executable(
     if let Some(configured) = configured {
         return Some(absolute_path(configured, current_directory));
     }
-    #[cfg(windows)]
-    {
-        let _ = home;
-        // Prefer the real CLI binary that npm shims wrap: JSON request
-        // bodies survive .exe argv quoting but are shredded by cmd shims.
-        path.into_iter()
-            .flat_map(std::env::split_paths)
-            .flat_map(|directory| {
-                [
-                    directory.join(r"node_modules\@opencode-ai\cli\bin\opencode2.exe"),
-                    directory.join("opencode2.exe"),
-                ]
-            })
-            .map(|candidate| absolute_path(candidate, current_directory))
-            .find(|candidate| is_executable(candidate))
-    }
-    #[cfg(unix)]
-    {
-        let path_candidates = path
-            .into_iter()
-            .flat_map(std::env::split_paths)
-            .map(|directory| absolute_path(directory.join("opencode2"), current_directory));
-        let home_candidates = home.into_iter().flat_map(|home| {
+    OPENCODE_BINARY_NAMES
+        .into_iter()
+        .find_map(|name| find_named_executable(name, path, home, current_directory))
+}
+
+#[cfg(windows)]
+fn find_named_executable(
+    name: &str,
+    path: Option<&OsStr>,
+    home: Option<&Path>,
+    current_directory: Option<&Path>,
+) -> Option<PathBuf> {
+    let _ = home;
+    // Prefer the real CLI binary that npm shims wrap: JSON request
+    // bodies survive .exe argv quoting but are shredded by cmd shims.
+    path.into_iter()
+        .flat_map(std::env::split_paths)
+        .flat_map(|directory| {
             [
-                home.join(".bun/bin/opencode2"),
-                home.join("Library/pnpm/opencode2"),
-                home.join("Library/pnpm/bin/opencode2"),
-                home.join(".yarn/bin/opencode2"),
-                home.join(".config/yarn/global/node_modules/.bin/opencode2"),
-                home.join(".npm-global/bin/opencode2"),
-                home.join(".local/bin/opencode2"),
-                home.join("bin/opencode2"),
-                home.join(".volta/bin/opencode2"),
-                home.join(".asdf/shims/opencode2"),
-                home.join(".local/share/mise/shims/opencode2"),
-                home.join(".nodenv/shims/opencode2"),
+                directory.join(format!(r"node_modules\@opencode-ai\cli\bin\{name}.exe")),
+                directory.join(format!("{name}.exe")),
             ]
-        });
-        path_candidates
-            .chain(home_candidates)
-            .chain(version_manager_candidates(home))
-            .chain([
-                PathBuf::from("/opt/homebrew/bin/opencode2"),
-                PathBuf::from("/usr/local/bin/opencode2"),
-            ])
-            .find(|path| is_executable(path))
-    }
+        })
+        .map(|candidate| absolute_path(candidate, current_directory))
+        .find(|candidate| is_executable(candidate))
 }
 
 #[cfg(unix)]
-fn version_manager_candidates(home: Option<&Path>) -> Vec<PathBuf> {
+fn find_named_executable(
+    name: &str,
+    path: Option<&OsStr>,
+    home: Option<&Path>,
+    current_directory: Option<&Path>,
+) -> Option<PathBuf> {
+    let path_candidates = path
+        .into_iter()
+        .flat_map(std::env::split_paths)
+        .map(|directory| absolute_path(directory.join(name), current_directory));
+    let home_candidates = home.into_iter().flat_map(|home| {
+        [
+            home.join(format!(".bun/bin/{name}")),
+            home.join(format!("Library/pnpm/{name}")),
+            home.join(format!("Library/pnpm/bin/{name}")),
+            home.join(format!(".yarn/bin/{name}")),
+            home.join(format!(".config/yarn/global/node_modules/.bin/{name}")),
+            home.join(format!(".npm-global/bin/{name}")),
+            home.join(format!(".local/bin/{name}")),
+            home.join(format!("bin/{name}")),
+            home.join(format!(".volta/bin/{name}")),
+            home.join(format!(".asdf/shims/{name}")),
+            home.join(format!(".local/share/mise/shims/{name}")),
+            home.join(format!(".nodenv/shims/{name}")),
+        ]
+    });
+    path_candidates
+        .chain(home_candidates)
+        .chain(version_manager_candidates(home, name))
+        .chain([
+            PathBuf::from(format!("/opt/homebrew/bin/{name}")),
+            PathBuf::from(format!("/usr/local/bin/{name}")),
+        ])
+        .find(|path| is_executable(path))
+}
+
+#[cfg(unix)]
+fn version_manager_candidates(home: Option<&Path>, name: &str) -> Vec<PathBuf> {
     let Some(home) = home else {
         return Vec::new();
     };
     let roots = [
-        (home.join(".nvm/versions/node"), "bin/opencode2"),
+        (home.join(".nvm/versions/node"), format!("bin/{name}")),
         (
             home.join("Library/Application Support/fnm/node-versions"),
-            "installation/bin/opencode2",
+            format!("installation/bin/{name}"),
         ),
         (
             home.join(".local/share/fnm/node-versions"),
-            "installation/bin/opencode2",
+            format!("installation/bin/{name}"),
         ),
         (
             home.join(".fnm/node-versions"),
-            "installation/bin/opencode2",
+            format!("installation/bin/{name}"),
         ),
     ];
     roots
@@ -665,7 +685,7 @@ fn version_manager_candidates(home: Option<&Path>) -> Vec<PathBuf> {
                 .flatten()
                 .flatten()
                 .take(64)
-                .map(move |entry| entry.path().join(suffix))
+                .map(move |entry| entry.path().join(&suffix))
         })
         .collect()
 }
@@ -824,21 +844,36 @@ mod tests {
         assert_eq!(found, Some(current.join("bin/opencode2")));
     }
 
+    /// A unique temp root per test, so discovery tests never see each
+    /// other's fake installs.
+    fn discovery_root(label: &str) -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "hex-opencode-{label}-{}-{:?}",
+            std::process::id(),
+            thread::current().id()
+        ))
+    }
+
+    /// Creates a file `is_executable` accepts: a mode-0o755 script on unix,
+    /// any regular `.exe` file on Windows.
+    fn write_fake_executable(path: &Path) {
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, "#!/bin/sh\n").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut permissions = path.metadata().unwrap().permissions();
+            permissions.set_mode(0o755);
+            std::fs::set_permissions(path, permissions).unwrap();
+        }
+    }
+
     #[cfg(unix)]
     #[test]
     fn standard_package_manager_location_finds_opencode_outside_the_gui_path() {
-        use std::os::unix::fs::PermissionsExt;
-        let root = std::env::temp_dir().join(format!(
-            "hex-opencode-discovery-{}-{:?}",
-            std::process::id(),
-            thread::current().id()
-        ));
+        let root = discovery_root("discovery");
         let executable = root.join("Library/pnpm/bin/opencode2");
-        std::fs::create_dir_all(executable.parent().unwrap()).unwrap();
-        std::fs::write(&executable, "#!/bin/sh\n").unwrap();
-        let mut permissions = executable.metadata().unwrap().permissions();
-        permissions.set_mode(0o755);
-        std::fs::set_permissions(&executable, permissions).unwrap();
+        write_fake_executable(&executable);
 
         let found = find_opencode_executable(
             None,
@@ -854,22 +889,99 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn version_manager_discovery_is_bounded_to_known_roots() {
-        use std::os::unix::fs::PermissionsExt;
-        let root = std::env::temp_dir().join(format!(
-            "hex-opencode-nvm-{}-{:?}",
-            std::process::id(),
-            thread::current().id()
-        ));
+        let root = discovery_root("nvm");
         let executable = root.join(".nvm/versions/node/v24.4.1/bin/opencode2");
-        std::fs::create_dir_all(executable.parent().unwrap()).unwrap();
-        std::fs::write(&executable, "#!/bin/sh\n").unwrap();
-        let mut permissions = executable.metadata().unwrap().permissions();
-        permissions.set_mode(0o755);
-        std::fs::set_permissions(&executable, permissions).unwrap();
+        write_fake_executable(&executable);
 
         let found = find_opencode_executable(None, None, Some(&root), Some(&root));
 
         assert_eq!(found, Some(executable));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn opencode2_wins_over_an_opencode_earlier_on_path() {
+        let root = discovery_root("prefer2");
+        let old = root.join("first/opencode");
+        let new = root.join("second/opencode2");
+        write_fake_executable(&old);
+        write_fake_executable(&new);
+        let path = std::env::join_paths([root.join("first"), root.join("second")]).unwrap();
+
+        let found = find_opencode_executable(None, Some(&path), None, Some(&root));
+
+        assert_eq!(found, Some(new));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn plain_opencode_is_found_when_opencode2_is_absent() {
+        let root = discovery_root("plain");
+        let on_path = root.join("bin/opencode");
+        let in_home = root.join("Library/pnpm/bin/opencode");
+        write_fake_executable(&on_path);
+        write_fake_executable(&in_home);
+        let path = std::env::join_paths([root.join("bin")]).unwrap();
+
+        let found = find_opencode_executable(None, Some(&path), Some(&root), Some(&root));
+        assert_eq!(found, Some(on_path.clone()));
+
+        std::fs::remove_file(&on_path).unwrap();
+        let found = find_opencode_executable(None, Some(&path), Some(&root), Some(&root));
+        assert_eq!(found, Some(in_home));
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn version_manager_locations_find_the_plain_opencode_name() {
+        let root = discovery_root("nvm-plain");
+        let executable = root.join(".nvm/versions/node/v24.4.1/bin/opencode");
+        write_fake_executable(&executable);
+
+        let found = find_opencode_executable(None, None, Some(&root), Some(&root));
+
+        assert_eq!(found, Some(executable));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn opencode2_wins_over_an_opencode_earlier_on_path() {
+        let root = discovery_root("prefer2");
+        let old = root.join(r"first\opencode.exe");
+        let new = root.join(r"second\opencode2.exe");
+        write_fake_executable(&old);
+        write_fake_executable(&new);
+        let path = std::env::join_paths([root.join("first"), root.join("second")]).unwrap();
+
+        let found = find_opencode_executable(None, Some(&path), None, Some(&root));
+
+        assert_eq!(found, Some(new));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn plain_opencode_is_found_when_opencode2_is_absent() {
+        let root = discovery_root("plain");
+        let shim = root.join(r"bin\opencode.exe");
+        let real = root.join(r"bin\node_modules\@opencode-ai\cli\bin\opencode.exe");
+        write_fake_executable(&shim);
+        write_fake_executable(&real);
+        let path = std::env::join_paths([root.join("bin")]).unwrap();
+
+        // The real npm-installed binary beats the shim exe alongside it.
+        let found = find_opencode_executable(None, Some(&path), None, Some(&root));
+        assert_eq!(found, Some(real.clone()));
+
+        std::fs::remove_file(&real).unwrap();
+        let found = find_opencode_executable(None, Some(&path), None, Some(&root));
+        assert_eq!(found, Some(shim));
+
         std::fs::remove_dir_all(root).unwrap();
     }
 
