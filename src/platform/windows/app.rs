@@ -31,15 +31,15 @@ use crate::desktop_host::{
     DesktopMicrophoneSnapshot, DesktopShortcut, DesktopSnapshot, DesktopTranscriptionSnapshot,
     DesktopUpdateStatus,
 };
-use crate::desktop_shell::DesktopPane;
+use crate::desktop_shell::{DesktopPane, render_navigation_items};
 use crate::desktop_transcription_picker::TranscriptionPickerDelegate;
 use crate::desktop_ui::{
     DIVIDER, FAINT, LINE, MUTED, PANE_LIST_WIDTH, SIDEBAR_WIDTH, SURFACE_SELECTED, TEXT,
     TEXT_ON_ACCENT, TEXT_SOFT, accent_color, compact_button, compact_panel, disclosure_button,
     dropdown_backdrop, dropdown_item, dropdown_panel, dropdown_panel_with_width, empty_message,
-    error_message, header_button, hotkey_keycaps, navigation_item, pane_body, pane_content,
-    pane_header_with_action, section_label, segmented_control, segmented_item, settings_panel,
-    settings_row, settings_section_label, sidebar_frame, toggle, window_frame,
+    error_message, header_button, hotkey_keycaps, pane_body, pane_content, pane_header_with_action,
+    section_label, segmented_control, segmented_item, settings_panel, settings_row,
+    settings_section_label, sidebar_frame, toggle, window_frame,
 };
 use crate::events::EventReader;
 use crate::history::{History, HistoryEntry, HistoryRetention};
@@ -147,19 +147,6 @@ struct WindowsApp {
     ui_language_dropdown_open: bool,
     ui_language_dropdown_bounds: Option<Bounds<Pixels>>,
     history_detail_text: Option<(u64, Entity<TextInput>)>,
-}
-
-fn windows_navigation_id(pane: DesktopPane) -> &'static str {
-    match pane {
-        DesktopPane::Settings => "windows-nav-settings",
-        DesktopPane::Modes => "windows-nav-modes",
-        DesktopPane::Commands => "windows-nav-commands",
-        DesktopPane::VoiceAction => "windows-nav-voice-action",
-        DesktopPane::History => "windows-nav-history",
-        DesktopPane::HudLab => "windows-nav-hud-lab",
-        DesktopPane::Meetings => "windows-nav-meetings",
-        DesktopPane::Activity => "windows-nav-activity",
-    }
 }
 
 /// Which shortcut a settings row is re-recording.
@@ -2182,7 +2169,7 @@ impl WindowsApp {
         .into_any_element()
     }
 
-    fn select_pane(&mut self, pane: DesktopPane) {
+    fn select_pane(&mut self, pane: DesktopPane, cx: &mut Context<Self>) {
         debug_assert!(DesktopPane::available(self.host.capabilities()).contains(&pane));
         self.close_popups();
         self.pane = pane;
@@ -2202,21 +2189,17 @@ impl WindowsApp {
             | DesktopPane::Meetings
             | DesktopPane::Activity => {}
         }
+        cx.notify();
     }
 
     fn render_navigation(&mut self, cx: &mut Context<Self>) -> AnyElement {
-        let selected_pane = self.pane;
-        let items = DesktopPane::available(self.host.capabilities())
-            .into_iter()
-            .map(|pane| {
-                navigation_item(pane.icon(), selected_pane == pane)
-                    .id(windows_navigation_id(pane))
-                    .child(tr(pane.label()))
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.select_pane(pane);
-                        cx.notify();
-                    }))
-            });
+        let items = render_navigation_items(
+            self.pane,
+            self.host.capabilities(),
+            |label| tr(label).to_string(),
+            Self::select_pane,
+            cx,
+        );
         let update = match self.host.updater.state() {
             crate::windows_updater::UpdateCheck::Available { version, url } => Some((version, url)),
             _ => None,

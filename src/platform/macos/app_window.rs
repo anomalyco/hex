@@ -27,7 +27,7 @@ use crate::desktop_host::{
     DesktopAction, DesktopCapabilities, DesktopHost, DesktopMicrophoneSnapshot, DesktopSnapshot,
     DesktopTranscriptionSnapshot, DesktopUpdateStatus,
 };
-use crate::desktop_shell::DesktopPane;
+use crate::desktop_shell::{DesktopPane, render_navigation_items};
 use crate::desktop_transcription_picker::{
     TranscriptionPickerDelegate, TranscriptionPickerModel, TranscriptionPickerProgress,
     TranscriptionPickerStatus, TranscriptionPickerView,
@@ -40,10 +40,9 @@ use crate::desktop_ui::{
     SURFACE_SELECTED, TEXT, TEXT_INPUT_HEIGHT, TEXT_SOFT, compact_button,
     compact_header_plus_button, compact_panel, compact_panel_header, compact_plus_button,
     compact_section_label, disclosure_button, empty_message, error_message, header_button,
-    hotkey_keycaps, listener_status, mix_color, navigation_item, pane_body, pane_content,
-    pane_header, pane_header_with_action, section_label, segmented_control, segmented_item,
-    settings_copy, settings_panel, settings_row, settings_section_label, sidebar_frame, toggle,
-    window_frame,
+    hotkey_keycaps, listener_status, mix_color, pane_body, pane_content, pane_header,
+    pane_header_with_action, section_label, segmented_control, segmented_item, settings_copy,
+    settings_panel, settings_row, settings_section_label, sidebar_frame, toggle, window_frame,
 };
 use crate::dictation_indicator::{DictationIndicatorEvent, DictationIndicatorSender, HudTuning};
 use crate::dictation_processor::{ModelCatalog, ModelChoice};
@@ -2171,19 +2170,13 @@ impl AppWindow {
     }
 
     fn render_navigation(&mut self, cx: &mut Context<Self>) -> AnyElement {
-        let selected_pane = self.pane;
-        let items = DesktopPane::available(self.capabilities())
-            .into_iter()
-            .enumerate()
-            .map(|(index, pane)| {
-                let selected = selected_pane == pane;
-                navigation_item(pane.icon(), selected)
-                    .id(("app-nav", index))
-                    .child(pane.label())
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.select_pane(pane, cx);
-                    }))
-            });
+        let items = render_navigation_items(
+            self.pane,
+            self.capabilities(),
+            |label| label.to_string(),
+            Self::select_pane,
+            cx,
+        );
 
         sidebar_frame()
             .w(px(SIDEBAR_WIDTH))

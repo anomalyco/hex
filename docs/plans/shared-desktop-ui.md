@@ -184,9 +184,11 @@ shortcut validation, update restart, and settings persistence. Windows and the
 transitional macOS root consume the same core settings actions while keeping
 their native validation and lifecycle. `src/desktop/shell.rs` now owns the one
 stable pane identity, order, label, icon, and capability filter consumed by all
-three roots; Linux no longer advertises a Commands catalog pane merely because
-its developer-only runtime toggle exists. Periodic refresh and the remaining
-render state still need to move into one root entity.
+three roots, plus the one renderer for navigation rows and selection callbacks.
+The current roots retain only their native frame/footer and pane-selection side
+effects. Linux no longer advertises a Commands catalog pane merely because its
+developer-only runtime toggle exists. Periodic refresh and the remaining render
+state still need to move into one root entity.
 
 - Move `AppWindow` and its portable dependencies out of macOS-only module gates.
 - Have the macOS lifecycle coordinator and Linux tray host construct their

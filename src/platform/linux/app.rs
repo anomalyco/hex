@@ -23,13 +23,13 @@ use crate::desktop_host::{
     DesktopUpdateStatus,
 };
 use crate::desktop_i18n::{tr, tr_fill};
-use crate::desktop_shell::DesktopPane;
+use crate::desktop_shell::{DesktopPane, render_navigation_items};
 use crate::desktop_transcription_picker::TranscriptionPickerDelegate;
 use crate::desktop_ui::{
     FAINT, LINE, MUTED, SIDEBAR_WIDTH, SUCCESS, SURFACE, TEXT, TEXT_SOFT, compact_button,
     disclosure_button, dropdown_backdrop, dropdown_item, dropdown_panel_with_width, error_message,
-    header_button, hotkey_keycaps, navigation_item, pane_content, pane_header, settings_panel,
-    settings_row, settings_section_label, sidebar_frame, toggle, window_frame,
+    header_button, hotkey_keycaps, pane_content, pane_header, settings_panel, settings_row,
+    settings_section_label, sidebar_frame, toggle, window_frame,
 };
 use crate::events::EventReader;
 use crate::linux_updater::InstalledUpdate;
@@ -125,19 +125,6 @@ struct LinuxApp {
     onboarding_selection: crate::transcription_models::TranscriptionSelection,
     onboarding_language_dropdown_open: bool,
     onboarding_language_dropdown_bounds: Option<Bounds<Pixels>>,
-}
-
-fn linux_navigation_id(pane: DesktopPane) -> &'static str {
-    match pane {
-        DesktopPane::Settings => "linux-nav-settings",
-        DesktopPane::Modes => "linux-nav-modes",
-        DesktopPane::Commands => "linux-nav-commands",
-        DesktopPane::VoiceAction => "linux-nav-voice-action",
-        DesktopPane::History => "linux-nav-history",
-        DesktopPane::HudLab => "linux-nav-hud-lab",
-        DesktopPane::Meetings => "linux-nav-meetings",
-        DesktopPane::Activity => "linux-nav-activity",
-    }
 }
 
 enum TranscriptionPickerState {
@@ -1300,20 +1287,21 @@ impl DesktopHost for LinuxDesktopHost {
 }
 
 impl LinuxApp {
+    fn select_pane(&mut self, pane: DesktopPane, cx: &mut Context<Self>) {
+        debug_assert!(DesktopPane::available(self.host.capabilities()).contains(&pane));
+        self.pane = pane;
+        cx.notify();
+    }
+
     fn render_shared_navigation(&self, cx: &mut Context<Self>) -> AnyElement {
         debug_assert!(self.host.capabilities().listener_control);
-        let selected_pane = self.pane;
-        let items = DesktopPane::available(self.host.capabilities())
-            .into_iter()
-            .map(|pane| {
-                navigation_item(pane.icon(), selected_pane == pane)
-                    .id(linux_navigation_id(pane))
-                    .child(tr(pane.label()))
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.pane = pane;
-                        cx.notify();
-                    }))
-            });
+        let items = render_navigation_items(
+            self.pane,
+            self.host.capabilities(),
+            |label| tr(label).to_string(),
+            Self::select_pane,
+            cx,
+        );
         sidebar_frame()
             .w(px(SIDEBAR_WIDTH))
             .px(px(14.0))

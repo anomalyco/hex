@@ -1,8 +1,10 @@
 //! Product-level state shared by the desktop window roots while their native
 //! lifecycle and remaining pane renderers are converging.
 
+use gpui::{AnyElement, Context, IntoElement, prelude::*};
+
 use crate::desktop_host::DesktopCapabilities;
-use crate::desktop_ui::NavigationIcon;
+use crate::desktop_ui::{NavigationIcon, navigation_item};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum DesktopPane {
@@ -69,6 +71,42 @@ impl DesktopPane {
             Self::Activity => NavigationIcon::Activity,
         }
     }
+
+    const fn navigation_id(self) -> &'static str {
+        match self {
+            Self::Settings => "desktop-nav-settings",
+            Self::Modes => "desktop-nav-modes",
+            Self::Commands => "desktop-nav-commands",
+            Self::VoiceAction => "desktop-nav-voice-action",
+            Self::History => "desktop-nav-history",
+            Self::HudLab => "desktop-nav-hud-lab",
+            Self::Meetings => "desktop-nav-meetings",
+            Self::Activity => "desktop-nav-activity",
+        }
+    }
+}
+
+pub(crate) fn render_navigation_items<V, L>(
+    selected: DesktopPane,
+    capabilities: DesktopCapabilities,
+    label: L,
+    select: fn(&mut V, DesktopPane, &mut Context<V>),
+    cx: &mut Context<V>,
+) -> Vec<AnyElement>
+where
+    V: 'static,
+    L: Fn(&'static str) -> String + Copy,
+{
+    DesktopPane::available(capabilities)
+        .into_iter()
+        .map(|pane| {
+            navigation_item(pane.icon(), selected == pane)
+                .id(pane.navigation_id())
+                .child(label(pane.label()))
+                .on_click(cx.listener(move |view, _, _, cx| select(view, pane, cx)))
+                .into_any_element()
+        })
+        .collect()
 }
 
 #[cfg(test)]
