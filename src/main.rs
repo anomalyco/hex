@@ -6,9 +6,13 @@ mod speech;
 // The historical flat module names, re-exported so existing `crate::` paths
 // keep resolving while call sites migrate to the folder tree.
 #[cfg(any(target_os = "linux", target_os = "windows"))]
+pub(crate) use common::command_context;
+#[cfg(any(target_os = "linux", target_os = "windows"))]
 pub(crate) use common::command_grammar as command_grammar_common;
 #[cfg(any(target_os = "linux", target_os = "windows"))]
 pub(crate) use common::commands_engine;
+#[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
+pub(crate) use common::keys;
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 pub(crate) use common::opencode;
 #[cfg(any(target_os = "linux", target_os = "windows"))]
@@ -16,8 +20,6 @@ pub(crate) use common::self_update;
 #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
 pub(crate) use common::spoken_text;
 pub(crate) use common::{app_paths, audio, dictation, events, history, instance};
-#[cfg(any(target_os = "linux", target_os = "windows"))]
-pub(crate) use common::{command_context, keys};
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 pub(crate) use common::{feedback, text_replacements};
 #[cfg(any(target_os = "linux", target_os = "windows"))]

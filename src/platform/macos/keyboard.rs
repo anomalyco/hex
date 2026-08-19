@@ -4,38 +4,7 @@ use std::sync::OnceLock;
 
 use color_eyre::eyre::{Result, eyre};
 
-#[derive(Clone, Copy, Debug)]
-pub enum Key {
-    Character(char),
-    Home,
-    End,
-    Up,
-    Down,
-    Left,
-    Right,
-    Enter,
-    #[allow(dead_code)]
-    Escape,
-}
-
-#[derive(Clone, Copy, Debug)]
-pub struct Modifiers(u8);
-
-impl Modifiers {
-    pub const NONE: Self = Self(0);
-    pub const COMMAND: Self = Self(1 << 0);
-    pub const SHIFT: Self = Self(1 << 1);
-    pub const OPTION: Self = Self(1 << 2);
-    pub const CONTROL: Self = Self(1 << 3);
-
-    pub const fn with(self, other: Self) -> Self {
-        Self(self.0 | other.0)
-    }
-
-    fn contains(self, other: Self) -> bool {
-        self.0 & other.0 != 0
-    }
-}
+pub use crate::keys::{Key, Modifiers};
 
 type InputSourceRef = *const c_void;
 type EventRef = *mut c_void;
