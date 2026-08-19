@@ -1,8 +1,8 @@
 use gpui::{AnyElement, Div, FontWeight, IntoElement, Pixels, Rgba, div, prelude::*, px, rgb};
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "windows"))]
 use gpui::{Image, ImageFormat, img};
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "windows"))]
 use std::sync::Arc;
 
 #[derive(Clone, Copy)]
@@ -33,21 +33,7 @@ impl NavigationIcon {
         }
     }
 
-    #[cfg(target_os = "windows")]
-    fn fluent_glyph(self) -> &'static str {
-        match self {
-            Self::Settings => "\u{E713}",
-            Self::Modes => "\u{E71D}",
-            Self::VoiceAction => "\u{E735}",
-            Self::Commands => "\u{E756}",
-            Self::History => "\u{E81C}",
-            Self::Meetings => "\u{E787}",
-            Self::Activity => "\u{E9D2}",
-            Self::HudLab => "\u{E9F5}",
-        }
-    }
-
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
     fn heroicon(self) -> &'static str {
         match self {
             Self::Settings => include_str!("../../assets/icons/settings.svg"),
@@ -124,16 +110,9 @@ fn plus_icon() -> AnyElement {
         .into_any_element()
 }
 
-#[cfg(target_os = "windows")]
-fn navigation_icon(icon: NavigationIcon, selected: bool) -> AnyElement {
-    crate::windows_ui::fluent_icon(
-        icon.fluent_glyph(),
-        16.0,
-        if selected { TEXT } else { TEXT_SOFT },
-    )
-}
-
-#[cfg(target_os = "linux")]
+// The mac sidebar's SF Symbols cannot ship on other platforms, so both
+// port shells render the same bundled vector set drawn to match them.
+#[cfg(any(target_os = "linux", target_os = "windows"))]
 fn navigation_icon(icon: NavigationIcon, selected: bool) -> AnyElement {
     let color = if selected { "#eeeeee" } else { "#858585" };
     let image = Image::from_bytes(
@@ -206,6 +185,19 @@ pub(crate) fn tr(text: &'static str) -> &'static str {
     {
         text
     }
+}
+
+/// A compact age label for event timestamps.
+#[cfg_attr(target_os = "macos", allow(dead_code))]
+pub(crate) fn event_age(timestamp_ms: u64) -> String {
+    let seconds = crate::history::now_ms().saturating_sub(timestamp_ms) / 1_000;
+    let (template, value) = match seconds {
+        0..=59 => ("{}s ago", seconds),
+        60..=3_599 => ("{}m ago", seconds / 60),
+        3_600..=86_399 => ("{}h ago", seconds / 3_600),
+        _ => ("{}d ago", seconds / 86_400),
+    };
+    tr_fill(template, &value.to_string())
 }
 
 /// Translate a `{}` template and substitute the dynamic value; identity

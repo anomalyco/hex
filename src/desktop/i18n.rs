@@ -46,7 +46,7 @@ pub(crate) fn apply(setting: Option<&str>) {
     CURRENT.store(code, Ordering::Relaxed);
 }
 
-fn system_language() -> String {
+pub(crate) fn system_language() -> String {
     #[cfg(target_os = "windows")]
     {
         crate::windows_settings::user_language()
@@ -220,6 +220,24 @@ const TRANSLATIONS: &[(&str, [&str; 5])] = &[
     ("Press a shortcut...", ["Naciśnij skrót...", "按下快捷键...", "ショートカットを押してください...", "Kürzel drücken...", "Pulsa un atajo..."]),
     ("The transcription change did not apply.", ["Zmiana transkrypcji nie została zastosowana.", "转写更改未生效。", "文字起こしの変更が適用されませんでした。", "Die Transkriptionsänderung wurde nicht übernommen.", "El cambio de transcripción no se aplicó."]),
     ("Automatic microphone", ["Automatyczny mikrofon", "自动麦克风", "自動マイク", "Automatisches Mikrofon", "Micrófono automático"]),
+    ("Welcome to HEX", ["Witaj w HEX", "欢迎使用 HEX", "HEX へようこそ", "Willkommen bei HEX", "Bienvenido a HEX"]),
+    ("Dictate into any application. Audio never leaves this computer; one speech model download is all it takes.", ["Dyktuj w dowolnej aplikacji. Dźwięk nigdy nie opuszcza tego komputera; wystarczy pobrać jeden model mowy.", "在任何应用中听写。音频绝不离开这台电脑；只需下载一个语音模型。", "どのアプリでも音声入力できます。音声はこのコンピューターから出ません。音声モデルを一つダウンロードするだけです。", "Diktiere in jede Anwendung. Audio verlässt diesen Computer nie; ein Sprachmodell-Download genügt.", "Dicta en cualquier aplicación. El audio nunca sale de este equipo; basta con descargar un modelo de voz."]),
+    ("Dictation language", ["Język dyktowania", "听写语言", "音声入力の言語", "Diktatsprache", "Idioma de dictado"]),
+    ("Download {}", ["Pobierz {}", "下载 {}", "{} をダウンロード", "{} herunterladen", "Descargar {}"]),
+    ("Start dictating", ["Zacznij dyktować", "开始听写", "音声入力を開始", "Diktat starten", "Empezar a dictar"]),
+    ("Set up later", ["Skonfiguruj później", "稍后设置", "後で設定", "Später einrichten", "Configurar más tarde"]),
+    ("Hold", ["Przytrzymaj", "按住", "押しながら", "Halte", "Mantén"]),
+    ("to dictate", ["aby dyktować", "即可听写", "で音声入力", "zum Diktieren", "para dictar"]),
+    ("Activity", ["Aktywność", "活动", "アクティビティ", "Aktivität", "Actividad"]),
+    ("Session", ["Sesja", "会话", "セッション", "Sitzung", "Sesión"]),
+    ("Session started {}", ["Sesja rozpoczęta {}", "会话开始于 {}", "セッション開始: {}", "Sitzung gestartet {}", "Sesión iniciada {}"]),
+    ("No session recorded yet", ["Nie zarejestrowano jeszcze sesji", "尚未记录会话", "まだセッションが記録されていません", "Noch keine Sitzung aufgezeichnet", "Aún no hay sesiones registradas"]),
+    ("Recent transcripts", ["Ostatnie transkrypcje", "最近的转写", "最近の文字起こし", "Letzte Transkripte", "Transcripciones recientes"]),
+    ("Nothing transcribed this session yet.", ["W tej sesji jeszcze nic nie przepisano.", "本次会话尚未转写任何内容。", "このセッションではまだ何も文字起こしされていません。", "In dieser Sitzung wurde noch nichts transkribiert.", "Aún no se ha transcrito nada en esta sesión."]),
+    ("Observations", ["Obserwacje", "观测记录", "観測ログ", "Beobachtungen", "Observaciones"]),
+    ("Event log", ["Dziennik zdarzeń", "事件日志", "イベントログ", "Ereignisprotokoll", "Registro de eventos"]),
+    ("Newest-first session observations on this disk", ["Obserwacje sesji od najnowszych, na tym dysku", "本磁盘上按最新排序的会话观测", "このディスク上の新しい順のセッション観測", "Sitzungsbeobachtungen auf dieser Festplatte, neueste zuerst", "Observaciones de sesión en este disco, primero las más recientes"]),
+    ("The device the active session captures from", ["Urządzenie, z którego nagrywa aktywna sesja", "当前会话采集所用的设备", "アクティブなセッションが使用する入力デバイス", "Das Gerät, von dem die aktive Sitzung aufnimmt", "El dispositivo del que captura la sesión activa"]),
     ("Or when the browser is on one of these sites; sites win over applications", ["Albo gdy przeglądarka jest na jednej z tych stron; strony wygrywają z aplikacjami", "或当浏览器位于这些网站之一时；网站优先于应用", "またはブラウザーがこれらのサイトにあるとき。サイトがアプリより優先されます", "Oder wenn der Browser auf einer dieser Seiten ist; Seiten schlagen Anwendungen", "O cuando el navegador está en uno de estos sitios; los sitios ganan a las aplicaciones"]),
     ("While dictating", ["Podczas dyktowania", "听写时", "音声入力中", "Während des Diktats", "Mientras dictas"]),
     ("Release microphone while idle", ["Zwalniaj mikrofon w bezczynności", "空闲时释放麦克风", "待機中はマイクを解放", "Mikrofon im Leerlauf freigeben", "Liberar el micrófono en reposo"]),

@@ -102,8 +102,15 @@ struct LinuxDesktopHost {
     update: UpdateState,
 }
 
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum LinuxPane {
+    Settings,
+    Activity,
+}
+
 struct LinuxApp {
     host: LinuxDesktopHost,
+    pane: LinuxPane,
     capturing_hotkey: bool,
     transcription_picker: TranscriptionPickerState,
     catalog_language_filter: Option<String>,
@@ -117,6 +124,10 @@ struct LinuxApp {
     microphone_dropdown_bounds: Option<Bounds<Pixels>>,
     ui_language_dropdown_open: bool,
     ui_language_dropdown_bounds: Option<Bounds<Pixels>>,
+    onboarding: bool,
+    onboarding_selection: crate::transcription_models::TranscriptionSelection,
+    onboarding_language_dropdown_open: bool,
+    onboarding_language_dropdown_bounds: Option<Bounds<Pixels>>,
 }
 
 enum TranscriptionPickerState {
@@ -154,6 +165,9 @@ pub fn open(event_path: PathBuf, start_hidden: bool) -> Result<()> {
         }
     };
     let close_to_tray = tray.is_some();
+    // First-run detection must precede anything that saves settings.
+    let onboarding = !crate::linux_settings::exists()
+        || std::env::var_os("HEX_ONBOARDING").is_some_and(|value| value == "1");
     let (settings, settings_error) = match crate::linux_settings::LinuxSettings::load() {
         Ok(settings) => (settings, None),
         Err(error) => (
@@ -189,6 +203,19 @@ pub fn open(event_path: PathBuf, start_hidden: bool) -> Result<()> {
                             settings_error.clone(),
                             update,
                         ),
+                        pane: LinuxPane::Settings,
+                        onboarding,
+                        // A fresh run offers the locale's recommendation,
+                        // like the Windows first-run default.
+                        onboarding_selection: if onboarding {
+                            crate::transcription_models::recommended_selection(
+                                &crate::desktop_i18n::system_language(),
+                            )
+                        } else {
+                            settings.transcription.clone()
+                        },
+                        onboarding_language_dropdown_open: false,
+                        onboarding_language_dropdown_bounds: None,
                         capturing_hotkey: false,
                         transcription_picker: TranscriptionPickerState::Closed,
                         catalog_language_filter: None,
@@ -208,10 +235,14 @@ pub fn open(event_path: PathBuf, start_hidden: bool) -> Result<()> {
             .expect("could not open the HEX X11 window");
         let app = window.update(cx, |_, _, cx| cx.entity()).unwrap();
         let x11_window = find_hex_window().ok();
-        app.update(cx, |app, cx| {
-            let _ = app.host.dispatch(DesktopAction::StartListening);
-            cx.notify();
-        });
+        // The microphone stays cold behind the first-run dialog; finishing
+        // onboarding starts the listener instead.
+        if !onboarding {
+            app.update(cx, |app, cx| {
+                let _ = app.host.dispatch(DesktopAction::StartListening);
+                cx.notify();
+            });
+        }
         let hotkey_app = app.clone();
         cx.observe_keystrokes(move |event, _, cx| {
             hotkey_app.update(cx, |app, cx| {
@@ -1210,8 +1241,10 @@ impl DesktopHost for LinuxDesktopHost {
 }
 
 impl LinuxApp {
-    fn render_shared_navigation(&self) -> AnyElement {
+    fn render_shared_navigation(&self, cx: &mut Context<Self>) -> AnyElement {
         debug_assert!(self.host.capabilities().listener_control);
+        let settings_selected = self.pane == LinuxPane::Settings;
+        let activity_selected = self.pane == LinuxPane::Activity;
         sidebar_frame()
             .w(px(SIDEBAR_WIDTH))
             .px(px(14.0))
@@ -1220,9 +1253,22 @@ impl LinuxApp {
             .flex()
             .flex_col()
             .child(
-                navigation_item(NavigationIcon::Settings, true)
+                navigation_item(NavigationIcon::Settings, settings_selected)
                     .id("linux-nav-settings")
-                    .child(tr("Settings")),
+                    .child(tr("Settings"))
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.pane = LinuxPane::Settings;
+                        cx.notify();
+                    })),
+            )
+            .child(
+                navigation_item(NavigationIcon::Activity, activity_selected)
+                    .id("linux-nav-activity")
+                    .child(tr("Activity"))
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.pane = LinuxPane::Activity;
+                        cx.notify();
+                    })),
             )
             .child(div().flex_1())
             .into_any_element()
@@ -1718,6 +1764,70 @@ impl LinuxApp {
     }
 }
 
+impl crate::desktop_onboarding::OnboardingDelegate for LinuxApp {
+    fn onboarding_selection(&self) -> crate::transcription_models::TranscriptionSelection {
+        self.onboarding_selection.clone()
+    }
+
+    fn set_onboarding_selection(
+        &mut self,
+        selection: crate::transcription_models::TranscriptionSelection,
+    ) {
+        self.onboarding_selection = selection;
+    }
+
+    fn onboarding_language_dropdown_open(&self) -> bool {
+        self.onboarding_language_dropdown_open
+    }
+
+    fn set_onboarding_language_dropdown_open(&mut self, open: bool) {
+        self.onboarding_language_dropdown_open = open;
+    }
+
+    fn onboarding_language_dropdown_bounds(&self) -> Option<Bounds<Pixels>> {
+        self.onboarding_language_dropdown_bounds
+    }
+
+    fn set_onboarding_language_dropdown_bounds(&mut self, bounds: Bounds<Pixels>) {
+        self.onboarding_language_dropdown_bounds = Some(bounds);
+    }
+
+    fn begin_onboarding_download(&mut self, _cx: &mut Context<Self>) {
+        let selection = self.onboarding_selection.clone();
+        let _ = self
+            .host
+            .choose_transcription(selection.model, selection.language);
+    }
+
+    fn cancel_onboarding_download(&mut self) {
+        self.host.cancel_transcription_preparation();
+    }
+
+    fn finish_onboarding(&mut self, cx: &mut Context<Self>) {
+        self.onboarding = false;
+        // The dialog's pending selection becomes the persisted one when it
+        // is genuinely usable; a stale prepared transcriber for another
+        // selection must not serve it.
+        let pending = self.onboarding_selection.clone();
+        let definition = crate::transcription_models::definition(pending.model);
+        if pending != self.host.settings.transcription
+            && crate::transcription_models::validate(&pending).is_ok()
+            && crate::transcription_models::is_installed(definition, &pending.language)
+            && crate::transcription_models::is_verified(definition)
+        {
+            self.host.settings.transcription = pending;
+            self.host.prepared_transcriber = None;
+        }
+        if let Err(error) = self.host.settings.save() {
+            self.host.settings_error = Some(format!("Could not save Linux settings: {error:#}"));
+        }
+        // The launch-time listener start was deferred while the dialog
+        // held the screen.
+        let _ = self.host.dispatch(DesktopAction::StartListening);
+        cx.notify();
+    }
+}
+
 impl crate::desktop_model_catalog::ModelCatalogDelegate for LinuxApp {
     fn catalog_language_filter(&self) -> Option<String> {
         self.catalog_language_filter.clone()
@@ -1792,7 +1902,10 @@ impl Render for LinuxApp {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let viewport = window.viewport_size();
         let snapshot = self.host.snapshot();
-        let content = self.render_shared_settings(&snapshot, cx);
+        let content = match self.pane {
+            LinuxPane::Settings => self.render_shared_settings(&snapshot, cx),
+            LinuxPane::Activity => crate::desktop_activity_pane::render_activity_pane(&snapshot),
+        };
         let model_picker = if self.transcription_picker.language().is_some() {
             Some(crate::desktop_model_catalog::render_model_catalog(
                 self,
@@ -1823,8 +1936,26 @@ impl Render for LinuxApp {
         let ui_language_dropdown = self
             .ui_language_dropdown_open
             .then(|| self.render_ui_language_dropdown(viewport.height, cx));
+        let onboarding = self.onboarding.then(|| {
+            crate::desktop_onboarding::render_onboarding(
+                self,
+                &snapshot.transcription,
+                snapshot.dictation_shortcut.clone(),
+                viewport.width,
+                viewport.height,
+                cx,
+            )
+        });
+        let onboarding_language_dropdown =
+            (self.onboarding && self.onboarding_language_dropdown_open).then(|| {
+                crate::desktop_onboarding::render_onboarding_language_dropdown(
+                    self,
+                    viewport.height,
+                    cx,
+                )
+            });
         window_frame()
-            .child(self.render_shared_navigation())
+            .child(self.render_shared_navigation(cx))
             .child(div().flex_1().h_full().overflow_hidden().child(content))
             .children(transcription_dropdown)
             .children(dictation_language_dropdown)
@@ -1832,5 +1963,7 @@ impl Render for LinuxApp {
             .children(ui_language_dropdown)
             .children(model_picker)
             .children(catalog_filter_dropdown)
+            .children(onboarding)
+            .children(onboarding_language_dropdown)
     }
 }

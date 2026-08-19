@@ -123,6 +123,10 @@ struct WindowsApp {
     history_search_input: Entity<TextInput>,
     _history_search_subscription: Subscription,
     restart_scheduled: bool,
+    onboarding: bool,
+    onboarding_selection: crate::transcription_models::TranscriptionSelection,
+    onboarding_language_dropdown_open: bool,
+    onboarding_language_dropdown_bounds: Option<Bounds<Pixels>>,
     model_catalog_language_filter: Option<String>,
     model_catalog_language_dropdown_open: bool,
     model_catalog_language_dropdown_bounds: Option<Bounds<Pixels>>,
@@ -145,6 +149,7 @@ struct WindowsApp {
 #[derive(Clone, Copy, Eq, PartialEq)]
 enum WindowsPane {
     Settings,
+    Activity,
     Modes,
     VoiceAction,
     History,
@@ -189,6 +194,9 @@ pub fn open(event_path: PathBuf, shutdown: &'static AtomicBool, start_hidden: bo
     shutdown.store(false, Ordering::Relaxed);
     let (tray_sender, tray_commands) = mpsc::channel();
     let (indicator_sender, indicator_events) = crate::windows_indicator::channel();
+    // First-run detection must precede anything that saves settings.
+    let onboarding = !crate::windows_settings::exists()
+        || std::env::var_os("HEX_ONBOARDING").is_some_and(|value| value == "1");
     let (settings, settings_error) = match crate::windows_settings::WindowsSettings::load() {
         Ok(settings) => (settings, None),
         Err(error) => (
@@ -265,6 +273,7 @@ pub fn open(event_path: PathBuf, shutdown: &'static AtomicBool, start_hidden: bo
                                 cx.notify();
                             },
                         );
+                        let onboarding_selection = host.settings.transcription.clone();
                         WindowsApp {
                             host,
                             pane: WindowsPane::Settings,
@@ -274,6 +283,10 @@ pub fn open(event_path: PathBuf, shutdown: &'static AtomicBool, start_hidden: bo
                             history_search_input,
                             _history_search_subscription: history_search_subscription,
                             restart_scheduled: false,
+                            onboarding,
+                            onboarding_selection,
+                            onboarding_language_dropdown_open: false,
+                            onboarding_language_dropdown_bounds: None,
                             history_entries,
                             selected_history,
                             history_copied: None,
@@ -344,7 +357,9 @@ pub fn open(event_path: PathBuf, shutdown: &'static AtomicBool, start_hidden: bo
             .ok()
             .flatten();
         crate::windows_ui::apply_window_icon(hwnd);
-        if listen_on_launch {
+        // The microphone stays cold behind the first-run dialog; finishing
+        // onboarding starts the listener instead.
+        if listen_on_launch && !onboarding {
             app.update(cx, |app, cx| {
                 app.host.start();
                 cx.notify();
@@ -1941,6 +1956,7 @@ impl WindowsApp {
 
     fn render_navigation(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let settings_selected = self.pane == WindowsPane::Settings;
+        let activity_selected = self.pane == WindowsPane::Activity;
         let modes_selected = self.pane == WindowsPane::Modes;
         let voice_action_selected = self.pane == WindowsPane::VoiceAction;
         let history_selected = self.pane == WindowsPane::History;
@@ -1993,6 +2009,15 @@ impl WindowsApp {
                         this.pane = WindowsPane::History;
                         this.history_clear_armed = false;
                         this.reload_history();
+                        cx.notify();
+                    })),
+            )
+            .child(
+                navigation_item(NavigationIcon::Activity, activity_selected)
+                    .id("windows-nav-activity")
+                    .child(tr("Activity"))
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.pane = WindowsPane::Activity;
                         cx.notify();
                     })),
             )
@@ -3865,6 +3890,76 @@ impl WindowsApp {
     }
 }
 
+impl crate::desktop_onboarding::OnboardingDelegate for WindowsApp {
+    fn onboarding_selection(&self) -> crate::transcription_models::TranscriptionSelection {
+        self.onboarding_selection.clone()
+    }
+
+    fn set_onboarding_selection(
+        &mut self,
+        selection: crate::transcription_models::TranscriptionSelection,
+    ) {
+        self.onboarding_selection = selection;
+    }
+
+    fn onboarding_language_dropdown_open(&self) -> bool {
+        self.onboarding_language_dropdown_open
+    }
+
+    fn set_onboarding_language_dropdown_open(&mut self, open: bool) {
+        self.onboarding_language_dropdown_open = open;
+    }
+
+    fn onboarding_language_dropdown_bounds(&self) -> Option<Bounds<Pixels>> {
+        self.onboarding_language_dropdown_bounds
+    }
+
+    fn set_onboarding_language_dropdown_bounds(&mut self, bounds: Bounds<Pixels>) {
+        self.onboarding_language_dropdown_bounds = Some(bounds);
+    }
+
+    fn begin_onboarding_download(&mut self, _cx: &mut Context<Self>) {
+        let selection = self.onboarding_selection.clone();
+        let _ = self
+            .host
+            .choose_transcription(selection.model, selection.language);
+    }
+
+    fn cancel_onboarding_download(&mut self) {
+        self.host.cancel_transcription_preparation();
+    }
+
+    fn finish_onboarding(&mut self, cx: &mut Context<Self>) {
+        self.onboarding = false;
+        // The dialog's pending selection becomes the persisted one when it
+        // is genuinely usable; a stale prepared transcriber for another
+        // selection must not serve it.
+        let pending = self.onboarding_selection.clone();
+        let definition = crate::transcription_models::definition(pending.model);
+        if pending != self.host.settings.transcription
+            && crate::transcription_models::validate(&pending).is_ok()
+            && crate::transcription_models::is_installed(definition, &pending.language)
+            && crate::transcription_models::is_verified(definition)
+        {
+            self.host.settings.transcription = pending;
+            self.host.prepared_transcriber = None;
+        }
+        if let Err(error) = self.host.settings.save() {
+            self.host.settings_error = Some(format!("Could not save Windows settings: {error:#}"));
+        }
+        // The launch-time listener start was deferred while the dialog
+        // held the screen.
+        if self.host.settings.listen_on_launch {
+            self.host.start();
+        }
+        cx.notify();
+    }
+
+    fn onboarding_top_inset() -> Pixels {
+        px(crate::windows_ui::CAPTION_HEIGHT)
+    }
+}
+
 impl crate::desktop_model_catalog::ModelCatalogDelegate for WindowsApp {
     fn catalog_language_filter(&self) -> Option<String> {
         self.model_catalog_language_filter.clone()
@@ -3957,6 +4052,7 @@ impl Render for WindowsApp {
         let snapshot = self.host.snapshot();
         let content = match self.pane {
             WindowsPane::Settings => self.render_settings(&snapshot, cx),
+            WindowsPane::Activity => crate::desktop_activity_pane::render_activity_pane(&snapshot),
             WindowsPane::Modes => self.render_modes(cx),
             WindowsPane::VoiceAction => self.render_voice_action(cx),
             WindowsPane::History => self.render_history(cx),
@@ -3987,6 +4083,24 @@ impl Render for WindowsApp {
         let voice_model_dropdown = self
             .voice_model_dropdown_open
             .then(|| self.render_voice_model_dropdown(viewport.height, cx));
+        let onboarding = self.onboarding.then(|| {
+            crate::desktop_onboarding::render_onboarding(
+                self,
+                &snapshot.transcription,
+                snapshot.dictation_shortcut.clone(),
+                viewport.width,
+                viewport.height,
+                cx,
+            )
+        });
+        let onboarding_language_dropdown =
+            (self.onboarding && self.onboarding_language_dropdown_open).then(|| {
+                crate::desktop_onboarding::render_onboarding_language_dropdown(
+                    self,
+                    viewport.height,
+                    cx,
+                )
+            });
         let microphone_dropdown = self
             .microphone_picker_open
             .then(|| self.render_microphone_dropdown(viewport.height, cx));
@@ -4019,6 +4133,8 @@ impl Render for WindowsApp {
             .children(dictation_language_dropdown)
             .children(ui_language_dropdown)
             .children(hotkey_picker)
+            .children(onboarding)
+            .children(onboarding_language_dropdown)
     }
 }
 

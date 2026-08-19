@@ -110,7 +110,9 @@ current-user startup registry, UI Automation, and Windows capture APIs.
 | Signed automatic self-update for managed installs | Implemented; the same ed25519 feed contract as Linux, activating into a user-local versions directory with a restart button — source builds keep the GitHub release link |
 | Web-domain mode rules and browser context via UI Automation | Implemented; the page URL comes from the browser's UIA document element, bounded so a hung provider degrades to application-only context |
 | Opt-in voice Commands | Missing; blocked on a Windows streaming command model |
-| Managed installer with Start Menu integration and clean uninstall | Implemented as `scripts/install-windows.ps1`; it creates the self-updating versions layout, and updates retarget the managed shortcut and Launch-at-login entry — a first-run onboarding flow inside the app remains missing |
+| Managed installer with Start Menu integration and clean uninstall | Implemented as `scripts/install-windows.ps1`; it creates the self-updating versions layout, and updates retarget the managed shortcut and Launch-at-login entry |
+| First-run onboarding | Implemented; a fresh install picks a dictation language, downloads its recommended model with live progress, and starts listening only after the dialog closes — shared with the Linux shell |
+| Activity pane with the live session and recent transcripts | Implemented; one shared read-only pane on both port shells |
 | Developer Meetings, live drafts, and meeting paste | Missing |
 | Local transcription API and public TypeScript SDK host lifecycle on Windows | Missing |
 
