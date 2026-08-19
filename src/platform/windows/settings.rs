@@ -30,12 +30,14 @@ pub struct WindowsSettings {
     pub indicator_position: IndicatorPosition,
     pub history_retention: crate::history::HistoryRetention,
     pub text_replacements: Vec<crate::text_replacements::TextReplacement>,
+    /// Global rewrite profile used when no contextual mode matches.
+    pub dictation_post_processing: crate::dictation_processing::PostProcessingSettings,
     pub modes: Vec<WindowsMode>,
     pub transcription: TranscriptionSelection,
 }
 
-/// A per-application dictation mode: when the focused application matches,
-/// the mode's corrections run after the global text replacements.
+/// A contextual dictation mode: when its native Windows matching rule wins,
+/// corrections and the shared OpenCode rewrite run after global replacements.
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(default)]
 pub struct WindowsMode {
@@ -47,6 +49,7 @@ pub struct WindowsMode {
     /// "x.com", "github.com"); case-insensitive, trailing dots ignored.
     pub websites: Vec<String>,
     pub corrections: Vec<crate::text_replacements::TextReplacement>,
+    pub post_processing: crate::dictation_processing::PostProcessingSettings,
 }
 
 impl WindowsMode {
@@ -139,6 +142,8 @@ impl Default for WindowsSettings {
             history_retention: crate::history::HistoryRetention::default(),
             modes: Vec::new(),
             text_replacements: Vec::new(),
+            dictation_post_processing: crate::dictation_processing::PostProcessingSettings::default(
+            ),
             transcription: recommended_selection(&user_language()),
         }
     }
@@ -397,6 +402,57 @@ mod tests {
             WindowsSettings::default().history_retention,
             crate::history::HistoryRetention::Week
         );
+    }
+
+    #[test]
+    fn older_settings_default_mode_processing_without_migration() {
+        let settings: WindowsSettings = serde_json::from_str(
+            r#"{
+                "platform": "windows",
+                "modes": [{
+                    "name": "Code",
+                    "applications": ["code"],
+                    "corrections": []
+                }]
+            }"#,
+        )
+        .expect("older Windows settings remain readable");
+
+        assert!(!settings.dictation_post_processing.enabled);
+        assert_eq!(
+            settings.dictation_post_processing,
+            crate::dictation_processing::PostProcessingSettings::default()
+        );
+        assert_eq!(
+            settings.modes[0].post_processing,
+            crate::dictation_processing::PostProcessingSettings::default()
+        );
+    }
+
+    #[test]
+    fn mode_processing_round_trips_with_windows_settings() {
+        let processing = crate::dictation_processing::PostProcessingSettings {
+            enabled: true,
+            prompt: "Keep code identifiers exact.".into(),
+            model: Some("openai/gpt-5.6-sol".into()),
+            variant: Some("fast".into()),
+            deadline_seconds: 15,
+        };
+        let settings = WindowsSettings {
+            dictation_post_processing: processing.clone(),
+            modes: vec![WindowsMode {
+                name: "Code".into(),
+                post_processing: processing,
+                ..WindowsMode::default()
+            }],
+            ..WindowsSettings::default()
+        };
+
+        let encoded = serde_json::to_string(&settings).expect("settings serialize");
+        let decoded: WindowsSettings =
+            serde_json::from_str(&encoded).expect("settings deserialize");
+
+        assert_eq!(decoded, settings);
     }
 
     #[test]

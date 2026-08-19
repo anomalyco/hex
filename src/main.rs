@@ -45,7 +45,8 @@ pub(crate) use desktop::{
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 pub(crate) use desktop::{
     history_pane as desktop_history_pane, mode_basics as desktop_mode_basics,
-    mode_list as desktop_mode_list, replacement_editor as desktop_replacement_editor, text_input,
+    mode_list as desktop_mode_list, mode_processing as desktop_mode_processing,
+    replacement_editor as desktop_replacement_editor, text_input,
     voice_action_pane as desktop_voice_action_pane,
 };
 #[cfg(target_os = "linux")]

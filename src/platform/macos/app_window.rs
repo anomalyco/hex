@@ -40,6 +40,10 @@ use crate::desktop_mode_list::{
     ModeActivation, ModeListAction, ModeListDelegate, ModeListEntry, ModeListView, ModeTarget,
     render_mode_list as render_shared_mode_list,
 };
+use crate::desktop_mode_processing::{
+    ModeProcessingAction, ModeProcessingDelegate, ModeProcessingUnavailableView,
+    ModeProcessingView, render_mode_processing as render_shared_mode_processing,
+};
 use crate::desktop_replacement_editor::{
     ReplacementEditorAction, ReplacementEditorDelegate, ReplacementEditorInput,
     ReplacementEditorView, render_replacement_editor as render_shared_replacement_editor,
@@ -3613,6 +3617,10 @@ impl AppWindow {
     fn render_mode_detail(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let selection = self.selected_mode;
         let is_default = selection == ModeSelection::Default;
+        let target = match selection {
+            ModeSelection::Default => ModeTarget::Global,
+            ModeSelection::Custom(index) => ModeTarget::Mode(index),
+        };
         let (name, browser_hosts, prompt, model, deadline, processing_position) = {
             let inputs = self.selected_mode_inputs_mut();
             (
@@ -3627,14 +3635,13 @@ impl AppWindow {
         let processing_enabled = self.selected_mode_settings().post_processing.enabled;
         let processing_can_toggle = processing_enabled || self.opencode_available();
         let processing_unavailable = opencode_unavailable_copy(&self.model_catalog).map(|copy| {
-            (
-                copy.title,
-                copy.description,
-                copy.error.map(str::to_owned),
-                copy.can_retry,
-                copy.retry_label,
-                copy.can_open_setup,
-            )
+            ModeProcessingUnavailableView {
+                title: copy.title,
+                description: copy.description,
+                error: copy.error.map(str::to_owned),
+                retry_label: copy.can_retry.then_some(copy.retry_label),
+                setup_label: copy.can_open_setup.then_some("Open setup"),
+            }
         });
         let corrections = self.render_mode_replacements(selection, cx);
         let transformations = self.render_mode_transformations(selection, cx);
@@ -3647,10 +3654,6 @@ impl AppWindow {
                 cx,
             )
         } else {
-            let target = match selection {
-                ModeSelection::Default => unreachable!(),
-                ModeSelection::Custom(index) => ModeTarget::Mode(index),
-            };
             let applications = Box::new(ModeApplicationEditorView::Catalog(
                 self.catalog_application_editor_view(selection, cx),
             ));
@@ -3668,24 +3671,6 @@ impl AppWindow {
             )
         };
 
-        let processing_toggle = div()
-            .id("mode-processing-toggle")
-            .h(px(28.0))
-            .flex()
-            .items_center()
-            .child(toggle(processing_position))
-            .when(!processing_can_toggle, |control| control.opacity(0.42))
-            .when(processing_can_toggle, |control| {
-                control.on_click(cx.listener(move |this, _, _, cx| {
-                    let enabled = !this.selected_mode_settings().post_processing.enabled;
-                    this.selected_mode_inputs_mut()
-                        .processing_toggle
-                        .set_enabled(enabled);
-                    this.selected_mode_settings_mut().post_processing.enabled = enabled;
-                    this.save_settings(cx);
-                }))
-            })
-            .into_any_element();
         let processing_settings = processing_enabled.then(|| {
             self.render_processing_settings(
                 ModelPickerTarget::Mode(selection),
@@ -3696,77 +3681,17 @@ impl AppWindow {
                 cx,
             )
         });
-        let processing_unavailable = processing_unavailable.map(
-            |(title, description, error, can_retry, retry_label, can_open_setup)| {
-                let actions = div()
-                    .flex()
-                    .items_center()
-                    .gap_2()
-                    .when(can_retry, |actions| {
-                        actions.child(
-                            header_button(retry_label)
-                                .id("retry-mode-opencode")
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.reload_model_catalog();
-                                    cx.notify();
-                                })),
-                        )
-                    })
-                    .when(can_open_setup, |actions| {
-                        actions.child(
-                            header_button("Open setup")
-                                .id("open-mode-opencode-setup")
-                                .on_click(|_, _, _| open_opencode_beta_docs()),
-                        )
-                    });
-                div()
-                    .px_3()
-                    .py_3()
-                    .flex()
-                    .items_start()
-                    .justify_between()
-                    .gap_4()
-                    .border_t_1()
-                    .border_color(rgb(LINE))
-                    .child(
-                        div()
-                            .min_w(px(0.0))
-                            .flex_1()
-                            .flex()
-                            .flex_col()
-                            .gap_1()
-                            .child(
-                                div()
-                                    .text_size(px(11.0))
-                                    .font_weight(FontWeight::SEMIBOLD)
-                                    .text_color(rgb(TEXT_SOFT))
-                                    .child(title),
-                            )
-                            .child(
-                                div()
-                                    .text_size(px(10.0))
-                                    .line_height(px(16.0))
-                                    .text_color(rgb(if error.is_some() { NEGATIVE } else { FAINT }))
-                                    .child(error.unwrap_or_else(|| description.into())),
-                            ),
-                    )
-                    .when(can_retry || can_open_setup, |notice| notice.child(actions))
+        let processing = render_shared_mode_processing(
+            ModeProcessingView {
+                target,
+                enabled: processing_enabled,
+                toggle_position: processing_position,
+                can_toggle: processing_can_toggle,
+                settings: processing_settings,
+                unavailable: processing_unavailable,
             },
+            cx,
         );
-        let processing = compact_panel()
-            .child(
-                compact_panel_header("OpenCode transformation", Some(processing_toggle)).when(
-                    !processing_enabled && processing_unavailable.is_none(),
-                    |header| header.border_b_0(),
-                ),
-            )
-            .when_some(processing_settings, |panel, settings| {
-                panel.child(div().px_3().pb_3().child(settings))
-            })
-            .when_some(processing_unavailable, |panel, unavailable| {
-                panel.child(unavailable)
-            })
-            .into_any_element();
 
         let remove = (!is_default).then(|| {
             let action =
@@ -6179,6 +6104,37 @@ impl VoiceActionPaneDelegate for AppWindow {
                 cx.notify();
             }
             VoiceActionPaneAction::OpenOpenCodeSetup => open_opencode_beta_docs(),
+        }
+    }
+}
+
+impl ModeProcessingDelegate for AppWindow {
+    fn handle_mode_processing_action(
+        &mut self,
+        action: ModeProcessingAction,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match action {
+            ModeProcessingAction::SetEnabled { target, enabled } => {
+                let selection = match target {
+                    ModeTarget::Global => ModeSelection::Default,
+                    ModeTarget::Mode(index) if index < self.processing_inputs.modes.len() => {
+                        ModeSelection::Custom(index)
+                    }
+                    ModeTarget::Mode(_) => return,
+                };
+                self.mode_inputs_mut(selection)
+                    .processing_toggle
+                    .set_enabled(enabled);
+                self.mode_settings_mut(selection).post_processing.enabled = enabled;
+                self.save_settings(cx);
+            }
+            ModeProcessingAction::RetryOpenCode => {
+                self.reload_model_catalog();
+                cx.notify();
+            }
+            ModeProcessingAction::OpenOpenCodeSetup => open_opencode_beta_docs(),
         }
     }
 }

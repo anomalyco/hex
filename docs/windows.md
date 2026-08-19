@@ -6,6 +6,8 @@ shortcut, and generation-safe automatic paste. Its implemented daily-use
 surface now includes live microphone/model/shortcut settings, double-tap lock,
 Paste Last Dictation, recording tones, a click-through HUD, retained History,
 text replacements, a resident system tray, and per-user Launch at login.
+Global and contextual Modes can also rewrite completed dictation through the
+same deadline-bounded OpenCode processing policy as macOS.
 
 The default shortcut is `Ctrl+Win`: hold both keys while speaking and release
 either one to transcribe and paste. Tap the shortcut twice within 300 ms to
@@ -67,7 +69,9 @@ The app starts its global listener on launch by default. Changing the
 transcription model, microphone, dictation shortcut, double-tap behavior, or
 Paste Last setting automatically restarts the listener; you do not need to
 stop it first. Text replacements and feedback volume apply without a model
-reload. The command-line listener uses the settings saved by the app:
+reload. Mode rules and OpenCode profiles are snapshotted by the output worker
+and apply to the next completed dictation without restarting capture. The
+command-line listener uses the settings saved by the app:
 
 ```powershell
 cargo run -- listen --model parakeet_v3 --language pl
@@ -102,7 +106,7 @@ current-user startup registry, UI Automation, and Windows capture APIs.
 | History retention, list, detail, search, copy, delete, and clear | Implemented |
 | Text replacements | Implemented in the Windows Modes pane using the shared phrase-boundary replacement engine |
 | Resident tray and Launch at login | Implemented |
-| Application modes with per-mode corrections | Implemented on the shared ordered processing policy; modes match by application name — OpenCode settings and TypeScript transformation hosting remain |
+| Application modes with per-mode corrections and OpenCode rewriting | Implemented on the shared ordered processing policy; global and contextual profiles persist their own enablement, prompt, model, and bounded deadline, while modes match by application name — reasoning/deadline controls and TypeScript transformation hosting remain |
 | Voice Action with selected-text capture and in-app OpenCode model selection | Implemented; selection is read through a clipboard round trip rather than UI Automation |
 | Recognition hints for Whisper-family models | Implemented |
 | Release microphone while idle | Implemented; mutually exclusive with audio pre-roll, as documented in Settings |
@@ -117,9 +121,9 @@ current-user startup registry, UI Automation, and Windows capture APIs.
 | Local transcription API and public TypeScript SDK host lifecycle on Windows | Missing |
 
 The shared visual tokens, navigation, pane scaffold, transcription picker,
-History presentation, and text input are already reused. Remaining panes should
-be added only with their complete Windows behavior; empty look-alike screens do
-not count as parity.
+History presentation, mode processing card, and text input are already reused.
+Remaining panes should be added only with their complete Windows behavior;
+empty look-alike screens do not count as parity.
 
 ## Current Port Boundary
 
@@ -127,10 +131,11 @@ The Windows listener preserves physical press/release timestamps, keeps audio
 capture off the transcription and paste worker, and restores the previous
 clipboard only when no newer clipboard change supersedes it. The optimized
 MSVC release build is verified with GPUI's DirectX shaders. The next parity
-slices are OpenCode mode rewriting with TypeScript transformations, the local
-transcription API host, and the developer-only Meetings surface; opt-in Commands
-wait on a Windows streaming command model. Shared first-run onboarding already
-ships. Windows releases are prepared and published with
+slices are the advanced OpenCode controls, bounded TypeScript transformation
+host, local transcription API host, and developer-only Meetings surface;
+opt-in Commands wait on a Windows streaming command model. Shared first-run
+onboarding and OpenCode mode rewriting already ship. Windows releases are
+prepared and published with
 [`scripts/release-windows.sh`](../scripts/release-windows.sh), which signs
 the update feed with the same release key as Linux and publishes
 [`scripts/install-windows.ps1`](../scripts/install-windows.ps1); users

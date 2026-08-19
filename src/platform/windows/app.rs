@@ -9,8 +9,9 @@ use color_eyre::Result;
 use color_eyre::eyre::eyre;
 use gpui::{
     AnyElement, App, Application, Bounds, Context, Div, Entity, FontWeight, MouseButton,
-    MouseDownEvent, MouseMoveEvent, Pixels, Point, Subscription, Timer, TitlebarOptions, Window,
-    WindowBounds, WindowOptions, canvas, div, prelude::*, px, relative, rgb, size,
+    MouseDownEvent, MouseMoveEvent, Pixels, Point, SharedString, Subscription, Timer,
+    TitlebarOptions, Window, WindowBounds, WindowOptions, canvas, div, prelude::*, px, relative,
+    rgb, size,
 };
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use tray_icon::menu::{Menu, MenuEvent, MenuItem};
@@ -43,6 +44,10 @@ use crate::desktop_mode_list::{
     ModeActivation, ModeListAction, ModeListDelegate, ModeListEntry, ModeListView, ModeTarget,
     render_mode_list as render_shared_mode_list,
 };
+use crate::desktop_mode_processing::{
+    ModeProcessingAction, ModeProcessingDelegate, ModeProcessingUnavailableView,
+    ModeProcessingView, render_mode_processing as render_shared_mode_processing,
+};
 use crate::desktop_replacement_editor::{
     ReplacementEditorAction, ReplacementEditorDelegate, ReplacementEditorInput,
     ReplacementEditorView, render_replacement_editor as render_shared_replacement_editor,
@@ -54,8 +59,8 @@ use crate::desktop_ui::{
     TEXT_SOFT, accent_color, compact_button, compact_section_label, disclosure_button,
     dropdown_backdrop, dropdown_item, dropdown_panel, dropdown_panel_with_width, error_message,
     header_button, hotkey_keycaps, pane_body, pane_content, pane_header_with_action,
-    segmented_control, segmented_item, settings_panel, settings_row, settings_section_label,
-    sidebar_frame, toggle, window_frame,
+    segmented_control, segmented_item, settings_copy, settings_panel, settings_row,
+    settings_section_label, sidebar_frame, toggle, window_frame,
 };
 use crate::desktop_voice_action_pane::{
     OPENCODE_SETUP_URL, VoiceActionError, VoiceActionPaneAction, VoiceActionPaneDelegate,
@@ -114,7 +119,7 @@ struct WindowsDesktopHost {
     last_dictation: Arc<Mutex<Option<String>>>,
     indicator: crate::windows_indicator::WindowsIndicatorSender,
     replacements: Arc<RwLock<crate::text_replacements::ReplacementSet>>,
-    modes: Arc<RwLock<Vec<crate::windows_settings::WindowsMode>>>,
+    mode_runtime: Arc<RwLock<crate::windows_dictation::WindowsModeRuntime>>,
     voice_action_model: Arc<RwLock<Option<crate::opencode::Model>>>,
     opencode_catalog: Option<crate::opencode::ModelCatalog>,
     opencode_catalog_rx: Option<std::sync::mpsc::Receiver<Result<crate::opencode::ModelCatalog>>>,
@@ -134,9 +139,11 @@ struct WindowsApp {
     replacement_inputs: Vec<ReplacementEditorInput>,
     transcription_picker: TranscriptionPickerState,
     mode_inputs: Vec<ModeInputs>,
+    global_processing_prompt: Entity<TextInput>,
+    _global_processing_prompt_subscription: Subscription,
     selected_mode: ModeTarget,
-    voice_model_dropdown_open: bool,
-    voice_model_dropdown_bounds: Option<Bounds<Pixels>>,
+    opencode_model_dropdown: Option<OpenCodeModelTarget>,
+    opencode_model_dropdown_bounds: Option<Bounds<Pixels>>,
     recognition_hints_input: Entity<TextInput>,
     _recognition_hints_subscription: Subscription,
     history_search_input: Entity<TextInput>,
@@ -186,8 +193,24 @@ struct ModeInputs {
     name: Entity<TextInput>,
     applications: Entity<TextInput>,
     websites: Entity<TextInput>,
+    processing_prompt: Entity<TextInput>,
     corrections: Vec<ReplacementEditorInput>,
     _subscriptions: Vec<Subscription>,
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum OpenCodeModelTarget {
+    VoiceAction,
+    Mode(ModeTarget),
+}
+
+impl OpenCodeModelTarget {
+    fn id_fragment(self) -> String {
+        match self {
+            Self::VoiceAction => "voice-action".into(),
+            Self::Mode(target) => format!("mode-{}", target.id_fragment()),
+        }
+    }
 }
 
 enum TrayCommand {
@@ -271,6 +294,23 @@ pub fn open(event_path: PathBuf, shutdown: &'static AtomicBool, start_hidden: bo
                             .iter()
                             .map(|mode| WindowsApp::mode_inputs(mode, cx))
                             .collect();
+                        let global_processing_prompt = cx.new(|cx| {
+                            TextInput::multiline_with_height(
+                                cx,
+                                "Tell OpenCode exactly how to transform the dictated text.",
+                                &host.settings.dictation_post_processing.prompt,
+                                px(92.0),
+                            )
+                        });
+                        let global_processing_prompt_subscription = cx.subscribe(
+                            &global_processing_prompt,
+                            |this: &mut WindowsApp, input, _: &TextChanged, cx| {
+                                this.sync_global_processing_prompt(
+                                    input.read(cx).text().to_string(),
+                                    cx,
+                                );
+                            },
+                        );
                         let recognition_hints_input = cx.new(|cx| {
                             crate::text_input::TextInput::multiline_with_height(
                                 cx,
@@ -315,9 +355,12 @@ pub fn open(event_path: PathBuf, shutdown: &'static AtomicBool, start_hidden: bo
                             replacement_inputs,
                             transcription_picker: TranscriptionPickerState::Closed,
                             mode_inputs,
+                            global_processing_prompt,
+                            _global_processing_prompt_subscription:
+                                global_processing_prompt_subscription,
                             selected_mode: ModeTarget::Global,
-                            voice_model_dropdown_open: false,
-                            voice_model_dropdown_bounds: None,
+                            opencode_model_dropdown: None,
+                            opencode_model_dropdown_bounds: None,
                             model_catalog_language_filter: None,
                             model_catalog_language_dropdown_open: false,
                             model_catalog_language_dropdown_bounds: None,
@@ -693,7 +736,9 @@ impl WindowsDesktopHost {
         let replacements = Arc::new(RwLock::new(crate::text_replacements::ReplacementSet::new(
             &settings.text_replacements,
         )));
-        let modes = Arc::new(RwLock::new(settings.modes.clone()));
+        let mode_runtime = Arc::new(RwLock::new(
+            crate::windows_dictation::WindowsModeRuntime::from_settings(&settings),
+        ));
         let voice_action_model = Arc::new(RwLock::new(settings.voice_action_model.clone()));
         let mut host = Self {
             event_path,
@@ -718,7 +763,7 @@ impl WindowsDesktopHost {
             last_dictation: Arc::new(Mutex::new(None)),
             indicator,
             replacements,
-            modes,
+            mode_runtime,
             voice_action_model,
             opencode_catalog: None,
             opencode_catalog_rx: None,
@@ -780,7 +825,7 @@ impl WindowsDesktopHost {
         let last_dictation = self.last_dictation.clone();
         let indicator = self.indicator.clone();
         let replacements = self.replacements.clone();
-        let modes = self.modes.clone();
+        let mode_runtime = self.mode_runtime.clone();
         let voice_action_model = self.voice_action_model.clone();
         let prepared_transcriber = self.prepared_transcriber.take();
         let listener_terminated = self.listener_terminated.clone();
@@ -803,7 +848,7 @@ impl WindowsDesktopHost {
                         last_dictation,
                         indicator: Some(indicator),
                         replacements,
-                        modes,
+                        mode_runtime,
                         voice_action_model,
                         fallback_to_default_device: true,
                     };
@@ -1258,9 +1303,41 @@ impl WindowsDesktopHost {
             eyre!(error)
         })?;
         *self
-            .modes
+            .mode_runtime
             .write()
-            .unwrap_or_else(|error| error.into_inner()) = candidate.modes.clone();
+            .unwrap_or_else(|error| error.into_inner()) =
+            crate::windows_dictation::WindowsModeRuntime::from_settings(&candidate);
+        self.settings = candidate;
+        self.settings_error = None;
+        Ok(())
+    }
+
+    fn set_mode_post_processing(
+        &mut self,
+        target: ModeTarget,
+        settings: crate::dictation_processing::PostProcessingSettings,
+    ) -> Result<()> {
+        let mut candidate = self.settings.clone();
+        match target {
+            ModeTarget::Global => candidate.dictation_post_processing = settings,
+            ModeTarget::Mode(index) => {
+                let mode = candidate
+                    .modes
+                    .get_mut(index)
+                    .ok_or_else(|| eyre!("dictation mode {index} no longer exists"))?;
+                mode.post_processing = settings;
+            }
+        }
+        candidate.save().map_err(|error| {
+            let error = format!("Could not save mode processing: {error:#}");
+            self.settings_error = Some(error.clone());
+            eyre!(error)
+        })?;
+        *self
+            .mode_runtime
+            .write()
+            .unwrap_or_else(|error| error.into_inner()) =
+            crate::windows_dictation::WindowsModeRuntime::from_settings(&candidate);
         self.settings = candidate;
         self.settings_error = None;
         Ok(())
@@ -1702,6 +1779,14 @@ impl WindowsApp {
             .new(|cx| TextInput::new(cx, "e.g. code, chrome, slack", mode.applications.join(", ")));
         let websites =
             cx.new(|cx| TextInput::new(cx, "e.g. x.com, github.com", mode.websites.join(", ")));
+        let processing_prompt = cx.new(|cx| {
+            TextInput::multiline_with_height(
+                cx,
+                "Tell OpenCode exactly how to transform the dictated text.",
+                &mode.post_processing.prompt,
+                px(92.0),
+            )
+        });
         let name_changed = cx.subscribe(&name, |this, _, _: &TextChanged, cx| this.sync_modes(cx));
         let applications_changed = cx.subscribe(&applications, |this, _, _: &TextChanged, cx| {
             this.sync_modes(cx)
@@ -1709,6 +1794,10 @@ impl WindowsApp {
         let websites_changed = cx.subscribe(&websites, |this, _, _: &TextChanged, cx| {
             this.sync_modes(cx)
         });
+        let processing_prompt_changed = cx
+            .subscribe(&processing_prompt, |this, _, _: &TextChanged, cx| {
+                this.sync_modes(cx)
+            });
         let corrections = mode
             .corrections
             .iter()
@@ -1718,16 +1807,36 @@ impl WindowsApp {
             name,
             applications,
             websites,
+            processing_prompt,
             corrections,
-            _subscriptions: vec![name_changed, applications_changed, websites_changed],
+            _subscriptions: vec![
+                name_changed,
+                applications_changed,
+                websites_changed,
+                processing_prompt_changed,
+            ],
         }
     }
 
-    fn sync_modes(&mut self, cx: &mut Context<Self>) {
-        let modes = self
-            .mode_inputs
+    fn sync_global_processing_prompt(&mut self, prompt: String, cx: &mut Context<Self>) {
+        let mut processing = self.host.settings.dictation_post_processing.clone();
+        processing.prompt = prompt;
+        let _ = self
+            .host
+            .set_mode_post_processing(ModeTarget::Global, processing);
+        cx.notify();
+    }
+
+    fn mode_values(
+        &self,
+        excluded: Option<usize>,
+        cx: &mut Context<Self>,
+    ) -> Vec<crate::windows_settings::WindowsMode> {
+        self.mode_inputs
             .iter()
-            .map(|inputs| crate::windows_settings::WindowsMode {
+            .enumerate()
+            .filter(|(index, _)| Some(*index) != excluded)
+            .map(|(index, inputs)| crate::windows_settings::WindowsMode {
                 name: inputs.name.read(cx).text().to_string(),
                 applications: inputs
                     .applications
@@ -1750,8 +1859,22 @@ impl WindowsApp {
                     .iter()
                     .map(|correction| correction.value(cx))
                     .collect(),
+                post_processing: {
+                    let mut processing = self
+                        .host
+                        .settings
+                        .modes
+                        .get(index)
+                        .map_or_else(Default::default, |mode| mode.post_processing.clone());
+                    processing.prompt = inputs.processing_prompt.read(cx).text().to_string();
+                    processing
+                },
             })
-            .collect();
+            .collect()
+    }
+
+    fn sync_modes(&mut self, cx: &mut Context<Self>) {
+        let modes = self.mode_values(None, cx);
         let _ = self.host.set_modes(modes);
         cx.notify();
     }
@@ -1769,13 +1892,21 @@ impl WindowsApp {
 
     fn remove_mode(&mut self, index: usize, cx: &mut Context<Self>) {
         if index < self.mode_inputs.len() {
+            // Build the persisted collection against the old indexes before
+            // removing the input row. This keeps every later mode's processing
+            // profile attached to that mode when indexes shift left.
+            let modes = self.mode_values(Some(index), cx);
+            if self.host.set_modes(modes).is_err() {
+                cx.notify();
+                return;
+            }
             self.mode_inputs.remove(index);
             self.selected_mode = match self.selected_mode {
                 ModeTarget::Mode(selected) if selected == index => ModeTarget::Global,
                 ModeTarget::Mode(selected) if selected > index => ModeTarget::Mode(selected - 1),
                 selected => selected,
             };
-            self.sync_modes(cx);
+            cx.notify();
         }
     }
 
@@ -1793,7 +1924,7 @@ impl WindowsApp {
     fn close_popups(&mut self) {
         self.transcription_picker = TranscriptionPickerState::Closed;
         self.model_catalog_language_dropdown_open = false;
-        self.voice_model_dropdown_open = false;
+        self.opencode_model_dropdown = None;
         self.microphone_picker_open = false;
         self.end_hotkey_capture();
         self.transcription_dropdown_open = false;
@@ -2879,7 +3010,7 @@ impl WindowsApp {
             .into_any_element()
     }
 
-    fn render_modes(&mut self, cx: &mut Context<Self>) -> AnyElement {
+    fn render_modes(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         if let ModeTarget::Mode(index) = self.selected_mode
             && index >= self.mode_inputs.len()
         {
@@ -2930,7 +3061,7 @@ impl WindowsApp {
             },
             cx,
         );
-        let detail = self.render_windows_mode_detail(cx);
+        let detail = self.render_windows_mode_detail(window, cx);
 
         div()
             .size_full()
@@ -2956,7 +3087,11 @@ impl WindowsApp {
             .into_any_element()
     }
 
-    fn render_windows_mode_detail(&mut self, cx: &mut Context<Self>) -> AnyElement {
+    fn render_windows_mode_detail(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let mut detail = div()
             .id("mode-detail")
             .flex_1()
@@ -2965,6 +3100,8 @@ impl WindowsApp {
             .overflow_y_scroll()
             .child(match self.selected_mode {
                 ModeTarget::Global => {
+                    let processing =
+                        self.render_windows_mode_processing(ModeTarget::Global, window, cx);
                     let basics = render_shared_mode_basics(
                         ModeBasicsView::Global {
                             title: "Global",
@@ -2993,9 +3130,15 @@ impl WindowsApp {
                         .child(div().h(px(4.0)))
                         .child(compact_section_label(tr("TEXT PROCESSING")))
                         .child(replacements)
+                        .child(processing)
                         .into_any_element()
                 }
                 ModeTarget::Mode(mode_index) => {
+                    let processing = self.render_windows_mode_processing(
+                        ModeTarget::Mode(mode_index),
+                        window,
+                        cx,
+                    );
                     let inputs = &self.mode_inputs[mode_index];
                     let name = inputs.name.clone();
                     let applications = inputs.applications.clone();
@@ -3038,6 +3181,7 @@ impl WindowsApp {
                         .child(div().h(px(4.0)))
                         .child(compact_section_label(tr("TEXT PROCESSING")))
                         .child(corrections)
+                        .child(processing)
                         .into_any_element()
                 }
             });
@@ -3048,6 +3192,215 @@ impl WindowsApp {
             ));
         }
         detail.into_any_element()
+    }
+
+    fn mode_post_processing(
+        &self,
+        target: ModeTarget,
+    ) -> Option<&crate::dictation_processing::PostProcessingSettings> {
+        match target {
+            ModeTarget::Global => Some(&self.host.settings.dictation_post_processing),
+            ModeTarget::Mode(index) => self
+                .host
+                .settings
+                .modes
+                .get(index)
+                .map(|mode| &mode.post_processing),
+        }
+    }
+
+    fn opencode_model_key(&self, target: OpenCodeModelTarget) -> Option<String> {
+        match target {
+            OpenCodeModelTarget::VoiceAction => self
+                .host
+                .settings
+                .voice_action_model
+                .as_ref()
+                .map(|model| format!("{}/{}", model.provider, model.id)),
+            OpenCodeModelTarget::Mode(target) => self.mode_post_processing(target)?.model.clone(),
+        }
+    }
+
+    fn opencode_model_label(&self, target: OpenCodeModelTarget) -> String {
+        let current_key = self.opencode_model_key(target);
+        if let (Some(key), Some(catalog)) = (&current_key, &self.host.opencode_catalog)
+            && let Some(choice) = catalog.models.iter().find(|choice| &choice.key == key)
+        {
+            return choice.name.clone();
+        }
+        if let Some(key) = current_key {
+            return key
+                .split_once('/')
+                .map_or(key.clone(), |(_, model)| model.to_string());
+        }
+        if self.host.opencode_catalog_rx.is_some() {
+            return tr("Loading models").to_string();
+        }
+        match target {
+            OpenCodeModelTarget::VoiceAction => tr("Choose a model").to_string(),
+            OpenCodeModelTarget::Mode(_) => self
+                .host
+                .opencode_catalog
+                .as_ref()
+                .and_then(|catalog| catalog.default_name.clone())
+                .map_or_else(
+                    || "OpenCode default".into(),
+                    |name| format!("{name} — Default"),
+                ),
+        }
+    }
+
+    fn render_opencode_model_control(
+        &mut self,
+        target: OpenCodeModelTarget,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let target_id = target.id_fragment();
+        let label = self.opencode_model_label(target);
+        div()
+            .relative()
+            .child(
+                disclosure_button(label)
+                    .id(SharedString::from(format!(
+                        "windows-opencode-model-{target_id}"
+                    )))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        let was_open = this.opencode_model_dropdown == Some(target);
+                        this.close_popups();
+                        if !was_open {
+                            this.opencode_model_dropdown = Some(target);
+                            if this.host.opencode_catalog.is_none() {
+                                this.host.request_opencode_catalog();
+                            }
+                        }
+                        cx.notify();
+                    })),
+            )
+            .child(
+                canvas(
+                    {
+                        let entity = cx.entity();
+                        move |bounds, _, cx| {
+                            entity.update(cx, |this, _| {
+                                this.opencode_model_dropdown_bounds = Some(bounds);
+                            });
+                        }
+                    },
+                    |_, _, _, _| {},
+                )
+                .w_full()
+                .h(px(0.0)),
+            )
+            .into_any_element()
+    }
+
+    fn set_opencode_model(
+        &mut self,
+        target: OpenCodeModelTarget,
+        model: Option<crate::opencode::Model>,
+    ) {
+        match target {
+            OpenCodeModelTarget::VoiceAction => self.host.set_voice_action_model(model),
+            OpenCodeModelTarget::Mode(target) => {
+                let Some(mut processing) = self.mode_post_processing(target).cloned() else {
+                    return;
+                };
+                processing.model = model
+                    .as_ref()
+                    .map(|model| format!("{}/{}", model.provider, model.id));
+                processing.variant = model.and_then(|model| model.variant);
+                let _ = self.host.set_mode_post_processing(target, processing);
+            }
+        }
+    }
+
+    fn render_windows_mode_processing(
+        &mut self,
+        target: ModeTarget,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let Some(settings) = self.mode_post_processing(target).cloned() else {
+            return div().into_any_element();
+        };
+        let installed = crate::opencode::opencode_installed();
+        let compact = window.viewport_size().width < px(980.0);
+        let settings_view = if settings.enabled {
+            let model_control =
+                self.render_opencode_model_control(OpenCodeModelTarget::Mode(target), cx);
+            let prompt = match target {
+                ModeTarget::Global => self.global_processing_prompt.clone(),
+                ModeTarget::Mode(index) => self.mode_inputs[index].processing_prompt.clone(),
+            };
+            Some(
+                div()
+                    .pt_4()
+                    .flex()
+                    .flex_col()
+                    .gap_5()
+                    .child(
+                        div()
+                            .flex()
+                            .when(compact, |row| row.flex_col().items_start().gap_3())
+                            .when(!compact, |row| row.items_center().justify_between().gap_4())
+                            .child(div().flex_1().min_w(px(0.0)).child(settings_copy(
+                                "Model",
+                                "Rewrites each completed dictation through OpenCode",
+                            )))
+                            .child(
+                                div()
+                                    .when(!compact, |control| control.w(px(320.0)).flex_none())
+                                    .when(compact, |control| control.w_full())
+                                    .child(model_control),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap_2()
+                            .child(settings_copy(
+                                "Instructions",
+                                "Tell OpenCode exactly how to transform the dictated text",
+                            ))
+                            .child(prompt),
+                    )
+                    .into_any_element(),
+            )
+        } else {
+            None
+        };
+        let unavailable = if !installed {
+            Some(ModeProcessingUnavailableView {
+                title: "OpenCode is required",
+                description: "Install and configure OpenCode to rewrite dictation.",
+                error: self.host.opencode_catalog_error.clone(),
+                retry_label: Some("Check again"),
+                setup_label: Some("Open setup"),
+            })
+        } else {
+            self.host
+                .opencode_catalog_error
+                .clone()
+                .map(|error| ModeProcessingUnavailableView {
+                    title: "Models could not be loaded",
+                    description: "Retry the OpenCode model catalog.",
+                    error: Some(error),
+                    retry_label: Some("Retry"),
+                    setup_label: None,
+                })
+        };
+        render_shared_mode_processing(
+            ModeProcessingView {
+                target,
+                enabled: settings.enabled,
+                toggle_position: if settings.enabled { 1.0 } else { 0.0 },
+                can_toggle: settings.enabled || installed,
+                settings: settings_view,
+                unavailable,
+            },
+            cx,
+        )
     }
 
     /// The Voice Action pane, mirroring macOS: an explainer, the capture
@@ -3111,52 +3464,8 @@ impl WindowsApp {
                     }))
                     .child(toggle(if enabled { 1.0 } else { 0.0 })),
             );
-        let current_model = self.host.settings.voice_action_model.clone();
-        let model_label = match (&current_model, &self.host.opencode_catalog) {
-            (Some(model), Some(catalog)) => {
-                let key = format!("{}/{}", model.provider, model.id);
-                catalog
-                    .models
-                    .iter()
-                    .find(|choice| choice.key == key)
-                    .map_or_else(|| model.id.clone(), |choice| choice.name.clone())
-            }
-            (Some(model), None) => model.id.clone(),
-            (None, _) if self.host.opencode_catalog_rx.is_some() => {
-                tr("Loading models").to_string()
-            }
-            (None, _) => tr("Choose a model").to_string(),
-        };
-        let model_control = div()
-            .relative()
-            .child(
-                disclosure_button(model_label)
-                    .id("windows-voice-model")
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        let open = this.voice_model_dropdown_open;
-                        this.close_popups();
-                        this.voice_model_dropdown_open = !open;
-                        if this.voice_model_dropdown_open && this.host.opencode_catalog.is_none() {
-                            this.host.request_opencode_catalog();
-                        }
-                        cx.notify();
-                    })),
-            )
-            .child(
-                canvas(
-                    {
-                        let entity = cx.entity();
-                        move |bounds, _, cx| {
-                            entity.update(cx, |this, _| {
-                                this.voice_model_dropdown_bounds = Some(bounds);
-                            });
-                        }
-                    },
-                    |_, _, _, _| {},
-                )
-                .w_full()
-                .h(px(0.0)),
-            );
+        let model_control =
+            self.render_opencode_model_control(OpenCodeModelTarget::VoiceAction, cx);
         let opencode_status = div()
             .text_size(px(12.0))
             .text_color(if opencode_installed {
@@ -3428,17 +3737,21 @@ impl WindowsApp {
             .into_any_element()
     }
 
-    fn render_voice_model_dropdown(
+    fn render_opencode_model_dropdown(
         &mut self,
         viewport_height: Pixels,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let Some(bounds) = self.voice_model_dropdown_bounds else {
+        let Some(target) = self.opencode_model_dropdown else {
             return div().into_any_element();
         };
-        let backdrop = dropdown_backdrop("windows-voice-model-backdrop").on_click(cx.listener(
+        let Some(bounds) = self.opencode_model_dropdown_bounds else {
+            return div().into_any_element();
+        };
+        let target_id = target.id_fragment();
+        let backdrop = dropdown_backdrop("windows-opencode-model-backdrop").on_click(cx.listener(
             |this, _, _, cx| {
-                this.voice_model_dropdown_open = false;
+                this.opencode_model_dropdown = None;
                 cx.notify();
             },
         ));
@@ -3451,7 +3764,9 @@ impl WindowsApp {
             return backdrop
                 .child(
                     dropdown_panel_with_width(bounds, viewport_height, 1, width)
-                        .id("windows-voice-model-dropdown")
+                        .id(SharedString::from(format!(
+                            "windows-opencode-model-dropdown-{target_id}"
+                        )))
                         .on_click(|_, _, cx| cx.stop_propagation())
                         .child(
                             div()
@@ -3464,39 +3779,57 @@ impl WindowsApp {
                 )
                 .into_any_element();
         };
-        let current_key = self
-            .host
-            .settings
-            .voice_action_model
-            .as_ref()
-            .map(|model| format!("{}/{}", model.provider, model.id));
-        let panel_rows = catalog.models.len().max(1);
-        let items = catalog
-            .models
-            .iter()
-            .enumerate()
-            .map(|(index, choice)| {
-                let selected = current_key.as_deref() == Some(choice.key.as_str());
-                let label = if catalog.default_key.as_ref() == Some(&choice.key) {
-                    format!("{} — {}", choice.name, tr("Default"))
-                } else {
-                    choice.name.clone()
-                };
-                let model = choice.model();
-                dropdown_item(("windows-voice-model-option", index), label, selected).on_click(
-                    cx.listener(move |this, _, _, cx| {
-                        cx.stop_propagation();
-                        this.host.set_voice_action_model(Some(model.clone()));
-                        this.voice_model_dropdown_open = false;
-                        cx.notify();
-                    }),
+        let current_key = self.opencode_model_key(target);
+        let includes_default = matches!(target, OpenCodeModelTarget::Mode(_));
+        let panel_rows = (catalog.models.len() + usize::from(includes_default)).max(1);
+        let mut items = Vec::with_capacity(panel_rows);
+        if includes_default {
+            let label = catalog.default_name.clone().map_or_else(
+                || "OpenCode default".into(),
+                |name| format!("{name} — OpenCode default"),
+            );
+            items.push(
+                dropdown_item(
+                    SharedString::from(format!("windows-opencode-model-default-{target_id}")),
+                    label,
+                    current_key.is_none(),
                 )
-            })
-            .collect::<Vec<_>>();
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    cx.stop_propagation();
+                    this.set_opencode_model(target, None);
+                    this.opencode_model_dropdown = None;
+                    cx.notify();
+                }))
+                .into_any_element(),
+            );
+        }
+        items.extend(catalog.models.iter().enumerate().map(|(index, choice)| {
+            let selected = current_key.as_deref() == Some(choice.key.as_str());
+            let label = if catalog.default_key.as_ref() == Some(&choice.key) {
+                format!("{} — {}", choice.name, tr("Default"))
+            } else {
+                choice.name.clone()
+            };
+            let model = choice.model();
+            dropdown_item(
+                SharedString::from(format!("windows-opencode-model-option-{target_id}-{index}")),
+                label,
+                selected,
+            )
+            .on_click(cx.listener(move |this, _, _, cx| {
+                cx.stop_propagation();
+                this.set_opencode_model(target, Some(model.clone()));
+                this.opencode_model_dropdown = None;
+                cx.notify();
+            }))
+            .into_any_element()
+        }));
         backdrop
             .child(
                 dropdown_panel_with_width(bounds, viewport_height, panel_rows, width)
-                    .id("windows-voice-model-dropdown")
+                    .id(SharedString::from(format!(
+                        "windows-opencode-model-dropdown-{target_id}"
+                    )))
                     .overflow_y_scroll()
                     .on_click(|_, _, cx| cx.stop_propagation())
                     .children(items),
@@ -3822,6 +4155,42 @@ impl VoiceActionPaneDelegate for WindowsApp {
     }
 }
 
+impl ModeProcessingDelegate for WindowsApp {
+    fn handle_mode_processing_action(
+        &mut self,
+        action: ModeProcessingAction,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match action {
+            ModeProcessingAction::SetEnabled { target, enabled } => {
+                let Some(mut processing) = self.mode_post_processing(target).cloned() else {
+                    return;
+                };
+                processing.enabled = enabled;
+                if self
+                    .host
+                    .set_mode_post_processing(target, processing)
+                    .is_ok()
+                    && enabled
+                    && self.host.opencode_catalog.is_none()
+                {
+                    self.host.request_opencode_catalog();
+                }
+            }
+            ModeProcessingAction::RetryOpenCode => self.host.request_opencode_catalog(),
+            ModeProcessingAction::OpenOpenCodeSetup => {
+                if let Err(error) = crate::commands_engine::execute(
+                    crate::commands_engine::Action::OpenUrl(OPENCODE_SETUP_URL.into()),
+                ) {
+                    tracing::error!(%error, "could not open the OpenCode beta documentation");
+                }
+            }
+        }
+        cx.notify();
+    }
+}
+
 impl Render for WindowsApp {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         debug_assert!(self.host.capabilities().listener_control);
@@ -3832,7 +4201,7 @@ impl Render for WindowsApp {
         let content = match self.pane {
             DesktopPane::Settings => self.render_settings(&snapshot, cx),
             DesktopPane::Activity => crate::desktop_activity_pane::render_activity_pane(&snapshot),
-            DesktopPane::Modes => self.render_modes(cx),
+            DesktopPane::Modes => self.render_modes(window, cx),
             DesktopPane::VoiceAction => self.render_voice_action(window, cx),
             DesktopPane::History => self.render_history(cx),
             DesktopPane::HudLab => crate::desktop_hud_lab::render_hud_lab_pane(self, window, cx),
@@ -3860,9 +4229,9 @@ impl Render for WindowsApp {
                     cx,
                 )
             });
-        let voice_model_dropdown = self
-            .voice_model_dropdown_open
-            .then(|| self.render_voice_model_dropdown(viewport.height, cx));
+        let opencode_model_dropdown = self
+            .opencode_model_dropdown
+            .map(|_| self.render_opencode_model_dropdown(viewport.height, cx));
         let onboarding = self.onboarding.then(|| {
             crate::desktop_onboarding::render_onboarding(
                 self,
@@ -3907,7 +4276,7 @@ impl Render for WindowsApp {
             )
             .children(model_picker)
             .children(model_catalog_language_dropdown)
-            .children(voice_model_dropdown)
+            .children(opencode_model_dropdown)
             .children(microphone_dropdown)
             .children(transcription_dropdown)
             .children(dictation_language_dropdown)

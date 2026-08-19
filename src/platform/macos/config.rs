@@ -50,29 +50,12 @@ fn mode_profile(mode: &crate::app_settings::DictationMode) -> Profile {
     } else {
         &mode.name
     };
-    let mut profile = Profile::new(name, &processing.prompt)
-        .ai_enabled(processing.enabled)
-        .replacements(crate::text_replacements::ReplacementSet::new(
-            &mode.replacements,
-        ))
-        .transformations(mode.transformations.clone());
-    if let Some((provider, model)) = processing
-        .model
-        .as_deref()
-        .and_then(|model| model.split_once('/'))
-    {
-        profile = profile.model(provider, model);
-        if let Some(variant) = processing
-            .variant
-            .as_deref()
-            .filter(|variant| !variant.is_empty())
-        {
-            profile = profile.variant(variant);
-        }
-    }
-    profile.deadline(std::time::Duration::from_secs(
-        processing.deadline_seconds.max(1),
-    ))
+    Profile::configured(
+        name,
+        crate::text_replacements::ReplacementSet::new(&mode.replacements),
+        mode.transformations.clone(),
+        processing,
+    )
 }
 
 /// Native system commands and typed captures that cannot yet be expressed by

@@ -15,9 +15,9 @@ hold-to-dictate loop: timestamped Win32 input, WASAPI capture, checksum-pinned
 local models, generation-safe paste, live settings, double-tap lock, Paste Last,
 History, replacements, tones, click-through HUD, tray residency, and Launch at
 login. Modes with corrections and browser-host selection, Voice Action,
-onboarding, and managed signed updates are implemented. OpenCode mode rewriting,
-TypeScript transformations, streaming commands, the local API host, and
-developer Meetings remain.
+onboarding, managed signed updates, and global/per-mode OpenCode rewriting are
+implemented. TypeScript transformations, streaming commands, the local API
+host, and developer Meetings remain.
 The authenticated local transcription service now implements discovery,
 direct-child embedding, model preparation, and bounded host-audio transcription;
 Promise and Effect TypeScript wrappers pass fake-helper tests. Signed helper
@@ -35,9 +35,9 @@ below.
 | Surface | macOS | Linux X11 | Windows |
 | --- | --- | --- | --- |
 | Dictation loop | Product implementation; physical timestamp regression recheck remains | Beta implementation; Arch/i3 smoke test remains | Alpha implementation; Windows 10/11 smoke matrix remains |
-| Desktop presentation | Full root still owns macOS composition; History, Voice Action, and the Modes collection/basics/replacement UI are shared | Shared primitives and panes, but a separate Linux root remains | Shared primitives plus History, Voice Action, and the shared Modes collection/basics/replacement UI, but a separate Windows root remains |
+| Desktop presentation | Full root still owns macOS composition; History, Voice Action, and the Modes collection/basics/replacement/processing UI are shared | Shared primitives and panes, but a separate Linux root remains | Shared primitives plus History, Voice Action, and the shared Modes collection/basics/replacement/processing UI, but a separate Windows root remains |
 | Commands | Persisted release opt-in | Bounded developer-only prototype; no packaged/context-complete release contract | Unavailable until a real streaming command model exists |
-| Modes and replacements | Full ordered pipeline on the shared processing policy | Not implemented | Corrections, replacements, and web-domain selection use the shared policy; OpenCode settings and TypeScript transformation hosting remain |
+| Modes and replacements | Full ordered pipeline on the shared processing policy | Not implemented | Corrections, replacements, web-domain selection, and OpenCode rewriting use the shared policy; reasoning/deadline controls and TypeScript transformation hosting remain |
 | Voice Action | Implemented | Not implemented | Implemented with clipboard-backed selected-text capture |
 | HUD | Product Metal HUD using the shared state model | Embedded developer lab only | Product GPUI/DirectX HUD using the same shared state model |
 | Packaging and updates | Sparkle flow implemented; clean-account validation remains | Signed direct-install flow implemented; real cross-version update remains | Managed installer and signed update flow implemented; signed-host validation remains |
@@ -83,8 +83,11 @@ native macOS tests plus authoritative release previews pass.
 - [x] Extract the mode name/application/site card with explicit catalog-backed
   and free-form application-rule variants; matching and persistence remain in
   the native roots while the complete basics renderer is shared.
-- [ ] Extract the rest of Modes around the shared processing policy: OpenCode
-  configuration and ordered transformation editing.
+- [x] Extract the OpenCode processing card, enablement actions, and unavailable
+  state; macOS and Windows supply their real model/prompt controls and persist
+  the same portable rewrite settings.
+- [ ] Extract ordered transformation editing after Windows has a real bounded
+  TypeScript transformation host to execute it.
 - [x] Extract the complete Voice Action scaffold, setting rows, and OpenCode
   unavailable state; macOS and Windows supply their native shortcut and model
   controls through one pane contract.
@@ -119,8 +122,12 @@ hosts, and no shared renderer branches on an operating-system name.
   microphone changes and recovery, lock/cancel, Paste Last, clipboard restore,
   History/replacements, audio control, HUD/tones, tray, startup, installer, and
   signed update restart.
-- [ ] Complete OpenCode mode rewriting and ordered TypeScript transformations
-  using the same portable processing policy as macOS.
+- [x] Complete global and contextual OpenCode mode rewriting using the same
+  persisted profile contract and portable processing policy as macOS.
+- [ ] Expose the remaining OpenCode reasoning-variant and deadline controls in
+  the Windows Modes editor.
+- [ ] Add the bounded TypeScript transformation host and ordered transformation
+  editing used by the same portable processing policy.
 - [ ] Add opt-in Commands only after selecting and measuring a real Windows
   streaming recognizer; do not introduce a placeholder model abstraction.
 - [ ] Port the authenticated local transcription host and direct-child handoff.
@@ -208,11 +215,11 @@ per-application and web-domain corrections, Voice Action with in-app OpenCode
 model selection, the UI Automation browser-context adapter, the signed
 installer/update contract, and shared interface translations now ship; the
 Linux shell renders the same shared settings surface and model catalog.
-Shared first-run onboarding now ships as well. Remaining slices are OpenCode
-mode rewriting with TypeScript transformations, the persisted opt-in command
-engine (waiting on a Windows streaming model), the authenticated local
-transcription host, and developer-only Meetings. The detailed live matrix is in
-[`docs/windows.md`](docs/windows.md).
+Shared first-run onboarding and global/per-mode OpenCode rewriting now ship as
+well. Remaining slices are the advanced OpenCode controls, bounded TypeScript
+transformation host, persisted opt-in command engine (waiting on a Windows
+streaming model), authenticated local transcription host, and developer-only
+Meetings. The detailed live matrix is in [`docs/windows.md`](docs/windows.md).
 
 Do not advertise a missing capability merely because its macOS pane can be
 drawn. Each Windows pane must own its real platform behavior and validation

@@ -43,6 +43,23 @@ struct JobResult {
     result: Result<(), String>,
 }
 
+/// Live mode-processing snapshot. The output worker clones it before any
+/// deadline-bounded OpenCode call, so settings writes never wait on inference.
+#[derive(Clone)]
+pub struct WindowsModeRuntime {
+    default: crate::dictation_processing::PostProcessingSettings,
+    modes: Vec<crate::windows_settings::WindowsMode>,
+}
+
+impl WindowsModeRuntime {
+    pub fn from_settings(settings: &crate::windows_settings::WindowsSettings) -> Self {
+        Self {
+            default: settings.dictation_post_processing.clone(),
+            modes: settings.modes.clone(),
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct WindowsDictationConfig {
     pub device: Option<String>,
@@ -58,7 +75,7 @@ pub struct WindowsDictationConfig {
     pub last_dictation: Arc<Mutex<Option<String>>>,
     pub indicator: Option<crate::windows_indicator::WindowsIndicatorSender>,
     pub replacements: Arc<RwLock<crate::text_replacements::ReplacementSet>>,
-    pub modes: Arc<RwLock<Vec<crate::windows_settings::WindowsMode>>>,
+    pub mode_runtime: Arc<RwLock<WindowsModeRuntime>>,
     pub voice_action_model: Arc<RwLock<Option<crate::opencode::Model>>>,
     pub fallback_to_default_device: bool,
 }
@@ -93,7 +110,7 @@ pub fn run_with_transcriber(
         last_dictation,
         indicator,
         replacements,
-        modes,
+        mode_runtime,
         voice_action_model,
         fallback_to_default_device,
     } = config;
@@ -163,7 +180,7 @@ pub fn run_with_transcriber(
                         history.as_ref(),
                         &last_dictation,
                         &replacements,
-                        &modes,
+                        &mode_runtime,
                     ),
                     OutputJob::VoiceAction(job) => process_voice_action_job(
                         job,
@@ -663,7 +680,7 @@ fn process_dictation_job(
     history: Option<&crate::history::History>,
     last_dictation: &Mutex<Option<String>>,
     replacements: &RwLock<crate::text_replacements::ReplacementSet>,
-    modes: &RwLock<Vec<crate::windows_settings::WindowsMode>>,
+    mode_runtime: &RwLock<WindowsModeRuntime>,
 ) -> JobResult {
     let started = Instant::now();
     // The context read starts now so the UIA walk overlaps inference.
@@ -687,10 +704,11 @@ fn process_dictation_job(
         // Context selection remains in the native adapter because Windows
         // application rules intentionally match executable substrings. The
         // selected mode then enters the shared ordered processing policy.
-        let processed = {
-            let modes = modes.read().unwrap_or_else(|error| error.into_inner());
-            process_mode_text(&text, &context, &modes)
-        };
+        let mode_runtime = mode_runtime
+            .read()
+            .unwrap_or_else(|error| error.into_inner())
+            .clone();
+        let processed = process_mode_text(&text, &context, &mode_runtime);
         let text = processed.text;
         if text.trim().is_empty() {
             return Err("text replacements produced empty output".into());
@@ -738,23 +756,33 @@ fn process_dictation_job(
 fn process_mode_text(
     text: &str,
     context: &crate::command_context::ContextSnapshot,
-    modes: &[crate::windows_settings::WindowsMode],
+    runtime: &WindowsModeRuntime,
 ) -> crate::dictation_processing::Processed {
     let mode = crate::windows_settings::mode_for_context(
-        modes,
+        &runtime.modes,
         context.application.as_deref(),
         context.browser_host(),
     );
     let profile = mode.map_or_else(
-        || crate::dictation_processing::Profile::new("Global", ""),
+        || {
+            crate::dictation_processing::Profile::configured(
+                "Global",
+                crate::text_replacements::ReplacementSet::default(),
+                Vec::new(),
+                &runtime.default,
+            )
+        },
         |mode| {
             let name = if mode.name.trim().is_empty() {
                 "Untitled mode"
             } else {
                 &mode.name
             };
-            crate::dictation_processing::Profile::new(name, "").replacements(
+            crate::dictation_processing::Profile::configured(
+                name,
                 crate::text_replacements::ReplacementSet::new(&mode.corrections),
+                Vec::new(),
+                &mode.post_processing,
             )
         },
     );
@@ -1026,7 +1054,11 @@ mod tests {
             ..crate::command_context::ContextSnapshot::default()
         };
 
-        let processed = process_mode_text("Use open code.", &context, &modes);
+        let runtime = WindowsModeRuntime {
+            default: crate::dictation_processing::PostProcessingSettings::default(),
+            modes,
+        };
+        let processed = process_mode_text("Use open code.", &context, &runtime);
 
         assert_eq!(processed.text, "Use OpenCode.");
         assert!(processed.observation.is_none());

@@ -10,11 +10,39 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
+use serde::{Deserialize, Serialize};
+
 use super::command_context::{ContextSelector, ContextSnapshot};
 use super::opencode::{Model, generate_cancellable};
 use super::text_replacements::ReplacementSet;
 
 const PROTOCOL_PROMPT: &str = "You transform dictated speech into replacement text. Return only the text that should be pasted. Do not add an explanation, label, alternative, or Markdown fence.";
+
+/// Persisted OpenCode rewrite settings shared by every desktop mode schema.
+/// Context matching and transformation selection remain owned by their native
+/// roots, but rewrite behavior must not drift between platforms.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(default)]
+pub struct PostProcessingSettings {
+    pub enabled: bool,
+    pub prompt: String,
+    /// Optional `provider/model` key from the OpenCode catalog.
+    pub model: Option<String>,
+    pub variant: Option<String>,
+    pub deadline_seconds: u64,
+}
+
+impl Default for PostProcessingSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            prompt: "Rewrite the transcript into clear, natural text while preserving the speaker's intended meaning.".into(),
+            model: None,
+            variant: None,
+            deadline_seconds: 30,
+        }
+    }
+}
 
 /// Platform-owned transformation execution. macOS currently backs this with
 /// the bounded Bun personal-command host; other shells can supply their real
@@ -88,6 +116,37 @@ impl Profile {
     pub fn deadline(mut self, deadline: Duration) -> Self {
         self.deadline = Some(deadline);
         self
+    }
+
+    /// Build one runtime profile from the shared persisted rewrite contract.
+    /// Invalid model keys deliberately fall back to OpenCode's default, which
+    /// preserves the existing macOS behavior and keeps a stale catalog entry
+    /// from disabling corrections or transformations.
+    pub(crate) fn configured(
+        name: impl Into<String>,
+        replacements: ReplacementSet,
+        transformations: Vec<String>,
+        settings: &PostProcessingSettings,
+    ) -> Self {
+        let mut profile = Self::new(name, &settings.prompt)
+            .ai_enabled(settings.enabled)
+            .replacements(replacements)
+            .transformations(transformations);
+        if let Some((provider, model)) = settings
+            .model
+            .as_deref()
+            .and_then(|key| key.split_once('/'))
+        {
+            profile = profile.model(provider, model);
+            if let Some(variant) = settings
+                .variant
+                .as_deref()
+                .filter(|variant| !variant.is_empty())
+            {
+                profile = profile.variant(variant);
+            }
+        }
+        profile.deadline(Duration::from_secs(settings.deadline_seconds.max(1)))
     }
 }
 
@@ -362,6 +421,36 @@ mod tests {
 
         assert!(!profiles.select(&context("Slack", None)).ai_enabled);
         assert_eq!(profiles.select(&context("Zed", None)).name, "default");
+    }
+
+    #[test]
+    fn persisted_rewrite_settings_build_the_same_runtime_profile_everywhere() {
+        let settings = PostProcessingSettings {
+            enabled: true,
+            prompt: "Keep technical terms exact.".into(),
+            model: Some("openai/gpt-5.6-sol".into()),
+            variant: Some("fast".into()),
+            deadline_seconds: 12,
+        };
+        let profile = Profile::configured(
+            "Coding",
+            ReplacementSet::default(),
+            vec!["lowercase".into()],
+            &settings,
+        );
+
+        assert!(profile.ai_enabled);
+        assert_eq!(profile.prompt, "Keep technical terms exact.");
+        assert_eq!(
+            profile.model,
+            Some(Model {
+                provider: "openai".into(),
+                id: "gpt-5.6-sol".into(),
+                variant: Some("fast".into()),
+            })
+        );
+        assert_eq!(profile.deadline, Some(Duration::from_secs(12)));
+        assert_eq!(profile.transformations, ["lowercase"]);
     }
 
     #[test]

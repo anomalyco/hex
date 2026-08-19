@@ -152,6 +152,8 @@ pub fn run(shutdown: &'static AtomicBool) -> Result<()> {
             let _instance = crate::instance::acquire("windows-listener")?;
             let settings = crate::windows_settings::WindowsSettings::load()?;
             let history = crate::history::History::open_default(settings.history_retention)?;
+            let mode_runtime =
+                crate::windows_dictation::WindowsModeRuntime::from_settings(&settings);
             let config = crate::windows_dictation::WindowsDictationConfig {
                 device,
                 hotkey: settings.dictation_hotkey,
@@ -168,7 +170,7 @@ pub fn run(shutdown: &'static AtomicBool) -> Result<()> {
                 replacements: Arc::new(std::sync::RwLock::new(
                     crate::text_replacements::ReplacementSet::new(&settings.text_replacements),
                 )),
-                modes: Arc::new(std::sync::RwLock::new(settings.modes.clone())),
+                mode_runtime: Arc::new(std::sync::RwLock::new(mode_runtime)),
                 voice_action_model: Arc::new(std::sync::RwLock::new(
                     settings.voice_action_model.clone(),
                 )),

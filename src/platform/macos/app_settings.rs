@@ -8,6 +8,7 @@ use objc2::MainThreadMarker;
 use objc2_app_kit::{NSApplication, NSApplicationActivationPolicy};
 use serde::{Deserialize, Serialize};
 
+pub use crate::dictation_processing::PostProcessingSettings as DictationPostProcessing;
 pub use crate::text_replacements::TextReplacement;
 use crate::transcription_models::TranscriptionSelection;
 
@@ -446,16 +447,6 @@ pub struct DictationMode {
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(default)]
-pub struct DictationPostProcessing {
-    pub enabled: bool,
-    pub prompt: String,
-    pub model: Option<String>,
-    pub variant: Option<String>,
-    pub deadline_seconds: u64,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(default)]
 pub struct VoiceActionSettings {
     pub model: Option<String>,
     pub variant: Option<String>,
@@ -468,18 +459,6 @@ impl Default for VoiceActionSettings {
             model: None,
             variant: None,
             deadline_seconds: 60,
-        }
-    }
-}
-
-impl Default for DictationPostProcessing {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            prompt: "Rewrite the transcript into clear, natural text while preserving the speaker's intended meaning.".into(),
-            model: None,
-            variant: None,
-            deadline_seconds: 30,
         }
     }
 }

@@ -1,7 +1,8 @@
 //! The one OpenCode client both desktop platforms share: executable
 //! discovery, the `opencode2 api` transport with deadlines and
-//! cancellation, the model catalog, and text generation. macOS keeps its
-//! richer processing pipeline on top; Windows drives voice actions with it.
+//! cancellation, the model catalog, and text generation. The shared dictation
+//! policy and both native desktop roots use it for mode rewriting; Windows also
+//! drives Voice Action with it.
 
 use std::ffi::OsStr;
 use std::io::Read;
