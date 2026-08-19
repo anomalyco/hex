@@ -20,39 +20,7 @@
 //!   helper below implements the raw Hermite formula, which handles that the
 //!   same way the GPU does.
 
-// TODO: remove once the Windows/Linux shells render the HUD through this
-// module.
-#![allow(dead_code)]
-
-/// Mirrors the Metal `Uniforms` struct field-for-field (minus `_padding`).
-#[derive(Clone, Copy, Debug, Default)]
-pub struct IndicatorUniforms {
-    pub resolution: [f32; 2],
-    pub time: f32,
-    pub width: f32,
-    pub height: f32,
-    pub opacity: f32,
-    pub scale: f32,
-    pub softness: f32,
-    pub average: f32,
-    pub peak: f32,
-    pub processing: f32,
-    pub post_processing: f32,
-    pub capturing: f32,
-    pub editing: f32,
-    pub queued_count: f32,
-    pub line_style: f32,
-    pub line_count: f32,
-    pub line_curvature: f32,
-    pub line_speed: f32,
-    pub line_sharpness: f32,
-    pub line_glow: f32,
-    pub sphere_depth: f32,
-    pub light_angle: f32,
-    pub sphere_outline: f32,
-    pub completion: f32,
-    pub recording_flash: f32,
-}
+pub use crate::desktop::indicator_model::IndicatorUniforms;
 
 /// The literal the Metal source uses for two pi.
 const TAU: f32 = std::f32::consts::TAU;

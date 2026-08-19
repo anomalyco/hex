@@ -39,7 +39,7 @@ below.
 | Commands | Persisted release opt-in | Bounded developer-only prototype; no packaged/context-complete release contract | Unavailable until a real streaming command model exists |
 | Modes and replacements | Full ordered pipeline | Not implemented | Corrections, replacements, and web-domain selection implemented; OpenCode rewriting and TypeScript transformations remain |
 | Voice Action | Implemented | Not implemented | Implemented with clipboard-backed selected-text capture |
-| HUD | Product Metal HUD | Embedded developer lab only | Product GPUI/DirectX HUD using the shared state model |
+| HUD | Product Metal HUD using the shared state model | Embedded developer lab only | Product GPUI/DirectX HUD using the same shared state model |
 | Packaging and updates | Sparkle flow implemented; clean-account validation remains | Signed direct-install flow implemented; real cross-version update remains | Managed installer and signed update flow implemented; signed-host validation remains |
 | Meetings | Developer-only implementation | Not implemented | Not implemented |
 | Local transcription API | Implemented | Not implemented | Not implemented |
@@ -56,7 +56,7 @@ below.
 - [x] Make macOS consume the shared command grammar and resolution engine, then
   delete the duplicate macOS copies without changing compiled protected
   commands or TypeScript personal-command behavior.
-- [ ] Move macOS HUD transitions onto the shared indicator state model while
+- [x] Move macOS HUD transitions onto the shared indicator state model while
   retaining Metal on macOS and GPUI/DirectX on Windows.
 - [ ] Share processing-pipeline policy—corrections, OpenCode rewriting, and
   TypeScript transformations—without moving platform context, selection, or

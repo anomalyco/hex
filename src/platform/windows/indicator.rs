@@ -1,5 +1,5 @@
-//! The Windows dictation HUD: the shared macOS indicator state machine
-//! drives the CPU port of the Metal shader, rendered at the mac's exact
+//! The Windows dictation HUD: the shared indicator state machine drives the
+//! CPU port of the Metal shader, rendered at the mac's exact
 //! geometry (112x64 logical points at 2x backing scale) into a
 //! transparent click-through popup. Event vocabulary, springs, and
 //! timing are identical to the macOS HUD.

@@ -9,7 +9,7 @@ pub mod host;
 pub mod hud_lab;
 #[cfg(any(target_os = "linux", target_os = "windows"))]
 pub mod i18n;
-#[cfg(any(target_os = "linux", target_os = "windows"))]
+#[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
 pub mod indicator_model;
 #[cfg(any(target_os = "linux", target_os = "windows"))]
 pub mod indicator_shader;

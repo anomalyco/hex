@@ -1,31 +1,19 @@
-//! Shared dictation-HUD state machine, extracted from the macOS indicator.
+//! Shared dictation-HUD state machine for every desktop shell.
 //!
-//! This module is an adapted copy of the non-Metal parts of
-//! `src/platform/macos/dictation_indicator.rs`: the event vocabulary, the
-//! phase/job bookkeeping, the critically-damped springs, and the per-frame
-//! uniform assembly. macOS keeps its original implementation until its shell
-//! port unifies on this model; until then the two MUST be kept in lockstep —
-//! any change to the macOS state machine has to be mirrored here (and vice
-//! versa). `HudTuning` was also copied from that file, where it is defined.
-//!
-//! The model is pure `std` plus [`IndicatorUniforms`]: where the macOS draw
-//! path reads the Metal drawable for its resolution, this model multiplies
-//! the logical window size by a backing scale supplied via
-//! [`IndicatorModel::set_backing_scale`].
-
-// TODO: remove once the Windows/Linux shells render the HUD through this
-// model.
-#![allow(dead_code)]
+//! The event vocabulary, phase/job bookkeeping, critically-damped springs,
+//! and per-frame uniform assembly live here. macOS submits each frame to its
+//! native Metal renderer, while Windows and the developer HUD Lab feed the
+//! same uniforms into the CPU shader port. Platform modules retain ownership
+//! of their windows, frame clocks, and rendering APIs.
 
 use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
-use crate::desktop::indicator_shader::IndicatorUniforms;
-
 pub const WINDOW_WIDTH: f32 = 112.0;
 pub const WINDOW_HEIGHT: f32 = 64.0;
 const CAPSULE_WIDTH: f32 = 56.0;
-const CAPSULE_HEIGHT: f32 = 16.0;
+pub const CAPSULE_HEIGHT: f32 = 16.0;
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 pub const TOP_OFFSET: f64 = 12.0;
 const ENTRANCE_ANGULAR_FREQUENCY: f32 = 24.0;
 const EXIT_ANGULAR_FREQUENCY: f32 = 24.0;
@@ -35,6 +23,45 @@ const HIDDEN_SOFTNESS: f32 = 4.0;
 const PROCESSING_MORPH_DURATION: Duration = Duration::from_millis(250);
 const RECORDING_FLASH_HALF_LIFE: Duration = Duration::from_millis(280);
 
+/// Shader inputs assembled by [`IndicatorModel`]. The layout matches the
+/// Metal `Uniforms` struct exactly, including its trailing alignment slot, so
+/// macOS can submit this value without a platform-specific copy.
+#[repr(C, align(8))]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct IndicatorUniforms {
+    pub resolution: [f32; 2],
+    pub time: f32,
+    pub width: f32,
+    pub height: f32,
+    pub opacity: f32,
+    pub scale: f32,
+    pub softness: f32,
+    pub average: f32,
+    pub peak: f32,
+    pub processing: f32,
+    pub post_processing: f32,
+    pub capturing: f32,
+    pub editing: f32,
+    pub queued_count: f32,
+    pub line_style: f32,
+    pub line_count: f32,
+    pub line_curvature: f32,
+    pub line_speed: f32,
+    pub line_sharpness: f32,
+    pub line_glow: f32,
+    pub sphere_depth: f32,
+    pub light_angle: f32,
+    pub sphere_outline: f32,
+    pub completion: f32,
+    pub recording_flash: f32,
+    pub(crate) _padding: f32,
+}
+
+const _: () = assert!(std::mem::size_of::<IndicatorUniforms>() == 112);
+
+// Each shell emits the subset it implements today; the full vocabulary is
+// shared so adding parity does not require another event translation layer.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 #[derive(Clone, Copy, Debug)]
 pub enum DictationIndicatorEvent {
     Reset,
@@ -59,6 +86,7 @@ impl DictationIndicatorEvent {
     /// `DictationIndicatorSender::meter` on macOS: `average` is the RMS of
     /// the slice and `peak` the maximum absolute sample. Returns `None` for
     /// an empty slice (the macOS sender sends nothing in that case).
+    #[cfg_attr(target_os = "linux", allow(dead_code))]
     pub fn meter(samples: &[f32]) -> Option<Self> {
         if samples.is_empty() {
             return None;
@@ -163,11 +191,14 @@ fn recording_flash_for(phase: Phase, editing: bool, elapsed: Duration) -> f32 {
 /// shell should hide/close the HUD window.
 pub struct IndicatorFrame {
     pub uniforms: IndicatorUniforms,
+    // Linux currently embeds the model in HUD Lab rather than owning a
+    // floating product window, so it has no visibility consumer yet.
+    #[cfg_attr(target_os = "linux", allow(dead_code))]
     pub visible: bool,
 }
 
-/// The dictation-HUD state machine: everything the macOS `MetalRenderer`
-/// holds except the Metal plumbing (layer, command queue, pipeline).
+/// The platform-neutral dictation-HUD lifecycle and animation state. Native
+/// shells own only their window, frame clock, and renderer plumbing.
 pub struct IndicatorModel {
     phase: Phase,
     capturing: bool,
@@ -508,6 +539,7 @@ impl IndicatorModel {
                 0.0
             },
             recording_flash: recording_flash_for(self.phase, self.editing, elapsed),
+            _padding: 0.0,
         };
 
         IndicatorFrame {
@@ -629,5 +661,134 @@ mod tests {
         let frame = model.frame(model.last_frame + Duration::from_millis(16));
         assert!(!frame.visible);
         assert!(frame.uniforms.opacity <= f32::EPSILON);
+    }
+
+    #[test]
+    fn entrance_reaches_recording_state_in_about_250ms_without_overshoot() {
+        let simulate = |frame_rate: usize| {
+            let mut opacity = Spring::new(0.0);
+            let mut scale = Spring::new(HIDDEN_SCALE);
+            let mut softness = Spring::new(HIDDEN_SOFTNESS);
+            for _ in 0..frame_rate / 4 {
+                let dt = 1.0 / frame_rate as f32;
+                opacity.step_critical(1.0, dt, ENTRANCE_ANGULAR_FREQUENCY);
+                scale.step_critical(1.0, dt, ENTRANCE_ANGULAR_FREQUENCY);
+                softness.step_critical(0.0, dt, ENTRANCE_ANGULAR_FREQUENCY);
+                assert!((0.0..=1.0).contains(&opacity.value));
+                assert!((HIDDEN_SCALE..=1.0).contains(&scale.value));
+                assert!((0.0..=HIDDEN_SOFTNESS).contains(&softness.value));
+            }
+            (opacity.value, scale.value, softness.value)
+        };
+
+        let at_60_hz = simulate(60);
+        let at_120_hz = simulate(120);
+        assert!((at_60_hz.0 - at_120_hz.0).abs() < 0.000_01);
+        assert!((at_60_hz.1 - at_120_hz.1).abs() < 0.000_01);
+        assert!((at_60_hz.2 - at_120_hz.2).abs() < 0.000_01);
+        assert!(at_60_hz.0 >= 0.98);
+        assert!(at_60_hz.1 >= 0.996);
+        assert!(at_60_hz.2 <= 0.08);
+    }
+
+    #[test]
+    fn lifecycle_exit_is_monotonic_and_visually_gone_in_about_250ms() {
+        let mut opacity = Spring::new(1.0);
+        let mut scale = Spring::new(1.0);
+        let mut softness = Spring::new(0.0);
+        let mut previous = (opacity.value, scale.value, softness.value);
+
+        for _ in 0..15 {
+            opacity.step_critical(0.0, 1.0 / 60.0, EXIT_ANGULAR_FREQUENCY);
+            scale.step_critical(HIDDEN_SCALE, 1.0 / 60.0, EXIT_ANGULAR_FREQUENCY);
+            softness.step_critical(HIDDEN_SOFTNESS, 1.0 / 60.0, EXIT_ANGULAR_FREQUENCY);
+            assert!((0.0..=previous.0).contains(&opacity.value));
+            assert!((HIDDEN_SCALE..=previous.1).contains(&scale.value));
+            assert!((previous.2..=HIDDEN_SOFTNESS).contains(&softness.value));
+            previous = (opacity.value, scale.value, softness.value);
+        }
+
+        assert!(opacity.value < 0.02);
+        assert!((scale.value - HIDDEN_SCALE).abs() < 0.004);
+        assert!((softness.value - HIDDEN_SOFTNESS).abs() < 0.08);
+    }
+
+    #[test]
+    fn completion_has_a_visible_bloom_before_exit() {
+        assert_eq!(
+            Phase::Completed.visible_duration(),
+            Some(Duration::from_millis(240))
+        );
+    }
+
+    #[test]
+    fn recording_flash_starts_bright_and_settles_without_a_second_pulse() {
+        let samples =
+            [0, 70, 280, 560, 1_120].map(|millis| recording_flash(Duration::from_millis(millis)));
+
+        assert_eq!(samples[0], 1.0);
+        assert!(samples.windows(2).all(|pair| pair[0] > pair[1]));
+        assert!((samples[2] - 0.5).abs() < 0.000_1);
+        assert!((samples[3] - 0.25).abs() < 0.000_1);
+        assert!(samples[4] < 0.07);
+    }
+
+    #[test]
+    fn voice_action_starts_green_without_the_dictation_flash() {
+        assert_eq!(
+            recording_flash_for(Phase::Recording, true, Duration::ZERO),
+            0.0
+        );
+        assert_eq!(
+            recording_flash_for(Phase::Recording, false, Duration::ZERO),
+            1.0
+        );
+    }
+
+    #[test]
+    fn rust_uniform_layout_matches_metal() {
+        assert_eq!(std::mem::size_of::<IndicatorUniforms>(), 112);
+        assert_eq!(std::mem::align_of::<IndicatorUniforms>(), 8);
+        assert_eq!(std::mem::offset_of!(IndicatorUniforms, sphere_outline), 92);
+        assert_eq!(
+            std::mem::offset_of!(IndicatorUniforms, recording_flash),
+            100
+        );
+        assert_eq!(std::mem::offset_of!(IndicatorUniforms, _padding), 104);
+    }
+
+    #[test]
+    fn pending_completion_cannot_replace_a_new_recording_phase() {
+        assert_eq!(active_phase(true, 0), Some(Phase::Recording));
+        assert_eq!(active_phase(true, 2), Some(Phase::Recording));
+        assert_eq!(active_phase(false, 2), Some(Phase::Transcribing));
+        assert_eq!(active_phase(false, 0), None);
+    }
+
+    #[test]
+    fn processing_morph_duration_matches_geometry_spring() {
+        let mut width = Spring::new(CAPSULE_WIDTH);
+        for _ in 0..15 {
+            width.step_critical(CAPSULE_HEIGHT, 1.0 / 60.0, GEOMETRY_ANGULAR_FREQUENCY);
+        }
+        assert!(width.value < CAPSULE_HEIGHT + 0.7);
+        assert_eq!(PROCESSING_MORPH_DURATION, Duration::from_millis(250));
+    }
+
+    #[test]
+    fn processing_morph_only_contracts_the_capsule() {
+        let mut width = Spring::new(CAPSULE_WIDTH);
+        let mut height = Spring::new(CAPSULE_HEIGHT);
+        let mut previous_width = width.value;
+
+        for _ in 0..15 {
+            width.step_critical(CAPSULE_HEIGHT, 1.0 / 60.0, GEOMETRY_ANGULAR_FREQUENCY);
+            height.step_critical(CAPSULE_HEIGHT, 1.0 / 60.0, GEOMETRY_ANGULAR_FREQUENCY);
+            assert!((CAPSULE_HEIGHT..=previous_width).contains(&width.value));
+            assert_eq!(height.value, CAPSULE_HEIGHT);
+            previous_width = width.value;
+        }
+
+        assert!(width.value < CAPSULE_HEIGHT + 0.7);
     }
 }
