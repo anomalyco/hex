@@ -35,6 +35,10 @@ use crate::desktop_host::{
     DesktopMicrophoneSnapshot, DesktopShortcut, DesktopSnapshot, DesktopTranscriptionSnapshot,
     DesktopUpdateStatus,
 };
+use crate::desktop_mode_basics::{
+    ModeApplicationEditorView, ModeBasicsAction, ModeBasicsDelegate, ModeBasicsView,
+    render_mode_basics as render_shared_mode_basics,
+};
 use crate::desktop_mode_list::{
     ModeActivation, ModeListAction, ModeListDelegate, ModeListEntry, ModeListView, ModeTarget,
     render_mode_list as render_shared_mode_list,
@@ -46,10 +50,10 @@ use crate::desktop_replacement_editor::{
 use crate::desktop_shell::{DesktopPane, render_navigation_items};
 use crate::desktop_transcription_picker::TranscriptionPickerDelegate;
 use crate::desktop_ui::{
-    DIVIDER, FAINT, LINE, MUTED, PANE_LIST_WIDTH, SECTION_GAP, SIDEBAR_WIDTH, TEXT, TEXT_ON_ACCENT,
-    TEXT_SOFT, accent_color, compact_button, compact_panel, compact_section_label,
-    disclosure_button, dropdown_backdrop, dropdown_item, dropdown_panel, dropdown_panel_with_width,
-    error_message, header_button, hotkey_keycaps, pane_body, pane_content, pane_header_with_action,
+    FAINT, LINE, MUTED, PANE_LIST_WIDTH, SECTION_GAP, SIDEBAR_WIDTH, TEXT, TEXT_ON_ACCENT,
+    TEXT_SOFT, accent_color, compact_button, compact_section_label, disclosure_button,
+    dropdown_backdrop, dropdown_item, dropdown_panel, dropdown_panel_with_width, error_message,
+    header_button, hotkey_keycaps, pane_body, pane_content, pane_header_with_action,
     segmented_control, segmented_item, settings_panel, settings_row, settings_section_label,
     sidebar_frame, toggle, window_frame,
 };
@@ -2956,6 +2960,13 @@ impl WindowsApp {
             .overflow_y_scroll()
             .child(match self.selected_mode {
                 ModeTarget::Global => {
+                    let basics = render_shared_mode_basics(
+                        ModeBasicsView::Global {
+                            title: "Global",
+                            description: "Used unless a more specific mode matches.",
+                        },
+                        cx,
+                    );
                     let replacements = render_shared_replacement_editor(
                         ReplacementEditorView {
                             target: ModeTarget::Global,
@@ -2973,19 +2984,7 @@ impl WindowsApp {
                         .flex_col()
                         .gap(px(SECTION_GAP))
                         .pb_5()
-                        .child(compact_panel().child(
-                            div()
-                                .min_h(px(64.0))
-                                .px_3()
-                                .py_2()
-                                .flex()
-                                .flex_col()
-                                .justify_center()
-                                .child(crate::desktop_ui::settings_copy(
-                                    "Global",
-                                    "Used unless a more specific mode matches.",
-                                )),
-                        ))
+                        .child(basics)
                         .child(div().h(px(4.0)))
                         .child(compact_section_label(tr("TEXT PROCESSING")))
                         .child(replacements)
@@ -2996,6 +2995,24 @@ impl WindowsApp {
                     let name = inputs.name.clone();
                     let applications = inputs.applications.clone();
                     let websites = inputs.websites.clone();
+                    let basics = render_shared_mode_basics(
+                        ModeBasicsView::Custom {
+                            target: ModeTarget::Mode(mode_index),
+                            name,
+                            applications: Box::new(ModeApplicationEditorView::Freeform {
+                                title: "Applications",
+                                description:
+                                    "Applies when the focused application contains any of these names",
+                                input: applications,
+                            }),
+                            websites,
+                            websites_title: "Web pages",
+                            websites_description:
+                                "Or when the browser is on one of these sites; sites win over applications",
+                            remove_mode: true,
+                        },
+                        cx,
+                    );
                     let corrections = render_shared_replacement_editor(
                         ReplacementEditorView {
                             target: ModeTarget::Mode(mode_index),
@@ -3005,51 +3022,6 @@ impl WindowsApp {
                         },
                         cx,
                     );
-                    let basics = compact_panel()
-                        .child(
-                            div()
-                                .w_full()
-                                .p_3()
-                                .flex()
-                                .items_center()
-                                .gap_3()
-                                .border_b_1()
-                                .border_color(rgb(DIVIDER))
-                                .child(div().flex_1().min_w(px(0.0)).child(name))
-                                .child(
-                                    compact_button(tr("Remove mode"))
-                                        .id(("windows-remove-mode", mode_index))
-                                        .on_click(cx.listener(move |this, _, _, cx| {
-                                            this.remove_mode(mode_index, cx);
-                                        })),
-                                ),
-                        )
-                        .child(
-                            div()
-                                .w_full()
-                                .p_3()
-                                .flex()
-                                .flex_col()
-                                .gap_2()
-                                .child(
-                                    div()
-                                        .text_size(px(11.0))
-                                        .text_color(rgb(FAINT))
-                                        .child(tr(
-                                            "Applies when the focused application contains any of these names",
-                                        )),
-                                )
-                                .child(applications)
-                                .child(
-                                    div()
-                                        .text_size(px(11.0))
-                                        .text_color(rgb(FAINT))
-                                        .child(tr(
-                                            "Or when the browser is on one of these sites; sites win over applications",
-                                        )),
-                                )
-                                .child(websites),
-                        );
                     div()
                         .w_full()
                         .max_w(px(700.0))
@@ -3755,6 +3727,19 @@ impl crate::desktop_hud_lab::HudLabDelegate for WindowsApp {
             .send(crate::windows_indicator::WindowsIndicatorEvent::Configure(
                 tuning,
             ));
+    }
+}
+
+impl ModeBasicsDelegate for WindowsApp {
+    fn handle_mode_basics_action(
+        &mut self,
+        action: ModeBasicsAction,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let ModeBasicsAction::RemoveMode(ModeTarget::Mode(index)) = action {
+            self.remove_mode(index, cx);
+        }
     }
 }
 

@@ -35,7 +35,7 @@ below.
 | Surface | macOS | Linux X11 | Windows |
 | --- | --- | --- | --- |
 | Dictation loop | Product implementation; physical timestamp regression recheck remains | Beta implementation; Arch/i3 smoke test remains | Alpha implementation; Windows 10/11 smoke matrix remains |
-| Desktop presentation | Full root still owns macOS composition; History, mode selection, and replacement editing are shared | Shared primitives and panes, but a separate Linux root remains | Shared primitives plus History and the shared Modes list/detail shell, but a separate Windows root remains |
+| Desktop presentation | Full root still owns macOS composition; History and the Modes collection/basics/replacement UI are shared | Shared primitives and panes, but a separate Linux root remains | Shared primitives plus History and the shared Modes collection/basics/replacement UI, but a separate Windows root remains |
 | Commands | Persisted release opt-in | Bounded developer-only prototype; no packaged/context-complete release contract | Unavailable until a real streaming command model exists |
 | Modes and replacements | Full ordered pipeline on the shared processing policy | Not implemented | Corrections, replacements, and web-domain selection use the shared policy; OpenCode settings and TypeScript transformation hosting remain |
 | Voice Action | Implemented | Not implemented | Implemented with clipboard-backed selected-text capture |
@@ -80,8 +80,11 @@ native macOS tests plus authoritative release previews pass.
 - [x] Extract mode identity, selection actions, activation-badge presentation,
   and the fixed list renderer; macOS and Windows consume the same collection UI
   while their matching semantics and settings remain native.
-- [ ] Extract the rest of Modes around the shared processing policy: matching-
-  rule editing, OpenCode configuration, and ordered transformation editing.
+- [x] Extract the mode name/application/site card with explicit catalog-backed
+  and free-form application-rule variants; matching and persistence remain in
+  the native roots while the complete basics renderer is shared.
+- [ ] Extract the rest of Modes around the shared processing policy: OpenCode
+  configuration and ordered transformation editing.
 - [ ] Extract Voice Action, Commands, and onboarding once; each platform should
   consume those pane modules only when its real capability exists.
 - [ ] Keep native lifecycle outside the shared root: AppKit/Dock/Sparkle on

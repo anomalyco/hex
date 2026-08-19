@@ -47,10 +47,10 @@ systems behind a nominally shared shell.
 
 Settings and Activity established the shared vocabulary. History now has one
 behavior-complete pane. Modes now shares its collection identity, selection,
-activation badges, list renderer, and replacement/correction editor. The rest
-of Modes, Voice Action, Commands, and Meetings can use the same shell, but each
-pane appears on a platform only when its underlying behavior is implemented
-there.
+activation badges, list renderer, basic matching card, and replacement/
+correction editor. The rest of Modes, Voice Action, Commands, and Meetings can
+use the same shell, but each pane appears on a platform only when its underlying
+behavior is implemented there.
 
 ## Desktop Hosts Own Consequential Behavior
 
@@ -208,8 +208,11 @@ selection contract, activation badges, and fixed mode list used by macOS and
 Windows. Windows now follows the same list/detail composition instead of
 rendering every mode as a separate card; application substring matching and
 browser-host normalization remain in its native settings/runtime modules.
-Periodic refresh and the remaining render state still need to move into one
-root entity.
+`src/desktop/mode_basics.rs` owns the shared global fallback and custom
+name/application/site card. Its catalog-backed and free-form application-rule
+variants represent the two real behaviors explicitly, so macOS retains its
+installed-app picker while Windows retains process-substring inputs. Periodic
+refresh and the remaining render state still need to move into one root entity.
 
 - Move `AppWindow` and its portable dependencies out of macOS-only module gates.
 - Have the macOS lifecycle coordinator and Linux tray host construct their

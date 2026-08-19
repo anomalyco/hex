@@ -13,7 +13,7 @@ use gpui::{
     KeyDownEvent, Modifiers as GpuiModifiers, ModifiersChangedEvent, MouseButton, MouseDownEvent,
     MouseMoveEvent, PathPromptOptions, Pixels, Point, Render, ScrollHandle, SharedString,
     Subscription, Timer, TitlebarOptions, Window, WindowBounds, WindowHandle, WindowOptions,
-    actions, div, img, prelude::*, px, relative, rgb, rgba, size,
+    actions, div, prelude::*, px, relative, rgb, rgba, size,
 };
 
 use crate::app_settings::{
@@ -31,6 +31,11 @@ use crate::desktop_host::{
     DesktopAction, DesktopCapabilities, DesktopHost, DesktopMicrophoneSnapshot, DesktopSnapshot,
     DesktopTranscriptionSnapshot, DesktopUpdateStatus,
 };
+use crate::desktop_mode_basics::{
+    CatalogApplicationEditorView, CatalogApplicationView, ModeApplicationEditorView,
+    ModeBasicsAction, ModeBasicsDelegate, ModeBasicsView,
+    render_mode_basics as render_shared_mode_basics,
+};
 use crate::desktop_mode_list::{
     ModeActivation, ModeListAction, ModeListDelegate, ModeListEntry, ModeListView, ModeTarget,
     render_mode_list as render_shared_mode_list,
@@ -47,14 +52,14 @@ use crate::desktop_transcription_picker::{
     transcription_selection_is_active,
 };
 use crate::desktop_ui::{
-    CANVAS, COMPACT_MULTILINE_INPUT_HEIGHT, CONTROL_HEIGHT, FAINT, LINE, MUTED, NEGATIVE,
-    PANE_CONTENT_WIDTH, PANE_LIST_WIDTH, SECTION_GAP, SIDEBAR_WIDTH, SURFACE, SURFACE_HOVER,
-    SURFACE_SELECTED, TEXT, TEXT_INPUT_HEIGHT, TEXT_SOFT, compact_button,
-    compact_header_plus_button, compact_panel, compact_panel_header, compact_plus_button,
-    compact_section_label, disclosure_button, empty_message, error_message, header_button,
-    hotkey_keycaps, listener_status, mix_color, pane_body, pane_content, pane_header,
-    pane_header_with_action, section_label, segmented_control, segmented_item, settings_copy,
-    settings_panel, settings_row, settings_section_label, sidebar_frame, toggle, window_frame,
+    CANVAS, COMPACT_MULTILINE_INPUT_HEIGHT, FAINT, LINE, MUTED, NEGATIVE, PANE_CONTENT_WIDTH,
+    PANE_LIST_WIDTH, SECTION_GAP, SIDEBAR_WIDTH, SURFACE, SURFACE_HOVER, SURFACE_SELECTED, TEXT,
+    TEXT_INPUT_HEIGHT, TEXT_SOFT, compact_button, compact_header_plus_button, compact_panel,
+    compact_panel_header, compact_section_label, disclosure_button, empty_message, error_message,
+    header_button, hotkey_keycaps, listener_status, mix_color, pane_body, pane_content,
+    pane_header, pane_header_with_action, section_label, segmented_control, segmented_item,
+    settings_copy, settings_panel, settings_row, settings_section_label, sidebar_frame, toggle,
+    window_frame,
 };
 use crate::dictation_indicator::{DictationIndicatorEvent, DictationIndicatorSender, HudTuning};
 use crate::dictation_processor::{ModelCatalog, ModelChoice};
@@ -3726,71 +3731,34 @@ impl AppWindow {
         });
         let corrections = self.render_mode_replacements(selection, cx);
         let transformations = self.render_mode_transformations(selection, cx);
-        let application_picker =
-            (!is_default).then(|| self.render_application_picker(selection, cx));
         let basics = if is_default {
-            compact_panel()
-                .child(
-                    div()
-                        .min_h(px(64.0))
-                        .px_3()
-                        .py_2()
-                        .flex()
-                        .flex_col()
-                        .justify_center()
-                        .child(settings_copy(
-                            "Global",
-                            "Used unless a more specific mode matches.",
-                        )),
-                )
-                .into_any_element()
+            render_shared_mode_basics(
+                ModeBasicsView::Global {
+                    title: "Global",
+                    description: "Used unless a more specific mode matches.",
+                },
+                cx,
+            )
         } else {
-            compact_panel()
-                .child(
-                    div()
-                        .min_h(px(54.0))
-                        .px_3()
-                        .py_2()
-                        .flex()
-                        .items_center()
-                        .justify_between()
-                        .gap_4()
-                        .border_b_1()
-                        .border_color(rgb(LINE))
-                        .child(
-                            div()
-                                .text_size(px(12.0))
-                                .font_weight(FontWeight::SEMIBOLD)
-                                .text_color(rgb(TEXT))
-                                .child("Name"),
-                        )
-                        .child(div().max_w(px(300.0)).min_w(px(0.0)).flex_1().child(name)),
-                )
-                .when_some(application_picker, |panel, picker| {
-                    panel.child(div().border_b_1().border_color(rgb(LINE)).child(picker))
-                })
-                .child(
-                    div()
-                        .min_h(px(64.0))
-                        .px_3()
-                        .py_2()
-                        .flex()
-                        .items_center()
-                        .justify_between()
-                        .gap_4()
-                        .child(settings_copy(
-                            "Web pages",
-                            "Switch when a domain is active in Brave",
-                        ))
-                        .child(
-                            div()
-                                .max_w(px(300.0))
-                                .min_w(px(0.0))
-                                .flex_1()
-                                .child(browser_hosts),
-                        ),
-                )
-                .into_any_element()
+            let target = match selection {
+                ModeSelection::Default => unreachable!(),
+                ModeSelection::Custom(index) => ModeTarget::Mode(index),
+            };
+            let applications = Box::new(ModeApplicationEditorView::Catalog(
+                self.catalog_application_editor_view(selection, cx),
+            ));
+            render_shared_mode_basics(
+                ModeBasicsView::Custom {
+                    target,
+                    name,
+                    applications,
+                    websites: browser_hosts,
+                    websites_title: "Web pages",
+                    websites_description: "Switch when a domain is active in Brave",
+                    remove_mode: false,
+                },
+                cx,
+            )
         };
 
         let processing_toggle = div()
@@ -4182,51 +4150,27 @@ impl AppWindow {
             .into_any_element()
     }
 
-    fn render_application_picker(
+    fn catalog_application_editor_view(
         &self,
         selection: ModeSelection,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let selected = self.mode_settings(selection).applications.clone();
-        let selected_rows = selected.iter().enumerate().map(|(index, name)| {
+        cx: &App,
+    ) -> CatalogApplicationEditorView {
+        let application_view = |name: &str| {
             let application = self.application_named(name);
-            let name = name.clone();
-            div()
-                .id(("selected-application", index))
-                .h(px(30.0))
-                .pl_1()
-                .pr_1()
-                .flex()
-                .items_center()
-                .gap_1()
-                .rounded_sm()
-                .bg(rgb(SURFACE_SELECTED))
-                .border_1()
-                .border_color(rgb(LINE))
-                .child(application_icon(application, Some(name.as_str()), 20.0))
-                .child(
-                    div()
-                        .text_size(px(10.0))
-                        .text_color(rgb(TEXT_SOFT))
-                        .child(name.clone()),
-                )
-                .child(
-                    div()
-                        .id(("remove-selected-application", index))
-                        .size(px(18.0))
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .rounded_sm()
-                        .text_size(px(14.0))
-                        .text_color(rgb(FAINT))
-                        .hover(|button| button.bg(rgb(SURFACE_HOVER)).text_color(rgb(TEXT_SOFT)))
-                        .child("×")
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.remove_mode_application(selection, &name, cx);
-                        })),
-                )
-        });
+            CatalogApplicationView {
+                name: name.to_owned(),
+                location: application
+                    .and_then(|application| application.path.parent())
+                    .map_or_else(String::new, |path| path.display().to_string()),
+                icon: application.and_then(|application| application.icon.clone()),
+            }
+        };
+        let selected = self
+            .mode_settings(selection)
+            .applications
+            .iter()
+            .map(|name| application_view(name))
+            .collect();
         let query = self
             .application_search
             .entity
@@ -4236,66 +4180,21 @@ impl AppWindow {
             .to_lowercase();
         let available = if self.application_picker_open {
             self.application_choices(selection, cx)
+                .into_iter()
+                .map(|application| CatalogApplicationView {
+                    name: application.name.clone(),
+                    location: application
+                        .path
+                        .parent()
+                        .map_or_else(String::new, |path| path.display().to_string()),
+                    icon: application.icon.clone(),
+                })
+                .collect::<Vec<_>>()
         } else {
             Vec::new()
         };
         let no_matches = available.is_empty();
-        let available_rows =
-            available
-                .into_iter()
-                .cloned()
-                .enumerate()
-                .map(|(index, application)| {
-                    let name = application.name.clone();
-                    let location = application
-                        .path
-                        .parent()
-                        .map_or_else(String::new, |path| path.display().to_string());
-                    div()
-                        .id(("available-application", index))
-                        .w_full()
-                        .px_2()
-                        .py_2()
-                        .flex()
-                        .items_center()
-                        .gap_3()
-                        .border_b_1()
-                        .border_color(rgb(LINE))
-                        .when(index == self.application_picker_highlight, |row| {
-                            row.bg(rgb(SURFACE_SELECTED))
-                        })
-                        .hover(|row| row.bg(rgb(SURFACE_HOVER)))
-                        .child(application_icon(Some(&application), Some(&name), 30.0))
-                        .child(
-                            div()
-                                .flex_1()
-                                .min_w(px(0.0))
-                                .flex()
-                                .flex_col()
-                                .gap_1()
-                                .child(
-                                    div()
-                                        .text_size(px(12.0))
-                                        .font_weight(FontWeight::SEMIBOLD)
-                                        .text_color(rgb(TEXT_SOFT))
-                                        .child(name.clone()),
-                                )
-                                .child(
-                                    div()
-                                        .text_size(px(10.0))
-                                        .text_color(rgb(FAINT))
-                                        .overflow_hidden()
-                                        .child(location),
-                                ),
-                        )
-                        .on_mouse_down(
-                            MouseButton::Left,
-                            cx.listener(move |this, _, _, cx| {
-                                this.add_mode_application(selection, name.clone(), cx);
-                            }),
-                        )
-                });
-        let picker_status = match &self.application_catalog {
+        let status = match &self.application_catalog {
             ApplicationCatalogState::Loading => Some("Finding applications on this Mac...".into()),
             ApplicationCatalogState::Loaded(applications) if applications.is_empty() => {
                 Some("No applications found.".into())
@@ -4305,143 +4204,17 @@ impl AppWindow {
             }
             _ => None,
         };
-        let tray = self.application_picker_open.then(|| {
-            div()
-                .mt_2()
-                .p_2()
-                .rounded_sm()
-                .border_1()
-                .border_color(rgb(LINE))
-                .bg(rgb(SURFACE))
-                .child(self.application_search.entity.clone())
-                .when_some(picker_status, |tray, status| {
-                    tray.child(
-                        div()
-                            .px_2()
-                            .py_3()
-                            .text_size(px(11.0))
-                            .text_color(rgb(MUTED))
-                            .child(status),
-                    )
-                })
-                .child(
-                    div()
-                        .id("application-picker-results")
-                        .max_h(px(300.0))
-                        .overflow_y_scroll()
-                        .children(available_rows),
-                )
-                .child(
-                    div()
-                        .pt_2()
-                        .flex()
-                        .items_center()
-                        .justify_between()
-                        .child(
-                            div()
-                                .id("choose-application-bundle")
-                                .h(px(28.0))
-                                .px_2()
-                                .flex()
-                                .items_center()
-                                .rounded_sm()
-                                .text_size(px(11.0))
-                                .text_color(rgb(TEXT_SOFT))
-                                .hover(|button| button.bg(rgb(SURFACE_HOVER)))
-                                .child("Choose from Finder...")
-                                .on_click(cx.listener(move |this, _, _, cx| {
-                                    this.choose_application(selection, cx);
-                                })),
-                        )
-                        .child(
-                            div()
-                                .id("close-application-picker")
-                                .h(px(28.0))
-                                .px_2()
-                                .flex()
-                                .items_center()
-                                .rounded_sm()
-                                .text_size(px(11.0))
-                                .text_color(rgb(MUTED))
-                                .hover(|button| button.bg(rgb(SURFACE_HOVER)))
-                                .child("Done")
-                                .on_click(cx.listener(|this, _, window, cx| {
-                                    this.application_picker_open = false;
-                                    this.application_picker_highlight = 0;
-                                    this.application_search
-                                        .entity
-                                        .update(cx, |input, cx| input.set_text("", cx));
-                                    window.blur();
-                                    cx.notify();
-                                })),
-                        ),
-                )
-        });
-        div()
-            .flex()
-            .flex_col()
-            .child(
-                div()
-                    .min_h(px(64.0))
-                    .px_3()
-                    .py_2()
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .gap_4()
-                    .child(settings_copy(
-                        "Applications",
-                        "Switch when an app is frontmost",
-                    ))
-                    .child(
-                        div()
-                            .max_w(px(300.0))
-                            .min_w(px(0.0))
-                            .min_h(px(CONTROL_HEIGHT))
-                            .flex_1()
-                            .p_1()
-                            .flex()
-                            .flex_wrap()
-                            .items_center()
-                            .justify_end()
-                            .gap_1()
-                            .children(selected_rows)
-                            .child(
-                                compact_plus_button()
-                                    .id("open-application-picker")
-                                    .size(px(30.0))
-                                    .border_1()
-                                    .border_color(rgb(LINE))
-                                    .bg(rgb(CANVAS))
-                                    .on_click(cx.listener(|this, _, window, cx| {
-                                        this.application_picker_highlight = 0;
-                                        this.application_picker_open = true;
-                                        this.application_picker_error = None;
-                                        this.ensure_application_catalog_load();
-                                        this.application_search
-                                            .entity
-                                            .update(cx, |input, cx| input.set_text("", cx));
-                                        this.application_search
-                                            .entity
-                                            .focus_handle(cx)
-                                            .focus(window);
-                                        cx.notify();
-                                    })),
-                            ),
-                    ),
-            )
-            .when_some(self.application_picker_error.clone(), |picker, error| {
-                picker.child(
-                    div()
-                        .text_size(px(10.0))
-                        .text_color(rgb(NEGATIVE))
-                        .child(error),
-                )
-            })
-            .when_some(tray, |picker, tray| picker.child(tray))
-            .into_any_element()
+        CatalogApplicationEditorView {
+            selected,
+            available,
+            search: self.application_search.entity.clone(),
+            open: self.application_picker_open,
+            highlighted: self.application_picker_highlight,
+            status,
+            error: self.application_picker_error.clone(),
+            choose_label: "Choose from Finder...",
+        }
     }
-
     fn application_named(&self, name: &str) -> Option<&InstalledApplication> {
         let ApplicationCatalogState::Loaded(applications) = &self.application_catalog else {
             return None;
@@ -6492,6 +6265,69 @@ impl HistoryPaneDelegate for AppWindow {
     }
 }
 
+impl ModeBasicsDelegate for AppWindow {
+    fn handle_mode_basics_action(
+        &mut self,
+        action: ModeBasicsAction,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let target = match &action {
+            ModeBasicsAction::AddApplication { target, .. }
+            | ModeBasicsAction::RemoveApplication { target, .. }
+            | ModeBasicsAction::OpenApplicationPicker(target)
+            | ModeBasicsAction::CloseApplicationPicker(target)
+            | ModeBasicsAction::ChooseApplicationFile(target)
+            | ModeBasicsAction::RemoveMode(target) => *target,
+        };
+        let selection = match target {
+            ModeTarget::Mode(index) if index < self.processing_inputs.modes.len() => {
+                ModeSelection::Custom(index)
+            }
+            ModeTarget::Global | ModeTarget::Mode(_) => return,
+        };
+
+        match action {
+            ModeBasicsAction::AddApplication { name, .. } => {
+                self.add_mode_application(selection, name, cx);
+            }
+            ModeBasicsAction::RemoveApplication { name, .. } => {
+                self.remove_mode_application(selection, &name, cx);
+            }
+            ModeBasicsAction::OpenApplicationPicker(_) => {
+                self.application_picker_highlight = 0;
+                self.application_picker_open = true;
+                self.application_picker_error = None;
+                self.ensure_application_catalog_load();
+                self.application_search
+                    .entity
+                    .update(cx, |input, cx| input.set_text("", cx));
+                self.application_search
+                    .entity
+                    .focus_handle(cx)
+                    .focus(window);
+                cx.notify();
+            }
+            ModeBasicsAction::CloseApplicationPicker(_) => {
+                self.application_picker_open = false;
+                self.application_picker_highlight = 0;
+                self.application_search
+                    .entity
+                    .update(cx, |input, cx| input.set_text("", cx));
+                window.blur();
+                cx.notify();
+            }
+            ModeBasicsAction::ChooseApplicationFile(_) => {
+                self.choose_application(selection, cx);
+            }
+            ModeBasicsAction::RemoveMode(_) => {
+                self.mode_delete_armed = true;
+                cx.notify();
+            }
+        }
+    }
+}
+
 impl ModeListDelegate for AppWindow {
     fn handle_mode_list_action(
         &mut self,
@@ -7055,35 +6891,6 @@ fn advance_highlight(current: usize, direction: i32, count: usize) -> usize {
     } else {
         (current + 1).min(count - 1)
     }
-}
-
-fn application_icon(
-    application: Option<&InstalledApplication>,
-    fallback_name: Option<&str>,
-    size: f32,
-) -> AnyElement {
-    if let Some(icon) = application.and_then(|application| application.icon.as_ref()) {
-        return img(icon.clone())
-            .size(px(size))
-            .rounded(px(size * 0.22))
-            .into_any_element();
-    }
-    let initial = fallback_name
-        .and_then(|name| name.chars().find(|character| character.is_alphanumeric()))
-        .map(|character| character.to_uppercase().to_string())
-        .unwrap_or_else(|| "?".into());
-    div()
-        .size(px(size))
-        .flex()
-        .items_center()
-        .justify_center()
-        .rounded(px(size * 0.22))
-        .bg(rgb(0x343434))
-        .text_size(px(size * 0.42))
-        .font_weight(FontWeight::SEMIBOLD)
-        .text_color(rgb(TEXT_SOFT))
-        .child(initial)
-        .into_any_element()
 }
 
 fn filtered_model_keys(catalog: &ModelCatalog, query: &str) -> Vec<Option<String>> {

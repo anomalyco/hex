@@ -16,6 +16,8 @@ pub mod indicator_model;
 #[cfg(any(target_os = "linux", target_os = "windows"))]
 pub mod indicator_shader;
 #[cfg(any(target_os = "macos", target_os = "windows"))]
+pub mod mode_basics;
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 pub mod mode_list;
 #[cfg(any(target_os = "linux", target_os = "windows"))]
 pub mod model_catalog;

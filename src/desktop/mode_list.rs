@@ -213,11 +213,8 @@ fn mode_activation_icons(activations: &[ModeActivation]) -> AnyElement {
 }
 
 fn mode_activation_icon(activation: &ModeActivation) -> AnyElement {
-    if let Some(icon) = &activation.icon {
-        return img(icon.clone())
-            .size(px(18.0))
-            .rounded(px(4.0))
-            .into_any_element();
+    if activation.kind == ModeActivationKind::Application {
+        return render_application_icon(activation.icon.clone(), &activation.label, 18.0);
     }
     let initial = activation
         .label
@@ -225,7 +222,6 @@ fn mode_activation_icon(activation: &ModeActivation) -> AnyElement {
         .find(|character| character.is_alphanumeric())
         .map(|character| character.to_uppercase().to_string())
         .unwrap_or_else(|| "?".into());
-    let website = activation.kind == ModeActivationKind::Website;
     div()
         .size(px(18.0))
         .flex_none()
@@ -233,17 +229,43 @@ fn mode_activation_icon(activation: &ModeActivation) -> AnyElement {
         .items_center()
         .justify_center()
         .rounded(px(4.0))
-        .when(website, |icon| {
-            icon.border_1()
-                .border_color(rgb(0x444444))
-                .bg(rgb(0xeeeeee))
-                .text_color(rgb(0x202020))
-        })
-        .when(!website, |icon| {
-            icon.bg(rgb(0x343434)).text_color(rgb(TEXT_SOFT))
-        })
+        .border_1()
+        .border_color(rgb(0x444444))
+        .bg(rgb(0xeeeeee))
+        .text_color(rgb(0x202020))
         .text_size(px(8.0))
         .font_weight(FontWeight::SEMIBOLD)
+        .child(initial)
+        .into_any_element()
+}
+
+pub(crate) fn render_application_icon(
+    icon: Option<Arc<Image>>,
+    fallback_name: &str,
+    size: f32,
+) -> AnyElement {
+    if let Some(icon) = icon {
+        return img(icon)
+            .size(px(size))
+            .rounded(px(size * 0.22))
+            .into_any_element();
+    }
+    let initial = fallback_name
+        .chars()
+        .find(|character| character.is_alphanumeric())
+        .map(|character| character.to_uppercase().to_string())
+        .unwrap_or_else(|| "?".into());
+    div()
+        .size(px(size))
+        .flex_none()
+        .flex()
+        .items_center()
+        .justify_center()
+        .rounded(px(size * 0.22))
+        .bg(rgb(0x343434))
+        .text_size(px(size * 0.42))
+        .font_weight(FontWeight::SEMIBOLD)
+        .text_color(rgb(TEXT_SOFT))
         .child(initial)
         .into_any_element()
 }
