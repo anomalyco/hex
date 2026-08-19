@@ -48,6 +48,11 @@ use crate::desktop_mode_processing::{
     ModeProcessingAction, ModeProcessingDelegate, ModeProcessingUnavailableView,
     ModeProcessingView, render_mode_processing as render_shared_mode_processing,
 };
+use crate::desktop_mode_transformations::{
+    ModeTransformationsAction, ModeTransformationsDelegate, ModeTransformationsView,
+    ModeTransformationsWorkspaceAction, TransformationCatalogEntry, TransformationWorkspaceView,
+    render_mode_transformations as render_shared_mode_transformations, reorder_transformation,
+};
 use crate::desktop_replacement_editor::{
     ReplacementEditorAction, ReplacementEditorDelegate, ReplacementEditorInput,
     ReplacementEditorView, render_replacement_editor as render_shared_replacement_editor,
@@ -81,6 +86,7 @@ const MINIMUM_HEIGHT: f32 = 560.0;
 
 type ListenerResult = std::result::Result<(), String>;
 type PreparationResult = std::result::Result<PreparedTranscription, String>;
+type PersonalCommandsSetupResult = std::result::Result<PathBuf, String>;
 
 struct PreparedTranscription {
     selection: crate::transcription_models::TranscriptionSelection,
@@ -120,6 +126,11 @@ struct WindowsDesktopHost {
     indicator: crate::windows_indicator::WindowsIndicatorSender,
     replacements: Arc<RwLock<crate::text_replacements::ReplacementSet>>,
     mode_runtime: Arc<RwLock<crate::windows_dictation::WindowsModeRuntime>>,
+    transformations: Arc<crate::personal_commands::TransformationClient>,
+    personal_commands: Option<crate::personal_commands::PersonalCommands>,
+    personal_commands_status: crate::personal_commands::StatusSnapshot,
+    personal_commands_setup: Option<Receiver<PersonalCommandsSetupResult>>,
+    personal_commands_setup_error: Option<String>,
     voice_action_model: Arc<RwLock<Option<crate::opencode::Model>>>,
     opencode_catalog: Option<crate::opencode::ModelCatalog>,
     opencode_catalog_rx: Option<std::sync::mpsc::Receiver<Result<crate::opencode::ModelCatalog>>>,
@@ -144,6 +155,7 @@ struct WindowsApp {
     selected_mode: ModeTarget,
     opencode_model_dropdown: Option<OpenCodeModelTarget>,
     opencode_model_dropdown_bounds: Option<Bounds<Pixels>>,
+    transformation_picker_open: bool,
     recognition_hints_input: Entity<TextInput>,
     _recognition_hints_subscription: Subscription,
     history_search_input: Entity<TextInput>,
@@ -361,6 +373,7 @@ pub fn open(event_path: PathBuf, shutdown: &'static AtomicBool, start_hidden: bo
                             selected_mode: ModeTarget::Global,
                             opencode_model_dropdown: None,
                             opencode_model_dropdown_bounds: None,
+                            transformation_picker_open: false,
                             model_catalog_language_filter: None,
                             model_catalog_language_dropdown_open: false,
                             model_catalog_language_dropdown_bounds: None,
@@ -739,6 +752,29 @@ impl WindowsDesktopHost {
         let mode_runtime = Arc::new(RwLock::new(
             crate::windows_dictation::WindowsModeRuntime::from_settings(&settings),
         ));
+        let transformations = Arc::new(crate::personal_commands::TransformationClient::default());
+        let personal_commands_configured = crate::personal_commands::workspace_configured();
+        let personal_commands = (settings.transformations_enabled()
+            || personal_commands_configured)
+            .then(|| {
+                crate::personal_commands::PersonalCommands::start(
+                    crate::commands_engine::CommandConfig::new(),
+                    transformations.clone(),
+                )
+            })
+            .flatten();
+        let mut personal_commands_status = if personal_commands_configured {
+            crate::personal_commands::load_status().unwrap_or_else(|error| {
+                crate::personal_commands::StatusSnapshot {
+                    host_state: crate::personal_commands::HostState::Unavailable,
+                    last_reload_error: Some(format!("{error:#}")),
+                    ..crate::personal_commands::StatusSnapshot::default()
+                }
+            })
+        } else {
+            crate::personal_commands::StatusSnapshot::default()
+        };
+        crate::personal_commands::include_builtin_transformations(&mut personal_commands_status);
         let voice_action_model = Arc::new(RwLock::new(settings.voice_action_model.clone()));
         let mut host = Self {
             event_path,
@@ -764,6 +800,11 @@ impl WindowsDesktopHost {
             indicator,
             replacements,
             mode_runtime,
+            transformations,
+            personal_commands,
+            personal_commands_status,
+            personal_commands_setup: None,
+            personal_commands_setup_error: None,
             voice_action_model,
             opencode_catalog: None,
             opencode_catalog_rx: None,
@@ -826,6 +867,7 @@ impl WindowsDesktopHost {
         let indicator = self.indicator.clone();
         let replacements = self.replacements.clone();
         let mode_runtime = self.mode_runtime.clone();
+        let transformations = self.transformations.clone();
         let voice_action_model = self.voice_action_model.clone();
         let prepared_transcriber = self.prepared_transcriber.take();
         let listener_terminated = self.listener_terminated.clone();
@@ -849,6 +891,7 @@ impl WindowsDesktopHost {
                         indicator: Some(indicator),
                         replacements,
                         mode_runtime,
+                        transformations,
                         voice_action_model,
                         fallback_to_default_device: true,
                     };
@@ -1294,6 +1337,88 @@ impl WindowsDesktopHost {
         Ok(())
     }
 
+    fn refresh_personal_commands_host(&mut self) {
+        let enabled = self.settings.transformations_enabled()
+            || crate::personal_commands::workspace_configured();
+        match (enabled, self.personal_commands.is_some()) {
+            (true, false) => {
+                self.personal_commands = crate::personal_commands::PersonalCommands::start(
+                    crate::commands_engine::CommandConfig::new(),
+                    self.transformations.clone(),
+                );
+            }
+            (false, true) => self.personal_commands = None,
+            _ => {}
+        }
+    }
+
+    fn initialize_personal_commands_workspace(&mut self) {
+        if self.personal_commands_setup.is_some() {
+            return;
+        }
+        let (sender, receiver) = mpsc::sync_channel(1);
+        if let Err(error) = std::thread::Builder::new()
+            .name("personal-commands-setup".into())
+            .spawn(move || {
+                let result = crate::personal_commands::initialize_workspace()
+                    .map_err(|error| format!("{error:#}"));
+                let _ = sender.send(result);
+            })
+        {
+            self.personal_commands_setup_error = Some(format!(
+                "Could not start the custom transformation setup worker: {error}"
+            ));
+            return;
+        }
+        self.personal_commands_setup = Some(receiver);
+        self.personal_commands_setup_error = None;
+        self.personal_commands_status.host_state = crate::personal_commands::HostState::Starting;
+        self.personal_commands_status.last_reload_error = None;
+        crate::personal_commands::include_builtin_transformations(
+            &mut self.personal_commands_status,
+        );
+    }
+
+    fn retry_personal_commands_host(&mut self) {
+        self.personal_commands_setup_error = None;
+        self.personal_commands = None;
+        self.personal_commands_status.host_state = crate::personal_commands::HostState::Starting;
+        self.personal_commands_status.last_reload_error = None;
+        crate::personal_commands::include_builtin_transformations(
+            &mut self.personal_commands_status,
+        );
+        self.refresh_personal_commands_host();
+    }
+
+    fn poll_personal_commands_setup(&mut self) {
+        let result =
+            self.personal_commands_setup
+                .as_ref()
+                .and_then(|receiver| match receiver.try_recv() {
+                    Ok(result) => Some(result),
+                    Err(TryRecvError::Disconnected) => Some(Err(
+                        "Custom transformation setup stopped unexpectedly".into(),
+                    )),
+                    Err(TryRecvError::Empty) => None,
+                });
+        let Some(result) = result else {
+            return;
+        };
+        self.personal_commands_setup = None;
+        match result {
+            Ok(_) => self.retry_personal_commands_host(),
+            Err(error) => {
+                self.personal_commands_setup_error = Some(error.clone());
+                self.personal_commands_status.host_state =
+                    crate::personal_commands::HostState::Unavailable;
+                self.personal_commands_status.last_reload_error = Some(error);
+                crate::personal_commands::include_builtin_transformations(
+                    &mut self.personal_commands_status,
+                );
+            }
+        }
+    }
+
     fn set_modes(&mut self, modes: Vec<crate::windows_settings::WindowsMode>) -> Result<()> {
         let mut candidate = self.settings.clone();
         candidate.modes = modes;
@@ -1309,6 +1434,7 @@ impl WindowsDesktopHost {
             crate::windows_dictation::WindowsModeRuntime::from_settings(&candidate);
         self.settings = candidate;
         self.settings_error = None;
+        self.refresh_personal_commands_host();
         Ok(())
     }
 
@@ -1340,6 +1466,38 @@ impl WindowsDesktopHost {
             crate::windows_dictation::WindowsModeRuntime::from_settings(&candidate);
         self.settings = candidate;
         self.settings_error = None;
+        Ok(())
+    }
+
+    fn set_mode_transformations(
+        &mut self,
+        target: ModeTarget,
+        transformations: Vec<String>,
+    ) -> Result<()> {
+        let mut candidate = self.settings.clone();
+        match target {
+            ModeTarget::Global => candidate.dictation_transformations = transformations,
+            ModeTarget::Mode(index) => {
+                let mode = candidate
+                    .modes
+                    .get_mut(index)
+                    .ok_or_else(|| eyre!("dictation mode {index} no longer exists"))?;
+                mode.transformations = transformations;
+            }
+        }
+        candidate.save().map_err(|error| {
+            let error = format!("Could not save mode transformations: {error:#}");
+            self.settings_error = Some(error.clone());
+            eyre!(error)
+        })?;
+        *self
+            .mode_runtime
+            .write()
+            .unwrap_or_else(|error| error.into_inner()) =
+            crate::windows_dictation::WindowsModeRuntime::from_settings(&candidate);
+        self.settings = candidate;
+        self.settings_error = None;
+        self.refresh_personal_commands_host();
         Ok(())
     }
 
@@ -1397,6 +1555,24 @@ impl WindowsDesktopHost {
 
     fn refresh(&mut self) {
         self.poll_opencode_catalog();
+        if crate::personal_commands::workspace_configured()
+            && let Ok(mut status) = crate::personal_commands::load_status()
+        {
+            crate::personal_commands::include_builtin_transformations(&mut status);
+            if status != self.personal_commands_status {
+                self.personal_commands_status = status;
+            }
+        } else if self.personal_commands_setup.is_none()
+            && self.personal_commands_setup_error.is_none()
+            && self.personal_commands_status.host_state
+                != crate::personal_commands::HostState::NotConfigured
+        {
+            self.personal_commands_status = crate::personal_commands::StatusSnapshot::default();
+            crate::personal_commands::include_builtin_transformations(
+                &mut self.personal_commands_status,
+            );
+        }
+        self.poll_personal_commands_setup();
         if self
             .hints_restart_after
             .is_some_and(|edited| edited.elapsed() >= Duration::from_millis(1200))
@@ -1869,6 +2045,12 @@ impl WindowsApp {
                     processing.prompt = inputs.processing_prompt.read(cx).text().to_string();
                     processing
                 },
+                transformations: self
+                    .host
+                    .settings
+                    .modes
+                    .get(index)
+                    .map_or_else(Vec::new, |mode| mode.transformations.clone()),
             })
             .collect()
     }
@@ -3102,6 +3284,8 @@ impl WindowsApp {
                 ModeTarget::Global => {
                     let processing =
                         self.render_windows_mode_processing(ModeTarget::Global, window, cx);
+                    let transformations =
+                        self.render_windows_mode_transformations(ModeTarget::Global, cx);
                     let basics = render_shared_mode_basics(
                         ModeBasicsView::Global {
                             title: "Global",
@@ -3131,12 +3315,17 @@ impl WindowsApp {
                         .child(compact_section_label(tr("TEXT PROCESSING")))
                         .child(replacements)
                         .child(processing)
+                        .child(transformations)
                         .into_any_element()
                 }
                 ModeTarget::Mode(mode_index) => {
                     let processing = self.render_windows_mode_processing(
                         ModeTarget::Mode(mode_index),
                         window,
+                        cx,
+                    );
+                    let transformations = self.render_windows_mode_transformations(
+                        ModeTarget::Mode(mode_index),
                         cx,
                     );
                     let inputs = &self.mode_inputs[mode_index];
@@ -3182,6 +3371,7 @@ impl WindowsApp {
                         .child(compact_section_label(tr("TEXT PROCESSING")))
                         .child(corrections)
                         .child(processing)
+                        .child(transformations)
                         .into_any_element()
                 }
             });
@@ -3207,6 +3397,109 @@ impl WindowsApp {
                 .get(index)
                 .map(|mode| &mode.post_processing),
         }
+    }
+
+    fn mode_transformations(&self, target: ModeTarget) -> Option<&Vec<String>> {
+        match target {
+            ModeTarget::Global => Some(&self.host.settings.dictation_transformations),
+            ModeTarget::Mode(index) => self
+                .host
+                .settings
+                .modes
+                .get(index)
+                .map(|mode| &mode.transformations),
+        }
+    }
+
+    fn render_windows_mode_transformations(
+        &self,
+        target: ModeTarget,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let selected = self
+            .mode_transformations(target)
+            .cloned()
+            .unwrap_or_default();
+        let catalog = self
+            .host
+            .personal_commands_status
+            .transformations
+            .iter()
+            .map(|transformation| TransformationCatalogEntry {
+                id: transformation.id.clone(),
+                name: transformation.name.clone(),
+                description: transformation.description.clone(),
+            })
+            .collect();
+        let configured = crate::personal_commands::workspace_configured();
+        let workspace = if self.host.personal_commands_setup.is_some() {
+            Some(TransformationWorkspaceView {
+                title: "Custom transformations",
+                description: "Preparing the TypeScript workspace and installing its dependencies…",
+                error: None,
+                action_label: None,
+                action: ModeTransformationsWorkspaceAction::Initialize,
+            })
+        } else if let Some(error) = self.host.personal_commands_setup_error.clone() {
+            Some(TransformationWorkspaceView {
+                title: "Custom transformations",
+                description: "The TypeScript workspace could not be prepared.",
+                error: Some(error),
+                action_label: Some("Retry setup"),
+                action: ModeTransformationsWorkspaceAction::Initialize,
+            })
+        } else {
+            match self.host.personal_commands_status.host_state {
+                crate::personal_commands::HostState::Active
+                    if self
+                        .host
+                        .personal_commands_status
+                        .last_reload_error
+                        .is_none() =>
+                {
+                    None
+                }
+                crate::personal_commands::HostState::Starting => {
+                    Some(TransformationWorkspaceView {
+                        title: "Custom transformations",
+                        description: "Loading registered TypeScript transformations…",
+                        error: None,
+                        action_label: None,
+                        action: ModeTransformationsWorkspaceAction::Retry,
+                    })
+                }
+                crate::personal_commands::HostState::NotConfigured => {
+                    Some(TransformationWorkspaceView {
+                        title: "Custom transformations",
+                        description: "Create a TypeScript workspace to define reusable transformations.",
+                        error: None,
+                        action_label: Some("Set up"),
+                        action: ModeTransformationsWorkspaceAction::Initialize,
+                    })
+                }
+                _ => Some(TransformationWorkspaceView {
+                    title: "Custom transformations",
+                    description: "Registered TypeScript transformations are unavailable.",
+                    error: self.host.personal_commands_status.last_reload_error.clone(),
+                    action_label: Some(if configured { "Retry" } else { "Set up" }),
+                    action: if configured {
+                        ModeTransformationsWorkspaceAction::Retry
+                    } else {
+                        ModeTransformationsWorkspaceAction::Initialize
+                    },
+                }),
+            }
+        };
+        render_shared_mode_transformations(
+            ModeTransformationsView {
+                target,
+                selected,
+                catalog,
+                picker_open: self.transformation_picker_open,
+                workspace,
+            },
+            cx,
+        )
     }
 
     fn opencode_model_key(&self, target: OpenCodeModelTarget) -> Option<String> {
@@ -4150,6 +4443,72 @@ impl VoiceActionPaneDelegate for WindowsApp {
                     tracing::error!(%error, "could not open the OpenCode beta documentation");
                 }
             }
+        }
+        cx.notify();
+    }
+}
+
+impl ModeTransformationsDelegate for WindowsApp {
+    fn handle_mode_transformations_action(
+        &mut self,
+        action: ModeTransformationsAction,
+        cx: &mut Context<Self>,
+    ) {
+        if matches!(action, ModeTransformationsAction::TogglePicker) {
+            self.transformation_picker_open = !self.transformation_picker_open;
+            cx.notify();
+            return;
+        }
+        if let ModeTransformationsAction::Workspace(action) = action {
+            match action {
+                ModeTransformationsWorkspaceAction::Initialize => {
+                    self.host.initialize_personal_commands_workspace();
+                }
+                ModeTransformationsWorkspaceAction::Retry => {
+                    self.host.retry_personal_commands_host();
+                }
+            }
+            cx.notify();
+            return;
+        }
+        let target = match &action {
+            ModeTransformationsAction::Add { target, .. }
+            | ModeTransformationsAction::Remove { target, .. }
+            | ModeTransformationsAction::Move { target, .. } => *target,
+            ModeTransformationsAction::TogglePicker => unreachable!(),
+            ModeTransformationsAction::Workspace(_) => unreachable!(),
+        };
+        let Some(mut transformations) = self.mode_transformations(target).cloned() else {
+            return;
+        };
+        let changed = match action {
+            ModeTransformationsAction::Add { id, .. } => {
+                let registered = self
+                    .host
+                    .personal_commands_status
+                    .transformations
+                    .iter()
+                    .any(|transformation| transformation.id == id);
+                if !registered || transformations.contains(&id) {
+                    false
+                } else {
+                    transformations.push(id);
+                    true
+                }
+            }
+            ModeTransformationsAction::Remove { id, .. } => {
+                let before = transformations.len();
+                transformations.retain(|candidate| candidate != &id);
+                transformations.len() != before
+            }
+            ModeTransformationsAction::Move {
+                id, target_index, ..
+            } => reorder_transformation(&mut transformations, &id, target_index),
+            ModeTransformationsAction::TogglePicker => unreachable!(),
+            ModeTransformationsAction::Workspace(_) => unreachable!(),
+        };
+        if changed {
+            let _ = self.host.set_mode_transformations(target, transformations);
         }
         cx.notify();
     }

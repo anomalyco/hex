@@ -7,7 +7,8 @@ surface now includes live microphone/model/shortcut settings, double-tap lock,
 Paste Last Dictation, recording tones, a click-through HUD, retained History,
 text replacements, a resident system tray, and per-user Launch at login.
 Global and contextual Modes can also rewrite completed dictation through the
-same deadline-bounded OpenCode processing policy as macOS.
+same deadline-bounded OpenCode processing policy as macOS, then run ordered
+built-in or user-defined TypeScript transformations.
 
 The default shortcut is `Ctrl+Win`: hold both keys while speaking and release
 either one to transcribe and paste. Tap the shortcut twice within 300 ms to
@@ -22,6 +23,9 @@ applied live or through an automatic listener restart as appropriate.
 - `winget` from Microsoft App Installer.
 - Visual Studio C++ Build Tools, CMake, and the stable MSVC Rust toolchain.
 - A Windows 10 or 11 SDK containing the DirectX `fxc.exe` shader compiler.
+- Bun is optional. It is required only for user-defined TypeScript
+  transformations; the built-in Lowercase and SpongeBob case transformations
+  run without it.
 
 Run the checked-in setup script from the repository root. It keeps an existing
 compatible Visual Studio installation and installs only missing prerequisites.
@@ -69,9 +73,10 @@ The app starts its global listener on launch by default. Changing the
 transcription model, microphone, dictation shortcut, double-tap behavior, or
 Paste Last setting automatically restarts the listener; you do not need to
 stop it first. Text replacements and feedback volume apply without a model
-reload. Mode rules and OpenCode profiles are snapshotted by the output worker
-and apply to the next completed dictation without restarting capture. The
-command-line listener uses the settings saved by the app:
+reload. Mode rules, OpenCode profiles, and ordered transformations are
+snapshotted by the output worker and apply to the next completed dictation
+without restarting capture. The command-line listener uses the settings saved
+by the app:
 
 ```powershell
 cargo run -- listen --model parakeet_v3 --language pl
@@ -86,6 +91,22 @@ Runtime data is stored under `%APPDATA%\voice-control`. Observations are in
 Successful pasted dictations are retained, subject to the selected retention
 window and hard size limits, in `history.json`. Captured audio is never retained
 by default.
+
+## Custom Transformations
+
+The Transformations card in Modes always offers the built-in transformations.
+Choose **Set up** there to create `~/.config/hex/hex.config.ts`, install the
+managed `@hex/commands` SDK with Bun, and load any transformations registered by
+that config. The Windows release executable embeds the checked-in SDK source,
+so a managed single-executable install does not depend on a repository checkout.
+
+Transformations run in the displayed order after mode corrections and the
+optional OpenCode rewrite. Reordering, adding, or removing them persists in the
+global or contextual mode and applies to the next output job. Host startup,
+registration, IPC, execution time, and status files are bounded; a failed step
+preserves the previous pipeline output. Use **Retry** in the card after fixing a
+Bun, dependency, or config error. Literal voice commands in the same config
+remain unavailable on Windows until a real streaming command recognizer lands.
 
 ## macOS Parity
 
@@ -106,7 +127,7 @@ current-user startup registry, UI Automation, and Windows capture APIs.
 | History retention, list, detail, search, copy, delete, and clear | Implemented |
 | Text replacements | Implemented in the Windows Modes pane using the shared phrase-boundary replacement engine |
 | Resident tray and Launch at login | Implemented |
-| Application modes with per-mode corrections and OpenCode rewriting | Implemented on the shared ordered processing policy; global and contextual profiles persist their own enablement, prompt, model, and bounded deadline, while modes match by application name — reasoning/deadline controls and TypeScript transformation hosting remain |
+| Application modes with per-mode corrections, OpenCode rewriting, and transformations | Implemented on the shared ordered processing policy; global and contextual profiles persist their own corrections, rewrite settings, and ordered built-in/TypeScript transformations, while modes match by application name — reasoning/deadline controls and physical end-to-end paste/UI validation remain |
 | Voice Action with selected-text capture and in-app OpenCode model selection | Implemented; selection is read through a clipboard round trip rather than UI Automation |
 | Recognition hints for Whisper-family models | Implemented |
 | Release microphone while idle | Implemented; mutually exclusive with audio pre-roll, as documented in Settings |
@@ -121,7 +142,8 @@ current-user startup registry, UI Automation, and Windows capture APIs.
 | Local transcription API and public TypeScript SDK host lifecycle on Windows | Missing |
 
 The shared visual tokens, navigation, pane scaffold, transcription picker,
-History presentation, mode processing card, and text input are already reused.
+History presentation, mode processing and transformation cards, and text input
+are already reused.
 Remaining panes should be added only with their complete Windows behavior;
 empty look-alike screens do not count as parity.
 
@@ -131,10 +153,10 @@ The Windows listener preserves physical press/release timestamps, keeps audio
 capture off the transcription and paste worker, and restores the previous
 clipboard only when no newer clipboard change supersedes it. The optimized
 MSVC release build is verified with GPUI's DirectX shaders. The next parity
-slices are the advanced OpenCode controls, bounded TypeScript transformation
-host, local transcription API host, and developer-only Meetings surface;
-opt-in Commands wait on a Windows streaming command model. Shared first-run
-onboarding and OpenCode mode rewriting already ship. Windows releases are
+slices are the advanced OpenCode controls, local transcription API host, and
+developer-only Meetings surface; opt-in Commands wait on a Windows streaming
+command model. Shared first-run onboarding, OpenCode mode rewriting, and the
+bounded TypeScript transformation host already ship. Windows releases are
 prepared and published with
 [`scripts/release-windows.sh`](../scripts/release-windows.sh), which signs
 the update feed with the same release key as Linux and publishes

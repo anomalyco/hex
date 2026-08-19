@@ -60,8 +60,9 @@ only in debug builds.
 - `commands`: pure contextual resolution plus bounded asynchronous macOS action
   execution.
 - `personal_commands`: the Bun-hosted `@hex/commands` TypeScript workspace:
-  managed SDK provisioning, the watch-reloaded user command and transformation
-  host, bounded invocation dispatch, and status snapshots.
+  shared macOS/Windows managed SDK provisioning, the watch-reloaded user command
+  and transformation host, bounded invocation/transform dispatch, and status
+  snapshots. Literal voice-command recognition remains macOS-only.
 - `text_replacements`: phrase-boundary-aware compilation of configured text
   replacements applied longest-match-first to transcripts.
 - `config`: compiled commands, preferred input devices, and dictation profiles.
@@ -447,8 +448,9 @@ seam once there are two real adapters or a current test requires substitution.
 - Validate public onboarding from a clean macOS account and signed Linux updates
   on the supported Arch/i3 host.
 - Physically validate the Windows global loop, live settings, lock/Paste Last,
-  History/replacements, HUD/tones, tray, and login startup; then add complete
-  Modes, context, Voice Action, Commands, packaging/updates, and Meetings.
+  History/replacements, Modes/transformations, HUD/tones, tray, login startup,
+  installer, and signed updates; then add advanced OpenCode controls, the local
+  API, Commands after a real streaming model, and Meetings.
 - Add a second real browser adapter before generalizing browser context.
 - Do not turn concrete macOS, Linux X11, or command modules into hypothetical
   platform or plugin frameworks.

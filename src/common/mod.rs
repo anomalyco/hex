@@ -25,6 +25,8 @@ pub mod instance;
 pub mod keys;
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 pub mod opencode;
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+pub mod personal_commands;
 #[cfg(any(target_os = "linux", target_os = "windows"))]
 pub mod self_update;
 #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]

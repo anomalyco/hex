@@ -32,6 +32,8 @@ pub struct WindowsSettings {
     pub text_replacements: Vec<crate::text_replacements::TextReplacement>,
     /// Global rewrite profile used when no contextual mode matches.
     pub dictation_post_processing: crate::dictation_processing::PostProcessingSettings,
+    /// Ordered final transformation IDs for the global fallback profile.
+    pub dictation_transformations: Vec<String>,
     pub modes: Vec<WindowsMode>,
     pub transcription: TranscriptionSelection,
 }
@@ -50,6 +52,7 @@ pub struct WindowsMode {
     pub websites: Vec<String>,
     pub corrections: Vec<crate::text_replacements::TextReplacement>,
     pub post_processing: crate::dictation_processing::PostProcessingSettings,
+    pub transformations: Vec<String>,
 }
 
 impl WindowsMode {
@@ -69,6 +72,16 @@ impl WindowsMode {
             crate::windows_context::canonical_host(candidate)
                 .is_some_and(|candidate| candidate == host)
         })
+    }
+}
+
+impl WindowsSettings {
+    pub fn transformations_enabled(&self) -> bool {
+        !self.dictation_transformations.is_empty()
+            || self
+                .modes
+                .iter()
+                .any(|mode| !mode.transformations.is_empty())
     }
 }
 
@@ -144,6 +157,7 @@ impl Default for WindowsSettings {
             text_replacements: Vec::new(),
             dictation_post_processing: crate::dictation_processing::PostProcessingSettings::default(
             ),
+            dictation_transformations: Vec::new(),
             transcription: recommended_selection(&user_language()),
         }
     }
@@ -427,6 +441,8 @@ mod tests {
             settings.modes[0].post_processing,
             crate::dictation_processing::PostProcessingSettings::default()
         );
+        assert!(settings.dictation_transformations.is_empty());
+        assert!(settings.modes[0].transformations.is_empty());
     }
 
     #[test]
@@ -440,9 +456,11 @@ mod tests {
         };
         let settings = WindowsSettings {
             dictation_post_processing: processing.clone(),
+            dictation_transformations: vec!["lowercase".into()],
             modes: vec![WindowsMode {
                 name: "Code".into(),
                 post_processing: processing,
+                transformations: vec!["trim-code-block".into(), "lowercase".into()],
                 ..WindowsMode::default()
             }],
             ..WindowsSettings::default()

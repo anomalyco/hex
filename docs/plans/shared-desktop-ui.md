@@ -49,8 +49,9 @@ Settings and Activity established the shared vocabulary. History now has one
 behavior-complete pane. Modes now shares its collection identity, selection,
 activation badges, list renderer, basic matching card, and replacement/
 correction editor. Its OpenCode processing card, enablement actions, and
-unavailable/retry state are shared as well. Voice Action also has one pane
-contract on macOS and Windows. Ordered transformation editing, Commands, and
+unavailable/retry state are shared as well. Its ordered transformation catalog,
+picker, drag ordering, removal, and host-workspace status are now shared too.
+Voice Action also has one pane contract on macOS and Windows. Commands and
 Meetings can use the same shell, but each pane appears on a platform only when
 its underlying behavior is implemented there.
 
@@ -220,8 +221,10 @@ missing/error recovery presentation. Both roots persist the same portable
 rewrite settings and execute the same ordered processing policy, while macOS
 retains its searchable model, reasoning, and deadline controls and Windows
 retains its native model dropdown. Advanced Windows reasoning/deadline controls
-remain parity work. The TypeScript transformation editor remains macOS-only
-until Windows has a real bounded transformation host.
+remain parity work. `src/desktop/mode_transformations.rs` owns the complete
+ordered transformation editor used by macOS and Windows. The platform roots
+supply the same bounded host catalog and persist selection into their existing
+mode schemas; the shared renderer does not know which operating system owns it.
 
 `src/desktop/voice_action_pane.rs` owns the Voice Action scaffold, explanatory
 copy, responsive setting rows, processing panel, persistence error, and

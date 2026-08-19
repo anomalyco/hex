@@ -48,6 +48,7 @@ struct JobResult {
 #[derive(Clone)]
 pub struct WindowsModeRuntime {
     default: crate::dictation_processing::PostProcessingSettings,
+    default_transformations: Vec<String>,
     modes: Vec<crate::windows_settings::WindowsMode>,
 }
 
@@ -55,6 +56,7 @@ impl WindowsModeRuntime {
     pub fn from_settings(settings: &crate::windows_settings::WindowsSettings) -> Self {
         Self {
             default: settings.dictation_post_processing.clone(),
+            default_transformations: settings.dictation_transformations.clone(),
             modes: settings.modes.clone(),
         }
     }
@@ -76,6 +78,7 @@ pub struct WindowsDictationConfig {
     pub indicator: Option<crate::windows_indicator::WindowsIndicatorSender>,
     pub replacements: Arc<RwLock<crate::text_replacements::ReplacementSet>>,
     pub mode_runtime: Arc<RwLock<WindowsModeRuntime>>,
+    pub transformations: Arc<crate::personal_commands::TransformationClient>,
     pub voice_action_model: Arc<RwLock<Option<crate::opencode::Model>>>,
     pub fallback_to_default_device: bool,
 }
@@ -111,6 +114,7 @@ pub fn run_with_transcriber(
         indicator,
         replacements,
         mode_runtime,
+        transformations,
         voice_action_model,
         fallback_to_default_device,
     } = config;
@@ -181,6 +185,7 @@ pub fn run_with_transcriber(
                         &last_dictation,
                         &replacements,
                         &mode_runtime,
+                        transformations.as_ref(),
                     ),
                     OutputJob::VoiceAction(job) => process_voice_action_job(
                         job,
@@ -673,6 +678,7 @@ pub fn run_with_transcriber(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn process_dictation_job(
     job: Job,
     transcriber: &mut LocalTranscriber,
@@ -681,6 +687,7 @@ fn process_dictation_job(
     last_dictation: &Mutex<Option<String>>,
     replacements: &RwLock<crate::text_replacements::ReplacementSet>,
     mode_runtime: &RwLock<WindowsModeRuntime>,
+    transformations: &crate::personal_commands::TransformationClient,
 ) -> JobResult {
     let started = Instant::now();
     // The context read starts now so the UIA walk overlaps inference.
@@ -708,7 +715,7 @@ fn process_dictation_job(
             .read()
             .unwrap_or_else(|error| error.into_inner())
             .clone();
-        let processed = process_mode_text(&text, &context, &mode_runtime);
+        let processed = process_mode_text(&text, &context, &mode_runtime, transformations);
         let text = processed.text;
         if text.trim().is_empty() {
             return Err("text replacements produced empty output".into());
@@ -757,6 +764,7 @@ fn process_mode_text(
     text: &str,
     context: &crate::command_context::ContextSnapshot,
     runtime: &WindowsModeRuntime,
+    transformations: &crate::personal_commands::TransformationClient,
 ) -> crate::dictation_processing::Processed {
     let mode = crate::windows_settings::mode_for_context(
         &runtime.modes,
@@ -768,7 +776,7 @@ fn process_mode_text(
             crate::dictation_processing::Profile::configured(
                 "Global",
                 crate::text_replacements::ReplacementSet::default(),
-                Vec::new(),
+                runtime.default_transformations.clone(),
                 &runtime.default,
             )
         },
@@ -781,7 +789,7 @@ fn process_mode_text(
             crate::dictation_processing::Profile::configured(
                 name,
                 crate::text_replacements::ReplacementSet::new(&mode.corrections),
-                Vec::new(),
+                mode.transformations.clone(),
                 &mode.post_processing,
             )
         },
@@ -789,7 +797,7 @@ fn process_mode_text(
     crate::dictation_processing::Profiles::new(profile).process_cancellable(
         text,
         context,
-        None,
+        Some(transformations),
         &AtomicBool::new(false),
     )
 }
@@ -1056,11 +1064,46 @@ mod tests {
 
         let runtime = WindowsModeRuntime {
             default: crate::dictation_processing::PostProcessingSettings::default(),
+            default_transformations: Vec::new(),
             modes,
         };
-        let processed = process_mode_text("Use open code.", &context, &runtime);
+        let transformations = crate::personal_commands::TransformationClient::default();
+        let processed = process_mode_text("Use open code.", &context, &runtime, &transformations);
 
         assert_eq!(processed.text, "Use OpenCode.");
         assert!(processed.observation.is_none());
+    }
+
+    #[test]
+    fn windows_modes_execute_selected_transformations_after_corrections() {
+        let runtime = WindowsModeRuntime {
+            default: crate::dictation_processing::PostProcessingSettings::default(),
+            default_transformations: vec!["lowercase".into()],
+            modes: Vec::new(),
+        };
+        let transformations = crate::personal_commands::TransformationClient::default();
+
+        let processed = process_mode_text(
+            "Keep OpenCode Exact.",
+            &crate::command_context::ContextSnapshot::default(),
+            &runtime,
+            &transformations,
+        );
+
+        assert_eq!(processed.text, "keep opencode exact.");
+        assert_eq!(
+            processed
+                .observation
+                .as_ref()
+                .map(|observation| observation.profile.as_str()),
+            Some("Custom transformations")
+        );
+        assert_eq!(
+            processed
+                .observation
+                .as_ref()
+                .and_then(|observation| observation.fallback.as_deref()),
+            None
+        );
     }
 }

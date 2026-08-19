@@ -44,6 +44,11 @@ use crate::desktop_mode_processing::{
     ModeProcessingAction, ModeProcessingDelegate, ModeProcessingUnavailableView,
     ModeProcessingView, render_mode_processing as render_shared_mode_processing,
 };
+use crate::desktop_mode_transformations::{
+    ModeTransformationsAction, ModeTransformationsDelegate, ModeTransformationsView,
+    TransformationCatalogEntry, render_mode_transformations as render_shared_mode_transformations,
+    reorder_transformation,
+};
 use crate::desktop_replacement_editor::{
     ReplacementEditorAction, ReplacementEditorDelegate, ReplacementEditorInput,
     ReplacementEditorView, render_replacement_editor as render_shared_replacement_editor,
@@ -59,11 +64,10 @@ use crate::desktop_ui::{
     CANVAS, COMPACT_MULTILINE_INPUT_HEIGHT, FAINT, LINE, MUTED, NEGATIVE, PANE_CONTENT_WIDTH,
     PANE_LIST_WIDTH, SECTION_GAP, SIDEBAR_WIDTH, SURFACE, SURFACE_HOVER, SURFACE_SELECTED, TEXT,
     TEXT_INPUT_HEIGHT, TEXT_SOFT, compact_button, compact_header_plus_button, compact_panel,
-    compact_panel_header, compact_section_label, disclosure_button, empty_message, error_message,
-    header_button, hotkey_keycaps, listener_status, mix_color, pane_body, pane_content,
-    pane_header, pane_header_with_action, section_label, segmented_control, segmented_item,
-    settings_copy, settings_panel, settings_row, settings_section_label, sidebar_frame, toggle,
-    window_frame,
+    compact_section_label, disclosure_button, empty_message, error_message, header_button,
+    hotkey_keycaps, listener_status, mix_color, pane_body, pane_content, pane_header,
+    pane_header_with_action, section_label, segmented_control, segmented_item, settings_copy,
+    settings_panel, settings_row, settings_section_label, sidebar_frame, toggle, window_frame,
 };
 use crate::desktop_voice_action_pane::{
     OPENCODE_SETUP_URL, VoiceActionError, VoiceActionPaneAction, VoiceActionPaneDelegate,
@@ -417,44 +421,6 @@ struct ProcessingInputs {
 
 struct VoiceActionInputs {
     model: ProcessingInput,
-}
-
-#[derive(Clone)]
-struct TransformationDrag {
-    selection: ModeSelection,
-    id: String,
-    name: String,
-    position: Point<Pixels>,
-}
-
-impl TransformationDrag {
-    fn at(mut self, position: Point<Pixels>) -> Self {
-        self.position = position;
-        self
-    }
-}
-
-impl Render for TransformationDrag {
-    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-        div()
-            .pl(self.position.x - px(90.0))
-            .pt(self.position.y - px(17.0))
-            .child(
-                div()
-                    .w(px(180.0))
-                    .h(px(34.0))
-                    .px_3()
-                    .flex()
-                    .items_center()
-                    .rounded(px(6.0))
-                    .border_1()
-                    .border_color(rgb(0x505050))
-                    .bg(rgb(SURFACE_SELECTED))
-                    .text_size(px(11.0))
-                    .text_color(rgb(TEXT))
-                    .child(self.name.clone()),
-            )
-    }
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -3789,197 +3755,30 @@ impl AppWindow {
         selection: ModeSelection,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let selected = self.mode_settings(selection).transformations.clone();
-        let catalog = &self.personal_commands_status.transformations;
-        let selected_rows = selected
-            .iter()
-            .enumerate()
-            .map(|(target_index, id)| {
-                let name = catalog
-                    .iter()
-                    .find(|transformation| &transformation.id == id)
-                    .map_or_else(|| id.clone(), |transformation| transformation.name.clone());
-                let drag = TransformationDrag {
-                    selection,
-                    id: id.clone(),
-                    name: name.clone(),
-                    position: Point::default(),
-                };
-                let dragged_id = id.clone();
-                let drop_id = id.clone();
-                div()
-                    .id(("mode-transformation", target_index))
-                    .h(px(36.0))
-                    .px_2()
-                    .flex()
-                    .items_center()
-                    .gap_2()
-                    .when(target_index + 1 < selected.len(), |row| {
-                        row.border_b_1().border_color(rgb(LINE))
-                    })
-                    .can_drop(move |value, _, _| {
-                        value
-                            .downcast_ref::<TransformationDrag>()
-                            .is_some_and(|drag| drag.selection == selection && drag.id != drop_id)
-                    })
-                    .on_drop(cx.listener(move |this, drag: &TransformationDrag, _, cx| {
-                        if drag.selection != selection {
-                            return;
-                        }
-                        let transformations =
-                            &mut this.mode_settings_mut(selection).transformations;
-                        if !reorder_transformation(transformations, &drag.id, target_index) {
-                            return;
-                        }
-                        this.save_settings(cx);
-                    }))
-                    .child(
-                        div()
-                            .id(("drag-mode-transformation", target_index))
-                            .w(px(20.0))
-                            .h_full()
-                            .flex_none()
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .text_size(px(12.0))
-                            .text_color(rgb(FAINT))
-                            .child("⠿")
-                            .on_drag(drag, |drag, position, _, cx| {
-                                cx.new(|_| drag.clone().at(position))
-                            }),
-                    )
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w(px(0.0))
-                            .text_size(px(11.0))
-                            .text_color(rgb(TEXT_SOFT))
-                            .truncate()
-                            .child(name),
-                    )
-                    .child(
-                        compact_button("×")
-                            .id(("remove-mode-transformation", target_index))
-                            .size(px(28.0))
-                            .px_0()
-                            .justify_center()
-                            .text_size(px(14.0))
-                            .text_color(rgb(MUTED))
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.mode_settings_mut(selection)
-                                    .transformations
-                                    .retain(|candidate| candidate != &dragged_id);
-                                this.save_settings(cx);
-                            })),
-                    )
-                    .into_any_element()
-            })
-            .collect::<Vec<_>>();
-
-        let available_rows = if self.transformation_picker_open {
-            catalog
-                .iter()
-                .enumerate()
-                .filter(|(_, transformation)| !selected.contains(&transformation.id))
-                .map(|(index, transformation)| {
-                    let id = transformation.id.clone();
-                    let name = transformation.name.clone();
-                    let description = transformation.description.clone();
-                    div()
-                        .id(("available-mode-transformation", index))
-                        .min_h(px(40.0))
-                        .px_3()
-                        .py_2()
-                        .flex()
-                        .items_center()
-                        .justify_between()
-                        .gap_3()
-                        .border_t_1()
-                        .border_color(rgb(LINE))
-                        .hover(|row| row.bg(rgb(SURFACE_HOVER)))
-                        .child(
-                            div()
-                                .flex_1()
-                                .min_w(px(0.0))
-                                .child(
-                                    div()
-                                        .text_size(px(11.0))
-                                        .font_weight(FontWeight::SEMIBOLD)
-                                        .text_color(rgb(TEXT_SOFT))
-                                        .child(name),
-                                )
-                                .when_some(description, |copy, description| {
-                                    copy.child(
-                                        div()
-                                            .pt_1()
-                                            .text_size(px(10.0))
-                                            .text_color(rgb(FAINT))
-                                            .child(description),
-                                    )
-                                }),
-                        )
-                        .child(
-                            div()
-                                .text_size(px(10.0))
-                                .text_color(rgb(TEXT_SOFT))
-                                .child("Add"),
-                        )
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.mode_settings_mut(selection)
-                                .transformations
-                                .push(id.clone());
-                            this.save_settings(cx);
-                        }))
-                        .into_any_element()
-                })
-                .collect::<Vec<_>>()
-        } else {
-            Vec::new()
+        let target = match selection {
+            ModeSelection::Default => ModeTarget::Global,
+            ModeSelection::Custom(index) => ModeTarget::Mode(index),
         };
-        let available_empty = available_rows.is_empty();
-        let catalog_empty = catalog.is_empty();
-        let add = (!catalog_empty).then(|| {
-            let button = if self.transformation_picker_open {
-                compact_button("Done")
-                    .h(px(28.0))
-                    .mr(px(-7.0))
-                    .text_size(px(10.0))
-            } else {
-                compact_header_plus_button()
-            };
-            button
-                .id("toggle-transformation-picker")
-                .on_click(cx.listener(|this, _, _, cx| {
-                    this.transformation_picker_open = !this.transformation_picker_open;
-                    cx.notify();
-                }))
-                .into_any_element()
-        });
-
-        compact_panel()
-            .child(compact_panel_header("Transformations", add).when(
-                selected.is_empty() && !self.transformation_picker_open,
-                |header| header.border_b_0(),
-            ))
-            .children(selected_rows)
-            .when(self.transformation_picker_open && !catalog_empty, |panel| {
-                panel
-                    .when(available_empty, |list| {
-                        list.child(
-                            div()
-                                .border_t_1()
-                                .border_color(rgb(LINE))
-                                .px_3()
-                                .py_3()
-                                .text_size(px(10.0))
-                                .text_color(rgb(MUTED))
-                                .child("Every registered transformation is already included."),
-                        )
-                    })
-                    .children(available_rows)
+        let catalog = self
+            .personal_commands_status
+            .transformations
+            .iter()
+            .map(|transformation| TransformationCatalogEntry {
+                id: transformation.id.clone(),
+                name: transformation.name.clone(),
+                description: transformation.description.clone(),
             })
-            .into_any_element()
+            .collect();
+        render_shared_mode_transformations(
+            ModeTransformationsView {
+                target,
+                selected: self.mode_settings(selection).transformations.clone(),
+                catalog,
+                picker_open: self.transformation_picker_open,
+                workspace: None,
+            },
+            cx,
+        )
     }
 
     fn catalog_application_editor_view(
@@ -6108,6 +5907,63 @@ impl VoiceActionPaneDelegate for AppWindow {
     }
 }
 
+impl ModeTransformationsDelegate for AppWindow {
+    fn handle_mode_transformations_action(
+        &mut self,
+        action: ModeTransformationsAction,
+        cx: &mut Context<Self>,
+    ) {
+        if matches!(action, ModeTransformationsAction::TogglePicker) {
+            self.transformation_picker_open = !self.transformation_picker_open;
+            cx.notify();
+            return;
+        }
+        if matches!(action, ModeTransformationsAction::Workspace(_)) {
+            self.provision_personal_workspace();
+            cx.notify();
+            return;
+        }
+        let target = match &action {
+            ModeTransformationsAction::Add { target, .. }
+            | ModeTransformationsAction::Remove { target, .. }
+            | ModeTransformationsAction::Move { target, .. } => *target,
+            ModeTransformationsAction::TogglePicker => unreachable!(),
+            ModeTransformationsAction::Workspace(_) => unreachable!(),
+        };
+        let selection = match target {
+            ModeTarget::Global => ModeSelection::Default,
+            ModeTarget::Mode(index) if index < self.processing_inputs.modes.len() => {
+                ModeSelection::Custom(index)
+            }
+            ModeTarget::Mode(_) => return,
+        };
+        let transformations = &mut self.mode_settings_mut(selection).transformations;
+        let changed = match action {
+            ModeTransformationsAction::Add { id, .. } => {
+                if transformations.contains(&id) {
+                    false
+                } else {
+                    transformations.push(id);
+                    true
+                }
+            }
+            ModeTransformationsAction::Remove { id, .. } => {
+                let before = transformations.len();
+                transformations.retain(|candidate| candidate != &id);
+                transformations.len() != before
+            }
+            ModeTransformationsAction::Move {
+                id, target_index, ..
+            } => reorder_transformation(transformations, &id, target_index),
+            ModeTransformationsAction::TogglePicker => unreachable!(),
+            ModeTransformationsAction::Workspace(_) => unreachable!(),
+        };
+        if changed {
+            self.save_settings(cx);
+        }
+    }
+}
+
 impl ModeProcessingDelegate for AppWindow {
     fn handle_mode_processing_action(
         &mut self,
@@ -6906,19 +6762,6 @@ fn browser_hosts(value: &str) -> Vec<String> {
     hosts.sort();
     hosts.dedup();
     hosts
-}
-
-fn reorder_transformation(values: &mut Vec<String>, id: &str, target_index: usize) -> bool {
-    let Some(from) = values.iter().position(|candidate| candidate == id) else {
-        return false;
-    };
-    if from == target_index {
-        return false;
-    }
-    let value = values.remove(from);
-    let target = target_index.min(values.len());
-    values.insert(target, value);
-    true
 }
 
 fn apply_mode_inputs(inputs: &ModeInputs, mode: &mut DictationMode, is_default: bool, cx: &App) {

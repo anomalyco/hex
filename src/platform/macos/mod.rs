@@ -24,7 +24,6 @@ pub mod microphone_activity;
 pub mod onboarding;
 pub mod paste;
 pub mod permission_guide;
-pub mod personal_commands;
 pub mod recording_environment;
 pub mod sparkle;
 pub mod status_item;

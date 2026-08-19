@@ -21,6 +21,8 @@ pub(crate) use common::dictation_processing;
 pub(crate) use common::keys;
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 pub(crate) use common::opencode;
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+pub(crate) use common::personal_commands;
 #[cfg(any(target_os = "linux", target_os = "windows"))]
 pub(crate) use common::self_update;
 #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
@@ -46,6 +48,7 @@ pub(crate) use desktop::{
 pub(crate) use desktop::{
     history_pane as desktop_history_pane, mode_basics as desktop_mode_basics,
     mode_list as desktop_mode_list, mode_processing as desktop_mode_processing,
+    mode_transformations as desktop_mode_transformations,
     replacement_editor as desktop_replacement_editor, text_input,
     voice_action_pane as desktop_voice_action_pane,
 };
@@ -62,7 +65,7 @@ pub(crate) use platform::macos::{
     accessibility, app_settings, app_window, application_catalog, config, context,
     developer_control, dictation_audio, dictation_diagnostics, dictation_indicator,
     dictation_processor, keyboard, local_api, login_item, meeting, meeting_detection,
-    meeting_watcher, microphone_activity, onboarding, paste, permission_guide, personal_commands,
+    meeting_watcher, microphone_activity, onboarding, paste, permission_guide,
     recording_environment, sparkle, status_item, suppression, swift_settings_import,
 };
 // The Windows shell's historical i18n path; the table itself is shared.

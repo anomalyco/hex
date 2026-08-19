@@ -1,3 +1,9 @@
+//! Supervised Bun host for personal commands and ordered dictation
+//! transformations. Native shells decide when to start it and retain their own
+//! recognition, context capture, and action execution adapters.
+
+#![cfg_attr(target_os = "windows", allow(dead_code))]
+
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::fs;
 use std::io::{BufRead, BufReader, Read, Write};
@@ -12,13 +18,13 @@ use std::time::{Duration, Instant, SystemTime};
 use color_eyre::eyre::{Result, WrapErr, eyre};
 use serde::{Deserialize, Serialize};
 
-use crate::commands::{
+use crate::command_context::ContextSnapshot;
+use crate::commands_engine::{
     Action, ActionOutcome, CapturedValue, CapturedValues, CommandConfig, ConfiguredCommand,
     ContextPredicate, PersonalCapture,
 };
-use crate::context::ContextSnapshot;
 use crate::dictation::DictationProtocol;
-use crate::keyboard::{Key, Modifiers};
+use crate::keys::{Key, Modifiers};
 
 const MAX_FRAME_BYTES: usize = 256 * 1024;
 const MAX_INPUT_FRAME_BYTES: usize = 64 * 1024;
@@ -210,7 +216,7 @@ fn persist_status_at(path: &Path, status: &StatusSnapshot) -> Result<()> {
     fs::create_dir_all(parent)?;
     let temporary = path.with_extension(format!("json.{}.tmp", std::process::id()));
     fs::write(&temporary, encoded)?;
-    fs::rename(temporary, path)?;
+    crate::transcription_models::atomic_replace(&temporary, path)?;
     Ok(())
 }
 
@@ -277,7 +283,8 @@ pub fn initialize_workspace() -> Result<PathBuf> {
     let workspace = crate::app_paths::personal_commands_workspace()?;
     let sdk = crate::app_paths::personal_commands_sdk()?;
     let sdk_changed = initialize_workspace_at(&workspace, &sdk)?;
-    let bun = find_bun().ok_or_else(|| eyre!("Bun is required to install personal commands"))?;
+    let bun = find_bun()
+        .ok_or_else(|| eyre!("Bun is required to install the personal command workspace"))?;
     if sdk_changed {
         remove_installed_managed_sdk(&workspace)?;
     }
@@ -285,10 +292,16 @@ pub fn initialize_workspace() -> Result<PathBuf> {
     Ok(workspace)
 }
 
+pub fn workspace_configured() -> bool {
+    crate::app_paths::personal_commands_workspace()
+        .map(|workspace| workspace.join("hex.config.ts").is_file())
+        .unwrap_or(false)
+}
+
 pub fn initialize_workspace_at(workspace: &Path, sdk: &Path) -> Result<bool> {
     let template = sdk.join("workspace-template");
     if !sdk.join("package.json").is_file()
-        || !sdk.join("dist/bin.js").is_file()
+        || sdk_code_directory(sdk).is_none()
         || !template.is_dir()
     {
         return Err(eyre!("personal command SDK resources are incomplete"));
@@ -300,9 +313,9 @@ pub fn initialize_workspace_at(workspace: &Path, sdk: &Path) -> Result<bool> {
 }
 
 fn refresh_managed_sdk_at(workspace: &Path, sdk: &Path) -> Result<bool> {
-    if !sdk.join("package.json").is_file() || !sdk.join("dist/bin.js").is_file() {
+    let Some(code_directory) = sdk_code_directory(sdk) else {
         return Err(eyre!("personal command SDK resources are incomplete"));
-    }
+    };
     fs::create_dir_all(workspace)?;
     let staged_sdk = workspace.join(".hex-sdk.tmp");
     let installed_sdk = workspace.join(".hex-sdk");
@@ -311,7 +324,14 @@ fn refresh_managed_sdk_at(workspace: &Path, sdk: &Path) -> Result<bool> {
     }
     fs::create_dir(&staged_sdk)?;
     fs::copy(sdk.join("package.json"), staged_sdk.join("package.json"))?;
-    copy_directory(&sdk.join("dist"), &staged_sdk.join("dist"), true)?;
+    copy_directory(
+        &sdk.join(code_directory),
+        &staged_sdk.join(code_directory),
+        true,
+    )?;
+    if code_directory == "src" {
+        write_source_sdk_manifest(&staged_sdk.join("package.json"))?;
+    }
     if directory_manifest(&staged_sdk)? == directory_manifest(&installed_sdk)? {
         fs::remove_dir_all(staged_sdk)?;
         return Ok(false);
@@ -333,6 +353,30 @@ fn refresh_managed_sdk_at(workspace: &Path, sdk: &Path) -> Result<bool> {
         fs::remove_dir_all(previous_sdk)?;
     }
     Ok(true)
+}
+
+fn sdk_code_directory(sdk: &Path) -> Option<&'static str> {
+    if sdk.join("dist/bin.js").is_file() {
+        Some("dist")
+    } else if sdk.join("src/bin.ts").is_file() {
+        Some("src")
+    } else {
+        None
+    }
+}
+
+fn write_source_sdk_manifest(path: &Path) -> Result<()> {
+    let mut manifest: serde_json::Value = serde_json::from_slice(&fs::read(path)?)?;
+    manifest["exports"]["."]["types"] = "./src/index.ts".into();
+    manifest["exports"]["."]["import"] = "./src/index.ts".into();
+    manifest["exports"]["./effect"]["types"] = "./src/effect.ts".into();
+    manifest["exports"]["./effect"]["import"] = "./src/effect.ts".into();
+    manifest["bin"]["hex-commands-host"] = "./src/bin.ts".into();
+    manifest["files"] = serde_json::json!(["src"]);
+    let mut encoded = serde_json::to_vec_pretty(&manifest)?;
+    encoded.push(b'\n');
+    fs::write(path, encoded)?;
+    Ok(())
 }
 
 fn directory_manifest(root: &Path) -> Result<Vec<(PathBuf, Option<Vec<u8>>)>> {
@@ -1079,8 +1123,11 @@ fn run_worker(
             return;
         }
     };
-    let managed_host = workspace.join("node_modules/@hex/commands/dist/bin.js");
-    if sdk_changed || !managed_host.is_file() {
+    let managed_package = workspace.join("node_modules/@hex/commands");
+    let managed_host_exists = ["dist/bin.js", "src/bin.ts"]
+        .iter()
+        .any(|relative| managed_package.join(relative).is_file());
+    if sdk_changed || !managed_host_exists {
         let refreshed = (|| {
             if sdk_changed {
                 remove_installed_managed_sdk(&workspace)?;
@@ -2010,7 +2057,7 @@ fn compile_registration(
                     ));
                 }
                 for phrase in &command.phrases {
-                    match crate::commands::phrase_placeholder(phrase) {
+                    match crate::commands_engine::phrase_placeholder(phrase) {
                         Ok(None) => {}
                         Ok(Some(_)) => {
                             return Err(eyre!(
@@ -2190,7 +2237,7 @@ fn spawn_tool_workers(jobs: Receiver<ToolJob>, events: SyncSender<HostEvent>) {
                 let result = job
                     .action
                     .into_action()
-                    .and_then(crate::commands::execute)
+                    .and_then(crate::commands_engine::execute)
                     .map(|()| WireResult::Success)
                     .unwrap_or_else(|error| WireResult::Failure {
                         message: bounded_error(&error.to_string()),
@@ -2430,15 +2477,27 @@ fn workspace_fingerprint(root: &Path) -> u64 {
 }
 
 fn find_bun() -> Option<PathBuf> {
-    let candidates = std::env::var_os("PATH")
+    let executable = if cfg!(target_os = "windows") {
+        "bun.exe"
+    } else {
+        "bun"
+    };
+    let mut candidates = std::env::var_os("PATH")
         .into_iter()
         .flat_map(|path| std::env::split_paths(&path).collect::<Vec<_>>())
-        .map(|path| path.join("bun"))
-        .chain([
-            dirs::home_dir().unwrap_or_default().join(".bun/bin/bun"),
-            PathBuf::from("/opt/homebrew/bin/bun"),
-            PathBuf::from("/usr/local/bin/bun"),
-        ]);
+        .map(|path| path.join(executable))
+        .collect::<Vec<_>>();
+    candidates.push(
+        dirs::home_dir()
+            .unwrap_or_default()
+            .join(".bun/bin")
+            .join(executable),
+    );
+    #[cfg(target_os = "macos")]
+    candidates.extend([
+        PathBuf::from("/opt/homebrew/bin/bun"),
+        PathBuf::from("/usr/local/bin/bun"),
+    ]);
     find_bun_candidate(candidates)
 }
 
@@ -2504,7 +2563,7 @@ impl Drop for HostProcess {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::commands::{Decision, Mode};
+    use crate::commands_engine::{Decision, Mode};
     use std::time::UNIX_EPOCH;
 
     #[test]
@@ -3468,6 +3527,7 @@ mod tests {
         assert!(backoff.retry_at.is_none());
     }
 
+    #[cfg(unix)]
     #[test]
     fn workspace_fingerprint_does_not_follow_symlinks_or_excessive_depth() {
         let unique = SystemTime::now()
@@ -3516,6 +3576,7 @@ mod tests {
         fs::remove_dir_all(root).unwrap();
     }
 
+    #[cfg(unix)]
     #[test]
     fn failed_children_are_reaped() {
         let mut child = Command::new("/bin/sh")
@@ -3533,10 +3594,21 @@ mod tests {
             .unwrap()
             .as_nanos();
         let workspace = std::env::temp_dir().join(format!("hex-workspace-{unique}"));
-        let sdk = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("sdk/commands");
+        let sdk = crate::app_paths::personal_commands_sdk().unwrap();
+        let code_directory = sdk_code_directory(&sdk).unwrap();
+        let host_relative = if code_directory == "dist" {
+            "dist/bin.js"
+        } else {
+            "src/bin.ts"
+        };
+        let index_relative = if code_directory == "dist" {
+            "dist/index.js"
+        } else {
+            "src/index.ts"
+        };
 
         assert!(initialize_workspace_at(&workspace, &sdk).unwrap());
-        assert!(workspace.join(".hex-sdk/dist/bin.js").is_file());
+        assert!(workspace.join(".hex-sdk").join(host_relative).is_file());
         assert!(workspace.join("package.json").is_file());
         assert!(workspace.join("tsconfig.json").is_file());
         assert!(workspace.join("AGENTS.md").is_file());
@@ -3545,22 +3617,117 @@ mod tests {
                 .join(".agents/skills/personal-commands/SKILL.md")
                 .is_file()
         );
+        if code_directory == "src" {
+            let manifest: serde_json::Value =
+                serde_json::from_slice(&fs::read(workspace.join(".hex-sdk/package.json")).unwrap())
+                    .unwrap();
+            assert_eq!(manifest["exports"]["."]["import"], "./src/index.ts");
+            assert_eq!(manifest["bin"]["hex-commands-host"], "./src/bin.ts");
+        }
         fs::write(workspace.join("hex.config.ts"), "// user config\n").unwrap();
         assert!(!initialize_workspace_at(&workspace, &sdk).unwrap());
         assert_eq!(
             fs::read_to_string(workspace.join("hex.config.ts")).unwrap(),
             "// user config\n"
         );
-        fs::write(workspace.join(".hex-sdk/dist/index.js"), "stale SDK\n").unwrap();
+        fs::write(
+            workspace.join(".hex-sdk").join(index_relative),
+            "stale SDK\n",
+        )
+        .unwrap();
         assert!(initialize_workspace_at(&workspace, &sdk).unwrap());
         assert_eq!(
-            fs::read(workspace.join(".hex-sdk/dist/index.js")).unwrap(),
-            fs::read(sdk.join("dist/index.js")).unwrap()
+            fs::read(workspace.join(".hex-sdk").join(index_relative)).unwrap(),
+            fs::read(sdk.join(index_relative)).unwrap()
         );
         assert_eq!(
             fs::read_to_string(workspace.join("hex.config.ts")).unwrap(),
             "// user config\n"
         );
+        fs::remove_dir_all(workspace).unwrap();
+    }
+
+    #[test]
+    #[ignore = "requires a local Bun installation"]
+    fn source_sdk_registers_and_executes_a_transformation_with_bun() {
+        let bun = find_bun().expect("Bun must be installed for this smoke test");
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let workspace = std::env::temp_dir().join(format!("hex-bun-workspace-{unique}"));
+        let sdk = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("sdk/commands");
+
+        initialize_workspace_at(&workspace, &sdk).unwrap();
+        fs::write(
+            workspace.join("hex.config.ts"),
+            r#"import { defineHexConfig } from "@hex/commands"
+
+export default defineHexConfig({
+  transformations: {
+    "add-brackets": {
+      name: "Add brackets",
+      transform: (text) => `[${text}]`,
+    },
+  },
+  commands: {},
+})
+"#,
+        )
+        .unwrap();
+        install_workspace_dependencies(&workspace, &bun).unwrap();
+        let host_entrypoint = workspace.join("node_modules/@hex/commands/src/bin.ts");
+        assert!(host_entrypoint.is_file());
+
+        let (event_sender, events) = mpsc::sync_channel(16);
+        let (process, runtime, _, _, transformations) = start_candidate(
+            1,
+            &CommandConfig::new(),
+            &event_sender,
+            &workspace,
+            &workspace.join("hex.config.ts"),
+            &bun,
+            &host_entrypoint,
+        )
+        .unwrap();
+        assert!(runtime.transformations.contains("add-brackets"));
+        assert_eq!(transformations[0].id, "add-brackets");
+
+        process
+            .input
+            .send(HostInput::Transform {
+                invocation_id: "smoke-transform".into(),
+                transformation_ids: vec!["add-brackets".into()],
+                text: "hello".into(),
+                context: InvocationContext {
+                    application: Some("Notepad".into()),
+                    browser_host: None,
+                    browser_url: None,
+                    window_title: None,
+                },
+            })
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            assert!(!remaining.is_zero(), "transformation result timed out");
+            match events.recv_timeout(remaining).unwrap() {
+                HostEvent::Frame(
+                    1,
+                    HostOutput::TransformationResult {
+                        invocation_id,
+                        result: TransformationWireResult::Success { text },
+                    },
+                ) => {
+                    assert_eq!(invocation_id, "smoke-transform");
+                    assert_eq!(text, "[hello]");
+                    break;
+                }
+                HostEvent::Closed(1, error) => panic!("host stopped: {error}"),
+                _ => {}
+            }
+        }
+        drop(process);
         fs::remove_dir_all(workspace).unwrap();
     }
 

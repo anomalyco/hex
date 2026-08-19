@@ -1,7 +1,9 @@
 # Personal Commands
 
-**Status:** The literal-command MVP is implemented on macOS. This document
-records the shipped contract and the remaining workspace lifecycle work.
+**Status:** The literal-command MVP is implemented on macOS. The same bounded
+host, workspace provisioner, managed SDK, status contract, and transformation
+executor now serve macOS and Windows; Windows deliberately consumes only the
+transformation catalog until it has a real streaming command recognizer.
 
 ## What Users Can Configure
 
@@ -91,11 +93,15 @@ least one phrase. Omitting the section uses the native protocol.
 
 ## Workspace
 
-Create the workspace from the Commands pane or run:
+On macOS, create the workspace from the Commands pane or run:
 
 ```sh
 hex commands init
 ```
+
+On Windows, choose **Set up** in the Modes transformation card. Bun must be
+installed either on `PATH` or in its standard `~/.bun/bin` location. The two
+platforms use the same workspace path and schema.
 
 Provisioning installs:
 
@@ -110,12 +116,14 @@ Provisioning installs:
 ```
 
 `.hex-sdk` is bundled and managed by HEX; it is not an npm package and must not
-be edited. On startup, HEX atomically refreshes it from the running app bundle
-and reinstalls only the managed `@hex/commands` dependency when its contents
-change. User config, package metadata, and third-party dependencies are
-preserved. Run `bun run check` after changing the config. HEX watches the
-workspace, activates valid changes, and reports the last reload error in the
-Commands pane.
+be edited. On macOS it comes from the app resources. The Windows single
+executable embeds the checked-in TypeScript source and materializes a
+content-addressed SDK under Application Data. On startup, HEX atomically
+refreshes `.hex-sdk` and reinstalls only the managed `@hex/commands` dependency
+when its contents change. User config, package metadata, and third-party
+dependencies are preserved. Run `bun run check` after changing the config. HEX
+watches the workspace, activates valid changes, and reports the last reload
+error in the macOS Commands pane or Windows Modes transformation card.
 
 ## Runtime Boundary
 
@@ -125,8 +133,11 @@ hex.config.ts -> supervised Bun host -> validated serializable registry
 ```
 
 Bun and IPC never run in the partial-transcript recognition path. Transport,
-pending invocations, tool calls, and status files are bounded. A failed host
-preserves native commands and the last valid runtime snapshot where possible.
+pending invocations, transformations, tool calls, and status files are bounded.
+A failed host preserves native commands and the last valid runtime snapshot
+where possible. Windows output processing uses only registered transformations;
+it does not expose literal commands merely because the shared host can validate
+them.
 
 ## Remaining Work
 

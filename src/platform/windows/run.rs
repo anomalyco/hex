@@ -154,6 +154,17 @@ pub fn run(shutdown: &'static AtomicBool) -> Result<()> {
             let history = crate::history::History::open_default(settings.history_retention)?;
             let mode_runtime =
                 crate::windows_dictation::WindowsModeRuntime::from_settings(&settings);
+            let transformations =
+                Arc::new(crate::personal_commands::TransformationClient::default());
+            let _personal_commands = settings
+                .transformations_enabled()
+                .then(|| {
+                    crate::personal_commands::PersonalCommands::start(
+                        crate::commands_engine::CommandConfig::new(),
+                        transformations.clone(),
+                    )
+                })
+                .flatten();
             let config = crate::windows_dictation::WindowsDictationConfig {
                 device,
                 hotkey: settings.dictation_hotkey,
@@ -171,6 +182,7 @@ pub fn run(shutdown: &'static AtomicBool) -> Result<()> {
                     crate::text_replacements::ReplacementSet::new(&settings.text_replacements),
                 )),
                 mode_runtime: Arc::new(std::sync::RwLock::new(mode_runtime)),
+                transformations,
                 voice_action_model: Arc::new(std::sync::RwLock::new(
                     settings.voice_action_model.clone(),
                 )),
