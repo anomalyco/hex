@@ -684,21 +684,14 @@ fn process_dictation_job(
             .read()
             .unwrap_or_else(|error| error.into_inner())
             .replace(&raw_text);
-        // Mode corrections run after the global replacements, scoped to the
-        // context the text is about to land in.
-        let text = {
+        // Context selection remains in the native adapter because Windows
+        // application rules intentionally match executable substrings. The
+        // selected mode then enters the shared ordered processing policy.
+        let processed = {
             let modes = modes.read().unwrap_or_else(|error| error.into_inner());
-            match crate::windows_settings::mode_for_context(
-                &modes,
-                context.application.as_deref(),
-                context.browser_host.as_deref(),
-            ) {
-                Some(mode) if !mode.corrections.is_empty() => {
-                    crate::text_replacements::ReplacementSet::new(&mode.corrections).replace(&text)
-                }
-                _ => text,
-            }
+            process_mode_text(&text, &context, &modes)
         };
+        let text = processed.text;
         if text.trim().is_empty() {
             return Err("text replacements produced empty output".into());
         }
@@ -716,7 +709,13 @@ fn process_dictation_job(
                 raw_text,
                 final_text: text.clone(),
                 application: application.clone(),
-                processing: None,
+                processing: processed.observation.map(|processing| {
+                    crate::history::HistoryProcessing {
+                        profile: processing.profile,
+                        latency_ms: processing.latency_ms,
+                        fallback: processing.fallback,
+                    }
+                }),
                 audio_ms: job.audio_ms,
                 inference_ms,
                 total_ms: started.elapsed().as_millis() as u64,
@@ -734,6 +733,37 @@ fn process_dictation_job(
         "completed Windows dictation job"
     );
     job_result(OutputKind::Dictation, result, latency_ms)
+}
+
+fn process_mode_text(
+    text: &str,
+    context: &crate::command_context::ContextSnapshot,
+    modes: &[crate::windows_settings::WindowsMode],
+) -> crate::dictation_processing::Processed {
+    let mode = crate::windows_settings::mode_for_context(
+        modes,
+        context.application.as_deref(),
+        context.browser_host(),
+    );
+    let profile = mode.map_or_else(
+        || crate::dictation_processing::Profile::new("Global", ""),
+        |mode| {
+            let name = if mode.name.trim().is_empty() {
+                "Untitled mode"
+            } else {
+                &mode.name
+            };
+            crate::dictation_processing::Profile::new(name, "").replacements(
+                crate::text_replacements::ReplacementSet::new(&mode.corrections),
+            )
+        },
+    );
+    crate::dictation_processing::Profiles::new(profile).process_cancellable(
+        text,
+        context,
+        None,
+        &AtomicBool::new(false),
+    )
 }
 
 /// Transcribe the held instruction, pair it with the focused application's
@@ -769,7 +799,7 @@ fn process_voice_action_job(
         let reply = crate::windows_voice_action::fulfil(
             &instruction,
             context.application.as_deref(),
-            context.browser_host.as_deref(),
+            context.browser_host(),
             selected.as_deref(),
             model.as_ref(),
         )
@@ -973,5 +1003,32 @@ impl Drop for IndicatorGuard {
         if let Some(indicator) = &self.0 {
             indicator.send(crate::windows_indicator::WindowsIndicatorEvent::Reset);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn windows_mode_corrections_use_the_shared_processing_policy() {
+        let modes = vec![crate::windows_settings::WindowsMode {
+            name: "Code".into(),
+            applications: vec!["code".into()],
+            corrections: vec![crate::text_replacements::TextReplacement {
+                matched_phrase: "open code".into(),
+                output: "OpenCode".into(),
+            }],
+            ..crate::windows_settings::WindowsMode::default()
+        }];
+        let context = crate::command_context::ContextSnapshot {
+            application: Some("Visual Studio Code".into()),
+            ..crate::command_context::ContextSnapshot::default()
+        };
+
+        let processed = process_mode_text("Use open code.", &context, &modes);
+
+        assert_eq!(processed.text, "Use OpenCode.");
+        assert!(processed.observation.is_none());
     }
 }

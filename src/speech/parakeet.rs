@@ -339,7 +339,7 @@ impl DictationWorker {
                             stage: DictationJobStage::Processing,
                         });
                     }
-                    let mut processed = if matches!(job.target, TranscriptionTarget::VoiceAction) {
+                    let processed = if matches!(job.target, TranscriptionTarget::VoiceAction) {
                         profiles.process_voice_action_cancellable(
                             &job.text,
                             job.context.selected_text.as_deref(),
@@ -350,45 +350,10 @@ impl DictationWorker {
                         profiles.process_cancellable(
                             &job.text,
                             &job.context,
+                            Some(transformations.as_ref()),
                             &job.control.cancelled,
                         )
                     };
-                    if !processed.transformations.is_empty() && !job.control.is_cancelled() {
-                        let started = Instant::now();
-                        match transformations.transform(
-                            &processed.transformations,
-                            &processed.text,
-                            &job.context,
-                            &job.control.cancelled,
-                        ) {
-                            Ok(text) => {
-                                processed.text = text;
-                                let observation = processed.observation.get_or_insert_with(|| {
-                                    ProcessingObservation {
-                                        profile: "Custom transformations".into(),
-                                        latency_ms: 0,
-                                        fallback: None,
-                                    }
-                                });
-                                observation.latency_ms = observation
-                                    .latency_ms
-                                    .saturating_add(started.elapsed().as_millis() as u64);
-                            }
-                            Err(error) => {
-                                let observation = processed.observation.get_or_insert_with(|| {
-                                    ProcessingObservation {
-                                        profile: "Custom transformations".into(),
-                                        latency_ms: 0,
-                                        fallback: None,
-                                    }
-                                });
-                                observation.latency_ms = observation
-                                    .latency_ms
-                                    .saturating_add(started.elapsed().as_millis() as u64);
-                                observation.fallback = Some(error);
-                            }
-                        }
-                    }
                     if job.control.is_cancelled() {
                         let _ = processor_output.send(OutputJob::Cancelled { job_id: job.job_id });
                         continue;

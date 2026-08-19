@@ -100,9 +100,9 @@ current-user startup registry, UI Automation, and Windows capture APIs.
 | Clipboard preservation and generation-safe restoration | Implemented |
 | Recording tones and click-through recording/processing HUD | Implemented; the renderer is native GPUI/DirectX rather than the macOS Metal shader |
 | History retention, list, detail, search, copy, delete, and clear | Implemented |
-| Text replacements | Implemented in the Windows Modes pane using the shared macOS replacement engine |
+| Text replacements | Implemented in the Windows Modes pane using the shared phrase-boundary replacement engine |
 | Resident tray and Launch at login | Implemented |
-| Application modes with per-mode corrections | Implemented; modes match by application name — web-domain rules, OpenCode rewrite, and TypeScript transformations remain |
+| Application modes with per-mode corrections | Implemented on the shared ordered processing policy; modes match by application name — OpenCode settings and TypeScript transformation hosting remain |
 | Voice Action with selected-text capture and in-app OpenCode model selection | Implemented; selection is read through a clipboard round trip rather than UI Automation |
 | Recognition hints for Whisper-family models | Implemented |
 | Release microphone while idle | Implemented; mutually exclusive with audio pre-roll, as documented in Settings |

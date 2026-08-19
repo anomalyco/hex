@@ -30,11 +30,7 @@ const BROWSER_STEMS: &[&str] = &[
 
 const URL_READ_DEADLINE: Duration = Duration::from_millis(300);
 
-#[derive(Clone, Debug, Default)]
-pub struct WindowsContext {
-    pub application: Option<String>,
-    pub browser_host: Option<String>,
-}
+pub type WindowsContext = crate::command_context::ContextSnapshot;
 
 /// A context read in flight: the application stem is immediate, the UIA
 /// URL read proceeds on a helper thread while the caller transcribes.
@@ -57,7 +53,7 @@ pub fn begin_capture() -> PendingContext {
 
 impl PendingContext {
     pub fn finish(self) -> WindowsContext {
-        let browser_host = self
+        let browser_url = self
             .url
             .and_then(|receiver| match receiver.recv_timeout(URL_READ_DEADLINE) {
                 Ok(url) => url,
@@ -69,18 +65,27 @@ impl PendingContext {
                 }
             })
             .as_deref()
-            .and_then(host_of);
+            .and_then(browser_url);
         WindowsContext {
             application: self.application,
-            browser_host,
+            browser_url,
+            window_title: None,
+            selected_text: None,
+            input_revision: None,
         }
     }
 }
 
+fn browser_url(url: &str) -> Option<Url> {
+    let mut url = Url::parse(url).ok()?;
+    let host = normalize_host(url.host_str()?);
+    url.set_host(Some(&host)).ok()?;
+    Some(url)
+}
+
+#[cfg(test)]
 fn host_of(url: &str) -> Option<String> {
-    Url::parse(url)
-        .ok()
-        .and_then(|url| url.host_str().map(normalize_host))
+    browser_url(url).and_then(|url| url.host_str().map(normalize_host))
 }
 
 /// Hosts compare case-insensitively with any trailing dot removed,
@@ -265,7 +270,7 @@ mod tests {
         let deadline = std::time::Instant::now() + Duration::from_secs(15);
         loop {
             let context = capture();
-            if context.browser_host.is_some() {
+            if context.browser_host().is_some() {
                 println!("foreground context: {context:?}");
                 return;
             }

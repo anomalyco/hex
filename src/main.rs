@@ -15,6 +15,8 @@ pub(crate) use common::command_grammar as command_grammar_common;
 pub(crate) use common::commands_engine as commands;
 #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
 pub(crate) use common::commands_engine;
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+pub(crate) use common::dictation_processing;
 #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
 pub(crate) use common::keys;
 #[cfg(any(target_os = "macos", target_os = "windows"))]

@@ -569,6 +569,18 @@ impl TransformationClient {
     }
 }
 
+impl crate::dictation_processing::TransformationExecutor for TransformationClient {
+    fn transform(
+        &self,
+        ids: &[String],
+        text: &str,
+        context: &ContextSnapshot,
+        cancelled: &AtomicBool,
+    ) -> std::result::Result<String, String> {
+        TransformationClient::transform(self, ids, text, context, cancelled)
+    }
+}
+
 fn apply_builtin_transformation(id: &str, text: &str) -> Option<String> {
     match id {
         LOWERCASE_TRANSFORMATION_ID => Some(text.to_lowercase()),
