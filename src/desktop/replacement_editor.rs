@@ -9,6 +9,7 @@ use gpui::{
     Subscription, Window, div, prelude::*, px, rgb,
 };
 
+use crate::desktop_mode_list::ModeTarget;
 use crate::desktop_ui::{
     FAINT, LINE, MUTED, SURFACE_HOVER, TEXT_SOFT, compact_button, compact_header_plus_button,
     compact_panel, compact_panel_header, tr,
@@ -58,30 +59,10 @@ impl ReplacementEditorInput {
     }
 }
 
-/// A root-relative replacement collection. `Global` means the macOS default
-/// mode in the macOS root and the global Windows replacement list in Windows.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum ReplacementEditorTarget {
-    Global,
-    Mode(usize),
-}
-
-impl ReplacementEditorTarget {
-    fn id_fragment(self) -> String {
-        match self {
-            Self::Global => "global".into(),
-            Self::Mode(index) => format!("mode-{index}"),
-        }
-    }
-}
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum ReplacementEditorAction {
-    Add(ReplacementEditorTarget),
-    Remove {
-        target: ReplacementEditorTarget,
-        index: usize,
-    },
+    Add(ModeTarget),
+    Remove { target: ModeTarget, index: usize },
 }
 
 pub(crate) trait ReplacementEditorDelegate: Sized + 'static {
@@ -94,7 +75,7 @@ pub(crate) trait ReplacementEditorDelegate: Sized + 'static {
 }
 
 pub(crate) struct ReplacementEditorView<'a> {
-    pub(crate) target: ReplacementEditorTarget,
+    pub(crate) target: ModeTarget,
     pub(crate) title: &'static str,
     pub(crate) empty_message: &'static str,
     pub(crate) rows: &'a [ReplacementEditorInput],

@@ -35,20 +35,23 @@ use crate::desktop_host::{
     DesktopMicrophoneSnapshot, DesktopShortcut, DesktopSnapshot, DesktopTranscriptionSnapshot,
     DesktopUpdateStatus,
 };
+use crate::desktop_mode_list::{
+    ModeActivation, ModeListAction, ModeListDelegate, ModeListEntry, ModeListView, ModeTarget,
+    render_mode_list as render_shared_mode_list,
+};
 use crate::desktop_replacement_editor::{
     ReplacementEditorAction, ReplacementEditorDelegate, ReplacementEditorInput,
-    ReplacementEditorTarget, ReplacementEditorView,
-    render_replacement_editor as render_shared_replacement_editor,
+    ReplacementEditorView, render_replacement_editor as render_shared_replacement_editor,
 };
 use crate::desktop_shell::{DesktopPane, render_navigation_items};
 use crate::desktop_transcription_picker::TranscriptionPickerDelegate;
 use crate::desktop_ui::{
-    DIVIDER, FAINT, LINE, MUTED, SIDEBAR_WIDTH, TEXT, TEXT_ON_ACCENT, TEXT_SOFT, accent_color,
-    compact_button, compact_panel, disclosure_button, dropdown_backdrop, dropdown_item,
-    dropdown_panel, dropdown_panel_with_width, empty_message, error_message, header_button,
-    hotkey_keycaps, pane_body, pane_content, pane_header_with_action, segmented_control,
-    segmented_item, settings_panel, settings_row, settings_section_label, sidebar_frame, toggle,
-    window_frame,
+    DIVIDER, FAINT, LINE, MUTED, PANE_LIST_WIDTH, SECTION_GAP, SIDEBAR_WIDTH, TEXT, TEXT_ON_ACCENT,
+    TEXT_SOFT, accent_color, compact_button, compact_panel, compact_section_label,
+    disclosure_button, dropdown_backdrop, dropdown_item, dropdown_panel, dropdown_panel_with_width,
+    error_message, header_button, hotkey_keycaps, pane_body, pane_content, pane_header_with_action,
+    segmented_control, segmented_item, settings_panel, settings_row, settings_section_label,
+    sidebar_frame, toggle, window_frame,
 };
 use crate::events::EventReader;
 use crate::history::{History, HistoryRetention};
@@ -122,6 +125,7 @@ struct WindowsApp {
     replacement_inputs: Vec<ReplacementEditorInput>,
     transcription_picker: TranscriptionPickerState,
     mode_inputs: Vec<ModeInputs>,
+    selected_mode: ModeTarget,
     voice_model_dropdown_open: bool,
     voice_model_dropdown_bounds: Option<Bounds<Pixels>>,
     recognition_hints_input: Entity<TextInput>,
@@ -302,6 +306,7 @@ pub fn open(event_path: PathBuf, shutdown: &'static AtomicBool, start_hidden: bo
                             replacement_inputs,
                             transcription_picker: TranscriptionPickerState::Closed,
                             mode_inputs,
+                            selected_mode: ModeTarget::Global,
                             voice_model_dropdown_open: false,
                             voice_model_dropdown_bounds: None,
                             model_catalog_language_filter: None,
@@ -1742,17 +1747,25 @@ impl WindowsApp {
         cx.notify();
     }
 
-    fn add_mode(&mut self, cx: &mut Context<Self>) {
-        self.mode_inputs.push(Self::mode_inputs(
-            &crate::windows_settings::WindowsMode::default(),
-            cx,
-        ));
+    fn add_mode(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let mode = crate::windows_settings::WindowsMode {
+            name: format!("Mode {}", self.mode_inputs.len() + 1),
+            ..Default::default()
+        };
+        self.mode_inputs.push(Self::mode_inputs(&mode, cx));
+        self.selected_mode = ModeTarget::Mode(self.mode_inputs.len().saturating_sub(1));
         self.sync_modes(cx);
+        window.blur();
     }
 
     fn remove_mode(&mut self, index: usize, cx: &mut Context<Self>) {
         if index < self.mode_inputs.len() {
             self.mode_inputs.remove(index);
+            self.selected_mode = match self.selected_mode {
+                ModeTarget::Mode(selected) if selected == index => ModeTarget::Global,
+                ModeTarget::Mode(selected) if selected > index => ModeTarget::Mode(selected - 1),
+                selected => selected,
+            };
             self.sync_modes(cx);
         }
     }
@@ -2858,84 +2871,57 @@ impl WindowsApp {
     }
 
     fn render_modes(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        if let ModeTarget::Mode(index) = self.selected_mode
+            && index >= self.mode_inputs.len()
+        {
+            self.selected_mode = ModeTarget::Global;
+        }
         let add = header_button(tr("Add mode"))
             .id("windows-add-mode")
-            .on_click(cx.listener(|this, _, _, cx| this.add_mode(cx)))
+            .on_click(cx.listener(|this, _, window, cx| this.add_mode(window, cx)))
             .into_any_element();
-        let replacement_count = self.replacement_inputs.len();
-        let mode_count = self.mode_inputs.len();
-        let mode_panels: Vec<AnyElement> = self
-            .mode_inputs
-            .iter()
-            .enumerate()
-            .map(|(mode_index, inputs)| {
-                let details = compact_panel()
-                    .mt_3()
-                    .child(
-                        div()
-                            .w_full()
-                            .p_3()
-                            .flex()
-                            .items_center()
-                            .gap_3()
-                            .border_b_1()
-                            .border_color(rgb(DIVIDER))
-                            .child(div().flex_1().min_w(px(0.0)).child(inputs.name.clone()))
-                            .child(
-                                compact_button(tr("Remove mode"))
-                                    .id(("windows-remove-mode", mode_index))
-                                    .on_click(cx.listener(move |this, _, _, cx| {
-                                        this.remove_mode(mode_index, cx);
-                                    })),
-                            ),
-                    )
-                    .child(
-                        div()
-                            .w_full()
-                            .p_3()
-                            .flex()
-                            .flex_col()
-                            .gap_2()
-                            .border_b_1()
-                            .border_color(rgb(DIVIDER))
-                            .child(div().text_size(px(11.0)).text_color(rgb(FAINT)).child(tr(
-                                "Applies when the focused application contains any of these names",
-                            )))
-                            .child(inputs.applications.clone())
-                            .child(div().text_size(px(11.0)).text_color(rgb(FAINT)).child(tr(
-                                "Or when the browser is on one of these sites; sites win over applications",
-                            )))
-                            .child(inputs.websites.clone()),
-                    )
-                    .into_any_element();
-                let corrections = render_shared_replacement_editor(
-                    ReplacementEditorView {
-                        target: ReplacementEditorTarget::Mode(mode_index),
-                        title: "Corrections",
-                        empty_message: "No corrections in this mode.",
-                        rows: &inputs.corrections,
-                    },
-                    cx,
-                );
-                div()
-                    .w_full()
-                    .flex()
-                    .flex_col()
-                    .gap_3()
-                    .child(details)
-                    .child(corrections)
-                    .into_any_element()
-            })
-            .collect();
-        let replacements = render_shared_replacement_editor(
-            ReplacementEditorView {
-                target: ReplacementEditorTarget::Global,
-                title: "Replacements",
-                empty_message: "No replacements yet. Add one to correct recurring phrases.",
-                rows: &self.replacement_inputs,
+        let mut entries = vec![ModeListEntry {
+            target: ModeTarget::Global,
+            title: tr("Global").into(),
+            empty_subtitle: "Fallback for everything",
+            activations: Vec::new(),
+        }];
+        entries.extend(self.mode_inputs.iter().enumerate().map(|(index, inputs)| {
+            let name = inputs.name.read(cx).text().trim().to_string();
+            let activations = self
+                .host
+                .settings
+                .modes
+                .get(index)
+                .map(|mode| {
+                    mode.applications
+                        .iter()
+                        .cloned()
+                        .map(|name| ModeActivation::application(name, None))
+                        .chain(mode.websites.iter().cloned().map(ModeActivation::website))
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            ModeListEntry {
+                target: ModeTarget::Mode(index),
+                title: if name.is_empty() {
+                    tr("Untitled mode").into()
+                } else {
+                    name
+                },
+                empty_subtitle: "No activation rules",
+                activations,
+            }
+        }));
+        let mode_list = render_shared_mode_list(
+            ModeListView {
+                entries,
+                selected: self.selected_mode,
+                secondary_action: false,
             },
             cx,
         );
+        let detail = self.render_windows_mode_detail(cx);
 
         div()
             .size_full()
@@ -2943,57 +2929,148 @@ impl WindowsApp {
             .flex_col()
             .child(pane_header_with_action("Modes", Some(add)))
             .child(
-                pane_body().child(
-                    div()
-                        .id("windows-modes-scroll")
-                        .size_full()
-                        .overflow_y_scroll()
-                        .px_8()
-                        .pt_1()
-                        .pb_7()
+                pane_body().p_5().child(
+                    pane_content()
+                        .flex_row()
+                        .gap_5()
                         .child(
-                            div().w_full().flex().justify_center().child(
-                                pane_content()
-                                    .child(settings_section_label("Default mode"))
-                                    .child(
-                                        settings_panel().child(
-                                            settings_row(
-                                                "Text replacements",
-                                                "Exact phrase-boundary corrections run before every Windows paste",
-                                                div()
-                                                    .text_size(px(12.0))
-                                                    .text_color(rgb(TEXT_SOFT))
-                                                    .child(tr_fill(
-                                                        "{} rules",
-                                                        &replacement_count.to_string(),
-                                                    )),
-                                            )
-                                            .border_b_0(),
-                                        ),
-                                    )
-                                    .child(settings_section_label("Application modes"))
-                                    .when(mode_count == 0, |content| {
-                                        content.child(compact_panel().child(empty_message(
-                                            "No modes yet. Add one to correct text in specific applications.",
-                                        )))
-                                    })
-                                    .children(mode_panels)
-                                    .child(settings_section_label("Replacements"))
-                                    .child(replacements)
-                                    .when_some(
-                                        self.host.settings_error.clone(),
-                                        |content, error| {
-                                            content.child(error_message(
-                                                "Text replacements could not be saved.",
-                                                error,
-                                            ))
-                                        },
-                                    ),
-                            ),
-                        ),
+                            div()
+                                .id("modes-list")
+                                .w(px(PANE_LIST_WIDTH))
+                                .h_full()
+                                .flex_none()
+                                .child(mode_list),
+                        )
+                        .child(detail),
                 ),
             )
             .into_any_element()
+    }
+
+    fn render_windows_mode_detail(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        let mut detail = div()
+            .id("mode-detail")
+            .flex_1()
+            .min_w(px(0.0))
+            .h_full()
+            .overflow_y_scroll()
+            .child(match self.selected_mode {
+                ModeTarget::Global => {
+                    let replacements = render_shared_replacement_editor(
+                        ReplacementEditorView {
+                            target: ModeTarget::Global,
+                            title: "Replacements",
+                            empty_message:
+                                "No replacements yet. Add one to correct recurring phrases.",
+                            rows: &self.replacement_inputs,
+                        },
+                        cx,
+                    );
+                    div()
+                        .w_full()
+                        .max_w(px(700.0))
+                        .flex()
+                        .flex_col()
+                        .gap(px(SECTION_GAP))
+                        .pb_5()
+                        .child(compact_panel().child(
+                            div()
+                                .min_h(px(64.0))
+                                .px_3()
+                                .py_2()
+                                .flex()
+                                .flex_col()
+                                .justify_center()
+                                .child(crate::desktop_ui::settings_copy(
+                                    "Global",
+                                    "Used unless a more specific mode matches.",
+                                )),
+                        ))
+                        .child(div().h(px(4.0)))
+                        .child(compact_section_label(tr("TEXT PROCESSING")))
+                        .child(replacements)
+                        .into_any_element()
+                }
+                ModeTarget::Mode(mode_index) => {
+                    let inputs = &self.mode_inputs[mode_index];
+                    let name = inputs.name.clone();
+                    let applications = inputs.applications.clone();
+                    let websites = inputs.websites.clone();
+                    let corrections = render_shared_replacement_editor(
+                        ReplacementEditorView {
+                            target: ModeTarget::Mode(mode_index),
+                            title: "Corrections",
+                            empty_message: "No corrections in this mode.",
+                            rows: &inputs.corrections,
+                        },
+                        cx,
+                    );
+                    let basics = compact_panel()
+                        .child(
+                            div()
+                                .w_full()
+                                .p_3()
+                                .flex()
+                                .items_center()
+                                .gap_3()
+                                .border_b_1()
+                                .border_color(rgb(DIVIDER))
+                                .child(div().flex_1().min_w(px(0.0)).child(name))
+                                .child(
+                                    compact_button(tr("Remove mode"))
+                                        .id(("windows-remove-mode", mode_index))
+                                        .on_click(cx.listener(move |this, _, _, cx| {
+                                            this.remove_mode(mode_index, cx);
+                                        })),
+                                ),
+                        )
+                        .child(
+                            div()
+                                .w_full()
+                                .p_3()
+                                .flex()
+                                .flex_col()
+                                .gap_2()
+                                .child(
+                                    div()
+                                        .text_size(px(11.0))
+                                        .text_color(rgb(FAINT))
+                                        .child(tr(
+                                            "Applies when the focused application contains any of these names",
+                                        )),
+                                )
+                                .child(applications)
+                                .child(
+                                    div()
+                                        .text_size(px(11.0))
+                                        .text_color(rgb(FAINT))
+                                        .child(tr(
+                                            "Or when the browser is on one of these sites; sites win over applications",
+                                        )),
+                                )
+                                .child(websites),
+                        );
+                    div()
+                        .w_full()
+                        .max_w(px(700.0))
+                        .flex()
+                        .flex_col()
+                        .gap(px(SECTION_GAP))
+                        .pb_5()
+                        .child(basics)
+                        .child(div().h(px(4.0)))
+                        .child(compact_section_label(tr("TEXT PROCESSING")))
+                        .child(corrections)
+                        .into_any_element()
+                }
+            });
+        if let Some(error) = self.host.settings_error.clone() {
+            detail = detail.child(error_message(
+                "Text replacements could not be saved.",
+                error,
+            ));
+        }
+        detail.into_any_element()
     }
 
     /// The Voice Action pane, mirroring macOS: an explainer, the capture
@@ -3681,6 +3758,30 @@ impl crate::desktop_hud_lab::HudLabDelegate for WindowsApp {
     }
 }
 
+impl ModeListDelegate for WindowsApp {
+    fn handle_mode_list_action(
+        &mut self,
+        action: ModeListAction,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let target = match action {
+            ModeListAction::Select(target) | ModeListAction::OpenContextMenu { target, .. } => {
+                target
+            }
+        };
+        if let ModeTarget::Mode(index) = target
+            && index >= self.mode_inputs.len()
+        {
+            return;
+        }
+        self.selected_mode = target;
+        self.close_popups();
+        window.blur();
+        cx.notify();
+    }
+}
+
 impl ReplacementEditorDelegate for WindowsApp {
     fn handle_replacement_editor_action(
         &mut self,
@@ -3689,7 +3790,7 @@ impl ReplacementEditorDelegate for WindowsApp {
         cx: &mut Context<Self>,
     ) {
         match action {
-            ReplacementEditorAction::Add(ReplacementEditorTarget::Global) => {
+            ReplacementEditorAction::Add(ModeTarget::Global) => {
                 let input = ReplacementEditorInput::new(
                     &crate::text_replacements::TextReplacement::default(),
                     Self::sync_text_replacements,
@@ -3700,7 +3801,7 @@ impl ReplacementEditorDelegate for WindowsApp {
                 self.sync_text_replacements(cx);
                 focus.focus(window);
             }
-            ReplacementEditorAction::Add(ReplacementEditorTarget::Mode(mode_index)) => {
+            ReplacementEditorAction::Add(ModeTarget::Mode(mode_index)) => {
                 if mode_index >= self.mode_inputs.len() {
                     return;
                 }
@@ -3715,7 +3816,7 @@ impl ReplacementEditorDelegate for WindowsApp {
                 focus.focus(window);
             }
             ReplacementEditorAction::Remove {
-                target: ReplacementEditorTarget::Global,
+                target: ModeTarget::Global,
                 index,
             } => {
                 if index < self.replacement_inputs.len() {
@@ -3724,7 +3825,7 @@ impl ReplacementEditorDelegate for WindowsApp {
                 }
             }
             ReplacementEditorAction::Remove {
-                target: ReplacementEditorTarget::Mode(mode_index),
+                target: ModeTarget::Mode(mode_index),
                 index,
             } => {
                 if let Some(mode) = self.mode_inputs.get_mut(mode_index)

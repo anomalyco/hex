@@ -44,8 +44,8 @@ pub(crate) use desktop::{
 };
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 pub(crate) use desktop::{
-    history_pane as desktop_history_pane, replacement_editor as desktop_replacement_editor,
-    text_input,
+    history_pane as desktop_history_pane, mode_list as desktop_mode_list,
+    replacement_editor as desktop_replacement_editor, text_input,
 };
 #[cfg(target_os = "linux")]
 pub(crate) use platform::linux::{

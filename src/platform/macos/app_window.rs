@@ -31,10 +31,13 @@ use crate::desktop_host::{
     DesktopAction, DesktopCapabilities, DesktopHost, DesktopMicrophoneSnapshot, DesktopSnapshot,
     DesktopTranscriptionSnapshot, DesktopUpdateStatus,
 };
+use crate::desktop_mode_list::{
+    ModeActivation, ModeListAction, ModeListDelegate, ModeListEntry, ModeListView, ModeTarget,
+    render_mode_list as render_shared_mode_list,
+};
 use crate::desktop_replacement_editor::{
     ReplacementEditorAction, ReplacementEditorDelegate, ReplacementEditorInput,
-    ReplacementEditorTarget, ReplacementEditorView,
-    render_replacement_editor as render_shared_replacement_editor,
+    ReplacementEditorView, render_replacement_editor as render_shared_replacement_editor,
 };
 use crate::desktop_shell::{DesktopPane, render_navigation_items};
 use crate::desktop_transcription_picker::{
@@ -2337,8 +2340,8 @@ impl AppWindow {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let target = match selection {
-            ModeSelection::Default => ReplacementEditorTarget::Global,
-            ModeSelection::Custom(index) => ReplacementEditorTarget::Mode(index),
+            ModeSelection::Default => ModeTarget::Global,
+            ModeSelection::Custom(index) => ModeTarget::Mode(index),
         };
         render_shared_replacement_editor(
             ReplacementEditorView {
@@ -3549,8 +3552,6 @@ impl AppWindow {
     }
 
     fn render_modes(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        let compact = window.viewport_size().width < px(980.0);
-        let mode_list_width = if compact { 196.0 } else { 220.0 };
         let add = compact_header_plus_button()
             .id("add-dictation-mode")
             .border_1()
@@ -3571,23 +3572,13 @@ impl AppWindow {
                 this.select_mode(selection, window, cx);
                 this.sync_processing_settings(cx);
             }));
-        let default_selected = self.selected_mode == ModeSelection::Default;
-        let mut rows = vec![
-            mode_row(
-                "Global",
-                "Fallback for everything",
-                default_selected,
-                &[],
-                &[],
-                &self.application_catalog,
-            )
-            .id("default-dictation-mode")
-            .on_click(cx.listener(|this, _, window, cx| {
-                this.select_mode(ModeSelection::Default, window, cx);
-            }))
-            .into_any_element(),
-        ];
-        rows.extend(
+        let mut entries = vec![ModeListEntry {
+            target: ModeTarget::Global,
+            title: "Global".into(),
+            empty_subtitle: "Fallback for everything",
+            activations: Vec::new(),
+        }];
+        entries.extend(
             self.processing_inputs
                 .modes
                 .iter()
@@ -3595,31 +3586,50 @@ impl AppWindow {
                 .map(|(index, inputs)| {
                     let name = input_text(&inputs.name, cx);
                     let mode = &self.settings.dictation_processing.modes[index];
-                    let selected = self.selected_mode == ModeSelection::Custom(index);
-                    mode_row(
-                        name,
-                        "No activation rules",
-                        selected,
-                        &mode.applications,
-                        &mode.browser_hosts,
-                        &self.application_catalog,
-                    )
-                    .id(("dictation-mode", index))
-                    .on_mouse_down(
-                        MouseButton::Right,
-                        cx.listener(move |this, event: &MouseDownEvent, window, cx| {
-                            this.select_mode(ModeSelection::Custom(index), window, cx);
-                            this.mode_context_menu = Some(event.position);
-                            cx.stop_propagation();
-                            cx.notify();
-                        }),
-                    )
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        this.select_mode(ModeSelection::Custom(index), window, cx);
-                    }))
-                    .into_any_element()
+                    let mut activations = mode
+                        .applications
+                        .iter()
+                        .map(|name| {
+                            let icon = match &self.application_catalog {
+                                ApplicationCatalogState::Loaded(applications) => applications
+                                    .iter()
+                                    .find(|application| &application.name == name)
+                                    .and_then(|application| application.icon.clone()),
+                                ApplicationCatalogState::Loading => None,
+                            };
+                            ModeActivation::application(name.clone(), icon)
+                        })
+                        .collect::<Vec<_>>();
+                    activations.extend(
+                        mode.browser_hosts
+                            .iter()
+                            .cloned()
+                            .map(ModeActivation::website),
+                    );
+                    ModeListEntry {
+                        target: ModeTarget::Mode(index),
+                        title: if name.is_empty() {
+                            "Untitled mode".into()
+                        } else {
+                            name
+                        },
+                        empty_subtitle: "No activation rules",
+                        activations,
+                    }
                 })
                 .collect::<Vec<_>>(),
+        );
+        let selected = match self.selected_mode {
+            ModeSelection::Default => ModeTarget::Global,
+            ModeSelection::Custom(index) => ModeTarget::Mode(index),
+        };
+        let mode_list = render_shared_mode_list(
+            ModeListView {
+                entries,
+                selected,
+                secondary_action: true,
+            },
+            cx,
         );
         let detail = self.render_mode_detail(window, cx);
         div()
@@ -3638,20 +3648,10 @@ impl AppWindow {
                         .child(
                             div()
                                 .id("modes-list")
-                                .w(px(mode_list_width))
+                                .w(px(PANE_LIST_WIDTH))
                                 .h_full()
                                 .flex_none()
-                                .flex()
-                                .flex_col()
-                                .gap_2()
-                                .child(
-                                    compact_panel()
-                                        .id("mode-list-card")
-                                        .overflow_y_scroll()
-                                        .child(
-                                            div().p_2().flex().flex_col().gap_1().children(rows),
-                                        ),
-                                ),
+                                .child(mode_list),
                         )
                         .child(detail),
                 ),
@@ -3764,7 +3764,7 @@ impl AppWindow {
                                 .text_color(rgb(TEXT))
                                 .child("Name"),
                         )
-                        .child(div().w(px(300.0)).flex_none().child(name)),
+                        .child(div().max_w(px(300.0)).min_w(px(0.0)).flex_1().child(name)),
                 )
                 .when_some(application_picker, |panel, picker| {
                     panel.child(div().border_b_1().border_color(rgb(LINE)).child(picker))
@@ -3782,7 +3782,13 @@ impl AppWindow {
                             "Web pages",
                             "Switch when a domain is active in Brave",
                         ))
-                        .child(div().max_w(px(300.0)).flex_1().child(browser_hosts)),
+                        .child(
+                            div()
+                                .max_w(px(300.0))
+                                .min_w(px(0.0))
+                                .flex_1()
+                                .child(browser_hosts),
+                        ),
                 )
                 .into_any_element()
         };
@@ -4390,6 +4396,7 @@ impl AppWindow {
                     .child(
                         div()
                             .max_w(px(300.0))
+                            .min_w(px(0.0))
                             .min_h(px(CONTROL_HEIGHT))
                             .flex_1()
                             .p_1()
@@ -6485,6 +6492,33 @@ impl HistoryPaneDelegate for AppWindow {
     }
 }
 
+impl ModeListDelegate for AppWindow {
+    fn handle_mode_list_action(
+        &mut self,
+        action: ModeListAction,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let target = match action {
+            ModeListAction::Select(target) | ModeListAction::OpenContextMenu { target, .. } => {
+                target
+            }
+        };
+        let selection = match target {
+            ModeTarget::Global => ModeSelection::Default,
+            ModeTarget::Mode(index) if index < self.processing_inputs.modes.len() => {
+                ModeSelection::Custom(index)
+            }
+            ModeTarget::Mode(_) => return,
+        };
+        self.select_mode(selection, window, cx);
+        if let ModeListAction::OpenContextMenu { position, .. } = action {
+            self.mode_context_menu = Some(position);
+            cx.notify();
+        }
+    }
+}
+
 impl ReplacementEditorDelegate for AppWindow {
     fn handle_replacement_editor_action(
         &mut self,
@@ -6497,14 +6531,14 @@ impl ReplacementEditorDelegate for AppWindow {
             | ReplacementEditorAction::Remove { target, .. } => target,
         };
         let selection = match target {
-            ReplacementEditorTarget::Global => ModeSelection::Default,
-            ReplacementEditorTarget::Mode(index)
+            ModeTarget::Global => ModeSelection::Default,
+            ModeTarget::Mode(index)
                 if index < self.processing_inputs.modes.len()
                     && index < self.settings.dictation_processing.modes.len() =>
             {
                 ModeSelection::Custom(index)
             }
-            ReplacementEditorTarget::Mode(_) => return,
+            ModeTarget::Mode(_) => return,
         };
 
         match action {
@@ -7021,123 +7055,6 @@ fn advance_highlight(current: usize, direction: i32, count: usize) -> usize {
     } else {
         (current + 1).min(count - 1)
     }
-}
-
-fn mode_row(
-    title: impl Into<String>,
-    subtitle: impl Into<String>,
-    selected: bool,
-    applications: &[String],
-    browser_hosts: &[String],
-    catalog: &ApplicationCatalogState,
-) -> Div {
-    let title = title.into();
-    let subtitle = subtitle.into();
-    let has_activations = !applications.is_empty() || !browser_hosts.is_empty();
-    div()
-        .w_full()
-        .min_h(px(52.0))
-        .px_3()
-        .py_2()
-        .flex()
-        .flex_col()
-        .items_start()
-        .justify_center()
-        .gap_1()
-        .rounded(px(6.0))
-        .when(selected, |row| {
-            row.bg(rgb(0x292929)).hover(|row| row.bg(rgb(0x303030)))
-        })
-        .when(!selected, |row| row.hover(|row| row.bg(rgb(SURFACE_HOVER))))
-        .child(
-            div()
-                .w_full()
-                .text_size(px(12.0))
-                .font_weight(FontWeight::SEMIBOLD)
-                .text_color(rgb(TEXT))
-                .truncate()
-                .child(title),
-        )
-        .when(has_activations, |row| {
-            row.child(mode_activation_icons(applications, browser_hosts, catalog))
-        })
-        .when(!has_activations, |row| {
-            row.child(
-                div()
-                    .text_size(px(10.0))
-                    .text_color(rgb(if selected { TEXT_SOFT } else { FAINT }))
-                    .truncate()
-                    .child(subtitle),
-            )
-        })
-}
-
-fn mode_activation_icons(
-    applications: &[String],
-    browser_hosts: &[String],
-    catalog: &ApplicationCatalogState,
-) -> AnyElement {
-    let total = applications.len() + browser_hosts.len();
-    let visible = total.min(5);
-    let mut icons = Vec::with_capacity(visible + usize::from(total > visible));
-    for name in applications.iter().take(visible) {
-        let application = match catalog {
-            ApplicationCatalogState::Loaded(applications) => applications
-                .iter()
-                .find(|application| &application.name == name),
-            _ => None,
-        };
-        icons.push(application_icon(application, Some(name), 18.0));
-    }
-    for host in browser_hosts
-        .iter()
-        .take(visible.saturating_sub(icons.len()))
-    {
-        let initial = host
-            .chars()
-            .find(|character| character.is_alphanumeric())
-            .map(|character| character.to_uppercase().to_string())
-            .unwrap_or_else(|| "?".into());
-        icons.push(
-            div()
-                .size(px(18.0))
-                .flex_none()
-                .flex()
-                .items_center()
-                .justify_center()
-                .rounded(px(4.0))
-                .border_1()
-                .border_color(rgb(0x444444))
-                .bg(rgb(0xeeeeee))
-                .text_size(px(8.0))
-                .font_weight(FontWeight::SEMIBOLD)
-                .text_color(rgb(0x202020))
-                .child(initial)
-                .into_any_element(),
-        );
-    }
-    if total > visible {
-        icons.push(
-            div()
-                .h(px(18.0))
-                .px_1()
-                .flex()
-                .items_center()
-                .rounded(px(4.0))
-                .bg(rgb(0x303030))
-                .text_size(px(8.0))
-                .text_color(rgb(MUTED))
-                .child(format!("+{}", total - visible))
-                .into_any_element(),
-        );
-    }
-    div()
-        .h(px(18.0))
-        .flex()
-        .items_center()
-        .gap_1()
-        .children(icons)
-        .into_any_element()
 }
 
 fn application_icon(

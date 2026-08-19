@@ -46,10 +46,11 @@ not inject arbitrary GPUI elements because that would preserve two visual
 systems behind a nominally shared shell.
 
 Settings and Activity established the shared vocabulary. History now has one
-behavior-complete pane, and the reusable replacement/correction editor is the
-first extracted piece of Modes. The rest of Modes, Voice Action, Commands, and
-Meetings can use the same shell, but each pane appears on a platform only when
-its underlying behavior is implemented there.
+behavior-complete pane. Modes now shares its collection identity, selection,
+activation badges, list renderer, and replacement/correction editor. The rest
+of Modes, Voice Action, Commands, and Meetings can use the same shell, but each
+pane appears on a platform only when its underlying behavior is implemented
+there.
 
 ## Desktop Hosts Own Consequential Behavior
 
@@ -202,8 +203,13 @@ delegate while retaining platform settings persistence.
 add/remove action contract, focus behavior, and complete editor card used by
 macOS mode corrections plus both Windows replacement collections. Each root
 still decides which collection a target names and persists through its existing
-schema. Periodic refresh and the remaining render state still need to move into
-one root entity.
+schema. `src/desktop/mode_list.rs` owns the shared global/custom identity,
+selection contract, activation badges, and fixed mode list used by macOS and
+Windows. Windows now follows the same list/detail composition instead of
+rendering every mode as a separate card; application substring matching and
+browser-host normalization remain in its native settings/runtime modules.
+Periodic refresh and the remaining render state still need to move into one
+root entity.
 
 - Move `AppWindow` and its portable dependencies out of macOS-only module gates.
 - Have the macOS lifecycle coordinator and Linux tray host construct their
