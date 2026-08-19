@@ -27,6 +27,7 @@ use crate::desktop_host::{
     DesktopAction, DesktopCapabilities, DesktopHost, DesktopMicrophoneSnapshot, DesktopSnapshot,
     DesktopTranscriptionSnapshot, DesktopUpdateStatus,
 };
+use crate::desktop_shell::DesktopPane;
 use crate::desktop_transcription_picker::{
     TranscriptionPickerDelegate, TranscriptionPickerModel, TranscriptionPickerProgress,
     TranscriptionPickerStatus, TranscriptionPickerView,
@@ -35,8 +36,8 @@ use crate::desktop_transcription_picker::{
 };
 use crate::desktop_ui::{
     CANVAS, COMPACT_MULTILINE_INPUT_HEIGHT, CONTROL_HEIGHT, FAINT, LINE, MUTED, NEGATIVE,
-    NavigationIcon, PANE_CONTENT_WIDTH, PANE_LIST_WIDTH, SECTION_GAP, SIDEBAR_WIDTH, SURFACE,
-    SURFACE_HOVER, SURFACE_SELECTED, TEXT, TEXT_INPUT_HEIGHT, TEXT_SOFT, compact_button,
+    PANE_CONTENT_WIDTH, PANE_LIST_WIDTH, SECTION_GAP, SIDEBAR_WIDTH, SURFACE, SURFACE_HOVER,
+    SURFACE_SELECTED, TEXT, TEXT_INPUT_HEIGHT, TEXT_SOFT, compact_button,
     compact_header_plus_button, compact_panel, compact_panel_header, compact_plus_button,
     compact_section_label, disclosure_button, empty_message, error_message, header_button,
     hotkey_keycaps, listener_status, mix_color, navigation_item, pane_body, pane_content,
@@ -252,19 +253,6 @@ pub struct AppWindowPreview {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum Pane {
-    HudLab,
-    Meetings,
-    Commands,
-    #[cfg_attr(not(debug_assertions), allow(dead_code))]
-    Activity,
-    History,
-    Modes,
-    VoiceAction,
-    Settings,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum HudDemoState {
     Recording,
     Transcribing,
@@ -285,101 +273,44 @@ enum HudControl {
 
 const HUD_MAX_SPEED: f32 = 24.0;
 
-impl Pane {
-    const ALL: [Self; 8] = [
-        Self::Settings,
-        Self::Modes,
-        Self::Commands,
-        Self::VoiceAction,
-        Self::History,
-        Self::HudLab,
-        Self::Meetings,
-        Self::Activity,
-    ];
-
-    fn all(capabilities: DesktopCapabilities) -> Vec<Self> {
-        Self::ALL
-            .into_iter()
-            .filter(|pane| match pane {
-                Self::Settings => true,
-                Self::Modes => capabilities.modes,
-                Self::Commands => capabilities.commands,
-                Self::VoiceAction => capabilities.voice_action,
-                Self::History => capabilities.history,
-                Self::HudLab => capabilities.hud_lab,
-                Self::Meetings => capabilities.meetings,
-                Self::Activity => capabilities.activity,
-            })
-            .collect()
+fn pane_from_preview(pane: PreviewPane) -> DesktopPane {
+    match pane {
+        PreviewPane::HudLab => DesktopPane::HudLab,
+        PreviewPane::Meetings => DesktopPane::Meetings,
+        PreviewPane::Commands => DesktopPane::Commands,
+        PreviewPane::Activity => DesktopPane::Activity,
+        PreviewPane::History => DesktopPane::History,
+        PreviewPane::Modes | PreviewPane::Replacements => DesktopPane::Modes,
+        PreviewPane::VoiceAction => DesktopPane::VoiceAction,
+        PreviewPane::Settings => DesktopPane::Settings,
     }
+}
 
-    fn label(self) -> &'static str {
-        match self {
-            Self::HudLab => "HUD Lab",
-            Self::Meetings => "Meetings",
-            Self::Commands => "Commands",
-            Self::Activity => "Activity",
-            Self::History => "History",
-            Self::Modes => "Modes",
-            Self::VoiceAction => "Voice Action",
-            Self::Settings => "Settings",
-        }
+fn pane_from_developer(pane: crate::developer_control::DeveloperPane) -> DesktopPane {
+    use crate::developer_control::DeveloperPane;
+    match pane {
+        DeveloperPane::Settings => DesktopPane::Settings,
+        DeveloperPane::Modes | DeveloperPane::Replacements => DesktopPane::Modes,
+        DeveloperPane::VoiceAction => DesktopPane::VoiceAction,
+        DeveloperPane::History => DesktopPane::History,
+        DeveloperPane::HudLab => DesktopPane::HudLab,
+        DeveloperPane::Commands => DesktopPane::Commands,
+        DeveloperPane::Meetings => DesktopPane::Meetings,
+        DeveloperPane::Activity => DesktopPane::Activity,
     }
+}
 
-    fn icon(self) -> NavigationIcon {
-        match self {
-            Self::Settings => NavigationIcon::Settings,
-            Self::Modes => NavigationIcon::Modes,
-            Self::VoiceAction => NavigationIcon::VoiceAction,
-            Self::History => NavigationIcon::History,
-            Self::Commands => NavigationIcon::Commands,
-            Self::Meetings => NavigationIcon::Meetings,
-            Self::Activity => NavigationIcon::Activity,
-            Self::HudLab => NavigationIcon::HudLab,
-        }
-    }
-
-    fn from_preview(pane: PreviewPane) -> Self {
-        match pane {
-            PreviewPane::HudLab => Self::HudLab,
-            PreviewPane::Meetings => Self::Meetings,
-            PreviewPane::Commands => Self::Commands,
-            PreviewPane::Activity => Self::Activity,
-            PreviewPane::History => Self::History,
-            PreviewPane::Modes => Self::Modes,
-            PreviewPane::VoiceAction => Self::VoiceAction,
-            PreviewPane::Replacements => Self::Modes,
-            PreviewPane::Settings => Self::Settings,
-        }
-    }
-
-    fn from_developer(pane: crate::developer_control::DeveloperPane) -> Self {
-        use crate::developer_control::DeveloperPane;
-        match pane {
-            DeveloperPane::Settings => Self::Settings,
-            DeveloperPane::Modes => Self::Modes,
-            DeveloperPane::VoiceAction => Self::VoiceAction,
-            DeveloperPane::Replacements => Self::Modes,
-            DeveloperPane::History => Self::History,
-            DeveloperPane::HudLab => Self::HudLab,
-            DeveloperPane::Commands => Self::Commands,
-            DeveloperPane::Meetings => Self::Meetings,
-            DeveloperPane::Activity => Self::Activity,
-        }
-    }
-
-    fn developer(self) -> crate::developer_control::DeveloperPane {
-        use crate::developer_control::DeveloperPane;
-        match self {
-            Self::Settings => DeveloperPane::Settings,
-            Self::Modes => DeveloperPane::Modes,
-            Self::VoiceAction => DeveloperPane::VoiceAction,
-            Self::History => DeveloperPane::History,
-            Self::HudLab => DeveloperPane::HudLab,
-            Self::Commands => DeveloperPane::Commands,
-            Self::Meetings => DeveloperPane::Meetings,
-            Self::Activity => DeveloperPane::Activity,
-        }
+fn developer_pane(pane: DesktopPane) -> crate::developer_control::DeveloperPane {
+    use crate::developer_control::DeveloperPane;
+    match pane {
+        DesktopPane::Settings => DeveloperPane::Settings,
+        DesktopPane::Modes => DeveloperPane::Modes,
+        DesktopPane::VoiceAction => DeveloperPane::VoiceAction,
+        DesktopPane::History => DeveloperPane::History,
+        DesktopPane::HudLab => DeveloperPane::HudLab,
+        DesktopPane::Commands => DeveloperPane::Commands,
+        DesktopPane::Meetings => DeveloperPane::Meetings,
+        DesktopPane::Activity => DeveloperPane::Activity,
     }
 }
 
@@ -721,7 +652,7 @@ impl ToggleSpring {
 /// Root GPUI entity for the production app shell.
 pub struct AppWindow {
     preview: bool,
-    pane: Pane,
+    pane: DesktopPane,
     event_reader: EventReader,
     activity: DesktopActivity,
     meeting_requests: SyncSender<MeetingRequest>,
@@ -1098,9 +1029,9 @@ impl AppWindow {
         let command_search = Self::command_search_input(cx);
         let mut window = Self {
             preview: preview_mode,
-            pane: preview
-                .as_ref()
-                .map_or(Pane::Modes, |preview| Pane::from_preview(preview.pane)),
+            pane: preview.as_ref().map_or(DesktopPane::Modes, |preview| {
+                pane_from_preview(preview.pane)
+            }),
             event_reader: EventReader::open(event_path),
             activity: DesktopActivity::default(),
             meeting_requests,
@@ -1264,7 +1195,7 @@ impl AppWindow {
             if crate::DEVELOPER_FEATURES_ENABLED {
                 window.reload_meetings();
                 if meeting::active(&window.meetings).is_some() {
-                    window.pane = Pane::Meetings;
+                    window.pane = DesktopPane::Meetings;
                 }
             }
             window.reload_events();
@@ -1273,10 +1204,10 @@ impl AppWindow {
         if window.preview {
             window.selected_history = window.history_entries.first().map(|entry| entry.id);
         }
-        if window.pane == Pane::Modes {
+        if window.pane == DesktopPane::Modes {
             window.ensure_application_catalog_load();
         }
-        if window.pane == Pane::HudLab {
+        if window.pane == DesktopPane::HudLab {
             window.apply_hud_lab();
         }
         window
@@ -1292,7 +1223,7 @@ impl AppWindow {
             self.reload_events();
         }
         self.reload_history(cx);
-        if self.pane == Pane::Modes {
+        if self.pane == DesktopPane::Modes {
             self.ensure_application_catalog_load();
         }
         self.permission_refresh_at = Instant::now();
@@ -1300,23 +1231,23 @@ impl AppWindow {
         cx.notify();
     }
 
-    fn select_pane(&mut self, pane: Pane, cx: &mut Context<Self>) {
+    fn select_pane(&mut self, pane: DesktopPane, cx: &mut Context<Self>) {
         self.pane = pane;
         self.mode_context_menu = None;
         match pane {
-            Pane::HudLab => self.apply_hud_lab(),
-            Pane::Meetings => self.reload_meetings(),
-            Pane::Commands | Pane::Activity => self.reload_events(),
-            Pane::History => self.reload_history(cx),
-            Pane::Modes => self.ensure_application_catalog_load(),
-            Pane::VoiceAction => {}
-            Pane::Settings => self.permission_refresh_at = Instant::now(),
+            DesktopPane::HudLab => self.apply_hud_lab(),
+            DesktopPane::Meetings => self.reload_meetings(),
+            DesktopPane::Commands | DesktopPane::Activity => self.reload_events(),
+            DesktopPane::History => self.reload_history(cx),
+            DesktopPane::Modes => self.ensure_application_catalog_load(),
+            DesktopPane::VoiceAction => {}
+            DesktopPane::Settings => self.permission_refresh_at = Instant::now(),
         }
         cx.notify();
     }
 
     pub(crate) fn show_settings(&mut self, cx: &mut Context<Self>) {
-        self.select_pane(Pane::Settings, cx);
+        self.select_pane(DesktopPane::Settings, cx);
     }
 
     pub(crate) fn developer_select_pane(
@@ -1324,11 +1255,11 @@ impl AppWindow {
         pane: crate::developer_control::DeveloperPane,
         cx: &mut Context<Self>,
     ) {
-        self.select_pane(Pane::from_developer(pane), cx);
+        self.select_pane(pane_from_developer(pane), cx);
     }
 
     pub(crate) fn developer_pane(&self) -> crate::developer_control::DeveloperPane {
-        self.pane.developer()
+        developer_pane(self.pane)
     }
 
     pub(crate) fn developer_set_commands_enabled(
@@ -1478,7 +1409,7 @@ impl AppWindow {
             || Instant::now() < self.permission_refresh_at
             || !self.setup_visible
                 && self.recognition_start.is_none()
-                && self.pane != Pane::Settings
+                && self.pane != DesktopPane::Settings
         {
             return false;
         }
@@ -1689,7 +1620,7 @@ impl AppWindow {
         self.meeting_runtime_error = None;
         self.meeting_refresh_started_ms = Some(now_ms());
         self.meeting_stop_pending = false;
-        self.pane = Pane::Meetings;
+        self.pane = DesktopPane::Meetings;
         self.reload_meetings();
         cx.notify();
     }
@@ -1717,7 +1648,7 @@ impl AppWindow {
         self.meeting_runtime_error = Some(format!("{title}: {error}"));
         self.meeting_refresh_started_ms = None;
         self.meeting_stop_pending = false;
-        self.pane = Pane::Meetings;
+        self.pane = DesktopPane::Meetings;
         self.reload_meetings();
         if let Some(failed) = self
             .meetings
@@ -1889,7 +1820,7 @@ impl AppWindow {
     /// Refresh the visible history while the pane is open so entries recorded
     /// by the recognition side appear without reopening the pane.
     fn poll_history(&mut self, cx: &App) -> bool {
-        if self.preview || self.pane != Pane::History || self.history.is_none() {
+        if self.preview || self.pane != DesktopPane::History || self.history.is_none() {
             return false;
         }
         let previous = std::mem::take(&mut self.history_entries);
@@ -2240,11 +2171,12 @@ impl AppWindow {
     }
 
     fn render_navigation(&mut self, cx: &mut Context<Self>) -> AnyElement {
-        let items = Pane::all(self.capabilities())
+        let selected_pane = self.pane;
+        let items = DesktopPane::available(self.capabilities())
             .into_iter()
             .enumerate()
             .map(|(index, pane)| {
-                let selected = self.pane == pane;
+                let selected = selected_pane == pane;
                 navigation_item(pane.icon(), selected)
                     .id(("app-nav", index))
                     .child(pane.label())
@@ -7150,21 +7082,21 @@ impl DesktopHost for AppWindow {
 impl Render for AppWindow {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let content = match self.pane {
-            Pane::HudLab => self.render_hud_lab(cx),
-            Pane::Meetings => self.render_meetings(cx),
-            Pane::Commands => self.render_commands(window, cx),
-            Pane::Activity => self.render_activity(cx),
-            Pane::History => self.render_history(cx),
-            Pane::Modes => self.render_modes(window, cx),
-            Pane::VoiceAction => self.render_voice_action(window, cx),
-            Pane::Settings => self.render_settings(window, cx),
+            DesktopPane::HudLab => self.render_hud_lab(cx),
+            DesktopPane::Meetings => self.render_meetings(cx),
+            DesktopPane::Commands => self.render_commands(window, cx),
+            DesktopPane::Activity => self.render_activity(cx),
+            DesktopPane::History => self.render_history(cx),
+            DesktopPane::Modes => self.render_modes(window, cx),
+            DesktopPane::VoiceAction => self.render_voice_action(window, cx),
+            DesktopPane::Settings => self.render_settings(window, cx),
         };
         let transcription_picker = self
             .transcription_picker_language
             .clone()
             .map(|language| self.render_transcription_picker(&language, cx));
         let setup = self.setup_visible.then(|| self.render_setup(cx));
-        let mode_context_menu = (self.pane == Pane::Modes)
+        let mode_context_menu = (self.pane == DesktopPane::Modes)
             .then(|| self.render_mode_context_menu(cx))
             .flatten();
         window_frame()
@@ -7192,23 +7124,23 @@ impl Render for AppWindow {
             .on_action(|_: &MinimizeWindow, window, _| window.minimize_window())
             .on_action(|_: &ToggleFullscreen, window, _| window.toggle_fullscreen())
             .on_action(cx.listener(|this, _: &ShowSettings, window, cx| {
-                this.select_pane(Pane::Settings, cx);
+                this.select_pane(DesktopPane::Settings, cx);
                 window.activate_window();
             }))
             .on_action(cx.listener(|this, _: &ShowModes, window, cx| {
-                this.select_pane(Pane::Modes, cx);
+                this.select_pane(DesktopPane::Modes, cx);
                 window.activate_window();
             }))
             .on_action(cx.listener(|this, _: &ShowVoiceAction, window, cx| {
-                this.select_pane(Pane::VoiceAction, cx);
+                this.select_pane(DesktopPane::VoiceAction, cx);
                 window.activate_window();
             }))
             .on_action(cx.listener(|this, _: &ShowCommands, window, cx| {
-                this.select_pane(Pane::Commands, cx);
+                this.select_pane(DesktopPane::Commands, cx);
                 window.activate_window();
             }))
             .on_action(cx.listener(|this, _: &ShowHistory, window, cx| {
-                this.select_pane(Pane::History, cx);
+                this.select_pane(DesktopPane::History, cx);
                 window.activate_window();
             }))
             .child(self.render_navigation(cx))
@@ -8314,13 +8246,13 @@ mod tests {
     #[test]
     fn production_navigation_keeps_commands_available_as_an_opt_in() {
         assert_eq!(
-            Pane::all(DesktopCapabilities::macos(false)),
+            DesktopPane::available(DesktopCapabilities::macos(false)),
             vec![
-                Pane::Settings,
-                Pane::Modes,
-                Pane::Commands,
-                Pane::VoiceAction,
-                Pane::History,
+                DesktopPane::Settings,
+                DesktopPane::Modes,
+                DesktopPane::Commands,
+                DesktopPane::VoiceAction,
+                DesktopPane::History,
             ]
         );
     }

@@ -23,12 +23,13 @@ use crate::desktop_host::{
     DesktopUpdateStatus,
 };
 use crate::desktop_i18n::{tr, tr_fill};
+use crate::desktop_shell::DesktopPane;
 use crate::desktop_transcription_picker::TranscriptionPickerDelegate;
 use crate::desktop_ui::{
-    FAINT, LINE, MUTED, NavigationIcon, SIDEBAR_WIDTH, SUCCESS, SURFACE, TEXT, TEXT_SOFT,
-    compact_button, disclosure_button, dropdown_backdrop, dropdown_item, dropdown_panel_with_width,
-    error_message, header_button, hotkey_keycaps, navigation_item, pane_content, pane_header,
-    settings_panel, settings_row, settings_section_label, sidebar_frame, toggle, window_frame,
+    FAINT, LINE, MUTED, SIDEBAR_WIDTH, SUCCESS, SURFACE, TEXT, TEXT_SOFT, compact_button,
+    disclosure_button, dropdown_backdrop, dropdown_item, dropdown_panel_with_width, error_message,
+    header_button, hotkey_keycaps, navigation_item, pane_content, pane_header, settings_panel,
+    settings_row, settings_section_label, sidebar_frame, toggle, window_frame,
 };
 use crate::events::EventReader;
 use crate::linux_updater::InstalledUpdate;
@@ -103,16 +104,9 @@ struct LinuxDesktopHost {
     update: UpdateState,
 }
 
-#[derive(Clone, Copy, Eq, PartialEq)]
-enum LinuxPane {
-    Settings,
-    HudLab,
-    Activity,
-}
-
 struct LinuxApp {
     host: LinuxDesktopHost,
-    pane: LinuxPane,
+    pane: DesktopPane,
     hud_lab: crate::desktop_hud_lab::HudLabState,
     capturing_hotkey: bool,
     transcription_picker: TranscriptionPickerState,
@@ -131,6 +125,19 @@ struct LinuxApp {
     onboarding_selection: crate::transcription_models::TranscriptionSelection,
     onboarding_language_dropdown_open: bool,
     onboarding_language_dropdown_bounds: Option<Bounds<Pixels>>,
+}
+
+fn linux_navigation_id(pane: DesktopPane) -> &'static str {
+    match pane {
+        DesktopPane::Settings => "linux-nav-settings",
+        DesktopPane::Modes => "linux-nav-modes",
+        DesktopPane::Commands => "linux-nav-commands",
+        DesktopPane::VoiceAction => "linux-nav-voice-action",
+        DesktopPane::History => "linux-nav-history",
+        DesktopPane::HudLab => "linux-nav-hud-lab",
+        DesktopPane::Meetings => "linux-nav-meetings",
+        DesktopPane::Activity => "linux-nav-activity",
+    }
 }
 
 enum TranscriptionPickerState {
@@ -206,7 +213,7 @@ pub fn open(event_path: PathBuf, start_hidden: bool) -> Result<()> {
                             settings_error.clone(),
                             update,
                         ),
-                        pane: LinuxPane::Settings,
+                        pane: DesktopPane::Settings,
                         hud_lab: crate::desktop_hud_lab::HudLabState::new(),
                         onboarding,
                         // A fresh run offers the locale's recommendation,
@@ -1295,9 +1302,18 @@ impl DesktopHost for LinuxDesktopHost {
 impl LinuxApp {
     fn render_shared_navigation(&self, cx: &mut Context<Self>) -> AnyElement {
         debug_assert!(self.host.capabilities().listener_control);
-        let settings_selected = self.pane == LinuxPane::Settings;
-        let hud_lab_selected = self.pane == LinuxPane::HudLab;
-        let activity_selected = self.pane == LinuxPane::Activity;
+        let selected_pane = self.pane;
+        let items = DesktopPane::available(self.host.capabilities())
+            .into_iter()
+            .map(|pane| {
+                navigation_item(pane.icon(), selected_pane == pane)
+                    .id(linux_navigation_id(pane))
+                    .child(tr(pane.label()))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.pane = pane;
+                        cx.notify();
+                    }))
+            });
         sidebar_frame()
             .w(px(SIDEBAR_WIDTH))
             .px(px(14.0))
@@ -1305,37 +1321,7 @@ impl LinuxApp {
             .pb_4()
             .flex()
             .flex_col()
-            .child(
-                navigation_item(NavigationIcon::Settings, settings_selected)
-                    .id("linux-nav-settings")
-                    .child(tr("Settings"))
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.pane = LinuxPane::Settings;
-                        cx.notify();
-                    })),
-            )
-            .when(crate::DEVELOPER_FEATURES_ENABLED, |sidebar| {
-                sidebar.child(
-                    // Between Settings and Activity, matching the macOS
-                    // sidebar's pane order.
-                    navigation_item(NavigationIcon::HudLab, hud_lab_selected)
-                        .id("linux-nav-hud-lab")
-                        .child(tr("HUD Lab"))
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.pane = LinuxPane::HudLab;
-                            cx.notify();
-                        })),
-                )
-            })
-            .child(
-                navigation_item(NavigationIcon::Activity, activity_selected)
-                    .id("linux-nav-activity")
-                    .child(tr("Activity"))
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.pane = LinuxPane::Activity;
-                        cx.notify();
-                    })),
-            )
+            .children(items)
             .child(div().flex_1())
             .into_any_element()
     }
@@ -2013,9 +1999,14 @@ impl Render for LinuxApp {
         let viewport = window.viewport_size();
         let snapshot = self.host.snapshot();
         let content = match self.pane {
-            LinuxPane::Settings => self.render_shared_settings(&snapshot, cx),
-            LinuxPane::HudLab => crate::desktop_hud_lab::render_hud_lab_pane(self, window, cx),
-            LinuxPane::Activity => crate::desktop_activity_pane::render_activity_pane(&snapshot),
+            DesktopPane::Settings => self.render_shared_settings(&snapshot, cx),
+            DesktopPane::HudLab => crate::desktop_hud_lab::render_hud_lab_pane(self, window, cx),
+            DesktopPane::Activity => crate::desktop_activity_pane::render_activity_pane(&snapshot),
+            DesktopPane::Modes
+            | DesktopPane::Commands
+            | DesktopPane::VoiceAction
+            | DesktopPane::History
+            | DesktopPane::Meetings => unreachable!("capability-filtered Linux pane"),
         };
         let model_picker = if self.transcription_picker.language().is_some() {
             Some(crate::desktop_model_catalog::render_model_catalog(

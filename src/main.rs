@@ -41,7 +41,7 @@ pub(crate) use desktop::onboarding as desktop_onboarding;
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 pub(crate) use desktop::text_input;
 pub(crate) use desktop::{
-    activity as desktop_activity, host as desktop_host,
+    activity as desktop_activity, host as desktop_host, shell as desktop_shell,
     transcription_picker as desktop_transcription_picker, ui as desktop_ui,
 };
 #[cfg(target_os = "linux")]

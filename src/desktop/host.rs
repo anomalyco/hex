@@ -42,7 +42,7 @@ impl DesktopCapabilities {
     pub(crate) const fn linux_x11() -> Self {
         Self {
             activity: true,
-            commands: crate::DEVELOPER_FEATURES_ENABLED,
+            commands: false,
             history: false,
             hud_lab: crate::DEVELOPER_FEATURES_ENABLED,
             meetings: false,
@@ -206,13 +206,13 @@ mod tests {
     #[test]
     fn linux_exposes_only_implemented_product_capabilities() {
         // Activity shipped on Linux in the 2026-08 port wave. HUD Lab is
-        // visible only in developer builds; the command prototype remains
-        // developer-only until its runtime satisfies the Linux release contract.
+        // visible only in developer builds. The command runtime prototype
+        // remains a Settings opt-in; it does not advertise the catalog pane.
         assert_eq!(
             DesktopCapabilities::linux_x11(),
             DesktopCapabilities {
                 activity: true,
-                commands: crate::DEVELOPER_FEATURES_ENABLED,
+                commands: false,
                 history: false,
                 hud_lab: crate::DEVELOPER_FEATURES_ENABLED,
                 meetings: false,

@@ -31,14 +31,15 @@ use crate::desktop_host::{
     DesktopMicrophoneSnapshot, DesktopShortcut, DesktopSnapshot, DesktopTranscriptionSnapshot,
     DesktopUpdateStatus,
 };
+use crate::desktop_shell::DesktopPane;
 use crate::desktop_transcription_picker::TranscriptionPickerDelegate;
 use crate::desktop_ui::{
-    DIVIDER, FAINT, LINE, MUTED, NavigationIcon, PANE_LIST_WIDTH, SIDEBAR_WIDTH, SURFACE_SELECTED,
-    TEXT, TEXT_ON_ACCENT, TEXT_SOFT, accent_color, compact_button, compact_panel,
-    disclosure_button, dropdown_backdrop, dropdown_item, dropdown_panel, dropdown_panel_with_width,
-    empty_message, error_message, header_button, hotkey_keycaps, navigation_item, pane_body,
-    pane_content, pane_header_with_action, section_label, segmented_control, segmented_item,
-    settings_panel, settings_row, settings_section_label, sidebar_frame, toggle, window_frame,
+    DIVIDER, FAINT, LINE, MUTED, PANE_LIST_WIDTH, SIDEBAR_WIDTH, SURFACE_SELECTED, TEXT,
+    TEXT_ON_ACCENT, TEXT_SOFT, accent_color, compact_button, compact_panel, disclosure_button,
+    dropdown_backdrop, dropdown_item, dropdown_panel, dropdown_panel_with_width, empty_message,
+    error_message, header_button, hotkey_keycaps, navigation_item, pane_body, pane_content,
+    pane_header_with_action, section_label, segmented_control, segmented_item, settings_panel,
+    settings_row, settings_section_label, sidebar_frame, toggle, window_frame,
 };
 use crate::events::EventReader;
 use crate::history::{History, HistoryEntry, HistoryRetention};
@@ -107,7 +108,7 @@ struct WindowsDesktopHost {
 
 struct WindowsApp {
     host: WindowsDesktopHost,
-    pane: WindowsPane,
+    pane: DesktopPane,
     hud_lab: crate::desktop_hud_lab::HudLabState,
     history_entries: Vec<HistoryEntry>,
     selected_history: Option<u64>,
@@ -148,14 +149,17 @@ struct WindowsApp {
     history_detail_text: Option<(u64, Entity<TextInput>)>,
 }
 
-#[derive(Clone, Copy, Eq, PartialEq)]
-enum WindowsPane {
-    Settings,
-    Activity,
-    Modes,
-    VoiceAction,
-    History,
-    HudLab,
+fn windows_navigation_id(pane: DesktopPane) -> &'static str {
+    match pane {
+        DesktopPane::Settings => "windows-nav-settings",
+        DesktopPane::Modes => "windows-nav-modes",
+        DesktopPane::Commands => "windows-nav-commands",
+        DesktopPane::VoiceAction => "windows-nav-voice-action",
+        DesktopPane::History => "windows-nav-history",
+        DesktopPane::HudLab => "windows-nav-hud-lab",
+        DesktopPane::Meetings => "windows-nav-meetings",
+        DesktopPane::Activity => "windows-nav-activity",
+    }
 }
 
 /// Which shortcut a settings row is re-recording.
@@ -296,7 +300,7 @@ pub fn open(event_path: PathBuf, shutdown: &'static AtomicBool, start_hidden: bo
                         let onboarding_selection = host.settings.transcription.clone();
                         WindowsApp {
                             host,
-                            pane: WindowsPane::Settings,
+                            pane: DesktopPane::Settings,
                             hud_lab: crate::desktop_hud_lab::HudLabState::new(),
                             recognition_hints_input,
                             _recognition_hints_subscription: recognition_hints_subscription,
@@ -469,7 +473,7 @@ pub fn open(event_path: PathBuf, shutdown: &'static AtomicBool, start_hidden: bo
                     if app
                         .update(cx, |this, cx| {
                             this.host.refresh();
-                            if this.pane == WindowsPane::History {
+                            if this.pane == DesktopPane::History {
                                 this.reload_history();
                             }
                             if matches!(
@@ -2178,13 +2182,41 @@ impl WindowsApp {
         .into_any_element()
     }
 
+    fn select_pane(&mut self, pane: DesktopPane) {
+        debug_assert!(DesktopPane::available(self.host.capabilities()).contains(&pane));
+        self.close_popups();
+        self.pane = pane;
+        match pane {
+            DesktopPane::VoiceAction if crate::windows_voice_action::opencode_installed() => {
+                self.host.request_opencode_catalog();
+            }
+            DesktopPane::History => {
+                self.history_clear_armed = false;
+                self.reload_history();
+            }
+            DesktopPane::Settings
+            | DesktopPane::Modes
+            | DesktopPane::Commands
+            | DesktopPane::VoiceAction
+            | DesktopPane::HudLab
+            | DesktopPane::Meetings
+            | DesktopPane::Activity => {}
+        }
+    }
+
     fn render_navigation(&mut self, cx: &mut Context<Self>) -> AnyElement {
-        let settings_selected = self.pane == WindowsPane::Settings;
-        let activity_selected = self.pane == WindowsPane::Activity;
-        let modes_selected = self.pane == WindowsPane::Modes;
-        let voice_action_selected = self.pane == WindowsPane::VoiceAction;
-        let history_selected = self.pane == WindowsPane::History;
-        let hud_lab_selected = self.pane == WindowsPane::HudLab;
+        let selected_pane = self.pane;
+        let items = DesktopPane::available(self.host.capabilities())
+            .into_iter()
+            .map(|pane| {
+                navigation_item(pane.icon(), selected_pane == pane)
+                    .id(windows_navigation_id(pane))
+                    .child(tr(pane.label()))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.select_pane(pane);
+                        cx.notify();
+                    }))
+            });
         let update = match self.host.updater.state() {
             crate::windows_updater::UpdateCheck::Available { version, url } => Some((version, url)),
             _ => None,
@@ -2196,75 +2228,7 @@ impl WindowsApp {
             .pb_4()
             .flex()
             .flex_col()
-            .child(
-                navigation_item(NavigationIcon::Settings, settings_selected)
-                    .id("windows-nav-settings")
-                    .child(tr("Settings"))
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.close_popups();
-                        this.pane = WindowsPane::Settings;
-                        cx.notify();
-                    })),
-            )
-            .child(
-                navigation_item(NavigationIcon::Modes, modes_selected)
-                    .id("windows-nav-modes")
-                    .child(tr("Modes"))
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.close_popups();
-                        this.pane = WindowsPane::Modes;
-                        cx.notify();
-                    })),
-            )
-            .child(
-                navigation_item(NavigationIcon::VoiceAction, voice_action_selected)
-                    .id("windows-nav-voice-action")
-                    .child(tr("Voice Action"))
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.close_popups();
-                        this.pane = WindowsPane::VoiceAction;
-                        if crate::windows_voice_action::opencode_installed() {
-                            this.host.request_opencode_catalog();
-                        }
-                        cx.notify();
-                    })),
-            )
-            .child(
-                navigation_item(NavigationIcon::History, history_selected)
-                    .id("windows-nav-history")
-                    .child(tr("History"))
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.close_popups();
-                        this.pane = WindowsPane::History;
-                        this.history_clear_armed = false;
-                        this.reload_history();
-                        cx.notify();
-                    })),
-            )
-            .when(crate::DEVELOPER_FEATURES_ENABLED, |sidebar| {
-                sidebar.child(
-                    // Between History and Activity, matching the macOS
-                    // sidebar's pane order.
-                    navigation_item(NavigationIcon::HudLab, hud_lab_selected)
-                        .id("windows-nav-hud-lab")
-                        .child(tr("HUD Lab"))
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.close_popups();
-                            this.pane = WindowsPane::HudLab;
-                            cx.notify();
-                        })),
-                )
-            })
-            .child(
-                navigation_item(NavigationIcon::Activity, activity_selected)
-                    .id("windows-nav-activity")
-                    .child(tr("Activity"))
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.close_popups();
-                        this.pane = WindowsPane::Activity;
-                        cx.notify();
-                    })),
-            )
+            .children(items)
             .child(div().flex_1())
             .when_some(update, |nav, (version, url)| {
                 nav.child(
@@ -4249,12 +4213,15 @@ impl Render for WindowsApp {
         let viewport = window.viewport_size();
         let snapshot = self.host.snapshot();
         let content = match self.pane {
-            WindowsPane::Settings => self.render_settings(&snapshot, cx),
-            WindowsPane::Activity => crate::desktop_activity_pane::render_activity_pane(&snapshot),
-            WindowsPane::Modes => self.render_modes(cx),
-            WindowsPane::VoiceAction => self.render_voice_action(cx),
-            WindowsPane::History => self.render_history(cx),
-            WindowsPane::HudLab => crate::desktop_hud_lab::render_hud_lab_pane(self, window, cx),
+            DesktopPane::Settings => self.render_settings(&snapshot, cx),
+            DesktopPane::Activity => crate::desktop_activity_pane::render_activity_pane(&snapshot),
+            DesktopPane::Modes => self.render_modes(cx),
+            DesktopPane::VoiceAction => self.render_voice_action(cx),
+            DesktopPane::History => self.render_history(cx),
+            DesktopPane::HudLab => crate::desktop_hud_lab::render_hud_lab_pane(self, window, cx),
+            DesktopPane::Commands | DesktopPane::Meetings => {
+                unreachable!("capability-filtered Windows pane")
+            }
         };
         let model_picker =
             self.transcription_picker
