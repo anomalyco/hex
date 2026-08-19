@@ -127,9 +127,10 @@ The Windows listener preserves physical press/release timestamps, keeps audio
 capture off the transcription and paste worker, and restores the previous
 clipboard only when no newer clipboard change supersedes it. The optimized
 MSVC release build is verified with GPUI's DirectX shaders. The next parity
-slices are in-app first-run onboarding, the local transcription API host,
-and the developer-only Meetings surface; opt-in Commands wait on a Windows
-streaming command model. Windows releases are prepared and published with
+slices are OpenCode mode rewriting with TypeScript transformations, the local
+transcription API host, and the developer-only Meetings surface; opt-in Commands
+wait on a Windows streaming command model. Shared first-run onboarding already
+ships. Windows releases are prepared and published with
 [`scripts/release-windows.sh`](../scripts/release-windows.sh), which signs
 the update feed with the same release key as Linux and publishes
 [`scripts/install-windows.ps1`](../scripts/install-windows.ps1); users

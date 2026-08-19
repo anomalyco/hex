@@ -20,8 +20,10 @@ HEX currently supports one Linux beta contract:
 | UI | GPUI settings shell and tray |
 
 The beta does not claim voice commands, application or browser context,
-meetings, native Wayland support, or package-manager installation. XWayland is
-not native Wayland support.
+meetings, native Wayland support, or package-manager installation. Developer
+builds contain a bounded command-recognition prototype for bringing up the
+portable engine and X11 executor; it is deliberately outside this release
+contract. XWayland is not native Wayland support.
 
 ## What Is Implemented
 
@@ -62,14 +64,23 @@ This validation blocks calling the direct-install update channel proven.
 
 ### 2. Add X11 Commands And Context
 
-Only begin this slice when command parity is a product priority. Add:
+The developer-only prototype now provides bounded, generation-safe Moonshine
+projection, wake/sleep resolution, a small compiled command set, and XTest key
+execution without blocking authoritative dictation capture. Finish the product
+slice by adding:
 
-- Moonshine command recognition and wake/sleep behavior;
+- packaged and verified Moonshine native/model assets for direct installs;
 - X11 foreground application and title through EWMH;
-- platform-appropriate command shortcuts and application launch;
+- the complete compiled and TypeScript command registry;
+- platform-appropriate command shortcuts, application launch, and failure
+  feedback;
 - MPRIS pause/resume for players HEX actually paused;
 - logind or XDG idle-sleep inhibition;
-- visible context age and failure.
+- visible context age and failure;
+- physical pressure, reset, dictation-pre-roll, action, and shutdown validation.
+
+Only after those gates pass may release builds expose the persisted Commands
+setting or load Moonshine while idle.
 
 Keep browser-host commands unavailable until a real browser adapter provides
 the active URL. Never infer a URL from a window title.
