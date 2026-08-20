@@ -1,28 +1,28 @@
-# Share The Desktop UI Across macOS And Linux
+# Share The Desktop UI Across macOS, Linux, And Windows
 
 **Status:** In progress. The shared visual vocabulary and transcription picker
-are implemented. macOS and Linux both render with GPUI, but they still use
+are implemented. All three desktop targets render with GPUI, but they still use
 separate root entities. This plan converges them on one product shell while
-keeping platform behavior in the existing macOS and X11 hosts.
+keeping platform behavior in the existing macOS, X11, and Win32 hosts.
 
 ## One Product Shell Should Represent The Same Product Concepts
 
-macOS renders the full `AppWindow` from `src/app_window.rs`. Linux renders a
-second, smaller `LinuxApp` tree from `src/linux_app.rs`. The duplicate tree makes
-shared concepts such as listener state, shortcuts, settings, updates, and
-activity look and behave differently even though both applications use GPUI.
+macOS renders the full `AppWindow`; Linux and Windows each render another root
+tree. Those duplicate trees make shared concepts such as listener state,
+shortcuts, settings, updates, and activity look and behave differently even
+though all three applications use GPUI.
 
 The target is one shared `AppWindow` for navigation, layout, controls, and
-presentation. The macOS and Linux hosts continue to own behavior that actually
-varies by platform.
+presentation. The macOS, Linux, and Windows hosts continue to own behavior that
+actually varies by platform.
 
 ```text
 macOS lifecycle ----\
-                     +-- shared GPUI AppWindow -- desktop actions
-Linux lifecycle ----/                              |
-                              +--------------------+--------------------+
-                              |                                         |
-                        macOS adapter                              Linux adapter
+Linux lifecycle -----+-- shared GPUI AppWindow -- desktop actions
+Windows lifecycle --/                              |
+                           +-----------------------+-----------------------+
+                           |                       |                       |
+                     macOS adapter            Linux adapter         Windows adapter
 ```
 
 The shared UI must depend on product capabilities such as `meetings` or
@@ -45,9 +45,18 @@ Shared rendering decides how every common concept looks. Platform adapters must
 not inject arbitrary GPUI elements because that would preserve two visual
 systems behind a nominally shared shell.
 
-The first shared panes are Settings and Activity. Replacements, Modes, Voice
-Action, Commands, and Meetings can use the same shell immediately, but each pane
-appears on Linux only when its underlying behavior is implemented there.
+Settings and Activity established the shared vocabulary. History now has one
+behavior-complete pane. The phrase/output replacement editor is shared by all
+three roots inside Modes. Modes also shares its collection identity, selection,
+activation badges, list renderer, and basic matching card. The website editor
+is an optional real capability: macOS and Windows supply browser adapters, while
+Linux exposes only its EWMH executable-name rules. The OpenCode processing card,
+enablement actions, and unavailable/retry state are shared by the roots that
+implement them. Its ordered transformation catalog, picker, drag ordering,
+removal, and host-workspace status are shared too. Voice Action also has one
+pane contract on macOS and Windows. Commands and Meetings can use the same
+shell, but each pane appears on a platform only when its underlying behavior is
+implemented there.
 
 ## Desktop Hosts Own Consequential Behavior
 
@@ -58,8 +67,10 @@ The outer application hosts remain separate:
   coordinator.
 - The Linux host owns the GTK tray, X11 map and unmap behavior, close-to-tray,
   X11 shortcut registration, listener lifecycle, and signed direct updates.
+- The Windows host owns the Win32 tray and caption lifecycle, global shortcut
+  hook, listener process, startup registration, and signed update restart.
 
-Both hosts open the shared `AppWindow`. The Linux host stops implementing its
+All three hosts open the shared `AppWindow`. The Linux host stops implementing its
 own `Render` tree.
 
 Use one real seam between the shared window and the two existing hosts. The
@@ -95,6 +106,7 @@ The initial set should cover only behavior that currently varies:
 struct DesktopCapabilities {
     activity: bool,
     commands: bool,
+    history: bool,
     hud_lab: bool,
     meetings: bool,
     modes: bool,
@@ -158,14 +170,15 @@ shared root window lands.
 
 ### 3. Normalize Core Settings For Presentation
 
-**In progress.** Shortcut keycaps, the double-tap toggle, and the complete local
-transcription picker now use shared GPUI presentation. `DesktopSnapshot` now
-also normalizes shortcut labels, listener status, operation errors, update
-status, observation metadata, and transcription selection/preparation state.
-Shortcut captures cross the host seam as portable values. The shared picker
-delegates model preparation to each current root while macOS and Linux validate,
-prewarm, and persist their native runtime selections independently. Portable
-microphone view state still remains.
+**Implemented.** Shortcut keycaps, the double-tap toggle, and the complete local
+transcription picker now use shared GPUI presentation. `DesktopSnapshot` also
+normalizes shortcut labels, listener status, microphone devices/selection/errors,
+operation errors, update status, observation metadata, and transcription
+selection/preparation state. Shortcut captures, microphone refresh and
+selection, update checks/restarts, error dismissal, and listener control cross
+the host seam as portable actions. The shared picker delegates model preparation
+to each current root while macOS, Linux, and Windows validate, prewarm, persist,
+and apply their native runtime selections independently.
 
 - Introduce portable view state for shortcut, double-tap lock, microphone, and
   transcription controls.
@@ -174,28 +187,83 @@ microphone view state still remains.
 
 ### 4. Open One Shared AppWindow From Both Hosts
 
-**In progress.** `src/desktop_host.rs` now defines semantic capabilities,
-portable activity and shortcut snapshots, and typed actions. Linux product
-state has moved into a contained `LinuxDesktopHost`; its GPUI root now retains
-presentation state and delegates listener lifecycle, update polling, activity,
-shortcut validation, update restart, and settings persistence. Those remaining
-Linux operations now use portable snapshots and typed actions; only periodic
-refresh remains lifecycle-driven. The existing macOS root remains the
-transitional macOS host. macOS navigation derives from capabilities. Moving the
-remaining render state into one root entity is still outstanding.
+**In progress.** `src/desktop/host.rs` now defines semantic capabilities,
+portable activity, microphone, shortcut, transcription, error, listener, and
+update snapshots plus typed actions. Linux product state has moved into a
+contained `LinuxDesktopHost`; its GPUI root now retains presentation state and
+delegates listener lifecycle, update polling, activity, microphone selection,
+shortcut validation, update restart, and settings persistence. Windows and the
+transitional macOS root consume the same core settings actions while keeping
+their native validation and lifecycle. `src/desktop/shell.rs` now owns the one
+stable pane identity, order, label, icon, and capability filter consumed by all
+three roots, plus the one renderer for navigation rows and selection callbacks.
+The current roots retain only their native frame/footer and pane-selection side
+effects. Linux no longer advertises a Commands catalog pane merely because its
+developer-only runtime toggle exists. `src/desktop/history_pane.rs` now owns the
+History store handle, bounded search snapshot, selection reconciliation,
+copy/delete behavior, confirmed-clear transition, selectable detail text, and
+the complete list-and-detail renderer for macOS, Linux, and Windows. The native
+roots now provide only the shared store handle, search entity, retention
+setting, and one typed action delegate while retaining platform settings and
+paste-worker ownership. Linux records an entry only after X11 paste succeeds.
+`src/desktop/replacement_editor.rs` likewise owns the phrase/output inputs,
+add/remove action contract, focus behavior, and complete editor card used by
+Linux global replacements, macOS mode corrections, and both Windows replacement
+collections. Each root still decides which collection a target names and
+persists through its existing schema. `src/desktop/mode_target.rs` owns their
+shared global/custom identity; `src/desktop/mode_list.rs` owns the selection
+contract, activation badges, and fixed mode list used by macOS, Linux, and
+Windows. Windows and Linux now follow the same list/detail composition instead of
+rendering every mode as a separate card; application substring matching and
+browser-host normalization remain in their native settings/runtime modules.
+`src/desktop/mode_basics.rs` owns the shared global fallback and custom
+name/application/site card. Its catalog-backed and free-form application-rule
+variants and optional website editor represent the real behaviors explicitly,
+so macOS retains its installed-app picker, Windows retains process-substring and
+browser-host inputs, and Linux retains executable-substring input without a
+fake browser field. Periodic refresh and the remaining render state still need
+to move into one root entity.
+`src/desktop/mode_processing.rs` owns the OpenCode card, toggle action, and
+missing/error recovery presentation. Both roots persist the same portable
+rewrite settings and execute the same ordered processing policy, while macOS
+retains its searchable model picker and Windows retains its native model
+dropdown. Both now use the shared reasoning-variant picker, catalog variant
+selection, default-model pinning, and deadline parsing contract; each root owns
+only its text-input state and persistence. `src/desktop/mode_transformations.rs`
+owns the complete ordered transformation editor used by macOS and Windows. The
+platform roots supply the same bounded host catalog and persist selection into
+their existing mode schemas; the shared renderer does not know which operating
+system owns it.
+
+`src/desktop/voice_action_pane.rs` owns the Voice Action scaffold, explanatory
+copy, responsive setting rows, processing panel, persistence error, and
+OpenCode-unavailable card. Native roots still own hotkey capture, selected-text
+access, OpenCode discovery, model controls, settings, and execution. macOS can
+therefore supply its searchable model and reasoning controls while Windows
+supplies its native dropdown and installation status without duplicating the
+pane or branching on an operating-system name.
+
+The macOS-main model control still replaces its selected card with a search
+field, and its reasoning control expands inline. Replace those inherited
+interactions with one anchored picker shared with Windows after the current
+functional port slices; this is tracked as UI convergence debt, not a port
+regression.
 
 - Move `AppWindow` and its portable dependencies out of macOS-only module gates.
 - Have the macOS lifecycle coordinator and Linux tray host construct their
-  adapters and open the same GPUI entity.
+  adapters alongside the Windows lifecycle host and open the same GPUI entity.
 - Keep native menus, Dock and tray behavior outside the shared window.
 
 ### 5. Delete The Duplicate Linux Render Tree
 
 **In progress.** The Linux production render now uses the shared navigation,
 pane headers, settings panels and rows, keycaps, toggles, messages, and exact
-transcription picker at the same default and minimum dimensions as macOS. The
-superseded Linux dashboard implementation has been removed. The remaining
-Linux Settings composition disappears when the shared root extraction lands.
+transcription picker at the same default and minimum dimensions as macOS. It
+also consumes the complete shared retained-History pane and text-input behavior.
+It now consumes the shared Modes list, basics card, and replacement editor over
+its concrete EWMH application context and live correction runtime. The
+superseded Linux dashboard implementation has been removed. The remaining Linux
+Settings composition disappears when the shared root extraction lands.
 
 - Remove `LinuxApp::render` and Linux-only visual constants and controls.
 - Retain the Linux lifecycle, tray, X11 window mapping, listener, updater, and
@@ -218,10 +286,10 @@ Linux Settings composition disappears when the shared root extraction lands.
 
 ## Completion Criteria
 
-- macOS and Linux open the same production `AppWindow` GPUI entity.
+- macOS, Linux, and Windows open the same production `AppWindow` GPUI entity.
 - The repository has one production `Render` implementation for the main
   desktop window.
-- Settings and Activity use the same layout and controls on both platforms.
+- Settings and Activity use the same layout and controls on all supporting platforms.
 - Platform-only panes and rows derive from semantic capabilities.
 - Linux retains working tray, close-to-tray, shortcut registration, listener,
   automatic paste, updates, and XDG persistence.
@@ -232,8 +300,8 @@ Linux Settings composition disappears when the shared root extraction lands.
 
 ## Rejected Directions
 
-- Do not maintain separate macOS and Linux render trees with shared colors.
+- Do not maintain separate platform render trees with shared colors.
 - Do not scatter `#[cfg(target_os = ...)]` through shared rendering.
 - Do not let platform adapters return arbitrary GPUI elements.
 - Do not create no-op adapters for unsupported features.
-- Do not generalize beyond the implemented macOS and X11 hosts.
+- Do not generalize beyond the implemented macOS, X11, and Win32 hosts.

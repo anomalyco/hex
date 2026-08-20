@@ -1,8 +1,12 @@
 # Linux Plan
 
 **Status:** Active validation and capability plan. The x86_64 Arch/i3 X11 beta
-is implemented. The immediate blocker is validating a genuine signed update on
-the target machine.
+has the source-complete dictation loop, live global replacements, EWMH
+application modes with corrections and optional OpenCode rewriting, ordered
+built-in/TypeScript transformations through the shared host, retained History,
+opt-in Voice Action with foreground-owned X11 selection capture, and a signed
+update path. The immediate release blocker is validating a genuine signed update
+on the target machine.
 
 ## The Supported Contract Is Narrow
 
@@ -15,20 +19,56 @@ HEX currently supports one Linux beta contract:
 | Desktop | i3 on X11 |
 | Audio | CPAL through ALSA, typically backed by PipeWire |
 | Inference | Vulkan with CPU fallback |
+| Local API | Authenticated loopback service with owner-only XDG discovery or SDK-owned direct-child handoff |
 | Shortcut | Configurable key-containing chord; default `Alt+Space` |
 | Insertion | X11 clipboard and synthetic paste |
-| UI | GPUI settings shell and tray |
+| Text replacements | Persisted case-insensitive phrase-boundary rules applied live before paste |
+| Application context | `_NET_ACTIVE_WINDOW`, `_NET_WM_PID` plus `/proc`, `WM_CLASS` fallback, and bounded window title |
+| Modes | Ordered executable-name substring rules with phrase-boundary corrections, optional deadline-bounded OpenCode rewriting, and built-in/TypeScript transformations; no browser rules yet |
+| Voice Action | Optional second held shortcut, dedicated OpenCode model/deadline, and bounded PRIMARY selection owned by the active X11 client |
+| Retained History | Bounded owner-only text/metadata store after successful paste |
+| UI | GPUI Settings, Modes, Voice Action, Activity, model catalog, onboarding, and History panes plus tray |
 
-The beta does not claim voice commands, application or browser context,
-meetings, native Wayland support, or package-manager installation. XWayland is
-not native Wayland support.
+The beta does not claim voice commands, browser context, meetings, native
+Wayland support, or package-manager installation. Developer builds contain a
+bounded command-recognition prototype for bringing up the portable engine and
+X11 executor; it is deliberately outside this release contract. XWayland is not
+native Wayland support.
 
 ## What Is Implemented
 
 - Global hold/release dictation, Escape cancellation, and double-tap lock.
 - Configurable persisted shortcut binding.
 - Local model installation and transcription.
-- Automatic clipboard insertion and restoration.
+- Shared local transcription service with bounded WAV admission, explicit model
+  preparation, owner-only discovery, and stdin-owned embedded lifecycle.
+- Automatic clipboard insertion. Generation-safe restoration of the previous
+  X11 clipboard remains an explicit parity gap.
+- Persisted global phrase-boundary replacements and ordered application-mode
+  corrections. The shared Modes list, basic editor, and phrase/output editor
+  expose only executable-name rules; a running listener sees edits without
+  restarting.
+- Persisted global and per-mode OpenCode model, reasoning-variant, deadline, and
+  prompt controls. Rewriting uses the shared ordered policy after corrections,
+  preserves corrected text on failure, and records bounded History metadata.
+- Persisted ordered global and per-mode transformations. Built-ins run without
+  Bun; custom steps use the shared bounded Bun supervisor, watch-reloaded
+  `~/.config/hex/hex.config.ts`, embedded managed SDK, and shared drag-order UI.
+- A concrete EWMH context adapter reads the active X11 client, resolves its
+  executable through `_NET_WM_PID` and `/proc` with `WM_CLASS` fallback, and
+  captures a bounded title. Context failure degrades to global processing and
+  never blocks paste.
+- Opt-in Voice Action uses a second persisted shortcut in the same X11 hotkey
+  owner as dictation, the shared generation prompt/client, a dedicated persisted
+  model and deadline, and the shared pane. PRIMARY selection capture is bounded
+  to 64 KiB, requires a stable owner belonging to the active X11 client, and
+  does not synthesize Copy, mutate CLIPBOARD, or change focus. Failed or empty
+  generation pastes nothing; successful output does not enter
+  retained History or Paste Last.
+- Shared retained-History pane with persisted retention, search, selectable
+  detail, copy, delete, and confirmed clear. Only successfully pasted output is
+  recorded; raw and replaced text remain distinct and captured audio is never
+  retained.
 - CLI microphone override.
 - GPUI shell, tray integration, desktop launcher, and autostart entry.
 - XDG paths, diagnostics, and exclusive listener ownership.
@@ -37,6 +77,11 @@ not native Wayland support.
 
 The update path is implemented but is not yet proven by a complete signed
 cross-version update on the supported Arch/i3 host.
+
+The local API passes its portable server suite and source-build standalone and
+direct-child lifecycle smokes under Linux. A signed architecture-specific SDK
+helper package and physical Arch/i3 validation remain distribution work, not a
+second service implementation.
 
 The direct installer is published as `install-linux.sh`. It verifies the same
 signed feed and content-addressed artifact as the in-app updater, creates the
@@ -60,21 +105,47 @@ Arch/i3 host. Verify:
 
 This validation blocks calling the direct-install update channel proven.
 
-### 2. Add X11 Commands And Context
+### 2. Continue Desktop Parity In Complete Vertical Slices
 
-Only begin this slice when command parity is a product priority. Add:
+Retained History, global replacements, application-mode corrections, OpenCode
+rewriting, built-in/TypeScript transformations, and Voice Action are implemented
+with the same store, processing policy, bounded hosts, and pane components used
+on macOS and Windows. Continue in dependency order:
 
-- Moonshine command recognition and wake/sleep behavior;
-- X11 foreground application and title through EWMH;
-- platform-appropriate command shortcuts and application launch;
+1. Physically validate X11 clipboard/focus behavior, EWMH identity, OpenCode and
+   Bun lifecycles, Voice Action shortcut/PRIMARY ownership, and minimum/wide UI
+   behavior on the supported host.
+2. Add generation-safe X11 clipboard restoration that preserves external
+   clipboard changes and does not pretend text-only snapshots preserve arbitrary
+   MIME targets.
+
+Do not mark either contract validated until those target-native checks pass.
+
+### 3. Add X11 Commands And Context
+
+The developer-only prototype now provides bounded, generation-safe Moonshine
+projection, wake/sleep resolution, a small compiled command set, and XTest key
+execution without blocking authoritative dictation capture. Finish the product
+slice by adding:
+
+- packaged and verified Moonshine native/model assets for direct installs;
+- project the existing EWMH application/title adapter into command decisions
+  and visible context health;
+- the complete compiled and TypeScript command registry;
+- platform-appropriate command shortcuts, application launch, and failure
+  feedback;
 - MPRIS pause/resume for players HEX actually paused;
 - logind or XDG idle-sleep inhibition;
-- visible context age and failure.
+- visible context age and failure;
+- physical pressure, reset, dictation-pre-roll, action, and shutdown validation.
+
+Only after those gates pass may release builds expose the persisted Commands
+setting or load Moonshine while idle.
 
 Keep browser-host commands unavailable until a real browser adapter provides
 the active URL. Never infer a URL from a window title.
 
-### 3. Add Manual PipeWire Meetings
+### 4. Add Manual PipeWire Meetings
 
 Manual meeting recording precedes automatic detection. Capture two explicit
 sources:
@@ -91,14 +162,14 @@ Handle route replacement, Bluetooth profile changes, clock alignment, queue
 pressure, and HEX feedback appearing in the output monitor. Route loss must
 produce a visible gap or failure rather than silent corruption.
 
-### 4. Add Metadata-Only Meeting Offers
+### 5. Add Metadata-Only Meeting Offers
 
 After manual capture is reliable, observe PipeWire registry nodes and active
 links without recording samples. Normalize process and media metadata into the
 existing meeting-candidate model. Detection remains offer-only and never starts
 recording automatically.
 
-### 5. Choose A Native Wayland Contract
+### 6. Choose A Native Wayland Contract
 
 Wayland support requires an explicit capability decision:
 
@@ -116,7 +187,7 @@ that handles keyboard hotplug, crash-safe key release, access policy, and exact
 re-injection of non-suppressed events. Do not build a general-purpose root
 daemon.
 
-### 6. Add Distribution Channels Deliberately
+### 7. Add Distribution Channels Deliberately
 
 The app-managed updater owns only the user-local direct-install layout. A future
 Arch package must leave updates to the package manager. Add architectures,
@@ -131,6 +202,7 @@ Do not fork these modules by platform:
 - transcription models, inference, processing, ordering, and cancellation;
 - command grammar and pure resolution;
 - event schema and bounded projections;
+- retained-history bounds, persistence, search, and pane behavior;
 - paste continuation and clipboard restoration state transitions;
 - meeting manifests, locking, WAV writing, transcript publication, and
   recovery.
@@ -170,6 +242,7 @@ implementation assumptions.
 | Command microphone and wake/sleep | Required | Required when shipped | Required when shipped |
 | Hold/release, lock, cancel | Required | Required | Required if advertised |
 | Foreground Paste and Send | Required | Required | Required if advertised |
+| Retained History after successful paste | Required | Required | Required if advertised |
 | Browser, terminal, editor, Electron insertion | Required | Required | Capability-dependent |
 | Application context | Required | Required when shipped | Capability-dependent |
 | GPUI shell and settings | Required | Required | Required |
@@ -183,7 +256,7 @@ implementation assumptions.
 | --- | --- | --- |
 | Generic Wayland parity is not a stable contract | Critical | Publish one constrained contract |
 | Native Wayland insertion is compositor-controlled | High | Prove portal or libei behavior; otherwise use manual paste or an approved helper |
-| Foreground and browser context lack universal APIs | High | EWMH first; add a real browser adapter later |
+| Foreground and browser context lack universal APIs | High | EWMH application context is implemented; add a real browser adapter later |
 | PipeWire output monitoring includes HEX feedback | High | Suppress feedback or construct a filtered capture graph |
 | PipeWire metadata varies by package format | Medium | Build identity rules from observed fixtures |
 | Packaging multiplies native dependencies | Medium | Keep one distro and channel until validated |

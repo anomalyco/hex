@@ -47,6 +47,23 @@ capture operation and observation stream is scoped by the handle's unguessable
 Embedded hosting is also available for callers that provide an explicit native
 service command. A bundled native helper is not published yet.
 
+Linux and Windows source builds expose the same direct-child contract:
+
+```typescript
+const host = await create({
+  command: ["C:\\path\\to\\voice-control.exe", "service", "--embedded"],
+})
+
+const linuxHost = await create({
+  command: ["/path/to/voice-control", "service", "--embedded"],
+})
+```
+
+Running `voice-control service` instead publishes authenticated discovery under
+the current user's XDG or Windows application-data directory, so `connect()`
+can attach without a custom discovery path. Automatic Linux and Windows helper
+selection remains gated on signed platform packages.
+
 ## Promise API
 
 ```ts
@@ -107,11 +124,11 @@ the helper for the layer's scope.
 
 ## Permissions
 
-The direct-child helper needs zero macOS TCC permissions. The host application captures
-microphone audio itself and sends encoded WAV, so the microphone prompt,
-`NSMicrophoneUsageDescription`, orange-dot indicator, and Privacy & Security
-entry all belong to the host's own bundle and signature. There is no second
-permission identity to sign, prompt for, or keep in sync.
+The direct-child helper needs no microphone permission on macOS, Linux, or
+Windows. The host application captures microphone audio itself and sends
+encoded WAV, so the permission prompt and operating-system privacy indicator
+belong to the host. On macOS, its bundle owns `NSMicrophoneUsageDescription`;
+there is no second permission identity to sign, prompt for, or keep in sync.
 
 This is a deliberate decomposition: direct-child hosts own capture and consent,
 while clients connected to the desktop app reuse capture owned by HEX's signed
@@ -120,8 +137,8 @@ desktop process. Neither mode opens a second microphone stream.
 ## Host Boundary
 
 - Use from Node or Electron main/preload code, not an untrusted renderer.
-- The client automatically selects and locates its installed native helper
-  package. Applications do not provide an executable path.
+- Published integrations will use the automatically selected signed native
+  helper package. Source builds use the explicit command override shown above.
 - Capture and encode audio in the host application.
 - Persist model selection in the host application.
 - Keep the helper executable signed and spawn it directly. Do not use

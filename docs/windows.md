@@ -1,0 +1,200 @@
+# Windows Alpha
+
+The Windows port is a source-build alpha with a native GPUI desktop app,
+WASAPI capture, local `transcribe.cpp` transcription, a global push-to-talk
+shortcut, and generation-safe automatic paste. Its implemented daily-use
+surface now includes live microphone/model/shortcut settings, double-tap lock,
+Paste Last Dictation, recording tones, a click-through HUD, retained History,
+text replacements, a resident system tray, and per-user Launch at login.
+Global and contextual Modes can also rewrite completed dictation through the
+same deadline-bounded OpenCode processing policy as macOS, then run ordered
+built-in or user-defined TypeScript transformations. The Windows CLI also
+hosts the shared authenticated local transcription API as a standalone process
+or an SDK-owned direct child.
+
+The default shortcut is `Ctrl+Win`: hold both keys while speaking and release
+either one to transcribe and paste. Tap the shortcut twice within 300 ms to
+lock recording, then press it again to finish; Escape cancels. Paste Last
+defaults to `Ctrl+Alt+V`. Settings changes are accepted while listening and are
+applied live or through an automatic listener restart as appropriate.
+
+## Requirements
+
+- 64-bit Windows 10 or 11.
+- PowerShell 7 or Windows PowerShell 5.1.
+- `winget` from Microsoft App Installer.
+- Visual Studio C++ Build Tools, CMake, and the stable MSVC Rust toolchain.
+- A Windows 10 or 11 SDK containing the DirectX `fxc.exe` shader compiler.
+- Bun is optional. It is required only for user-defined TypeScript
+  transformations; the built-in Lowercase and SpongeBob case transformations
+  run without it.
+
+Run the checked-in setup script from the repository root. It keeps an existing
+compatible Visual Studio installation and installs only missing prerequisites.
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\setup-windows.ps1
+```
+
+The script also discovers the installed Windows SDK, persists `GPUI_FXC_PATH`
+for GPUI release builds, installs `rustfmt`, Clippy, and rust-analyzer, fetches
+Cargo dependencies, and runs `cargo check --all-targets`.
+
+## Smoke Test
+
+List WASAPI inputs and the compute backends visible to `transcribe.cpp`:
+
+```powershell
+cargo run -- devices
+cargo run -- model devices
+```
+
+Install the default English model, load it, and transcribe a WAV file:
+
+```powershell
+cargo run -- model install
+cargo run -- model check
+cargo run -- model transcribe .\sample.wav
+```
+
+For Polish, select the multilingual Parakeet model explicitly:
+
+```powershell
+cargo run -- model install --model parakeet_v3 --language pl
+cargo run -- model check --model parakeet_v3 --language pl
+cargo run -- capture --model parakeet_v3 --language pl --copy
+```
+
+Open the desktop application after the model is installed:
+
+```powershell
+cargo run -- app
+```
+
+The app starts its global listener on launch by default. Changing the
+transcription model, microphone, dictation shortcut, double-tap behavior, or
+Paste Last setting automatically restarts the listener; you do not need to
+stop it first. Text replacements and feedback volume apply without a model
+reload. Mode rules, OpenCode profiles, and ordered transformations are
+snapshotted by the output worker and apply to the next completed dictation
+without restarting capture. The command-line listener uses the settings saved
+by the app:
+
+```powershell
+cargo run -- listen --model parakeet_v3 --language pl
+```
+
+`capture` prewarms the selected model and opens the microphone before prompting.
+Press Enter once to start, then again to stop. Captures shorter than 300 ms are
+discarded. `--device` accepts a case-insensitive fragment from `devices`.
+
+Runtime data is stored under `%APPDATA%\voice-control`. Observations are in
+`logs\live.ndjson`, and native/runtime diagnostics are in `logs\process.log`.
+Successful pasted dictations are retained, subject to the selected retention
+window and hard size limits, in `history.json`. Captured audio is never retained
+by default.
+
+## Custom Transformations
+
+The Transformations card in Modes always offers the built-in transformations.
+Choose **Set up** there to create `~/.config/hex/hex.config.ts`, install the
+managed `@hex/commands` SDK with Bun, and load any transformations registered by
+that config. The Windows release executable embeds the checked-in SDK source,
+so a managed single-executable install does not depend on a repository checkout.
+
+Transformations run in the displayed order after mode corrections and the
+optional OpenCode rewrite. Reordering, adding, or removing them persists in the
+global or contextual mode and applies to the next output job. Host startup,
+registration, IPC, execution time, and status files are bounded; a failed step
+preserves the previous pipeline output. Use **Retry** in the card after fixing a
+Bun, dependency, or config error. Literal voice commands in the same config
+remain unavailable on Windows until a real streaming command recognizer lands.
+
+## Local Transcription Service
+
+Run a discoverable per-user service from a source build with:
+
+```powershell
+cargo run -- service
+```
+
+It binds only an ephemeral loopback port, requires a generated bearer token on
+every route, and publishes discovery under `%APPDATA%\voice-control`. The
+TypeScript client's `connect()` resolves that Windows location automatically.
+The service never opens a microphone or persists submitted audio; callers own
+capture and send bounded PCM WAV data for raw local transcription.
+
+SDK hosts can instead own an isolated helper process:
+
+```typescript
+const host = await create({
+  command: ["C:\\path\\to\\voice-control.exe", "service", "--embedded"],
+})
+```
+
+Embedded mode publishes no discovery file, returns its authenticated endpoint
+as one JSON line on stdout, and exits when the host closes stdin. macOS, Linux,
+and Windows share the HTTP server, request bounds, model-progress stream, WAV
+validation, inference admission, and lease lifecycle; each target retains its
+real warm-model backend. Automatic helper selection still awaits a signed
+Windows platform package.
+
+## macOS Parity
+
+The target is product and visual parity with macOS, using native Windows
+adapters where the operating-system APIs differ. A direct copy of AppKit,
+CoreAudio event taps, Metal, `SMAppService`, Accessibility, or
+ScreenCaptureKit code would not run on Windows; the Windows implementation must
+preserve the same user contract through Win32, WASAPI, GPUI/DirectX, the
+current-user startup registry, UI Automation, and Windows capture APIs.
+
+| Area | Windows status |
+| --- | --- |
+| Local hold-to-dictate, timestamped boundaries, Escape, paste | Implemented |
+| Live model, shortcut, and microphone selection | Implemented |
+| Double-tap lock and Paste Last Dictation | Implemented |
+| Clipboard preservation and generation-safe restoration | Implemented |
+| Recording tones and click-through recording/processing HUD | Implemented; the renderer is native GPUI/DirectX rather than the macOS Metal shader |
+| History retention, list, detail, search, copy, delete, and clear | Implemented |
+| Text replacements | Implemented in the Windows Modes pane using the shared phrase-boundary replacement engine |
+| Resident tray and Launch at login | Implemented |
+| Application modes with per-mode corrections, OpenCode rewriting, and transformations | Implemented on the shared ordered processing policy; global and contextual profiles persist their own corrections, model, reasoning variant, deadline, and ordered built-in/TypeScript transformations, while modes match by application name — physical end-to-end paste/UI validation remains |
+| Voice Action with selected-text capture and in-app OpenCode model selection | Implemented; selection is read through a clipboard round trip rather than UI Automation |
+| Recognition hints for Whisper-family models | Implemented |
+| Release microphone while idle | Implemented; mutually exclusive with audio pre-roll, as documented in Settings |
+| While-dictating audio control (mute other apps or pause media) | Implemented via WASAPI session volumes and GSMTC |
+| Signed automatic self-update for managed installs | Implemented; the same ed25519 feed contract as Linux, activating into a user-local versions directory with a restart button — source builds keep the GitHub release link |
+| Web-domain mode rules and browser context via UI Automation | Implemented; the page URL comes from the browser's UIA document element, bounded so a hung provider degrades to application-only context |
+| Opt-in voice Commands | Missing; blocked on a Windows streaming command model |
+| Managed installer with Start Menu integration and clean uninstall | Implemented as `scripts/install-windows.ps1`; it creates the self-updating versions layout, and updates retarget the managed shortcut and Launch-at-login entry |
+| First-run onboarding | Implemented; a fresh install picks a dictation language, downloads its recommended model with live progress, and starts listening only after the dialog closes — shared with the Linux shell |
+| Activity pane with the live session and recent transcripts | Implemented; one shared read-only pane on both port shells |
+| Developer Meetings, live drafts, and meeting paste | Missing |
+| Local transcription API and public TypeScript SDK host lifecycle on Windows | Implemented for source builds through the shared standalone and direct-child service; native authentication, discovery, SDK lifecycle, WAV upload, and Parakeet v3 inference smokes pass — automatic helper selection awaits a signed Windows platform package |
+
+The shared visual tokens, navigation, pane scaffold, transcription picker,
+History presentation, mode processing and transformation cards, and text input
+are already reused.
+Remaining panes should be added only with their complete Windows behavior;
+empty look-alike screens do not count as parity.
+
+## Current Port Boundary
+
+The Windows listener preserves physical press/release timestamps, keeps audio
+capture off the transcription and paste worker, and restores the previous
+clipboard only when no newer clipboard change supersedes it. The optimized
+MSVC release build is verified with GPUI's DirectX shaders. The remaining code
+parity slice is the developer-only Meetings surface after the physical matrix
+is green; opt-in Commands wait on a Windows streaming command model. Shared
+first-run onboarding, complete OpenCode mode rewriting controls, the bounded
+TypeScript transformation host, and the local transcription API already ship
+in source builds. Windows releases are
+prepared and published with
+[`scripts/release-windows.sh`](../scripts/release-windows.sh), which signs
+the update feed with the same release key as Linux and publishes
+[`scripts/install-windows.ps1`](../scripts/install-windows.ps1); users
+install with:
+
+```powershell
+powershell -ExecutionPolicy Bypass -Command "iwr https://pub-089d681d41754031a4aefa7017d8c2fb.r2.dev/install-windows.ps1 -OutFile install-windows.ps1; ./install-windows.ps1"
+```

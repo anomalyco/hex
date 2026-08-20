@@ -2,11 +2,11 @@
 
 ## Purpose
 
-Build HEX as a local, observable macOS voice appliance with an explicit Linux
-X11 beta contract. Keep the engine native Rust and keep consequential behavior
-explicit. Protected commands and typed captures remain compiled Rust; ordinary
-literal commands live in the explicit TypeScript user config. User-facing
-runtime settings persist in Application Support.
+Build HEX as a local, observable macOS voice appliance with explicit Linux X11
+beta and Windows source-build alpha contracts. Keep the engine native Rust and
+keep consequential behavior explicit. Protected commands and typed captures
+remain compiled Rust; ordinary literal commands live in the explicit TypeScript
+user config. User-facing runtime settings persist in Application Support.
 
 The distributed release starts in hotkey-dictation-only mode. Voice commands and
 their catalog remain available as a persisted opt-in that defaults off.
@@ -29,8 +29,9 @@ only in debug builds.
 - `recording_environment`: serialized RAII ownership of idle-sleep prevention,
   output muting, and supported media-player pause/resume behavior.
 - `dictation_processor`: context-selected, deadline-bounded OpenCode rewrite
-  profiles with raw-transcript fallback. The macOS app discovers the `opencode2`
-  beta executable, links missing installs to `https://v2.opencode.ai/`, and uses
+  profiles with raw-transcript fallback shared by all three desktop roots. The
+  apps discover the `opencode2` beta executable, link missing installs to
+  `https://v2.opencode.ai/`, and use
   `opencode2 api get` to discover or start its managed service.
 - `parakeet`: the strict-Metal `transcribe.cpp` adapter plus bounded inference,
   processing, ordered output, paste, last-result, and meeting-delta workers.
@@ -39,11 +40,13 @@ only in debug builds.
 - `transcription`: runtime selection and transactional warm-model activation.
 - `transcription_models`: the compiled model catalog, language recommendations,
   pinned artifact verification, and lazy installation.
-- `transcription_service`: bounded host-audio admission, hostile WAV validation,
-  normalization, cancellation, and warm inference ownership.
+- `transcription_service`: shared macOS/Linux/Windows bounded host-audio
+  admission, hostile WAV validation, normalization, cancellation, and
+  target-native warm inference ownership.
 - `local_api`: authenticated loopback discovery or direct-child endpoint
   handoff, bounded HTTP parsing, model preparation progress, and raw
-  transcription routes.
+  transcription routes shared by macOS, Linux, and Windows. Desktop capture
+  and developer control remain capability-backed macOS routes.
 - `sdk/typescript`: Promise and Effect v4 host wrappers for direct-child
   lifecycle, authenticated model preparation, and host-audio transcription.
 - `developer_control`: the typed debug-only command/reply protocol the local
@@ -60,8 +63,9 @@ only in debug builds.
 - `commands`: pure contextual resolution plus bounded asynchronous macOS action
   execution.
 - `personal_commands`: the Bun-hosted `@hex/commands` TypeScript workspace:
-  managed SDK provisioning, the watch-reloaded user command and transformation
-  host, bounded invocation dispatch, and status snapshots.
+  shared macOS/Linux/Windows managed SDK provisioning, the watch-reloaded user
+  command and transformation host, bounded invocation/transform dispatch, and
+  status snapshots. Literal voice-command recognition remains macOS-only.
 - `text_replacements`: phrase-boundary-aware compilation of configured text
   replacements applied longest-match-first to transcripts.
 - `config`: compiled commands, preferred input devices, and dictation profiles.
@@ -79,12 +83,27 @@ only in debug builds.
 - `onboarding`: required permission health, selected dictation-model
   installation, the release startup gate, and opt-in command-model setup.
 - `sparkle`: packaged-app-only Sparkle lifecycle and manual update checks.
-- `linux`, `linux_app`, `linux_dictation`, `linux_input`, `linux_paste`,
-  `linux_settings`, `linux_transcriber`: the X11 beta CLI, GPUI shell and tray,
-  hotkey capture-transcribe-paste loop, X11 grabs and synthetic paste,
-  persisted Linux settings, and the `transcribe.cpp` session.
+- `linux`, `linux_app`, `linux_context`, `linux_dictation`, `linux_input`,
+  `linux_paste`, `linux_settings`: the X11 beta CLI, GPUI shell and tray, EWMH
+  foreground application identity, hotkey capture-transcribe-process-paste
+  loop, X11 grabs and synthetic paste, and persisted Linux settings and modes
+  with shared OpenCode and TypeScript transformation processing.
 - `linux_updater`: signed direct-install updates, bounded downloads, atomic
   version activation, and restart handoff for user-local Linux installs.
+- `windows`, `windows_app`, `windows_dictation`, `windows_input`,
+  `windows_paste`, `windows_settings`: the Windows alpha CLI and native GPUI
+  shell, WASAPI capture, timestamped global shortcut and lock state machine,
+  bounded local inference/paste worker, live persisted settings, History,
+  replacements, tray, and generation-safe clipboard restoration.
+- `windows_indicator`: the transparent, topmost, click-through GPUI/DirectX
+  recording and processing HUD.
+- `windows_login_item`: the current-user Windows startup-registration adapter;
+  the registry remains the source of truth instead of a duplicate setting.
+- `windows_ui`: the Windows 11 Fluent visual layer: the user's system accent
+  color, Segoe Fluent Icons glyphs, and the custom caption bar with native
+  drag, Snap Layouts, and caption-button behavior.
+- `local_transcriber`: the shared `transcribe.cpp` model loader, prewarmer, WAV
+  adapter, and bounded inference owner used by Linux and Windows.
 - `history`: the owner-only bounded retained-dictation store: retention
   windows with hard entry and byte caps, atomic crash-safe persistence, and
   search. Text and bounded metadata only, never audio.
@@ -94,8 +113,9 @@ only in debug builds.
 - `desktop_activity`: the shared listener, device, transcript, and session
   projection over `EventReader`.
 - `desktop_host`: semantic desktop capabilities, portable UI snapshots, and
-  typed actions implemented by the macOS root and contained Linux adapter.
-- `desktop_ui`: platform-neutral GPUI visual tokens and controls shared by both
+  typed actions implemented by the macOS root and contained Linux and Windows
+  adapters.
+- `desktop_ui`: platform-neutral GPUI visual tokens and controls shared by all
   desktop roots, including the mandatory pane scaffold: `pane_header` /
   `pane_header_with_action`, `pane_body`, `pane_content`, the shared
   `header_button` action chip, and the single `PANE_CONTENT_WIDTH` and
@@ -103,7 +123,7 @@ only in debug builds.
 - `text_input`: the shared GPUI single- and multi-line text input with editing,
   selection, clipboard, and input-method support.
 - `desktop_transcription_picker`: the single GPUI language/model picker used by
-  both desktop roots over portable model presentation and platform preparation
+  all desktop roots over portable model presentation and platform preparation
   callbacks.
 - `app_window`: the production Settings, Modes with mode-owned processing,
   Voice Action, History, Replacements, and opt-in Commands shell plus
@@ -348,8 +368,22 @@ For a source install, run `scripts/install-linux.sh`, then `hex model install`.
 The installer owns the user-local version layout, desktop entry, and autostart
 entry; only that managed layout participates in automatic updates.
 
+Prepare the Windows alpha from PowerShell with:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\setup-windows.ps1
+cargo run -- devices
+cargo run -- model devices
+cargo run -- model status --model parakeet_v3 --language pl
+```
+
+The script preserves a compatible Visual Studio C++ installation, installs
+missing Rust/CMake/Windows SDK prerequisites, discovers `fxc.exe`, and validates
+all Windows targets. See `docs/windows.md` for the desktop/listener smoke test
+and the live macOS-parity matrix.
+
 Automatic microphone selection follows the compiled preference order in
-`src/config.rs`, then falls back to the macOS default. A saved microphone takes
+`src/platform/macos/config.rs`, then falls back to the macOS default. A saved microphone takes
 precedence while available; override everything with `--device`. The app bundle
 build requires Xcode 26 for Icon Composer compilation and a Developer ID signing
 identity. `scripts/release-app.sh` prepares a notarized and stapled DMG plus its
@@ -399,6 +433,8 @@ Tab to cycle, and `q`/Escape to quit.
   CoreAudio, Moonshine, and context-adapter diagnostics.
 - `~/Library/Application Support/voice-control/meetings/`: manifests, separate
   tracks, recoverable live drafts, and atomically published final transcripts.
+- `%APPDATA%\voice-control\logs\`: Windows alpha observations and native/runtime
+  diagnostics. The alpha does not persist captured audio.
 
 When diagnosing a missed command, inspect both logs and distinguish microphone
 capture, transcription, command mode/dictation, context matching, command resolution,
@@ -413,8 +449,12 @@ seam once there are two real adapters or a current test requires substitution.
 
 `ROADMAP.md` is the authoritative work list. Keep these constraints visible:
 
-- Validate public onboarding from a clean macOS account and signed Linux updates
-  on the supported Arch/i3 host.
+- Validate public onboarding from a clean macOS account and signed Linux
+  updates plus the local API/SDK lifecycle on the supported Arch/i3 host.
+- Physically validate the Windows global loop, live settings, lock/Paste Last,
+  History/replacements, Modes/transformations, HUD/tones, tray, login startup,
+  local API/SDK lifecycle, installer, and signed updates; then add Commands
+  after a real streaming model and Meetings after the ordinary matrix is green.
 - Add a second real browser adapter before generalizing browser context.
 - Do not turn concrete macOS, Linux X11, or command modules into hypothetical
   platform or plugin frameworks.

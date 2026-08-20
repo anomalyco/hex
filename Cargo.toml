@@ -17,8 +17,10 @@ inherits = "release"
 debug-assertions = true
 
 [dependencies]
-arboard = { version = "3.6.1", default-features = false }
+arboard = { version = "3.6.1", default-features = false, features = ["image-data"] }
+base64 = "0.22.1"
 clap = { version = "4.6.1", features = ["derive"] }
+ed25519-dalek = "2.2.0"
 color-eyre = "0.6.5"
 cpal = "0.18.1"
 ctrlc = "3.5.2"
@@ -27,12 +29,14 @@ dirs = "6.0.0"
 fs2 = "0.4.3"
 getrandom = "0.3.4"
 hound = "3.5.1"
+image = { version = "0.25.10", default-features = false }
 libc = "0.2.177"
 libloading = "0.9.0"
 ratatui = "0.30.2"
 regex = "1.12.3"
 rodio = { version = "0.22.2", default-features = false, features = ["playback", "mp3"] }
 rubato = "0.16.2"
+semver = "1.0.28"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.150"
 sha2 = "0.11.0"
@@ -60,12 +64,30 @@ raw-window-handle = "0.6.2"
 screencapturekit = { version = "=8.0.0", features = ["macos_15_0"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-base64 = "0.22.1"
-ed25519-dalek = "2.2.0"
 gpui = { version = "0.2.2", default-features = false, features = ["font-kit", "x11"] }
 gtk = "0.18.2"
-semver = "1.0.28"
 tray-icon = { version = "0.24.1", default-features = false, features = ["gtk"] }
 transcribe-cpp = { version = "=0.1.3", features = ["vulkan"] }
 x11-clipboard = "0.9.3"
 x11rb = { version = "0.13.2", features = ["xtest"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+gpui = { version = "0.2.2", default-features = false, features = ["font-kit", "windows-manifest"] }
+raw-window-handle = "0.6.2"
+tray-icon = { version = "0.24.1", default-features = false }
+winreg = "0.55.0"
+windows-sys = { version = "0.61.2", features = [
+  "Win32_Foundation",
+  "Win32_Globalization",
+  "Win32_Graphics_Dwm",
+  "Win32_Storage_FileSystem",
+  "Win32_System_Console",
+  "Win32_System_DataExchange",
+  "Win32_System_JobObjects",
+  "Win32_System_SystemInformation",
+  "Win32_System_Threading",
+  "Win32_UI_Input_KeyboardAndMouse",
+  "Win32_UI_WindowsAndMessaging",
+] }
+windows = { version = "0.62.2", features = ["Media_Control", "Foundation", "Foundation_Collections", "Win32_Media_Audio", "Win32_System_Com", "Win32_System_Ole", "Win32_System_Variant", "Win32_UI_Accessibility"] }
+windows-future = "0.3.2"

@@ -4,8 +4,8 @@ HEX currently supports one Linux beta target: x86_64 Arch Linux running i3 on
 X11. Audio uses ALSA, including PipeWire systems with ALSA compatibility.
 Inference uses Vulkan when available and can fall back to the CPU.
 
-The beta does not support voice commands, application or browser context,
-meetings, native Wayland, or package-manager installation.
+The beta does not support voice commands, browser context, meetings, native
+Wayland, or package-manager installation.
 
 ## Install A Published Build
 
@@ -64,6 +64,73 @@ launcher, and autostart entry.
 Hold **Alt-Space**, speak, then release. Double-tap the shortcut to keep
 recording, press it again to finish, or press Escape to cancel. Stop the listener
 before changing the shortcut in Settings.
+
+## Voice Action
+
+Voice Action is an opt-in second capture target in its own pane. Enable it to
+use the default **Ctrl-Alt-I** shortcut, hold the shortcut while speaking an
+instruction, and release it to transcribe. HEX sends that instruction and
+optional selected text through the dedicated OpenCode model, then pastes only a
+non-empty result at the current cursor. Voice Action output is not retained in
+History and does not replace ordinary dictation state.
+
+On X11, selected text comes from the PRIMARY selection. HEX accepts at most 64
+KiB and only while the selection owner belongs to the stable active X11 client;
+it neither sends Ctrl-C nor changes CLIPBOARD ownership or focus. Applications
+that do not publish PRIMARY simply provide no selected-text context. Enabling or
+disabling Voice Action restarts the listener automatically. Stop listening
+before recording a custom Voice Action shortcut.
+
+The worker, persistence, shared pane, and native adapter are source-complete.
+The shortcut, active-client ownership check, focus preservation, paste, and a
+real OpenCode response still require a physical smoke test on the supported
+Arch/i3 host.
+
+## Modes And Text Replacements
+
+The Modes pane uses the same collection, application-rule, and phrase/output
+editors as the other desktop builds. Global replacements always run first. A
+custom mode matches the first comma-separated executable-name substring against
+the active X11 client, then applies its corrections and optional OpenCode rewrite
+profile. Global and per-mode profiles persist their model, reasoning variant,
+deadline, and instructions through the same shared processing card used by the
+other desktop builds. Rules match
+case-insensitively at phrase boundaries, prefer the longest overlapping phrase,
+and take effect while the listener is running.
+
+HEX reads the active client through `_NET_ACTIVE_WINDOW`, resolves its
+executable through `_NET_WM_PID` and `/proc` with `WM_CLASS` as a fallback, and
+keeps the window title bounded. The Linux pane deliberately has no Websites
+field until a real browser adapter exists. A replacement that leaves the entire
+output empty is not pasted or added to History.
+
+OpenCode is optional. When enabled, HEX asks the separately installed
+`opencode2` service to rewrite corrected text after local transcription. Catalog
+loading and rewriting stay off the audio-capture thread and are deadline-bounded;
+an unavailable model, timeout, or empty response preserves the corrected text.
+The prompt includes the resolved foreground application but no browser host on
+Linux because the X11 beta does not yet have a browser adapter. Successful
+History entries include bounded processing latency and fallback metadata.
+
+Transformations run last, after corrections and any successful OpenCode rewrite.
+The shared ordered editor includes built-in Lowercase and SpongeBob case steps,
+which do not require another runtime. Custom TypeScript transformations use the
+same bounded, watch-reloaded `@hex/commands` host as macOS and Windows. Choosing
+**Set up** creates `~/.config/hex/hex.config.ts`, installs the managed embedded
+SDK, and requires [Bun](https://bun.sh/). A missing, failed, or timed-out custom
+step preserves the previous pipeline output and records bounded fallback
+metadata instead of blocking capture or paste.
+
+## Retained History
+
+The History pane uses the same bounded, owner-only store and complete
+list/detail UI as macOS and Windows. HEX records an entry only after text has
+been pasted successfully; it keeps both the raw transcript and final pasted
+text, the resolved foreground application when available, and bounded timing
+metadata, never captured audio. The retention control can turn recording off or keep
+entries for 24 hours, 7 days, 30 days, or indefinitely, all still subject to
+the store's hard entry and byte caps. Search, selectable text, copy, individual
+delete, and confirmed clear are available in the pane.
 
 Managed installs check for signed updates at startup and every 24 hours. HEX
 downloads, verifies, and installs an available update, then asks before

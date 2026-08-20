@@ -45,7 +45,7 @@ fn compile_permission_guide() {
 fn compile_apple_speech_bridge() {
     let manifest_dir = PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap());
     let output_dir = PathBuf::from(std::env::var_os("OUT_DIR").unwrap());
-    let source = manifest_dir.join("src/apple_speech.swift");
+    let source = manifest_dir.join("src/speech/apple_speech.swift");
     let object = output_dir.join("apple_speech.o");
     let sdk = Command::new("xcrun")
         .args(["--sdk", "macosx", "--show-sdk-path"])
@@ -84,7 +84,7 @@ fn compile_apple_speech_bridge() {
 fn compile_indicator_shader() {
     let manifest_dir = PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap());
     let output_dir = PathBuf::from(std::env::var_os("OUT_DIR").unwrap());
-    let source = manifest_dir.join("src/dictation_indicator.metal");
+    let source = manifest_dir.join("src/platform/macos/dictation_indicator.metal");
     let air = output_dir.join("dictation_indicator.air");
     let library = output_dir.join("dictation_indicator.metallib");
     println!("cargo:rerun-if-changed={}", source.display());

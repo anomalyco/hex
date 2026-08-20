@@ -1,127 +1,105 @@
+mod common;
+mod desktop;
+mod platform;
+mod speech;
+
+// The historical flat module names, re-exported so existing `crate::` paths
+// keep resolving while call sites migrate to the folder tree.
+#[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
+pub(crate) use common::command_context;
 #[cfg(target_os = "macos")]
-mod accessibility;
-mod app_paths;
+pub(crate) use common::command_grammar;
+#[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
+pub(crate) use common::command_grammar as command_grammar_common;
 #[cfg(target_os = "macos")]
-mod app_settings;
-#[cfg(target_os = "macos")]
-mod app_window;
-#[cfg(target_os = "macos")]
-mod apple_speech;
-#[cfg(target_os = "macos")]
-mod application_catalog;
-#[cfg_attr(target_os = "linux", allow(dead_code))]
-mod audio;
-#[cfg(target_os = "macos")]
-mod command_grammar;
-#[cfg(target_os = "macos")]
-mod commands;
-#[cfg(target_os = "macos")]
-mod config;
-#[cfg(target_os = "macos")]
-mod context;
-#[cfg(all(debug_assertions, target_os = "macos"))]
-mod dashboard;
-#[cfg(any(target_os = "macos", target_os = "linux"))]
-mod desktop_activity;
-#[cfg(any(target_os = "macos", target_os = "linux"))]
-mod desktop_host;
-#[cfg(any(target_os = "macos", target_os = "linux"))]
-mod desktop_transcription_picker;
-#[cfg(any(target_os = "macos", target_os = "linux"))]
-mod desktop_ui;
-#[cfg(target_os = "macos")]
-mod developer_control;
-#[cfg_attr(target_os = "linux", allow(dead_code))]
-mod dictation;
-#[cfg(target_os = "macos")]
-mod dictation_audio;
-#[cfg(target_os = "macos")]
-mod dictation_diagnostics;
-#[cfg(target_os = "macos")]
-mod dictation_indicator;
-#[cfg(target_os = "macos")]
-pub mod dictation_processor;
-#[cfg_attr(target_os = "linux", allow(dead_code))]
-mod events;
-#[cfg(target_os = "macos")]
-mod feedback;
-mod history;
-mod instance;
-#[cfg(target_os = "macos")]
-mod keyboard;
+pub(crate) use common::commands_engine as commands;
+#[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
+pub(crate) use common::commands_engine;
+#[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
+pub(crate) use common::dictation_processing;
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+pub(crate) use common::feedback;
+#[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
+pub(crate) use common::keys;
+#[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
+pub(crate) use common::local_api;
+#[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
+pub(crate) use common::opencode;
+#[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
+pub(crate) use common::personal_commands;
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+pub(crate) use common::self_update;
+#[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
+pub(crate) use common::spoken_text;
+#[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
+pub(crate) use common::text_replacements;
+pub(crate) use common::{app_paths, audio, dictation, events, history, instance};
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+pub(crate) use desktop::activity_pane as desktop_activity_pane;
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+pub(crate) use desktop::hud_lab as desktop_hud_lab;
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+pub(crate) use desktop::i18n as desktop_i18n;
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+pub(crate) use desktop::model_catalog as desktop_model_catalog;
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+pub(crate) use desktop::onboarding as desktop_onboarding;
+#[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
+pub(crate) use desktop::voice_action_pane as desktop_voice_action_pane;
+pub(crate) use desktop::{
+    activity as desktop_activity, host as desktop_host, shell as desktop_shell,
+    transcription_picker as desktop_transcription_picker, ui as desktop_ui,
+};
+#[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
+pub(crate) use desktop::{
+    history_pane as desktop_history_pane, mode_basics as desktop_mode_basics,
+    mode_list as desktop_mode_list, mode_processing as desktop_mode_processing,
+    mode_target as desktop_mode_target, mode_transformations as desktop_mode_transformations,
+    replacement_editor as desktop_replacement_editor, text_input,
+};
 #[cfg(target_os = "linux")]
-mod linux;
-#[cfg(target_os = "linux")]
-mod linux_app;
-#[cfg(target_os = "linux")]
-mod linux_dictation;
-#[cfg(target_os = "linux")]
-mod linux_input;
-#[cfg(target_os = "linux")]
-mod linux_paste;
-#[cfg(target_os = "linux")]
-mod linux_settings;
-#[cfg(target_os = "linux")]
-mod linux_transcriber;
-#[cfg(target_os = "linux")]
-mod linux_updater;
-#[cfg(target_os = "macos")]
-mod local_api;
-#[cfg(target_os = "macos")]
-mod login_item;
-#[cfg(target_os = "macos")]
-mod meeting;
-#[cfg(target_os = "macos")]
-mod meeting_detection;
-#[cfg(target_os = "macos")]
-mod meeting_watcher;
-#[cfg(target_os = "macos")]
-mod microphone_activity;
-#[cfg_attr(target_os = "linux", allow(dead_code))]
-mod moonshine;
+pub(crate) use platform::linux::{
+    app as linux_app, command_executor as linux_command_executor, context as linux_context,
+    dictation as linux_dictation, input as linux_input, paste as linux_paste, run as linux,
+    settings as linux_settings, updater as linux_updater,
+};
 #[cfg(all(target_os = "macos", debug_assertions))]
-mod moonshine_lab;
+pub(crate) use platform::macos::dashboard;
 #[cfg(target_os = "macos")]
-mod onboarding;
-#[cfg(target_os = "macos")]
-mod parakeet;
-#[cfg(target_os = "macos")]
-mod paste;
-#[cfg(target_os = "macos")]
-mod permission_guide;
-#[cfg(target_os = "macos")]
-mod personal_commands;
-#[cfg(target_os = "macos")]
-mod recognition;
-#[cfg(target_os = "macos")]
-mod recording_environment;
-#[cfg(target_os = "macos")]
-mod sparkle;
+pub(crate) use platform::macos::{
+    accessibility, app_settings, app_window, application_catalog, config, context,
+    developer_control, dictation_audio, dictation_diagnostics, dictation_indicator,
+    dictation_processor, keyboard, login_item, meeting, meeting_detection, meeting_watcher,
+    microphone_activity, onboarding, paste, permission_guide, recording_environment, sparkle,
+    status_item, suppression, swift_settings_import,
+};
+// The Windows shell's historical i18n path; the table itself is shared.
+#[cfg(target_os = "windows")]
+pub(crate) use desktop::i18n as windows_i18n;
+#[cfg(target_os = "windows")]
+pub(crate) use platform::windows::{
+    app as windows_app, audio_control as windows_audio_control, context as windows_context,
+    dictation as windows_dictation, indicator as windows_indicator, input as windows_input,
+    login_item as windows_login_item, paste as windows_paste, run as windows,
+    settings as windows_settings, ui as windows_ui, updater as windows_updater,
+    voice_action as windows_voice_action,
+};
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+pub(crate) use speech::local_transcriber;
 #[cfg(any(target_os = "macos", target_os = "linux"))]
-mod spoken_text;
+pub(crate) use speech::moonshine;
+#[cfg(all(target_os = "macos", debug_assertions))]
+pub(crate) use speech::moonshine_lab;
+pub(crate) use speech::transcription_models;
+#[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
+pub(crate) use speech::transcription_service;
 #[cfg(target_os = "macos")]
-mod status_item;
-#[cfg(target_os = "macos")]
-mod suppression;
-#[cfg(target_os = "macos")]
-mod swift_settings_import;
-#[cfg(target_os = "macos")]
-mod text_input;
-#[cfg(target_os = "macos")]
-mod text_replacements;
-#[cfg(target_os = "macos")]
-mod transcription;
-#[cfg(target_os = "macos")]
-mod transcription_benchmark;
-#[cfg_attr(target_os = "linux", allow(dead_code))]
-mod transcription_models;
-#[cfg(target_os = "macos")]
-mod transcription_service;
+pub(crate) use speech::{
+    apple_speech, parakeet, recognition, transcription, transcription_benchmark,
+};
 
 #[cfg(target_os = "macos")]
 use std::fs::{self, OpenOptions};
-#[cfg(target_os = "macos")]
-use std::io::{Read, Write};
 #[cfg(target_os = "macos")]
 use std::path::PathBuf;
 #[cfg(target_os = "macos")]
@@ -147,7 +125,6 @@ struct Cli {
 }
 
 static SHUTDOWN: AtomicBool = AtomicBool::new(false);
-#[cfg(target_os = "macos")]
 pub(crate) const DEVELOPER_FEATURES_ENABLED: bool = cfg!(debug_assertions);
 
 #[cfg(target_os = "macos")]
@@ -517,46 +494,7 @@ fn main() -> Result<()> {
                 event_path
             };
             let events = events::EventLog::create(&service_event_path)?;
-            let local_api = if embedded {
-                let api = local_api::LocalApi::start_embedded(events)?;
-                std::thread::Builder::new()
-                    .name("embedded-host-lease".into())
-                    .spawn(|| {
-                        let mut stdin = std::io::stdin().lock();
-                        let mut buffer = [0_u8; 1];
-                        loop {
-                            match stdin.read(&mut buffer) {
-                                Ok(0) => {
-                                    SHUTDOWN.store(true, Ordering::Release);
-                                    std::thread::sleep(std::time::Duration::from_secs(5));
-                                    tracing::warn!(
-                                        "forcing embedded service shutdown after host lease closed"
-                                    );
-                                    std::process::exit(0);
-                                }
-                                Ok(_) => {}
-                                Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
-                                Err(error) => {
-                                    tracing::warn!(%error, "embedded host lease failed");
-                                    SHUTDOWN.store(true, Ordering::Release);
-                                    break;
-                                }
-                            }
-                        }
-                    })?;
-                let mut stdout = std::io::stdout().lock();
-                serde_json::to_writer(&mut stdout, &api.embedded_endpoint())?;
-                stdout.write_all(b"\n")?;
-                stdout.flush()?;
-                drop(stdout);
-                api
-            } else {
-                local_api::LocalApi::start(events)?
-            };
-            while !SHUTDOWN.load(Ordering::Relaxed) {
-                std::thread::sleep(std::time::Duration::from_millis(100));
-            }
-            drop(local_api);
+            local_api::run_until_shutdown(events, embedded, &SHUTDOWN)?;
             if embedded
                 && let Err(error) = fs::remove_file(&service_event_path)
                 && error.kind() != std::io::ErrorKind::NotFound
@@ -705,4 +643,9 @@ mod tests {
 #[cfg(target_os = "linux")]
 fn main() -> Result<()> {
     linux::run(&SHUTDOWN)
+}
+
+#[cfg(target_os = "windows")]
+fn main() -> Result<()> {
+    windows::run(&SHUTDOWN)
 }

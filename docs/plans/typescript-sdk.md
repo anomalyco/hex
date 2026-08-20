@@ -1,9 +1,11 @@
 # HEX Local Transcription Service and SDK - Implementation Plan
 
 **Status:** Private preview. Service phases 1-3, a signed macOS artifact proof,
-direct-child mode, and Promise and Effect wrappers are implemented. The packages
-are not published. Signed package validation, an Electron bridge, and a real
-consumer remain.
+shared macOS/Linux/Windows direct-child mode, and Promise and Effect wrappers
+are implemented. Linux and Windows source builds pass standalone discovery and
+SDK-owned lifecycle smokes; Windows additionally passes real inference. The
+packages are not published. Signed package validation, an Electron bridge, and
+a real consumer remain.
 
 Companion to
 [`../specs/local-transcription-service.md`](../specs/local-transcription-service.md).
@@ -102,6 +104,13 @@ LaunchServices-owned application.
 existing release proof. `@hex-ai/client` installs it optionally and resolves it
 automatically; the packages remain private until artifact validation and the
 first consumer are complete.
+
+Linux and Windows now consume the same authenticated HTTP server and
+stdin-owned direct-child lifecycle from `voice-control service --embedded`.
+The TypeScript client resolves standalone discovery from the current user's XDG
+or Windows application-data directory. Signed Linux and `win32-x64` helper
+packages are still required before automatic helper selection can claim either
+distribution.
 
 ## Phase 5 - TypeScript SDK (In Progress)
 

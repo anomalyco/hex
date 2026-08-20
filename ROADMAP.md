@@ -5,13 +5,193 @@ explicit selected-text voice editing, optional context-aware OpenCode
 post-processing, a Metal HUD, bounded paste workers, settings, and a signed GPUI
 app bundle. Streaming commands are a disabled-by-default experimental opt-in;
 meetings remain a developer prototype until their product surface is redesigned.
-An x86_64 Arch/i3 X11 beta now provides hotkey dictation, automatic paste, a
-GPUI shell, and signed user-local updates; it does not yet include commands,
-meetings, native Wayland support, or a package-manager channel.
-The authenticated local transcription service now implements discovery,
-direct-child embedding, model preparation, and bounded host-audio transcription;
-Promise and Effect TypeScript wrappers pass fake-helper tests. Signed helper
-package validation, an Electron bridge, and a first real consumer remain.
+An x86_64 Arch/i3 X11 beta now provides hotkey dictation, automatic paste,
+live phrase-boundary replacements, EWMH application modes with corrections and
+optional OpenCode rewriting plus ordered built-in/TypeScript transformations, a
+GPUI shell, bounded retained History, opt-in Voice Action over a bounded
+foreground-owned X11 PRIMARY selection, and signed user-local updates. Developer
+builds have the first bounded Moonshine command prototype, but release builds do
+not yet claim commands, browser context, meetings, native Wayland support, or a
+package-manager channel. The shared authenticated local transcription host is
+available as a standalone Linux service or an SDK-owned direct child.
+The Windows source-build alpha now has the native GPUI shell and complete global
+hold-to-dictate loop: timestamped Win32 input, WASAPI capture, checksum-pinned
+local models, generation-safe paste, live settings, double-tap lock, Paste Last,
+History, replacements, tones, click-through HUD, tray residency, and Launch at
+login. Modes with corrections and browser-host selection, Voice Action,
+onboarding, managed signed updates, and global/per-mode OpenCode rewriting are
+implemented. The bounded TypeScript transformation host, embedded managed SDK,
+and shared ordered Modes editor are also implemented. OpenCode reasoning
+variants and deadlines are editable on Windows through the same contract as
+macOS. The shared authenticated local transcription host and direct-child SDK
+handoff now run on Windows as well. Streaming commands and developer Meetings
+remain. The local transcription service implements discovery, direct-child
+embedding, model preparation, and bounded host-audio transcription on macOS,
+Linux, and Windows; Promise and Effect TypeScript wrappers pass fake-helper
+tests plus native Linux and Windows source-build smokes. Signed helper package
+validation, an Electron bridge, and a first real consumer remain.
+
+## Cross-Platform Convergence Plan
+
+This is the authoritative execution order for the macOS, Linux X11, and Windows
+port. Detailed platform plans remain useful for adapter-specific work, but a
+stale status sentence there must not override this matrix. “Implemented” means
+the behavior exists in source; “release” additionally requires its assets and
+distribution contract; “validated” requires the physical-host evidence listed
+below.
+
+| Surface | macOS | Linux X11 | Windows |
+| --- | --- | --- | --- |
+| Dictation loop | Product implementation; physical timestamp regression recheck remains | Beta implementation; Arch/i3 smoke test remains | Alpha implementation; Windows 10/11 smoke matrix remains |
+| Desktop presentation | Full root still owns macOS composition; History, Voice Action, and the Modes collection/basics/replacement/processing/transformation UI are shared | Shared Settings vocabulary, Activity, onboarding, model catalog, History, Voice Action, and the Modes collection/basics/replacement/processing/transformation UI, but a separate Linux root remains | Shared primitives plus History, Voice Action, and the shared Modes collection/basics/replacement/processing/transformation UI, but a separate Windows root remains |
+| Retained History | Shared bounded store and complete pane | Shared bounded store and complete pane; physical X11 clipboard/UI validation remains | Shared bounded store and complete pane; physical validation remains |
+| Commands | Persisted release opt-in | Bounded developer-only prototype; no packaged/context-complete release contract | Unavailable until a real streaming command model exists |
+| Modes and replacements | Full ordered pipeline on the shared processing policy and shared transformation host | Global replacements plus ordered EWMH executable-name modes, corrections, OpenCode model/variant/deadline rewriting, and built-in/TypeScript transformations are persisted, edited through the shared UI, and projected live before paste; browser rules and physical X11 validation remain | Corrections, replacements, web-domain selection, OpenCode model/variant/deadline rewriting, and ordered built-in/TypeScript transformations use the shared policy; physical end-to-end validation remains |
+| Voice Action | Implemented | Source-complete with one target-aware X11 hotkey owner and bounded foreground-owned PRIMARY selection; Arch/i3 focus/selection/OpenCode smoke remains | Implemented with clipboard-backed selected-text capture |
+| HUD | Product Metal HUD using the shared state model | Embedded developer lab only | Product GPUI/DirectX HUD using the same shared state model |
+| Packaging and updates | Sparkle flow implemented; clean-account validation remains | Signed direct-install flow implemented; real cross-version update remains | Managed installer and signed update flow implemented; signed-host validation remains |
+| Meetings | Developer-only implementation | Not implemented | Not implemented |
+| Local transcription API | Shared implementation with native warm-model activation | Shared implementation; owner-only XDG discovery and direct-child lifecycle pass a target-native source-build smoke, while a signed automatic helper package remains | Shared implementation; standalone discovery, direct-child lifecycle, and real transcribe.cpp inference pass a target-native source-build smoke, while a signed automatic helper package remains |
+
+### Phase 1: Make macOS A Consumer Of The Portable Core
+
+- [x] Extract platform-neutral command keys, typed grammar, pure resolution,
+  and bounded action dispatch for the desktop shells.
+- [x] Make the macOS keyboard executor consume the neutral key and modifier
+  vocabulary.
+- [x] Share the command context snapshot and selector vocabulary while keeping
+  `NSWorkspace`/Accessibility/AppleScript, EWMH, and UI Automation capture in
+  their native adapters.
+- [x] Make macOS consume the shared command grammar and resolution engine, then
+  delete the duplicate macOS copies without changing compiled protected
+  commands or TypeScript personal-command behavior.
+- [x] Move macOS HUD transitions onto the shared indicator state model while
+  retaining Metal on macOS and GPUI/DirectX on Windows.
+- [x] Share processing-pipeline policy—corrections, OpenCode rewriting, and
+  TypeScript transformations—without moving platform context, selection, or
+  paste I/O into the portable layer.
+- [x] Move authenticated local API parsing, discovery, direct-child lifecycle,
+  audio admission, and model-preparation streaming into one implementation;
+  macOS, Linux, and Windows retain their concrete warm-model activation
+  backends, and only macOS exposes its real desktop
+  capture/developer-control capabilities.
+
+Exit gate: the macOS release behavior is unchanged, duplicate semantic engines
+are gone, command overlap/catalog tests run against the one implementation, and
+native macOS tests plus authoritative release previews pass.
+
+### Phase 2: Converge Desktop Presentation By Capability
+
+- [x] Finish portable microphone, update, shortcut, error, and listener actions
+  behind the existing deep `DesktopHost` seam.
+- [ ] Have macOS, Linux, and Windows open the same production GPUI root, then
+  remove the remaining Linux and Windows Settings/render composition.
+- [x] Extract the behavior-complete History pane once; macOS, Linux, and Windows
+  consume the same state, actions, selectable detail model, and renderer.
+- [x] Extract the paired replacement/correction input, actions, and renderer;
+  macOS mode corrections, Linux global rules, and Windows global/per-mode rules
+  consume it while their existing settings schemas and runtime projection
+  remain native.
+- [x] Extract mode identity, selection actions, activation-badge presentation,
+  and the fixed list renderer; macOS, Linux, and Windows consume the same
+  collection UI while their matching semantics and settings remain native.
+- [x] Extract the mode name/application/site card with explicit catalog-backed
+  and free-form application-rule variants plus an optional real website field;
+  matching and persistence remain in the native roots while the complete basics
+  renderer is shared.
+- [x] Extract the OpenCode processing card, enablement actions, and unavailable
+  state; macOS, Linux, and Windows supply their real model/prompt controls and
+  persist the same portable rewrite settings.
+- [x] Extract ordered transformation editing; macOS, Linux, and Windows consume
+  the same catalog, picker, drag ordering, removal, and workspace-status
+  renderer while their persisted mode schemas remain native.
+- [x] Extract the complete Voice Action scaffold, setting rows, and OpenCode
+  unavailable state; macOS, Linux, and Windows supply their native shortcut and
+  model controls through one pane contract.
+- [ ] Replace the inherited inline OpenCode model search and reasoning-variant
+  expansion with one anchored picker interaction; this exists on macOS main and
+  is shared UI debt rather than a port regression.
+- [ ] Extract Commands and onboarding once; each platform should consume those
+  pane modules only when its real capability exists.
+- [ ] Keep native lifecycle outside the shared root: AppKit/Dock/Sparkle on
+  macOS, GTK tray/X11/updater on Linux, and Win32 tray/caption/startup on
+  Windows.
+
+Exit gate: every common pane has one renderer, capability flags omit behavior
+that is genuinely absent, minimum and wide previews match on all supporting
+hosts, and no shared renderer branches on an operating-system name.
+
+### Phase 3: Promote Linux In Complete Vertical Slices
+
+- [ ] Physically validate the current beta install, model download, shortcut,
+  lock/cancel, paste, tray/autostart, and signed cross-version update on the
+  supported x86_64 Arch/i3 host.
+- [ ] Finish the command slice with packaged Moonshine assets, EWMH application
+  and title context, native action/media/idle adapters, visible context health,
+  and pressure/recovery tests; only then enable Commands in release builds.
+- [x] Add retained History using the shared bounded store and complete pane;
+  Linux records text and bounded timing metadata only after X11 paste succeeds.
+- [x] Add global phrase-boundary replacements through the shared editor and a
+  live compiled runtime; successful History records preserve raw and final text.
+- [x] Add contextual application Modes using a real `_NET_ACTIVE_WINDOW`,
+  `_NET_WM_PID`/`WM_CLASS`, and bounded-title EWMH adapter; the shared Modes UI
+  edits ordered executable-name rules and live corrections without pretending a
+  browser adapter exists.
+- [x] Add global and contextual OpenCode mode rewriting through the shared
+  ordered policy, including persisted model, reasoning variant, deadline, and
+  prompt controls plus corrected-text fallback and History observations.
+- [x] Add the bounded TypeScript transformation host, embedded managed SDK,
+  built-in transformations, and shared ordered editor; failed custom steps
+  preserve prior output and surface bounded History fallback metadata.
+- [x] Add Voice Action with one X11 owner for dictation and Voice Action
+  shortcuts, persisted dedicated model/deadline settings, and a bounded PRIMARY
+  selection accepted only while its owner belongs to the stable active client.
+  The adapter does not synthesize Copy, mutate CLIPBOARD, or change focus;
+  physical Arch/i3 selection, paste, and OpenCode validation remains.
+- [ ] Add generation-safe X11 clipboard restoration without reducing the
+  previous clipboard to a text-only snapshot; an external ownership change must
+  always supersede HEX's delayed restore.
+- [x] Add the authenticated local transcription host and SDK-owned direct-child
+  lifecycle on Linux using the shared server and concrete `LocalTranscriber`;
+  owner-only XDG discovery and native source-build lifecycle smokes pass.
+- [ ] Keep PipeWire meetings and native Wayland as later explicit contracts from
+  `docs/plans/linux.md`; neither blocks the supported X11 beta.
+
+### Phase 4: Finish And Validate Windows Parity
+
+- [ ] Run the physical Windows 10/11 matrix for timestamped shortcuts, live
+  microphone changes and recovery, lock/cancel, Paste Last, clipboard restore,
+  History/replacements, audio control, HUD/tones, tray, startup, installer, and
+  signed update restart.
+- [x] Complete global and contextual OpenCode mode rewriting using the same
+  persisted profile contract and portable processing policy as macOS.
+- [x] Expose OpenCode reasoning-variant and deadline controls in the Windows
+  Modes editor; both roots consume the shared variant picker and portable
+  deadline/default-model semantics.
+- [x] Add the bounded TypeScript transformation host, embedded managed SDK, and
+  ordered transformation editing used by the same portable processing policy.
+- [ ] Add opt-in Commands only after selecting and measuring a real Windows
+  streaming recognizer; do not introduce a placeholder model abstraction.
+- [x] Port the authenticated local transcription host and direct-child handoff;
+  the Windows CLI now consumes the shared service, the TypeScript client resolves
+  per-user Windows discovery, and native source-build/inference smokes pass.
+- [ ] Add developer Meetings only after the ordinary dictation and distribution
+  matrix is physically green.
+
+### Phase 5: Prove Releases Instead Of Inferring Them
+
+For every promoted capability, require all of the following evidence:
+
+1. `cargo fmt --check`, target-native tests, all-target/all-feature Clippy with
+   warnings denied, and `git diff --check`.
+2. An optimized native build and deterministic release-mode previews for every
+   affected pane and HUD state.
+3. Physical input, audio, focus, clipboard, tray/login, and recovery tests on
+   the supported operating-system versions; mocks do not prove native adapters.
+4. Clean-install and real cross-version signed-update tests for the distribution
+   channel that claims the feature.
+5. Updated capability matrices and diagnostics that distinguish source-complete,
+   release-enabled, and physically validated behavior.
 
 ## Validate The macOS Release
 
@@ -51,17 +231,51 @@ Run a genuine signed update between two published versions on the target
 Arch/i3 machine. Verify exact artifact validation, atomic activation, restart,
 and retained-version rollback. Smoke-test installation, model download, the CLI
 microphone override, hotkey rebinding, locked capture, cancellation, automatic
-paste, tray behavior, autostart, and startup without a tray host.
+paste, global replacements, EWMH application-mode corrections, History
+retention/search/copy/delete/clear, tray behavior, autostart, and startup without
+a tray host.
 
 Keep app-managed updates limited to the user-local direct-install layout. A
-future Arch package must leave updates to the package manager. Add commands,
-context, meetings, or Wayland only as explicit later capability slices.
+future Arch package must leave updates to the package manager. The developer
+command prototype is not a release capability until its context, packaged
+assets, native actions, and physical validation land. Add meetings or Wayland
+only as explicit later capability slices.
 
 Converge the separate macOS and Linux GPUI roots on one capability-driven
 product shell without merging their lifecycle or platform behavior. Follow
 [`docs/plans/shared-desktop-ui.md`](docs/plans/shared-desktop-ui.md); preserve
 both settings formats and delete the duplicate Linux render tree only after the
-shared Settings and Activity slices work on both hosts.
+remaining production composition moves behind the shared root.
+
+## Establish The Windows Alpha
+
+The source-build product loop and desktop host are implemented. Physically
+smoke-test the new double-tap lock, Paste Last, live microphone switching,
+clipboard restoration, recording tones, click-through HUD, close-to-tray, and
+Launch at login on Windows 10 and 11. Include the implemented mutually exclusive
+release-microphone-while-idle policy in that matrix. Add bounded automatic stream
+recovery without moving capture or paste work onto the UI thread.
+
+Continue toward macOS product parity in complete vertical slices. Modes with
+per-application and web-domain corrections, Voice Action with in-app OpenCode
+model selection, the UI Automation browser-context adapter, the signed
+installer/update contract, and shared interface translations now ship; the
+Linux shell renders the same shared settings surface and model catalog.
+Shared first-run onboarding and global/per-mode OpenCode rewriting now ship as
+well, as do ordered built-in and TypeScript transformations through the shared
+bounded host and Modes editor. Reasoning variants and rewrite deadlines are now
+editable on Windows through the same portable settings contract. Remaining
+slices are the persisted opt-in command engine (waiting on a Windows streaming
+model) and developer-only Meetings after the physical parity matrix is green.
+The signed automatic Windows helper package remains part of the private SDK
+distribution work rather than the source-build port. The detailed live matrix
+is in [`docs/windows.md`](docs/windows.md).
+
+Do not advertise a missing capability merely because its macOS pane can be
+drawn. Each Windows pane must own its real platform behavior and validation
+contract. Keep DirectML, CUDA, and other accelerators out of the baseline until
+the CPU backend and one real accelerated backend can be compared on supported
+hardware.
 
 ## Harden The Real-Time Boundary
 
@@ -166,7 +380,7 @@ Keep protected lifecycle commands and typed captures in compiled Rust. Ordinary
 literal commands and dictation control phrases already use the explicit
 TypeScript user config. Do not generalize that config into a plugin framework.
 
-Do not generalize the concrete macOS and Linux X11 adapters into a platform
-framework. Add seams only when a second implemented adapter requires one.
+Do not generalize the concrete macOS, Linux X11, and Windows adapters into a
+platform framework. Add seams only when implemented adapters require one.
 Follow the remaining capability contracts and exit criteria in
 [`docs/plans/linux.md`](docs/plans/linux.md).

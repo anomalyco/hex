@@ -1,8 +1,10 @@
 # HEX Local Transcription Service and SDK
 
-**Status:** The internal service, direct-child mode, and Promise and Effect
-wrappers are implemented. The npm packages are private previews; signed helper
-packaging, clean-consumer validation, and a real consumer remain.
+**Status:** The shared macOS/Linux/Windows service, direct-child mode, and
+Promise and Effect wrappers are implemented. Linux and Windows source builds
+pass standalone and direct-child smokes; Windows additionally passes real local
+inference. The npm packages are private previews; signed helper packaging,
+clean-consumer validation, and a real consumer remain.
 
 **Authority:** This document defines implemented internal service behavior and
 the target private SDK contract. It does not claim a published package.
@@ -19,21 +21,22 @@ Host application                         HEX Service
 ----------------                         -----------
 microphone permission                    service discovery and authentication
 device selection                         model download and verification
-capture start/stop                       strict-Metal load and prewarm
+capture start/stop                       target-native load and prewarm
 levels and waveform        WAV/PCM       resampling and inference
 capture UX                 ---------->   final raw transcript
 settings and model choice
 ```
 
-This gives macOS permission to the application the user intentionally used. An
-OpenCode Desktop microphone button prompts for OpenCode microphone access, not
-HEX access. HEX Service has no microphone entitlement and never captures audio.
+This gives microphone permission to the application the user intentionally
+used. An OpenCode Desktop microphone button prompts for OpenCode microphone
+access, not HEX access. HEX Service has no microphone entitlement or capture
+responsibility and never captures audio.
 
 ## Decisions
 
 | Decision | Reason |
 | --- | --- |
-| Host owns microphone capture | Correct TCC identity, intuitive permission prompt, no shared permission broker. |
+| Host owns microphone capture | Correct OS permission identity, intuitive permission prompt, no shared permission broker. |
 | Service owns models and inference | Hosts share verified model artifacts while each helper owns its warm runtime. |
 | Completed audio goes over localhost | Simple final-only contract; no partial transcripts or bidirectional session protocol. |
 | Model preparation is explicit | A transcription call never hides a large network download. |
@@ -158,8 +161,10 @@ export type ModelProgress =
 ```
 
 For managed GGUF models, preparation means download, checksum verification,
-strict-Metal load, and prewarm. System-managed runtimes such as Apple Speech
-perform their platform-specific availability and readiness checks instead. A
+target-native load, and prewarm. macOS retains its strict-Metal runtime while
+Linux and Windows use their concrete `transcribe.cpp` backends. System-managed
+runtimes such as Apple Speech perform their platform-specific availability and
+readiness checks instead. A
 preparation does not select the model or change full `Hex.app` settings. The
 service serializes preparation and preserves the existing artifact and warm
 runtime when a replacement fails.

@@ -105,16 +105,32 @@ Diagnostics are stored at:
 
 - macOS: `~/Library/Application Support/voice-control/logs/`
 - Linux: `~/.local/share/voice-control/logs/`, or under `XDG_DATA_HOME`
+- Windows: `%APPDATA%\voice-control\logs\`
 
 ## Linux X11 Beta
 
 The Linux beta targets x86_64 Arch Linux on i3/X11. It supports local hotkey
-dictation, automatic paste, shortcut rebinding, a tray app, and user-local
-updates. It does not support voice commands, meetings, native Wayland, or a
-package-manager install.
+dictation, automatic paste, shortcut rebinding, retained History, global text
+replacements, EWMH application modes with corrections and optional OpenCode
+rewriting plus ordered built-in/TypeScript transformations, a tray app, and
+user-local updates. It does not support voice commands, browser context, Voice
+Action, meetings, native Wayland, or a package-manager install.
 
 See the [Linux installation guide](docs/linux.md) for the verified user-local
 installer, source-build fallback, requirements, and limitations.
+
+## Windows Alpha
+
+The source-build Windows alpha now includes a native GPUI desktop app, WASAPI
+capture, local model installation and validation, global hold-to-dictate,
+double-tap lock, automatic paste, Paste Last, live microphone/settings changes,
+History, replacements, full processing modes, Voice Action, tones/HUD, a
+resident tray, Launch at login, and managed installation/updates. Its default
+shortcut is `Ctrl+Win`. Commands and meetings are not yet implemented, and the
+complete native behavior still needs physical Windows 10/11 validation.
+
+See the [Windows alpha guide](docs/windows.md) for environment setup, smoke
+tests, Polish model selection, and the current port boundary.
 
 ## Contributing
 
