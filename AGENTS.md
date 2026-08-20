@@ -29,8 +29,9 @@ only in debug builds.
 - `recording_environment`: serialized RAII ownership of idle-sleep prevention,
   output muting, and supported media-player pause/resume behavior.
 - `dictation_processor`: context-selected, deadline-bounded OpenCode rewrite
-  profiles with raw-transcript fallback. The macOS app discovers the `opencode2`
-  beta executable, links missing installs to `https://v2.opencode.ai/`, and uses
+  profiles with raw-transcript fallback shared by all three desktop roots. The
+  apps discover the `opencode2` beta executable, link missing installs to
+  `https://v2.opencode.ai/`, and use
   `opencode2 api get` to discover or start its managed service.
 - `parakeet`: the strict-Metal `transcribe.cpp` adapter plus bounded inference,
   processing, ordered output, paste, last-result, and meeting-delta workers.
@@ -85,7 +86,8 @@ only in debug builds.
 - `linux`, `linux_app`, `linux_context`, `linux_dictation`, `linux_input`,
   `linux_paste`, `linux_settings`: the X11 beta CLI, GPUI shell and tray, EWMH
   foreground application identity, hotkey capture-transcribe-process-paste
-  loop, X11 grabs and synthetic paste, and persisted Linux settings and modes.
+  loop, X11 grabs and synthetic paste, and persisted Linux settings and modes
+  with shared OpenCode processing.
 - `linux_updater`: signed direct-install updates, bounded downloads, atomic
   version activation, and restart handoff for user-local Linux installs.
 - `windows`, `windows_app`, `windows_dictation`, `windows_input`,
@@ -113,7 +115,7 @@ only in debug builds.
 - `desktop_host`: semantic desktop capabilities, portable UI snapshots, and
   typed actions implemented by the macOS root and contained Linux and Windows
   adapters.
-- `desktop_ui`: platform-neutral GPUI visual tokens and controls shared by both
+- `desktop_ui`: platform-neutral GPUI visual tokens and controls shared by all
   desktop roots, including the mandatory pane scaffold: `pane_header` /
   `pane_header_with_action`, `pane_body`, `pane_content`, the shared
   `header_button` action chip, and the single `PANE_CONTENT_WIDTH` and
@@ -121,7 +123,7 @@ only in debug builds.
 - `text_input`: the shared GPUI single- and multi-line text input with editing,
   selection, clipboard, and input-method support.
 - `desktop_transcription_picker`: the single GPUI language/model picker used by
-  both desktop roots over portable model presentation and platform preparation
+  all desktop roots over portable model presentation and platform preparation
   callbacks.
 - `app_window`: the production Settings, Modes with mode-owned processing,
   Voice Action, History, Replacements, and opt-in Commands shell plus

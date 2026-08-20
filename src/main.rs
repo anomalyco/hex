@@ -15,7 +15,7 @@ pub(crate) use common::command_grammar as command_grammar_common;
 pub(crate) use common::commands_engine as commands;
 #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
 pub(crate) use common::commands_engine;
-#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
 pub(crate) use common::dictation_processing;
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 pub(crate) use common::feedback;
@@ -23,7 +23,7 @@ pub(crate) use common::feedback;
 pub(crate) use common::keys;
 #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
 pub(crate) use common::local_api;
-#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
 pub(crate) use common::opencode;
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 pub(crate) use common::personal_commands;
@@ -51,12 +51,12 @@ pub(crate) use desktop::{
 #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
 pub(crate) use desktop::{
     history_pane as desktop_history_pane, mode_basics as desktop_mode_basics,
-    mode_list as desktop_mode_list, mode_target as desktop_mode_target,
-    replacement_editor as desktop_replacement_editor, text_input,
+    mode_list as desktop_mode_list, mode_processing as desktop_mode_processing,
+    mode_target as desktop_mode_target, replacement_editor as desktop_replacement_editor,
+    text_input,
 };
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 pub(crate) use desktop::{
-    mode_processing as desktop_mode_processing,
     mode_transformations as desktop_mode_transformations,
     voice_action_pane as desktop_voice_action_pane,
 };

@@ -8,9 +8,9 @@ use std::time::{Duration, Instant};
 use color_eyre::Result;
 use color_eyre::eyre::eyre;
 use gpui::{
-    AnyElement, App, Application, Bounds, Context, Keystroke, Pixels, Subscription, Timer,
-    TitlebarOptions, Window, WindowBounds, WindowKind, WindowOptions, canvas, div, prelude::*, px,
-    rgb, size,
+    AnyElement, App, Application, Bounds, Context, Keystroke, Pixels, SharedString, Subscription,
+    Timer, TitlebarOptions, Window, WindowBounds, WindowKind, WindowOptions, canvas, div,
+    prelude::*, px, rgb, size,
 };
 use tray_icon::menu::{Menu, MenuEvent, MenuItem};
 use tray_icon::{Icon, MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
@@ -36,6 +36,11 @@ use crate::desktop_mode_list::{
     ModeActivation, ModeListAction, ModeListDelegate, ModeListEntry, ModeListView, ModeTarget,
     render_mode_list as render_shared_mode_list,
 };
+use crate::desktop_mode_processing::{
+    ModeProcessingAction, ModeProcessingDelegate, ModeProcessingUnavailableView,
+    ModeProcessingView, ModeVariantPickerView,
+    render_mode_processing as render_shared_mode_processing, render_mode_variant_picker,
+};
 use crate::desktop_replacement_editor::{
     ReplacementEditorAction, ReplacementEditorDelegate, ReplacementEditorInput,
     ReplacementEditorView, render_replacement_editor as render_shared_replacement_editor,
@@ -46,8 +51,8 @@ use crate::desktop_ui::{
     FAINT, LINE, MUTED, PANE_LIST_WIDTH, SECTION_GAP, SIDEBAR_WIDTH, SUCCESS, SURFACE, TEXT,
     TEXT_SOFT, compact_button, compact_section_label, disclosure_button, dropdown_backdrop,
     dropdown_item, dropdown_panel_with_width, error_message, header_button, hotkey_keycaps,
-    pane_body, pane_content, pane_header, pane_header_with_action, settings_panel, settings_row,
-    settings_section_label, sidebar_frame, toggle, window_frame,
+    pane_body, pane_content, pane_header, pane_header_with_action, settings_copy, settings_panel,
+    settings_row, settings_section_label, sidebar_frame, toggle, window_frame,
 };
 use crate::events::EventReader;
 use crate::history::{History, HistoryRetention};
@@ -59,9 +64,12 @@ const WINDOW_HEIGHT: f32 = 700.0;
 const MINIMUM_WIDTH: f32 = 860.0;
 const MINIMUM_HEIGHT: f32 = 560.0;
 const UPDATE_INTERVAL: Duration = Duration::from_secs(24 * 60 * 60);
+const OPENCODE_INSTALL_RETRY_INTERVAL: Duration = Duration::from_secs(60);
+const OPENCODE_SETUP_URL: &str = "https://v2.opencode.ai/";
 
 type ListenerResult = std::result::Result<(), String>;
 type PreparationResult = std::result::Result<PreparedTranscription, String>;
+type OpenCodeCatalogProbe = (bool, Option<Result<crate::opencode::ModelCatalog>>);
 
 struct PreparedTranscription {
     selection: crate::transcription_models::TranscriptionSelection,
@@ -125,6 +133,12 @@ struct LinuxDesktopHost {
     history_error: Option<String>,
     replacements: crate::linux_dictation::SharedReplacements,
     modes: crate::linux_dictation::SharedModes,
+    opencode_catalog: Option<crate::opencode::ModelCatalog>,
+    opencode_catalog_rx: Option<Receiver<OpenCodeCatalogProbe>>,
+    opencode_catalog_error: Option<String>,
+    opencode_installed: bool,
+    opencode_probe_complete: bool,
+    opencode_retry_at: Option<Instant>,
     update: UpdateState,
 }
 
@@ -137,7 +151,14 @@ struct LinuxApp {
     _history_search_subscription: Subscription,
     replacement_inputs: Vec<ReplacementEditorInput>,
     mode_inputs: Vec<LinuxModeInputs>,
+    global_processing_prompt: gpui::Entity<TextInput>,
+    _global_processing_prompt_subscription: Subscription,
+    global_processing_deadline: gpui::Entity<TextInput>,
+    _global_processing_deadline_subscription: Subscription,
     selected_mode: ModeTarget,
+    opencode_model_dropdown: Option<ModeTarget>,
+    opencode_model_dropdown_bounds: Option<Bounds<Pixels>>,
+    opencode_variant_picker_open: Option<ModeTarget>,
     capturing_hotkey: bool,
     transcription_picker: TranscriptionPickerState,
     catalog_language_filter: Option<String>,
@@ -160,6 +181,8 @@ struct LinuxApp {
 struct LinuxModeInputs {
     name: gpui::Entity<TextInput>,
     applications: gpui::Entity<TextInput>,
+    processing_prompt: gpui::Entity<TextInput>,
+    processing_deadline: gpui::Entity<TextInput>,
     corrections: Vec<ReplacementEditorInput>,
     _subscriptions: Vec<Subscription>,
 }
@@ -265,6 +288,42 @@ pub fn open(event_path: PathBuf, start_hidden: bool) -> Result<()> {
                             .iter()
                             .map(|mode| LinuxApp::mode_inputs(mode, cx))
                             .collect();
+                        let global_processing_prompt = cx.new(|cx| {
+                            TextInput::multiline_with_height(
+                                cx,
+                                "Tell OpenCode exactly how to transform the dictated text.",
+                                &settings.dictation_post_processing.prompt,
+                                px(92.0),
+                            )
+                        });
+                        let global_processing_prompt_subscription = cx.subscribe(
+                            &global_processing_prompt,
+                            |this: &mut LinuxApp, input, _: &TextChanged, cx| {
+                                this.sync_global_processing_prompt(
+                                    input.read(cx).text().to_string(),
+                                    cx,
+                                );
+                            },
+                        );
+                        let global_processing_deadline = cx.new(|cx| {
+                            TextInput::new(
+                                cx,
+                                "Seconds",
+                                settings
+                                    .dictation_post_processing
+                                    .deadline_seconds
+                                    .to_string(),
+                            )
+                        });
+                        let global_processing_deadline_subscription = cx.subscribe(
+                            &global_processing_deadline,
+                            |this: &mut LinuxApp, input, _: &TextChanged, cx| {
+                                this.sync_global_processing_deadline(
+                                    input.read(cx).text().to_string(),
+                                    cx,
+                                );
+                            },
+                        );
                         LinuxApp {
                             host,
                             pane: DesktopPane::Settings,
@@ -274,7 +333,16 @@ pub fn open(event_path: PathBuf, start_hidden: bool) -> Result<()> {
                             _history_search_subscription: history_search_subscription,
                             replacement_inputs,
                             mode_inputs,
+                            global_processing_prompt,
+                            _global_processing_prompt_subscription:
+                                global_processing_prompt_subscription,
+                            global_processing_deadline,
+                            _global_processing_deadline_subscription:
+                                global_processing_deadline_subscription,
                             selected_mode: ModeTarget::Global,
+                            opencode_model_dropdown: None,
+                            opencode_model_dropdown_bounds: None,
+                            opencode_variant_picker_open: None,
                             onboarding,
                             // A fresh run offers the locale's recommendation,
                             // like the Windows first-run default.
@@ -579,9 +647,9 @@ impl LinuxDesktopHost {
         let replacements = Arc::new(RwLock::new(crate::text_replacements::ReplacementSet::new(
             &settings.text_replacements,
         )));
-        let modes = Arc::new(RwLock::new(crate::linux_dictation::LinuxModeRuntime::new(
-            &settings.modes,
-        )));
+        let modes = Arc::new(RwLock::new(
+            crate::linux_dictation::LinuxModeRuntime::from_settings(&settings),
+        ));
         Self {
             event_reader,
             event_path,
@@ -605,6 +673,12 @@ impl LinuxDesktopHost {
             history_error,
             replacements,
             modes,
+            opencode_catalog: None,
+            opencode_catalog_rx: None,
+            opencode_catalog_error: None,
+            opencode_installed: false,
+            opencode_probe_complete: false,
+            opencode_retry_at: None,
             update,
         }
     }
@@ -679,6 +753,14 @@ impl LinuxDesktopHost {
     }
 
     fn refresh(&mut self) {
+        if self
+            .opencode_retry_at
+            .is_some_and(|retry_at| Instant::now() >= retry_at)
+        {
+            self.opencode_retry_at = None;
+            self.request_opencode_catalog();
+        }
+        self.poll_opencode_catalog();
         if matches!(&self.update, UpdateState::Waiting(at) | UpdateState::Failed(at) if Instant::now() >= *at)
         {
             self.update = UpdateState::Checking(start_update_check());
@@ -954,10 +1036,100 @@ impl LinuxDesktopHost {
             .modes
             .write()
             .unwrap_or_else(|error| error.into_inner()) =
-            crate::linux_dictation::LinuxModeRuntime::new(&candidate.modes);
+            crate::linux_dictation::LinuxModeRuntime::from_settings(&candidate);
         self.settings = candidate;
         self.settings_error = None;
         Ok(())
+    }
+
+    fn set_mode_post_processing(
+        &mut self,
+        target: ModeTarget,
+        settings: crate::dictation_processing::PostProcessingSettings,
+    ) -> Result<()> {
+        let mut candidate = self.settings.clone();
+        match target {
+            ModeTarget::Global => candidate.dictation_post_processing = settings,
+            ModeTarget::Mode(index) => {
+                let mode = candidate
+                    .modes
+                    .get_mut(index)
+                    .ok_or_else(|| eyre!("dictation mode {index} no longer exists"))?;
+                mode.post_processing = settings;
+            }
+        }
+        candidate.save().map_err(|error| {
+            let message = format!("Could not save mode processing: {error:#}");
+            self.settings_error = Some(message.clone());
+            eyre!(message)
+        })?;
+        *self
+            .modes
+            .write()
+            .unwrap_or_else(|error| error.into_inner()) =
+            crate::linux_dictation::LinuxModeRuntime::from_settings(&candidate);
+        self.settings = candidate;
+        self.settings_error = None;
+        Ok(())
+    }
+
+    fn request_opencode_catalog(&mut self) {
+        if self.opencode_catalog_rx.is_some() {
+            return;
+        }
+        let (sender, receiver) = mpsc::channel();
+        self.opencode_catalog_rx = Some(receiver);
+        self.opencode_retry_at = None;
+        let _ = std::thread::Builder::new()
+            .name("linux-opencode-catalog".into())
+            .spawn(move || {
+                let installed = crate::opencode::opencode_installed();
+                let catalog = installed.then(crate::opencode::load_model_catalog);
+                let _ = sender.send((installed, catalog));
+            });
+    }
+
+    fn poll_opencode_catalog(&mut self) -> bool {
+        let Some(receiver) = &self.opencode_catalog_rx else {
+            return false;
+        };
+        match receiver.try_recv() {
+            Ok((installed, Some(Ok(catalog)))) => {
+                self.opencode_installed = installed;
+                self.opencode_probe_complete = true;
+                self.opencode_catalog = Some(catalog);
+                self.opencode_catalog_error = None;
+                self.opencode_retry_at = None;
+                self.opencode_catalog_rx = None;
+                true
+            }
+            Ok((installed, Some(Err(error)))) => {
+                self.opencode_installed = installed;
+                self.opencode_probe_complete = true;
+                self.opencode_catalog_error = Some(format!("{error:#}"));
+                self.opencode_retry_at = None;
+                self.opencode_catalog_rx = None;
+                true
+            }
+            Ok((installed, None)) => {
+                self.opencode_installed = installed;
+                self.opencode_probe_complete = true;
+                self.opencode_catalog = None;
+                self.opencode_catalog_error = None;
+                self.opencode_retry_at = Some(Instant::now() + OPENCODE_INSTALL_RETRY_INTERVAL);
+                self.opencode_catalog_rx = None;
+                true
+            }
+            Err(TryRecvError::Empty) => false,
+            Err(TryRecvError::Disconnected) => {
+                self.opencode_catalog_error =
+                    Some("the OpenCode catalog worker stopped unexpectedly".into());
+                self.opencode_probe_complete = true;
+                self.opencode_retry_at = None;
+                self.opencode_catalog_rx = None;
+                true
+            }
+        }
     }
 
     /// Re-enumerate capture devices; the dropdown trigger calls this so
@@ -1077,6 +1249,8 @@ impl LinuxDesktopHost {
 impl LinuxApp {
     fn close_popups(&mut self) {
         self.catalog_filter_dropdown_open = false;
+        self.opencode_model_dropdown = None;
+        self.opencode_variant_picker_open = None;
         self.transcription_dropdown_open = false;
         self.dictation_language_dropdown_open = false;
         self.microphone_dropdown_open = false;
@@ -1463,6 +1637,12 @@ impl LinuxApp {
         if pane == DesktopPane::History {
             self.history_pane.reload();
         }
+        if pane == DesktopPane::Modes
+            && self.host.opencode_catalog.is_none()
+            && !self.host.opencode_probe_complete
+        {
+            self.host.request_opencode_catalog();
+        }
         cx.notify();
     }
 
@@ -1483,6 +1663,25 @@ impl LinuxApp {
         cx.notify();
     }
 
+    fn sync_global_processing_prompt(&mut self, prompt: String, cx: &mut Context<Self>) {
+        let mut processing = self.host.settings.dictation_post_processing.clone();
+        processing.prompt = prompt;
+        let _ = self
+            .host
+            .set_mode_post_processing(ModeTarget::Global, processing);
+        cx.notify();
+    }
+
+    fn sync_global_processing_deadline(&mut self, deadline: String, cx: &mut Context<Self>) {
+        let mut processing = self.host.settings.dictation_post_processing.clone();
+        if processing.update_deadline_from_text(&deadline) {
+            let _ = self
+                .host
+                .set_mode_post_processing(ModeTarget::Global, processing);
+        }
+        cx.notify();
+    }
+
     fn mode_inputs(
         mode: &crate::linux_settings::LinuxMode,
         cx: &mut Context<Self>,
@@ -1495,10 +1694,33 @@ impl LinuxApp {
                 mode.applications.join(", "),
             )
         });
+        let processing_prompt = cx.new(|cx| {
+            TextInput::multiline_with_height(
+                cx,
+                "Tell OpenCode exactly how to transform the dictated text.",
+                &mode.post_processing.prompt,
+                px(92.0),
+            )
+        });
+        let processing_deadline = cx.new(|cx| {
+            TextInput::new(
+                cx,
+                "Seconds",
+                mode.post_processing.deadline_seconds.to_string(),
+            )
+        });
         let name_changed = cx.subscribe(&name, |this, _, _: &TextChanged, cx| this.sync_modes(cx));
         let applications_changed = cx.subscribe(&applications, |this, _, _: &TextChanged, cx| {
             this.sync_modes(cx)
         });
+        let processing_prompt_changed = cx
+            .subscribe(&processing_prompt, |this, _, _: &TextChanged, cx| {
+                this.sync_modes(cx)
+            });
+        let processing_deadline_changed = cx
+            .subscribe(&processing_deadline, |this, _, _: &TextChanged, cx| {
+                this.sync_modes(cx)
+            });
         let corrections = mode
             .corrections
             .iter()
@@ -1507,8 +1729,15 @@ impl LinuxApp {
         LinuxModeInputs {
             name,
             applications,
+            processing_prompt,
+            processing_deadline,
             corrections,
-            _subscriptions: vec![name_changed, applications_changed],
+            _subscriptions: vec![
+                name_changed,
+                applications_changed,
+                processing_prompt_changed,
+                processing_deadline_changed,
+            ],
         }
     }
 
@@ -1521,7 +1750,7 @@ impl LinuxApp {
             .iter()
             .enumerate()
             .filter(|(index, _)| Some(*index) != excluded)
-            .map(|(_, inputs)| crate::linux_settings::LinuxMode {
+            .map(|(index, inputs)| crate::linux_settings::LinuxMode {
                 name: inputs.name.read(cx).text().to_string(),
                 applications: inputs
                     .applications
@@ -1536,6 +1765,18 @@ impl LinuxApp {
                     .iter()
                     .map(|correction| correction.value(cx))
                     .collect(),
+                post_processing: {
+                    let mut processing = self
+                        .host
+                        .settings
+                        .modes
+                        .get(index)
+                        .map_or_else(Default::default, |mode| mode.post_processing.clone());
+                    processing.prompt = inputs.processing_prompt.read(cx).text().to_string();
+                    processing
+                        .update_deadline_from_text(inputs.processing_deadline.read(cx).text());
+                    processing
+                },
             })
             .collect()
     }
@@ -1584,7 +1825,7 @@ impl LinuxApp {
         render_shared_history_pane(view, cx)
     }
 
-    fn render_modes(&mut self, cx: &mut Context<Self>) -> AnyElement {
+    fn render_modes(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         if let ModeTarget::Mode(index) = self.selected_mode
             && index >= self.mode_inputs.len()
         {
@@ -1634,7 +1875,7 @@ impl LinuxApp {
             },
             cx,
         );
-        let detail = self.render_linux_mode_detail(cx);
+        let detail = self.render_linux_mode_detail(window, cx);
 
         div()
             .size_full()
@@ -1660,7 +1901,11 @@ impl LinuxApp {
             .into_any_element()
     }
 
-    fn render_linux_mode_detail(&mut self, cx: &mut Context<Self>) -> AnyElement {
+    fn render_linux_mode_detail(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let mut detail = div()
             .id("mode-detail")
             .flex_1()
@@ -1669,6 +1914,8 @@ impl LinuxApp {
             .overflow_y_scroll()
             .child(match self.selected_mode {
                 ModeTarget::Global => {
+                    let processing =
+                        self.render_linux_mode_processing(ModeTarget::Global, window, cx);
                     let basics = render_shared_mode_basics(
                         ModeBasicsView::Global {
                             title: "Global",
@@ -1697,9 +1944,15 @@ impl LinuxApp {
                         .child(div().h(px(4.0)))
                         .child(compact_section_label(tr("TEXT PROCESSING")))
                         .child(replacements)
+                        .child(processing)
                         .into_any_element()
                 }
                 ModeTarget::Mode(mode_index) => {
+                    let processing = self.render_linux_mode_processing(
+                        ModeTarget::Mode(mode_index),
+                        window,
+                        cx,
+                    );
                     let inputs = &self.mode_inputs[mode_index];
                     let basics = render_shared_mode_basics(
                         ModeBasicsView::Custom {
@@ -1736,6 +1989,7 @@ impl LinuxApp {
                         .child(div().h(px(4.0)))
                         .child(compact_section_label(tr("TEXT PROCESSING")))
                         .child(corrections)
+                        .child(processing)
                         .into_any_element()
                 }
             });
@@ -1743,6 +1997,353 @@ impl LinuxApp {
             detail = detail.child(error_message("Modes could not be saved.", error));
         }
         detail.into_any_element()
+    }
+
+    fn mode_post_processing(
+        &self,
+        target: ModeTarget,
+    ) -> Option<&crate::dictation_processing::PostProcessingSettings> {
+        match target {
+            ModeTarget::Global => Some(&self.host.settings.dictation_post_processing),
+            ModeTarget::Mode(index) => self
+                .host
+                .settings
+                .modes
+                .get(index)
+                .map(|mode| &mode.post_processing),
+        }
+    }
+
+    fn opencode_model_key(&self, target: ModeTarget) -> Option<String> {
+        self.mode_post_processing(target)?.model.clone()
+    }
+
+    fn opencode_model_label(&self, target: ModeTarget) -> String {
+        let current_key = self.opencode_model_key(target);
+        if let (Some(key), Some(catalog)) = (&current_key, &self.host.opencode_catalog)
+            && let Some(choice) = catalog.models.iter().find(|choice| &choice.key == key)
+        {
+            return choice.name.clone();
+        }
+        if let Some(key) = current_key {
+            return key
+                .split_once('/')
+                .map_or(key.clone(), |(_, model)| model.to_string());
+        }
+        if self.host.opencode_catalog_rx.is_some() {
+            return tr("Loading models").to_string();
+        }
+        self.host
+            .opencode_catalog
+            .as_ref()
+            .and_then(|catalog| catalog.default_name.clone())
+            .map_or_else(
+                || "OpenCode default".into(),
+                |name| format!("{name} — Default"),
+            )
+    }
+
+    fn render_opencode_model_control(
+        &mut self,
+        target: ModeTarget,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let target_id = target.id_fragment();
+        let label = self.opencode_model_label(target);
+        div()
+            .relative()
+            .child(
+                disclosure_button(label)
+                    .id(SharedString::from(format!(
+                        "linux-opencode-model-{target_id}"
+                    )))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        let was_open = this.opencode_model_dropdown == Some(target);
+                        this.close_popups();
+                        if !was_open {
+                            this.opencode_model_dropdown = Some(target);
+                            if this.host.opencode_catalog.is_none() {
+                                this.host.request_opencode_catalog();
+                            }
+                        }
+                        cx.notify();
+                    })),
+            )
+            .child(
+                canvas(
+                    {
+                        let entity = cx.entity();
+                        move |bounds, _, cx| {
+                            entity.update(cx, |this, _| {
+                                this.opencode_model_dropdown_bounds = Some(bounds);
+                            });
+                        }
+                    },
+                    |_, _, _, _| {},
+                )
+                .w_full()
+                .h(px(0.0)),
+            )
+            .into_any_element()
+    }
+
+    fn set_opencode_model(&mut self, target: ModeTarget, model: Option<crate::opencode::Model>) {
+        let Some(mut processing) = self.mode_post_processing(target).cloned() else {
+            return;
+        };
+        processing.model = model
+            .as_ref()
+            .map(|model| format!("{}/{}", model.provider, model.id));
+        processing.variant = model.and_then(|model| model.variant);
+        let _ = self.host.set_mode_post_processing(target, processing);
+    }
+
+    fn set_mode_variant(&mut self, target: ModeTarget, variant: Option<String>) {
+        let Some(mut processing) = self.mode_post_processing(target).cloned() else {
+            return;
+        };
+        let default_model = self
+            .host
+            .opencode_catalog
+            .as_ref()
+            .and_then(|catalog| catalog.default_key.as_deref());
+        processing.set_variant(variant, default_model);
+        let _ = self.host.set_mode_post_processing(target, processing);
+    }
+
+    fn render_linux_mode_processing(
+        &mut self,
+        target: ModeTarget,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let Some(settings) = self.mode_post_processing(target).cloned() else {
+            return div().into_any_element();
+        };
+        let installed = self.host.opencode_installed;
+        let compact = window.viewport_size().width < px(980.0);
+        let settings_view = if settings.enabled {
+            let model_control = self.render_opencode_model_control(target, cx);
+            let prompt = match target {
+                ModeTarget::Global => self.global_processing_prompt.clone(),
+                ModeTarget::Mode(index) => self.mode_inputs[index].processing_prompt.clone(),
+            };
+            let deadline = match target {
+                ModeTarget::Global => self.global_processing_deadline.clone(),
+                ModeTarget::Mode(index) => self.mode_inputs[index].processing_deadline.clone(),
+            };
+            let variants = self
+                .host
+                .opencode_catalog
+                .as_ref()
+                .map(|catalog| catalog.variants_for(settings.model.as_deref()).to_vec())
+                .unwrap_or_default();
+            let variant_control = (!variants.is_empty()).then(|| {
+                render_mode_variant_picker(
+                    ModeVariantPickerView {
+                        target,
+                        variants,
+                        selected: settings.variant.clone(),
+                        open: self.opencode_variant_picker_open == Some(target),
+                    },
+                    cx,
+                )
+            });
+            Some(
+                div()
+                    .pt_4()
+                    .flex()
+                    .flex_col()
+                    .gap_5()
+                    .child(
+                        div()
+                            .flex()
+                            .when(compact, |row| row.flex_col().items_start().gap_3())
+                            .when(!compact, |row| row.items_center().justify_between().gap_4())
+                            .child(div().flex_1().min_w(px(0.0)).child(settings_copy(
+                                "Model",
+                                "Rewrites each completed dictation through OpenCode",
+                            )))
+                            .child(
+                                div()
+                                    .when(!compact, |control| control.w(px(320.0)).flex_none())
+                                    .when(compact, |control| control.w_full())
+                                    .child(model_control),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .when(compact, |row| row.flex_col().items_start().gap_3())
+                            .when(!compact, |row| row.items_center().justify_between().gap_4())
+                            .child(div().flex_1().min_w(px(0.0)).child(settings_copy(
+                                "Deadline",
+                                "Maximum time OpenCode may spend on one rewrite",
+                            )))
+                            .child(
+                                div()
+                                    .when(!compact, |control| control.w(px(120.0)).flex_none())
+                                    .when(compact, |control| control.w_full())
+                                    .child(deadline),
+                            ),
+                    )
+                    .when_some(variant_control, |processing, variant_control| {
+                        processing.child(
+                            div()
+                                .flex()
+                                .when(compact, |row| row.flex_col().items_start().gap_3())
+                                .when(!compact, |row| row.items_start().justify_between().gap_4())
+                                .child(div().flex_1().min_w(px(0.0)).child(settings_copy(
+                                    "Thinking",
+                                    "Choose how much reasoning the model should use",
+                                )))
+                                .child(variant_control),
+                        )
+                    })
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap_2()
+                            .child(settings_copy(
+                                "Instructions",
+                                "Tell OpenCode exactly how to transform the dictated text",
+                            ))
+                            .child(prompt),
+                    )
+                    .into_any_element(),
+            )
+        } else {
+            None
+        };
+        let unavailable = if !installed {
+            Some(ModeProcessingUnavailableView {
+                title: "OpenCode is required",
+                description: "Install and configure OpenCode to rewrite dictation.",
+                error: self.host.opencode_catalog_error.clone(),
+                retry_label: Some("Check again"),
+                setup_label: Some("Open setup"),
+            })
+        } else {
+            self.host
+                .opencode_catalog_error
+                .clone()
+                .map(|error| ModeProcessingUnavailableView {
+                    title: "Models could not be loaded",
+                    description: "Retry the OpenCode model catalog.",
+                    error: Some(error),
+                    retry_label: Some("Retry"),
+                    setup_label: None,
+                })
+        };
+        render_shared_mode_processing(
+            ModeProcessingView {
+                target,
+                enabled: settings.enabled,
+                toggle_position: if settings.enabled { 1.0 } else { 0.0 },
+                can_toggle: settings.enabled || installed,
+                settings: settings_view,
+                unavailable,
+            },
+            cx,
+        )
+    }
+
+    fn render_opencode_model_dropdown(
+        &mut self,
+        viewport_height: Pixels,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let Some(target) = self.opencode_model_dropdown else {
+            return div().into_any_element();
+        };
+        let Some(bounds) = self.opencode_model_dropdown_bounds else {
+            return div().into_any_element();
+        };
+        let target_id = target.id_fragment();
+        let backdrop = dropdown_backdrop("linux-opencode-model-backdrop").on_click(cx.listener(
+            |this, _, _, cx| {
+                this.opencode_model_dropdown = None;
+                cx.notify();
+            },
+        ));
+        let width = px(320.0);
+        let Some(catalog) = self.host.opencode_catalog.clone() else {
+            let message = self.host.opencode_catalog_error.clone().map_or_else(
+                || tr("Loading models").to_string(),
+                |error| tr_fill("Models could not be loaded: {}", &error),
+            );
+            return backdrop
+                .child(
+                    dropdown_panel_with_width(bounds, viewport_height, 1, width)
+                        .id(SharedString::from(format!(
+                            "linux-opencode-model-dropdown-{target_id}"
+                        )))
+                        .on_click(|_, _, cx| cx.stop_propagation())
+                        .child(
+                            div()
+                                .px_3()
+                                .py_2()
+                                .text_size(px(12.0))
+                                .text_color(rgb(MUTED))
+                                .child(message),
+                        ),
+                )
+                .into_any_element();
+        };
+        let current_key = self.opencode_model_key(target);
+        let panel_rows = (catalog.models.len() + 1).max(1);
+        let mut items = Vec::with_capacity(panel_rows);
+        let default_label = catalog.default_name.clone().map_or_else(
+            || "OpenCode default".into(),
+            |name| format!("{name} — OpenCode default"),
+        );
+        items.push(
+            dropdown_item(
+                SharedString::from(format!("linux-opencode-model-default-{target_id}")),
+                default_label,
+                current_key.is_none(),
+            )
+            .on_click(cx.listener(move |this, _, _, cx| {
+                cx.stop_propagation();
+                this.set_opencode_model(target, None);
+                this.opencode_model_dropdown = None;
+                cx.notify();
+            }))
+            .into_any_element(),
+        );
+        items.extend(catalog.models.iter().enumerate().map(|(index, choice)| {
+            let selected = current_key.as_deref() == Some(choice.key.as_str());
+            let label = if catalog.default_key.as_ref() == Some(&choice.key) {
+                format!("{} — {}", choice.name, tr("Default"))
+            } else {
+                choice.name.clone()
+            };
+            let model = choice.model();
+            dropdown_item(
+                SharedString::from(format!("linux-opencode-model-option-{target_id}-{index}")),
+                label,
+                selected,
+            )
+            .on_click(cx.listener(move |this, _, _, cx| {
+                cx.stop_propagation();
+                this.set_opencode_model(target, Some(model.clone()));
+                this.opencode_model_dropdown = None;
+                cx.notify();
+            }))
+            .into_any_element()
+        }));
+        backdrop
+            .child(
+                dropdown_panel_with_width(bounds, viewport_height, panel_rows, width)
+                    .id(SharedString::from(format!(
+                        "linux-opencode-model-dropdown-{target_id}"
+                    )))
+                    .overflow_y_scroll()
+                    .on_click(|_, _, cx| cx.stop_propagation())
+                    .children(items),
+            )
+            .into_any_element()
     }
 
     fn render_shared_navigation(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -2540,13 +3141,61 @@ impl HistoryPaneDelegate for LinuxApp {
     }
 }
 
+impl ModeProcessingDelegate for LinuxApp {
+    fn handle_mode_processing_action(
+        &mut self,
+        action: ModeProcessingAction,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match action {
+            ModeProcessingAction::SetEnabled { target, enabled } => {
+                let Some(mut processing) = self.mode_post_processing(target).cloned() else {
+                    return;
+                };
+                processing.enabled = enabled;
+                if self
+                    .host
+                    .set_mode_post_processing(target, processing)
+                    .is_ok()
+                    && enabled
+                    && self.host.opencode_catalog.is_none()
+                {
+                    self.host.request_opencode_catalog();
+                }
+            }
+            ModeProcessingAction::ToggleVariantPicker { target } => {
+                self.opencode_variant_picker_open =
+                    if self.opencode_variant_picker_open == Some(target) {
+                        None
+                    } else {
+                        Some(target)
+                    };
+            }
+            ModeProcessingAction::SetVariant { target, variant } => {
+                self.opencode_variant_picker_open = None;
+                self.set_mode_variant(target, variant);
+            }
+            ModeProcessingAction::RetryOpenCode => self.host.request_opencode_catalog(),
+            ModeProcessingAction::OpenOpenCodeSetup => {
+                if let Err(error) = crate::commands_engine::execute(
+                    crate::commands_engine::Action::OpenUrl(OPENCODE_SETUP_URL.into()),
+                ) {
+                    tracing::error!(%error, "could not open the OpenCode beta documentation");
+                }
+            }
+        }
+        cx.notify();
+    }
+}
+
 impl Render for LinuxApp {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let viewport = window.viewport_size();
         let snapshot = self.host.snapshot();
         let content = match self.pane {
             DesktopPane::Settings => self.render_shared_settings(&snapshot, cx),
-            DesktopPane::Modes => self.render_modes(cx),
+            DesktopPane::Modes => self.render_modes(window, cx),
             DesktopPane::HudLab => crate::desktop_hud_lab::render_hud_lab_pane(self, window, cx),
             DesktopPane::Activity => crate::desktop_activity_pane::render_activity_pane(&snapshot),
             DesktopPane::History => self.render_history(cx),
@@ -2584,6 +3233,9 @@ impl Render for LinuxApp {
         let ui_language_dropdown = self
             .ui_language_dropdown_open
             .then(|| self.render_ui_language_dropdown(viewport.height, cx));
+        let opencode_model_dropdown = self
+            .opencode_model_dropdown
+            .map(|_| self.render_opencode_model_dropdown(viewport.height, cx));
         let onboarding = self.onboarding.then(|| {
             crate::desktop_onboarding::render_onboarding(
                 self,
@@ -2609,6 +3261,7 @@ impl Render for LinuxApp {
             .children(dictation_language_dropdown)
             .children(microphone_dropdown)
             .children(ui_language_dropdown)
+            .children(opencode_model_dropdown)
             .children(model_picker)
             .children(catalog_filter_dropdown)
             .children(onboarding)

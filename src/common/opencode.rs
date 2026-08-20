@@ -1,7 +1,7 @@
-//! The one OpenCode client both desktop platforms share: executable
+//! The one OpenCode client all three desktop platforms share: executable
 //! discovery, the `opencode2 api` transport with deadlines and
 //! cancellation, the model catalog, and text generation. The shared dictation
-//! policy and both native desktop roots use it for mode rewriting; Windows also
+//! policy and every native desktop root use it for mode rewriting; Windows also
 //! drives Voice Action with it.
 
 use std::ffi::OsStr;
@@ -16,6 +16,7 @@ use color_eyre::eyre::{Result, WrapErr, eyre};
 use serde::{Deserialize, Serialize};
 
 const MAX_OUTPUT_BYTES: u64 = 16 * 1024 * 1024;
+#[cfg_attr(target_os = "linux", allow(dead_code))]
 pub const VOICE_ACTION_PROTOCOL_PROMPT: &str = "You execute a one-off voice instruction. When selected text is provided, transform or use it as instructed. When no text is selected, generate the requested text. Return only the exact paste-ready result without an explanation, label, alternative, or Markdown fence.";
 
 /// A generation model reference in OpenCode's request shape.
@@ -127,6 +128,7 @@ struct ResponseData {
 
 /// The voice-action prompt both platforms send, so the model is steered
 /// identically regardless of OS.
+#[cfg_attr(target_os = "linux", allow(dead_code))]
 pub fn voice_action_prompt(
     instruction: &str,
     application: Option<&str>,
@@ -161,7 +163,7 @@ pub fn load_model_catalog() -> Result<ModelCatalog> {
     Ok(build_model_catalog(models.data, default.data))
 }
 
-#[cfg_attr(target_os = "macos", allow(dead_code))]
+#[cfg_attr(any(target_os = "linux", target_os = "macos"), allow(dead_code))]
 pub fn generate(prompt: &str, model: Option<&Model>, deadline: Duration) -> Result<String> {
     generate_cancellable(prompt, model, deadline, &AtomicBool::new(false))
 }

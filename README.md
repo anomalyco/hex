@@ -111,9 +111,10 @@ Diagnostics are stored at:
 
 The Linux beta targets x86_64 Arch Linux on i3/X11. It supports local hotkey
 dictation, automatic paste, shortcut rebinding, retained History, global text
-replacements, EWMH application modes with corrections, a tray app, and
-user-local updates. It does not support voice commands, browser context,
-meetings, native Wayland, or a package-manager install.
+replacements, EWMH application modes with corrections and optional OpenCode
+rewriting, a tray app, and user-local updates. It does not support voice
+commands, browser context, TypeScript transformations, meetings, native Wayland,
+or a package-manager install.
 
 See the [Linux installation guide](docs/linux.md) for the verified user-local
 installer, source-build fallback, requirements, and limitations.
@@ -123,9 +124,10 @@ installer, source-build fallback, requirements, and limitations.
 The source-build Windows alpha now includes a native GPUI desktop app, WASAPI
 capture, local model installation and validation, global hold-to-dictate,
 double-tap lock, automatic paste, Paste Last, live microphone/settings changes,
-History, replacements, tones/HUD, a resident tray, and Launch at login. Its
-default shortcut is `Ctrl+Win`. Full processing modes, Voice Action, commands,
-packaged installation/updates, and meetings are not yet implemented.
+History, replacements, full processing modes, Voice Action, tones/HUD, a
+resident tray, Launch at login, and managed installation/updates. Its default
+shortcut is `Ctrl+Win`. Commands and meetings are not yet implemented, and the
+complete native behavior still needs physical Windows 10/11 validation.
 
 See the [Windows alpha guide](docs/windows.md) for environment setup, smoke
 tests, Polish model selection, and the current port boundary.

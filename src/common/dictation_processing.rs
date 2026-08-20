@@ -5,7 +5,7 @@
 //! corrections, optional OpenCode rewriting, then selected transformations.
 //! Every failed step preserves the previous step's text.
 
-#![cfg_attr(target_os = "windows", allow(dead_code))]
+#![cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
@@ -46,7 +46,7 @@ impl Default for PostProcessingSettings {
 
 impl PostProcessingSettings {
     /// Apply a user-edited deadline without letting a transient invalid field
-    /// erase the last persisted value. Both desktop roots use this contract.
+    /// erase the last persisted value. Every desktop root uses this contract.
     pub fn update_deadline_from_text(&mut self, text: &str) -> bool {
         let Ok(seconds) = text.trim().parse::<u64>() else {
             return false;
@@ -71,8 +71,8 @@ impl PostProcessingSettings {
 }
 
 /// Platform-owned transformation execution. macOS and Windows currently back
-/// this with the shared bounded Bun personal-command host; Linux can supply its
-/// real host when that capability is implemented.
+/// this with the shared bounded Bun personal-command host; Linux supplies its
+/// real host once that capability is implemented.
 pub trait TransformationExecutor {
     fn transform(
         &self,

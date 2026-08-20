@@ -39,6 +39,7 @@ struct OutputRuntime {
 
 #[derive(Clone, Default)]
 pub(crate) struct LinuxModeRuntime {
+    default: crate::dictation_processing::PostProcessingSettings,
     modes: Vec<(
         crate::linux_settings::LinuxMode,
         crate::text_replacements::ReplacementSet,
@@ -46,9 +47,11 @@ pub(crate) struct LinuxModeRuntime {
 }
 
 impl LinuxModeRuntime {
-    pub(crate) fn new(modes: &[crate::linux_settings::LinuxMode]) -> Self {
+    pub(crate) fn from_settings(settings: &crate::linux_settings::LinuxSettings) -> Self {
         Self {
-            modes: modes
+            default: settings.dictation_post_processing.clone(),
+            modes: settings
+                .modes
                 .iter()
                 .cloned()
                 .map(|mode| {
@@ -60,17 +63,45 @@ impl LinuxModeRuntime {
         }
     }
 
-    fn process(&self, text: &str, application: Option<&str>) -> String {
-        let Some(application) = application else {
-            return text.to_string();
-        };
-        self.modes
-            .iter()
-            .find(|(mode, _)| mode.matches_application(application))
-            .map_or_else(
-                || text.to_string(),
-                |(_, corrections)| corrections.replace(text),
-            )
+    fn process(
+        &self,
+        text: &str,
+        context: &ContextSnapshot,
+    ) -> crate::dictation_processing::Processed {
+        let mode = context.application.as_deref().and_then(|application| {
+            self.modes
+                .iter()
+                .find(|(mode, _)| mode.matches_application(application))
+        });
+        let profile = mode.map_or_else(
+            || {
+                crate::dictation_processing::Profile::configured(
+                    "Global",
+                    crate::text_replacements::ReplacementSet::default(),
+                    Vec::new(),
+                    &self.default,
+                )
+            },
+            |(mode, corrections)| {
+                let name = if mode.name.trim().is_empty() {
+                    "Untitled mode"
+                } else {
+                    &mode.name
+                };
+                crate::dictation_processing::Profile::configured(
+                    name,
+                    corrections.clone(),
+                    Vec::new(),
+                    &mode.post_processing,
+                )
+            },
+        );
+        crate::dictation_processing::Profiles::new(profile).process_cancellable(
+            text,
+            context,
+            None,
+            &AtomicBool::new(false),
+        )
     }
 }
 
@@ -437,7 +468,7 @@ pub(crate) fn run(event_path: &Path, device: Option<&str>, shutdown: &AtomicBool
     let replacements = Arc::new(RwLock::new(crate::text_replacements::ReplacementSet::new(
         &settings.text_replacements,
     )));
-    let modes = Arc::new(RwLock::new(LinuxModeRuntime::new(&settings.modes)));
+    let modes = Arc::new(RwLock::new(LinuxModeRuntime::from_settings(&settings)));
     run_with_settings(
         event_path,
         device,
@@ -581,12 +612,10 @@ fn run_with_settings(
                 if raw_text.is_empty() {
                     return Err("transcription was empty".into());
                 }
-                let final_text = process_text(
-                    &raw_text,
-                    context.application.as_deref(),
-                    &replacements,
-                    &modes,
-                )?;
+                let crate::dictation_processing::Processed {
+                    text: final_text,
+                    observation,
+                } = process_text(&raw_text, &context, &replacements, &modes)?;
                 let paste_result = paster
                     .as_mut()
                     .map_err(|error| format!("{error:#}"))?
@@ -595,12 +624,15 @@ fn run_with_settings(
                 paste_result?;
                 retain_successful_dictation(
                     history.as_ref(),
-                    &raw_text,
-                    &final_text,
-                    context.application.as_deref(),
-                    job.audio_ms,
-                    inference_ms,
-                    started.elapsed().as_millis() as u64,
+                    RetainedDictation {
+                        raw_text: &raw_text,
+                        final_text: &final_text,
+                        application: context.application.as_deref(),
+                        processing: observation,
+                        audio_ms: job.audio_ms,
+                        inference_ms,
+                        total_ms: started.elapsed().as_millis() as u64,
+                    },
                 );
                 Ok(final_text)
             });
@@ -775,27 +807,38 @@ fn open_history(
     }
 }
 
-fn retain_successful_dictation(
-    history: Option<&crate::history::History>,
-    raw_text: &str,
-    final_text: &str,
-    application: Option<&str>,
+struct RetainedDictation<'a> {
+    raw_text: &'a str,
+    final_text: &'a str,
+    application: Option<&'a str>,
+    processing: Option<crate::dictation_processing::ProcessingObservation>,
     audio_ms: u64,
     inference_ms: u64,
     total_ms: u64,
+}
+
+fn retain_successful_dictation(
+    history: Option<&crate::history::History>,
+    dictation: RetainedDictation<'_>,
 ) {
     let Some(history) = history else {
         return;
     };
     let draft = crate::history::HistoryDraft {
         kind: crate::history::HistoryKind::Dictation,
-        raw_text: raw_text.to_string(),
-        final_text: final_text.to_string(),
-        application: application.map(str::to_string),
-        processing: None,
-        audio_ms,
-        inference_ms,
-        total_ms,
+        raw_text: dictation.raw_text.to_string(),
+        final_text: dictation.final_text.to_string(),
+        application: dictation.application.map(str::to_string),
+        processing: dictation
+            .processing
+            .map(|processing| crate::history::HistoryProcessing {
+                profile: processing.profile,
+                latency_ms: processing.latency_ms,
+                fallback: processing.fallback,
+            }),
+        audio_ms: dictation.audio_ms,
+        inference_ms: dictation.inference_ms,
+        total_ms: dictation.total_ms,
     };
     if let Err(error) = history.record(draft) {
         tracing::warn!(%error, "could not retain Linux dictation history");
@@ -804,22 +847,23 @@ fn retain_successful_dictation(
 
 fn process_text(
     raw_text: &str,
-    application: Option<&str>,
+    context: &ContextSnapshot,
     replacements: &RwLock<crate::text_replacements::ReplacementSet>,
     modes: &RwLock<LinuxModeRuntime>,
-) -> std::result::Result<String, String> {
+) -> std::result::Result<crate::dictation_processing::Processed, String> {
     let text = replacements
         .read()
         .unwrap_or_else(|error| error.into_inner())
         .replace(raw_text);
-    let text = modes
+    let modes = modes
         .read()
         .unwrap_or_else(|error| error.into_inner())
-        .process(&text, application);
-    if text.trim().is_empty() {
+        .clone();
+    let processed = modes.process(&text, context);
+    if processed.text.trim().is_empty() {
         return Err("text replacements produced empty output".into());
     }
-    Ok(text)
+    Ok(processed)
 }
 
 fn submit_capture(
@@ -870,7 +914,7 @@ mod tests {
 
     use crate::history::{History, HistoryRetention, HistoryStore};
 
-    use super::{LinuxModeRuntime, process_text, retain_successful_dictation};
+    use super::{LinuxModeRuntime, RetainedDictation, process_text, retain_successful_dictation};
 
     #[test]
     fn successful_paste_retains_only_text_and_bounded_metadata() {
@@ -886,12 +930,19 @@ mod tests {
 
         retain_successful_dictation(
             Some(&history),
-            "hello open code",
-            "hello OpenCode",
-            Some("firefox"),
-            1_250,
-            310,
-            420,
+            RetainedDictation {
+                raw_text: "hello open code",
+                final_text: "hello OpenCode",
+                application: Some("firefox"),
+                processing: Some(crate::dictation_processing::ProcessingObservation {
+                    profile: "Browser".into(),
+                    latency_ms: 85,
+                    fallback: Some("processor timed out".into()),
+                }),
+                audio_ms: 1_250,
+                inference_ms: 310,
+                total_ms: 420,
+            },
         );
 
         let entries = history.search("");
@@ -900,7 +951,14 @@ mod tests {
         assert_eq!(entry.raw_text, "hello open code");
         assert_eq!(entry.final_text, "hello OpenCode");
         assert_eq!(entry.application.as_deref(), Some("firefox"));
-        assert_eq!(entry.processing, None);
+        assert_eq!(
+            entry.processing,
+            Some(crate::history::HistoryProcessing {
+                profile: "Browser".into(),
+                latency_ms: 85,
+                fallback: Some("processor timed out".into()),
+            })
+        );
         assert_eq!(entry.audio_ms, 1_250);
         assert_eq!(entry.inference_ms, 310);
         assert_eq!(entry.total_ms, 420);
@@ -916,39 +974,54 @@ mod tests {
                 output: "OpenCode".into(),
             },
         ]));
-        let modes = RwLock::new(LinuxModeRuntime::new(&[crate::linux_settings::LinuxMode {
-            name: "Browser".into(),
-            applications: vec!["firefox".into()],
-            corrections: vec![crate::text_replacements::TextReplacement {
-                matched_phrase: "full stop".into(),
-                output: ".".into(),
+        let mut settings = crate::linux_settings::LinuxSettings {
+            modes: vec![crate::linux_settings::LinuxMode {
+                name: "Browser".into(),
+                applications: vec!["firefox".into()],
+                corrections: vec![crate::text_replacements::TextReplacement {
+                    matched_phrase: "full stop".into(),
+                    output: ".".into(),
+                }],
+                ..Default::default()
             }],
-        }]));
+            ..Default::default()
+        };
+        let modes = RwLock::new(LinuxModeRuntime::from_settings(&settings));
+        let firefox = crate::command_context::ContextSnapshot {
+            application: Some("Firefox".into()),
+            ..Default::default()
+        };
+        let code = crate::command_context::ContextSnapshot {
+            application: Some("code".into()),
+            ..Default::default()
+        };
 
         assert_eq!(
-            process_text(
-                "open code full stop",
-                Some("Firefox"),
-                &replacements,
-                &modes,
-            )
-            .unwrap(),
+            process_text("open code full stop", &firefox, &replacements, &modes)
+                .unwrap()
+                .text,
             "OpenCode ."
         );
         assert_eq!(
-            process_text("open code full stop", Some("code"), &replacements, &modes).unwrap(),
+            process_text("open code full stop", &code, &replacements, &modes)
+                .unwrap()
+                .text,
             "OpenCode full stop"
         );
-        *modes.write().unwrap() = LinuxModeRuntime::new(&[crate::linux_settings::LinuxMode {
+        settings.modes = vec![crate::linux_settings::LinuxMode {
             name: "Editor".into(),
             applications: vec!["code".into()],
             corrections: vec![crate::text_replacements::TextReplacement {
                 matched_phrase: "full stop".into(),
                 output: ".".into(),
             }],
-        }]);
+            ..Default::default()
+        }];
+        *modes.write().unwrap() = LinuxModeRuntime::from_settings(&settings);
         assert_eq!(
-            process_text("open code full stop", Some("code"), &replacements, &modes).unwrap(),
+            process_text("open code full stop", &code, &replacements, &modes)
+                .unwrap()
+                .text,
             "OpenCode ."
         );
     }

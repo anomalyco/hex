@@ -12,7 +12,7 @@ pub mod command_grammar;
 pub mod commands_engine;
 #[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
 pub mod dictation;
-#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
 pub mod dictation_processing;
 #[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
 pub mod events;
@@ -25,7 +25,7 @@ pub mod instance;
 pub mod keys;
 #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
 pub mod local_api;
-#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
 pub mod opencode;
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 pub mod personal_commands;

@@ -34,6 +34,8 @@ pub struct LinuxSettings {
     /// Ordered application modes. The first case-insensitive executable-name
     /// substring match supplies corrections after global replacements.
     pub modes: Vec<LinuxMode>,
+    /// Global OpenCode rewrite profile used when no application mode matches.
+    pub dictation_post_processing: crate::dictation_processing::PostProcessingSettings,
     pub transcription: crate::transcription_models::TranscriptionSelection,
 }
 
@@ -43,6 +45,7 @@ pub struct LinuxMode {
     pub name: String,
     pub applications: Vec<String>,
     pub corrections: Vec<crate::text_replacements::TextReplacement>,
+    pub post_processing: crate::dictation_processing::PostProcessingSettings,
 }
 
 impl LinuxMode {
@@ -78,6 +81,8 @@ impl Default for LinuxSettings {
             history_retention: crate::history::HistoryRetention::default(),
             text_replacements: Vec::new(),
             modes: Vec::new(),
+            dictation_post_processing: crate::dictation_processing::PostProcessingSettings::default(
+            ),
             transcription: crate::transcription_models::TranscriptionSelection::default(),
         }
     }
@@ -257,6 +262,10 @@ mod tests {
         );
         assert!(settings.text_replacements.is_empty());
         assert!(settings.modes.is_empty());
+        assert_eq!(
+            settings.dictation_post_processing,
+            crate::dictation_processing::PostProcessingSettings::default()
+        );
     }
 
     #[test]
@@ -273,7 +282,18 @@ mod tests {
                     matched_phrase: "full stop".into(),
                     output: ".".into(),
                 }],
+                post_processing: crate::dictation_processing::PostProcessingSettings {
+                    enabled: true,
+                    prompt: "Keep browser prose concise.".into(),
+                    model: Some("openai/model".into()),
+                    variant: Some("high".into()),
+                    deadline_seconds: 12,
+                },
             }],
+            dictation_post_processing: crate::dictation_processing::PostProcessingSettings {
+                prompt: "Clean up global dictation.".into(),
+                ..Default::default()
+            },
             ..LinuxSettings::default()
         };
 
@@ -282,6 +302,10 @@ mod tests {
 
         assert_eq!(decoded.text_replacements, settings.text_replacements);
         assert_eq!(decoded.modes, settings.modes);
+        assert_eq!(
+            decoded.dictation_post_processing,
+            settings.dictation_post_processing
+        );
     }
 
     #[test]

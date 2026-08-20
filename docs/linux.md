@@ -70,7 +70,10 @@ before changing the shortcut in Settings.
 The Modes pane uses the same collection, application-rule, and phrase/output
 editors as the other desktop builds. Global replacements always run first. A
 custom mode matches the first comma-separated executable-name substring against
-the active X11 client, then applies its corrections. Rules match
+the active X11 client, then applies its corrections and optional OpenCode rewrite
+profile. Global and per-mode profiles persist their model, reasoning variant,
+deadline, and instructions through the same shared processing card used by the
+other desktop builds. Rules match
 case-insensitively at phrase boundaries, prefer the longest overlapping phrase,
 and take effect while the listener is running.
 
@@ -79,6 +82,14 @@ executable through `_NET_WM_PID` and `/proc` with `WM_CLASS` as a fallback, and
 keeps the window title bounded. The Linux pane deliberately has no Websites
 field until a real browser adapter exists. A replacement that leaves the entire
 output empty is not pasted or added to History.
+
+OpenCode is optional. When enabled, HEX asks the separately installed
+`opencode2` service to rewrite corrected text after local transcription. Catalog
+loading and rewriting stay off the audio-capture thread and are deadline-bounded;
+an unavailable model, timeout, or empty response preserves the corrected text.
+The prompt includes the resolved foreground application but no browser host on
+Linux because the X11 beta does not yet have a browser adapter. Successful
+History entries include bounded processing latency and fallback metadata.
 
 ## Retained History
 

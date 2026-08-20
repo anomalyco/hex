@@ -2,9 +2,9 @@
 
 **Status:** Active validation and capability plan. The x86_64 Arch/i3 X11 beta
 has the source-complete dictation loop, live global replacements, EWMH
-application modes with corrections, shared retained History, and signed update
-path. The immediate release blocker is validating a genuine signed update on
-the target machine.
+application modes with corrections and optional OpenCode rewriting, shared
+retained History, and signed update path. The immediate release blocker is
+validating a genuine signed update on the target machine.
 
 ## The Supported Contract Is Narrow
 
@@ -22,7 +22,7 @@ HEX currently supports one Linux beta contract:
 | Insertion | X11 clipboard and synthetic paste |
 | Text replacements | Persisted case-insensitive phrase-boundary rules applied live before paste |
 | Application context | `_NET_ACTIVE_WINDOW`, `_NET_WM_PID` plus `/proc`, `WM_CLASS` fallback, and bounded window title |
-| Modes | Ordered executable-name substring rules with phrase-boundary corrections; no browser rules yet |
+| Modes | Ordered executable-name substring rules with phrase-boundary corrections and optional deadline-bounded OpenCode rewriting; no browser rules yet |
 | Retained History | Bounded owner-only text/metadata store after successful paste |
 | UI | GPUI Settings, Modes, Activity, model catalog, onboarding, and History panes plus tray |
 
@@ -44,6 +44,9 @@ native Wayland support.
   corrections. The shared Modes list, basic editor, and phrase/output editor
   expose only executable-name rules; a running listener sees edits without
   restarting.
+- Persisted global and per-mode OpenCode model, reasoning-variant, deadline, and
+  prompt controls. Rewriting uses the shared ordered policy after corrections,
+  preserves corrected text on failure, and records bounded History metadata.
 - A concrete EWMH context adapter reads the active X11 client, resolves its
   executable through `_NET_WM_PID` and `/proc` with `WM_CLASS` fallback, and
   captures a bounded title. Context failure degrades to global processing and
@@ -90,12 +93,13 @@ This validation blocks calling the direct-install update channel proven.
 
 ### 2. Continue Desktop Parity In Complete Vertical Slices
 
-Retained History, global replacements, and application-mode corrections are
-implemented with the same store and editor components used on macOS and
-Windows. Physically validate their X11 clipboard, focus, EWMH identity, and UI
-behavior on the supported host. Continue in dependency order:
+Retained History, global replacements, application-mode corrections, and
+OpenCode rewriting are implemented with the same store, processing policy, and
+editor components used on macOS and Windows. Physically validate their X11
+clipboard, focus, EWMH identity, OpenCode lifecycle, and UI behavior on the
+supported host. Continue in dependency order:
 
-1. Add full OpenCode and TypeScript mode processing before Voice Action.
+1. Add the bounded TypeScript transformation host and ordered mode editor.
 2. Add Voice Action with a real selected-text and focus-preserving X11 contract.
 
 Do not expose a pane before its worker, persistence, and native validation path
