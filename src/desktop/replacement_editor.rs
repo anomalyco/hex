@@ -1,4 +1,4 @@
-//! Shared text-replacement editor used by the macOS and Windows shells.
+//! Shared text-replacement editor used by all three desktop shells.
 //!
 //! The component owns the paired text inputs and their GPUI presentation. The
 //! native roots still own the meaning of a target, settings persistence, and
@@ -9,7 +9,7 @@ use gpui::{
     Subscription, Window, div, prelude::*, px, rgb,
 };
 
-use crate::desktop_mode_list::ModeTarget;
+use crate::desktop_mode_target::ModeTarget;
 use crate::desktop_ui::{
     FAINT, LINE, MUTED, SURFACE_HOVER, TEXT_SOFT, compact_button, compact_header_plus_button,
     compact_panel, compact_panel_header, tr,

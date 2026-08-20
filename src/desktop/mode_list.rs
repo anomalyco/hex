@@ -11,25 +11,10 @@ use gpui::{
     SharedString, Window, div, img, prelude::*, px, rgb,
 };
 
+pub(crate) use crate::desktop_mode_target::ModeTarget;
 use crate::desktop_ui::{
     FAINT, MUTED, SURFACE_HOVER, SURFACE_SELECTED, TEXT, TEXT_SOFT, compact_panel, tr,
 };
-
-/// Root-relative identity shared by the mode list and its nested editors.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum ModeTarget {
-    Global,
-    Mode(usize),
-}
-
-impl ModeTarget {
-    pub(crate) fn id_fragment(self) -> String {
-        match self {
-            Self::Global => "global".into(),
-            Self::Mode(index) => format!("mode-{index}"),
-        }
-    }
-}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum ModeActivationKind {

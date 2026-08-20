@@ -28,6 +28,9 @@ pub struct LinuxSettings {
     /// bounded history store. `Off` stops new recording without deleting
     /// entries retained under an earlier policy.
     pub history_retention: crate::history::HistoryRetention,
+    /// Phrase-boundary replacements applied after transcription and before
+    /// successful output is pasted or retained in History.
+    pub text_replacements: Vec<crate::text_replacements::TextReplacement>,
     pub transcription: crate::transcription_models::TranscriptionSelection,
 }
 
@@ -52,6 +55,7 @@ impl Default for LinuxSettings {
             ui_language: None,
             commands_enabled: false,
             history_retention: crate::history::HistoryRetention::default(),
+            text_replacements: Vec::new(),
             transcription: crate::transcription_models::TranscriptionSelection::default(),
         }
     }
@@ -229,5 +233,22 @@ mod tests {
             settings.history_retention,
             crate::history::HistoryRetention::default()
         );
+        assert!(settings.text_replacements.is_empty());
+    }
+
+    #[test]
+    fn text_replacements_round_trip_in_the_linux_schema() {
+        let settings = LinuxSettings {
+            text_replacements: vec![crate::text_replacements::TextReplacement {
+                matched_phrase: "open code".into(),
+                output: "OpenCode".into(),
+            }],
+            ..LinuxSettings::default()
+        };
+
+        let encoded = serde_json::to_string(&settings).unwrap();
+        let decoded: LinuxSettings = serde_json::from_str(&encoded).unwrap();
+
+        assert_eq!(decoded.text_replacements, settings.text_replacements);
     }
 }

@@ -1,9 +1,9 @@
 # Linux Plan
 
 **Status:** Active validation and capability plan. The x86_64 Arch/i3 X11 beta
-has the source-complete dictation loop, shared retained History, and signed
-update path. The immediate release blocker is validating a genuine signed
-update on the target machine.
+has the source-complete dictation loop, live global text replacements, shared
+retained History, and signed update path. The immediate release blocker is
+validating a genuine signed update on the target machine.
 
 ## The Supported Contract Is Narrow
 
@@ -19,8 +19,9 @@ HEX currently supports one Linux beta contract:
 | Local API | Authenticated loopback service with owner-only XDG discovery or SDK-owned direct-child handoff |
 | Shortcut | Configurable key-containing chord; default `Alt+Space` |
 | Insertion | X11 clipboard and synthetic paste |
+| Text replacements | Persisted case-insensitive phrase-boundary rules applied live before paste |
 | Retained History | Bounded owner-only text/metadata store after successful paste |
-| UI | GPUI Settings, Activity, model catalog, onboarding, and History panes plus tray |
+| UI | GPUI Settings with the shared replacement editor, Activity, model catalog, onboarding, and History panes plus tray |
 
 The beta does not claim voice commands, application or browser context,
 meetings, native Wayland support, or package-manager installation. Developer
@@ -36,9 +37,13 @@ contract. XWayland is not native Wayland support.
 - Shared local transcription service with bounded WAV admission, explicit model
   preparation, owner-only discovery, and stdin-owned embedded lifecycle.
 - Automatic clipboard insertion and restoration.
+- Persisted global phrase-boundary text replacements. Settings uses the same
+  phrase/output editor as macOS and Windows, and a running listener sees edits
+  without restarting.
 - Shared retained-History pane with persisted retention, search, selectable
   detail, copy, delete, and confirmed clear. Only successfully pasted output is
-  recorded; captured audio is never retained.
+  recorded; raw and replaced text remain distinct and captured audio is never
+  retained.
 - CLI microphone override.
 - GPUI shell, tray integration, desktop launcher, and autostart entry.
 - XDG paths, diagnostics, and exclusive listener ownership.
@@ -77,16 +82,14 @@ This validation blocks calling the direct-install update channel proven.
 
 ### 2. Continue Desktop Parity In Complete Vertical Slices
 
-Retained History is implemented with the same store, state, actions, and
-renderer used on macOS and Windows. Physically validate its X11 clipboard and
-UI behavior on the supported host. Continue in dependency order:
+Retained History and global replacements are implemented with the same store
+and editor components used on macOS and Windows. Physically validate their X11
+clipboard and UI behavior on the supported host. Continue in dependency order:
 
-1. Add phrase-boundary replacements to the real Linux output worker and shared
-   editor.
-2. Add application modes and corrections only after a real EWMH context adapter
+1. Add application modes and corrections only after a real EWMH context adapter
    exists.
-3. Add full OpenCode and TypeScript mode processing before Voice Action.
-4. Add Voice Action with a real selected-text and focus-preserving X11 contract.
+2. Add full OpenCode and TypeScript mode processing before Voice Action.
+3. Add Voice Action with a real selected-text and focus-preserving X11 contract.
 
 Do not expose a pane before its worker, persistence, and native validation path
 exist.

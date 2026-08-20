@@ -46,14 +46,16 @@ not inject arbitrary GPUI elements because that would preserve two visual
 systems behind a nominally shared shell.
 
 Settings and Activity established the shared vocabulary. History now has one
-behavior-complete pane. Modes now shares its collection identity, selection,
-activation badges, list renderer, basic matching card, and replacement/
-correction editor. Its OpenCode processing card, enablement actions, and
-unavailable/retry state are shared as well. Its ordered transformation catalog,
-picker, drag ordering, removal, and host-workspace status are now shared too.
-Voice Action also has one pane contract on macOS and Windows. Commands and
-Meetings can use the same shell, but each pane appears on a platform only when
-its underlying behavior is implemented there.
+behavior-complete pane. The phrase/output replacement editor is shared by all
+three roots: Linux composes its real global rules into Settings while macOS and
+Windows use it inside their behavior-complete Modes panes. Modes also shares its
+collection identity, selection, activation badges, list renderer, and basic
+matching card. Its OpenCode processing card, enablement actions, and unavailable/
+retry state are shared as well. Its ordered transformation catalog, picker,
+drag ordering, removal, and host-workspace status are now shared too. Voice
+Action also has one pane contract on macOS and Windows. Commands and Meetings
+can use the same shell, but each pane appears on a platform only when its
+underlying behavior is implemented there.
 
 ## Desktop Hosts Own Consequential Behavior
 
@@ -205,11 +207,12 @@ setting, and one typed action delegate while retaining platform settings and
 paste-worker ownership. Linux records an entry only after X11 paste succeeds.
 `src/desktop/replacement_editor.rs` likewise owns the phrase/output inputs,
 add/remove action contract, focus behavior, and complete editor card used by
-macOS mode corrections plus both Windows replacement collections. Each root
-still decides which collection a target names and persists through its existing
-schema. `src/desktop/mode_list.rs` owns the shared global/custom identity,
-selection contract, activation badges, and fixed mode list used by macOS and
-Windows. Windows now follows the same list/detail composition instead of
+Linux global replacements, macOS mode corrections, and both Windows replacement
+collections. Each root still decides which collection a target names and
+persists through its existing schema. `src/desktop/mode_target.rs` owns their
+shared global/custom identity; `src/desktop/mode_list.rs` owns the selection
+contract, activation badges, and fixed mode list used by macOS and Windows.
+Windows now follows the same list/detail composition instead of
 rendering every mode as a separate card; application substring matching and
 browser-host normalization remain in its native settings/runtime modules.
 `src/desktop/mode_basics.rs` owns the shared global fallback and custom

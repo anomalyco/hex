@@ -1,6 +1,7 @@
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, SyncSender, TrySendError};
+use std::sync::{Arc, RwLock};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -26,6 +27,8 @@ struct Job {
     samples: Vec<f32>,
     audio_ms: u64,
 }
+
+pub(crate) type SharedReplacements = Arc<RwLock<crate::text_replacements::ReplacementSet>>;
 
 /// The opt-in streaming command loop: Moonshine hears idle-time audio,
 /// the shared engine resolves wake, sleep, and command phrases, and the
@@ -383,33 +386,62 @@ struct JobResult {
     result: Result<(), String>,
 }
 
-pub fn run(event_path: &Path, device: Option<&str>, shutdown: &AtomicBool) -> Result<()> {
+pub(crate) fn run(event_path: &Path, device: Option<&str>, shutdown: &AtomicBool) -> Result<()> {
     let settings = crate::linux_settings::LinuxSettings::load()?;
     let transcriber = LocalTranscriber::load(&settings.transcription)?;
     let history = open_history(&settings);
-    run_with_settings(event_path, device, shutdown, settings, transcriber, history)
+    let replacements = Arc::new(RwLock::new(crate::text_replacements::ReplacementSet::new(
+        &settings.text_replacements,
+    )));
+    run_with_settings(
+        event_path,
+        device,
+        shutdown,
+        settings,
+        transcriber,
+        history,
+        replacements,
+    )
 }
 
-pub fn run_with_history(
+pub(crate) fn run_with_history(
     event_path: &Path,
     device: Option<&str>,
     shutdown: &AtomicBool,
     history: Option<crate::history::History>,
+    replacements: SharedReplacements,
 ) -> Result<()> {
     let settings = crate::linux_settings::LinuxSettings::load()?;
     let transcriber = LocalTranscriber::load(&settings.transcription)?;
-    run_with_settings(event_path, device, shutdown, settings, transcriber, history)
+    run_with_settings(
+        event_path,
+        device,
+        shutdown,
+        settings,
+        transcriber,
+        history,
+        replacements,
+    )
 }
 
-pub fn run_with_transcriber(
+pub(crate) fn run_with_transcriber(
     event_path: &Path,
     device: Option<&str>,
     shutdown: &AtomicBool,
     transcriber: LocalTranscriber,
     history: Option<crate::history::History>,
+    replacements: SharedReplacements,
 ) -> Result<()> {
     let settings = crate::linux_settings::LinuxSettings::load()?;
-    run_with_settings(event_path, device, shutdown, settings, transcriber, history)
+    run_with_settings(
+        event_path,
+        device,
+        shutdown,
+        settings,
+        transcriber,
+        history,
+        replacements,
+    )
 }
 
 fn run_with_settings(
@@ -419,6 +451,7 @@ fn run_with_settings(
     settings: crate::linux_settings::LinuxSettings,
     transcriber: LocalTranscriber,
     history: Option<crate::history::History>,
+    replacements: SharedReplacements,
 ) -> Result<()> {
     // A CLI device override stays a strict substring query; the settings
     // choice is an exact enumerated name and falls back to automatic
@@ -471,20 +504,28 @@ fn run_with_settings(
                 if raw_text.is_empty() {
                     return Err("transcription was empty".into());
                 }
+                let final_text = replacements
+                    .read()
+                    .unwrap_or_else(|error| error.into_inner())
+                    .replace(&raw_text);
+                if final_text.trim().is_empty() {
+                    return Err("text replacements produced empty output".into());
+                }
                 let paste_result = paster
                     .as_mut()
                     .map_err(|error| format!("{error:#}"))?
-                    .paste(&raw_text)
+                    .paste(&final_text)
                     .map_err(|error| format!("{error:#}"));
                 paste_result?;
                 retain_successful_dictation(
                     history.as_ref(),
                     &raw_text,
+                    &final_text,
                     job.audio_ms,
                     inference_ms,
                     started.elapsed().as_millis() as u64,
                 );
-                Ok(raw_text)
+                Ok(final_text)
             });
             tracing::info!(
                 audio_ms = job.audio_ms,
@@ -659,7 +700,8 @@ fn open_history(
 
 fn retain_successful_dictation(
     history: Option<&crate::history::History>,
-    text: &str,
+    raw_text: &str,
+    final_text: &str,
     audio_ms: u64,
     inference_ms: u64,
     total_ms: u64,
@@ -669,8 +711,8 @@ fn retain_successful_dictation(
     };
     let draft = crate::history::HistoryDraft {
         kind: crate::history::HistoryKind::Dictation,
-        raw_text: text.to_string(),
-        final_text: text.to_string(),
+        raw_text: raw_text.to_string(),
+        final_text: final_text.to_string(),
         application: None,
         processing: None,
         audio_ms,
@@ -743,13 +785,20 @@ mod tests {
             0,
         ));
 
-        retain_successful_dictation(Some(&history), "hello Linux", 1_250, 310, 420);
+        retain_successful_dictation(
+            Some(&history),
+            "hello open code",
+            "hello OpenCode",
+            1_250,
+            310,
+            420,
+        );
 
         let entries = history.search("");
         assert_eq!(entries.len(), 1);
         let entry = &entries[0];
-        assert_eq!(entry.raw_text, "hello Linux");
-        assert_eq!(entry.final_text, "hello Linux");
+        assert_eq!(entry.raw_text, "hello open code");
+        assert_eq!(entry.final_text, "hello OpenCode");
         assert_eq!(entry.application, None);
         assert_eq!(entry.processing, None);
         assert_eq!(entry.audio_ms, 1_250);

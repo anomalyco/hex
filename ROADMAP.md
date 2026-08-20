@@ -5,12 +5,13 @@ explicit selected-text voice editing, optional context-aware OpenCode
 post-processing, a Metal HUD, bounded paste workers, settings, and a signed GPUI
 app bundle. Streaming commands are a disabled-by-default experimental opt-in;
 meetings remain a developer prototype until their product surface is redesigned.
-An x86_64 Arch/i3 X11 beta now provides hotkey dictation, automatic paste, a
-GPUI shell, bounded retained History, and signed user-local updates. Developer
-builds have the first bounded Moonshine command prototype, but release builds do
-not yet claim commands, context, meetings, native Wayland support, or a
-package-manager channel. The shared authenticated local transcription host is
-available as a standalone Linux service or an SDK-owned direct child.
+An x86_64 Arch/i3 X11 beta now provides hotkey dictation, automatic paste,
+live phrase-boundary text replacements, a GPUI shell, bounded retained History,
+and signed user-local updates. Developer builds have the first bounded
+Moonshine command prototype, but release builds do not yet claim commands,
+context, meetings, native Wayland support, or a package-manager channel. The
+shared authenticated local transcription host is available as a standalone
+Linux service or an SDK-owned direct child.
 The Windows source-build alpha now has the native GPUI shell and complete global
 hold-to-dictate loop: timestamped Win32 input, WASAPI capture, checksum-pinned
 local models, generation-safe paste, live settings, double-tap lock, Paste Last,
@@ -40,10 +41,10 @@ below.
 | Surface | macOS | Linux X11 | Windows |
 | --- | --- | --- | --- |
 | Dictation loop | Product implementation; physical timestamp regression recheck remains | Beta implementation; Arch/i3 smoke test remains | Alpha implementation; Windows 10/11 smoke matrix remains |
-| Desktop presentation | Full root still owns macOS composition; History, Voice Action, and the Modes collection/basics/replacement/processing/transformation UI are shared | Shared Settings, Activity, onboarding, model catalog, and History panes, but a separate Linux root remains | Shared primitives plus History, Voice Action, and the shared Modes collection/basics/replacement/processing/transformation UI, but a separate Windows root remains |
+| Desktop presentation | Full root still owns macOS composition; History, Voice Action, and the Modes collection/basics/replacement/processing/transformation UI are shared | Shared Settings vocabulary, Activity, onboarding, model catalog, History, and replacement editor, but a separate Linux root remains | Shared primitives plus History, Voice Action, and the shared Modes collection/basics/replacement/processing/transformation UI, but a separate Windows root remains |
 | Retained History | Shared bounded store and complete pane | Shared bounded store and complete pane; physical X11 clipboard/UI validation remains | Shared bounded store and complete pane; physical validation remains |
 | Commands | Persisted release opt-in | Bounded developer-only prototype; no packaged/context-complete release contract | Unavailable until a real streaming command model exists |
-| Modes and replacements | Full ordered pipeline on the shared processing policy and shared transformation host | Not implemented | Corrections, replacements, web-domain selection, OpenCode model/variant/deadline rewriting, and ordered built-in/TypeScript transformations use the shared policy; physical end-to-end validation remains |
+| Modes and replacements | Full ordered pipeline on the shared processing policy and shared transformation host | Global phrase-boundary replacements are persisted, editable through the shared editor, and projected live before paste; contextual Modes are not implemented and physical X11 validation remains | Corrections, replacements, web-domain selection, OpenCode model/variant/deadline rewriting, and ordered built-in/TypeScript transformations use the shared policy; physical end-to-end validation remains |
 | Voice Action | Implemented | Not implemented | Implemented with clipboard-backed selected-text capture |
 | HUD | Product Metal HUD using the shared state model | Embedded developer lab only | Product GPUI/DirectX HUD using the same shared state model |
 | Packaging and updates | Sparkle flow implemented; clean-account validation remains | Signed direct-install flow implemented; real cross-version update remains | Managed installer and signed update flow implemented; signed-host validation remains |
@@ -86,8 +87,9 @@ native macOS tests plus authoritative release previews pass.
 - [x] Extract the behavior-complete History pane once; macOS, Linux, and Windows
   consume the same state, actions, selectable detail model, and renderer.
 - [x] Extract the paired replacement/correction input, actions, and renderer;
-  macOS mode corrections and Windows global/per-mode rules consume it while
-  their existing settings schemas and runtime projection remain native.
+  macOS mode corrections, Linux global rules, and Windows global/per-mode rules
+  consume it while their existing settings schemas and runtime projection
+  remain native.
 - [x] Extract mode identity, selection actions, activation-badge presentation,
   and the fixed list renderer; macOS and Windows consume the same collection UI
   while their matching semantics and settings remain native.
@@ -126,8 +128,10 @@ hosts, and no shared renderer branches on an operating-system name.
   and pressure/recovery tests; only then enable Commands in release builds.
 - [x] Add retained History using the shared bounded store and complete pane;
   Linux records text and bounded timing metadata only after X11 paste succeeds.
-- [ ] Add replacements before Modes; add full mode processing before Voice
-  Action so each new pane owns real behavior.
+- [x] Add global phrase-boundary replacements through the shared editor and a
+  live compiled runtime; successful History records preserve raw and final text.
+- [ ] Add contextual Modes only after a real EWMH context adapter, then add full
+  mode processing before Voice Action so each new pane owns real behavior.
 - [x] Add the authenticated local transcription host and SDK-owned direct-child
   lifecycle on Linux using the shared server and concrete `LocalTranscriber`;
   owner-only XDG discovery and native source-build lifecycle smokes pass.

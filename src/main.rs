@@ -17,6 +17,8 @@ pub(crate) use common::commands_engine as commands;
 pub(crate) use common::commands_engine;
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 pub(crate) use common::dictation_processing;
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+pub(crate) use common::feedback;
 #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
 pub(crate) use common::keys;
 #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
@@ -29,9 +31,9 @@ pub(crate) use common::personal_commands;
 pub(crate) use common::self_update;
 #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
 pub(crate) use common::spoken_text;
+#[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
+pub(crate) use common::text_replacements;
 pub(crate) use common::{app_paths, audio, dictation, events, history, instance};
-#[cfg(any(target_os = "macos", target_os = "windows"))]
-pub(crate) use common::{feedback, text_replacements};
 #[cfg(any(target_os = "linux", target_os = "windows"))]
 pub(crate) use desktop::activity_pane as desktop_activity_pane;
 #[cfg(any(target_os = "linux", target_os = "windows"))]
@@ -47,13 +49,15 @@ pub(crate) use desktop::{
     transcription_picker as desktop_transcription_picker, ui as desktop_ui,
 };
 #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
-pub(crate) use desktop::{history_pane as desktop_history_pane, text_input};
+pub(crate) use desktop::{
+    history_pane as desktop_history_pane, mode_target as desktop_mode_target,
+    replacement_editor as desktop_replacement_editor, text_input,
+};
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 pub(crate) use desktop::{
     mode_basics as desktop_mode_basics, mode_list as desktop_mode_list,
     mode_processing as desktop_mode_processing,
     mode_transformations as desktop_mode_transformations,
-    replacement_editor as desktop_replacement_editor,
     voice_action_pane as desktop_voice_action_pane,
 };
 #[cfg(target_os = "linux")]

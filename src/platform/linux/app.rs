@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, TryRecvError};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
@@ -28,6 +28,11 @@ use crate::desktop_host::{
     DesktopUpdateStatus,
 };
 use crate::desktop_i18n::{tr, tr_fill};
+use crate::desktop_mode_target::ModeTarget;
+use crate::desktop_replacement_editor::{
+    ReplacementEditorAction, ReplacementEditorDelegate, ReplacementEditorInput,
+    ReplacementEditorView, render_replacement_editor as render_shared_replacement_editor,
+};
 use crate::desktop_shell::{DesktopPane, render_navigation_items};
 use crate::desktop_transcription_picker::TranscriptionPickerDelegate;
 use crate::desktop_ui::{
@@ -110,6 +115,7 @@ struct LinuxDesktopHost {
     transcription_error: Option<String>,
     history: Option<History>,
     history_error: Option<String>,
+    replacements: crate::linux_dictation::SharedReplacements,
     update: UpdateState,
 }
 
@@ -120,6 +126,7 @@ struct LinuxApp {
     history_pane: HistoryPaneState,
     history_search_input: gpui::Entity<TextInput>,
     _history_search_subscription: Subscription,
+    replacement_inputs: Vec<ReplacementEditorInput>,
     capturing_hotkey: bool,
     transcription_picker: TranscriptionPickerState,
     catalog_language_filter: Option<String>,
@@ -224,6 +231,17 @@ pub fn open(event_path: PathBuf, start_hidden: bool) -> Result<()> {
                                 cx.notify();
                             },
                         );
+                        let replacement_inputs = settings
+                            .text_replacements
+                            .iter()
+                            .map(|replacement| {
+                                ReplacementEditorInput::new(
+                                    replacement,
+                                    LinuxApp::sync_text_replacements,
+                                    cx,
+                                )
+                            })
+                            .collect();
                         LinuxApp {
                             host,
                             pane: DesktopPane::Settings,
@@ -231,6 +249,7 @@ pub fn open(event_path: PathBuf, start_hidden: bool) -> Result<()> {
                             history_pane,
                             history_search_input,
                             _history_search_subscription: history_search_subscription,
+                            replacement_inputs,
                             onboarding,
                             // A fresh run offers the locale's recommendation,
                             // like the Windows first-run default.
@@ -532,6 +551,9 @@ impl LinuxDesktopHost {
                 Some(format!("Could not open retained history: {error:#}")),
             ),
         };
+        let replacements = Arc::new(RwLock::new(crate::text_replacements::ReplacementSet::new(
+            &settings.text_replacements,
+        )));
         Self {
             event_reader,
             event_path,
@@ -553,6 +575,7 @@ impl LinuxDesktopHost {
             transcription_error: None,
             history,
             history_error,
+            replacements,
             update,
         }
     }
@@ -577,6 +600,7 @@ impl LinuxDesktopHost {
         let event_path = self.event_path.clone();
         let prepared_transcriber = self.prepared_transcriber.take();
         let history = self.history.clone();
+        let replacements = self.replacements.clone();
         let worker = std::thread::spawn(move || {
             let result = crate::instance::acquire("listener").and_then(|_instance| {
                 if let Some(transcriber) = prepared_transcriber {
@@ -586,9 +610,16 @@ impl LinuxDesktopHost {
                         &stop,
                         transcriber,
                         history,
+                        replacements,
                     )
                 } else {
-                    crate::linux_dictation::run_with_history(&event_path, None, &stop, history)
+                    crate::linux_dictation::run_with_history(
+                        &event_path,
+                        None,
+                        &stop,
+                        history,
+                        replacements,
+                    )
                 }
             });
             let result = result.map_err(|error| format!("{error:#}"));
@@ -847,6 +878,30 @@ impl LinuxDesktopHost {
             self.settings_error = Some(message.clone());
             eyre!(message)
         })?;
+        self.settings = candidate;
+        self.settings_error = None;
+        Ok(())
+    }
+
+    fn set_text_replacements(
+        &mut self,
+        replacements: Vec<crate::text_replacements::TextReplacement>,
+    ) -> Result<()> {
+        if replacements == self.settings.text_replacements {
+            return Ok(());
+        }
+        let mut candidate = self.settings.clone();
+        candidate.text_replacements = replacements;
+        candidate.save().map_err(|error| {
+            let message = format!("Could not save text replacements: {error:#}");
+            self.settings_error = Some(message.clone());
+            eyre!(message)
+        })?;
+        *self
+            .replacements
+            .write()
+            .unwrap_or_else(|error| error.into_inner()) =
+            crate::text_replacements::ReplacementSet::new(&candidate.text_replacements);
         self.settings = candidate;
         self.settings_error = None;
         Ok(())
@@ -1365,6 +1420,16 @@ impl LinuxApp {
         }
     }
 
+    fn sync_text_replacements(&mut self, cx: &mut Context<Self>) {
+        let replacements = self
+            .replacement_inputs
+            .iter()
+            .map(|inputs| inputs.value(cx))
+            .collect();
+        let _ = self.host.set_text_replacements(replacements);
+        cx.notify();
+    }
+
     fn render_history(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let view = self.history_pane.view(
             self.host.settings.history_retention,
@@ -1484,6 +1549,15 @@ impl LinuxApp {
             let _ = this.host.dispatch(action);
             cx.notify();
         }));
+        let replacement_editor = render_shared_replacement_editor(
+            ReplacementEditorView {
+                target: ModeTarget::Global,
+                title: "Replacements",
+                empty_message: "Add phrases HEX should replace after transcription.",
+                rows: &self.replacement_inputs,
+            },
+            cx,
+        );
 
         div()
             .size_full()
@@ -1813,6 +1887,8 @@ impl LinuxApp {
                                             )
                                         }),
                                 )
+                                .child(settings_section_label("Text replacements"))
+                                .child(replacement_editor)
                                 .child(settings_section_label("Application"))
                                 .child(
                                     settings_panel()
@@ -2059,6 +2135,43 @@ impl TranscriptionPickerDelegate for LinuxApp {
             self.host.cancel_transcription_preparation();
             self.transcription_picker = TranscriptionPickerState::Choosing(language);
             cx.notify();
+        }
+    }
+}
+
+impl ReplacementEditorDelegate for LinuxApp {
+    fn handle_replacement_editor_action(
+        &mut self,
+        action: ReplacementEditorAction,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match action {
+            ReplacementEditorAction::Add(ModeTarget::Global) => {
+                let input = ReplacementEditorInput::new(
+                    &crate::text_replacements::TextReplacement::default(),
+                    Self::sync_text_replacements,
+                    cx,
+                );
+                let focus = input.matched_phrase_focus(cx);
+                self.replacement_inputs.push(input);
+                self.sync_text_replacements(cx);
+                focus.focus(window);
+            }
+            ReplacementEditorAction::Remove {
+                target: ModeTarget::Global,
+                index,
+            } => {
+                if index < self.replacement_inputs.len() {
+                    self.replacement_inputs.remove(index);
+                    self.sync_text_replacements(cx);
+                }
+            }
+            ReplacementEditorAction::Add(ModeTarget::Mode(_))
+            | ReplacementEditorAction::Remove {
+                target: ModeTarget::Mode(_),
+                ..
+            } => unreachable!("Linux exposes only global text replacements"),
         }
     }
 }

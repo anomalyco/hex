@@ -65,12 +65,21 @@ Hold **Alt-Space**, speak, then release. Double-tap the shortcut to keep
 recording, press it again to finish, or press Escape to cancel. Stop the listener
 before changing the shortcut in Settings.
 
+## Text Replacements
+
+Settings includes the same phrase/output replacement editor used by the other
+desktop builds. Rules match case-insensitively at phrase boundaries, prefer the
+longest overlapping phrase, and apply immediately before paste. Edits take
+effect while the listener is running. A replacement that leaves the entire
+output empty is not pasted or added to History.
+
 ## Retained History
 
 The History pane uses the same bounded, owner-only store and complete
 list/detail UI as macOS and Windows. HEX records an entry only after text has
-been pasted successfully; it keeps the transcript and bounded timing metadata,
-never captured audio. The retention control can turn recording off or keep
+been pasted successfully; it keeps both the raw transcript and final pasted
+text plus bounded timing metadata, never captured audio. The retention control
+can turn recording off or keep
 entries for 24 hours, 7 days, 30 days, or indefinitely, all still subject to
 the store's hard entry and byte caps. Search, selectable text, copy, individual
 delete, and confirmed clear are available in the pane.

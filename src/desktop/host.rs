@@ -47,7 +47,7 @@ impl DesktopCapabilities {
             hud_lab: crate::DEVELOPER_FEATURES_ENABLED,
             meetings: false,
             modes: false,
-            replacements: false,
+            replacements: true,
             listener_control: true,
             update_restart: true,
             voice_action: false,
@@ -208,6 +208,8 @@ mod tests {
         // Activity shipped on Linux in the 2026-08 port wave. HUD Lab is
         // visible only in developer builds. The command runtime prototype
         // remains a Settings opt-in; it does not advertise the catalog pane.
+        // Global replacements are behavior-complete in Settings, while Modes
+        // stays absent until native context and processing exist.
         assert_eq!(
             DesktopCapabilities::linux_x11(),
             DesktopCapabilities {
@@ -217,7 +219,7 @@ mod tests {
                 hud_lab: crate::DEVELOPER_FEATURES_ENABLED,
                 meetings: false,
                 modes: false,
-                replacements: false,
+                replacements: true,
                 listener_control: true,
                 update_restart: true,
                 voice_action: false,

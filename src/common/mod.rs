@@ -33,5 +33,5 @@ pub mod personal_commands;
 pub mod self_update;
 #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
 pub mod spoken_text;
-#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
 pub mod text_replacements;
