@@ -110,9 +110,10 @@ Diagnostics are stored at:
 ## Linux X11 Beta
 
 The Linux beta targets x86_64 Arch Linux on i3/X11. It supports local hotkey
-dictation, automatic paste, shortcut rebinding, a tray app, and user-local
-updates. It does not support voice commands, meetings, native Wayland, or a
-package-manager install.
+dictation, automatic paste, shortcut rebinding, retained History, global text
+replacements, EWMH application modes with corrections, a tray app, and
+user-local updates. It does not support voice commands, browser context,
+meetings, native Wayland, or a package-manager install.
 
 See the [Linux installation guide](docs/linux.md) for the verified user-local
 installer, source-build fallback, requirements, and limitations.

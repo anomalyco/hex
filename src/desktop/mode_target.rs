@@ -1,13 +1,12 @@
 //! Shared identity for the global fallback and optional custom mode editors.
 //!
-//! Linux currently uses only the global target for text replacements. macOS
-//! and Windows also use indexed targets for their behavior-complete Modes
-//! panes.
+//! All three roots use the global and indexed targets for their concrete Modes
+//! panes; later processing cards reuse the same identity without coupling it
+//! to a platform settings schema.
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum ModeTarget {
     Global,
-    #[cfg_attr(target_os = "linux", allow(dead_code))]
     Mode(usize),
 }
 

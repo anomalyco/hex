@@ -38,7 +38,7 @@ pub(crate) struct CatalogApplicationEditorView {
 }
 
 pub(crate) enum ModeApplicationEditorView {
-    #[cfg_attr(target_os = "windows", allow(dead_code))]
+    #[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
     Catalog(CatalogApplicationEditorView),
     #[cfg_attr(target_os = "macos", allow(dead_code))]
     Freeform {
@@ -46,6 +46,12 @@ pub(crate) enum ModeApplicationEditorView {
         description: &'static str,
         input: Entity<TextInput>,
     },
+}
+
+pub(crate) struct ModeWebsiteEditorView {
+    pub(crate) input: Entity<TextInput>,
+    pub(crate) title: &'static str,
+    pub(crate) description: &'static str,
 }
 
 pub(crate) enum ModeBasicsView {
@@ -57,9 +63,7 @@ pub(crate) enum ModeBasicsView {
         target: ModeTarget,
         name: Entity<TextInput>,
         applications: Box<ModeApplicationEditorView>,
-        websites: Entity<TextInput>,
-        websites_title: &'static str,
-        websites_description: &'static str,
+        websites: Option<ModeWebsiteEditorView>,
         remove_mode: bool,
     },
 }
@@ -106,8 +110,6 @@ pub(crate) fn render_mode_basics<T: ModeBasicsDelegate>(
             name,
             applications,
             websites,
-            websites_title,
-            websites_description,
             remove_mode,
         } => {
             let target_id = target.id_fragment();
@@ -163,11 +165,13 @@ pub(crate) fn render_mode_basics<T: ModeBasicsDelegate>(
                         .border_color(rgb(LINE))
                         .child(render_application_editor(target, *applications, cx)),
                 )
-                .child(rule_input_row(
-                    websites_title,
-                    websites_description,
-                    websites,
-                ))
+                .when_some(websites, |panel, websites| {
+                    panel.child(rule_input_row(
+                        websites.title,
+                        websites.description,
+                        websites.input,
+                    ))
+                })
                 .into_any_element()
         }
     }

@@ -4,8 +4,8 @@ HEX currently supports one Linux beta target: x86_64 Arch Linux running i3 on
 X11. Audio uses ALSA, including PipeWire systems with ALSA compatibility.
 Inference uses Vulkan when available and can fall back to the CPU.
 
-The beta does not support voice commands, application or browser context,
-meetings, native Wayland, or package-manager installation.
+The beta does not support voice commands, browser context, meetings, native
+Wayland, or package-manager installation.
 
 ## Install A Published Build
 
@@ -65,12 +65,19 @@ Hold **Alt-Space**, speak, then release. Double-tap the shortcut to keep
 recording, press it again to finish, or press Escape to cancel. Stop the listener
 before changing the shortcut in Settings.
 
-## Text Replacements
+## Modes And Text Replacements
 
-Settings includes the same phrase/output replacement editor used by the other
-desktop builds. Rules match case-insensitively at phrase boundaries, prefer the
-longest overlapping phrase, and apply immediately before paste. Edits take
-effect while the listener is running. A replacement that leaves the entire
+The Modes pane uses the same collection, application-rule, and phrase/output
+editors as the other desktop builds. Global replacements always run first. A
+custom mode matches the first comma-separated executable-name substring against
+the active X11 client, then applies its corrections. Rules match
+case-insensitively at phrase boundaries, prefer the longest overlapping phrase,
+and take effect while the listener is running.
+
+HEX reads the active client through `_NET_ACTIVE_WINDOW`, resolves its
+executable through `_NET_WM_PID` and `/proc` with `WM_CLASS` as a fallback, and
+keeps the window title bounded. The Linux pane deliberately has no Websites
+field until a real browser adapter exists. A replacement that leaves the entire
 output empty is not pasted or added to History.
 
 ## Retained History
@@ -78,8 +85,8 @@ output empty is not pasted or added to History.
 The History pane uses the same bounded, owner-only store and complete
 list/detail UI as macOS and Windows. HEX records an entry only after text has
 been pasted successfully; it keeps both the raw transcript and final pasted
-text plus bounded timing metadata, never captured audio. The retention control
-can turn recording off or keep
+text, the resolved foreground application when available, and bounded timing
+metadata, never captured audio. The retention control can turn recording off or keep
 entries for 24 hours, 7 days, 30 days, or indefinitely, all still subject to
 the store's hard entry and byte caps. Search, selectable text, copy, individual
 delete, and confirmed clear are available in the pane.

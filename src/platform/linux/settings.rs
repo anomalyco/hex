@@ -31,7 +31,28 @@ pub struct LinuxSettings {
     /// Phrase-boundary replacements applied after transcription and before
     /// successful output is pasted or retained in History.
     pub text_replacements: Vec<crate::text_replacements::TextReplacement>,
+    /// Ordered application modes. The first case-insensitive executable-name
+    /// substring match supplies corrections after global replacements.
+    pub modes: Vec<LinuxMode>,
     pub transcription: crate::transcription_models::TranscriptionSelection,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(default)]
+pub struct LinuxMode {
+    pub name: String,
+    pub applications: Vec<String>,
+    pub corrections: Vec<crate::text_replacements::TextReplacement>,
+}
+
+impl LinuxMode {
+    pub fn matches_application(&self, application: &str) -> bool {
+        let application = application.to_lowercase();
+        self.applications.iter().any(|candidate| {
+            let candidate = candidate.trim().to_lowercase();
+            !candidate.is_empty() && application.contains(&candidate)
+        })
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -56,6 +77,7 @@ impl Default for LinuxSettings {
             commands_enabled: false,
             history_retention: crate::history::HistoryRetention::default(),
             text_replacements: Vec::new(),
+            modes: Vec::new(),
             transcription: crate::transcription_models::TranscriptionSelection::default(),
         }
     }
@@ -234,6 +256,7 @@ mod tests {
             crate::history::HistoryRetention::default()
         );
         assert!(settings.text_replacements.is_empty());
+        assert!(settings.modes.is_empty());
     }
 
     #[test]
@@ -243,6 +266,14 @@ mod tests {
                 matched_phrase: "open code".into(),
                 output: "OpenCode".into(),
             }],
+            modes: vec![LinuxMode {
+                name: "Browser".into(),
+                applications: vec!["firefox".into()],
+                corrections: vec![crate::text_replacements::TextReplacement {
+                    matched_phrase: "full stop".into(),
+                    output: ".".into(),
+                }],
+            }],
             ..LinuxSettings::default()
         };
 
@@ -250,5 +281,31 @@ mod tests {
         let decoded: LinuxSettings = serde_json::from_str(&encoded).unwrap();
 
         assert_eq!(decoded.text_replacements, settings.text_replacements);
+        assert_eq!(decoded.modes, settings.modes);
+    }
+
+    #[test]
+    fn modes_match_case_insensitive_application_substrings_in_order() {
+        let modes = [
+            LinuxMode {
+                name: "Browser".into(),
+                applications: vec!["firefox".into()],
+                ..LinuxMode::default()
+            },
+            LinuxMode {
+                name: "Fallback browser".into(),
+                applications: vec!["fox".into()],
+                ..LinuxMode::default()
+            },
+        ];
+
+        assert_eq!(
+            modes
+                .iter()
+                .find(|mode| mode.matches_application("Firefox"))
+                .map(|mode| mode.name.as_str()),
+            Some("Browser")
+        );
+        assert!(!modes.iter().any(|mode| mode.matches_application("code")));
     }
 }

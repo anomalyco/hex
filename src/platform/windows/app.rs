@@ -38,7 +38,7 @@ use crate::desktop_host::{
 };
 use crate::desktop_mode_basics::{
     ModeApplicationEditorView, ModeBasicsAction, ModeBasicsDelegate, ModeBasicsView,
-    render_mode_basics as render_shared_mode_basics,
+    ModeWebsiteEditorView, render_mode_basics as render_shared_mode_basics,
 };
 use crate::desktop_mode_list::{
     ModeActivation, ModeListAction, ModeListDelegate, ModeListEntry, ModeListView, ModeTarget,
@@ -3396,10 +3396,12 @@ impl WindowsApp {
                                     "Applies when the focused application contains any of these names",
                                 input: applications,
                             }),
-                            websites,
-                            websites_title: "Web pages",
-                            websites_description:
-                                "Or when the browser is on one of these sites; sites win over applications",
+                            websites: Some(ModeWebsiteEditorView {
+                                input: websites,
+                                title: "Web pages",
+                                description:
+                                    "Or when the browser is on one of these sites; sites win over applications",
+                            }),
                             remove_mode: true,
                         },
                         cx,

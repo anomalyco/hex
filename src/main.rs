@@ -50,21 +50,21 @@ pub(crate) use desktop::{
 };
 #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
 pub(crate) use desktop::{
-    history_pane as desktop_history_pane, mode_target as desktop_mode_target,
+    history_pane as desktop_history_pane, mode_basics as desktop_mode_basics,
+    mode_list as desktop_mode_list, mode_target as desktop_mode_target,
     replacement_editor as desktop_replacement_editor, text_input,
 };
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 pub(crate) use desktop::{
-    mode_basics as desktop_mode_basics, mode_list as desktop_mode_list,
     mode_processing as desktop_mode_processing,
     mode_transformations as desktop_mode_transformations,
     voice_action_pane as desktop_voice_action_pane,
 };
 #[cfg(target_os = "linux")]
 pub(crate) use platform::linux::{
-    app as linux_app, command_executor as linux_command_executor, dictation as linux_dictation,
-    input as linux_input, paste as linux_paste, run as linux, settings as linux_settings,
-    updater as linux_updater,
+    app as linux_app, command_executor as linux_command_executor, context as linux_context,
+    dictation as linux_dictation, input as linux_input, paste as linux_paste, run as linux,
+    settings as linux_settings, updater as linux_updater,
 };
 #[cfg(all(target_os = "macos", debug_assertions))]
 pub(crate) use platform::macos::dashboard;

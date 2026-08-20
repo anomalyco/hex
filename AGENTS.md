@@ -82,10 +82,10 @@ only in debug builds.
 - `onboarding`: required permission health, selected dictation-model
   installation, the release startup gate, and opt-in command-model setup.
 - `sparkle`: packaged-app-only Sparkle lifecycle and manual update checks.
-- `linux`, `linux_app`, `linux_dictation`, `linux_input`, `linux_paste`,
-  `linux_settings`: the X11 beta CLI, GPUI shell and tray, hotkey
-  capture-transcribe-paste loop, X11 grabs and synthetic paste, and persisted
-  Linux settings.
+- `linux`, `linux_app`, `linux_context`, `linux_dictation`, `linux_input`,
+  `linux_paste`, `linux_settings`: the X11 beta CLI, GPUI shell and tray, EWMH
+  foreground application identity, hotkey capture-transcribe-process-paste
+  loop, X11 grabs and synthetic paste, and persisted Linux settings and modes.
 - `linux_updater`: signed direct-install updates, bounded downloads, atomic
   version activation, and restart handoff for user-local Linux installs.
 - `windows`, `windows_app`, `windows_dictation`, `windows_input`,

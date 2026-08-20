@@ -3,6 +3,7 @@
 
 pub mod app;
 pub mod command_executor;
+pub mod context;
 pub mod dictation;
 pub mod input;
 pub mod paste;

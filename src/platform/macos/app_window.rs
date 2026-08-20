@@ -33,7 +33,7 @@ use crate::desktop_host::{
 };
 use crate::desktop_mode_basics::{
     CatalogApplicationEditorView, CatalogApplicationView, ModeApplicationEditorView,
-    ModeBasicsAction, ModeBasicsDelegate, ModeBasicsView,
+    ModeBasicsAction, ModeBasicsDelegate, ModeBasicsView, ModeWebsiteEditorView,
     render_mode_basics as render_shared_mode_basics,
 };
 use crate::desktop_mode_list::{
@@ -3629,9 +3629,11 @@ impl AppWindow {
                     target,
                     name,
                     applications,
-                    websites: browser_hosts,
-                    websites_title: "Web pages",
-                    websites_description: "Switch when a domain is active in Brave",
+                    websites: Some(ModeWebsiteEditorView {
+                        input: browser_hosts,
+                        title: "Web pages",
+                        description: "Switch when a domain is active in Brave",
+                    }),
                     remove_mode: false,
                 },
                 cx,

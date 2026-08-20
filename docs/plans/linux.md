@@ -1,9 +1,10 @@
 # Linux Plan
 
 **Status:** Active validation and capability plan. The x86_64 Arch/i3 X11 beta
-has the source-complete dictation loop, live global text replacements, shared
-retained History, and signed update path. The immediate release blocker is
-validating a genuine signed update on the target machine.
+has the source-complete dictation loop, live global replacements, EWMH
+application modes with corrections, shared retained History, and signed update
+path. The immediate release blocker is validating a genuine signed update on
+the target machine.
 
 ## The Supported Contract Is Narrow
 
@@ -20,14 +21,16 @@ HEX currently supports one Linux beta contract:
 | Shortcut | Configurable key-containing chord; default `Alt+Space` |
 | Insertion | X11 clipboard and synthetic paste |
 | Text replacements | Persisted case-insensitive phrase-boundary rules applied live before paste |
+| Application context | `_NET_ACTIVE_WINDOW`, `_NET_WM_PID` plus `/proc`, `WM_CLASS` fallback, and bounded window title |
+| Modes | Ordered executable-name substring rules with phrase-boundary corrections; no browser rules yet |
 | Retained History | Bounded owner-only text/metadata store after successful paste |
-| UI | GPUI Settings with the shared replacement editor, Activity, model catalog, onboarding, and History panes plus tray |
+| UI | GPUI Settings, Modes, Activity, model catalog, onboarding, and History panes plus tray |
 
-The beta does not claim voice commands, application or browser context,
-meetings, native Wayland support, or package-manager installation. Developer
-builds contain a bounded command-recognition prototype for bringing up the
-portable engine and X11 executor; it is deliberately outside this release
-contract. XWayland is not native Wayland support.
+The beta does not claim voice commands, browser context, meetings, native
+Wayland support, or package-manager installation. Developer builds contain a
+bounded command-recognition prototype for bringing up the portable engine and
+X11 executor; it is deliberately outside this release contract. XWayland is not
+native Wayland support.
 
 ## What Is Implemented
 
@@ -37,9 +40,14 @@ contract. XWayland is not native Wayland support.
 - Shared local transcription service with bounded WAV admission, explicit model
   preparation, owner-only discovery, and stdin-owned embedded lifecycle.
 - Automatic clipboard insertion and restoration.
-- Persisted global phrase-boundary text replacements. Settings uses the same
-  phrase/output editor as macOS and Windows, and a running listener sees edits
-  without restarting.
+- Persisted global phrase-boundary replacements and ordered application-mode
+  corrections. The shared Modes list, basic editor, and phrase/output editor
+  expose only executable-name rules; a running listener sees edits without
+  restarting.
+- A concrete EWMH context adapter reads the active X11 client, resolves its
+  executable through `_NET_WM_PID` and `/proc` with `WM_CLASS` fallback, and
+  captures a bounded title. Context failure degrades to global processing and
+  never blocks paste.
 - Shared retained-History pane with persisted retention, search, selectable
   detail, copy, delete, and confirmed clear. Only successfully pasted output is
   recorded; raw and replaced text remain distinct and captured audio is never
@@ -82,14 +90,13 @@ This validation blocks calling the direct-install update channel proven.
 
 ### 2. Continue Desktop Parity In Complete Vertical Slices
 
-Retained History and global replacements are implemented with the same store
-and editor components used on macOS and Windows. Physically validate their X11
-clipboard and UI behavior on the supported host. Continue in dependency order:
+Retained History, global replacements, and application-mode corrections are
+implemented with the same store and editor components used on macOS and
+Windows. Physically validate their X11 clipboard, focus, EWMH identity, and UI
+behavior on the supported host. Continue in dependency order:
 
-1. Add application modes and corrections only after a real EWMH context adapter
-   exists.
-2. Add full OpenCode and TypeScript mode processing before Voice Action.
-3. Add Voice Action with a real selected-text and focus-preserving X11 contract.
+1. Add full OpenCode and TypeScript mode processing before Voice Action.
+2. Add Voice Action with a real selected-text and focus-preserving X11 contract.
 
 Do not expose a pane before its worker, persistence, and native validation path
 exist.
@@ -102,7 +109,8 @@ execution without blocking authoritative dictation capture. Finish the product
 slice by adding:
 
 - packaged and verified Moonshine native/model assets for direct installs;
-- X11 foreground application and title through EWMH;
+- project the existing EWMH application/title adapter into command decisions
+  and visible context health;
 - the complete compiled and TypeScript command registry;
 - platform-appropriate command shortcuts, application launch, and failure
   feedback;
@@ -228,7 +236,7 @@ implementation assumptions.
 | --- | --- | --- |
 | Generic Wayland parity is not a stable contract | Critical | Publish one constrained contract |
 | Native Wayland insertion is compositor-controlled | High | Prove portal or libei behavior; otherwise use manual paste or an approved helper |
-| Foreground and browser context lack universal APIs | High | EWMH first; add a real browser adapter later |
+| Foreground and browser context lack universal APIs | High | EWMH application context is implemented; add a real browser adapter later |
 | PipeWire output monitoring includes HEX feedback | High | Suppress feedback or construct a filtered capture graph |
 | PipeWire metadata varies by package format | Medium | Build identity rules from observed fixtures |
 | Packaging multiplies native dependencies | Medium | Keep one distro and channel until validated |

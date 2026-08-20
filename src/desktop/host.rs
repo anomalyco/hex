@@ -46,7 +46,7 @@ impl DesktopCapabilities {
             history: true,
             hud_lab: crate::DEVELOPER_FEATURES_ENABLED,
             meetings: false,
-            modes: false,
+            modes: true,
             replacements: true,
             listener_control: true,
             update_restart: true,
@@ -208,8 +208,9 @@ mod tests {
         // Activity shipped on Linux in the 2026-08 port wave. HUD Lab is
         // visible only in developer builds. The command runtime prototype
         // remains a Settings opt-in; it does not advertise the catalog pane.
-        // Global replacements are behavior-complete in Settings, while Modes
-        // stays absent until native context and processing exist.
+        // EWMH application context, global replacements, and per-mode
+        // corrections are behavior-complete; browser and rewrite processing
+        // remain separate later capabilities.
         assert_eq!(
             DesktopCapabilities::linux_x11(),
             DesktopCapabilities {
@@ -218,7 +219,7 @@ mod tests {
                 history: true,
                 hud_lab: crate::DEVELOPER_FEATURES_ENABLED,
                 meetings: false,
-                modes: false,
+                modes: true,
                 replacements: true,
                 listener_control: true,
                 update_restart: true,

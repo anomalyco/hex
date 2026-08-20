@@ -28,7 +28,14 @@ use crate::desktop_host::{
     DesktopUpdateStatus,
 };
 use crate::desktop_i18n::{tr, tr_fill};
-use crate::desktop_mode_target::ModeTarget;
+use crate::desktop_mode_basics::{
+    ModeApplicationEditorView, ModeBasicsAction, ModeBasicsDelegate, ModeBasicsView,
+    render_mode_basics as render_shared_mode_basics,
+};
+use crate::desktop_mode_list::{
+    ModeActivation, ModeListAction, ModeListDelegate, ModeListEntry, ModeListView, ModeTarget,
+    render_mode_list as render_shared_mode_list,
+};
 use crate::desktop_replacement_editor::{
     ReplacementEditorAction, ReplacementEditorDelegate, ReplacementEditorInput,
     ReplacementEditorView, render_replacement_editor as render_shared_replacement_editor,
@@ -36,9 +43,10 @@ use crate::desktop_replacement_editor::{
 use crate::desktop_shell::{DesktopPane, render_navigation_items};
 use crate::desktop_transcription_picker::TranscriptionPickerDelegate;
 use crate::desktop_ui::{
-    FAINT, LINE, MUTED, SIDEBAR_WIDTH, SUCCESS, SURFACE, TEXT, TEXT_SOFT, compact_button,
-    disclosure_button, dropdown_backdrop, dropdown_item, dropdown_panel_with_width, error_message,
-    header_button, hotkey_keycaps, pane_content, pane_header, settings_panel, settings_row,
+    FAINT, LINE, MUTED, PANE_LIST_WIDTH, SECTION_GAP, SIDEBAR_WIDTH, SUCCESS, SURFACE, TEXT,
+    TEXT_SOFT, compact_button, compact_section_label, disclosure_button, dropdown_backdrop,
+    dropdown_item, dropdown_panel_with_width, error_message, header_button, hotkey_keycaps,
+    pane_body, pane_content, pane_header, pane_header_with_action, settings_panel, settings_row,
     settings_section_label, sidebar_frame, toggle, window_frame,
 };
 use crate::events::EventReader;
@@ -116,6 +124,7 @@ struct LinuxDesktopHost {
     history: Option<History>,
     history_error: Option<String>,
     replacements: crate::linux_dictation::SharedReplacements,
+    modes: crate::linux_dictation::SharedModes,
     update: UpdateState,
 }
 
@@ -127,6 +136,8 @@ struct LinuxApp {
     history_search_input: gpui::Entity<TextInput>,
     _history_search_subscription: Subscription,
     replacement_inputs: Vec<ReplacementEditorInput>,
+    mode_inputs: Vec<LinuxModeInputs>,
+    selected_mode: ModeTarget,
     capturing_hotkey: bool,
     transcription_picker: TranscriptionPickerState,
     catalog_language_filter: Option<String>,
@@ -144,6 +155,13 @@ struct LinuxApp {
     onboarding_selection: crate::transcription_models::TranscriptionSelection,
     onboarding_language_dropdown_open: bool,
     onboarding_language_dropdown_bounds: Option<Bounds<Pixels>>,
+}
+
+struct LinuxModeInputs {
+    name: gpui::Entity<TextInput>,
+    applications: gpui::Entity<TextInput>,
+    corrections: Vec<ReplacementEditorInput>,
+    _subscriptions: Vec<Subscription>,
 }
 
 enum TranscriptionPickerState {
@@ -242,6 +260,11 @@ pub fn open(event_path: PathBuf, start_hidden: bool) -> Result<()> {
                                 )
                             })
                             .collect();
+                        let mode_inputs = settings
+                            .modes
+                            .iter()
+                            .map(|mode| LinuxApp::mode_inputs(mode, cx))
+                            .collect();
                         LinuxApp {
                             host,
                             pane: DesktopPane::Settings,
@@ -250,6 +273,8 @@ pub fn open(event_path: PathBuf, start_hidden: bool) -> Result<()> {
                             history_search_input,
                             _history_search_subscription: history_search_subscription,
                             replacement_inputs,
+                            mode_inputs,
+                            selected_mode: ModeTarget::Global,
                             onboarding,
                             // A fresh run offers the locale's recommendation,
                             // like the Windows first-run default.
@@ -554,6 +579,9 @@ impl LinuxDesktopHost {
         let replacements = Arc::new(RwLock::new(crate::text_replacements::ReplacementSet::new(
             &settings.text_replacements,
         )));
+        let modes = Arc::new(RwLock::new(crate::linux_dictation::LinuxModeRuntime::new(
+            &settings.modes,
+        )));
         Self {
             event_reader,
             event_path,
@@ -576,6 +604,7 @@ impl LinuxDesktopHost {
             history,
             history_error,
             replacements,
+            modes,
             update,
         }
     }
@@ -601,6 +630,7 @@ impl LinuxDesktopHost {
         let prepared_transcriber = self.prepared_transcriber.take();
         let history = self.history.clone();
         let replacements = self.replacements.clone();
+        let modes = self.modes.clone();
         let worker = std::thread::spawn(move || {
             let result = crate::instance::acquire("listener").and_then(|_instance| {
                 if let Some(transcriber) = prepared_transcriber {
@@ -611,6 +641,7 @@ impl LinuxDesktopHost {
                         transcriber,
                         history,
                         replacements,
+                        modes,
                     )
                 } else {
                     crate::linux_dictation::run_with_history(
@@ -619,6 +650,7 @@ impl LinuxDesktopHost {
                         &stop,
                         history,
                         replacements,
+                        modes,
                     )
                 }
             });
@@ -902,6 +934,27 @@ impl LinuxDesktopHost {
             .write()
             .unwrap_or_else(|error| error.into_inner()) =
             crate::text_replacements::ReplacementSet::new(&candidate.text_replacements);
+        self.settings = candidate;
+        self.settings_error = None;
+        Ok(())
+    }
+
+    fn set_modes(&mut self, modes: Vec<crate::linux_settings::LinuxMode>) -> Result<()> {
+        if modes == self.settings.modes {
+            return Ok(());
+        }
+        let mut candidate = self.settings.clone();
+        candidate.modes = modes;
+        candidate.save().map_err(|error| {
+            let message = format!("Could not save modes: {error:#}");
+            self.settings_error = Some(message.clone());
+            eyre!(message)
+        })?;
+        *self
+            .modes
+            .write()
+            .unwrap_or_else(|error| error.into_inner()) =
+            crate::linux_dictation::LinuxModeRuntime::new(&candidate.modes);
         self.settings = candidate;
         self.settings_error = None;
         Ok(())
@@ -1430,6 +1483,98 @@ impl LinuxApp {
         cx.notify();
     }
 
+    fn mode_inputs(
+        mode: &crate::linux_settings::LinuxMode,
+        cx: &mut Context<Self>,
+    ) -> LinuxModeInputs {
+        let name = cx.new(|cx| TextInput::new(cx, "e.g. Coding", &mode.name));
+        let applications = cx.new(|cx| {
+            TextInput::new(
+                cx,
+                "e.g. code, firefox, slack",
+                mode.applications.join(", "),
+            )
+        });
+        let name_changed = cx.subscribe(&name, |this, _, _: &TextChanged, cx| this.sync_modes(cx));
+        let applications_changed = cx.subscribe(&applications, |this, _, _: &TextChanged, cx| {
+            this.sync_modes(cx)
+        });
+        let corrections = mode
+            .corrections
+            .iter()
+            .map(|correction| ReplacementEditorInput::new(correction, Self::sync_modes, cx))
+            .collect();
+        LinuxModeInputs {
+            name,
+            applications,
+            corrections,
+            _subscriptions: vec![name_changed, applications_changed],
+        }
+    }
+
+    fn mode_values(
+        &self,
+        excluded: Option<usize>,
+        cx: &mut Context<Self>,
+    ) -> Vec<crate::linux_settings::LinuxMode> {
+        self.mode_inputs
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| Some(*index) != excluded)
+            .map(|(_, inputs)| crate::linux_settings::LinuxMode {
+                name: inputs.name.read(cx).text().to_string(),
+                applications: inputs
+                    .applications
+                    .read(cx)
+                    .text()
+                    .split(',')
+                    .map(|application| application.trim().to_string())
+                    .filter(|application| !application.is_empty())
+                    .collect(),
+                corrections: inputs
+                    .corrections
+                    .iter()
+                    .map(|correction| correction.value(cx))
+                    .collect(),
+            })
+            .collect()
+    }
+
+    fn sync_modes(&mut self, cx: &mut Context<Self>) {
+        let modes = self.mode_values(None, cx);
+        let _ = self.host.set_modes(modes);
+        cx.notify();
+    }
+
+    fn add_mode(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let mode = crate::linux_settings::LinuxMode {
+            name: format!("Mode {}", self.mode_inputs.len() + 1),
+            ..Default::default()
+        };
+        self.mode_inputs.push(Self::mode_inputs(&mode, cx));
+        self.selected_mode = ModeTarget::Mode(self.mode_inputs.len().saturating_sub(1));
+        self.sync_modes(cx);
+        window.blur();
+    }
+
+    fn remove_mode(&mut self, index: usize, cx: &mut Context<Self>) {
+        if index >= self.mode_inputs.len() {
+            return;
+        }
+        let modes = self.mode_values(Some(index), cx);
+        if self.host.set_modes(modes).is_err() {
+            cx.notify();
+            return;
+        }
+        self.mode_inputs.remove(index);
+        self.selected_mode = match self.selected_mode {
+            ModeTarget::Mode(selected) if selected == index => ModeTarget::Global,
+            ModeTarget::Mode(selected) if selected > index => ModeTarget::Mode(selected - 1),
+            selected => selected,
+        };
+        cx.notify();
+    }
+
     fn render_history(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let view = self.history_pane.view(
             self.host.settings.history_retention,
@@ -1437,6 +1582,167 @@ impl LinuxApp {
             cx,
         );
         render_shared_history_pane(view, cx)
+    }
+
+    fn render_modes(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        if let ModeTarget::Mode(index) = self.selected_mode
+            && index >= self.mode_inputs.len()
+        {
+            self.selected_mode = ModeTarget::Global;
+        }
+        let add = header_button(tr("Add mode"))
+            .id("linux-add-mode")
+            .on_click(cx.listener(|this, _, window, cx| this.add_mode(window, cx)))
+            .into_any_element();
+        let mut entries = vec![ModeListEntry {
+            target: ModeTarget::Global,
+            title: tr("Global").into(),
+            empty_subtitle: "Fallback for everything",
+            activations: Vec::new(),
+        }];
+        entries.extend(self.mode_inputs.iter().enumerate().map(|(index, inputs)| {
+            let name = inputs.name.read(cx).text().trim().to_string();
+            let activations = self
+                .host
+                .settings
+                .modes
+                .get(index)
+                .map(|mode| {
+                    mode.applications
+                        .iter()
+                        .cloned()
+                        .map(|name| ModeActivation::application(name, None))
+                        .collect()
+                })
+                .unwrap_or_default();
+            ModeListEntry {
+                target: ModeTarget::Mode(index),
+                title: if name.is_empty() {
+                    tr("Untitled mode").into()
+                } else {
+                    name
+                },
+                empty_subtitle: "No activation rules",
+                activations,
+            }
+        }));
+        let mode_list = render_shared_mode_list(
+            ModeListView {
+                entries,
+                selected: self.selected_mode,
+                secondary_action: false,
+            },
+            cx,
+        );
+        let detail = self.render_linux_mode_detail(cx);
+
+        div()
+            .size_full()
+            .flex()
+            .flex_col()
+            .child(pane_header_with_action("Modes", Some(add)))
+            .child(
+                pane_body().p_5().child(
+                    pane_content()
+                        .flex_row()
+                        .gap_5()
+                        .child(
+                            div()
+                                .id("modes-list")
+                                .w(px(PANE_LIST_WIDTH))
+                                .h_full()
+                                .flex_none()
+                                .child(mode_list),
+                        )
+                        .child(detail),
+                ),
+            )
+            .into_any_element()
+    }
+
+    fn render_linux_mode_detail(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        let mut detail = div()
+            .id("mode-detail")
+            .flex_1()
+            .min_w(px(0.0))
+            .h_full()
+            .overflow_y_scroll()
+            .child(match self.selected_mode {
+                ModeTarget::Global => {
+                    let basics = render_shared_mode_basics(
+                        ModeBasicsView::Global {
+                            title: "Global",
+                            description: "Used unless a more specific application mode matches.",
+                        },
+                        cx,
+                    );
+                    let replacements = render_shared_replacement_editor(
+                        ReplacementEditorView {
+                            target: ModeTarget::Global,
+                            title: "Replacements",
+                            empty_message:
+                                "No replacements yet. Add one to correct recurring phrases.",
+                            rows: &self.replacement_inputs,
+                        },
+                        cx,
+                    );
+                    div()
+                        .w_full()
+                        .max_w(px(700.0))
+                        .flex()
+                        .flex_col()
+                        .gap(px(SECTION_GAP))
+                        .pb_5()
+                        .child(basics)
+                        .child(div().h(px(4.0)))
+                        .child(compact_section_label(tr("TEXT PROCESSING")))
+                        .child(replacements)
+                        .into_any_element()
+                }
+                ModeTarget::Mode(mode_index) => {
+                    let inputs = &self.mode_inputs[mode_index];
+                    let basics = render_shared_mode_basics(
+                        ModeBasicsView::Custom {
+                            target: ModeTarget::Mode(mode_index),
+                            name: inputs.name.clone(),
+                            applications: Box::new(ModeApplicationEditorView::Freeform {
+                                title: "Applications",
+                                description:
+                                    "Applies when the focused executable contains any of these names",
+                                input: inputs.applications.clone(),
+                            }),
+                            websites: None,
+                            remove_mode: true,
+                        },
+                        cx,
+                    );
+                    let corrections = render_shared_replacement_editor(
+                        ReplacementEditorView {
+                            target: ModeTarget::Mode(mode_index),
+                            title: "Corrections",
+                            empty_message: "No corrections in this mode.",
+                            rows: &inputs.corrections,
+                        },
+                        cx,
+                    );
+                    div()
+                        .w_full()
+                        .max_w(px(700.0))
+                        .flex()
+                        .flex_col()
+                        .gap(px(SECTION_GAP))
+                        .pb_5()
+                        .child(basics)
+                        .child(div().h(px(4.0)))
+                        .child(compact_section_label(tr("TEXT PROCESSING")))
+                        .child(corrections)
+                        .into_any_element()
+                }
+            });
+        if let Some(error) = self.host.settings_error.clone() {
+            detail = detail.child(error_message("Modes could not be saved.", error));
+        }
+        detail.into_any_element()
     }
 
     fn render_shared_navigation(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -1549,16 +1855,6 @@ impl LinuxApp {
             let _ = this.host.dispatch(action);
             cx.notify();
         }));
-        let replacement_editor = render_shared_replacement_editor(
-            ReplacementEditorView {
-                target: ModeTarget::Global,
-                title: "Replacements",
-                empty_message: "Add phrases HEX should replace after transcription.",
-                rows: &self.replacement_inputs,
-            },
-            cx,
-        );
-
         div()
             .size_full()
             .flex()
@@ -1887,8 +2183,6 @@ impl LinuxApp {
                                             )
                                         }),
                                 )
-                                .child(settings_section_label("Text replacements"))
-                                .child(replacement_editor)
                                 .child(settings_section_label("Application"))
                                 .child(
                                     settings_panel()
@@ -2139,6 +2433,43 @@ impl TranscriptionPickerDelegate for LinuxApp {
     }
 }
 
+impl ModeBasicsDelegate for LinuxApp {
+    fn handle_mode_basics_action(
+        &mut self,
+        action: ModeBasicsAction,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let ModeBasicsAction::RemoveMode(ModeTarget::Mode(index)) = action {
+            self.remove_mode(index, cx);
+        }
+    }
+}
+
+impl ModeListDelegate for LinuxApp {
+    fn handle_mode_list_action(
+        &mut self,
+        action: ModeListAction,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let target = match action {
+            ModeListAction::Select(target) | ModeListAction::OpenContextMenu { target, .. } => {
+                target
+            }
+        };
+        if let ModeTarget::Mode(index) = target
+            && index >= self.mode_inputs.len()
+        {
+            return;
+        }
+        self.selected_mode = target;
+        self.close_popups();
+        window.blur();
+        cx.notify();
+    }
+}
+
 impl ReplacementEditorDelegate for LinuxApp {
     fn handle_replacement_editor_action(
         &mut self,
@@ -2167,11 +2498,31 @@ impl ReplacementEditorDelegate for LinuxApp {
                     self.sync_text_replacements(cx);
                 }
             }
-            ReplacementEditorAction::Add(ModeTarget::Mode(_))
-            | ReplacementEditorAction::Remove {
-                target: ModeTarget::Mode(_),
-                ..
-            } => unreachable!("Linux exposes only global text replacements"),
+            ReplacementEditorAction::Add(ModeTarget::Mode(mode_index)) => {
+                if mode_index >= self.mode_inputs.len() {
+                    return;
+                }
+                let input = ReplacementEditorInput::new(
+                    &crate::text_replacements::TextReplacement::default(),
+                    Self::sync_modes,
+                    cx,
+                );
+                let focus = input.matched_phrase_focus(cx);
+                self.mode_inputs[mode_index].corrections.push(input);
+                self.sync_modes(cx);
+                focus.focus(window);
+            }
+            ReplacementEditorAction::Remove {
+                target: ModeTarget::Mode(mode_index),
+                index,
+            } => {
+                if let Some(mode) = self.mode_inputs.get_mut(mode_index)
+                    && index < mode.corrections.len()
+                {
+                    mode.corrections.remove(index);
+                    self.sync_modes(cx);
+                }
+            }
         }
     }
 }
@@ -2195,13 +2546,13 @@ impl Render for LinuxApp {
         let snapshot = self.host.snapshot();
         let content = match self.pane {
             DesktopPane::Settings => self.render_shared_settings(&snapshot, cx),
+            DesktopPane::Modes => self.render_modes(cx),
             DesktopPane::HudLab => crate::desktop_hud_lab::render_hud_lab_pane(self, window, cx),
             DesktopPane::Activity => crate::desktop_activity_pane::render_activity_pane(&snapshot),
             DesktopPane::History => self.render_history(cx),
-            DesktopPane::Modes
-            | DesktopPane::Commands
-            | DesktopPane::VoiceAction
-            | DesktopPane::Meetings => unreachable!("capability-filtered Linux pane"),
+            DesktopPane::Commands | DesktopPane::VoiceAction | DesktopPane::Meetings => {
+                unreachable!("capability-filtered Linux pane")
+            }
         };
         let model_picker = if self.transcription_picker.language().is_some() {
             Some(crate::desktop_model_catalog::render_model_catalog(

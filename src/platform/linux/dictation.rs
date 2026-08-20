@@ -29,6 +29,50 @@ struct Job {
 }
 
 pub(crate) type SharedReplacements = Arc<RwLock<crate::text_replacements::ReplacementSet>>;
+pub(crate) type SharedModes = Arc<RwLock<LinuxModeRuntime>>;
+
+struct OutputRuntime {
+    history: Option<crate::history::History>,
+    replacements: SharedReplacements,
+    modes: SharedModes,
+}
+
+#[derive(Clone, Default)]
+pub(crate) struct LinuxModeRuntime {
+    modes: Vec<(
+        crate::linux_settings::LinuxMode,
+        crate::text_replacements::ReplacementSet,
+    )>,
+}
+
+impl LinuxModeRuntime {
+    pub(crate) fn new(modes: &[crate::linux_settings::LinuxMode]) -> Self {
+        Self {
+            modes: modes
+                .iter()
+                .cloned()
+                .map(|mode| {
+                    let corrections =
+                        crate::text_replacements::ReplacementSet::new(&mode.corrections);
+                    (mode, corrections)
+                })
+                .collect(),
+        }
+    }
+
+    fn process(&self, text: &str, application: Option<&str>) -> String {
+        let Some(application) = application else {
+            return text.to_string();
+        };
+        self.modes
+            .iter()
+            .find(|(mode, _)| mode.matches_application(application))
+            .map_or_else(
+                || text.to_string(),
+                |(_, corrections)| corrections.replace(text),
+            )
+    }
+}
 
 /// The opt-in streaming command loop: Moonshine hears idle-time audio,
 /// the shared engine resolves wake, sleep, and command phrases, and the
@@ -393,14 +437,18 @@ pub(crate) fn run(event_path: &Path, device: Option<&str>, shutdown: &AtomicBool
     let replacements = Arc::new(RwLock::new(crate::text_replacements::ReplacementSet::new(
         &settings.text_replacements,
     )));
+    let modes = Arc::new(RwLock::new(LinuxModeRuntime::new(&settings.modes)));
     run_with_settings(
         event_path,
         device,
         shutdown,
         settings,
         transcriber,
-        history,
-        replacements,
+        OutputRuntime {
+            history,
+            replacements,
+            modes,
+        },
     )
 }
 
@@ -410,6 +458,7 @@ pub(crate) fn run_with_history(
     shutdown: &AtomicBool,
     history: Option<crate::history::History>,
     replacements: SharedReplacements,
+    modes: SharedModes,
 ) -> Result<()> {
     let settings = crate::linux_settings::LinuxSettings::load()?;
     let transcriber = LocalTranscriber::load(&settings.transcription)?;
@@ -419,8 +468,11 @@ pub(crate) fn run_with_history(
         shutdown,
         settings,
         transcriber,
-        history,
-        replacements,
+        OutputRuntime {
+            history,
+            replacements,
+            modes,
+        },
     )
 }
 
@@ -431,6 +483,7 @@ pub(crate) fn run_with_transcriber(
     transcriber: LocalTranscriber,
     history: Option<crate::history::History>,
     replacements: SharedReplacements,
+    modes: SharedModes,
 ) -> Result<()> {
     let settings = crate::linux_settings::LinuxSettings::load()?;
     run_with_settings(
@@ -439,8 +492,11 @@ pub(crate) fn run_with_transcriber(
         shutdown,
         settings,
         transcriber,
-        history,
-        replacements,
+        OutputRuntime {
+            history,
+            replacements,
+            modes,
+        },
     )
 }
 
@@ -450,8 +506,7 @@ fn run_with_settings(
     shutdown: &AtomicBool,
     settings: crate::linux_settings::LinuxSettings,
     transcriber: LocalTranscriber,
-    history: Option<crate::history::History>,
-    replacements: SharedReplacements,
+    output: OutputRuntime,
 ) -> Result<()> {
     // A CLI device override stays a strict substring query; the settings
     // choice is an exact enumerated name and falls back to automatic
@@ -489,11 +544,33 @@ fn run_with_settings(
     };
     let (jobs, job_receiver) = mpsc::sync_channel::<Job>(2);
     let (result_sender, results) = mpsc::channel();
+    let OutputRuntime {
+        history,
+        replacements,
+        modes,
+    } = output;
     let worker = thread::spawn(move || {
         let mut transcriber = transcriber;
         let mut paster = X11Paster::new();
+        let context_reader = match crate::linux_context::LinuxContext::new() {
+            Ok(reader) => Some(reader),
+            Err(error) => {
+                tracing::warn!(%error, "Linux foreground context is unavailable");
+                None
+            }
+        };
         while let Ok(job) = job_receiver.recv() {
             let started = Instant::now();
+            let context = context_reader
+                .as_ref()
+                .and_then(|reader| match reader.capture() {
+                    Ok(context) => Some(context),
+                    Err(error) => {
+                        tracing::debug!(%error, "could not capture Linux foreground context");
+                        None
+                    }
+                })
+                .unwrap_or_default();
             let inference_started = Instant::now();
             let transcription = transcriber
                 .transcribe(&job.samples)
@@ -504,13 +581,12 @@ fn run_with_settings(
                 if raw_text.is_empty() {
                     return Err("transcription was empty".into());
                 }
-                let final_text = replacements
-                    .read()
-                    .unwrap_or_else(|error| error.into_inner())
-                    .replace(&raw_text);
-                if final_text.trim().is_empty() {
-                    return Err("text replacements produced empty output".into());
-                }
+                let final_text = process_text(
+                    &raw_text,
+                    context.application.as_deref(),
+                    &replacements,
+                    &modes,
+                )?;
                 let paste_result = paster
                     .as_mut()
                     .map_err(|error| format!("{error:#}"))?
@@ -521,6 +597,7 @@ fn run_with_settings(
                     history.as_ref(),
                     &raw_text,
                     &final_text,
+                    context.application.as_deref(),
                     job.audio_ms,
                     inference_ms,
                     started.elapsed().as_millis() as u64,
@@ -702,6 +779,7 @@ fn retain_successful_dictation(
     history: Option<&crate::history::History>,
     raw_text: &str,
     final_text: &str,
+    application: Option<&str>,
     audio_ms: u64,
     inference_ms: u64,
     total_ms: u64,
@@ -713,7 +791,7 @@ fn retain_successful_dictation(
         kind: crate::history::HistoryKind::Dictation,
         raw_text: raw_text.to_string(),
         final_text: final_text.to_string(),
-        application: None,
+        application: application.map(str::to_string),
         processing: None,
         audio_ms,
         inference_ms,
@@ -722,6 +800,26 @@ fn retain_successful_dictation(
     if let Err(error) = history.record(draft) {
         tracing::warn!(%error, "could not retain Linux dictation history");
     }
+}
+
+fn process_text(
+    raw_text: &str,
+    application: Option<&str>,
+    replacements: &RwLock<crate::text_replacements::ReplacementSet>,
+    modes: &RwLock<LinuxModeRuntime>,
+) -> std::result::Result<String, String> {
+    let text = replacements
+        .read()
+        .unwrap_or_else(|error| error.into_inner())
+        .replace(raw_text);
+    let text = modes
+        .read()
+        .unwrap_or_else(|error| error.into_inner())
+        .process(&text, application);
+    if text.trim().is_empty() {
+        return Err("text replacements produced empty output".into());
+    }
+    Ok(text)
 }
 
 fn submit_capture(
@@ -768,10 +866,11 @@ fn emit_state(events: &mut EventLog, state: VoiceState, device: &str) -> Result<
 #[allow(clippy::unwrap_used)]
 mod tests {
     use std::fs;
+    use std::sync::RwLock;
 
     use crate::history::{History, HistoryRetention, HistoryStore};
 
-    use super::retain_successful_dictation;
+    use super::{LinuxModeRuntime, process_text, retain_successful_dictation};
 
     #[test]
     fn successful_paste_retains_only_text_and_bounded_metadata() {
@@ -789,6 +888,7 @@ mod tests {
             Some(&history),
             "hello open code",
             "hello OpenCode",
+            Some("firefox"),
             1_250,
             310,
             420,
@@ -799,12 +899,57 @@ mod tests {
         let entry = &entries[0];
         assert_eq!(entry.raw_text, "hello open code");
         assert_eq!(entry.final_text, "hello OpenCode");
-        assert_eq!(entry.application, None);
+        assert_eq!(entry.application.as_deref(), Some("firefox"));
         assert_eq!(entry.processing, None);
         assert_eq!(entry.audio_ms, 1_250);
         assert_eq!(entry.inference_ms, 310);
         assert_eq!(entry.total_ms, 420);
 
         fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn foreground_application_selects_live_mode_corrections_after_global_replacements() {
+        let replacements = RwLock::new(crate::text_replacements::ReplacementSet::new(&[
+            crate::text_replacements::TextReplacement {
+                matched_phrase: "open code".into(),
+                output: "OpenCode".into(),
+            },
+        ]));
+        let modes = RwLock::new(LinuxModeRuntime::new(&[crate::linux_settings::LinuxMode {
+            name: "Browser".into(),
+            applications: vec!["firefox".into()],
+            corrections: vec![crate::text_replacements::TextReplacement {
+                matched_phrase: "full stop".into(),
+                output: ".".into(),
+            }],
+        }]));
+
+        assert_eq!(
+            process_text(
+                "open code full stop",
+                Some("Firefox"),
+                &replacements,
+                &modes,
+            )
+            .unwrap(),
+            "OpenCode ."
+        );
+        assert_eq!(
+            process_text("open code full stop", Some("code"), &replacements, &modes).unwrap(),
+            "OpenCode full stop"
+        );
+        *modes.write().unwrap() = LinuxModeRuntime::new(&[crate::linux_settings::LinuxMode {
+            name: "Editor".into(),
+            applications: vec!["code".into()],
+            corrections: vec![crate::text_replacements::TextReplacement {
+                matched_phrase: "full stop".into(),
+                output: ".".into(),
+            }],
+        }]);
+        assert_eq!(
+            process_text("open code full stop", Some("code"), &replacements, &modes).unwrap(),
+            "OpenCode ."
+        );
     }
 }

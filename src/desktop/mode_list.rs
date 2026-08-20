@@ -19,6 +19,7 @@ use crate::desktop_ui::{
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum ModeActivationKind {
     Application,
+    #[cfg_attr(target_os = "linux", allow(dead_code))]
     Website,
 }
 
@@ -38,6 +39,7 @@ impl ModeActivation {
         }
     }
 
+    #[cfg_attr(target_os = "linux", allow(dead_code))]
     pub(crate) fn website(label: impl Into<String>) -> Self {
         Self {
             label: label.into(),

@@ -47,15 +47,16 @@ systems behind a nominally shared shell.
 
 Settings and Activity established the shared vocabulary. History now has one
 behavior-complete pane. The phrase/output replacement editor is shared by all
-three roots: Linux composes its real global rules into Settings while macOS and
-Windows use it inside their behavior-complete Modes panes. Modes also shares its
-collection identity, selection, activation badges, list renderer, and basic
-matching card. Its OpenCode processing card, enablement actions, and unavailable/
-retry state are shared as well. Its ordered transformation catalog, picker,
-drag ordering, removal, and host-workspace status are now shared too. Voice
-Action also has one pane contract on macOS and Windows. Commands and Meetings
-can use the same shell, but each pane appears on a platform only when its
-underlying behavior is implemented there.
+three roots inside Modes. Modes also shares its collection identity, selection,
+activation badges, list renderer, and basic matching card. The website editor
+is an optional real capability: macOS and Windows supply browser adapters, while
+Linux exposes only its EWMH executable-name rules. The OpenCode processing card,
+enablement actions, and unavailable/retry state are shared by the roots that
+implement them. Its ordered transformation catalog, picker, drag ordering,
+removal, and host-workspace status are shared too. Voice Action also has one
+pane contract on macOS and Windows. Commands and Meetings can use the same
+shell, but each pane appears on a platform only when its underlying behavior is
+implemented there.
 
 ## Desktop Hosts Own Consequential Behavior
 
@@ -211,15 +212,17 @@ Linux global replacements, macOS mode corrections, and both Windows replacement
 collections. Each root still decides which collection a target names and
 persists through its existing schema. `src/desktop/mode_target.rs` owns their
 shared global/custom identity; `src/desktop/mode_list.rs` owns the selection
-contract, activation badges, and fixed mode list used by macOS and Windows.
-Windows now follows the same list/detail composition instead of
+contract, activation badges, and fixed mode list used by macOS, Linux, and
+Windows. Windows and Linux now follow the same list/detail composition instead of
 rendering every mode as a separate card; application substring matching and
-browser-host normalization remain in its native settings/runtime modules.
+browser-host normalization remain in their native settings/runtime modules.
 `src/desktop/mode_basics.rs` owns the shared global fallback and custom
 name/application/site card. Its catalog-backed and free-form application-rule
-variants represent the two real behaviors explicitly, so macOS retains its
-installed-app picker while Windows retains process-substring inputs. Periodic
-refresh and the remaining render state still need to move into one root entity.
+variants and optional website editor represent the real behaviors explicitly,
+so macOS retains its installed-app picker, Windows retains process-substring and
+browser-host inputs, and Linux retains executable-substring input without a
+fake browser field. Periodic refresh and the remaining render state still need
+to move into one root entity.
 `src/desktop/mode_processing.rs` owns the OpenCode card, toggle action, and
 missing/error recovery presentation. Both roots persist the same portable
 rewrite settings and execute the same ordered processing policy, while macOS
@@ -257,8 +260,10 @@ regression.
 pane headers, settings panels and rows, keycaps, toggles, messages, and exact
 transcription picker at the same default and minimum dimensions as macOS. It
 also consumes the complete shared retained-History pane and text-input behavior.
-The superseded Linux dashboard implementation has been removed. The remaining
-Linux Settings composition disappears when the shared root extraction lands.
+It now consumes the shared Modes list, basics card, and replacement editor over
+its concrete EWMH application context and live correction runtime. The
+superseded Linux dashboard implementation has been removed. The remaining Linux
+Settings composition disappears when the shared root extraction lands.
 
 - Remove `LinuxApp::render` and Linux-only visual constants and controls.
 - Retain the Linux lifecycle, tray, X11 window mapping, listener, updater, and
