@@ -1,4 +1,4 @@
-//! Shared retained-history pane for the macOS and Windows shells.
+//! Shared retained-history pane for the macOS, Linux, and Windows shells.
 //!
 //! The native roots own settings persistence and translate pane actions into
 //! their existing runtime calls. This module owns the history handle, bounded
@@ -79,7 +79,7 @@ impl HistoryPaneState {
         self.error.as_deref()
     }
 
-    #[cfg(target_os = "windows")]
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
     pub(crate) fn set_error(&mut self, error: Option<String>) {
         self.error = error;
     }

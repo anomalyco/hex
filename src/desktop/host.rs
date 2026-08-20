@@ -43,7 +43,7 @@ impl DesktopCapabilities {
         Self {
             activity: true,
             commands: false,
-            history: false,
+            history: true,
             hud_lab: crate::DEVELOPER_FEATURES_ENABLED,
             meetings: false,
             modes: false,
@@ -213,7 +213,7 @@ mod tests {
             DesktopCapabilities {
                 activity: true,
                 commands: false,
-                history: false,
+                history: true,
                 hud_lab: crate::DEVELOPER_FEATURES_ENABLED,
                 meetings: false,
                 modes: false,

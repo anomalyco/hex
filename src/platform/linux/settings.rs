@@ -24,6 +24,10 @@ pub struct LinuxSettings {
     /// This persisted prototype is honored only by developer builds until
     /// the Linux release bundles Moonshine and gains physical X11 validation.
     pub commands_enabled: bool,
+    /// How long successfully pasted dictations remain in the owner-only
+    /// bounded history store. `Off` stops new recording without deleting
+    /// entries retained under an earlier policy.
+    pub history_retention: crate::history::HistoryRetention,
     pub transcription: crate::transcription_models::TranscriptionSelection,
 }
 
@@ -47,6 +51,7 @@ impl Default for LinuxSettings {
             microphone: None,
             ui_language: None,
             commands_enabled: false,
+            history_retention: crate::history::HistoryRetention::default(),
             transcription: crate::transcription_models::TranscriptionSelection::default(),
         }
     }
@@ -220,5 +225,9 @@ mod tests {
             crate::transcription_models::TranscriptionSelection::default()
         );
         assert!(!settings.commands_enabled);
+        assert_eq!(
+            settings.history_retention,
+            crate::history::HistoryRetention::default()
+        );
     }
 }

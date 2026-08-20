@@ -1,8 +1,9 @@
 # Linux Plan
 
 **Status:** Active validation and capability plan. The x86_64 Arch/i3 X11 beta
-is implemented. The immediate blocker is validating a genuine signed update on
-the target machine.
+has the source-complete dictation loop, shared retained History, and signed
+update path. The immediate release blocker is validating a genuine signed
+update on the target machine.
 
 ## The Supported Contract Is Narrow
 
@@ -18,7 +19,8 @@ HEX currently supports one Linux beta contract:
 | Local API | Authenticated loopback service with owner-only XDG discovery or SDK-owned direct-child handoff |
 | Shortcut | Configurable key-containing chord; default `Alt+Space` |
 | Insertion | X11 clipboard and synthetic paste |
-| UI | GPUI settings shell and tray |
+| Retained History | Bounded owner-only text/metadata store after successful paste |
+| UI | GPUI Settings, Activity, model catalog, onboarding, and History panes plus tray |
 
 The beta does not claim voice commands, application or browser context,
 meetings, native Wayland support, or package-manager installation. Developer
@@ -34,6 +36,9 @@ contract. XWayland is not native Wayland support.
 - Shared local transcription service with bounded WAV admission, explicit model
   preparation, owner-only discovery, and stdin-owned embedded lifecycle.
 - Automatic clipboard insertion and restoration.
+- Shared retained-History pane with persisted retention, search, selectable
+  detail, copy, delete, and confirmed clear. Only successfully pasted output is
+  recorded; captured audio is never retained.
 - CLI microphone override.
 - GPUI shell, tray integration, desktop launcher, and autostart entry.
 - XDG paths, diagnostics, and exclusive listener ownership.
@@ -70,7 +75,23 @@ Arch/i3 host. Verify:
 
 This validation blocks calling the direct-install update channel proven.
 
-### 2. Add X11 Commands And Context
+### 2. Continue Desktop Parity In Complete Vertical Slices
+
+Retained History is implemented with the same store, state, actions, and
+renderer used on macOS and Windows. Physically validate its X11 clipboard and
+UI behavior on the supported host. Continue in dependency order:
+
+1. Add phrase-boundary replacements to the real Linux output worker and shared
+   editor.
+2. Add application modes and corrections only after a real EWMH context adapter
+   exists.
+3. Add full OpenCode and TypeScript mode processing before Voice Action.
+4. Add Voice Action with a real selected-text and focus-preserving X11 contract.
+
+Do not expose a pane before its worker, persistence, and native validation path
+exist.
+
+### 3. Add X11 Commands And Context
 
 The developer-only prototype now provides bounded, generation-safe Moonshine
 projection, wake/sleep resolution, a small compiled command set, and XTest key
@@ -93,7 +114,7 @@ setting or load Moonshine while idle.
 Keep browser-host commands unavailable until a real browser adapter provides
 the active URL. Never infer a URL from a window title.
 
-### 3. Add Manual PipeWire Meetings
+### 4. Add Manual PipeWire Meetings
 
 Manual meeting recording precedes automatic detection. Capture two explicit
 sources:
@@ -110,14 +131,14 @@ Handle route replacement, Bluetooth profile changes, clock alignment, queue
 pressure, and HEX feedback appearing in the output monitor. Route loss must
 produce a visible gap or failure rather than silent corruption.
 
-### 4. Add Metadata-Only Meeting Offers
+### 5. Add Metadata-Only Meeting Offers
 
 After manual capture is reliable, observe PipeWire registry nodes and active
 links without recording samples. Normalize process and media metadata into the
 existing meeting-candidate model. Detection remains offer-only and never starts
 recording automatically.
 
-### 5. Choose A Native Wayland Contract
+### 6. Choose A Native Wayland Contract
 
 Wayland support requires an explicit capability decision:
 
@@ -135,7 +156,7 @@ that handles keyboard hotplug, crash-safe key release, access policy, and exact
 re-injection of non-suppressed events. Do not build a general-purpose root
 daemon.
 
-### 6. Add Distribution Channels Deliberately
+### 7. Add Distribution Channels Deliberately
 
 The app-managed updater owns only the user-local direct-install layout. A future
 Arch package must leave updates to the package manager. Add architectures,
@@ -150,6 +171,7 @@ Do not fork these modules by platform:
 - transcription models, inference, processing, ordering, and cancellation;
 - command grammar and pure resolution;
 - event schema and bounded projections;
+- retained-history bounds, persistence, search, and pane behavior;
 - paste continuation and clipboard restoration state transitions;
 - meeting manifests, locking, WAV writing, transcript publication, and
   recovery.
@@ -189,6 +211,7 @@ implementation assumptions.
 | Command microphone and wake/sleep | Required | Required when shipped | Required when shipped |
 | Hold/release, lock, cancel | Required | Required | Required if advertised |
 | Foreground Paste and Send | Required | Required | Required if advertised |
+| Retained History after successful paste | Required | Required | Required if advertised |
 | Browser, terminal, editor, Electron insertion | Required | Required | Capability-dependent |
 | Application context | Required | Required when shipped | Capability-dependent |
 | GPUI shell and settings | Required | Required | Required |

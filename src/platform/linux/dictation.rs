@@ -386,7 +386,19 @@ struct JobResult {
 pub fn run(event_path: &Path, device: Option<&str>, shutdown: &AtomicBool) -> Result<()> {
     let settings = crate::linux_settings::LinuxSettings::load()?;
     let transcriber = LocalTranscriber::load(&settings.transcription)?;
-    run_with_settings(event_path, device, shutdown, settings, transcriber)
+    let history = open_history(&settings);
+    run_with_settings(event_path, device, shutdown, settings, transcriber, history)
+}
+
+pub fn run_with_history(
+    event_path: &Path,
+    device: Option<&str>,
+    shutdown: &AtomicBool,
+    history: Option<crate::history::History>,
+) -> Result<()> {
+    let settings = crate::linux_settings::LinuxSettings::load()?;
+    let transcriber = LocalTranscriber::load(&settings.transcription)?;
+    run_with_settings(event_path, device, shutdown, settings, transcriber, history)
 }
 
 pub fn run_with_transcriber(
@@ -394,9 +406,10 @@ pub fn run_with_transcriber(
     device: Option<&str>,
     shutdown: &AtomicBool,
     transcriber: LocalTranscriber,
+    history: Option<crate::history::History>,
 ) -> Result<()> {
     let settings = crate::linux_settings::LinuxSettings::load()?;
-    run_with_settings(event_path, device, shutdown, settings, transcriber)
+    run_with_settings(event_path, device, shutdown, settings, transcriber, history)
 }
 
 fn run_with_settings(
@@ -405,6 +418,7 @@ fn run_with_settings(
     shutdown: &AtomicBool,
     settings: crate::linux_settings::LinuxSettings,
     transcriber: LocalTranscriber,
+    history: Option<crate::history::History>,
 ) -> Result<()> {
     // A CLI device override stays a strict substring query; the settings
     // choice is an exact enumerated name and falls back to automatic
@@ -447,21 +461,31 @@ fn run_with_settings(
         let mut paster = X11Paster::new();
         while let Ok(job) = job_receiver.recv() {
             let started = Instant::now();
-            let result = transcriber
+            let inference_started = Instant::now();
+            let transcription = transcriber
                 .transcribe(&job.samples)
-                .map_err(|error| format!("{error:#}"))
-                .and_then(|text| {
-                    let text = text.trim().to_string();
-                    if text.is_empty() {
-                        return Err("transcription was empty".into());
-                    }
-                    let paste_result = paster
-                        .as_mut()
-                        .map_err(|error| format!("{error:#}"))?
-                        .paste(&text)
-                        .map_err(|error| format!("{error:#}"));
-                    paste_result.map(|()| text)
-                });
+                .map(|text| text.trim().to_string())
+                .map_err(|error| format!("{error:#}"));
+            let inference_ms = inference_started.elapsed().as_millis() as u64;
+            let result = transcription.and_then(|raw_text| {
+                if raw_text.is_empty() {
+                    return Err("transcription was empty".into());
+                }
+                let paste_result = paster
+                    .as_mut()
+                    .map_err(|error| format!("{error:#}"))?
+                    .paste(&raw_text)
+                    .map_err(|error| format!("{error:#}"));
+                paste_result?;
+                retain_successful_dictation(
+                    history.as_ref(),
+                    &raw_text,
+                    job.audio_ms,
+                    inference_ms,
+                    started.elapsed().as_millis() as u64,
+                );
+                Ok(raw_text)
+            });
             tracing::info!(
                 audio_ms = job.audio_ms,
                 elapsed_ms = started.elapsed().as_millis(),
@@ -621,6 +645,43 @@ fn run_with_settings(
     Ok(())
 }
 
+fn open_history(
+    settings: &crate::linux_settings::LinuxSettings,
+) -> Option<crate::history::History> {
+    match crate::history::History::open_default(settings.history_retention) {
+        Ok(history) => Some(history),
+        Err(error) => {
+            tracing::warn!(%error, "Linux retained history is unavailable");
+            None
+        }
+    }
+}
+
+fn retain_successful_dictation(
+    history: Option<&crate::history::History>,
+    text: &str,
+    audio_ms: u64,
+    inference_ms: u64,
+    total_ms: u64,
+) {
+    let Some(history) = history else {
+        return;
+    };
+    let draft = crate::history::HistoryDraft {
+        kind: crate::history::HistoryKind::Dictation,
+        raw_text: text.to_string(),
+        final_text: text.to_string(),
+        application: None,
+        processing: None,
+        audio_ms,
+        inference_ms,
+        total_ms,
+    };
+    if let Err(error) = history.record(draft) {
+        tracing::warn!(%error, "could not retain Linux dictation history");
+    }
+}
+
 fn submit_capture(
     capture: &mut DictationCapture,
     ended_at: CaptureInstant,
@@ -659,4 +720,42 @@ fn emit_state(events: &mut EventLog, state: VoiceState, device: &str) -> Result<
         device: device.into(),
     })?;
     Ok(())
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use std::fs;
+
+    use crate::history::{History, HistoryRetention, HistoryStore};
+
+    use super::retain_successful_dictation;
+
+    #[test]
+    fn successful_paste_retains_only_text_and_bounded_metadata() {
+        let directory =
+            std::env::temp_dir().join(format!("hex-linux-history-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&directory);
+        fs::create_dir_all(&directory).unwrap();
+        let history = History::new(HistoryStore::open(
+            directory.join("history.json"),
+            HistoryRetention::Week,
+            0,
+        ));
+
+        retain_successful_dictation(Some(&history), "hello Linux", 1_250, 310, 420);
+
+        let entries = history.search("");
+        assert_eq!(entries.len(), 1);
+        let entry = &entries[0];
+        assert_eq!(entry.raw_text, "hello Linux");
+        assert_eq!(entry.final_text, "hello Linux");
+        assert_eq!(entry.application, None);
+        assert_eq!(entry.processing, None);
+        assert_eq!(entry.audio_ms, 1_250);
+        assert_eq!(entry.inference_ms, 310);
+        assert_eq!(entry.total_ms, 420);
+
+        fs::remove_dir_all(directory).unwrap();
+    }
 }

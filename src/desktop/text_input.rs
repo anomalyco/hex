@@ -81,7 +81,7 @@ actions!(
 /// Emitted after keyboard, clipboard, or input-method editing changes the text.
 pub struct Changed;
 pub struct Submitted;
-#[cfg_attr(target_os = "windows", allow(dead_code))]
+#[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
 pub struct Navigate(pub i32);
 pub struct Dismissed;
 
@@ -250,7 +250,7 @@ impl MultilineLayout {
     }
 }
 
-#[cfg_attr(target_os = "windows", allow(dead_code))]
+#[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
 impl TextInput {
     pub fn new(
         cx: &mut Context<Self>,

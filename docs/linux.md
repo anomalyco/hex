@@ -65,6 +65,16 @@ Hold **Alt-Space**, speak, then release. Double-tap the shortcut to keep
 recording, press it again to finish, or press Escape to cancel. Stop the listener
 before changing the shortcut in Settings.
 
+## Retained History
+
+The History pane uses the same bounded, owner-only store and complete
+list/detail UI as macOS and Windows. HEX records an entry only after text has
+been pasted successfully; it keeps the transcript and bounded timing metadata,
+never captured audio. The retention control can turn recording off or keep
+entries for 24 hours, 7 days, 30 days, or indefinitely, all still subject to
+the store's hard entry and byte caps. Search, selectable text, copy, individual
+delete, and confirmed clear are available in the pane.
+
 Managed installs check for signed updates at startup and every 24 hours. HEX
 downloads, verifies, and installs an available update, then asks before
 restarting into it. The signed update path is implemented but still awaiting a

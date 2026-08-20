@@ -142,7 +142,7 @@ mod tests {
 
     #[test]
     fn linux_navigation_contains_only_panes_with_renderers() {
-        let mut expected = vec![DesktopPane::Settings];
+        let mut expected = vec![DesktopPane::Settings, DesktopPane::History];
         if crate::DEVELOPER_FEATURES_ENABLED {
             expected.push(DesktopPane::HudLab);
         }

@@ -4,7 +4,7 @@
 pub mod activity;
 #[cfg(any(target_os = "linux", target_os = "windows"))]
 pub mod activity_pane;
-#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
 pub mod history_pane;
 pub mod host;
 #[cfg(any(target_os = "linux", target_os = "windows"))]
@@ -36,5 +36,5 @@ pub mod ui;
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 pub mod voice_action_pane;
 
-#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
 pub mod text_input;

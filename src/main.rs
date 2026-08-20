@@ -46,12 +46,14 @@ pub(crate) use desktop::{
     activity as desktop_activity, host as desktop_host, shell as desktop_shell,
     transcription_picker as desktop_transcription_picker, ui as desktop_ui,
 };
+#[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
+pub(crate) use desktop::{history_pane as desktop_history_pane, text_input};
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 pub(crate) use desktop::{
-    history_pane as desktop_history_pane, mode_basics as desktop_mode_basics,
-    mode_list as desktop_mode_list, mode_processing as desktop_mode_processing,
+    mode_basics as desktop_mode_basics, mode_list as desktop_mode_list,
+    mode_processing as desktop_mode_processing,
     mode_transformations as desktop_mode_transformations,
-    replacement_editor as desktop_replacement_editor, text_input,
+    replacement_editor as desktop_replacement_editor,
     voice_action_pane as desktop_voice_action_pane,
 };
 #[cfg(target_os = "linux")]

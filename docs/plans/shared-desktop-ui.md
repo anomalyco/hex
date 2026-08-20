@@ -199,9 +199,10 @@ effects. Linux no longer advertises a Commands catalog pane merely because its
 developer-only runtime toggle exists. `src/desktop/history_pane.rs` now owns the
 History store handle, bounded search snapshot, selection reconciliation,
 copy/delete behavior, confirmed-clear transition, selectable detail text, and
-the complete list-and-detail renderer for macOS and Windows. The native roots
-now provide only the search entity, retention setting, and one typed action
-delegate while retaining platform settings persistence.
+the complete list-and-detail renderer for macOS, Linux, and Windows. The native
+roots now provide only the shared store handle, search entity, retention
+setting, and one typed action delegate while retaining platform settings and
+paste-worker ownership. Linux records an entry only after X11 paste succeeds.
 `src/desktop/replacement_editor.rs` likewise owns the phrase/output inputs,
 add/remove action contract, focus behavior, and complete editor card used by
 macOS mode corrections plus both Windows replacement collections. Each root
@@ -236,6 +237,12 @@ therefore supply its searchable model and reasoning controls while Windows
 supplies its native dropdown and installation status without duplicating the
 pane or branching on an operating-system name.
 
+The macOS-main model control still replaces its selected card with a search
+field, and its reasoning control expands inline. Replace those inherited
+interactions with one anchored picker shared with Windows after the current
+functional port slices; this is tracked as UI convergence debt, not a port
+regression.
+
 - Move `AppWindow` and its portable dependencies out of macOS-only module gates.
 - Have the macOS lifecycle coordinator and Linux tray host construct their
   adapters alongside the Windows lifecycle host and open the same GPUI entity.
@@ -245,8 +252,9 @@ pane or branching on an operating-system name.
 
 **In progress.** The Linux production render now uses the shared navigation,
 pane headers, settings panels and rows, keycaps, toggles, messages, and exact
-transcription picker at the same default and minimum dimensions as macOS. The
-superseded Linux dashboard implementation has been removed. The remaining
+transcription picker at the same default and minimum dimensions as macOS. It
+also consumes the complete shared retained-History pane and text-input behavior.
+The superseded Linux dashboard implementation has been removed. The remaining
 Linux Settings composition disappears when the shared root extraction lands.
 
 - Remove `LinuxApp::render` and Linux-only visual constants and controls.

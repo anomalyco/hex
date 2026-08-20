@@ -8,8 +8,9 @@ use std::time::{Duration, Instant};
 use color_eyre::Result;
 use color_eyre::eyre::eyre;
 use gpui::{
-    AnyElement, App, Application, Bounds, Context, Keystroke, Pixels, Timer, TitlebarOptions,
-    Window, WindowBounds, WindowKind, WindowOptions, canvas, div, prelude::*, px, rgb, size,
+    AnyElement, App, Application, Bounds, Context, Keystroke, Pixels, Subscription, Timer,
+    TitlebarOptions, Window, WindowBounds, WindowKind, WindowOptions, canvas, div, prelude::*, px,
+    rgb, size,
 };
 use tray_icon::menu::{Menu, MenuEvent, MenuItem};
 use tray_icon::{Icon, MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
@@ -17,6 +18,10 @@ use x11rb::connection::Connection;
 use x11rb::protocol::xproto::ConnectionExt;
 
 use crate::desktop_activity::DesktopActivity;
+use crate::desktop_history_pane::{
+    HistoryPaneAction, HistoryPaneDelegate, HistoryPaneState,
+    render_history_pane as render_shared_history_pane,
+};
 use crate::desktop_host::{
     DesktopAction, DesktopCapabilities, DesktopHost, DesktopListenerSnapshot,
     DesktopMicrophoneSnapshot, DesktopShortcut, DesktopSnapshot, DesktopTranscriptionSnapshot,
@@ -32,7 +37,9 @@ use crate::desktop_ui::{
     settings_section_label, sidebar_frame, toggle, window_frame,
 };
 use crate::events::EventReader;
+use crate::history::{History, HistoryRetention};
 use crate::linux_updater::InstalledUpdate;
+use crate::text_input::{Changed as TextChanged, TextInput};
 
 const WINDOW_WIDTH: f32 = 1040.0;
 const WINDOW_HEIGHT: f32 = 700.0;
@@ -101,6 +108,8 @@ struct LinuxDesktopHost {
     prepared_transcriber: Option<crate::local_transcriber::LocalTranscriber>,
     transcription_preparation: Option<TranscriptionPreparation>,
     transcription_error: Option<String>,
+    history: Option<History>,
+    history_error: Option<String>,
     update: UpdateState,
 }
 
@@ -108,6 +117,9 @@ struct LinuxApp {
     host: LinuxDesktopHost,
     pane: DesktopPane,
     hud_lab: crate::desktop_hud_lab::HudLabState,
+    history_pane: HistoryPaneState,
+    history_search_input: gpui::Entity<TextInput>,
+    _history_search_subscription: Subscription,
     capturing_hotkey: bool,
     transcription_picker: TranscriptionPickerState,
     catalog_language_filter: Option<String>,
@@ -178,6 +190,7 @@ pub fn open(event_path: PathBuf, start_hidden: bool) -> Result<()> {
         UpdateState::Unmanaged
     };
     Application::new().run(move |cx: &mut App| {
+        cx.bind_keys(crate::text_input::key_bindings());
         let bounds = Bounds::centered(None, size(px(WINDOW_WIDTH), px(WINDOW_HEIGHT)), cx);
         let window = cx
             .open_window(
@@ -192,41 +205,58 @@ pub fn open(event_path: PathBuf, start_hidden: bool) -> Result<()> {
                     ..Default::default()
                 },
                 |_, cx| {
-                    cx.new(|_| LinuxApp {
-                        host: LinuxDesktopHost::new(
+                    cx.new(|cx| {
+                        let host = LinuxDesktopHost::new(
                             event_path.clone(),
                             listener_stop.clone(),
                             settings.clone(),
                             settings_error.clone(),
                             update,
-                        ),
-                        pane: DesktopPane::Settings,
-                        hud_lab: crate::desktop_hud_lab::HudLabState::new(),
-                        onboarding,
-                        // A fresh run offers the locale's recommendation,
-                        // like the Windows first-run default.
-                        onboarding_selection: if onboarding {
-                            crate::transcription_models::recommended_selection(
-                                &crate::desktop_i18n::system_language(),
-                            )
-                        } else {
-                            settings.transcription.clone()
-                        },
-                        onboarding_language_dropdown_open: false,
-                        onboarding_language_dropdown_bounds: None,
-                        capturing_hotkey: false,
-                        transcription_picker: TranscriptionPickerState::Closed,
-                        catalog_language_filter: None,
-                        catalog_filter_dropdown_open: false,
-                        catalog_filter_dropdown_bounds: None,
-                        transcription_dropdown_open: false,
-                        transcription_dropdown_bounds: None,
-                        dictation_language_dropdown_open: false,
-                        dictation_language_dropdown_bounds: None,
-                        microphone_dropdown_open: false,
-                        microphone_dropdown_bounds: None,
-                        ui_language_dropdown_open: false,
-                        ui_language_dropdown_bounds: None,
+                        );
+                        let history_pane =
+                            HistoryPaneState::new(host.history.clone(), host.history_error.clone());
+                        let history_search_input = cx.new(|cx| TextInput::new(cx, "Search", ""));
+                        let history_search_subscription = cx.subscribe(
+                            &history_search_input,
+                            |this: &mut LinuxApp, input, _: &TextChanged, cx| {
+                                this.history_pane
+                                    .set_query(input.read(cx).text().to_string());
+                                cx.notify();
+                            },
+                        );
+                        LinuxApp {
+                            host,
+                            pane: DesktopPane::Settings,
+                            hud_lab: crate::desktop_hud_lab::HudLabState::new(),
+                            history_pane,
+                            history_search_input,
+                            _history_search_subscription: history_search_subscription,
+                            onboarding,
+                            // A fresh run offers the locale's recommendation,
+                            // like the Windows first-run default.
+                            onboarding_selection: if onboarding {
+                                crate::transcription_models::recommended_selection(
+                                    &crate::desktop_i18n::system_language(),
+                                )
+                            } else {
+                                settings.transcription.clone()
+                            },
+                            onboarding_language_dropdown_open: false,
+                            onboarding_language_dropdown_bounds: None,
+                            capturing_hotkey: false,
+                            transcription_picker: TranscriptionPickerState::Closed,
+                            catalog_language_filter: None,
+                            catalog_filter_dropdown_open: false,
+                            catalog_filter_dropdown_bounds: None,
+                            transcription_dropdown_open: false,
+                            transcription_dropdown_bounds: None,
+                            dictation_language_dropdown_open: false,
+                            dictation_language_dropdown_bounds: None,
+                            microphone_dropdown_open: false,
+                            microphone_dropdown_bounds: None,
+                            ui_language_dropdown_open: false,
+                            ui_language_dropdown_bounds: None,
+                        }
                     })
                 },
             )
@@ -291,6 +321,9 @@ pub fn open(event_path: PathBuf, start_hidden: bool) -> Result<()> {
                 if app
                     .update(cx, |this, cx| {
                         this.host.refresh();
+                        if this.pane == DesktopPane::History {
+                            this.history_pane.reload();
+                        }
                         if matches!(
                             this.transcription_picker,
                             TranscriptionPickerState::Preparing(_)
@@ -492,6 +525,13 @@ impl LinuxDesktopHost {
                 Some(format!("Could not enumerate microphones: {error:#}")),
             ),
         };
+        let (history, history_error) = match History::open_default(settings.history_retention) {
+            Ok(history) => (Some(history), None),
+            Err(error) => (
+                None,
+                Some(format!("Could not open retained history: {error:#}")),
+            ),
+        };
         Self {
             event_reader,
             event_path,
@@ -511,6 +551,8 @@ impl LinuxDesktopHost {
             prepared_transcriber: None,
             transcription_preparation: None,
             transcription_error: None,
+            history,
+            history_error,
             update,
         }
     }
@@ -534,6 +576,7 @@ impl LinuxDesktopHost {
         let (result_sender, result_receiver) = mpsc::channel();
         let event_path = self.event_path.clone();
         let prepared_transcriber = self.prepared_transcriber.take();
+        let history = self.history.clone();
         let worker = std::thread::spawn(move || {
             let result = crate::instance::acquire("listener").and_then(|_instance| {
                 if let Some(transcriber) = prepared_transcriber {
@@ -542,9 +585,10 @@ impl LinuxDesktopHost {
                         None,
                         &stop,
                         transcriber,
+                        history,
                     )
                 } else {
-                    crate::linux_dictation::run(&event_path, None, &stop)
+                    crate::linux_dictation::run_with_history(&event_path, None, &stop, history)
                 }
             });
             let result = result.map_err(|error| format!("{error:#}"));
@@ -790,6 +834,22 @@ impl LinuxDesktopHost {
                     Some(format!("Could not save the commands setting: {error:#}"));
             }
         }
+    }
+
+    fn set_history_retention(&mut self, retention: HistoryRetention) -> Result<()> {
+        if retention == self.settings.history_retention {
+            return Ok(());
+        }
+        let mut candidate = self.settings.clone();
+        candidate.history_retention = retention;
+        candidate.save().map_err(|error| {
+            let message = format!("Could not save history retention: {error:#}");
+            self.settings_error = Some(message.clone());
+            eyre!(message)
+        })?;
+        self.settings = candidate;
+        self.settings_error = None;
+        Ok(())
     }
 
     /// Re-enumerate capture devices; the dropdown trigger calls this so
@@ -1289,8 +1349,29 @@ impl DesktopHost for LinuxDesktopHost {
 impl LinuxApp {
     fn select_pane(&mut self, pane: DesktopPane, cx: &mut Context<Self>) {
         debug_assert!(DesktopPane::available(self.host.capabilities()).contains(&pane));
+        self.close_popups();
         self.pane = pane;
+        self.history_pane.disarm_clear();
+        if pane == DesktopPane::History {
+            self.history_pane.reload();
+        }
         cx.notify();
+    }
+
+    fn set_history_retention(&mut self, retention: HistoryRetention) {
+        match self.host.set_history_retention(retention) {
+            Ok(()) => self.history_pane.set_retention(retention),
+            Err(error) => self.history_pane.set_error(Some(error.to_string())),
+        }
+    }
+
+    fn render_history(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        let view = self.history_pane.view(
+            self.host.settings.history_retention,
+            self.history_search_input.clone(),
+            cx,
+        );
+        render_shared_history_pane(view, cx)
     }
 
     fn render_shared_navigation(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -1982,6 +2063,19 @@ impl TranscriptionPickerDelegate for LinuxApp {
     }
 }
 
+impl HistoryPaneDelegate for LinuxApp {
+    fn handle_history_action(&mut self, action: HistoryPaneAction, cx: &mut Context<Self>) {
+        match action {
+            HistoryPaneAction::SetRetention(retention) => self.set_history_retention(retention),
+            HistoryPaneAction::Select(id) => self.history_pane.select(id),
+            HistoryPaneAction::Copy(id) => self.history_pane.copy(id),
+            HistoryPaneAction::Delete(id) => self.history_pane.delete(id),
+            HistoryPaneAction::Clear => self.history_pane.clear(),
+        }
+        cx.notify();
+    }
+}
+
 impl Render for LinuxApp {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let viewport = window.viewport_size();
@@ -1990,10 +2084,10 @@ impl Render for LinuxApp {
             DesktopPane::Settings => self.render_shared_settings(&snapshot, cx),
             DesktopPane::HudLab => crate::desktop_hud_lab::render_hud_lab_pane(self, window, cx),
             DesktopPane::Activity => crate::desktop_activity_pane::render_activity_pane(&snapshot),
+            DesktopPane::History => self.render_history(cx),
             DesktopPane::Modes
             | DesktopPane::Commands
             | DesktopPane::VoiceAction
-            | DesktopPane::History
             | DesktopPane::Meetings => unreachable!("capability-filtered Linux pane"),
         };
         let model_picker = if self.transcription_picker.language().is_some() {
