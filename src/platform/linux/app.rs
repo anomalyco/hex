@@ -59,6 +59,11 @@ use crate::desktop_ui::{
     pane_body, pane_content, pane_header, pane_header_with_action, settings_copy, settings_panel,
     settings_row, settings_section_label, sidebar_frame, toggle, window_frame,
 };
+use crate::desktop_voice_action_pane::{
+    OPENCODE_SETUP_URL, VoiceActionError, VoiceActionPaneAction, VoiceActionPaneDelegate,
+    VoiceActionReadyView, VoiceActionSettingRow, VoiceActionUnavailableView, VoiceActionView,
+    render_voice_action_pane as render_shared_voice_action_pane,
+};
 use crate::events::EventReader;
 use crate::history::{History, HistoryRetention};
 use crate::linux_updater::InstalledUpdate;
@@ -70,7 +75,6 @@ const MINIMUM_WIDTH: f32 = 860.0;
 const MINIMUM_HEIGHT: f32 = 560.0;
 const UPDATE_INTERVAL: Duration = Duration::from_secs(24 * 60 * 60);
 const OPENCODE_INSTALL_RETRY_INTERVAL: Duration = Duration::from_secs(60);
-const OPENCODE_SETUP_URL: &str = "https://v2.opencode.ai/";
 
 type ListenerResult = std::result::Result<(), String>;
 type PreparationResult = std::result::Result<PreparedTranscription, String>;
@@ -140,6 +144,7 @@ struct LinuxDesktopHost {
     replacements: crate::linux_dictation::SharedReplacements,
     modes: crate::linux_dictation::SharedModes,
     transformations: crate::linux_dictation::SharedTransformations,
+    voice_action: crate::linux_dictation::SharedVoiceAction,
     personal_commands: Option<crate::personal_commands::PersonalCommands>,
     personal_commands_status: crate::personal_commands::StatusSnapshot,
     personal_commands_setup: Option<Receiver<PersonalCommandsSetupResult>>,
@@ -167,11 +172,11 @@ struct LinuxApp {
     global_processing_deadline: gpui::Entity<TextInput>,
     _global_processing_deadline_subscription: Subscription,
     selected_mode: ModeTarget,
-    opencode_model_dropdown: Option<ModeTarget>,
+    opencode_model_dropdown: Option<OpenCodeModelTarget>,
     opencode_model_dropdown_bounds: Option<Bounds<Pixels>>,
     opencode_variant_picker_open: Option<ModeTarget>,
     transformation_picker_open: bool,
-    capturing_hotkey: bool,
+    capturing_hotkey: Option<HotkeyTarget>,
     transcription_picker: TranscriptionPickerState,
     catalog_language_filter: Option<String>,
     catalog_filter_dropdown_open: bool,
@@ -197,6 +202,27 @@ struct LinuxModeInputs {
     processing_deadline: gpui::Entity<TextInput>,
     corrections: Vec<ReplacementEditorInput>,
     _subscriptions: Vec<Subscription>,
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum HotkeyTarget {
+    Dictation,
+    VoiceAction,
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum OpenCodeModelTarget {
+    VoiceAction,
+    Mode(ModeTarget),
+}
+
+impl OpenCodeModelTarget {
+    fn id_fragment(self) -> String {
+        match self {
+            Self::VoiceAction => "voice-action".into(),
+            Self::Mode(target) => format!("mode-{}", target.id_fragment()),
+        }
+    }
 }
 
 enum TranscriptionPickerState {
@@ -368,7 +394,7 @@ pub fn open(event_path: PathBuf, start_hidden: bool) -> Result<()> {
                             },
                             onboarding_language_dropdown_open: false,
                             onboarding_language_dropdown_bounds: None,
-                            capturing_hotkey: false,
+                            capturing_hotkey: None,
                             transcription_picker: TranscriptionPickerState::Closed,
                             catalog_language_filter: None,
                             catalog_filter_dropdown_open: false,
@@ -664,6 +690,7 @@ impl LinuxDesktopHost {
             crate::linux_dictation::LinuxModeRuntime::from_settings(&settings),
         ));
         let transformations = Arc::new(crate::personal_commands::TransformationClient::default());
+        let voice_action = Arc::new(RwLock::new(settings.voice_action.clone()));
         let personal_commands_configured = crate::personal_commands::workspace_configured();
         let personal_commands = (settings.transformations_enabled()
             || personal_commands_configured)
@@ -710,6 +737,7 @@ impl LinuxDesktopHost {
             replacements,
             modes,
             transformations,
+            voice_action,
             personal_commands,
             personal_commands_status,
             personal_commands_setup: None,
@@ -747,6 +775,7 @@ impl LinuxDesktopHost {
         let replacements = self.replacements.clone();
         let modes = self.modes.clone();
         let transformations = self.transformations.clone();
+        let voice_action = self.voice_action.clone();
         let worker = std::thread::spawn(move || {
             let result = crate::instance::acquire("listener").and_then(|_instance| {
                 let output = crate::linux_dictation::LinuxOutputRuntime::new(
@@ -754,6 +783,7 @@ impl LinuxDesktopHost {
                     replacements,
                     modes,
                     transformations,
+                    voice_action,
                 );
                 if let Some(transcriber) = prepared_transcriber {
                     crate::linux_dictation::run_with_transcriber(
@@ -896,6 +926,7 @@ impl LinuxDesktopHost {
             self.start();
         }
 
+        let mut restart_listener = false;
         if let Some(receiver) = &self.listener_result {
             match receiver.try_recv() {
                 Ok(Ok(())) => {
@@ -907,6 +938,7 @@ impl LinuxDesktopHost {
                         .lock()
                         .unwrap_or_else(|error| error.into_inner())
                         .take();
+                    restart_listener = self.listen_when_ready;
                 }
                 Ok(Err(error)) => {
                     self.status = "Unavailable".into();
@@ -928,6 +960,9 @@ impl LinuxDesktopHost {
                     self.join_listener();
                 }
             }
+        }
+        if restart_listener {
+            self.start();
         }
 
         self.activity.refresh(&mut self.event_reader);
@@ -955,11 +990,39 @@ impl LinuxDesktopHost {
     }
 
     fn set_dictation_hotkey(&mut self, shortcut: DesktopShortcut) -> Result<()> {
+        if self.is_running() {
+            let error = "Stop listening before changing the dictation shortcut".to_string();
+            self.error = Some(error.clone());
+            return Err(eyre!(error));
+        }
+        let binding = Self::hotkey_from_shortcut(shortcut)?;
+        let mut candidate = self.settings.clone();
+        candidate.dictation_hotkey = binding.clone();
+        if let Err(error) = crate::linux_input::X11HotkeyMonitor::start(
+            candidate.dictation_hotkey.clone(),
+            candidate.voice_action_hotkey.clone(),
+            candidate.double_tap_lock,
+        )
+        .map(drop)
+        {
+            self.error = Some(format!("Could not register {}: {error:#}", binding.label()));
+            return Err(error);
+        }
+        if let Err(error) = candidate.save() {
+            self.error = Some(format!("Could not save shortcut: {error:#}"));
+            return Err(error);
+        }
+        self.settings = candidate;
+        self.error = None;
+        self.settings_error = None;
+        Ok(())
+    }
+
+    fn hotkey_from_shortcut(
+        shortcut: DesktopShortcut,
+    ) -> Result<crate::linux_settings::LinuxHotkey> {
         if shortcut.function {
-            self.error = Some("The Fn modifier cannot be registered on X11".into());
-            return Err(color_eyre::eyre::eyre!(
-                "the Fn modifier cannot be registered on X11"
-            ));
+            return Err(eyre!("the Fn modifier cannot be registered on X11"));
         }
         let binding = crate::linux_settings::LinuxHotkey {
             control: shortcut.control,
@@ -972,22 +1035,114 @@ impl LinuxDesktopHost {
                 shortcut.key.to_ascii_lowercase()
             },
         };
-        if let Err(error) = binding.validate().and_then(|()| {
-            crate::linux_input::X11HotkeyMonitor::start(binding.clone(), false).map(drop)
-        }) {
-            self.error = Some(format!("Could not register {}: {error:#}", binding.label()));
-            return Err(error);
+        binding.validate()?;
+        Ok(binding)
+    }
+
+    fn set_voice_action_hotkey(&mut self, shortcut: DesktopShortcut) -> Result<()> {
+        if self.is_running() {
+            let error = "Stop listening before changing the Voice Action shortcut".to_string();
+            self.settings_error = Some(error.clone());
+            return Err(eyre!(error));
         }
+        let binding = Self::hotkey_from_shortcut(shortcut).map_err(|error| {
+            self.settings_error = Some(format!("That Voice Action shortcut is invalid: {error:#}"));
+            error
+        })?;
         let mut candidate = self.settings.clone();
-        candidate.dictation_hotkey = binding;
+        candidate.voice_action_hotkey = Some(binding.clone());
+        crate::linux_input::X11HotkeyMonitor::start(
+            candidate.dictation_hotkey.clone(),
+            candidate.voice_action_hotkey.clone(),
+            candidate.double_tap_lock,
+        )
+        .map(drop)
+        .map_err(|error| {
+            self.settings_error =
+                Some(format!("Could not register {}: {error:#}", binding.label()));
+            error
+        })?;
         if let Err(error) = candidate.save() {
-            self.error = Some(format!("Could not save shortcut: {error:#}"));
+            self.settings_error = Some(format!("Could not save Voice Action shortcut: {error:#}"));
             return Err(error);
         }
         self.settings = candidate;
-        self.error = None;
         self.settings_error = None;
         Ok(())
+    }
+
+    fn set_voice_action_enabled(&mut self, enabled: bool) {
+        if enabled == self.settings.voice_action_hotkey.is_some() {
+            return;
+        }
+        let mut candidate = self.settings.clone();
+        candidate.voice_action_hotkey =
+            enabled.then(crate::linux_settings::LinuxHotkey::voice_action_default);
+        if enabled
+            && candidate.voice_action.model.is_none()
+            && let Some(default) = self
+                .opencode_catalog
+                .as_ref()
+                .and_then(|catalog| catalog.default_key.as_ref())
+                .and_then(|key| {
+                    self.opencode_catalog
+                        .as_ref()
+                        .and_then(|catalog| catalog.models.iter().find(|choice| &choice.key == key))
+                })
+        {
+            candidate.voice_action.model = Some(default.model());
+        }
+        match candidate.save() {
+            Ok(()) => {
+                *self
+                    .voice_action
+                    .write()
+                    .unwrap_or_else(|error| error.into_inner()) = candidate.voice_action.clone();
+                self.settings = candidate;
+                self.settings_error = None;
+                self.restart_listener_for_settings();
+            }
+            Err(error) => {
+                self.settings_error = Some(format!(
+                    "Could not save the Voice Action setting: {error:#}"
+                ));
+            }
+        }
+    }
+
+    fn set_voice_action_model(&mut self, model: Option<crate::opencode::Model>) {
+        if model == self.settings.voice_action.model {
+            return;
+        }
+        let mut candidate = self.settings.clone();
+        candidate.voice_action.model = model;
+        match candidate.save() {
+            Ok(()) => {
+                *self
+                    .voice_action
+                    .write()
+                    .unwrap_or_else(|error| error.into_inner()) = candidate.voice_action.clone();
+                self.settings = candidate;
+                self.settings_error = None;
+            }
+            Err(error) => {
+                self.settings_error =
+                    Some(format!("Could not save the Voice Action model: {error:#}"));
+            }
+        }
+    }
+
+    fn restart_listener_for_settings(&mut self) {
+        if let Some(stop) = self
+            .listener_stop
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .as_ref()
+        {
+            self.listen_when_ready = true;
+            stop.store(true, Ordering::Relaxed);
+            self.status = "Restarting".into();
+        }
     }
 
     fn restart_into_update(&self) -> Result<()> {
@@ -1267,6 +1422,19 @@ impl LinuxDesktopHost {
         };
         match receiver.try_recv() {
             Ok((installed, Some(Ok(catalog)))) => {
+                let default_voice_action_model = (self.settings.voice_action_hotkey.is_some()
+                    && self.settings.voice_action.model.is_none())
+                .then(|| {
+                    catalog
+                        .default_key
+                        .as_ref()
+                        .and_then(|key| catalog.models.iter().find(|choice| &choice.key == key))
+                        .map(|choice| choice.model())
+                })
+                .flatten();
+                if let Some(model) = default_voice_action_model {
+                    self.set_voice_action_model(Some(model));
+                }
                 self.opencode_installed = installed;
                 self.opencode_probe_complete = true;
                 self.opencode_catalog = Some(catalog);
@@ -1644,11 +1812,11 @@ impl LinuxApp {
     }
 
     fn capture_hotkey(&mut self, keystroke: &Keystroke) -> bool {
-        if !self.capturing_hotkey {
+        let Some(target) = self.capturing_hotkey else {
             return false;
-        }
+        };
         if keystroke.key == "escape" {
-            self.capturing_hotkey = false;
+            self.capturing_hotkey = None;
             return true;
         }
         let shortcut = DesktopShortcut {
@@ -1659,12 +1827,14 @@ impl LinuxApp {
             platform: keystroke.modifiers.platform,
             shift: keystroke.modifiers.shift,
         };
-        if self
-            .host
-            .dispatch(DesktopAction::SetDictationShortcut(shortcut))
-            .is_ok()
-        {
-            self.capturing_hotkey = false;
+        let result = match target {
+            HotkeyTarget::Dictation => self
+                .host
+                .dispatch(DesktopAction::SetDictationShortcut(shortcut)),
+            HotkeyTarget::VoiceAction => self.host.set_voice_action_hotkey(shortcut),
+        };
+        if result.is_ok() {
+            self.capturing_hotkey = None;
         }
         true
     }
@@ -1809,7 +1979,7 @@ impl LinuxApp {
         if pane == DesktopPane::History {
             self.history_pane.reload();
         }
-        if pane == DesktopPane::Modes
+        if matches!(pane, DesktopPane::Modes | DesktopPane::VoiceAction)
             && self.host.opencode_catalog.is_none()
             && !self.host.opencode_probe_complete
         {
@@ -1992,6 +2162,144 @@ impl LinuxApp {
             selected => selected,
         };
         cx.notify();
+    }
+
+    fn render_voice_action(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        let view = if self.host.opencode_catalog_rx.is_some() || !self.host.opencode_probe_complete
+        {
+            VoiceActionView::Unavailable(VoiceActionUnavailableView {
+                title: "Checking OpenCode",
+                description: "Loading the local model catalog for Voice Action.",
+                error: None,
+                retry_label: None,
+                setup_label: None,
+            })
+        } else if !self.host.opencode_installed {
+            VoiceActionView::Unavailable(VoiceActionUnavailableView {
+                title: "OpenCode is required",
+                description: "Install and configure OpenCode to use Voice Action.",
+                error: None,
+                retry_label: Some("Check again"),
+                setup_label: Some("Open OpenCode setup"),
+            })
+        } else if let Some(error) = self.host.opencode_catalog_error.clone() {
+            VoiceActionView::Unavailable(VoiceActionUnavailableView {
+                title: "Models could not be loaded",
+                description: "Retry the OpenCode model catalog.",
+                error: Some(VoiceActionError {
+                    title: "OpenCode reported:",
+                    detail: error,
+                }),
+                retry_label: Some("Retry"),
+                setup_label: None,
+            })
+        } else {
+            let enabled = self.host.settings.voice_action_hotkey.is_some();
+            let running = self.host.is_running();
+            let capturing = self.capturing_hotkey == Some(HotkeyTarget::VoiceAction);
+            let shortcut_control = div()
+                .flex()
+                .items_center()
+                .gap_3()
+                .child(
+                    div()
+                        .id("linux-voice-action-binding")
+                        .cursor_pointer()
+                        .flex()
+                        .items_center()
+                        .gap_3()
+                        .when(running, |control| control.opacity(0.5))
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            if running {
+                                this.host.settings_error = Some(
+                                    "Stop listening before changing the Voice Action shortcut"
+                                        .into(),
+                                );
+                            } else {
+                                this.capturing_hotkey =
+                                    if this.capturing_hotkey == Some(HotkeyTarget::VoiceAction) {
+                                        None
+                                    } else {
+                                        Some(HotkeyTarget::VoiceAction)
+                                    };
+                                this.host.settings_error = None;
+                            }
+                            cx.notify();
+                        }))
+                        .child(if capturing {
+                            div()
+                                .h(px(34.0))
+                                .px_3()
+                                .flex()
+                                .items_center()
+                                .rounded(px(6.0))
+                                .border_1()
+                                .border_color(rgb(TEXT_SOFT))
+                                .bg(rgb(SURFACE))
+                                .text_size(px(11.0))
+                                .child(tr("Press a shortcut..."))
+                                .into_any_element()
+                        } else {
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap_3()
+                                .when_some(
+                                    self.host
+                                        .settings
+                                        .voice_action_hotkey
+                                        .as_ref()
+                                        .map(crate::linux_settings::LinuxHotkey::keycaps),
+                                    |control, keycaps| control.child(hotkey_keycaps(keycaps, 1.0)),
+                                )
+                                .when(!enabled, |control| {
+                                    control.child(
+                                        div()
+                                            .text_size(px(11.0))
+                                            .text_color(rgb(FAINT))
+                                            .child(tr("Disabled")),
+                                    )
+                                })
+                                .into_any_element()
+                        }),
+                )
+                .child(
+                    div()
+                        .id("linux-voice-action-toggle")
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            cx.stop_propagation();
+                            this.host.set_voice_action_enabled(!enabled);
+                            if enabled {
+                                this.capturing_hotkey = None;
+                            }
+                            cx.notify();
+                        }))
+                        .child(toggle(if enabled { 1.0 } else { 0.0 })),
+                );
+            let model_control =
+                self.render_opencode_model_control(OpenCodeModelTarget::VoiceAction, cx);
+            VoiceActionView::Ready(Box::new(VoiceActionReadyView {
+                shortcut: VoiceActionSettingRow::translated(
+                    "Shortcut",
+                    "Hold to speak; selected text is included automatically",
+                    shortcut_control,
+                ),
+                processing: vec![VoiceActionSettingRow::translated(
+                    "Model",
+                    "Fulfils each voice action; served by OpenCode",
+                    model_control,
+                )],
+                error: self
+                    .host
+                    .settings_error
+                    .clone()
+                    .map(|detail| VoiceActionError {
+                        title: "The Voice Action setting could not be saved.",
+                        detail,
+                    }),
+            }))
+        };
+        render_shared_voice_action_pane(view, window, cx)
     }
 
     fn render_history(&mut self, cx: &mut Context<Self>) -> AnyElement {
@@ -2303,11 +2611,20 @@ impl LinuxApp {
         )
     }
 
-    fn opencode_model_key(&self, target: ModeTarget) -> Option<String> {
-        self.mode_post_processing(target)?.model.clone()
+    fn opencode_model_key(&self, target: OpenCodeModelTarget) -> Option<String> {
+        match target {
+            OpenCodeModelTarget::VoiceAction => self
+                .host
+                .settings
+                .voice_action
+                .model
+                .as_ref()
+                .map(|model| format!("{}/{}", model.provider, model.id)),
+            OpenCodeModelTarget::Mode(target) => self.mode_post_processing(target)?.model.clone(),
+        }
     }
 
-    fn opencode_model_label(&self, target: ModeTarget) -> String {
+    fn opencode_model_label(&self, target: OpenCodeModelTarget) -> String {
         let current_key = self.opencode_model_key(target);
         if let (Some(key), Some(catalog)) = (&current_key, &self.host.opencode_catalog)
             && let Some(choice) = catalog.models.iter().find(|choice| &choice.key == key)
@@ -2322,19 +2639,23 @@ impl LinuxApp {
         if self.host.opencode_catalog_rx.is_some() {
             return tr("Loading models").to_string();
         }
-        self.host
-            .opencode_catalog
-            .as_ref()
-            .and_then(|catalog| catalog.default_name.clone())
-            .map_or_else(
-                || "OpenCode default".into(),
-                |name| format!("{name} — Default"),
-            )
+        match target {
+            OpenCodeModelTarget::VoiceAction => tr("Choose a model").to_string(),
+            OpenCodeModelTarget::Mode(_) => self
+                .host
+                .opencode_catalog
+                .as_ref()
+                .and_then(|catalog| catalog.default_name.clone())
+                .map_or_else(
+                    || "OpenCode default".into(),
+                    |name| format!("{name} — Default"),
+                ),
+        }
     }
 
     fn render_opencode_model_control(
         &mut self,
-        target: ModeTarget,
+        target: OpenCodeModelTarget,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let target_id = target.id_fragment();
@@ -2376,15 +2697,24 @@ impl LinuxApp {
             .into_any_element()
     }
 
-    fn set_opencode_model(&mut self, target: ModeTarget, model: Option<crate::opencode::Model>) {
-        let Some(mut processing) = self.mode_post_processing(target).cloned() else {
-            return;
-        };
-        processing.model = model
-            .as_ref()
-            .map(|model| format!("{}/{}", model.provider, model.id));
-        processing.variant = model.and_then(|model| model.variant);
-        let _ = self.host.set_mode_post_processing(target, processing);
+    fn set_opencode_model(
+        &mut self,
+        target: OpenCodeModelTarget,
+        model: Option<crate::opencode::Model>,
+    ) {
+        match target {
+            OpenCodeModelTarget::VoiceAction => self.host.set_voice_action_model(model),
+            OpenCodeModelTarget::Mode(target) => {
+                let Some(mut processing) = self.mode_post_processing(target).cloned() else {
+                    return;
+                };
+                processing.model = model
+                    .as_ref()
+                    .map(|model| format!("{}/{}", model.provider, model.id));
+                processing.variant = model.and_then(|model| model.variant);
+                let _ = self.host.set_mode_post_processing(target, processing);
+            }
+        }
     }
 
     fn set_mode_variant(&mut self, target: ModeTarget, variant: Option<String>) {
@@ -2412,7 +2742,8 @@ impl LinuxApp {
         let installed = self.host.opencode_installed;
         let compact = window.viewport_size().width < px(980.0);
         let settings_view = if settings.enabled {
-            let model_control = self.render_opencode_model_control(target, cx);
+            let model_control =
+                self.render_opencode_model_control(OpenCodeModelTarget::Mode(target), cx);
             let prompt = match target {
                 ModeTarget::Global => self.global_processing_prompt.clone(),
                 ModeTarget::Mode(index) => self.mode_inputs[index].processing_prompt.clone(),
@@ -2581,26 +2912,29 @@ impl LinuxApp {
                 .into_any_element();
         };
         let current_key = self.opencode_model_key(target);
-        let panel_rows = (catalog.models.len() + 1).max(1);
+        let includes_default = matches!(target, OpenCodeModelTarget::Mode(_));
+        let panel_rows = (catalog.models.len() + usize::from(includes_default)).max(1);
         let mut items = Vec::with_capacity(panel_rows);
-        let default_label = catalog.default_name.clone().map_or_else(
-            || "OpenCode default".into(),
-            |name| format!("{name} — OpenCode default"),
-        );
-        items.push(
-            dropdown_item(
-                SharedString::from(format!("linux-opencode-model-default-{target_id}")),
-                default_label,
-                current_key.is_none(),
-            )
-            .on_click(cx.listener(move |this, _, _, cx| {
-                cx.stop_propagation();
-                this.set_opencode_model(target, None);
-                this.opencode_model_dropdown = None;
-                cx.notify();
-            }))
-            .into_any_element(),
-        );
+        if includes_default {
+            let default_label = catalog.default_name.clone().map_or_else(
+                || "OpenCode default".into(),
+                |name| format!("{name} — OpenCode default"),
+            );
+            items.push(
+                dropdown_item(
+                    SharedString::from(format!("linux-opencode-model-default-{target_id}")),
+                    default_label,
+                    current_key.is_none(),
+                )
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    cx.stop_propagation();
+                    this.set_opencode_model(target, None);
+                    this.opencode_model_dropdown = None;
+                    cx.notify();
+                }))
+                .into_any_element(),
+            );
+        }
         items.extend(catalog.models.iter().enumerate().map(|(index, choice)| {
             let selected = current_key.as_deref() == Some(choice.key.as_str());
             let label = if catalog.default_key.as_ref() == Some(&choice.key) {
@@ -2665,7 +2999,7 @@ impl LinuxApp {
             .listener
             .as_ref()
             .is_some_and(|listener| listener.running);
-        let shortcut = if self.capturing_hotkey {
+        let shortcut = if self.capturing_hotkey == Some(HotkeyTarget::Dictation) {
             div()
                 .w(px(180.0))
                 .h(px(34.0))
@@ -3008,7 +3342,13 @@ impl LinuxApp {
                                                 cx.listener(move |this, _, _, cx| {
                                                     if !running {
                                                         this.capturing_hotkey =
-                                                            !this.capturing_hotkey;
+                                                            if this.capturing_hotkey
+                                                                == Some(HotkeyTarget::Dictation)
+                                                            {
+                                                                None
+                                                            } else {
+                                                                Some(HotkeyTarget::Dictation)
+                                                            };
                                                         let _ = this
                                                             .host
                                                             .dispatch(DesktopAction::ClearError);
@@ -3544,6 +3884,27 @@ impl ModeProcessingDelegate for LinuxApp {
     }
 }
 
+impl VoiceActionPaneDelegate for LinuxApp {
+    fn handle_voice_action_pane_action(
+        &mut self,
+        action: VoiceActionPaneAction,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match action {
+            VoiceActionPaneAction::RetryOpenCode => self.host.request_opencode_catalog(),
+            VoiceActionPaneAction::OpenOpenCodeSetup => {
+                if let Err(error) = crate::commands_engine::execute(
+                    crate::commands_engine::Action::OpenUrl(OPENCODE_SETUP_URL.into()),
+                ) {
+                    tracing::error!(%error, "could not open the OpenCode beta documentation");
+                }
+            }
+        }
+        cx.notify();
+    }
+}
+
 impl Render for LinuxApp {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let viewport = window.viewport_size();
@@ -3551,10 +3912,11 @@ impl Render for LinuxApp {
         let content = match self.pane {
             DesktopPane::Settings => self.render_shared_settings(&snapshot, cx),
             DesktopPane::Modes => self.render_modes(window, cx),
+            DesktopPane::VoiceAction => self.render_voice_action(window, cx),
             DesktopPane::HudLab => crate::desktop_hud_lab::render_hud_lab_pane(self, window, cx),
             DesktopPane::Activity => crate::desktop_activity_pane::render_activity_pane(&snapshot),
             DesktopPane::History => self.render_history(cx),
-            DesktopPane::Commands | DesktopPane::VoiceAction | DesktopPane::Meetings => {
+            DesktopPane::Commands | DesktopPane::Meetings => {
                 unreachable!("capability-filtered Linux pane")
             }
         };

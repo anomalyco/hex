@@ -4,8 +4,9 @@
 has the source-complete dictation loop, live global replacements, EWMH
 application modes with corrections and optional OpenCode rewriting, ordered
 built-in/TypeScript transformations through the shared host, retained History,
-and a signed update path. The immediate release blocker is validating a genuine
-signed update on the target machine.
+opt-in Voice Action with foreground-owned X11 selection capture, and a signed
+update path. The immediate release blocker is validating a genuine signed update
+on the target machine.
 
 ## The Supported Contract Is Narrow
 
@@ -24,8 +25,9 @@ HEX currently supports one Linux beta contract:
 | Text replacements | Persisted case-insensitive phrase-boundary rules applied live before paste |
 | Application context | `_NET_ACTIVE_WINDOW`, `_NET_WM_PID` plus `/proc`, `WM_CLASS` fallback, and bounded window title |
 | Modes | Ordered executable-name substring rules with phrase-boundary corrections, optional deadline-bounded OpenCode rewriting, and built-in/TypeScript transformations; no browser rules yet |
+| Voice Action | Optional second held shortcut, dedicated OpenCode model/deadline, and bounded PRIMARY selection owned by the active X11 client |
 | Retained History | Bounded owner-only text/metadata store after successful paste |
-| UI | GPUI Settings, Modes, Activity, model catalog, onboarding, and History panes plus tray |
+| UI | GPUI Settings, Modes, Voice Action, Activity, model catalog, onboarding, and History panes plus tray |
 
 The beta does not claim voice commands, browser context, meetings, native
 Wayland support, or package-manager installation. Developer builds contain a
@@ -40,7 +42,8 @@ native Wayland support.
 - Local model installation and transcription.
 - Shared local transcription service with bounded WAV admission, explicit model
   preparation, owner-only discovery, and stdin-owned embedded lifecycle.
-- Automatic clipboard insertion and restoration.
+- Automatic clipboard insertion. Generation-safe restoration of the previous
+  X11 clipboard remains an explicit parity gap.
 - Persisted global phrase-boundary replacements and ordered application-mode
   corrections. The shared Modes list, basic editor, and phrase/output editor
   expose only executable-name rules; a running listener sees edits without
@@ -55,6 +58,13 @@ native Wayland support.
   executable through `_NET_WM_PID` and `/proc` with `WM_CLASS` fallback, and
   captures a bounded title. Context failure degrades to global processing and
   never blocks paste.
+- Opt-in Voice Action uses a second persisted shortcut in the same X11 hotkey
+  owner as dictation, the shared generation prompt/client, a dedicated persisted
+  model and deadline, and the shared pane. PRIMARY selection capture is bounded
+  to 64 KiB, requires a stable owner belonging to the active X11 client, and
+  does not synthesize Copy, mutate CLIPBOARD, or change focus. Failed or empty
+  generation pastes nothing; successful output does not enter
+  retained History or Paste Last.
 - Shared retained-History pane with persisted retention, search, selectable
   detail, copy, delete, and confirmed clear. Only successfully pasted output is
   recorded; raw and replaced text remain distinct and captured audio is never
@@ -98,16 +108,18 @@ This validation blocks calling the direct-install update channel proven.
 ### 2. Continue Desktop Parity In Complete Vertical Slices
 
 Retained History, global replacements, application-mode corrections, OpenCode
-rewriting, and built-in/TypeScript transformations are implemented with the same
-store, processing policy, bounded host, and editor components used on macOS and
-Windows. Physically validate their X11 clipboard, focus, EWMH identity, OpenCode
-and Bun lifecycles, and UI behavior on the supported host. Continue in dependency
-order:
+rewriting, built-in/TypeScript transformations, and Voice Action are implemented
+with the same store, processing policy, bounded hosts, and pane components used
+on macOS and Windows. Continue in dependency order:
 
-1. Add Voice Action with a real selected-text and focus-preserving X11 contract.
+1. Physically validate X11 clipboard/focus behavior, EWMH identity, OpenCode and
+   Bun lifecycles, Voice Action shortcut/PRIMARY ownership, and minimum/wide UI
+   behavior on the supported host.
+2. Add generation-safe X11 clipboard restoration that preserves external
+   clipboard changes and does not pretend text-only snapshots preserve arbitrary
+   MIME targets.
 
-Do not expose a pane before its worker, persistence, and native validation path
-exist.
+Do not mark either contract validated until those target-native checks pass.
 
 ### 3. Add X11 Commands And Context
 

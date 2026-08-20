@@ -4,7 +4,7 @@
 
 use std::time::Duration;
 
-use color_eyre::eyre::{Result, eyre};
+use color_eyre::eyre::Result;
 
 pub use crate::opencode::{Model, opencode_installed};
 
@@ -20,11 +20,12 @@ pub fn fulfil(
     selected_text: Option<&str>,
     model: Option<&Model>,
 ) -> Result<String> {
-    let prompt =
-        crate::opencode::voice_action_prompt(instruction, application, browser_host, selected_text);
-    let reply = crate::opencode::generate(&prompt, model, GENERATION_DEADLINE)?;
-    if reply.trim().is_empty() {
-        return Err(eyre!("OpenCode returned empty text"));
-    }
-    Ok(reply)
+    crate::opencode::fulfil_voice_action(
+        instruction,
+        application,
+        browser_host,
+        selected_text,
+        model,
+        GENERATION_DEADLINE,
+    )
 }

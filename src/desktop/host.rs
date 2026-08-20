@@ -50,7 +50,7 @@ impl DesktopCapabilities {
             replacements: true,
             listener_control: true,
             update_restart: true,
-            voice_action: false,
+            voice_action: true,
         }
     }
 
@@ -208,9 +208,9 @@ mod tests {
         // Activity shipped on Linux in the 2026-08 port wave. HUD Lab is
         // visible only in developer builds. The command runtime prototype
         // remains a Settings opt-in; it does not advertise the catalog pane.
-        // EWMH application context, global replacements, and per-mode
-        // corrections are behavior-complete; browser and rewrite processing
-        // remain separate later capabilities.
+        // EWMH application context, mode processing, transformations, and
+        // PRIMARY-selection Voice Action are source-complete; physical Arch/i3
+        // validation remains separate from capability availability.
         assert_eq!(
             DesktopCapabilities::linux_x11(),
             DesktopCapabilities {
@@ -223,7 +223,7 @@ mod tests {
                 replacements: true,
                 listener_control: true,
                 update_restart: true,
-                voice_action: false,
+                voice_action: true,
             }
         );
     }

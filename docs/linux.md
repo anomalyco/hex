@@ -65,6 +65,27 @@ Hold **Alt-Space**, speak, then release. Double-tap the shortcut to keep
 recording, press it again to finish, or press Escape to cancel. Stop the listener
 before changing the shortcut in Settings.
 
+## Voice Action
+
+Voice Action is an opt-in second capture target in its own pane. Enable it to
+use the default **Ctrl-Alt-I** shortcut, hold the shortcut while speaking an
+instruction, and release it to transcribe. HEX sends that instruction and
+optional selected text through the dedicated OpenCode model, then pastes only a
+non-empty result at the current cursor. Voice Action output is not retained in
+History and does not replace ordinary dictation state.
+
+On X11, selected text comes from the PRIMARY selection. HEX accepts at most 64
+KiB and only while the selection owner belongs to the stable active X11 client;
+it neither sends Ctrl-C nor changes CLIPBOARD ownership or focus. Applications
+that do not publish PRIMARY simply provide no selected-text context. Enabling or
+disabling Voice Action restarts the listener automatically. Stop listening
+before recording a custom Voice Action shortcut.
+
+The worker, persistence, shared pane, and native adapter are source-complete.
+The shortcut, active-client ownership check, focus preservation, paste, and a
+real OpenCode response still require a physical smoke test on the supported
+Arch/i3 host.
+
 ## Modes And Text Replacements
 
 The Modes pane uses the same collection, application-rule, and phrase/output

@@ -44,7 +44,7 @@ pub(crate) use desktop::i18n as desktop_i18n;
 pub(crate) use desktop::model_catalog as desktop_model_catalog;
 #[cfg(any(target_os = "linux", target_os = "windows"))]
 pub(crate) use desktop::onboarding as desktop_onboarding;
-#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
 pub(crate) use desktop::voice_action_pane as desktop_voice_action_pane;
 pub(crate) use desktop::{
     activity as desktop_activity, host as desktop_host, shell as desktop_shell,

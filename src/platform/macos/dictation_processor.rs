@@ -8,7 +8,7 @@ use std::sync::atomic::AtomicBool;
 use std::time::{Duration, Instant};
 
 use crate::context::ContextSnapshot;
-use crate::opencode::{Model, generate_cancellable};
+use crate::opencode::{Model, fulfil_voice_action_cancellable};
 
 pub use crate::dictation_processing::{Processed, ProcessingObservation, Profile, Profiles};
 pub use crate::opencode::{ModelCatalog, ModelChoice, load_model_catalog, opencode_installed};
@@ -22,7 +22,6 @@ impl Profiles {
         cancelled: &AtomicBool,
     ) -> Processed {
         let settings = crate::app_settings::voice_action_settings();
-        let prompt = voice_action_prompt(instruction, selected_text, context);
         let deadline = Duration::from_secs(settings.deadline_seconds.max(1));
         let started = Instant::now();
         let model = match settings.model.as_deref() {
@@ -41,7 +40,15 @@ impl Profiles {
                 })
             }
         };
-        match generate_cancellable(&prompt, model.as_ref(), deadline, cancelled) {
+        match fulfil_voice_action_cancellable(
+            instruction,
+            context.application.as_deref(),
+            context.browser_host(),
+            selected_text,
+            model.as_ref(),
+            deadline,
+            cancelled,
+        ) {
             Ok(text) if !text.trim().is_empty() => {
                 let latency_ms = started.elapsed().as_millis() as u64;
                 tracing::info!(latency_ms, "voice action completed");
@@ -60,6 +67,7 @@ impl Profiles {
     }
 }
 
+#[cfg(test)]
 fn voice_action_prompt(
     instruction: &str,
     selected_text: Option<&str>,

@@ -145,6 +145,7 @@ mod tests {
         let mut expected = vec![
             DesktopPane::Settings,
             DesktopPane::Modes,
+            DesktopPane::VoiceAction,
             DesktopPane::History,
         ];
         if crate::DEVELOPER_FEATURES_ENABLED {

@@ -33,7 +33,7 @@ impl VoiceActionSettingRow {
         }
     }
 
-    #[cfg_attr(target_os = "windows", allow(dead_code))]
+    #[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
     pub(crate) fn dynamic(
         title: &'static str,
         description: impl Into<SharedString>,

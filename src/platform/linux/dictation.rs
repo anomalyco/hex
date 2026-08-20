@@ -17,13 +17,29 @@ use crate::dictation::{DictationCapture, Finish};
 use crate::events::{
     CommandOutcome, DictationPhase, EventLog, TranscriptPhase, VoiceEvent, VoiceState, now_ms,
 };
-use crate::linux_input::{HotkeyEvent, X11HotkeyMonitor};
+use crate::linux_input::{CaptureTarget, HotkeyEvent, X11HotkeyMonitor};
 use crate::linux_paste::X11Paster;
 use crate::local_transcriber::LocalTranscriber;
 
 const UPDATE_INTERVAL: Duration = Duration::from_millis(20);
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum JobKind {
+    Dictation,
+    VoiceAction,
+}
+
+impl From<CaptureTarget> for JobKind {
+    fn from(target: CaptureTarget) -> Self {
+        match target {
+            CaptureTarget::Dictation => Self::Dictation,
+            CaptureTarget::VoiceAction => Self::VoiceAction,
+        }
+    }
+}
+
 struct Job {
+    kind: JobKind,
     samples: Vec<f32>,
     audio_ms: u64,
 }
@@ -31,12 +47,14 @@ struct Job {
 pub(crate) type SharedReplacements = Arc<RwLock<crate::text_replacements::ReplacementSet>>;
 pub(crate) type SharedModes = Arc<RwLock<LinuxModeRuntime>>;
 pub(crate) type SharedTransformations = Arc<crate::personal_commands::TransformationClient>;
+pub(crate) type SharedVoiceAction = Arc<RwLock<crate::linux_settings::LinuxVoiceActionSettings>>;
 
 pub(crate) struct LinuxOutputRuntime {
     history: Option<crate::history::History>,
     replacements: SharedReplacements,
     modes: SharedModes,
     transformations: SharedTransformations,
+    voice_action: SharedVoiceAction,
 }
 
 impl LinuxOutputRuntime {
@@ -45,12 +63,14 @@ impl LinuxOutputRuntime {
         replacements: SharedReplacements,
         modes: SharedModes,
         transformations: SharedTransformations,
+        voice_action: SharedVoiceAction,
     ) -> Self {
         Self {
             history,
             replacements,
             modes,
             transformations,
+            voice_action,
         }
     }
 }
@@ -478,6 +498,7 @@ fn directional_command(
 }
 
 struct JobResult {
+    kind: JobKind,
     text: Option<String>,
     result: Result<(), String>,
 }
@@ -491,6 +512,7 @@ pub(crate) fn run(event_path: &Path, device: Option<&str>, shutdown: &AtomicBool
     )));
     let modes = Arc::new(RwLock::new(LinuxModeRuntime::from_settings(&settings)));
     let transformations = Arc::new(crate::personal_commands::TransformationClient::default());
+    let voice_action = Arc::new(RwLock::new(settings.voice_action.clone()));
     let _personal_commands = (settings.transformations_enabled()
         || crate::personal_commands::workspace_configured())
     .then(|| {
@@ -506,7 +528,7 @@ pub(crate) fn run(event_path: &Path, device: Option<&str>, shutdown: &AtomicBool
         shutdown,
         settings,
         transcriber,
-        LinuxOutputRuntime::new(history, replacements, modes, transformations),
+        LinuxOutputRuntime::new(history, replacements, modes, transformations, voice_action),
     )
 }
 
@@ -559,7 +581,11 @@ fn run_with_settings(
         (None, None) => AudioInput::open(&[])?,
     };
     let hotkey_label = settings.dictation_hotkey.label();
-    let hotkey = X11HotkeyMonitor::start(settings.dictation_hotkey, settings.double_tap_lock)?;
+    let hotkey = X11HotkeyMonitor::start(
+        settings.dictation_hotkey,
+        settings.voice_action_hotkey,
+        settings.double_tap_lock,
+    )?;
     let mut commands = if crate::DEVELOPER_FEATURES_ENABLED && settings.commands_enabled {
         match CommandRuntime::start() {
             Ok(runtime) => {
@@ -581,6 +607,7 @@ fn run_with_settings(
         replacements,
         modes,
         transformations,
+        voice_action,
     } = output;
     let worker = thread::spawn(move || {
         let mut transcriber = transcriber;
@@ -614,41 +641,59 @@ fn run_with_settings(
                 if raw_text.is_empty() {
                     return Err("transcription was empty".into());
                 }
-                let crate::dictation_processing::Processed {
-                    text: final_text,
-                    observation,
-                } = process_text(&raw_text, &context, &replacements, &modes, &transformations)?;
-                let paste_result = paster
-                    .as_mut()
-                    .map_err(|error| format!("{error:#}"))?
-                    .paste(&final_text)
-                    .map_err(|error| format!("{error:#}"));
-                paste_result?;
-                retain_successful_dictation(
-                    history.as_ref(),
-                    RetainedDictation {
-                        raw_text: &raw_text,
-                        final_text: &final_text,
-                        application: context.application.as_deref(),
-                        processing: observation,
-                        audio_ms: job.audio_ms,
-                        inference_ms,
-                        total_ms: started.elapsed().as_millis() as u64,
-                    },
-                );
-                Ok(final_text)
+                match job.kind {
+                    JobKind::Dictation => {
+                        let crate::dictation_processing::Processed {
+                            text: final_text,
+                            observation,
+                        } = process_text(
+                            &raw_text,
+                            &context,
+                            &replacements,
+                            &modes,
+                            &transformations,
+                        )?;
+                        paster
+                            .as_mut()
+                            .map_err(|error| format!("{error:#}"))?
+                            .paste(&final_text)
+                            .map_err(|error| format!("{error:#}"))?;
+                        retain_successful_dictation(
+                            history.as_ref(),
+                            RetainedDictation {
+                                raw_text: &raw_text,
+                                final_text: &final_text,
+                                application: context.application.as_deref(),
+                                processing: observation,
+                                audio_ms: job.audio_ms,
+                                inference_ms,
+                                total_ms: started.elapsed().as_millis() as u64,
+                            },
+                        );
+                        Ok(final_text)
+                    }
+                    JobKind::VoiceAction => process_voice_action(
+                        &raw_text,
+                        &context,
+                        &voice_action,
+                        paster.as_mut().map_err(|error| format!("{error:#}"))?,
+                    ),
+                }
             });
             tracing::info!(
+                kind = ?job.kind,
                 audio_ms = job.audio_ms,
                 elapsed_ms = started.elapsed().as_millis(),
-                "completed Linux dictation job"
+                "completed Linux output job"
             );
             let event = match result {
                 Ok(text) => JobResult {
+                    kind: job.kind,
                     text: Some(text),
                     result: Ok(()),
                 },
                 Err(error) => JobResult {
+                    kind: job.kind,
                     text: None,
                     result: Err(error),
                 },
@@ -661,7 +706,7 @@ fn run_with_settings(
 
     let mut events = EventLog::create(event_path)?;
     let mut capture = DictationCapture::new(input.sample_rate);
-    let mut recording = false;
+    let mut recording = None;
     let mut captured_through = CaptureInstant::ZERO;
     let mut pending = 0_usize;
     events.emit(&VoiceEvent::SessionStarted {
@@ -679,18 +724,19 @@ fn run_with_settings(
         }
         while let Ok(action) = hotkey.events.try_recv() {
             match action {
-                HotkeyEvent::Start if !recording => {
+                HotkeyEvent::Start(target) if recording.is_none() => {
                     if let Some(runtime) = &mut commands {
                         runtime.reset();
                     }
                     capture.start(captured_through);
-                    recording = true;
+                    recording = Some(target.into());
                     events.dictation(DictationPhase::Started, "")?;
                     emit_state(&mut events, VoiceState::Dictating, &input.device_name)?;
                 }
-                HotkeyEvent::Finish if recording => {
-                    recording = false;
+                HotkeyEvent::Finish(target) if recording == Some(target.into()) => {
+                    let kind = recording.take().expect("matching capture is active");
                     submit_capture(
+                        kind,
                         &mut capture,
                         captured_through,
                         &jobs,
@@ -707,9 +753,9 @@ fn run_with_settings(
                         &input.device_name,
                     )?;
                 }
-                HotkeyEvent::Cancel if recording => {
+                HotkeyEvent::Cancel(target) if recording == Some(target.into()) => {
                     capture.cancel();
-                    recording = false;
+                    recording = None;
                     events.dictation(DictationPhase::Cancelled, "")?;
                     emit_state(&mut events, VoiceState::Listening, &input.device_name)?;
                 }
@@ -727,13 +773,19 @@ fn run_with_settings(
                         latency_ms: 0,
                         text: text.clone(),
                     })?;
-                    events.dictation(DictationPhase::Pasted, text)?;
+                    events.dictation(
+                        match result.kind {
+                            JobKind::Dictation => DictationPhase::Pasted,
+                            JobKind::VoiceAction => DictationPhase::VoiceAction,
+                        },
+                        text,
+                    )?;
                 }
                 Err(error) => events.dictation(DictationPhase::Failed(error), "")?,
             }
             emit_state(
                 &mut events,
-                if recording {
+                if recording.is_some() {
                     VoiceState::Dictating
                 } else if pending > 0 {
                     VoiceState::Transcribing
@@ -757,7 +809,7 @@ fn run_with_settings(
                 return Err(eyre!("microphone stream stopped: {error}"));
             }
         };
-        if recording {
+        if recording.is_some() {
             capture.ingest(&chunk, captured_through);
             capture.become_intentional(captured_through);
         } else {
@@ -781,7 +833,7 @@ fn run_with_settings(
                     runtime.reset();
                 }
                 capture.start_voice_at(captured_through);
-                recording = true;
+                recording = Some(JobKind::Dictation);
                 events.dictation(DictationPhase::Started, "")?;
                 emit_state(&mut events, VoiceState::Dictating, &input.device_name)?;
             }
@@ -869,7 +921,35 @@ fn process_text(
     Ok(processed)
 }
 
+fn process_voice_action(
+    instruction: &str,
+    context: &ContextSnapshot,
+    settings: &RwLock<crate::linux_settings::LinuxVoiceActionSettings>,
+    paster: &mut X11Paster,
+) -> std::result::Result<String, String> {
+    let selected_text = paster.selected_text().unwrap_or_else(|error| {
+        tracing::warn!(%error, "could not read the X11 PRIMARY selection for Voice Action");
+        None
+    });
+    let settings = settings
+        .read()
+        .unwrap_or_else(|error| error.into_inner())
+        .clone();
+    let reply = crate::opencode::fulfil_voice_action(
+        instruction,
+        context.application.as_deref(),
+        context.browser_host(),
+        selected_text.as_deref(),
+        settings.model.as_ref(),
+        Duration::from_secs(settings.deadline_seconds.max(1)),
+    )
+    .map_err(|error| format!("{error:#}"))?;
+    paster.paste(&reply).map_err(|error| format!("{error:#}"))?;
+    Ok(reply)
+}
+
 fn submit_capture(
+    kind: JobKind,
     capture: &mut DictationCapture,
     ended_at: CaptureInstant,
     jobs: &SyncSender<Job>,
@@ -881,6 +961,7 @@ fn submit_capture(
         Finish::Transcribe(clip) => {
             let audio_ms = clip.duration_ms();
             let job = Job {
+                kind,
                 samples: clip.into_parakeet_samples(),
                 audio_ms,
             };

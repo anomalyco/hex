@@ -1,8 +1,8 @@
 //! The one OpenCode client all three desktop platforms share: executable
 //! discovery, the `opencode2 api` transport with deadlines and
 //! cancellation, the model catalog, and text generation. The shared dictation
-//! policy and every native desktop root use it for mode rewriting; Windows also
-//! drives Voice Action with it.
+//! policy and every native desktop root use it for mode rewriting and Voice
+//! Action.
 
 use std::ffi::OsStr;
 use std::io::Read;
@@ -147,6 +147,48 @@ pub fn voice_action_prompt(
     )
 }
 
+/// Fulfil one Voice Action through the same prompt and empty-response contract
+/// on every desktop host.
+#[cfg_attr(target_os = "macos", allow(dead_code))]
+pub fn fulfil_voice_action(
+    instruction: &str,
+    application: Option<&str>,
+    browser_host: Option<&str>,
+    selected_text: Option<&str>,
+    model: Option<&Model>,
+    deadline: Duration,
+) -> Result<String> {
+    fulfil_voice_action_cancellable(
+        instruction,
+        application,
+        browser_host,
+        selected_text,
+        model,
+        deadline,
+        &AtomicBool::new(false),
+    )
+}
+
+/// Cancellable form used by the macOS processing queue. Platform adapters own
+/// selection capture and paste; this function owns only portable generation
+/// semantics.
+pub fn fulfil_voice_action_cancellable(
+    instruction: &str,
+    application: Option<&str>,
+    browser_host: Option<&str>,
+    selected_text: Option<&str>,
+    model: Option<&Model>,
+    deadline: Duration,
+    cancelled: &AtomicBool,
+) -> Result<String> {
+    let prompt = voice_action_prompt(instruction, application, browser_host, selected_text);
+    let reply = generate_cancellable(&prompt, model, deadline, cancelled)?;
+    if reply.trim().is_empty() {
+        return Err(eyre!("OpenCode returned empty text"));
+    }
+    Ok(reply)
+}
+
 pub fn opencode_installed() -> bool {
     let executable = opencode_executable();
     if executable.components().count() > 1 {
@@ -163,7 +205,7 @@ pub fn load_model_catalog() -> Result<ModelCatalog> {
     Ok(build_model_catalog(models.data, default.data))
 }
 
-#[cfg_attr(any(target_os = "linux", target_os = "macos"), allow(dead_code))]
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn generate(prompt: &str, model: Option<&Model>, deadline: Duration) -> Result<String> {
     generate_cancellable(prompt, model, deadline, &AtomicBool::new(false))
 }

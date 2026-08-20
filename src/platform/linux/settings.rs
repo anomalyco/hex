@@ -15,6 +15,12 @@ pub struct LinuxSettings {
     pub schema_version: u32,
     pub platform: String,
     pub dictation_hotkey: LinuxHotkey,
+    /// Optional second held shortcut for Voice Action. `None` keeps the
+    /// OpenCode-backed capture target disabled.
+    pub voice_action_hotkey: Option<LinuxHotkey>,
+    /// Dedicated generation settings; ordinary dictation modes never borrow
+    /// this model or deadline.
+    pub voice_action: LinuxVoiceActionSettings,
     pub double_tap_lock: bool,
     /// A preferred capture device name; `None` uses the system default.
     pub microphone: Option<String>,
@@ -51,6 +57,22 @@ pub struct LinuxMode {
     pub transformations: Vec<String>,
 }
 
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(default)]
+pub struct LinuxVoiceActionSettings {
+    pub model: Option<crate::opencode::Model>,
+    pub deadline_seconds: u64,
+}
+
+impl Default for LinuxVoiceActionSettings {
+    fn default() -> Self {
+        Self {
+            model: None,
+            deadline_seconds: 60,
+        }
+    }
+}
+
 impl LinuxMode {
     pub fn matches_application(&self, application: &str) -> bool {
         let application = application.to_lowercase();
@@ -68,6 +90,31 @@ impl LinuxSettings {
                 .modes
                 .iter()
                 .any(|mode| !mode.transformations.is_empty())
+    }
+
+    fn validate(&self) -> Result<()> {
+        self.dictation_hotkey.validate()?;
+        if let Some(voice_action) = &self.voice_action_hotkey {
+            voice_action.validate()?;
+            if voice_action == &self.dictation_hotkey {
+                return Err(eyre!(
+                    "the dictation and Voice Action shortcuts must be different"
+                ));
+            }
+        }
+        if self.voice_action.deadline_seconds == 0 {
+            return Err(eyre!(
+                "the Voice Action deadline must be at least one second"
+            ));
+        }
+        if let Some(model) = &self.voice_action.model
+            && (model.provider.trim().is_empty() || model.id.trim().is_empty())
+        {
+            return Err(eyre!(
+                "the Voice Action model requires a provider and model id"
+            ));
+        }
+        crate::transcription_models::validate(&self.transcription).map(|_| ())
     }
 }
 
@@ -87,6 +134,8 @@ impl Default for LinuxSettings {
             schema_version: 1,
             platform: "x11".into(),
             dictation_hotkey: LinuxHotkey::default(),
+            voice_action_hotkey: None,
+            voice_action: LinuxVoiceActionSettings::default(),
             double_tap_lock: true,
             microphone: None,
             ui_language: None,
@@ -128,14 +177,12 @@ impl LinuxSettings {
                 settings.platform
             ));
         }
-        settings.dictation_hotkey.validate()?;
-        crate::transcription_models::validate(&settings.transcription)?;
+        settings.validate()?;
         Ok(settings)
     }
 
     pub fn save(&self) -> Result<()> {
-        self.dictation_hotkey.validate()?;
-        crate::transcription_models::validate(&self.transcription)?;
+        self.validate()?;
         let path = settings_path()?;
         let directory = path.parent().unwrap();
         fs::create_dir_all(directory)?;
@@ -151,6 +198,16 @@ impl LinuxSettings {
 }
 
 impl LinuxHotkey {
+    pub fn voice_action_default() -> Self {
+        Self {
+            control: true,
+            alt: true,
+            shift: false,
+            super_key: false,
+            key: "i".into(),
+        }
+    }
+
     pub fn validate(&self) -> Result<()> {
         if self.key.trim().is_empty() {
             return Err(eyre!("Linux hotkeys require a non-modifier key"));
@@ -228,6 +285,17 @@ mod tests {
     }
 
     #[test]
+    fn voice_action_default_is_unique_and_disabled_until_opted_in() {
+        let settings = LinuxSettings::default();
+        let voice_action = LinuxHotkey::voice_action_default();
+
+        assert!(settings.voice_action_hotkey.is_none());
+        assert_ne!(voice_action, settings.dictation_hotkey);
+        assert_eq!(voice_action.label(), "Ctrl+Alt+I");
+        assert_eq!(settings.voice_action.deadline_seconds, 60);
+    }
+
+    #[test]
     fn modifier_only_bindings_are_rejected() {
         let binding = LinuxHotkey {
             key: String::new(),
@@ -281,6 +349,37 @@ mod tests {
             crate::dictation_processing::PostProcessingSettings::default()
         );
         assert!(settings.dictation_transformations.is_empty());
+        assert!(settings.voice_action_hotkey.is_none());
+        assert_eq!(settings.voice_action, LinuxVoiceActionSettings::default());
+    }
+
+    #[test]
+    fn voice_action_settings_round_trip_and_require_a_unique_shortcut() {
+        let settings = LinuxSettings {
+            voice_action_hotkey: Some(LinuxHotkey::voice_action_default()),
+            voice_action: LinuxVoiceActionSettings {
+                model: Some(crate::opencode::Model {
+                    provider: "openai".into(),
+                    id: "gpt-5".into(),
+                    variant: Some("high".into()),
+                }),
+                deadline_seconds: 25,
+            },
+            ..LinuxSettings::default()
+        };
+
+        let encoded = serde_json::to_string(&settings).unwrap();
+        let decoded: LinuxSettings = serde_json::from_str(&encoded).unwrap();
+
+        assert_eq!(decoded.voice_action_hotkey, settings.voice_action_hotkey);
+        assert_eq!(decoded.voice_action, settings.voice_action);
+        assert!(decoded.validate().is_ok());
+
+        let invalid = LinuxSettings {
+            voice_action_hotkey: Some(settings.dictation_hotkey.clone()),
+            ..settings
+        };
+        assert!(invalid.validate().is_err());
     }
 
     #[test]

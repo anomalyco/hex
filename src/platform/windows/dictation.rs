@@ -191,7 +191,6 @@ pub fn run_with_transcriber(
                         job,
                         &mut transcriber,
                         &mut paster,
-                        &last_dictation,
                         &voice_action_model,
                     ),
                     OutputJob::PasteLast => process_paste_last(&mut paster, &last_dictation),
@@ -517,7 +516,7 @@ pub fn run_with_transcriber(
                 Ok(()) => {
                     let text = result.text.unwrap_or_default();
                     match result.kind {
-                        OutputKind::Dictation | OutputKind::VoiceAction => {
+                        OutputKind::Dictation => {
                             events.emit(&VoiceEvent::Transcript {
                                 timestamp_ms: now_ms(),
                                 phase: TranscriptPhase::Completed,
@@ -525,6 +524,15 @@ pub fn run_with_transcriber(
                                 text: text.clone(),
                             })?;
                             events.dictation(DictationPhase::Pasted, text)?;
+                        }
+                        OutputKind::VoiceAction => {
+                            events.emit(&VoiceEvent::Transcript {
+                                timestamp_ms: now_ms(),
+                                phase: TranscriptPhase::Completed,
+                                latency_ms: result.latency_ms,
+                                text: text.clone(),
+                            })?;
+                            events.dictation(DictationPhase::VoiceAction, text)?;
                         }
                         OutputKind::Repaste => {
                             events.dictation(DictationPhase::Repasted, text)?;
@@ -808,7 +816,6 @@ fn process_voice_action_job(
     job: Job,
     transcriber: &mut LocalTranscriber,
     paster: &mut Result<WindowsPaster>,
-    last_dictation: &Mutex<Option<String>>,
     voice_action_model: &RwLock<Option<crate::opencode::Model>>,
 ) -> JobResult {
     let started = Instant::now();
@@ -841,9 +848,6 @@ fn process_voice_action_job(
         )
         .map_err(|error| format!("{error:#}"))?;
         paster.paste(&reply).map_err(|error| format!("{error:#}"))?;
-        *last_dictation
-            .lock()
-            .unwrap_or_else(|error| error.into_inner()) = Some(reply.clone());
         Ok(reply)
     });
     match result {
