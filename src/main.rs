@@ -25,7 +25,7 @@ pub(crate) use common::keys;
 pub(crate) use common::local_api;
 #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
 pub(crate) use common::opencode;
-#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
 pub(crate) use common::personal_commands;
 #[cfg(any(target_os = "linux", target_os = "windows"))]
 pub(crate) use common::self_update;
@@ -44,6 +44,8 @@ pub(crate) use desktop::i18n as desktop_i18n;
 pub(crate) use desktop::model_catalog as desktop_model_catalog;
 #[cfg(any(target_os = "linux", target_os = "windows"))]
 pub(crate) use desktop::onboarding as desktop_onboarding;
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+pub(crate) use desktop::voice_action_pane as desktop_voice_action_pane;
 pub(crate) use desktop::{
     activity as desktop_activity, host as desktop_host, shell as desktop_shell,
     transcription_picker as desktop_transcription_picker, ui as desktop_ui,
@@ -52,13 +54,8 @@ pub(crate) use desktop::{
 pub(crate) use desktop::{
     history_pane as desktop_history_pane, mode_basics as desktop_mode_basics,
     mode_list as desktop_mode_list, mode_processing as desktop_mode_processing,
-    mode_target as desktop_mode_target, replacement_editor as desktop_replacement_editor,
-    text_input,
-};
-#[cfg(any(target_os = "macos", target_os = "windows"))]
-pub(crate) use desktop::{
-    mode_transformations as desktop_mode_transformations,
-    voice_action_pane as desktop_voice_action_pane,
+    mode_target as desktop_mode_target, mode_transformations as desktop_mode_transformations,
+    replacement_editor as desktop_replacement_editor, text_input,
 };
 #[cfg(target_os = "linux")]
 pub(crate) use platform::linux::{

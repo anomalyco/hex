@@ -70,9 +70,9 @@ impl PostProcessingSettings {
     }
 }
 
-/// Platform-owned transformation execution. macOS and Windows currently back
-/// this with the shared bounded Bun personal-command host; Linux supplies its
-/// real host once that capability is implemented.
+/// Platform-owned transformation execution. All three desktop roots back this
+/// with the shared bounded Bun personal-command host while retaining native
+/// lifecycle and output ownership.
 pub trait TransformationExecutor {
     fn transform(
         &self,

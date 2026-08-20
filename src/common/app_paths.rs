@@ -25,19 +25,19 @@ pub fn local_api_discovery_file() -> Result<PathBuf> {
     Ok(support_dir()?.join("local-api.json"))
 }
 
-#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
 pub fn personal_commands_status_file() -> Result<PathBuf> {
     Ok(support_dir()?.join("personal-commands.json"))
 }
 
-#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
 pub fn personal_commands_workspace() -> Result<PathBuf> {
     Ok(dirs::home_dir()
         .ok_or_else(|| eyre!("home directory is unavailable"))?
         .join(".config/hex"))
 }
 
-#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
 pub fn personal_commands_host() -> Result<PathBuf> {
     let package = personal_commands_workspace()?.join("node_modules/@hex/commands");
     for relative in ["dist/bin.js", "src/bin.ts"] {
@@ -51,7 +51,7 @@ pub fn personal_commands_host() -> Result<PathBuf> {
     ))
 }
 
-#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
 pub fn personal_commands_sdk() -> Result<PathBuf> {
     let executable = std::env::current_exe()?;
     if let Some(contents) = executable.parent().and_then(|path| path.parent()) {
@@ -64,7 +64,7 @@ pub fn personal_commands_sdk() -> Result<PathBuf> {
     if source.join("dist/bin.js").is_file() || source.join("src/bin.ts").is_file() {
         Ok(source)
     } else {
-        #[cfg(target_os = "windows")]
+        #[cfg(any(target_os = "linux", target_os = "windows"))]
         {
             materialize_embedded_personal_commands_sdk()
         }
@@ -75,12 +75,12 @@ pub fn personal_commands_sdk() -> Result<PathBuf> {
     }
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "linux", target_os = "windows"))]
 fn materialize_embedded_personal_commands_sdk() -> Result<PathBuf> {
     materialize_embedded_personal_commands_sdk_at(&support_dir()?.join("commands-sdk"))
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "linux", target_os = "windows"))]
 fn materialize_embedded_personal_commands_sdk_at(root: &std::path::Path) -> Result<PathBuf> {
     use std::fmt::Write as _;
     use std::fs;
@@ -167,7 +167,7 @@ fn materialize_embedded_personal_commands_sdk_at(root: &std::path::Path) -> Resu
     Ok(root)
 }
 
-#[cfg(all(test, target_os = "windows"))]
+#[cfg(all(test, any(target_os = "linux", target_os = "windows")))]
 mod tests {
     use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};

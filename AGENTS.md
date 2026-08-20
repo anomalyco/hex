@@ -63,9 +63,9 @@ only in debug builds.
 - `commands`: pure contextual resolution plus bounded asynchronous macOS action
   execution.
 - `personal_commands`: the Bun-hosted `@hex/commands` TypeScript workspace:
-  shared macOS/Windows managed SDK provisioning, the watch-reloaded user command
-  and transformation host, bounded invocation/transform dispatch, and status
-  snapshots. Literal voice-command recognition remains macOS-only.
+  shared macOS/Linux/Windows managed SDK provisioning, the watch-reloaded user
+  command and transformation host, bounded invocation/transform dispatch, and
+  status snapshots. Literal voice-command recognition remains macOS-only.
 - `text_replacements`: phrase-boundary-aware compilation of configured text
   replacements applied longest-match-first to transcripts.
 - `config`: compiled commands, preferred input devices, and dictation profiles.
@@ -87,7 +87,7 @@ only in debug builds.
   `linux_paste`, `linux_settings`: the X11 beta CLI, GPUI shell and tray, EWMH
   foreground application identity, hotkey capture-transcribe-process-paste
   loop, X11 grabs and synthetic paste, and persisted Linux settings and modes
-  with shared OpenCode processing.
+  with shared OpenCode and TypeScript transformation processing.
 - `linux_updater`: signed direct-install updates, bounded downloads, atomic
   version activation, and restart handoff for user-local Linux installs.
 - `windows`, `windows_app`, `windows_dictation`, `windows_input`,

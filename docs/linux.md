@@ -91,6 +91,15 @@ The prompt includes the resolved foreground application but no browser host on
 Linux because the X11 beta does not yet have a browser adapter. Successful
 History entries include bounded processing latency and fallback metadata.
 
+Transformations run last, after corrections and any successful OpenCode rewrite.
+The shared ordered editor includes built-in Lowercase and SpongeBob case steps,
+which do not require another runtime. Custom TypeScript transformations use the
+same bounded, watch-reloaded `@hex/commands` host as macOS and Windows. Choosing
+**Set up** creates `~/.config/hex/hex.config.ts`, installs the managed embedded
+SDK, and requires [Bun](https://bun.sh/). A missing, failed, or timed-out custom
+step preserves the previous pipeline output and records bounded fallback
+metadata instead of blocking capture or paste.
+
 ## Retained History
 
 The History pane uses the same bounded, owner-only store and complete

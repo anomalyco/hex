@@ -30,16 +30,35 @@ struct Job {
 
 pub(crate) type SharedReplacements = Arc<RwLock<crate::text_replacements::ReplacementSet>>;
 pub(crate) type SharedModes = Arc<RwLock<LinuxModeRuntime>>;
+pub(crate) type SharedTransformations = Arc<crate::personal_commands::TransformationClient>;
 
-struct OutputRuntime {
+pub(crate) struct LinuxOutputRuntime {
     history: Option<crate::history::History>,
     replacements: SharedReplacements,
     modes: SharedModes,
+    transformations: SharedTransformations,
+}
+
+impl LinuxOutputRuntime {
+    pub(crate) fn new(
+        history: Option<crate::history::History>,
+        replacements: SharedReplacements,
+        modes: SharedModes,
+        transformations: SharedTransformations,
+    ) -> Self {
+        Self {
+            history,
+            replacements,
+            modes,
+            transformations,
+        }
+    }
 }
 
 #[derive(Clone, Default)]
 pub(crate) struct LinuxModeRuntime {
     default: crate::dictation_processing::PostProcessingSettings,
+    default_transformations: Vec<String>,
     modes: Vec<(
         crate::linux_settings::LinuxMode,
         crate::text_replacements::ReplacementSet,
@@ -50,6 +69,7 @@ impl LinuxModeRuntime {
     pub(crate) fn from_settings(settings: &crate::linux_settings::LinuxSettings) -> Self {
         Self {
             default: settings.dictation_post_processing.clone(),
+            default_transformations: settings.dictation_transformations.clone(),
             modes: settings
                 .modes
                 .iter()
@@ -67,6 +87,7 @@ impl LinuxModeRuntime {
         &self,
         text: &str,
         context: &ContextSnapshot,
+        transformations: &crate::personal_commands::TransformationClient,
     ) -> crate::dictation_processing::Processed {
         let mode = context.application.as_deref().and_then(|application| {
             self.modes
@@ -78,7 +99,7 @@ impl LinuxModeRuntime {
                 crate::dictation_processing::Profile::configured(
                     "Global",
                     crate::text_replacements::ReplacementSet::default(),
-                    Vec::new(),
+                    self.default_transformations.clone(),
                     &self.default,
                 )
             },
@@ -91,7 +112,7 @@ impl LinuxModeRuntime {
                 crate::dictation_processing::Profile::configured(
                     name,
                     corrections.clone(),
-                    Vec::new(),
+                    mode.transformations.clone(),
                     &mode.post_processing,
                 )
             },
@@ -99,7 +120,7 @@ impl LinuxModeRuntime {
         crate::dictation_processing::Profiles::new(profile).process_cancellable(
             text,
             context,
-            None,
+            Some(transformations),
             &AtomicBool::new(false),
         )
     }
@@ -469,17 +490,23 @@ pub(crate) fn run(event_path: &Path, device: Option<&str>, shutdown: &AtomicBool
         &settings.text_replacements,
     )));
     let modes = Arc::new(RwLock::new(LinuxModeRuntime::from_settings(&settings)));
+    let transformations = Arc::new(crate::personal_commands::TransformationClient::default());
+    let _personal_commands = (settings.transformations_enabled()
+        || crate::personal_commands::workspace_configured())
+    .then(|| {
+        crate::personal_commands::PersonalCommands::start(
+            crate::commands_engine::CommandConfig::new(),
+            transformations.clone(),
+        )
+    })
+    .flatten();
     run_with_settings(
         event_path,
         device,
         shutdown,
         settings,
         transcriber,
-        OutputRuntime {
-            history,
-            replacements,
-            modes,
-        },
+        LinuxOutputRuntime::new(history, replacements, modes, transformations),
     )
 }
 
@@ -487,24 +514,11 @@ pub(crate) fn run_with_history(
     event_path: &Path,
     device: Option<&str>,
     shutdown: &AtomicBool,
-    history: Option<crate::history::History>,
-    replacements: SharedReplacements,
-    modes: SharedModes,
+    output: LinuxOutputRuntime,
 ) -> Result<()> {
     let settings = crate::linux_settings::LinuxSettings::load()?;
     let transcriber = LocalTranscriber::load(&settings.transcription)?;
-    run_with_settings(
-        event_path,
-        device,
-        shutdown,
-        settings,
-        transcriber,
-        OutputRuntime {
-            history,
-            replacements,
-            modes,
-        },
-    )
+    run_with_settings(event_path, device, shutdown, settings, transcriber, output)
 }
 
 pub(crate) fn run_with_transcriber(
@@ -512,23 +526,10 @@ pub(crate) fn run_with_transcriber(
     device: Option<&str>,
     shutdown: &AtomicBool,
     transcriber: LocalTranscriber,
-    history: Option<crate::history::History>,
-    replacements: SharedReplacements,
-    modes: SharedModes,
+    output: LinuxOutputRuntime,
 ) -> Result<()> {
     let settings = crate::linux_settings::LinuxSettings::load()?;
-    run_with_settings(
-        event_path,
-        device,
-        shutdown,
-        settings,
-        transcriber,
-        OutputRuntime {
-            history,
-            replacements,
-            modes,
-        },
-    )
+    run_with_settings(event_path, device, shutdown, settings, transcriber, output)
 }
 
 fn run_with_settings(
@@ -537,7 +538,7 @@ fn run_with_settings(
     shutdown: &AtomicBool,
     settings: crate::linux_settings::LinuxSettings,
     transcriber: LocalTranscriber,
-    output: OutputRuntime,
+    output: LinuxOutputRuntime,
 ) -> Result<()> {
     // A CLI device override stays a strict substring query; the settings
     // choice is an exact enumerated name and falls back to automatic
@@ -575,10 +576,11 @@ fn run_with_settings(
     };
     let (jobs, job_receiver) = mpsc::sync_channel::<Job>(2);
     let (result_sender, results) = mpsc::channel();
-    let OutputRuntime {
+    let LinuxOutputRuntime {
         history,
         replacements,
         modes,
+        transformations,
     } = output;
     let worker = thread::spawn(move || {
         let mut transcriber = transcriber;
@@ -615,7 +617,7 @@ fn run_with_settings(
                 let crate::dictation_processing::Processed {
                     text: final_text,
                     observation,
-                } = process_text(&raw_text, &context, &replacements, &modes)?;
+                } = process_text(&raw_text, &context, &replacements, &modes, &transformations)?;
                 let paste_result = paster
                     .as_mut()
                     .map_err(|error| format!("{error:#}"))?
@@ -850,6 +852,7 @@ fn process_text(
     context: &ContextSnapshot,
     replacements: &RwLock<crate::text_replacements::ReplacementSet>,
     modes: &RwLock<LinuxModeRuntime>,
+    transformations: &crate::personal_commands::TransformationClient,
 ) -> std::result::Result<crate::dictation_processing::Processed, String> {
     let text = replacements
         .read()
@@ -859,7 +862,7 @@ fn process_text(
         .read()
         .unwrap_or_else(|error| error.into_inner())
         .clone();
-    let processed = modes.process(&text, context);
+    let processed = modes.process(&text, context, transformations);
     if processed.text.trim().is_empty() {
         return Err("text replacements produced empty output".into());
     }
@@ -987,6 +990,7 @@ mod tests {
             ..Default::default()
         };
         let modes = RwLock::new(LinuxModeRuntime::from_settings(&settings));
+        let transformations = crate::personal_commands::TransformationClient::default();
         let firefox = crate::command_context::ContextSnapshot {
             application: Some("Firefox".into()),
             ..Default::default()
@@ -997,15 +1001,27 @@ mod tests {
         };
 
         assert_eq!(
-            process_text("open code full stop", &firefox, &replacements, &modes)
-                .unwrap()
-                .text,
+            process_text(
+                "open code full stop",
+                &firefox,
+                &replacements,
+                &modes,
+                &transformations,
+            )
+            .unwrap()
+            .text,
             "OpenCode ."
         );
         assert_eq!(
-            process_text("open code full stop", &code, &replacements, &modes)
-                .unwrap()
-                .text,
+            process_text(
+                "open code full stop",
+                &code,
+                &replacements,
+                &modes,
+                &transformations,
+            )
+            .unwrap()
+            .text,
             "OpenCode full stop"
         );
         settings.modes = vec![crate::linux_settings::LinuxMode {
@@ -1019,10 +1035,58 @@ mod tests {
         }];
         *modes.write().unwrap() = LinuxModeRuntime::from_settings(&settings);
         assert_eq!(
-            process_text("open code full stop", &code, &replacements, &modes)
-                .unwrap()
-                .text,
+            process_text(
+                "open code full stop",
+                &code,
+                &replacements,
+                &modes,
+                &transformations,
+            )
+            .unwrap()
+            .text,
             "OpenCode ."
+        );
+    }
+
+    #[test]
+    fn linux_modes_execute_selected_transformations_after_corrections() {
+        let settings = crate::linux_settings::LinuxSettings {
+            text_replacements: vec![crate::text_replacements::TextReplacement {
+                matched_phrase: "open code".into(),
+                output: "OpenCode".into(),
+            }],
+            dictation_transformations: vec!["lowercase".into()],
+            ..Default::default()
+        };
+        let replacements = RwLock::new(crate::text_replacements::ReplacementSet::new(
+            &settings.text_replacements,
+        ));
+        let modes = RwLock::new(LinuxModeRuntime::from_settings(&settings));
+        let transformations = crate::personal_commands::TransformationClient::default();
+
+        let processed = process_text(
+            "Keep open code Exact.",
+            &crate::command_context::ContextSnapshot::default(),
+            &replacements,
+            &modes,
+            &transformations,
+        )
+        .unwrap();
+
+        assert_eq!(processed.text, "keep opencode exact.");
+        assert_eq!(
+            processed
+                .observation
+                .as_ref()
+                .map(|observation| observation.profile.as_str()),
+            Some("Custom transformations")
+        );
+        assert!(
+            processed
+                .observation
+                .as_ref()
+                .and_then(|observation| observation.fallback.as_deref())
+                .is_none()
         );
     }
 }

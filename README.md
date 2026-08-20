@@ -112,9 +112,9 @@ Diagnostics are stored at:
 The Linux beta targets x86_64 Arch Linux on i3/X11. It supports local hotkey
 dictation, automatic paste, shortcut rebinding, retained History, global text
 replacements, EWMH application modes with corrections and optional OpenCode
-rewriting, a tray app, and user-local updates. It does not support voice
-commands, browser context, TypeScript transformations, meetings, native Wayland,
-or a package-manager install.
+rewriting plus ordered built-in/TypeScript transformations, a tray app, and
+user-local updates. It does not support voice commands, browser context, Voice
+Action, meetings, native Wayland, or a package-manager install.
 
 See the [Linux installation guide](docs/linux.md) for the verified user-local
 installer, source-build fallback, requirements, and limitations.

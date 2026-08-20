@@ -2,7 +2,7 @@
 //! transformations. Native shells decide when to start it and retain their own
 //! recognition, context capture, and action execution adapters.
 
-#![cfg_attr(target_os = "windows", allow(dead_code))]
+#![cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
 
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::fs;

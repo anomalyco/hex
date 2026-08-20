@@ -36,6 +36,8 @@ pub struct LinuxSettings {
     pub modes: Vec<LinuxMode>,
     /// Global OpenCode rewrite profile used when no application mode matches.
     pub dictation_post_processing: crate::dictation_processing::PostProcessingSettings,
+    /// Ordered final transformation IDs for the global fallback profile.
+    pub dictation_transformations: Vec<String>,
     pub transcription: crate::transcription_models::TranscriptionSelection,
 }
 
@@ -46,6 +48,7 @@ pub struct LinuxMode {
     pub applications: Vec<String>,
     pub corrections: Vec<crate::text_replacements::TextReplacement>,
     pub post_processing: crate::dictation_processing::PostProcessingSettings,
+    pub transformations: Vec<String>,
 }
 
 impl LinuxMode {
@@ -55,6 +58,16 @@ impl LinuxMode {
             let candidate = candidate.trim().to_lowercase();
             !candidate.is_empty() && application.contains(&candidate)
         })
+    }
+}
+
+impl LinuxSettings {
+    pub fn transformations_enabled(&self) -> bool {
+        !self.dictation_transformations.is_empty()
+            || self
+                .modes
+                .iter()
+                .any(|mode| !mode.transformations.is_empty())
     }
 }
 
@@ -83,6 +96,7 @@ impl Default for LinuxSettings {
             modes: Vec::new(),
             dictation_post_processing: crate::dictation_processing::PostProcessingSettings::default(
             ),
+            dictation_transformations: Vec::new(),
             transcription: crate::transcription_models::TranscriptionSelection::default(),
         }
     }
@@ -266,6 +280,7 @@ mod tests {
             settings.dictation_post_processing,
             crate::dictation_processing::PostProcessingSettings::default()
         );
+        assert!(settings.dictation_transformations.is_empty());
     }
 
     #[test]
@@ -289,11 +304,13 @@ mod tests {
                     variant: Some("high".into()),
                     deadline_seconds: 12,
                 },
+                transformations: vec!["trim-code-block".into(), "lowercase".into()],
             }],
             dictation_post_processing: crate::dictation_processing::PostProcessingSettings {
                 prompt: "Clean up global dictation.".into(),
                 ..Default::default()
             },
+            dictation_transformations: vec!["lowercase".into()],
             ..LinuxSettings::default()
         };
 
@@ -306,6 +323,11 @@ mod tests {
             decoded.dictation_post_processing,
             settings.dictation_post_processing
         );
+        assert_eq!(
+            decoded.dictation_transformations,
+            settings.dictation_transformations
+        );
+        assert!(decoded.transformations_enabled());
     }
 
     #[test]

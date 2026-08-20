@@ -41,6 +41,11 @@ use crate::desktop_mode_processing::{
     ModeProcessingView, ModeVariantPickerView,
     render_mode_processing as render_shared_mode_processing, render_mode_variant_picker,
 };
+use crate::desktop_mode_transformations::{
+    ModeTransformationsAction, ModeTransformationsDelegate, ModeTransformationsView,
+    ModeTransformationsWorkspaceAction, TransformationCatalogEntry, TransformationWorkspaceView,
+    render_mode_transformations as render_shared_mode_transformations, reorder_transformation,
+};
 use crate::desktop_replacement_editor::{
     ReplacementEditorAction, ReplacementEditorDelegate, ReplacementEditorInput,
     ReplacementEditorView, render_replacement_editor as render_shared_replacement_editor,
@@ -69,6 +74,7 @@ const OPENCODE_SETUP_URL: &str = "https://v2.opencode.ai/";
 
 type ListenerResult = std::result::Result<(), String>;
 type PreparationResult = std::result::Result<PreparedTranscription, String>;
+type PersonalCommandsSetupResult = std::result::Result<PathBuf, String>;
 type OpenCodeCatalogProbe = (bool, Option<Result<crate::opencode::ModelCatalog>>);
 
 struct PreparedTranscription {
@@ -133,6 +139,11 @@ struct LinuxDesktopHost {
     history_error: Option<String>,
     replacements: crate::linux_dictation::SharedReplacements,
     modes: crate::linux_dictation::SharedModes,
+    transformations: crate::linux_dictation::SharedTransformations,
+    personal_commands: Option<crate::personal_commands::PersonalCommands>,
+    personal_commands_status: crate::personal_commands::StatusSnapshot,
+    personal_commands_setup: Option<Receiver<PersonalCommandsSetupResult>>,
+    personal_commands_setup_error: Option<String>,
     opencode_catalog: Option<crate::opencode::ModelCatalog>,
     opencode_catalog_rx: Option<Receiver<OpenCodeCatalogProbe>>,
     opencode_catalog_error: Option<String>,
@@ -159,6 +170,7 @@ struct LinuxApp {
     opencode_model_dropdown: Option<ModeTarget>,
     opencode_model_dropdown_bounds: Option<Bounds<Pixels>>,
     opencode_variant_picker_open: Option<ModeTarget>,
+    transformation_picker_open: bool,
     capturing_hotkey: bool,
     transcription_picker: TranscriptionPickerState,
     catalog_language_filter: Option<String>,
@@ -343,6 +355,7 @@ pub fn open(event_path: PathBuf, start_hidden: bool) -> Result<()> {
                             opencode_model_dropdown: None,
                             opencode_model_dropdown_bounds: None,
                             opencode_variant_picker_open: None,
+                            transformation_picker_open: false,
                             onboarding,
                             // A fresh run offers the locale's recommendation,
                             // like the Windows first-run default.
@@ -650,6 +663,29 @@ impl LinuxDesktopHost {
         let modes = Arc::new(RwLock::new(
             crate::linux_dictation::LinuxModeRuntime::from_settings(&settings),
         ));
+        let transformations = Arc::new(crate::personal_commands::TransformationClient::default());
+        let personal_commands_configured = crate::personal_commands::workspace_configured();
+        let personal_commands = (settings.transformations_enabled()
+            || personal_commands_configured)
+            .then(|| {
+                crate::personal_commands::PersonalCommands::start(
+                    crate::commands_engine::CommandConfig::new(),
+                    transformations.clone(),
+                )
+            })
+            .flatten();
+        let mut personal_commands_status = if personal_commands_configured {
+            crate::personal_commands::load_status().unwrap_or_else(|error| {
+                crate::personal_commands::StatusSnapshot {
+                    host_state: crate::personal_commands::HostState::Unavailable,
+                    last_reload_error: Some(format!("{error:#}")),
+                    ..crate::personal_commands::StatusSnapshot::default()
+                }
+            })
+        } else {
+            crate::personal_commands::StatusSnapshot::default()
+        };
+        crate::personal_commands::include_builtin_transformations(&mut personal_commands_status);
         Self {
             event_reader,
             event_path,
@@ -673,6 +709,11 @@ impl LinuxDesktopHost {
             history_error,
             replacements,
             modes,
+            transformations,
+            personal_commands,
+            personal_commands_status,
+            personal_commands_setup: None,
+            personal_commands_setup_error: None,
             opencode_catalog: None,
             opencode_catalog_rx: None,
             opencode_catalog_error: None,
@@ -705,27 +746,25 @@ impl LinuxDesktopHost {
         let history = self.history.clone();
         let replacements = self.replacements.clone();
         let modes = self.modes.clone();
+        let transformations = self.transformations.clone();
         let worker = std::thread::spawn(move || {
             let result = crate::instance::acquire("listener").and_then(|_instance| {
+                let output = crate::linux_dictation::LinuxOutputRuntime::new(
+                    history,
+                    replacements,
+                    modes,
+                    transformations,
+                );
                 if let Some(transcriber) = prepared_transcriber {
                     crate::linux_dictation::run_with_transcriber(
                         &event_path,
                         None,
                         &stop,
                         transcriber,
-                        history,
-                        replacements,
-                        modes,
+                        output,
                     )
                 } else {
-                    crate::linux_dictation::run_with_history(
-                        &event_path,
-                        None,
-                        &stop,
-                        history,
-                        replacements,
-                        modes,
-                    )
+                    crate::linux_dictation::run_with_history(&event_path, None, &stop, output)
                 }
             });
             let result = result.map_err(|error| format!("{error:#}"));
@@ -761,6 +800,24 @@ impl LinuxDesktopHost {
             self.request_opencode_catalog();
         }
         self.poll_opencode_catalog();
+        if crate::personal_commands::workspace_configured()
+            && let Ok(mut status) = crate::personal_commands::load_status()
+        {
+            crate::personal_commands::include_builtin_transformations(&mut status);
+            if status != self.personal_commands_status {
+                self.personal_commands_status = status;
+            }
+        } else if self.personal_commands_setup.is_none()
+            && self.personal_commands_setup_error.is_none()
+            && self.personal_commands_status.host_state
+                != crate::personal_commands::HostState::NotConfigured
+        {
+            self.personal_commands_status = crate::personal_commands::StatusSnapshot::default();
+            crate::personal_commands::include_builtin_transformations(
+                &mut self.personal_commands_status,
+            );
+        }
+        self.poll_personal_commands_setup();
         if matches!(&self.update, UpdateState::Waiting(at) | UpdateState::Failed(at) if Instant::now() >= *at)
         {
             self.update = UpdateState::Checking(start_update_check());
@@ -1039,7 +1096,90 @@ impl LinuxDesktopHost {
             crate::linux_dictation::LinuxModeRuntime::from_settings(&candidate);
         self.settings = candidate;
         self.settings_error = None;
+        self.refresh_personal_commands_host();
         Ok(())
+    }
+
+    fn refresh_personal_commands_host(&mut self) {
+        let enabled = self.settings.transformations_enabled()
+            || crate::personal_commands::workspace_configured();
+        match (enabled, self.personal_commands.is_some()) {
+            (true, false) => {
+                self.personal_commands = crate::personal_commands::PersonalCommands::start(
+                    crate::commands_engine::CommandConfig::new(),
+                    self.transformations.clone(),
+                );
+            }
+            (false, true) => self.personal_commands = None,
+            _ => {}
+        }
+    }
+
+    fn initialize_personal_commands_workspace(&mut self) {
+        if self.personal_commands_setup.is_some() {
+            return;
+        }
+        let (sender, receiver) = mpsc::sync_channel(1);
+        if let Err(error) = std::thread::Builder::new()
+            .name("linux-personal-commands-setup".into())
+            .spawn(move || {
+                let result = crate::personal_commands::initialize_workspace()
+                    .map_err(|error| format!("{error:#}"));
+                let _ = sender.send(result);
+            })
+        {
+            self.personal_commands_setup_error = Some(format!(
+                "Could not start the custom transformation setup worker: {error}"
+            ));
+            return;
+        }
+        self.personal_commands_setup = Some(receiver);
+        self.personal_commands_setup_error = None;
+        self.personal_commands_status.host_state = crate::personal_commands::HostState::Starting;
+        self.personal_commands_status.last_reload_error = None;
+        crate::personal_commands::include_builtin_transformations(
+            &mut self.personal_commands_status,
+        );
+    }
+
+    fn retry_personal_commands_host(&mut self) {
+        self.personal_commands_setup_error = None;
+        self.personal_commands = None;
+        self.personal_commands_status.host_state = crate::personal_commands::HostState::Starting;
+        self.personal_commands_status.last_reload_error = None;
+        crate::personal_commands::include_builtin_transformations(
+            &mut self.personal_commands_status,
+        );
+        self.refresh_personal_commands_host();
+    }
+
+    fn poll_personal_commands_setup(&mut self) {
+        let result =
+            self.personal_commands_setup
+                .as_ref()
+                .and_then(|receiver| match receiver.try_recv() {
+                    Ok(result) => Some(result),
+                    Err(TryRecvError::Disconnected) => Some(Err(
+                        "Custom transformation setup stopped unexpectedly".into(),
+                    )),
+                    Err(TryRecvError::Empty) => None,
+                });
+        let Some(result) = result else {
+            return;
+        };
+        self.personal_commands_setup = None;
+        match result {
+            Ok(_) => self.retry_personal_commands_host(),
+            Err(error) => {
+                self.personal_commands_setup_error = Some(error.clone());
+                self.personal_commands_status.host_state =
+                    crate::personal_commands::HostState::Unavailable;
+                self.personal_commands_status.last_reload_error = Some(error);
+                crate::personal_commands::include_builtin_transformations(
+                    &mut self.personal_commands_status,
+                );
+            }
+        }
     }
 
     fn set_mode_post_processing(
@@ -1070,6 +1210,38 @@ impl LinuxDesktopHost {
             crate::linux_dictation::LinuxModeRuntime::from_settings(&candidate);
         self.settings = candidate;
         self.settings_error = None;
+        Ok(())
+    }
+
+    fn set_mode_transformations(
+        &mut self,
+        target: ModeTarget,
+        transformations: Vec<String>,
+    ) -> Result<()> {
+        let mut candidate = self.settings.clone();
+        match target {
+            ModeTarget::Global => candidate.dictation_transformations = transformations,
+            ModeTarget::Mode(index) => {
+                let mode = candidate
+                    .modes
+                    .get_mut(index)
+                    .ok_or_else(|| eyre!("dictation mode {index} no longer exists"))?;
+                mode.transformations = transformations;
+            }
+        }
+        candidate.save().map_err(|error| {
+            let message = format!("Could not save mode transformations: {error:#}");
+            self.settings_error = Some(message.clone());
+            eyre!(message)
+        })?;
+        *self
+            .modes
+            .write()
+            .unwrap_or_else(|error| error.into_inner()) =
+            crate::linux_dictation::LinuxModeRuntime::from_settings(&candidate);
+        self.settings = candidate;
+        self.settings_error = None;
+        self.refresh_personal_commands_host();
         Ok(())
     }
 
@@ -1777,6 +1949,12 @@ impl LinuxApp {
                         .update_deadline_from_text(inputs.processing_deadline.read(cx).text());
                     processing
                 },
+                transformations: self
+                    .host
+                    .settings
+                    .modes
+                    .get(index)
+                    .map_or_else(Vec::new, |mode| mode.transformations.clone()),
             })
             .collect()
     }
@@ -1916,6 +2094,8 @@ impl LinuxApp {
                 ModeTarget::Global => {
                     let processing =
                         self.render_linux_mode_processing(ModeTarget::Global, window, cx);
+                    let transformations =
+                        self.render_linux_mode_transformations(ModeTarget::Global, cx);
                     let basics = render_shared_mode_basics(
                         ModeBasicsView::Global {
                             title: "Global",
@@ -1945,12 +2125,17 @@ impl LinuxApp {
                         .child(compact_section_label(tr("TEXT PROCESSING")))
                         .child(replacements)
                         .child(processing)
+                        .child(transformations)
                         .into_any_element()
                 }
                 ModeTarget::Mode(mode_index) => {
                     let processing = self.render_linux_mode_processing(
                         ModeTarget::Mode(mode_index),
                         window,
+                        cx,
+                    );
+                    let transformations = self.render_linux_mode_transformations(
+                        ModeTarget::Mode(mode_index),
                         cx,
                     );
                     let inputs = &self.mode_inputs[mode_index];
@@ -1990,6 +2175,7 @@ impl LinuxApp {
                         .child(compact_section_label(tr("TEXT PROCESSING")))
                         .child(corrections)
                         .child(processing)
+                        .child(transformations)
                         .into_any_element()
                 }
             });
@@ -2012,6 +2198,109 @@ impl LinuxApp {
                 .get(index)
                 .map(|mode| &mode.post_processing),
         }
+    }
+
+    fn mode_transformations(&self, target: ModeTarget) -> Option<&Vec<String>> {
+        match target {
+            ModeTarget::Global => Some(&self.host.settings.dictation_transformations),
+            ModeTarget::Mode(index) => self
+                .host
+                .settings
+                .modes
+                .get(index)
+                .map(|mode| &mode.transformations),
+        }
+    }
+
+    fn render_linux_mode_transformations(
+        &self,
+        target: ModeTarget,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let selected = self
+            .mode_transformations(target)
+            .cloned()
+            .unwrap_or_default();
+        let catalog = self
+            .host
+            .personal_commands_status
+            .transformations
+            .iter()
+            .map(|transformation| TransformationCatalogEntry {
+                id: transformation.id.clone(),
+                name: transformation.name.clone(),
+                description: transformation.description.clone(),
+            })
+            .collect();
+        let configured = crate::personal_commands::workspace_configured();
+        let workspace = if self.host.personal_commands_setup.is_some() {
+            Some(TransformationWorkspaceView {
+                title: "Custom transformations",
+                description: "Preparing the TypeScript workspace and installing its dependencies…",
+                error: None,
+                action_label: None,
+                action: ModeTransformationsWorkspaceAction::Initialize,
+            })
+        } else if let Some(error) = self.host.personal_commands_setup_error.clone() {
+            Some(TransformationWorkspaceView {
+                title: "Custom transformations",
+                description: "The TypeScript workspace could not be prepared.",
+                error: Some(error),
+                action_label: Some("Retry setup"),
+                action: ModeTransformationsWorkspaceAction::Initialize,
+            })
+        } else {
+            match self.host.personal_commands_status.host_state {
+                crate::personal_commands::HostState::Active
+                    if self
+                        .host
+                        .personal_commands_status
+                        .last_reload_error
+                        .is_none() =>
+                {
+                    None
+                }
+                crate::personal_commands::HostState::Starting => {
+                    Some(TransformationWorkspaceView {
+                        title: "Custom transformations",
+                        description: "Loading registered TypeScript transformations…",
+                        error: None,
+                        action_label: None,
+                        action: ModeTransformationsWorkspaceAction::Retry,
+                    })
+                }
+                crate::personal_commands::HostState::NotConfigured => {
+                    Some(TransformationWorkspaceView {
+                        title: "Custom transformations",
+                        description: "Create a TypeScript workspace to define reusable transformations.",
+                        error: None,
+                        action_label: Some("Set up"),
+                        action: ModeTransformationsWorkspaceAction::Initialize,
+                    })
+                }
+                _ => Some(TransformationWorkspaceView {
+                    title: "Custom transformations",
+                    description: "Registered TypeScript transformations are unavailable.",
+                    error: self.host.personal_commands_status.last_reload_error.clone(),
+                    action_label: Some(if configured { "Retry" } else { "Set up" }),
+                    action: if configured {
+                        ModeTransformationsWorkspaceAction::Retry
+                    } else {
+                        ModeTransformationsWorkspaceAction::Initialize
+                    },
+                }),
+            }
+        };
+        render_shared_mode_transformations(
+            ModeTransformationsView {
+                target,
+                selected,
+                catalog,
+                picker_open: self.transformation_picker_open,
+                workspace,
+            },
+            cx,
+        )
     }
 
     fn opencode_model_key(&self, target: ModeTarget) -> Option<String> {
@@ -3136,6 +3425,72 @@ impl HistoryPaneDelegate for LinuxApp {
             HistoryPaneAction::Copy(id) => self.history_pane.copy(id),
             HistoryPaneAction::Delete(id) => self.history_pane.delete(id),
             HistoryPaneAction::Clear => self.history_pane.clear(),
+        }
+        cx.notify();
+    }
+}
+
+impl ModeTransformationsDelegate for LinuxApp {
+    fn handle_mode_transformations_action(
+        &mut self,
+        action: ModeTransformationsAction,
+        cx: &mut Context<Self>,
+    ) {
+        if matches!(action, ModeTransformationsAction::TogglePicker) {
+            self.transformation_picker_open = !self.transformation_picker_open;
+            cx.notify();
+            return;
+        }
+        if let ModeTransformationsAction::Workspace(action) = action {
+            match action {
+                ModeTransformationsWorkspaceAction::Initialize => {
+                    self.host.initialize_personal_commands_workspace();
+                }
+                ModeTransformationsWorkspaceAction::Retry => {
+                    self.host.retry_personal_commands_host();
+                }
+            }
+            cx.notify();
+            return;
+        }
+        let target = match &action {
+            ModeTransformationsAction::Add { target, .. }
+            | ModeTransformationsAction::Remove { target, .. }
+            | ModeTransformationsAction::Move { target, .. } => *target,
+            ModeTransformationsAction::TogglePicker => unreachable!(),
+            ModeTransformationsAction::Workspace(_) => unreachable!(),
+        };
+        let Some(mut transformations) = self.mode_transformations(target).cloned() else {
+            return;
+        };
+        let changed = match action {
+            ModeTransformationsAction::Add { id, .. } => {
+                let registered = self
+                    .host
+                    .personal_commands_status
+                    .transformations
+                    .iter()
+                    .any(|transformation| transformation.id == id);
+                if !registered || transformations.contains(&id) {
+                    false
+                } else {
+                    transformations.push(id);
+                    true
+                }
+            }
+            ModeTransformationsAction::Remove { id, .. } => {
+                let before = transformations.len();
+                transformations.retain(|candidate| candidate != &id);
+                transformations.len() != before
+            }
+            ModeTransformationsAction::Move {
+                id, target_index, ..
+            } => reorder_transformation(&mut transformations, &id, target_index),
+            ModeTransformationsAction::TogglePicker => unreachable!(),
+            ModeTransformationsAction::Workspace(_) => unreachable!(),
+        };
+        if changed {
+            let _ = self.host.set_mode_transformations(target, transformations);
         }
         cx.notify();
     }
