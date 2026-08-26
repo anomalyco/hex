@@ -860,7 +860,11 @@ impl DictationHotkey {
             State::AwaitingSecondTap { released_at }
                 if now.duration_since(released_at) >= DOUBLE_TAP_WINDOW =>
             {
-                self.state = State::Idle;
+                self.state = if trigger_pressed {
+                    State::FirstTapPressed
+                } else {
+                    State::Idle
+                };
                 None
             }
             State::Locked if trigger_pressed => {
@@ -1140,6 +1144,45 @@ mod tests {
             hotkey.process(event(true), now + Duration::from_secs(1)),
             Some(HotkeyAction::Finish)
         );
+    }
+
+    #[test]
+    fn double_tap_only_restarts_with_the_first_press_after_timeout() {
+        let now = capture_time();
+        let binding = RuntimeHotkey {
+            modifiers: crate::app_settings::modifiers_from_flags(SHIFT_KEY_MASK),
+            key_code: Some(49),
+        };
+        for delay in [DOUBLE_TAP_WINDOW, Duration::from_secs(1)] {
+            let mut hotkey = DictationHotkey::with_binding(false, now, 9, true, binding);
+            hotkey.set_double_tap_only(true);
+            let event = |down| InputEvent::Key {
+                code: 49,
+                down,
+                flags: SHIFT_KEY_MASK,
+            };
+
+            assert_eq!(hotkey.process(event(true), now), None);
+            let released_at = now + Duration::from_millis(50);
+            assert_eq!(hotkey.process(event(false), released_at), None);
+
+            let first_press = released_at + delay;
+            assert_eq!(hotkey.process(event(true), first_press), None);
+            assert_eq!(
+                hotkey.process(event(false), first_press + Duration::from_millis(50)),
+                None
+            );
+            assert!(!hotkey.is_recording());
+            assert_eq!(
+                hotkey.process(event(true), first_press + Duration::from_millis(150)),
+                None
+            );
+            assert_eq!(
+                hotkey.process(event(false), first_press + Duration::from_millis(200)),
+                Some(HotkeyAction::Start)
+            );
+            assert!(hotkey.is_recording());
+        }
     }
 
     #[test]

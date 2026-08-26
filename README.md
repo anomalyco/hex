@@ -125,3 +125,4 @@ the native application. Report vulnerabilities through the process in
 [`SECURITY.md`](SECURITY.md).
 
 HEX is available under the [MIT License](LICENSE).
+Vendored icon licenses are listed in [Third-Party Notices](THIRD_PARTY_NOTICES.md).

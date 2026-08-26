@@ -546,12 +546,11 @@ impl DictationCapture {
             return;
         }
         self.ring.drain(
-            ..samples.len().min(
-                self.ring
-                    .len()
-                    .saturating_add(samples.len())
-                    .saturating_sub(capacity),
-            ),
+            ..self
+                .ring
+                .len()
+                .saturating_add(samples.len())
+                .saturating_sub(capacity),
         );
         self.ring.extend(samples);
     }
@@ -843,6 +842,11 @@ mod tests {
         }
 
         capture.start_at(pressed_at);
+        capture.ingest(&vec![32.0; 16_000], origin + Duration::from_secs(32));
+        assert_eq!(capture.ring.len(), 160_000);
+        assert_eq!(capture.ring.front(), Some(&23.0));
+        assert_eq!(capture.ring.back(), Some(&32.0));
+
         let Finish::Transcribe(clip) = capture.finish(origin + Duration::from_secs(31)) else {
             panic!("expected transcription")
         };

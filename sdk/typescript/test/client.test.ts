@@ -1,8 +1,9 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { connect, create, HexError } from "../src/index.js"
+import { makeClient } from "../src/client.js"
 import { helper, options, processIsAlive } from "./support.js"
 
 describe("Promise client", () => {
@@ -110,6 +111,76 @@ describe("Promise client", () => {
     } finally {
       await host.close()
       await rm(directory, { recursive: true, force: true })
+    }
+  })
+
+  it.each([
+    { operation: "finish", status: 409, code: "cancelled" },
+    { operation: "finish", status: 409, code: "capture-discarded" },
+    { operation: "finish", status: 409, code: "transcription failed" },
+    { operation: "cancel", status: 409, code: "dictation-not-active" },
+    { operation: "heartbeat", status: 409, code: "dictation-not-active" },
+    { operation: "heartbeat", status: 404, code: "dictation-not-found" },
+    { operation: "heartbeat", status: 401, code: "unauthorized" },
+  ])("stops heartbeats after terminal $operation error $code", async ({ operation, status, code }) => {
+    vi.useFakeTimers()
+    const lifetime = new AbortController()
+    const transport = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json({ id: 1, ownerToken: "x".repeat(32), sampleRate: 48_000 }))
+      .mockImplementation(async () => Response.json({ code }, { status }))
+    const client = makeClient({
+      type: "ready", url: "http://127.0.0.1:1", token: "fixture", apiVersion: "2", pid: 1,
+    }, transport, lifetime.signal)
+    try {
+      const recording = await client.dictation.start({ source: "test" })
+      if (operation === "heartbeat") {
+        await vi.advanceTimersByTimeAsync(3_000)
+      } else {
+        await expect(operation === "finish" ? recording.finish() : recording.cancel()).rejects.toMatchObject({
+          status, remoteCode: code,
+        })
+      }
+      expect(vi.getTimerCount()).toBe(0)
+      await vi.advanceTimersByTimeAsync(9_000)
+      expect(transport).toHaveBeenCalledTimes(2)
+    } finally {
+      lifetime.abort()
+      vi.useRealTimers()
+    }
+  })
+
+  it.each(["finish", "cancel", "heartbeat"])("keeps heartbeats and retries after transient %s failures", async (operation) => {
+    vi.useFakeTimers()
+    const lifetime = new AbortController()
+    const transcript = { transcript: "test", durationMs: 500 }
+    const transport = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json({ id: 1, ownerToken: "x".repeat(32), sampleRate: 48_000 }))
+      .mockResolvedValueOnce(Response.json({ code: "service-capture-busy" }, { status: 503 }))
+      .mockImplementation(async (url) => String(url).endsWith("/finish")
+        ? Response.json(transcript)
+        : new Response(null, { status: 204 }))
+    const client = makeClient({
+      type: "ready", url: "http://127.0.0.1:1", token: "fixture", apiVersion: "2", pid: 1,
+    }, transport, lifetime.signal)
+    try {
+      const recording = await client.dictation.start({ source: "test" })
+      if (operation === "heartbeat") {
+        await vi.advanceTimersByTimeAsync(3_000)
+      } else {
+        await expect(operation === "finish" ? recording.finish() : recording.cancel()).rejects.toMatchObject({ status: 503 })
+      }
+      expect(vi.getTimerCount()).toBe(1)
+      await vi.advanceTimersByTimeAsync(3_000)
+      expect(transport).toHaveBeenCalledTimes(3)
+      if (operation === "finish") {
+        await expect(recording.finish()).resolves.toEqual(transcript)
+      } else {
+        await recording.cancel()
+      }
+      expect(vi.getTimerCount()).toBe(0)
+    } finally {
+      lifetime.abort()
+      vi.useRealTimers()
     }
   })
 

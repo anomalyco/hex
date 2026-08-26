@@ -1493,12 +1493,20 @@ fn handle_edit_hotkey_action(
 ) -> Result<bool> {
     match action {
         HotkeyAction::Start => {
-            if !crate::dictation_processor::opencode_installed() {
+            if !admit_voice_action(
+                crate::dictation_processor::opencode_installed(),
+                edit_context,
+                || {
+                    dictation.cancel()?;
+                    reset_command_recognizer(dictation, recognizer)
+                },
+            )? {
                 feedback::play(Tone::Error);
                 events.dictation(
                     DictationPhase::Failed("Voice Action requires OpenCode".into()),
                     "",
                 )?;
+                emit_engine_state(events, false, worker, mode, device)?;
                 return Ok(false);
             }
             let promoted = dictation.is_recording();
@@ -1569,6 +1577,19 @@ fn handle_edit_hotkey_action(
         }
         HotkeyAction::PasteLast | HotkeyAction::PasteMeeting => Ok(false),
     }
+}
+
+fn admit_voice_action(
+    installed: bool,
+    edit_context: &mut Option<ContextSnapshot>,
+    cancel_capture: impl FnOnce() -> Result<()>,
+) -> Result<bool> {
+    if installed {
+        return Ok(true);
+    }
+    *edit_context = None;
+    cancel_capture()?;
+    Ok(false)
 }
 
 fn reset_recognizer(recognizer: &mut Option<Moonshine>) -> Result<()> {
@@ -2258,6 +2279,97 @@ mod tests {
             edit.is_recording(),
             edit_action,
         ));
+    }
+
+    #[test]
+    fn rejected_voice_action_cancels_promoted_capture() {
+        use crate::app_settings::RuntimeHotkey;
+        use crate::dictation::DictationCapture;
+        use crate::suppression::InputEvent;
+
+        const OPTION: u64 = 1 << 19;
+        const COMMAND: u64 = 1 << 20;
+        let now = CaptureInstant::from_nanos(60_000_000_000);
+        let mut hotkey = DictationHotkey::new(
+            now,
+            true,
+            42,
+            RuntimeHotkey {
+                modifiers: crate::app_settings::modifiers_from_flags(OPTION),
+                key_code: None,
+            },
+        );
+        let mut edit_hotkey = DictationHotkey::new_without_paste(
+            now,
+            42,
+            RuntimeHotkey {
+                modifiers: crate::app_settings::modifiers_from_flags(OPTION | COMMAND),
+                key_code: None,
+            },
+        );
+        hotkey.suspend();
+        edit_hotkey.suspend();
+        let mut capture = DictationCapture::new(16_000);
+        let option = InputEvent::Flags(OPTION);
+        assert_eq!(edit_hotkey.process(option, now), None);
+        assert_eq!(hotkey.process(option, now), Some(HotkeyAction::Start));
+        capture.start_at(now);
+
+        let chord_at = now + Duration::from_millis(40);
+        let chord = InputEvent::Flags(OPTION | COMMAND);
+        let edit_action = edit_hotkey.process(chord, chord_at);
+        assert_eq!(edit_action, Some(HotkeyAction::Start));
+        let mut pending = None;
+        start_pending_voice_action(&mut pending, chord_at, capture.is_recording(), None);
+        let action = hotkey.process(chord, chord_at).unwrap();
+        assert!(voice_action_owns_action(
+            action,
+            pending.is_some(),
+            edit_hotkey.is_recording(),
+            edit_action,
+        ));
+        hotkey.suspend();
+
+        let rejected_at = chord_at + MINIMUM_HOLD_DURATION;
+        capture.ingest(&[0.5; 5_440], rejected_at);
+        let mut edit_context = Some(ContextSnapshot::default());
+        assert!(
+            !admit_voice_action(false, &mut edit_context, || {
+                capture.cancel();
+                Ok(())
+            })
+            .unwrap()
+        );
+        edit_hotkey.suspend();
+        assert!(!capture.is_recording());
+        assert!(edit_context.is_none());
+
+        let released_at = rejected_at + Duration::from_millis(100);
+        assert_eq!(hotkey.process(InputEvent::Flags(0), released_at), None);
+        assert_eq!(edit_hotkey.process(InputEvent::Flags(0), released_at), None);
+        capture.ingest(&[0.5; 1_600], released_at);
+        assert!(matches!(capture.finish(released_at), Finish::Discard));
+        assert_eq!(
+            hotkey.process(option, released_at + Duration::from_secs(1)),
+            Some(HotkeyAction::Start)
+        );
+    }
+
+    #[test]
+    fn accepted_voice_action_preserves_promoted_capture() {
+        let mut capture = crate::dictation::DictationCapture::new(16_000);
+        let now = CaptureInstant::from_nanos(60_000_000_000);
+        capture.start_at(now);
+        let mut edit_context = None;
+
+        assert!(
+            admit_voice_action(true, &mut edit_context, || {
+                capture.cancel();
+                Ok(())
+            })
+            .unwrap()
+        );
+        assert!(capture.is_recording());
     }
 
     #[test]

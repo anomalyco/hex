@@ -31,7 +31,10 @@ only in debug builds.
 - `dictation_processor`: context-selected, deadline-bounded OpenCode rewrite
   profiles with raw-transcript fallback. The macOS app discovers the `opencode2`
   beta executable, links missing installs to `https://v2.opencode.ai/`, and uses
-  `opencode2 api get` to discover or start its managed service.
+  `opencode2 api get` to discover or start its managed service. Generation uses
+  CLI-managed discovery with the matching owner-only service registration and
+  authenticated loopback HTTP through the system curl; request bodies and
+  credentials use stdin, never argv or new temporary files.
 - `parakeet`: the strict-Metal `transcribe.cpp` adapter plus bounded inference,
   processing, ordered output, paste, last-result, and meeting-delta workers.
 - `apple_speech`: the Swift `SpeechAnalyzer` bridge with per-locale support
@@ -284,9 +287,8 @@ When exports or packaging change, install the packed tarball in a clean consumer
 and import both `@kitlangton/hex` and `@kitlangton/hex/effect`. The release
 workflow is `.github/workflows/release-typescript.yml`; npm trusted publishing
 authorizes `anomalyco/hex` and that exact workflow filename for `npm publish`.
-The source repository is private, so npm trusted publishing must not request a
-Sigstore provenance bundle; npm only accepts GitHub provenance from public
-source repositories.
+The workflow uses npm trusted publishing without requesting a Sigstore
+provenance bundle.
 Use the configured Changesets release command (`cd sdk && bun run release`), not
 direct `npm publish`, after the bootstrap release.
 

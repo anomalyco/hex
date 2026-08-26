@@ -37,6 +37,7 @@ pub struct Parakeet {
 
 static TRANSCRIBE_LOGGING: Once = Once::new();
 const TRANSCRIPTION_SAMPLES_PER_MS: usize = 16;
+const MAX_PENDING_OUTPUTS: usize = 16;
 
 pub enum WorkerEvent {
     ModelFailed(String),
@@ -231,6 +232,17 @@ struct WorkerState {
 }
 
 impl WorkerState {
+    fn next_output_sequence(&self) -> Result<u64, &'static str> {
+        if !self.output_available {
+            return Err("dictation worker is unavailable");
+        }
+        // Count accepted work even after it leaves a channel for ordered buffering.
+        if self.jobs.len() + self.pending_pastes >= MAX_PENDING_OUTPUTS {
+            return Err("dictation queue is full");
+        }
+        Ok(self.next_sequence)
+    }
+
     fn cancel_latest(&self) -> Option<DictationJobId> {
         self.jobs
             .iter()
@@ -585,10 +597,7 @@ impl DictationWorker {
         context: ContextSnapshot,
     ) -> Result<DictationJobId, &'static str> {
         let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
-        if !state.output_available {
-            return Err("dictation worker is unavailable");
-        }
-        let job_id = DictationJobId(state.next_sequence);
+        let job_id = DictationJobId(state.next_output_sequence()?);
         let control = Arc::new(JobControl::default());
         let (_, selection) = crate::app_settings::transcription_selection();
         self.inference_jobs
@@ -642,10 +651,7 @@ impl DictationWorker {
 
     fn submit_paste(&self, kind: PasteKind) -> Result<(), &'static str> {
         let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
-        if !state.output_available {
-            return Err("dictation worker is unavailable");
-        }
-        let sequence = state.next_sequence;
+        let sequence = state.next_output_sequence()?;
         self.output_jobs
             .as_ref()
             .ok_or("dictation worker is unavailable")?
@@ -1297,6 +1303,45 @@ mod tests {
                 .map(|job| job.sequence())
                 .collect::<Vec<_>>(),
             [2]
+        );
+    }
+
+    #[test]
+    fn ordered_waiting_outputs_remain_bounded_after_channel_drain() {
+        let (output_sender, output_receiver) = mpsc::sync_channel(1);
+        let (_, events) = mpsc::channel();
+        let worker = DictationWorker {
+            inference_jobs: None,
+            output_jobs: Some(output_sender),
+            events,
+            state: Arc::new(Mutex::new(WorkerState {
+                output_available: true,
+                next_sequence: 1,
+                jobs: BTreeMap::from([(DictationJobId(0), Arc::new(JobControl::default()))]),
+                pending_pastes: 0,
+            })),
+            inference_worker: None,
+            processor_workers: Vec::new(),
+            output_worker: None,
+        };
+        let mut ordered = OrderedOutputs::default();
+        for _ in 1..MAX_PENDING_OUTPUTS {
+            worker.paste_last().unwrap();
+            assert!(ordered.push(output_receiver.try_recv().unwrap()).is_empty());
+        }
+        assert_eq!(worker.paste_last(), Err("dictation queue is full"));
+        assert_eq!(worker.paste_meeting(), Err("dictation queue is full"));
+        assert_eq!(ordered.waiting.len(), MAX_PENDING_OUTPUTS - 1);
+        assert_eq!(
+            worker.state.lock().unwrap().next_sequence,
+            MAX_PENDING_OUTPUTS as u64
+        );
+
+        worker.state.lock().unwrap().jobs.remove(&DictationJobId(0));
+        worker.paste_last().unwrap();
+        assert_eq!(
+            output_receiver.try_recv().unwrap().sequence(),
+            MAX_PENDING_OUTPUTS as u64
         );
     }
 

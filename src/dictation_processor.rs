@@ -1,8 +1,8 @@
 use std::collections::HashSet;
 use std::ffi::OsStr;
 use std::fs;
-use std::io::Read;
-use std::os::unix::fs::PermissionsExt;
+use std::io::{Read, Write};
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Stdio};
@@ -291,13 +291,11 @@ struct DefaultModelResponse {
 
 #[derive(Clone, Deserialize)]
 struct ModelInfo {
-    #[serde(rename = "modelID")]
-    model_id: String,
+    id: String,
     #[serde(rename = "providerID")]
     provider_id: String,
     name: String,
     enabled: bool,
-    status: String,
     capabilities: ModelCapabilities,
     variants: Vec<ModelVariant>,
 }
@@ -314,7 +312,6 @@ struct ModelVariant {
 
 fn model_is_available(model: &ModelInfo) -> bool {
     model.enabled
-        && model.status == "active"
         && model
             .capabilities
             .output
@@ -334,7 +331,7 @@ fn build_model_catalog(models: Vec<ModelInfo>, default: Option<ModelInfo>) -> Mo
         .into_iter()
         .filter(model_is_available)
         .filter_map(|model| {
-            let key = format!("{}/{}", model.provider_id, model.model_id);
+            let key = format!("{}/{}", model.provider_id, model.id);
             seen.insert(key.clone()).then_some(ModelChoice {
                 key,
                 name: model.name,
@@ -348,7 +345,7 @@ fn build_model_catalog(models: Vec<ModelInfo>, default: Option<ModelInfo>) -> Mo
         })
         .collect();
     if let Some(model) = default.as_ref().filter(|model| model_is_available(model)) {
-        let key = format!("{}/{}", model.provider_id, model.model_id);
+        let key = format!("{}/{}", model.provider_id, model.id);
         if seen.insert(key.clone()) {
             choices.push(ModelChoice {
                 key,
@@ -365,7 +362,7 @@ fn build_model_catalog(models: Vec<ModelInfo>, default: Option<ModelInfo>) -> Mo
     ModelCatalog {
         default_key: default
             .as_ref()
-            .map(|model| format!("{}/{}", model.provider_id, model.model_id)),
+            .map(|model| format!("{}/{}", model.provider_id, model.id)),
         default_name: default.map(|model| model.name),
         models: choices,
     }
@@ -391,6 +388,7 @@ fn opencode_api<T: for<'de> Deserialize<'de>>(path: &str) -> Result<T> {
     command.args(["get", path]).stdin(Stdio::null());
     let output = run_command(
         command,
+        None,
         Duration::from_secs(10),
         path,
         &AtomicBool::new(false),
@@ -497,6 +495,8 @@ fn generate_cancellable(
     let request = Request { prompt, model };
     let data = serde_json::to_string(&request)?;
     let started = Instant::now();
+    let (endpoint, password) =
+        discover_opencode_service(deadline.saturating_sub(started.elapsed()), cancelled)?;
     for attempt in 0..2 {
         let remaining = deadline.saturating_sub(started.elapsed());
         if remaining.is_zero() {
@@ -505,11 +505,8 @@ fn generate_cancellable(
                 deadline.as_secs()
             ));
         }
-        let mut command = opencode_command()?;
-        command
-            .args(["post", "/api/generate", "--data", &data])
-            .stdin(Stdio::null());
-        let output = run_command(command, remaining, "/api/generate", cancelled)?;
+        let (command, input) = generation_command(&endpoint, &password, &data)?;
+        let output = run_command(command, Some(input), remaining, "/api/generate", cancelled)?;
         let status = output.status;
         if !status.success() {
             return Err(eyre!(
@@ -531,6 +528,178 @@ fn generate_cancellable(
         }
     }
     unreachable!("generation loop returns on its second attempt")
+}
+
+fn discover_opencode_service(
+    deadline: Duration,
+    cancelled: &AtomicBool,
+) -> Result<(String, String)> {
+    let started = Instant::now();
+    let workspace = crate::app_paths::opencode_workspace()?;
+    fs::create_dir_all(&workspace)?;
+    let executable = opencode_executable();
+    let run = |args: &[&str]| -> Result<String> {
+        let mut command = Command::new(&executable);
+        command.current_dir(&workspace).args(args);
+        let output = run_command(
+            command,
+            None,
+            deadline.saturating_sub(started.elapsed()),
+            "service discovery",
+            cancelled,
+        )?;
+        if !output.status.success() {
+            // Discovery can return credentials; never include its output in diagnostics.
+            return Err(eyre!(
+                "OpenCode service discovery failed ({})",
+                output.status
+            ));
+        }
+        let mut value = String::from_utf8(output.stdout)
+            .wrap_err("OpenCode service discovery returned invalid UTF-8")?;
+        if value.ends_with('\n') {
+            value.pop();
+        }
+        Ok(value)
+    };
+    #[derive(Deserialize)]
+    struct Health {
+        pid: u32,
+        version: String,
+    }
+    let health: Health = serde_json::from_str(&run(&["api", "get", "/api/health"])?)
+        .map_err(|_| eyre!("OpenCode returned an invalid service health response"))?;
+    let paths = run(&["debug", "paths"])?;
+    let state = paths
+        .lines()
+        .find_map(|line| {
+            let (key, value) = line.split_once(char::is_whitespace)?;
+            (key == "state").then(|| Path::new(value.trim_start()))
+        })
+        .filter(|path| path.is_absolute())
+        .ok_or_else(|| eyre!("OpenCode did not report its state directory"))?;
+    read_service_registration(state, health.pid, &health.version)
+}
+
+fn read_service_registration(state: &Path, pid: u32, version: &str) -> Result<(String, String)> {
+    #[derive(Deserialize)]
+    struct Registration {
+        pid: u32,
+        version: String,
+        url: String,
+        password: String,
+    }
+    let mut found = None;
+    for entry in fs::read_dir(state)?.take(512).flatten() {
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if !name.starts_with("service") || !name.ends_with(".json") {
+            continue;
+        }
+        let Ok(mut file) = fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+            .open(entry.path())
+        else {
+            continue;
+        };
+        let metadata = file.metadata()?;
+        if !metadata.is_file()
+            || metadata.uid() != unsafe { libc::geteuid() }
+            || metadata.permissions().mode() & 0o077 != 0
+            || metadata.len() > 64 * 1024
+        {
+            continue;
+        }
+        let mut bytes = Vec::new();
+        Read::by_ref(&mut file)
+            .take(64 * 1024 + 1)
+            .read_to_end(&mut bytes)?;
+        if bytes.len() > 64 * 1024 {
+            continue;
+        }
+        let Ok(registration) = serde_json::from_slice::<Registration>(&bytes) else {
+            continue;
+        };
+        if registration.pid != pid
+            || registration.version != version
+            || registration.password.is_empty()
+        {
+            continue;
+        }
+        let endpoint = (registration.url, registration.password);
+        if found.as_ref().is_some_and(|previous| previous != &endpoint) {
+            return Err(eyre!(
+                "OpenCode has conflicting active service registrations"
+            ));
+        }
+        found = Some(endpoint);
+    }
+    found.ok_or_else(|| eyre!("OpenCode active service registration is unavailable"))
+}
+
+fn generation_command(endpoint: &str, password: &str, data: &str) -> Result<(Command, Vec<u8>)> {
+    let mut url = url::Url::parse(endpoint).wrap_err("invalid OpenCode service endpoint")?;
+    if url.scheme() != "http"
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.path() != "/"
+        || url.query().is_some()
+        || url.fragment().is_some()
+        || url.port_or_known_default() == Some(0)
+    {
+        return Err(eyre!("OpenCode service must use a loopback HTTP endpoint"));
+    }
+    match url.host() {
+        Some(url::Host::Domain("localhost")) => url.set_host(Some("127.0.0.1"))?,
+        Some(url::Host::Ipv4(ip)) if ip.is_unspecified() => url.set_host(Some("127.0.0.1"))?,
+        Some(url::Host::Ipv6(ip)) if ip.is_unspecified() => url.set_host(Some("[::1]"))?,
+        Some(url::Host::Ipv4(ip)) if ip.is_loopback() => {}
+        Some(url::Host::Ipv6(ip)) if ip.is_loopback() => {}
+        _ => return Err(eyre!("OpenCode service must use a loopback HTTP endpoint")),
+    }
+    url.set_path("/api/generate");
+    let mut input = String::new();
+    for (key, value) in [
+        ("url", url.as_str()),
+        ("user", &format!("opencode:{password}")),
+        ("header", "Content-Type: application/json"),
+        ("data-binary", data),
+    ] {
+        input.push_str(key);
+        input.push_str(" = \"");
+        for ch in value.chars() {
+            match ch {
+                '\\' => input.push_str("\\\\"),
+                '"' => input.push_str("\\\""),
+                '\n' => input.push_str("\\n"),
+                '\r' => input.push_str("\\r"),
+                '\t' => input.push_str("\\t"),
+                ch if ch.is_control() => {
+                    return Err(eyre!("unsupported OpenCode request character"));
+                }
+                ch => input.push(ch),
+            }
+        }
+        input.push_str("\"\n");
+    }
+    let mut command = Command::new("/usr/bin/curl");
+    // Ignore curlrc, proxies, and redirects. Both credentials and body stay off argv and disk.
+    command.args([
+        "--disable",
+        "--silent",
+        "--show-error",
+        "--noproxy",
+        "*",
+        "--proxy",
+        "",
+        "--proto",
+        "=http",
+        "--basic",
+        "--config",
+        "-",
+    ]);
+    Ok((command, input.into_bytes()))
 }
 
 fn retryable_generation_error(message: &str) -> bool {
@@ -566,12 +735,24 @@ struct CommandOutput {
 
 fn run_command(
     mut command: Command,
+    input: Option<Vec<u8>>,
     deadline: Duration,
     operation: &str,
     cancelled: &AtomicBool,
 ) -> Result<CommandOutput> {
+    if cancelled.load(Ordering::Acquire) {
+        return Err(eyre!("opencode2 {operation} was cancelled"));
+    }
+    if deadline.is_zero() {
+        return Err(eyre!("opencode2 {operation} deadline expired"));
+    }
     let mut child = command
         .process_group(0)
+        .stdin(if input.is_some() {
+            Stdio::piped()
+        } else {
+            Stdio::null()
+        })
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
@@ -584,6 +765,10 @@ fn run_command(
         })?;
     let stdout = child.stdout.take().expect("opencode2 stdout must be piped");
     let stderr = child.stderr.take().expect("opencode2 stderr must be piped");
+    let input = input.map(|input| {
+        let mut stdin = child.stdin.take().expect("OpenCode input must be piped");
+        thread::spawn(move || stdin.write_all(&input))
+    });
     let stdout = thread::spawn(move || read_output(stdout));
     let stderr = thread::spawn(move || read_output(stderr));
     let started = Instant::now();
@@ -595,6 +780,9 @@ fn run_command(
                 terminate_process_group(&mut child);
                 let _ = stdout.join();
                 let _ = stderr.join();
+                if let Some(input) = input {
+                    let _ = input.join();
+                }
                 return Err(error).wrap_err("could not inspect opencode2");
             }
         }
@@ -602,12 +790,18 @@ fn run_command(
             terminate_process_group(&mut child);
             let _ = stdout.join();
             let _ = stderr.join();
+            if let Some(input) = input {
+                let _ = input.join();
+            }
             return Err(eyre!("opencode2 {operation} was cancelled"));
         }
         if started.elapsed() >= deadline {
             terminate_process_group(&mut child);
             let _ = stdout.join();
             let _ = stderr.join();
+            if let Some(input) = input {
+                let _ = input.join();
+            }
             return Err(eyre!(
                 "opencode2 {operation} exceeded {} seconds",
                 deadline.as_secs()
@@ -616,6 +810,14 @@ fn run_command(
         thread::sleep(Duration::from_millis(20));
     };
     kill_process_group(child.id());
+    if let Some(input) = input {
+        let result = input
+            .join()
+            .map_err(|_| eyre!("OpenCode input writer panicked"))?;
+        if status.success() {
+            result.wrap_err("could not write OpenCode request")?;
+        }
+    }
     let stdout = stdout
         .join()
         .map_err(|_| eyre!("opencode2 stdout reader panicked"))??;
@@ -908,25 +1110,138 @@ mod tests {
     }
 
     #[test]
-    fn model_catalog_keeps_an_available_default_missing_from_the_model_list() {
-        let catalog = build_model_catalog(
-            Vec::new(),
-            Some(ModelInfo {
-                model_id: "gemini-3.6-flash".into(),
-                provider_id: "opencode".into(),
-                name: "Gemini 3.6 Flash".into(),
-                enabled: true,
-                status: "active".into(),
-                capabilities: ModelCapabilities {
-                    output: vec!["text".into()],
-                },
-                variants: vec![ModelVariant { id: "high".into() }],
-            }),
+    fn model_catalog_uses_wire_catalog_ids_and_preserves_aliases() {
+        let wire_models = ["rewrite-fast", "rewrite-careful", "rewrite-fast"].map(|id| {
+            serde_json::json!({
+                "id": id,
+                "modelID": "shared-deployment",
+                "providerID": "example",
+                "name": id,
+                "enabled": true,
+                "status": "active",
+                "capabilities": { "tools": false, "input": ["text"], "output": ["text"] },
+                "variants": [{ "id": "high" }],
+                "time": { "released": 0 },
+                "cost": [],
+                "limit": { "context": 10000, "output": 1000 }
+            })
+        });
+        let models: ModelsResponse =
+            serde_json::from_value(serde_json::json!({ "data": wire_models })).unwrap();
+        let default: DefaultModelResponse =
+            serde_json::from_value(serde_json::json!({ "data": wire_models[1] })).unwrap();
+        let catalog = build_model_catalog(models.data, default.data);
+
+        assert_eq!(catalog.models.len(), 2);
+        assert_eq!(
+            catalog.default_key.as_deref(),
+            Some("example/rewrite-careful")
         );
+        for (choice, expected_id) in catalog
+            .models
+            .iter()
+            .zip(["rewrite-fast", "rewrite-careful"])
+        {
+            assert_eq!(choice.key, format!("example/{expected_id}"));
+            assert_eq!(choice.variants, ["high"]);
+            let (provider, id) = choice.key.split_once('/').unwrap();
+            let model = Model {
+                provider: provider.into(),
+                id: id.into(),
+                variant: Some("high".into()),
+            };
+            let request = serde_json::to_value(Request {
+                prompt: "Rewrite this.",
+                model: Some(&model),
+            })
+            .unwrap();
+            assert_eq!(
+                request["model"],
+                serde_json::json!({
+                    "providerID": "example", "id": expected_id, "variant": "high"
+                })
+            );
+        }
+
+        let mut missing_catalog_id = wire_models[0].clone();
+        missing_catalog_id.as_object_mut().unwrap().remove("id");
+        assert!(serde_json::from_value::<ModelInfo>(missing_catalog_id).is_err());
+    }
+
+    #[test]
+    fn model_catalog_keeps_an_available_default_missing_from_the_model_list() {
+        let default: DefaultModelResponse = serde_json::from_value(serde_json::json!({
+            "data": {
+                "id": "rewrite-default",
+                "modelID": "shared-deployment",
+                "providerID": "example",
+                "name": "Example Rewrite",
+                "enabled": true,
+                "status": "beta",
+                "capabilities": { "tools": false, "input": ["text"], "output": ["text"] },
+                "variants": [{ "id": "high" }],
+                "time": { "released": 0 },
+                "cost": [],
+                "limit": { "context": 10000, "output": 1000 }
+            }
+        }))
+        .unwrap();
+        let catalog = build_model_catalog(Vec::new(), default.data);
 
         assert_eq!(catalog.models.len(), 1);
-        assert_eq!(catalog.models[0].key, "opencode/gemini-3.6-flash");
+        assert_eq!(catalog.models[0].key, "example/rewrite-default");
         assert_eq!(catalog.models[0].variants, ["high"]);
+        assert_eq!(
+            catalog.default_key.as_deref(),
+            Some("example/rewrite-default")
+        );
+        assert_eq!(catalog.default_name.as_deref(), Some("Example Rewrite"));
+    }
+
+    #[test]
+    fn model_catalog_keeps_available_text_models_regardless_of_release_status() {
+        let wire_models: Vec<_> = [
+            ("active", "active", true, "text"),
+            ("alpha", "alpha", true, "text"),
+            ("beta", "beta", true, "text"),
+            ("deprecated", "deprecated", true, "text"),
+            ("disabled", "active", false, "text"),
+            ("image", "active", true, "image"),
+        ]
+        .into_iter()
+        .map(|(id, status, enabled, output)| {
+            serde_json::json!({
+                "id": id,
+                "modelID": id,
+                "providerID": "example",
+                "name": id,
+                "enabled": enabled,
+                "status": status,
+                "capabilities": { "tools": false, "input": ["text"], "output": [output] },
+                "variants": [],
+                "time": { "released": 0 },
+                "cost": [],
+                "limit": { "context": 10000, "output": 1000 }
+            })
+        })
+        .collect();
+        let models: ModelsResponse =
+            serde_json::from_value(serde_json::json!({ "data": wire_models })).unwrap();
+        let catalog = build_model_catalog(models.data, None);
+
+        assert_eq!(
+            catalog
+                .models
+                .iter()
+                .map(|choice| choice.key.as_str())
+                .collect::<Vec<_>>(),
+            [
+                "example/active",
+                "example/alpha",
+                "example/beta",
+                "example/deprecated"
+            ]
+        );
     }
 
     #[test]
@@ -1023,6 +1338,7 @@ mod tests {
 
         let error = match run_command(
             command,
+            None,
             Duration::from_secs(5),
             "test generation",
             &cancelled,
@@ -1043,6 +1359,7 @@ mod tests {
 
         let _ = run_command(
             command,
+            None,
             Duration::from_millis(500),
             "test descendant",
             &AtomicBool::new(false),
@@ -1062,7 +1379,7 @@ mod tests {
     #[test]
     fn only_model_unavailability_is_retried() {
         assert!(retryable_generation_error(
-            "Model unavailable: openai/gpt-5.6-sol"
+            "Model unavailable: example/rewrite-model"
         ));
         assert!(!retryable_generation_error("Provider request failed"));
         assert!(!retryable_generation_error("processor returned empty text"));
@@ -1077,6 +1394,220 @@ mod tests {
             .expect_err("cancelled retry unexpectedly waited");
 
         assert!(error.to_string().contains("was cancelled"));
+        assert!(started.elapsed() < Duration::from_secs(1));
+    }
+
+    #[test]
+    fn service_discovery_uses_private_active_registration_without_rewriting_config() {
+        let root = std::env::temp_dir().join(format!(
+            "hex-service-registration-{}-{:?}",
+            std::process::id(),
+            thread::current().id()
+        ));
+        let state = root.join("state");
+        fs::create_dir_all(&state).unwrap();
+        let registration = state.join("service.json");
+        let bytes = br#"{"pid":42,"version":"fixture-version","url":"http://127.0.0.1:1234","password":"registered-password"}"#;
+        fs::write(&registration, bytes).unwrap();
+        fs::set_permissions(&registration, fs::Permissions::from_mode(0o600)).unwrap();
+        let config = root.join("config/service.json");
+        for configured in [false, true] {
+            if configured {
+                fs::create_dir_all(config.parent().unwrap()).unwrap();
+                fs::write(&config, br#"{"password":"different-configured-password"}"#).unwrap();
+            }
+            let before = fs::read(&config).ok();
+            assert_eq!(
+                read_service_registration(&state, 42, "fixture-version").unwrap(),
+                ("http://127.0.0.1:1234".into(), "registered-password".into())
+            );
+            assert_eq!(fs::read(&config).ok(), before);
+            assert_eq!(fs::read(&registration).unwrap(), bytes);
+        }
+        assert!(read_service_registration(&state, 43, "fixture-version").is_err());
+        assert!(read_service_registration(&state, 42, "other-version").is_err());
+        fs::set_permissions(&registration, fs::Permissions::from_mode(0o644)).unwrap();
+        assert!(read_service_registration(&state, 42, "fixture-version").is_err());
+        fs::set_permissions(&registration, fs::Permissions::from_mode(0o600)).unwrap();
+        let legacy = state.join("service-legacy.json");
+        fs::copy(&registration, &legacy).unwrap();
+        assert!(read_service_registration(&state, 42, "fixture-version").is_ok());
+        fs::write(
+            &legacy,
+            String::from_utf8_lossy(bytes).replace("registered-password", "conflicting-password"),
+        )
+        .unwrap();
+        assert!(read_service_registration(&state, 42, "fixture-version").is_err());
+        fs::remove_file(&legacy).unwrap();
+        let target = state.join("fixture-registration");
+        fs::rename(&registration, &target).unwrap();
+        std::os::unix::fs::symlink(&target, &registration).unwrap();
+        assert!(read_service_registration(&state, 42, "fixture-version").is_err());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    fn receive_generation_request(stream: &mut std::net::TcpStream) -> Vec<u8> {
+        use std::io::BufRead;
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        let mut reader = std::io::BufReader::new(stream);
+        let mut headers = String::new();
+        loop {
+            let mut line = String::new();
+            assert!(reader.read_line(&mut line).unwrap() > 0);
+            if line == "\r\n" {
+                break;
+            }
+            headers.push_str(&line);
+        }
+        assert!(headers.starts_with("POST /api/generate HTTP/1.1\r\n"));
+        assert!(headers.contains("Authorization: Basic b3BlbmNvZGU6Zml4dHVyZS1wYXNzd29yZA==\r\n"));
+        let length: usize = headers
+            .lines()
+            .find_map(|line| {
+                let (key, value) = line.split_once(':')?;
+                key.eq_ignore_ascii_case("content-length")
+                    .then(|| value.trim().parse().unwrap())
+            })
+            .unwrap();
+        if headers
+            .to_ascii_lowercase()
+            .contains("expect: 100-continue")
+        {
+            reader
+                .get_mut()
+                .write_all(b"HTTP/1.1 100 Continue\r\n\r\n")
+                .unwrap();
+        }
+        let mut body = vec![0; length];
+        reader.read_exact(&mut body).unwrap();
+        body
+    }
+
+    #[test]
+    fn generation_pipes_credentials_and_large_json_without_argv_exposure() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let endpoint = format!("http://{}", listener.local_addr().unwrap());
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let body = receive_generation_request(&mut stream);
+            let response = r#"{"data":{"text":"fixture result"}}"#;
+            write!(
+                stream,
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{response}",
+                response.len()
+            )
+            .unwrap();
+            body
+        });
+        let prompt = format!(
+            "fixture prompt: \"quoted\"\\path\n\r\t\u{00e9}{}",
+            "a".repeat(1024 * 1024)
+        );
+        let data = serde_json::to_string(&Request {
+            prompt: &prompt,
+            model: None,
+        })
+        .unwrap();
+        let (command, input) = generation_command(&endpoint, "fixture-password", &data).unwrap();
+        for arg in command.get_args() {
+            assert!(!arg.to_string_lossy().contains("fixture"));
+            assert!(!arg.to_string_lossy().contains(&prompt));
+        }
+        let output = run_command(
+            command,
+            Some(input),
+            Duration::from_secs(5),
+            "test generation",
+            &AtomicBool::new(false),
+        )
+        .unwrap();
+        assert!(output.status.success());
+        assert_eq!(server.join().unwrap(), data.as_bytes());
+        assert!(
+            matches!(serde_json::from_slice::<Response>(&output.stdout).unwrap(), Response::Success { data } if data.text == "fixture result")
+        );
+    }
+
+    #[test]
+    fn generation_refuses_non_loopback_or_ambiguous_endpoints() {
+        for endpoint in [
+            "https://127.0.0.1:1234",
+            "http://example.com",
+            "http://127.0.0.1.example.com",
+            "http://user:password@127.0.0.1",
+            "http://127.0.0.1/base",
+            "http://127.0.0.1/?query",
+            "http://127.0.0.1/#fragment",
+            "http://127.0.0.1:0",
+            "file:///tmp/fixture",
+        ] {
+            assert!(generation_command(endpoint, "fixture-password", "{}").is_err());
+        }
+        for (endpoint, expected) in [
+            (
+                "http://localhost:1234",
+                "http://127.0.0.1:1234/api/generate",
+            ),
+            ("http://0.0.0.0:1234", "http://127.0.0.1:1234/api/generate"),
+            ("http://[::]:1234", "http://[::1]:1234/api/generate"),
+        ] {
+            let (_, input) = generation_command(endpoint, "fixture-password", "{}").unwrap();
+            assert!(String::from_utf8(input).unwrap().contains(expected));
+        }
+    }
+
+    #[test]
+    fn generation_http_wait_observes_cancellation_and_deadline() {
+        for cancel in [false, true] {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let endpoint = format!("http://{}", listener.local_addr().unwrap());
+            let cancelled = std::sync::Arc::new(AtomicBool::new(false));
+            let flag = cancelled.clone();
+            let server = thread::spawn(move || {
+                let (mut stream, _) = listener.accept().unwrap();
+                receive_generation_request(&mut stream);
+                flag.store(cancel, Ordering::Release);
+                let mut byte = [0];
+                assert_eq!(stream.read(&mut byte).unwrap(), 0);
+            });
+            let (command, input) = generation_command(&endpoint, "fixture-password", "{}").unwrap();
+            let started = Instant::now();
+            let error = run_command(
+                command,
+                Some(input),
+                Duration::from_millis(300),
+                "test generation",
+                &cancelled,
+            )
+            .err()
+            .unwrap();
+            assert!(
+                error
+                    .to_string()
+                    .contains(if cancel { "cancelled" } else { "exceeded" })
+            );
+            server.join().unwrap();
+            assert!(started.elapsed() < Duration::from_secs(2));
+        }
+    }
+
+    #[test]
+    fn blocked_request_pipe_does_not_outlive_the_deadline() {
+        let mut command = Command::new("/bin/sleep");
+        command.arg("5");
+        let started = Instant::now();
+        let error = run_command(
+            command,
+            Some(vec![b'x'; 1024 * 1024]),
+            Duration::from_millis(100),
+            "test input",
+            &AtomicBool::new(false),
+        )
+        .err()
+        .unwrap();
+        assert!(error.to_string().contains("exceeded"));
         assert!(started.elapsed() < Duration::from_secs(1));
     }
 

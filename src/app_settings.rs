@@ -634,8 +634,13 @@ impl AppSettings {
     }
 
     pub fn load() -> Result<Self> {
-        let path = path()?;
-        match fs::read(&path) {
+        let settings = Self::load_from(&path()?, crate::swift_settings_import::import)?;
+        settings.apply_runtime();
+        Ok(settings)
+    }
+
+    fn load_from(path: &std::path::Path, import: impl FnOnce() -> Option<Self>) -> Result<Self> {
+        match fs::read(path) {
             Ok(data) => {
                 let mut settings: Self = serde_json::from_slice(&data)?;
                 let microphone_policy_migrated = settings.normalize_microphone_policy();
@@ -646,31 +651,27 @@ impl AppSettings {
                 crate::transcription_models::validate(&settings.transcription)?;
                 settings.repair_hotkey_conflict();
                 if (transcription_migrated || microphone_policy_migrated)
-                    && let Err(error) = settings.save()
+                    && let Err(error) = settings.write_to(path)
                 {
                     tracing::warn!(%error, "could not persist the replacement transcription model");
                 }
-                settings.apply_runtime();
                 Ok(settings)
             }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                if let Some(mut settings) = crate::swift_settings_import::import() {
+                if let Some(mut settings) = import() {
                     settings.normalize_double_tap_settings();
                     settings.repair_hotkey_conflict();
-                    settings.save()?;
+                    settings.write_to(path)?;
                     tracing::info!("imported preferences from Swift HEX");
                     return Ok(settings);
                 }
-                let settings = Self::default();
-                settings.apply_runtime();
-                Ok(settings)
+                Ok(Self::default())
             }
             Err(error) => Err(error.into()),
         }
     }
 
     pub fn save(&self) -> Result<()> {
-        self.validate_microphone_policy()?;
         let path = path()?;
         self.write_to(&path)?;
         self.apply_runtime();
@@ -678,10 +679,15 @@ impl AppSettings {
     }
 
     fn write_to(&self, path: &std::path::Path) -> Result<()> {
+        self.validate_microphone_policy()?;
         let parent = path
             .parent()
             .ok_or_else(|| eyre!("settings path has no parent"))?;
         fs::create_dir_all(parent)?;
+        if !path.exists() {
+            // New preferences, including Swift imports, are not legacy onboarding completion.
+            crate::onboarding::record_pending_at(parent)?;
+        }
         let temporary = settings_temporary_path(path);
         fs::write(&temporary, serde_json::to_vec_pretty(self)?)?;
         fs::rename(temporary, path)?;
@@ -995,6 +1001,96 @@ mod tests {
     }
 
     #[test]
+    fn swift_import_requires_onboarding_across_settings_reloads() {
+        use crate::onboarding::{completion_recorded_at, record_completion_at};
+        use std::os::unix::fs::PermissionsExt;
+
+        let directory = std::env::temp_dir().join(format!(
+            "hex-swift-onboarding-{}-{}",
+            std::process::id(),
+            SETTINGS_TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed),
+        ));
+        fs::create_dir(&directory).unwrap();
+        let path = directory.join("settings.json");
+        assert!(!completion_recorded_at(&directory));
+
+        // Fixture for the converted preferences returned by the Swift importer.
+        let imported = AppSettings::load_from(&path, || {
+            Some(AppSettings {
+                sound_effects: false,
+                double_tap_lock: false,
+                ..Default::default()
+            })
+        })
+        .unwrap();
+        assert!(!imported.sound_effects);
+        assert!(!imported.double_tap_lock);
+        assert!(path.is_file());
+        assert!(!directory.join("models").exists());
+        assert!(!completion_recorded_at(&directory));
+        assert!(!directory.join("onboarding-complete").exists());
+        assert_eq!(
+            fs::metadata(directory.join("onboarding-pending"))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600,
+        );
+        drop(imported);
+
+        let reloaded = AppSettings::load_from(&path, || panic!("must not import twice")).unwrap();
+        assert!(!reloaded.sound_effects);
+        assert!(!reloaded.double_tap_lock);
+        reloaded.write_to(&path).unwrap();
+        assert!(!completion_recorded_at(&directory));
+        assert!(!directory.join("onboarding-complete").exists());
+
+        record_completion_at(&directory).unwrap();
+        assert!(completion_recorded_at(&directory));
+        drop(reloaded);
+        AppSettings::load_from(&path, || panic!("must not import after completion")).unwrap();
+        assert!(completion_recorded_at(&directory));
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn rewriting_legacy_rust_settings_preserves_onboarding_migration() {
+        let directory = std::env::temp_dir().join(format!(
+            "hex-legacy-onboarding-{}-{}",
+            std::process::id(),
+            SETTINGS_TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed),
+        ));
+        fs::create_dir(&directory).unwrap();
+        let path = directory.join("settings.json");
+        fs::write(&path, b"{}").unwrap();
+
+        let settings =
+            AppSettings::load_from(&path, || panic!("legacy settings must win")).unwrap();
+        settings.write_to(&path).unwrap();
+        assert!(!directory.join("onboarding-pending").exists());
+        assert!(crate::onboarding::completion_recorded_at(&directory));
+        assert!(directory.join("onboarding-complete").is_file());
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn first_settings_write_requires_the_pending_marker() {
+        let directory = std::env::temp_dir().join(format!(
+            "hex-pending-onboarding-{}-{}",
+            std::process::id(),
+            SETTINGS_TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed),
+        ));
+        fs::create_dir(&directory).unwrap();
+        fs::create_dir(directory.join("onboarding-pending")).unwrap();
+        let path = directory.join("settings.json");
+
+        assert!(AppSettings::load_from(&path, || Some(AppSettings::default())).is_err());
+        assert!(!path.exists());
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
     fn legacy_sleep_prevention_setting_is_ignored() {
         let settings: AppSettings =
             serde_json::from_str(r#"{"prevent_system_sleep":false}"#).unwrap();
@@ -1094,7 +1190,7 @@ mod tests {
     fn voice_action_settings_round_trip() {
         let settings = AppSettings {
             voice_action: VoiceActionSettings {
-                model: Some("openai/gpt-5.6-sol".into()),
+                model: Some("example/rewrite-model".into()),
                 variant: Some("fast".into()),
                 deadline_seconds: 12,
             },

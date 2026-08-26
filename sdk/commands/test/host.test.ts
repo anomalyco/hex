@@ -722,6 +722,40 @@ describe("command host", () => {
     })
   })
 
+  it("reports Effect timeouts without losing subsequent invocations", async () => {
+    const timedOut = await Effect.runPromise(Deferred.make<void>())
+    const completed = await Effect.runPromise(Deferred.make<void>())
+    const output: HostOutput[] = []
+    async function* input(): AsyncGenerator<string> {
+      yield `${JSON.stringify({ type: "invoke", invocationId: "timeout", commandId: "timeout", context: {} })}\n`
+      await Effect.runPromise(Deferred.await(timedOut))
+      yield `${JSON.stringify({ type: "invoke", invocationId: "next", commandId: "next", context: {} })}\n`
+      await Effect.runPromise(Deferred.await(completed))
+      yield `${JSON.stringify({ type: "shutdown" })}\n`
+    }
+
+    await runHost({
+      config: {
+        commands: {
+          timeout: { phrases: ["timeout"], run: Effect.never.pipe(Effect.timeout(0)) },
+          next: { phrases: ["next"], run: Effect.void },
+        },
+      },
+      input: input(),
+      write: (frame) => {
+        output.push(frame)
+        if (frame.type === "invocationResult") {
+          Effect.runFork(Deferred.succeed(frame.invocationId === "timeout" ? timedOut : completed, undefined))
+        }
+      },
+    })
+
+    expect(output.filter((frame) => frame.type === "invocationResult")).toEqual([
+      { type: "invocationResult", invocationId: "timeout", result: { type: "failure", message: "TimeoutError" } },
+      { type: "invocationResult", invocationId: "next", result: { type: "success" } },
+    ])
+  })
+
   it("interrupts pending invocations on shutdown", async () => {
     let releaseShutdown: (() => void) | undefined
     const toolWritten = new Promise<void>((resolve) => { releaseShutdown = resolve })

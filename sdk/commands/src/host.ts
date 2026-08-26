@@ -478,7 +478,9 @@ export const evaluateConfig = async (entrypoint: string): Promise<unknown> => {
 }
 
 const errorMessage = (error: unknown): string => {
-  const message = error instanceof Error ? error.message : String(error)
+  const message = error instanceof Error && typeof error.message === "string"
+    ? error.message
+    : String(error)
   return utf8Length(message) <= MAX_ERROR_BYTES
     ? message
     : Buffer.from(message).subarray(0, MAX_ERROR_BYTES).toString("utf8")

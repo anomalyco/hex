@@ -83,7 +83,7 @@ type CfDataRef = *const c_void;
 const CF_STRING_ENCODING_UTF8: u32 = 0x0800_0100;
 const BAD_PASTEBOARD_FLAVOR: i32 = -25133;
 const DUPLICATE_PASTEBOARD_FLAVOR: i32 = -25134;
-const SEND_AFTER_PASTE_DELAY: Duration = Duration::from_millis(100);
+const PASTE_SETTLE_DELAY: Duration = Duration::from_millis(100);
 const SYSTEM_TRANSLATED_FLAVOR: u32 = 1 << 8;
 
 #[link(name = "ApplicationServices", kind = "framework")]
@@ -245,31 +245,35 @@ impl Paster {
         drop(restore);
 
         let clipboard_restore = self.clipboard_restore.clone();
-        thread::spawn(move || {
-            thread::sleep(Duration::from_millis(500));
-            let mut restore = clipboard_restore
-                .lock()
-                .unwrap_or_else(|error| error.into_inner());
-            if restore.generation != generation {
-                return;
-            }
-            let clipboard = NSPasteboard::generalPasteboard();
-            if restore.last_change_count != Some(clipboard.changeCount()) {
-                restore.original = None;
-                restore.last_change_count = None;
-                return;
-            }
-            let Some(previous) = restore.original.take() else {
-                return;
-            };
-            let result = restore_clipboard(&clipboard, &previous);
-            restore.last_change_count = None;
-            if let Err(error) = result {
-                tracing::warn!(%error, "could not restore clipboard after paste");
-            }
-        });
-
-        keyboard::post_command('v')?;
+        complete_paste(
+            || keyboard::post_command('v'),
+            move || {
+                thread::spawn(move || {
+                    thread::sleep(Duration::from_millis(500));
+                    let mut restore = clipboard_restore
+                        .lock()
+                        .unwrap_or_else(|error| error.into_inner());
+                    if restore.generation != generation {
+                        return;
+                    }
+                    let clipboard = NSPasteboard::generalPasteboard();
+                    if restore.last_change_count != Some(clipboard.changeCount()) {
+                        restore.original = None;
+                        restore.last_change_count = None;
+                        return;
+                    }
+                    let Some(previous) = restore.original.take() else {
+                        return;
+                    };
+                    let result = restore_clipboard(&clipboard, &previous);
+                    restore.last_change_count = None;
+                    if let Err(error) = result {
+                        tracing::warn!(%error, "could not restore clipboard after paste");
+                    }
+                });
+            },
+            thread::sleep,
+        )?;
         self.continuation = Some(Continuation {
             revision,
             inserted: text,
@@ -278,8 +282,7 @@ impl Paster {
     }
 
     pub fn paste_and_send(&mut self, text: &str) -> Result<()> {
-        self.paste(text)?;
-        send_after_paste(thread::sleep, keyboard::post_enter)?;
+        send_after_paste(|| self.paste(text), keyboard::post_enter)?;
         self.continuation = None;
         Ok(())
     }
@@ -292,11 +295,25 @@ impl Paster {
     }
 }
 
-fn send_after_paste(
+fn complete_paste(
+    post_paste: impl FnOnce() -> Result<()>,
+    schedule_restore: impl FnOnce(),
     wait: impl FnOnce(Duration),
+) -> Result<()> {
+    let posted = post_paste();
+    schedule_restore();
+    posted?;
+    // Keep the clipboard stable for the target's 100 ms consumption window.
+    // This is not an acknowledgment; longer OS or application stalls can still lose a paste.
+    wait(PASTE_SETTLE_DELAY);
+    Ok(())
+}
+
+fn send_after_paste(
+    paste: impl FnOnce() -> Result<()>,
     post_enter: impl FnOnce() -> Result<()>,
 ) -> Result<()> {
-    wait(SEND_AFTER_PASTE_DELAY);
+    paste()?;
     post_enter()
 }
 
@@ -608,7 +625,7 @@ fn replace_character(text: &str, index: usize, replacement: impl Iterator<Item =
 
 #[cfg(test)]
 mod tests {
-    use std::cell::RefCell;
+    use std::cell::{Cell, RefCell};
 
     use super::*;
     use objc2_foundation::NSData;
@@ -616,13 +633,36 @@ mod tests {
     static PASTEBOARD_TEST: Mutex<()> = Mutex::new(());
 
     #[test]
-    fn send_waits_for_the_target_to_apply_the_paste_before_pressing_enter() {
+    fn sequential_pastes_settle_before_overwrite_and_enter() {
+        let clipboard = Cell::new("");
+        let pending = Cell::new(false);
+        let consumed = RefCell::new(Vec::new());
         let steps = RefCell::new(Vec::new());
+        let paste = |text| {
+            clipboard.set(text);
+            complete_paste(
+                || {
+                    pending.set(true);
+                    steps.borrow_mut().push("post");
+                    Ok(())
+                },
+                || steps.borrow_mut().push("restore"),
+                |delay| {
+                    assert_eq!(delay, PASTE_SETTLE_DELAY);
+                    assert!(pending.replace(false));
+                    consumed.borrow_mut().push(clipboard.get());
+                    steps.borrow_mut().push("settle");
+                },
+            )
+        };
 
+        paste("first").unwrap();
+        assert_eq!(*consumed.borrow(), ["first"]);
         send_after_paste(
-            |delay| steps.borrow_mut().push(("wait", Some(delay))),
+            || paste("second"),
             || {
-                steps.borrow_mut().push(("enter", None));
+                assert_eq!(*consumed.borrow(), ["first", "second"]);
+                steps.borrow_mut().push("enter");
                 Ok(())
             },
         )
@@ -630,8 +670,54 @@ mod tests {
 
         assert_eq!(
             steps.into_inner(),
-            vec![("wait", Some(SEND_AFTER_PASTE_DELAY)), ("enter", None)]
+            [
+                "post", "restore", "settle", "post", "restore", "settle", "enter"
+            ]
         );
+    }
+
+    #[test]
+    fn restoration_is_scheduled_after_a_stalled_post_completes() {
+        let elapsed = Cell::new(Duration::ZERO);
+        let restore_scheduled_at = Cell::new(None);
+
+        complete_paste(
+            || {
+                elapsed.set(Duration::from_secs(1));
+                assert_eq!(restore_scheduled_at.get(), None);
+                Ok(())
+            },
+            || restore_scheduled_at.set(Some(elapsed.get())),
+            |delay| elapsed.set(elapsed.get() + delay),
+        )
+        .unwrap();
+
+        assert_eq!(restore_scheduled_at.get(), Some(Duration::from_secs(1)));
+        assert_eq!(elapsed.get(), Duration::from_secs(1) + PASTE_SETTLE_DELAY);
+    }
+
+    #[test]
+    fn failed_paste_still_schedules_restore_without_settling_or_sending() {
+        let steps = RefCell::new(Vec::new());
+        let result = send_after_paste(
+            || {
+                complete_paste(
+                    || {
+                        steps.borrow_mut().push("post");
+                        Err(eyre!("post failed"))
+                    },
+                    || steps.borrow_mut().push("restore"),
+                    |_| steps.borrow_mut().push("settle"),
+                )
+            },
+            || {
+                steps.borrow_mut().push("enter");
+                Ok(())
+            },
+        );
+
+        assert_eq!(result.unwrap_err().to_string(), "post failed");
+        assert_eq!(steps.into_inner(), ["post", "restore"]);
     }
 
     #[test]

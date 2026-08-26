@@ -441,12 +441,20 @@ export const makeClient = (
     let finishInFlight: Promise<TranscriptionResult> | undefined
     let cancelInFlight: Promise<void> | undefined
     const heartbeat = setInterval(() => {
-      void request(`/dictations/${id}/heartbeat`, { method: "POST", headers }).catch(() => {
-        // A transient heartbeat failure is retried by the next interval; the server lease is authoritative.
-      })
+      void request(`/dictations/${id}/heartbeat`, { method: "POST", headers }).catch(stopHeartbeatOnTerminalError)
     }, 3_000)
-    const stopHeartbeat = () => clearInterval(heartbeat)
+    const stopHeartbeat = () => {
+      clearInterval(heartbeat)
+      lifetime.removeEventListener("abort", stopHeartbeat)
+    }
+    const stopHeartbeatOnTerminalError = (error: unknown) => {
+      // These responses cannot renew this capture; transport and server failures can be retried.
+      if (error instanceof HexError && (error.status === 401 || error.status === 404 || error.status === 409)) {
+        stopHeartbeat()
+      }
+    }
     lifetime.addEventListener("abort", stopHeartbeat, { once: true })
+    if (lifetime.aborted) stopHeartbeat()
     return {
       id,
       ownerToken,
@@ -464,7 +472,10 @@ export const makeClient = (
           finished = result
           stopHeartbeat()
           return result
-        })().finally(() => {
+        })().catch((error: unknown) => {
+          stopHeartbeatOnTerminalError(error)
+          throw error
+        }).finally(() => {
           finishInFlight = undefined
         })
         return finishInFlight
@@ -477,6 +488,9 @@ export const makeClient = (
         ).then(() => {
           cancelled = true
           stopHeartbeat()
+        }).catch((error: unknown) => {
+          stopHeartbeatOnTerminalError(error)
+          throw error
         }).finally(() => {
           cancelInFlight = undefined
         })

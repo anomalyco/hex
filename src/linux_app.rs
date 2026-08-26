@@ -278,7 +278,10 @@ pub fn open(event_path: PathBuf, start_hidden: bool) -> Result<()> {
             })
             .ok();
         cx.activate(true);
-        if start_hidden && let Some(window) = x11_window {
+        if start_hidden
+            && close_to_tray
+            && let Some(window) = x11_window
+        {
             set_x11_window_mapped(window, false);
         }
         cx.on_app_quit(move |_| {
@@ -461,7 +464,7 @@ impl LinuxDesktopHost {
 
     fn start(&mut self) {
         self.listen_when_ready = true;
-        if self.listener_result.is_some() {
+        if self.listener_result.is_some() || self.transcription_preparation.is_some() {
             return;
         }
         let model = crate::transcription_models::definition(self.settings.transcription.model);
@@ -899,7 +902,9 @@ impl DesktopHost for LinuxDesktopHost {
                 self.settings_error = None;
             }
             DesktopAction::SetDoubleTapOnly(_) => {
-                return Err(eyre!("double-tap-only is unavailable on X11"));
+                return Err(color_eyre::eyre::eyre!(
+                    "double-tap-only is unavailable on X11"
+                ));
             }
             DesktopAction::StartListening => self.start(),
             DesktopAction::StopListening => self.stop(),
@@ -1213,5 +1218,55 @@ impl Render for LinuxApp {
             .child(self.render_shared_navigation())
             .child(div().flex_1().h_full().overflow_hidden().child(content))
             .children(model_picker)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::transcription_models::{
+        ModelPreparationStage, TranscriptionModelId, TranscriptionSelection,
+    };
+
+    #[test]
+    fn start_during_preparation_defers_listening_and_stop_clears_the_request() {
+        let settings = crate::linux_settings::LinuxSettings {
+            // An unavailable model prevents a regressed guard from opening audio.
+            transcription: TranscriptionSelection {
+                model: TranscriptionModelId::AppleSpeech,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let mut host = LinuxDesktopHost::new(
+            PathBuf::new(),
+            Arc::new(Mutex::new(None)),
+            settings,
+            None,
+            UpdateState::Unmanaged,
+        );
+        let (_sender, result) = mpsc::sync_channel(1);
+        host.transcription_preparation = Some(TranscriptionPreparation {
+            canceled: Arc::new(AtomicBool::new(false)),
+            model: TranscriptionModelId::default(),
+            progress: Arc::new(AtomicU64::new(0)),
+            result,
+            stage: Arc::new(AtomicU8::new(ModelPreparationStage::Downloading as u8)),
+            worker: None,
+        });
+
+        host.dispatch(DesktopAction::StartListening).unwrap();
+
+        assert!(host.listen_when_ready);
+        assert_eq!(host.status, "Ready");
+        assert!(!host.is_running());
+        assert!(host.listener_worker.is_none());
+        assert!(host.listener_stop.lock().unwrap().is_none());
+        assert!(host.transcription_preparation.is_some());
+
+        host.dispatch(DesktopAction::StopListening).unwrap();
+
+        assert!(!host.listen_when_ready);
+        assert!(host.transcription_preparation.is_some());
     }
 }

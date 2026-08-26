@@ -5505,20 +5505,7 @@ impl AppWindow {
         variant: Option<String>,
         cx: &mut Context<Self>,
     ) {
-        match target {
-            ModelPickerTarget::Mode(selection) => {
-                self.mode_settings_mut(selection).post_processing.variant = variant.clone();
-            }
-            ModelPickerTarget::VoiceAction => {
-                if variant.is_some()
-                    && self.settings.voice_action.model.is_none()
-                    && let ModelCatalogState::Loaded(catalog) = &self.model_catalog
-                {
-                    self.settings.voice_action.model = catalog.default_key.clone();
-                }
-                self.settings.voice_action.variant = variant.clone();
-            }
-        }
+        apply_model_variant(&mut self.settings, target, variant, &self.model_catalog);
         self.save_settings(cx);
     }
 
@@ -7614,6 +7601,39 @@ fn model_presentation(
     })
 }
 
+fn apply_model_variant(
+    settings: &mut AppSettings,
+    target: ModelPickerTarget,
+    variant: Option<String>,
+    catalog: &ModelCatalogState,
+) {
+    let (model, selected_variant) = match target {
+        ModelPickerTarget::Mode(selection) => {
+            let processing = match selection {
+                ModeSelection::Default => {
+                    &mut settings.dictation_processing.default_mode.post_processing
+                }
+                ModeSelection::Custom(index) => {
+                    &mut settings.dictation_processing.modes[index].post_processing
+                }
+            };
+            (&mut processing.model, &mut processing.variant)
+        }
+        ModelPickerTarget::VoiceAction => (
+            &mut settings.voice_action.model,
+            &mut settings.voice_action.variant,
+        ),
+    };
+    if variant.is_some()
+        && model.is_none()
+        && let ModelCatalogState::Loaded(catalog) = catalog
+    {
+        // V2 variants belong to an explicit catalog model, not the floating default.
+        *model = catalog.default_key.clone();
+    }
+    *selected_variant = variant;
+}
+
 fn model_variants(catalog: &ModelCatalog, selected_key: Option<&str>) -> Vec<String> {
     selected_key
         .or(catalog.default_key.as_deref())
@@ -8416,19 +8436,19 @@ mod tests {
     fn selected_model_presents_provider_name_and_resolved_key() {
         let catalog = ModelCatalogState::Loaded(ModelCatalog {
             models: vec![crate::dictation_processor::ModelChoice {
-                key: "opencode/gpt-5.6-terra".into(),
-                name: "GPT 5.6 Terra".into(),
+                key: "opencode/example-rewrite".into(),
+                name: "Example Rewrite".into(),
                 provider: "opencode".into(),
                 variants: Vec::new(),
             }],
-            default_key: Some("opencode/gpt-5.6-terra".into()),
-            default_name: Some("GPT 5.6 Terra".into()),
+            default_key: Some("opencode/example-rewrite".into()),
+            default_name: Some("Example Rewrite".into()),
         });
 
-        let selected = model_presentation(&catalog, Some("opencode/gpt-5.6-terra")).unwrap();
-        assert_eq!(selected.name, "GPT 5.6 Terra");
+        let selected = model_presentation(&catalog, Some("opencode/example-rewrite")).unwrap();
+        assert_eq!(selected.name, "Example Rewrite");
         assert_eq!(selected.provider, "OpenCode");
-        assert_eq!(selected.key, "opencode/gpt-5.6-terra");
+        assert_eq!(selected.key, "opencode/example-rewrite");
         assert!(!selected.is_default);
 
         let default = model_presentation(&catalog, None).unwrap();
@@ -8499,16 +8519,63 @@ mod tests {
     fn default_model_exposes_its_thinking_variants() {
         let catalog = ModelCatalog {
             models: vec![crate::dictation_processor::ModelChoice {
-                key: "opencode/gemini-3.6-flash".into(),
-                name: "Gemini 3.6 Flash".into(),
+                key: "opencode/example-rewrite".into(),
+                name: "Example Rewrite".into(),
                 provider: "opencode".into(),
                 variants: vec!["low".into(), "high".into()],
             }],
-            default_key: Some("opencode/gemini-3.6-flash".into()),
-            default_name: Some("Gemini 3.6 Flash".into()),
+            default_key: Some("opencode/example-rewrite".into()),
+            default_name: Some("Example Rewrite".into()),
         };
 
         assert_eq!(model_variants(&catalog, None), ["low", "high"]);
+    }
+
+    #[test]
+    fn model_variant_selection_resolves_defaults_without_replacing_explicit_models() {
+        let catalog = ModelCatalogState::Loaded(ModelCatalog {
+            models: Vec::new(),
+            default_key: Some("example/rewrite-default".into()),
+            default_name: Some("Example Rewrite".into()),
+        });
+        for (target, path) in [
+            (
+                ModelPickerTarget::Mode(ModeSelection::Default),
+                "/dictation_processing/default_mode/post_processing",
+            ),
+            (
+                ModelPickerTarget::Mode(ModeSelection::Custom(0)),
+                "/dictation_processing/modes/0/post_processing",
+            ),
+            (ModelPickerTarget::VoiceAction, "/voice_action"),
+        ] {
+            for model in [None, Some("example/explicit-selection")] {
+                for variant in [None, Some("high")] {
+                    let mut settings: AppSettings = serde_json::from_value(serde_json::json!({
+                        "dictation_processing": {
+                            "default_mode": { "post_processing": { "model": model, "variant": "low" } },
+                            "modes": [{ "post_processing": { "model": model, "variant": "low" } }]
+                        },
+                        "voice_action": { "model": model, "variant": "low" }
+                    }))
+                    .unwrap();
+                    let mut expected = serde_json::to_value(&settings).unwrap();
+                    let selection = expected.pointer_mut(path).unwrap();
+                    selection["model"] =
+                        serde_json::json!(model.or(variant.map(|_| "example/rewrite-default")));
+                    selection["variant"] = serde_json::json!(variant);
+
+                    apply_model_variant(
+                        &mut settings,
+                        target,
+                        variant.map(str::to_owned),
+                        &catalog,
+                    );
+
+                    assert_eq!(serde_json::to_value(&settings).unwrap(), expected);
+                }
+            }
+        }
     }
 
     #[test]

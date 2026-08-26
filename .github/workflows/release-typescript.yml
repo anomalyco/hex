@@ -25,6 +25,8 @@ jobs:
       - run: npm install --global npm@latest
       - run: bun install --frozen-lockfile
       - uses: changesets/action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           cwd: sdk
           publish: bun run release

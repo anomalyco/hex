@@ -97,11 +97,12 @@ pub fn record_completion() -> color_eyre::Result<()> {
     record_completion_at(&directory)
 }
 
-fn completion_recorded_at(directory: &Path) -> bool {
+pub(crate) fn completion_recorded_at(directory: &Path) -> bool {
     if directory.join("onboarding-complete").is_file() {
         return true;
     }
-    if !directory.join("settings.json").is_file() {
+    if directory.join("onboarding-pending").is_file() || !directory.join("settings.json").is_file()
+    {
         return false;
     }
     if let Err(error) = record_completion_at(directory) {
@@ -110,7 +111,21 @@ fn completion_recorded_at(directory: &Path) -> bool {
     true
 }
 
-fn record_completion_at(directory: &Path) -> color_eyre::Result<()> {
+pub(crate) fn record_pending_at(directory: &Path) -> color_eyre::Result<()> {
+    fs::create_dir_all(directory)?;
+    let file = OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .mode(0o600)
+        .open(directory.join("onboarding-pending"))?;
+    file.set_permissions(fs::Permissions::from_mode(0o600))?;
+    file.sync_all()?;
+    File::open(directory)?.sync_all()?;
+    Ok(())
+}
+
+pub(crate) fn record_completion_at(directory: &Path) -> color_eyre::Result<()> {
     fs::create_dir_all(directory)?;
     let destination = directory.join("onboarding-complete");
     let temporary = directory.join(".onboarding-complete.tmp");
