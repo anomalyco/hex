@@ -10,15 +10,19 @@
   spirv-headers,
   openblas,
   gtk3,
+  gtk-layer-shell,
   libayatana-appindicator,
   alsa-lib,
   alsa-plugins,
   pipewire,
   openssl,
   libxkbcommon,
+  wayland,
   fontconfig,
   freetype,
   curl,
+  wl-clipboard,
+  wtype,
   wrapGAppsHook3,
   autoAddDriverRunpath,
   makeWrapper,
@@ -80,10 +84,12 @@ rustPlatform.buildRustPackage {
     spirv-headers
     openblas
     gtk3
+    gtk-layer-shell
     libayatana-appindicator
     alsa-lib
     openssl
     libxkbcommon
+    wayland
     fontconfig
     freetype
     libx11
@@ -113,11 +119,18 @@ rustPlatform.buildRustPackage {
 
   preFixup = ''
     gappsWrapperArgs+=(
-      --prefix PATH : ${lib.makeBinPath [ curl ]}
+      --prefix PATH : ${
+        lib.makeBinPath [
+          curl
+          wl-clipboard
+          wtype
+        ]
+      }
       --prefix LD_LIBRARY_PATH : ${
         lib.makeLibraryPath [
           vulkan-loader
           libayatana-appindicator
+          gtk-layer-shell
           openblas
           alsa-lib
         ]
