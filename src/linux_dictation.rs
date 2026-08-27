@@ -10,8 +10,8 @@ use color_eyre::eyre::eyre;
 use crate::audio::{AudioInput, AudioInputEvent, CaptureInstant};
 use crate::dictation::{DictationCapture, Finish};
 use crate::events::{DictationPhase, EventLog, TranscriptPhase, VoiceEvent, VoiceState, now_ms};
-use crate::linux_input::{HotkeyEvent, X11HotkeyMonitor};
-use crate::linux_paste::X11Paster;
+use crate::linux_input::{HotkeyEvent, LinuxHotkeyMonitor};
+use crate::linux_paste::LinuxPaster;
 use crate::linux_transcriber::LinuxTranscriber;
 
 const UPDATE_INTERVAL: Duration = Duration::from_millis(20);
@@ -54,12 +54,13 @@ fn run_with_settings(
         None => AudioInput::open(&[])?,
     };
     let hotkey_label = settings.dictation_hotkey.label();
-    let hotkey = X11HotkeyMonitor::start(settings.dictation_hotkey, settings.double_tap_lock)?;
+    let hotkey = LinuxHotkeyMonitor::start(settings.dictation_hotkey, settings.double_tap_lock)?;
+    let indicator = crate::linux_indicator::LinuxIndicator::start();
     let (jobs, job_receiver) = mpsc::sync_channel::<Job>(2);
     let (result_sender, results) = mpsc::channel();
     let worker = thread::spawn(move || {
         let mut transcriber = transcriber;
-        let mut paster = X11Paster::new();
+        let mut paster = LinuxPaster::new();
         while let Ok(job) = job_receiver.recv() {
             let started = Instant::now();
             let result = transcriber
@@ -114,13 +115,14 @@ fn run_with_settings(
 
     while !shutdown.load(Ordering::Relaxed) {
         if let Ok(error) = hotkey.errors.try_recv() {
-            return Err(eyre!("X11 hotkey monitor stopped: {error}"));
+            return Err(eyre!("hotkey monitor stopped: {error}"));
         }
         while let Ok(action) = hotkey.events.try_recv() {
             match action {
                 HotkeyEvent::Start if !recording => {
                     capture.start(captured_through);
                     recording = true;
+                    indicator.set_visible(true);
                     events.dictation(DictationPhase::Started, "")?;
                     emit_state(&mut events, VoiceState::Dictating, &input.device_name)?;
                 }
@@ -133,6 +135,7 @@ fn run_with_settings(
                         &mut events,
                         &mut pending,
                     )?;
+                    indicator.set_visible(pending > 0);
                     emit_state(
                         &mut events,
                         if pending > 0 {
@@ -146,6 +149,7 @@ fn run_with_settings(
                 HotkeyEvent::Cancel if recording => {
                     capture.cancel();
                     recording = false;
+                    indicator.set_visible(false);
                     events.dictation(DictationPhase::Cancelled, "")?;
                     emit_state(&mut events, VoiceState::Listening, &input.device_name)?;
                 }
@@ -167,6 +171,7 @@ fn run_with_settings(
                 }
                 Err(error) => events.dictation(DictationPhase::Failed(error), "")?,
             }
+            indicator.set_visible(recording || pending > 0);
             emit_state(
                 &mut events,
                 if recording {

@@ -22,7 +22,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Open the Linux X11 transcription shell.
+    /// Open the Linux transcription shell.
     App {
         /// Start with only the tray icon visible.
         #[arg(long)]
@@ -34,7 +34,7 @@ enum Command {
         #[arg(long)]
         device: Option<String>,
     },
-    /// Run X11 hotkey dictation and automatic paste until interrupted.
+    /// Run hotkey dictation and automatic paste until interrupted.
     Dictate {
         /// Select an input device by a case-insensitive name fragment.
         #[arg(long)]
@@ -91,7 +91,7 @@ pub fn run(shutdown: &'static AtomicBool) -> Result<()> {
         .command
         .unwrap_or(Command::App { hidden: false })
     {
-        Command::App { hidden } => crate::linux_app::open(event_path, hidden),
+        Command::App { hidden } => crate::linux_app::open(event_path, hidden, shutdown),
         Command::Listen { device } => {
             let _instance = crate::instance::acquire("listener")?;
             listen(&root, &event_path, device.as_deref(), shutdown)

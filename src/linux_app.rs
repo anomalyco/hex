@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::sync::{Arc, Mutex};
-use std::thread::JoinHandle;
+use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use color_eyre::Result;
@@ -99,11 +99,13 @@ struct LinuxDesktopHost {
     transcription_preparation: Option<TranscriptionPreparation>,
     transcription_error: Option<String>,
     update: UpdateState,
+    keep_listening: Arc<AtomicBool>,
 }
 
 struct LinuxApp {
     host: LinuxDesktopHost,
     capturing_hotkey: bool,
+    hotkey_capture: Option<Receiver<Result<crate::linux_settings::LinuxHotkey, String>>>,
     transcription_picker: TranscriptionPickerState,
 }
 
@@ -130,18 +132,28 @@ enum UpdateState {
     Ready(InstalledUpdate),
 }
 
-pub fn open(event_path: PathBuf, start_hidden: bool) -> Result<()> {
+pub fn open(event_path: PathBuf, start_hidden: bool, shutdown: &'static AtomicBool) -> Result<()> {
     let listener_stop = Arc::new(Mutex::new(None));
     let quit_stop = listener_stop.clone();
+    let listener_stop_after_shell = listener_stop.clone();
+    let keep_listening = Arc::new(AtomicBool::new(true));
+    let keep_listening_after_shell = keep_listening.clone();
+    let session = crate::linux_session::LinuxSession::detect();
     let (tray_sender, tray_commands) = mpsc::channel();
-    let tray = match spawn_tray(tray_sender) {
-        Ok(tray) => Some(tray),
-        Err(error) => {
-            tracing::warn!(%error, "system tray is unavailable; closing HEX will quit");
-            None
+    let tray = if session.is_wayland() {
+        tracing::info!("skipping GTK tray on Wayland");
+        None
+    } else {
+        match spawn_tray(tray_sender) {
+            Ok(tray) => Some(tray),
+            Err(error) => {
+                tracing::warn!(%error, "system tray is unavailable; closing Settings leaves dictation running");
+                None
+            }
         }
     };
     let close_to_tray = tray.is_some();
+    tracing::info!(session = session.as_str(), "starting Linux HEX shell");
     let (settings, settings_error) = match crate::linux_settings::LinuxSettings::load() {
         Ok(settings) => (settings, None),
         Err(error) => (
@@ -161,7 +173,9 @@ pub fn open(event_path: PathBuf, start_hidden: bool) -> Result<()> {
                 WindowOptions {
                     window_bounds: Some(WindowBounds::Windowed(bounds)),
                     window_min_size: Some(size(px(MINIMUM_WIDTH), px(MINIMUM_HEIGHT))),
-                    kind: WindowKind::Floating,
+                    kind: WindowKind::Normal,
+                    show: true,
+                    app_id: Some("hex".into()),
                     titlebar: Some(TitlebarOptions {
                         title: Some("HEX".into()),
                         ..Default::default()
@@ -176,13 +190,15 @@ pub fn open(event_path: PathBuf, start_hidden: bool) -> Result<()> {
                             settings.clone(),
                             settings_error.clone(),
                             update,
+                            keep_listening.clone(),
                         ),
                         capturing_hotkey: false,
+                        hotkey_capture: None,
                         transcription_picker: TranscriptionPickerState::Closed,
                     })
                 },
             )
-            .expect("could not open the HEX X11 window");
+            .expect("could not open the HEX window");
         let app = window.update(cx, |_, _, cx| cx.entity()).unwrap();
         let x11_window = find_hex_window().ok();
         app.update(cx, |app, cx| {
@@ -199,6 +215,7 @@ pub fn open(event_path: PathBuf, start_hidden: bool) -> Result<()> {
         })
         .detach();
         let tray_window = window;
+        let keep_listening_on_quit = keep_listening.clone();
         cx.spawn(async move |cx| {
             loop {
                 Timer::after(Duration::from_millis(250)).await;
@@ -228,6 +245,7 @@ pub fn open(event_path: PathBuf, start_hidden: bool) -> Result<()> {
                             });
                         }
                         TrayCommand::Quit => {
+                            keep_listening.store(false, Ordering::Relaxed);
                             let _ = tray_window.update(cx, |app, _, cx| {
                                 let _ = app.host.dispatch(DesktopAction::StopListening);
                                 cx.quit();
@@ -238,6 +256,7 @@ pub fn open(event_path: PathBuf, start_hidden: bool) -> Result<()> {
                 }
                 if app
                     .update(cx, |this, cx| {
+                        this.poll_hotkey_capture();
                         this.host.refresh();
                         if matches!(
                             this.transcription_picker,
@@ -266,29 +285,31 @@ pub fn open(event_path: PathBuf, start_hidden: bool) -> Result<()> {
         .detach();
         window
             .update(cx, |_, window, cx| {
-                if close_to_tray {
+                if close_to_tray && x11_window.is_some() {
                     window.on_window_should_close(cx, move |_, _| {
-                        if let Some(window) = x11_window {
-                            set_x11_window_mapped(window, false);
+                        if let Some(x11_window) = x11_window {
+                            set_x11_window_mapped(x11_window, false);
                         }
                         false
                     });
                 }
-                window.activate_window();
+                if !session.is_wayland() {
+                    window.activate_window();
+                }
             })
             .ok();
-        cx.activate(true);
-        if start_hidden
-            && close_to_tray
-            && let Some(window) = x11_window
-        {
+        if !session.is_wayland() {
+            cx.activate(true);
+        }
+        if start_hidden && close_to_tray && let Some(window) = x11_window {
             set_x11_window_mapped(window, false);
         }
         cx.on_app_quit(move |_| {
-            if let Some(stop) = quit_stop
-                .lock()
-                .unwrap_or_else(|error| error.into_inner())
-                .take()
+            if !keep_listening_on_quit.load(Ordering::Relaxed)
+                && let Some(stop) = quit_stop
+                    .lock()
+                    .unwrap_or_else(|error| error.into_inner())
+                    .take()
             {
                 stop.store(true, Ordering::Relaxed);
             }
@@ -299,6 +320,26 @@ pub fn open(event_path: PathBuf, start_hidden: bool) -> Result<()> {
         })
         .detach();
     });
+    if keep_listening_after_shell.load(Ordering::Relaxed) {
+        while !shutdown.load(Ordering::Relaxed) {
+            if listener_stop_after_shell
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .as_ref()
+                .is_none_or(|stop| stop.load(Ordering::Relaxed))
+            {
+                break;
+            }
+            thread::sleep(Duration::from_millis(250));
+        }
+        if let Some(stop) = listener_stop_after_shell
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .take()
+        {
+            stop.store(true, Ordering::Relaxed);
+        }
+    }
     Ok(())
 }
 
@@ -437,6 +478,7 @@ impl LinuxDesktopHost {
         settings: crate::linux_settings::LinuxSettings,
         error: Option<String>,
         update: UpdateState,
+        keep_listening: Arc<AtomicBool>,
     ) -> Self {
         let mut event_reader = EventReader::open(&event_path);
         let mut activity = DesktopActivity::default();
@@ -459,6 +501,7 @@ impl LinuxDesktopHost {
             transcription_preparation: None,
             transcription_error: None,
             update,
+            keep_listening,
         }
     }
 
@@ -657,9 +700,9 @@ impl LinuxDesktopHost {
 
     fn set_dictation_hotkey(&mut self, shortcut: DesktopShortcut) -> Result<()> {
         if shortcut.function {
-            self.error = Some("The Fn modifier cannot be registered on X11".into());
+            self.error = Some("The Fn modifier cannot be registered on Linux".into());
             return Err(color_eyre::eyre::eyre!(
-                "the Fn modifier cannot be registered on X11"
+                "the Fn modifier cannot be registered on Linux"
             ));
         }
         let binding = crate::linux_settings::LinuxHotkey {
@@ -674,7 +717,7 @@ impl LinuxDesktopHost {
             },
         };
         if let Err(error) = binding.validate().and_then(|()| {
-            crate::linux_input::X11HotkeyMonitor::start(binding.clone(), false).map(drop)
+            crate::linux_input::LinuxHotkeyMonitor::start(binding.clone(), false).map(drop)
         }) {
             self.error = Some(format!("Could not register {}: {error:#}", binding.label()));
             return Err(error);
@@ -775,12 +818,62 @@ impl LinuxDesktopHost {
 }
 
 impl LinuxApp {
+    fn begin_hotkey_capture(&mut self) {
+        if self.host.is_running() {
+            let _ = self.host.dispatch(DesktopAction::StopListening);
+        }
+        self.capturing_hotkey = true;
+        let (sender, receiver) = mpsc::sync_channel(1);
+        std::thread::spawn(move || {
+            let result = crate::linux_input::capture_next_binding()
+                .map_err(|error| format!("{error:#}"));
+            let _ = sender.send(result);
+        });
+        self.hotkey_capture = Some(receiver);
+    }
+
+    fn poll_hotkey_capture(&mut self) {
+        let Some(receiver) = &self.hotkey_capture else {
+            return;
+        };
+        match receiver.try_recv() {
+            Ok(Ok(binding)) => {
+                self.hotkey_capture = None;
+                self.capturing_hotkey = false;
+                let shortcut = DesktopShortcut {
+                    alt: binding.alt,
+                    control: binding.control,
+                    function: false,
+                    key: binding.key,
+                    platform: binding.super_key,
+                    shift: binding.shift,
+                };
+                let _ = self.host.dispatch(DesktopAction::SetDictationShortcut(shortcut));
+                let _ = self.host.dispatch(DesktopAction::StartListening);
+            }
+            Ok(Err(error)) => {
+                self.hotkey_capture = None;
+                self.capturing_hotkey = false;
+                self.host.error = Some(error);
+            }
+            Err(TryRecvError::Empty) => {}
+            Err(TryRecvError::Disconnected) => {
+                self.hotkey_capture = None;
+                self.capturing_hotkey = false;
+            }
+        }
+    }
+
     fn capture_hotkey(&mut self, keystroke: &Keystroke) -> bool {
+        if crate::linux_session::LinuxSession::detect().is_wayland() {
+            return false;
+        }
         if !self.capturing_hotkey {
             return false;
         }
         if keystroke.key == "escape" {
             self.capturing_hotkey = false;
+            self.hotkey_capture = None;
             return true;
         }
         let shortcut = DesktopShortcut {
@@ -814,6 +907,15 @@ fn start_update_check() -> Receiver<Result<Option<InstalledUpdate>, String>> {
 impl Drop for LinuxDesktopHost {
     fn drop(&mut self) {
         self.cancel_transcription_preparation();
+        if let Some(mut preparation) = self.transcription_preparation.take()
+            && let Some(worker) = preparation.worker.take()
+        {
+            let _ = worker.join();
+        }
+        if self.keep_listening.load(Ordering::Relaxed) {
+            let _ = self.listener_worker.take();
+            return;
+        }
         if let Some(stop) = self
             .listener_stop
             .lock()
@@ -823,11 +925,6 @@ impl Drop for LinuxDesktopHost {
             stop.store(true, Ordering::Relaxed);
         }
         self.join_listener();
-        if let Some(mut preparation) = self.transcription_preparation.take()
-            && let Some(worker) = preparation.worker.take()
-        {
-            let _ = worker.join();
-        }
     }
 }
 
@@ -903,7 +1000,7 @@ impl DesktopHost for LinuxDesktopHost {
             }
             DesktopAction::SetDoubleTapOnly(_) => {
                 return Err(color_eyre::eyre::eyre!(
-                    "double-tap-only is unavailable on X11"
+                    "double-tap-only is unavailable on Linux"
                 ));
             }
             DesktopAction::StartListening => self.start(),
@@ -1005,7 +1102,10 @@ impl LinuxApp {
                                         .child(settings_row(
                                             "Microphone",
                                             "Automatically chooses the preferred available input",
-                                            disclosure_button("Automatic"),
+                                            div()
+                                                .text_size(px(12.0))
+                                                .text_color(rgb(TEXT_SOFT))
+                                                .child("Automatic"),
                                         ))
                                         .child(
                                             settings_row(
@@ -1015,17 +1115,18 @@ impl LinuxApp {
                                             )
                                             .border_b_0()
                                             .id("dictation-hotkey-setting")
-                                            .when(running, |row| row.opacity(0.5))
                                             .on_click(
                                                 cx.listener(move |this, _, _, cx| {
-                                                    if !running {
-                                                        this.capturing_hotkey =
-                                                            !this.capturing_hotkey;
-                                                        let _ = this
-                                                            .host
-                                                            .dispatch(DesktopAction::ClearError);
-                                                        cx.notify();
+                                                    if this.capturing_hotkey {
+                                                        this.capturing_hotkey = false;
+                                                        this.hotkey_capture = None;
+                                                    } else {
+                                                        this.begin_hotkey_capture();
                                                     }
+                                                    let _ = this
+                                                        .host
+                                                        .dispatch(DesktopAction::ClearError);
+                                                    cx.notify();
                                                 }),
                                             ),
                                         ),
@@ -1044,17 +1145,19 @@ impl LinuxApp {
                                         )
                                         .border_b_0()
                                         .id("double-tap-setting")
-                                        .when(running, |row| row.opacity(0.5))
                                         .on_click(
                                             cx.listener(move |this, _, _, cx| {
-                                                if !running {
-                                                    let enabled =
-                                                        !this.host.snapshot().double_tap_lock;
-                                                    let _ = this.host.dispatch(
-                                                        DesktopAction::SetDoubleTapLock(enabled),
-                                                    );
-                                                    cx.notify();
+                                                if running {
+                                                    let _ = this
+                                                        .host
+                                                        .dispatch(DesktopAction::StopListening);
                                                 }
+                                                let enabled =
+                                                    !this.host.snapshot().double_tap_lock;
+                                                let _ = this.host.dispatch(
+                                                    DesktopAction::SetDoubleTapLock(enabled),
+                                                );
+                                                cx.notify();
                                             }),
                                         ),
                                     ),
@@ -1085,6 +1188,10 @@ impl LinuxApp {
                                                             )
                                                             .is_ok()
                                                         {
+                                                            this.host.keep_listening.store(
+                                                                false,
+                                                                Ordering::Relaxed,
+                                                            );
                                                             let _ = this.host.dispatch(
                                                                 DesktopAction::StopListening,
                                                             );
@@ -1094,7 +1201,27 @@ impl LinuxApp {
                                                         }
                                                     })),
                                             ))
-                                        }),
+                                        })
+                                        .child(
+                                            settings_row(
+                                                "Quit HEX",
+                                                "Stop dictation and close the application",
+                                                compact_button("Quit")
+                                                    .id("quit-hex")
+                                                    .border_1()
+                                                    .border_color(rgb(LINE))
+                                                    .on_click(cx.listener(|this, _, _, cx| {
+                                                        this.host
+                                                            .keep_listening
+                                                            .store(false, Ordering::Relaxed);
+                                                        let _ = this
+                                                            .host
+                                                            .dispatch(DesktopAction::StopListening);
+                                                        cx.quit();
+                                                    })),
+                                            )
+                                            .border_b_0(),
+                                        ),
                                 ),
                         ),
                     ),
@@ -1244,6 +1371,7 @@ mod tests {
             settings,
             None,
             UpdateState::Unmanaged,
+            Arc::new(AtomicBool::new(false)),
         );
         let (_sender, result) = mpsc::sync_channel(1);
         host.transcription_preparation = Some(TranscriptionPreparation {

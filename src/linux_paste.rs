@@ -1,3 +1,5 @@
+use std::io::Write;
+use std::process::{Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -9,12 +11,18 @@ use x11rb::protocol::xtest;
 use x11rb::rust_connection::RustConnection;
 
 use crate::linux_input::Keymap;
+use crate::linux_session::LinuxSession;
 
 const XK_CONTROL_L: u32 = 0xffe3;
 const XK_SHIFT_L: u32 = 0xffe1;
 const XK_V: u32 = 0x76;
 const KEY_PRESS: u8 = 2;
 const KEY_RELEASE: u8 = 3;
+
+pub enum LinuxPaster {
+    X11(X11Paster),
+    Wayland,
+}
 
 pub struct X11Paster {
     clipboard: Clipboard,
@@ -23,6 +31,23 @@ pub struct X11Paster {
     control: u8,
     shift: u8,
     v: u8,
+}
+
+impl LinuxPaster {
+    pub fn new() -> Result<Self> {
+        if LinuxSession::detect().is_wayland() {
+            Ok(Self::Wayland)
+        } else {
+            Ok(Self::X11(X11Paster::new()?))
+        }
+    }
+
+    pub fn paste(&mut self, text: &str) -> Result<()> {
+        match self {
+            Self::X11(paster) => paster.paste(text),
+            Self::Wayland => paste_wayland(text),
+        }
+    }
 }
 
 impl X11Paster {
@@ -80,5 +105,108 @@ impl X11Paster {
         Err(eyre!(
             "release the dictation shortcut before HEX inserts the transcript"
         ))
+    }
+}
+
+fn paste_wayland(text: &str) -> Result<()> {
+    if text.trim().is_empty() {
+        return Err(eyre!("refusing to paste an empty transcript"));
+    }
+    wait_for_idle_modifiers()?;
+    if type_wayland(text).is_ok() {
+        return Ok(());
+    }
+    copy_wayland(text)?;
+    thread::sleep(Duration::from_millis(80));
+    paste_wayland_keys().wrap_err("could not insert the transcript on Wayland")
+}
+
+fn copy_wayland(text: &str) -> Result<()> {
+    let mut child = Command::new("wl-copy")
+        .args(["--type", "text/plain"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .wrap_err("wl-copy is required to paste on Wayland")?;
+    {
+        let mut stdin = child
+            .stdin
+            .take()
+            .ok_or_else(|| eyre!("wl-copy stdin is unavailable"))?;
+        stdin.write_all(text.as_bytes())?;
+    }
+    let output = child.wait_with_output()?;
+    if !output.status.success() {
+        return Err(eyre!(
+            "wl-copy failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    Ok(())
+}
+
+fn type_wayland(text: &str) -> Result<()> {
+    let status = Command::new("wtype")
+        .arg("--")
+        .arg(text)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .wrap_err("could not start wtype")?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(eyre!("wtype failed"))
+    }
+}
+
+fn paste_wayland_keys() -> Result<()> {
+    if run_silent(
+        "wtype",
+        &["-M", "ctrl", "-k", "v", "-m", "ctrl"],
+    )
+    .is_ok()
+    {
+        return Ok(());
+    }
+    let mut child = Command::new("dotool")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .wrap_err("install wtype or dotool to paste on Wayland")?;
+    child
+        .stdin
+        .as_mut()
+        .ok_or_else(|| eyre!("dotool stdin is unavailable"))?
+        .write_all(b"key ctrl+v\n")?;
+    let output = child.wait_with_output()?;
+    if output.status.success() {
+        return Ok(());
+    }
+    Err(eyre!(
+        "wtype and dotool failed; install wtype for Hyprland paste"
+    ))
+}
+
+fn wait_for_idle_modifiers() -> Result<()> {
+    thread::sleep(Duration::from_millis(80));
+    Ok(())
+}
+
+fn run_silent(program: &str, args: &[&str]) -> Result<()> {
+    let status = Command::new(program)
+        .args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .wrap_err_with(|| format!("could not start {program}"))?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(eyre!("{program} failed"))
     }
 }

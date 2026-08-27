@@ -1,8 +1,8 @@
 # Contributing To HEX
 
-HEX is a native Rust macOS application with an explicit x86_64 Arch Linux X11
-beta. Read [`AGENTS.md`](AGENTS.md) before changing behavior; it defines the
-architecture and invariants.
+HEX is a native Rust macOS application with an explicit x86_64 Linux beta for
+X11 and Wayland. Read [`AGENTS.md`](AGENTS.md) before changing behavior; it
+defines the architecture and invariants.
 
 ## Set Up
 

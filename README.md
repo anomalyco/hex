@@ -110,12 +110,11 @@ Diagnostics are stored at:
 - macOS: `~/Library/Application Support/voice-control/logs/`
 - Linux: `~/.local/share/voice-control/logs/`, or under `XDG_DATA_HOME`
 
-## Linux X11 Beta
+## Linux Beta
 
-The Linux beta targets x86_64 Arch Linux on i3/X11. It supports local hotkey
-dictation, automatic paste, shortcut rebinding, a tray app, and user-local
-updates. It does not support voice commands, meetings, native Wayland, or a
-package-manager install.
+The Linux beta targets x86_64 Linux. On X11 it grabs the shortcut and pastes
+with xtest. On Wayland it observes evdev and pastes with wl-copy and wtype.
+It does not support voice commands or meetings.
 
 See the [Linux installation guide](docs/linux.md) for the verified user-local
 installer, source-build fallback, requirements, and limitations.

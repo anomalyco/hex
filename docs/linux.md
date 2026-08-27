@@ -1,11 +1,13 @@
-# Install The Linux X11 Beta
+# Install The Linux Beta
 
-HEX currently supports one Linux beta target: x86_64 Arch Linux running i3 on
-X11. Audio uses ALSA, including PipeWire systems with ALSA compatibility.
-Inference uses Vulkan when available and can fall back to the CPU.
+HEX currently supports x86_64 Linux. Audio uses ALSA, including PipeWire
+systems with ALSA compatibility. Inference uses Vulkan when available and can
+fall back to the CPU.
 
-The beta does not support voice commands, application or browser context,
-meetings, native Wayland, or package-manager installation.
+On X11, HEX grabs the dictation shortcut and pastes with xtest. On Wayland,
+HEX observes keyboard devices through evdev and pastes with `wl-copy` and
+`wtype`. The beta does not support voice commands, application or browser
+context, or meetings.
 
 ## Install A Published Build
 
@@ -13,7 +15,7 @@ After the first signed Linux release is published, download and inspect the
 installer before running it:
 
 ```sh
-sudo pacman -S --needed alsa-lib curl gtk3 jq libappindicator-gtk3 libxkbcommon \
+sudo pacman -S --needed alsa-lib curl gtk3 gtk-layer-shell jq libappindicator-gtk3 libxkbcommon \
   libxkbcommon-x11 libx11 libxcb openblas openssl util-linux vulkan-icd-loader xxd
 curl --proto '=https' --tlsv1.2 -fsSLO \
   https://pub-089d681d41754031a4aefa7017d8c2fb.r2.dev/install-linux.sh
@@ -40,9 +42,9 @@ Install the native dependencies and, for a source build, the Rust toolchain:
 
 ```sh
 sudo pacman -S --needed base-devel git rustup python alsa-lib curl jq openssl xxd \
-  util-linux gtk3 libappindicator-gtk3 libxkbcommon \
+  util-linux gtk3 gtk-layer-shell libappindicator-gtk3 libxkbcommon \
   libxkbcommon-x11 libx11 libxcb openblas vulkan-headers vulkan-icd-loader \
-  shaderc spirv-headers clang cmake pkgconf
+  shaderc spirv-headers clang cmake pkgconf gtk-layer-shell wl-clipboard wtype
 rustup default stable
 ```
 
@@ -69,6 +71,12 @@ Managed installs check for signed updates at startup and every 24 hours. HEX
 downloads, verifies, and installs an available update, then asks before
 restarting into it. The signed update path is implemented but still awaiting a
 complete cross-version validation on the supported Arch/i3 host.
+
+On Wayland, join the `input` group so HEX can read `/dev/input/event*`, and
+install `wl-clipboard` and `wtype`. Bind the dictation shortcut in the
+compositor if the trigger key would otherwise reach the focused client.
+Closing Settings leaves dictation running. Quit HEX from Settings, or send
+SIGINT, to stop the process.
 
 See [`plans/linux.md`](plans/linux.md) for the engineering contract and remaining
 validation work.

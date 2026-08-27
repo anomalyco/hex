@@ -6,22 +6,22 @@ the target machine.
 
 ## The Supported Contract Is Narrow
 
-HEX currently supports one Linux beta contract:
+HEX currently supports one Linux beta contract, with two session adapters:
 
 | Area | Contract |
 | --- | --- |
 | Distribution | User-local direct install with signed automatic updates |
-| Host | x86_64 Arch Linux rolling |
-| Desktop | i3 on X11 |
+| Host | x86_64 Linux |
+| Desktop | i3 on X11, or a Wayland compositor |
 | Audio | CPAL through ALSA, typically backed by PipeWire |
 | Inference | Vulkan with CPU fallback |
 | Shortcut | Configurable key-containing chord; default `Alt+Space` |
-| Insertion | X11 clipboard and synthetic paste |
+| Insertion | X11 clipboard and xtest, or Wayland wl-copy plus wtype |
 | UI | GPUI settings shell and tray |
 
 The beta does not claim voice commands, application or browser context,
-meetings, native Wayland support, or package-manager installation. XWayland is
-not native Wayland support.
+meetings, or a privileged input helper. XWayland is not native Wayland
+support.
 
 ## What Is Implemented
 
@@ -118,9 +118,9 @@ daemon.
 
 ### 6. Add Distribution Channels Deliberately
 
-The app-managed updater owns only the user-local direct-install layout. A future
-Arch package must leave updates to the package manager. Add architectures,
-distros, or package formats one validated channel at a time.
+The app-managed updater owns only the user-local direct-install layout. A
+future Arch package must leave updates to the package manager. Add
+architectures, distros, or package formats one validated channel at a time.
 
 ## Preserve The Portable Core
 

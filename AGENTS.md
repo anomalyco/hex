@@ -83,8 +83,9 @@ only in debug builds.
   installation, the release startup gate, and opt-in command-model setup.
 - `sparkle`: packaged-app-only Sparkle lifecycle and manual update checks.
 - `linux`, `linux_app`, `linux_dictation`, `linux_input`, `linux_paste`,
-  `linux_settings`, `linux_transcriber`: the X11 beta CLI, GPUI shell and tray,
-  hotkey capture-transcribe-paste loop, X11 grabs and synthetic paste,
+  `linux_session`, `linux_settings`, `linux_transcriber`: the Linux beta CLI,
+  GPUI shell and tray, hotkey capture-transcribe-paste loop, X11 grabs or
+  Wayland evdev observation plus wl-copy/wtype paste, session detection,
   persisted Linux settings, and the `transcribe.cpp` session.
 - `linux_updater`: signed direct-install updates, bounded downloads, atomic
   version activation, and restart handoff for user-local Linux installs.
@@ -341,7 +342,7 @@ native build dependencies with:
 
 ```sh
 sudo pacman -S --needed base-devel git rustup python alsa-lib curl jq openssl xxd \
-  util-linux gtk3 libappindicator-gtk3 libxkbcommon \
+  util-linux gtk3 gtk-layer-shell libappindicator-gtk3 libxkbcommon \
   libxkbcommon-x11 libx11 libxcb openblas vulkan-headers vulkan-icd-loader \
   shaderc spirv-headers clang cmake pkgconf
 rustup default stable
@@ -349,7 +350,9 @@ rustup default stable
 
 For a source install, run `scripts/install-linux.sh`, then `hex model install`.
 The installer owns the user-local version layout, desktop entry, and autostart
-entry; only that managed layout participates in automatic updates.
+entry; only that managed layout participates in automatic updates. On Wayland
+HEX uses evdev and wl-copy/wtype; on X11 it keeps the grab-and-xtest path.
+Do not present XWayland as native Wayland support.
 
 Automatic microphone selection follows the compiled preference order in
 `src/config.rs`, then falls back to the macOS default. A saved microphone takes

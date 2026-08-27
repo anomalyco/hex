@@ -33,7 +33,7 @@ impl Default for LinuxSettings {
     fn default() -> Self {
         Self {
             schema_version: 1,
-            platform: "x11".into(),
+            platform: "linux".into(),
             dictation_hotkey: LinuxHotkey::default(),
             double_tap_lock: true,
             transcription: crate::transcription_models::TranscriptionSelection::default(),
@@ -61,7 +61,10 @@ impl LinuxSettings {
         }
         let settings: Self = serde_json::from_slice(&fs::read(&path)?)
             .wrap_err_with(|| format!("could not parse {}", path.display()))?;
-        if settings.platform != "x11" {
+        if settings.platform != "x11"
+            && settings.platform != "wayland"
+            && settings.platform != "linux"
+        {
             return Err(eyre!(
                 "unsupported Linux settings platform: {}",
                 settings.platform
@@ -73,14 +76,16 @@ impl LinuxSettings {
     }
 
     pub fn save(&self) -> Result<()> {
-        self.dictation_hotkey.validate()?;
-        crate::transcription_models::validate(&self.transcription)?;
+        let mut settings = self.clone();
+        settings.platform = crate::linux_session::LinuxSession::detect().as_str().into();
+        settings.dictation_hotkey.validate()?;
+        crate::transcription_models::validate(&settings.transcription)?;
         let path = settings_path()?;
         let directory = path.parent().unwrap();
         fs::create_dir_all(directory)?;
         let partial = path.with_extension("json.partial");
         let mut file = File::create(&partial)?;
-        serde_json::to_writer_pretty(&mut file, self)?;
+        serde_json::to_writer_pretty(&mut file, &settings)?;
         file.write_all(b"\n")?;
         file.sync_all()?;
         fs::rename(partial, &path)?;
