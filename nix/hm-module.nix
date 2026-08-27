@@ -19,24 +19,24 @@ in
     autostart = lib.mkOption {
       type = lib.types.bool;
       default = false;
-      description = "Start HEX hidden in the tray when the graphical session starts.";
+      description = "Start HEX with the graphical session.";
     };
   };
 
   config = lib.mkIf cfg.enable {
     home.packages = [ cfg.package ];
 
-    xdg.configFile."autostart/HEX.desktop" = lib.mkIf cfg.autostart {
-      text = ''
-        [Desktop Entry]
-        Type=Application
-        Name=HEX
-        Comment=Local voice dictation
-        Exec=${lib.getExe cfg.package} app --hidden
-        Icon=audio-input-microphone
-        Terminal=false
-        X-GNOME-Autostart-enabled=true
-      '';
+    systemd.user.services.hex = lib.mkIf cfg.autostart {
+      Unit = {
+        Description = "HEX local voice dictation";
+        After = [ "graphical-session.target" ];
+        PartOf = [ "graphical-session.target" ];
+      };
+      Service = {
+        ExecStart = "${lib.getExe cfg.package} app --hidden";
+        Restart = "on-failure";
+      };
+      Install.WantedBy = [ "graphical-session.target" ];
     };
   };
 }
