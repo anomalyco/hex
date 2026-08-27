@@ -34,7 +34,7 @@ use crate::desktop_transcription_picker::{
     transcription_selection_is_active,
 };
 use crate::desktop_ui::{
-    CANVAS, COMPACT_MULTILINE_INPUT_HEIGHT, CONTROL_HEIGHT, FAINT, LINE, MUTED, NEGATIVE,
+    ACCENT, CANVAS, COMPACT_MULTILINE_INPUT_HEIGHT, CONTROL_HEIGHT, FAINT, LINE, MUTED, NEGATIVE,
     NavigationIcon, PANE_CONTENT_WIDTH, PANE_LIST_WIDTH, SECTION_GAP, SIDEBAR_WIDTH, SURFACE,
     SURFACE_HOVER, SURFACE_SELECTED, TEXT, TEXT_INPUT_HEIGHT, TEXT_SOFT, compact_button,
     compact_header_plus_button, compact_panel, compact_panel_header, compact_plus_button,
@@ -249,6 +249,7 @@ pub struct AppWindowPreview {
     pub select_global_mode: bool,
     pub opencode_unavailable: bool,
     pub permissions_missing: bool,
+    pub model_missing: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1027,6 +1028,9 @@ impl AppWindow {
         let preview_picker = preview
             .as_ref()
             .and_then(|preview| preview.transcription_picker.as_ref());
+        let preview_model_missing = preview
+            .as_ref()
+            .is_some_and(|preview| preview.model_missing);
         let preview_model_state = preview_picker.map(|(_, state)| *state);
         let preview_downloading = preview_picker.and_then(|(language, state)| {
             matches!(state, PreviewModelState::Downloading)
@@ -1050,7 +1054,7 @@ impl AppWindow {
                 input_monitoring: PermissionState::NeedsSettings,
                 accessibility: PermissionState::NeedsSettings,
                 command_model: true,
-                transcription_model: true,
+                transcription_model: !preview_model_missing,
             }
         } else if preview_mode {
             SetupStatus {
@@ -1058,7 +1062,7 @@ impl AppWindow {
                 input_monitoring: PermissionState::Ready,
                 accessibility: PermissionState::Ready,
                 command_model: true,
-                transcription_model: true,
+                transcription_model: !preview_model_missing,
             }
         } else {
             crate::onboarding::status_with_transcription_model(selected_model.is_some_and(
@@ -1160,7 +1164,7 @@ impl AppWindow {
                     | PreviewModelState::Downloading
                     | PreviewModelState::Error,
                 ) => Some(false),
-                Some(PreviewModelState::Actual) | None => None,
+                Some(PreviewModelState::Actual) | None => preview_model_missing.then_some(false),
             },
             processing_inputs,
             voice_action_inputs,
@@ -1479,6 +1483,7 @@ impl AppWindow {
             || !self.setup_visible
                 && self.recognition_start.is_none()
                 && self.pane != Pane::Settings
+                && self.setup_status.transcription_model
         {
             return false;
         }
@@ -1587,6 +1592,8 @@ impl AppWindow {
     fn apply_transcription_selection(&mut self, selection: TranscriptionSelection) {
         if self.preview {
             self.settings.transcription = selection;
+            self.transcription_preview_installed = Some(true);
+            self.setup_status.transcription_model = true;
             self.transcription_picker_language = None;
             self.transcription_picker_error = None;
             return;
@@ -1594,6 +1601,7 @@ impl AppWindow {
         let previous = std::mem::replace(&mut self.settings.transcription, selection);
         match self.settings.save() {
             Ok(()) => {
+                self.permission_refresh_at = Instant::now();
                 self.transcription_picker_language = None;
                 self.transcription_picker_error = None;
                 self.settings_load_error = None;
@@ -3006,6 +3014,57 @@ impl AppWindow {
         )
     }
 
+    fn render_model_notice(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        if self.setup_visible {
+            return None;
+        }
+        let (title, description) =
+            dictation_model_notice(self.setup_status, self.transcription_downloading.is_some())?;
+        Some(
+            div()
+                .id("dictation-model-notice")
+                .w_full()
+                .flex()
+                .justify_center()
+                .flex_shrink_0()
+                .px_8()
+                .py_4()
+                .bg(rgb(SURFACE))
+                .border_b_1()
+                .border_color(rgb(LINE))
+                .child(
+                    div()
+                        .w_full()
+                        .max_w(px(PANE_CONTENT_WIDTH))
+                        .flex()
+                        .items_center()
+                        .gap_4()
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .border_l_2()
+                                .border_color(rgb(ACCENT))
+                                .pl_3()
+                                .child(settings_copy(title, description)),
+                        )
+                        .child(
+                            compact_button("Choose model")
+                                .id("choose-required-model")
+                                .flex_shrink_0()
+                                .bg(rgb(ACCENT))
+                                .text_color(rgb(TEXT))
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.transcription_picker_language =
+                                        Some(this.settings.transcription.language.clone());
+                                    cx.notify();
+                                })),
+                        ),
+                )
+                .into_any_element(),
+        )
+    }
+
     fn perform_permission_action(&mut self, warning: PermissionWarning) {
         match warning.action {
             PermissionAction::RequestMicrophone => crate::onboarding::request_microphone(),
@@ -3542,6 +3601,7 @@ impl AppWindow {
             ));
         }
         let models_ready = status.command_model && status.transcription_model;
+        let model_notice = dictation_model_notice(status, self.transcription_downloading.is_some());
         let models = if models_ready {
             setup_ready_badge()
         } else {
@@ -3616,12 +3676,16 @@ impl AppWindow {
                             .child(setup_group_label("LOCAL MODELS"))
                             .child(
                                 div().border_t_1().border_color(rgb(LINE)).child(setup_row(
-                                    if self.settings.commands_enabled {
+                                    if let Some((title, _)) = model_notice {
+                                        title
+                                    } else if self.settings.commands_enabled {
                                         "Local speech models"
                                     } else {
                                         "Local dictation model"
                                     },
-                                    if self.settings.commands_enabled {
+                                    if let Some((_, description)) = model_notice {
+                                        description
+                                    } else if self.settings.commands_enabled {
                                         "Command recognition and the selected dictation model."
                                     } else {
                                         "The selected model transcribes speech entirely on this Mac."
@@ -7093,6 +7157,7 @@ impl DesktopHost for AppWindow {
 
 impl Render for AppWindow {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let model_notice = self.render_model_notice(cx);
         let content = match self.pane {
             Pane::HudLab => self.render_hud_lab(cx),
             Pane::Meetings => self.render_meetings(cx),
@@ -7156,7 +7221,17 @@ impl Render for AppWindow {
                 window.activate_window();
             }))
             .child(self.render_navigation(cx))
-            .child(div().flex_1().h_full().overflow_hidden().child(content))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .h_full()
+                    .flex()
+                    .flex_col()
+                    .overflow_hidden()
+                    .children(model_notice)
+                    .child(div().flex_1().min_h_0().child(content)),
+            )
             .children(setup)
             .children(transcription_picker)
             .children(mode_context_menu)
@@ -7819,17 +7894,43 @@ fn apply_mode_inputs(inputs: &ModeInputs, mode: &mut DictationMode, is_default: 
         .max(1);
 }
 
+fn dictation_model_notice(
+    status: SetupStatus,
+    preparing: bool,
+) -> Option<(&'static str, &'static str)> {
+    if status.transcription_model {
+        return None;
+    }
+    Some(if preparing {
+        (
+            "Preparing speech model",
+            "Dictation will be available once your local speech model is ready.",
+        )
+    } else {
+        (
+            "Download a speech model to start dictating",
+            "The dictation shortcut needs a local speech model. Choose one to download first.",
+        )
+    })
+}
+
 fn setup_row(title: &'static str, description: &'static str, control: AnyElement) -> Div {
     div()
         .w_full()
-        .h(px(70.0))
+        .min_h(px(70.0))
+        .py_3()
         .flex()
         .items_center()
-        .justify_between()
+        .gap_4()
         .border_b_1()
         .border_color(rgb(LINE))
-        .child(settings_copy(title, description))
-        .child(control)
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .child(settings_copy(title, description)),
+        )
+        .child(div().flex_shrink_0().child(control))
 }
 
 fn setup_group_label(label: &'static str) -> Div {
@@ -8250,6 +8351,37 @@ mod tests {
 
     use super::*;
     use crate::personal_commands::StatusExecution;
+
+    #[test]
+    fn missing_dictation_model_has_a_notice_even_with_all_permissions_granted() {
+        let mut status = SetupStatus {
+            microphone: PermissionState::Ready,
+            input_monitoring: PermissionState::Ready,
+            accessibility: PermissionState::Ready,
+            command_model: true,
+            transcription_model: false,
+        };
+        let (title, description) = dictation_model_notice(status, false).unwrap();
+        assert_eq!(title, "Download a speech model to start dictating");
+        assert!(description.contains("dictation shortcut"));
+        assert!(!status.ready());
+
+        assert_eq!(
+            dictation_model_notice(status, true).unwrap().0,
+            "Preparing speech model"
+        );
+        // A failed or cancelled preparation must expose the download action again.
+        assert_eq!(dictation_model_notice(status, false).unwrap().0, title);
+
+        status.transcription_model = true;
+        assert!(dictation_model_notice(status, false).is_none());
+        assert!(dictation_model_notice(status, true).is_none());
+
+        // Permission and opt-in command-model failures have their own setup UI.
+        status.microphone = PermissionState::NeedsRequest;
+        status.command_model = false;
+        assert!(dictation_model_notice(status, false).is_none());
+    }
 
     #[test]
     fn inactive_hotkey_controls_keep_their_idle_width() {
