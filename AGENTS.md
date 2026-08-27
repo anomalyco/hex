@@ -349,7 +349,9 @@ rustup default stable
 
 For a source install, run `scripts/install-linux.sh`, then `hex model install`.
 The installer owns the user-local version layout, desktop entry, and autostart
-entry; only that managed layout participates in automatic updates.
+entry; only that managed layout participates in automatic updates. A Nix
+flake packages the same Linux binary; it does not participate in app-managed
+updates.
 
 Automatic microphone selection follows the compiled preference order in
 `src/config.rs`, then falls back to the macOS default. A saved microphone takes

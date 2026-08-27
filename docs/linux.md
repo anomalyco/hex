@@ -5,7 +5,8 @@ X11. Audio uses ALSA, including PipeWire systems with ALSA compatibility.
 Inference uses Vulkan when available and can fall back to the CPU.
 
 The beta does not support voice commands, application or browser context,
-meetings, native Wayland, or package-manager installation.
+meetings, native Wayland, or package-manager installation. A Nix flake
+packages the same X11 binary for `nix build` / `nix run`.
 
 ## Install A Published Build
 
@@ -58,6 +59,22 @@ cd hex
 
 Do not run the installer as root. It installs a user-local binary, desktop
 launcher, and autostart entry.
+
+## Install With Nix
+
+The flake packages the Linux X11 beta. It does not change the desktop
+contract. The Nix package is not the user-local managed layout, so HEX does
+not apply its signed in-app updater.
+
+```sh
+nix build
+nix run . -- model install
+nix run . -- app
+```
+
+`nix develop` provides the native build inputs. Optional NixOS and Home
+Manager modules are `hex.nixosModules.hex` and `hex.homeManagerModules.hex`.
+After install, run `hex model install` once, then `hex app`.
 
 ## Dictate
 

@@ -6,7 +6,7 @@ override shipped behavior.
 ## User Guides
 
 - [`../README.md`](../README.md): install and use HEX on macOS.
-- [`linux.md`](linux.md): install the supported Linux X11 beta from source.
+- [`linux.md`](linux.md): install the supported Linux X11 beta from source or Nix.
 - [`../ios/README.md`](../ios/README.md): build and test the iOS prototype.
 
 ## Engineering Reference

@@ -115,10 +115,10 @@ Diagnostics are stored at:
 The Linux beta targets x86_64 Arch Linux on i3/X11. It supports local hotkey
 dictation, automatic paste, shortcut rebinding, a tray app, and user-local
 updates. It does not support voice commands, meetings, native Wayland, or a
-package-manager install.
+package-manager install. A Nix flake packages the same X11 binary.
 
 See the [Linux installation guide](docs/linux.md) for the verified user-local
-installer, source-build fallback, requirements, and limitations.
+installer, source-build fallback, Nix flake, requirements, and limitations.
 
 ## Contributing
 

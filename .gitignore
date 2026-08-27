@@ -1,4 +1,6 @@
 /target
+/result
+/result-*
 /.venv
 /logs
 /perf/transcription-corpus

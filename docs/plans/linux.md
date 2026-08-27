@@ -118,9 +118,11 @@ daemon.
 
 ### 6. Add Distribution Channels Deliberately
 
-The app-managed updater owns only the user-local direct-install layout. A future
-Arch package must leave updates to the package manager. Add architectures,
-distros, or package formats one validated channel at a time.
+The app-managed updater owns only the user-local direct-install layout. A
+future Arch package must leave updates to the package manager. The Nix flake
+is a source package of the same X11 beta and does not participate in
+app-managed updates. Add architectures, distros, or package formats one
+validated channel at a time.
 
 ## Preserve The Portable Core
 

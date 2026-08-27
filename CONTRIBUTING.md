@@ -14,7 +14,8 @@ On macOS:
 ```
 
 Linux dependencies and installation are documented in
-[`docs/linux.md`](docs/linux.md).
+[`docs/linux.md`](docs/linux.md). On Nix, `nix develop` provides the native
+build inputs used by the flake.
 
 ## Validate Changes
 
