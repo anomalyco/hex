@@ -23,9 +23,8 @@ override shipped behavior.
 
 ## Active Plans
 
-- [`plans/swift-to-rust-migration.md`](plans/swift-to-rust-migration.md): move
-  the public Swift population and current Rust installs onto one permanent HEX
-  identity, data root, and R2 update channel.
+- [`plans/swift-app-handoff.md`](plans/swift-app-handoff.md): a manual download
+  handoff from Swift, without data import or automatic replacement.
 - [`plans/shared-desktop-ui.md`](plans/shared-desktop-ui.md): converge the macOS
   and Linux GPUI applications on one capability-driven product shell.
 - [`plans/typescript-sdk.md`](plans/typescript-sdk.md): private SDK packaging,

@@ -2,37 +2,32 @@
 set -eu
 
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+team_id=${VOICE_CONTROL_TEAM_ID:?Set VOICE_CONTROL_TEAM_ID to the Anomaly Apple Developer Team ID}
+identity=${VOICE_CONTROL_CODESIGN_IDENTITY:-}
+if [ -z "$identity" ]; then
+  identity=$(security find-identity -v -p codesigning | sed -n "s/.*\"\(Developer ID Application:.*($team_id)\)\"/\1/p" | head -1)
+fi
+if [ -z "$identity" ]; then
+  echo "No Developer ID signing identity found for team $team_id. Set VOICE_CONTROL_CODESIGN_IDENTITY." >&2
+  exit 1
+fi
+case "$identity" in
+  "Developer ID Application:"*"($team_id)") ;;
+  *)
+    echo "Signing identity is not a Developer ID Application identity for team $team_id." >&2
+    exit 1
+    ;;
+esac
 icon_output="$root/target/AppIcon.assets"
 icon_info="$root/target/AppIcon-info.plist"
 sparkle_dir=$("$root/scripts/setup-sparkle.sh")
 version=${HEX_VERSION:-$(cargo metadata --no-deps --format-version 1 --manifest-path "$root/Cargo.toml" | jq -r '.packages[0].version')}
 build_number=${HEX_BUILD_NUMBER:-$(printf '%s\n' "$version" | awk -F. '{ print ($1 * 10000) + ($2 * 100) + $3 }')}
-app_identity=${HEX_APP_IDENTITY:-auto}
+bundle_name=Hex.app
+bundle_id=ly.anoma.Hex
+executable_name=hex
 
-if [ "$app_identity" = "auto" ]; then
-  case "$version" in
-    0.*|1.*|2.0.*) app_identity=current ;;
-    *) app_identity=permanent ;;
-  esac
-fi
-case "$app_identity" in
-  current)
-    bundle_name=HEX.app
-    bundle_id=com.kitlangton.voice-control.agent
-    executable_name=voice-control-watch
-    ;;
-  permanent)
-    bundle_name=Hex.app
-    bundle_id=com.kitlangton.Hex
-    executable_name=hex
-    ;;
-  *)
-    echo "HEX_APP_IDENTITY must be auto, current, or permanent." >&2
-    exit 1
-    ;;
-esac
-
-bundle="$root/target/app-$app_identity/$bundle_name"
+bundle="$root/target/app/$bundle_name"
 executable="$bundle/Contents/MacOS/$executable_name"
 frameworks="$bundle/Contents/Frameworks"
 
@@ -41,6 +36,7 @@ rm -rf "$bundle"
 mkdir -p "$bundle/Contents/MacOS" "$bundle/Contents/Resources" "$frameworks"
 cp "$root/target/release/voice-control" "$executable"
 cp "$root/app/Info.plist" "$bundle/Contents/Info.plist"
+cp "$root/LICENSE" "$root/THIRD_PARTY_NOTICES.md" "$bundle/Contents/Resources/"
 (cd "$root/sdk/commands" && bun run build)
 mkdir -p "$bundle/Contents/Resources/commands-sdk"
 cp "$root/sdk/commands/package.json" "$bundle/Contents/Resources/commands-sdk/"
@@ -73,23 +69,6 @@ fi
 cp "$moonshine_dir/libmoonshine.dylib" "$frameworks/"
 cp "$moonshine_dir/libonnxruntime.1.23.2.dylib" "$frameworks/"
 /usr/bin/ditto "$sparkle_dir/Sparkle.framework" "$frameworks/Sparkle.framework"
-
-identity=${VOICE_CONTROL_CODESIGN_IDENTITY:-}
-team_id=${VOICE_CONTROL_TEAM_ID:-QC99C9JE59}
-if [ -z "$identity" ]; then
-  identity=$(security find-identity -v -p codesigning | sed -n "s/.*\"\(Developer ID Application:.*($team_id)\)\"/\1/p" | head -1)
-fi
-if [ -z "$identity" ]; then
-  echo "No Developer ID signing identity found for team $team_id. Set VOICE_CONTROL_CODESIGN_IDENTITY." >&2
-  exit 1
-fi
-case "$identity" in
-  *"($team_id)"*) ;;
-  *)
-    echo "Signing identity does not belong to expected team $team_id: $identity" >&2
-    exit 1
-    ;;
-esac
 
 sparkle="$frameworks/Sparkle.framework/Versions/B"
 codesign --force --timestamp --options runtime --sign "$identity" "$sparkle/XPCServices/Installer.xpc"

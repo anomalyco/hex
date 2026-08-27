@@ -2,10 +2,11 @@
 set -eu
 
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+team_id=${VOICE_CONTROL_TEAM_ID:?Set VOICE_CONTROL_TEAM_ID to the Anomaly Apple Developer Team ID}
 mode=${1:-prepare}
 version=${HEX_VERSION:-$(cargo metadata --no-deps --format-version 1 --manifest-path "$root/Cargo.toml" | jq -r '.packages[0].version')}
 build_number=${HEX_BUILD_NUMBER:-$(printf '%s\n' "$version" | awk -F. '{ print ($1 * 10000) + ($2 * 100) + $3 }')}
-notary_profile=${HEX_NOTARY_PROFILE:-AC_PASSWORD}
+notary_profile=${HEX_NOTARY_PROFILE:?Set HEX_NOTARY_PROFILE to the Anomaly notarization profile}
 bucket=${HEX_RELEASE_BUCKET:-hex-releases}
 base_url=${HEX_RELEASE_BASE_URL:-https://pub-089d681d41754031a4aefa7017d8c2fb.r2.dev}
 release_notes=${HEX_RELEASE_NOTES:-$root/docs/releases/$version.md}
@@ -13,15 +14,10 @@ dist="$root/dist"
 updates="$dist/updates"
 artifact="HEX-$version-arm64.dmg"
 latest_artifact="HEX-latest-arm64.dmg"
-team_id=${VOICE_CONTROL_TEAM_ID:-QC99C9JE59}
 identity=${VOICE_CONTROL_CODESIGN_IDENTITY:-}
 
 if [ "$mode" != "prepare" ] && [ "$mode" != "publish" ]; then
   echo "Usage: $0 [prepare|publish]" >&2
-  exit 1
-fi
-if [ "$version" = 2.1.0 ]; then
-  echo "HEX 2.1.0 must use scripts/release-transition-app.sh." >&2
   exit 1
 fi
 if [ -n "$(git -C "$root" status --porcelain)" ]; then
@@ -59,6 +55,13 @@ if [ "$mode" = "publish" ]; then
   fi
   xcrun stapler validate "$dist/$artifact"
   spctl --assess --type open --context context:primary-signature --verbose=2 "$dist/$artifact"
+  mountpoint=$(mktemp -d "${TMPDIR:-/tmp}/hex-release-validation.XXXXXX")
+  trap 'hdiutil detach -quiet "$mountpoint" 2>/dev/null || true; rmdir "$mountpoint" 2>/dev/null || true' EXIT HUP INT TERM
+  hdiutil attach -quiet -nobrowse -readonly -mountpoint "$mountpoint" "$dist/$artifact"
+  "$root/scripts/validate-app.sh" "$mountpoint/Hex.app" Hex.app "$version" "$build_number" >/dev/null
+  hdiutil detach -quiet "$mountpoint"
+  rmdir "$mountpoint"
+  trap - EXIT HUP INT TERM
   wrangler r2 object put "$bucket/releases/$artifact" --remote \
     --file "$dist/$artifact" \
     --content-type application/x-apple-diskimage
@@ -82,9 +85,7 @@ fi
 export HEX_VERSION="$version" HEX_BUILD_NUMBER="$build_number"
 bundle=$("$root/scripts/build-app.sh")
 bundle_name=$(basename "$bundle")
-if [ "$bundle_name" = Hex.app ]; then
-  "$root/scripts/validate-permanent-app.sh" "$bundle" Hex.app "$version" "$build_number" >/dev/null
-fi
+"$root/scripts/validate-app.sh" "$bundle" Hex.app "$version" "$build_number" >/dev/null
 if [ -z "$identity" ]; then
   identity=$(security find-identity -v -p codesigning | sed -n "s/.*\"\(Developer ID Application:.*($team_id)\)\"/\1/p" | head -1)
 fi
@@ -104,7 +105,7 @@ xcrun stapler validate "$bundle"
 
 /usr/bin/ditto "$bundle" "$dist/staging/$bundle_name"
 ln -s /Applications "$dist/staging/Applications"
-hdiutil create -quiet -fs APFS -format ULFO -volname HEX -srcfolder "$dist/staging" "$dist/$artifact"
+hdiutil create -quiet -fs APFS -format ULFO -volname Hex -srcfolder "$dist/staging" "$dist/$artifact"
 codesign --force --timestamp --sign "$identity" "$dist/$artifact"
 xcrun notarytool submit "$dist/$artifact" --keychain-profile "$notary_profile" --wait
 xcrun stapler staple "$dist/$artifact"

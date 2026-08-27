@@ -37,13 +37,16 @@ Microphone, Accessibility, or Input Monitoring access after onboarding, and
 supported transcription runtimes expose automatic language detection. Keep true
 processor chains as future work only if real profiles need composition.
 
-Replace the public Swift app through the direct, explicitly confirmed migration
-in [`docs/plans/swift-to-rust-migration.md`](docs/plans/swift-to-rust-migration.md).
-Converge both installed populations on `Hex.app`, `com.kitlangton.Hex`, the
-existing Rust `voice-control` Application Support root, and the R2 update channel
-only after the allowlisted preference import and agreed parity work are complete.
-Transition tooling now builds both host-name archives and validates the R2 and
-legacy-S3 feeds; signed upgrade testing and the physical soak remain.
+Keep Swift and Rust separate. Prefer the old app's existing Sparkle update window
+with a website-only informational item to install the new app manually, with no
+data import or automatic replacement.
+Follow [`docs/plans/swift-app-handoff.md`](docs/plans/swift-app-handoff.md).
+The new app uses Anomaly identity `ly.anoma.Hex`, display name `Hex`, and filename
+`Hex.app`, while retaining the Rust `voice-control` data root. Configure the
+Anomaly signing team and validate the new identity before release. The legacy
+S3 feed must never install a Rust payload. Publish
+the updated Rust artifact first, then the separately validated legacy feed notice.
+No Swift rebuild should be necessary for the notice.
 
 ## Validate The Linux X11 Beta
 

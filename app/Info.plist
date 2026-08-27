@@ -3,11 +3,11 @@
 <plist version="1.0">
 <dict>
   <key>CFBundleDisplayName</key>
-  <string>HEX</string>
+  <string>Hex</string>
   <key>CFBundleExecutable</key>
   <string>hex</string>
   <key>CFBundleIdentifier</key>
-  <string>com.kitlangton.Hex</string>
+  <string>ly.anoma.Hex</string>
   <key>CFBundleInfoDictionaryVersion</key>
   <string>6.0</string>
   <key>CFBundleIconFile</key>
@@ -15,7 +15,7 @@
   <key>CFBundleIconName</key>
   <string>AppIcon</string>
   <key>CFBundleName</key>
-  <string>HEX</string>
+  <string>Hex</string>
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>CFBundleShortVersionString</key>

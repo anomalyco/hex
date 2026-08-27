@@ -315,6 +315,7 @@ cargo fmt --check
 cargo test
 cargo clippy --all-targets --all-features -- -D warnings
 git diff --check
+./scripts/test-app-identity.sh # macOS only
 ./scripts/test-install-linux-release.sh # x86_64 Linux only
 cd sdk/typescript && bun run check && bun run test && bun run build
 ```
@@ -356,15 +357,19 @@ precedence while available; override everything with `--device`. The app bundle
 build requires Xcode 26 for Icon Composer compilation and a Developer ID signing
 identity. `scripts/release-app.sh` prepares a notarized and stapled DMG plus its
 signed Sparkle appcast; run `scripts/release-app.sh publish` only after validating
-the prepared artifact. Versions before 2.1 default to the current Rust package
-identity; 2.1 and later default to `Hex.app`, `com.kitlangton.Hex`, and executable
-`hex`. The one-time public transition uses
-`scripts/release-transition-app.sh prepare`, which produces independently signed
-`HEX.app` and `Hex.app` host-name archives plus validated R2 and legacy-S3 feeds.
-Its `validate` mode rechecks prepared archives and feeds without publishing. Run
-`publish` only after signed upgrade testing; immutable R2 artifacts must publish
-before either feed. `verify-public` downloads both public feeds and artifacts
-into a clean directory and validates them.
+the prepared artifact. The Anomaly app is named `Hex`, packaged as `Hex.app`,
+with bundle identifier `ly.anoma.Hex` and executable `hex`. Signing requires an
+explicit Anomaly `VOICE_CONTROL_TEAM_ID` and `HEX_NOTARY_PROFILE`; the main app
+build and release scripts must not default to the personal signing team.
+`scripts/validate-app.sh` checks this identity before preparation and publication.
+There is no Swift migration: never import Swift preferences or data, adopt its
+bundle identifier, publish Rust artifacts to its S3 feed, or automatically quit,
+delete, or replace the Swift app. Prefer a website-only informational item in
+the legacy Sparkle feed, with no enclosure, pointing to the new app for manual
+installation and fresh setup. Publish it only after the new artifact is live. See
+`docs/plans/swift-app-handoff.md`. The Rust data root remains unchanged, but the
+new app identity requires fresh macOS permission grants. Validate signed
+distribution with the Anomaly team before publishing an app update.
 
 `SMAppService` is meaningful only from a signed app installed in
 `/Applications`. When replacing a local bundle outside Finder during a login-item
@@ -375,8 +380,7 @@ smoke test, register the new bundle with Launch Services before launch:
   -f /Applications/Hex.app
 ```
 
-An existing Rust-origin installation may retain `/Applications/HEX.app` after
-Sparkle replacement; pass its actual host path to `lsregister` in that case.
+Pass the actual installed Rust host path to `lsregister` if it was renamed.
 
 Verify both registration and unregistration with `sfltool dumpbtm`, and restore
 the user's original login-item state after the test. Do not add release test

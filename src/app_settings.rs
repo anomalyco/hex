@@ -634,12 +634,12 @@ impl AppSettings {
     }
 
     pub fn load() -> Result<Self> {
-        let settings = Self::load_from(&path()?, crate::swift_settings_import::import)?;
+        let settings = Self::load_from(&path()?)?;
         settings.apply_runtime();
         Ok(settings)
     }
 
-    fn load_from(path: &std::path::Path, import: impl FnOnce() -> Option<Self>) -> Result<Self> {
+    fn load_from(path: &std::path::Path) -> Result<Self> {
         match fs::read(path) {
             Ok(data) => {
                 let mut settings: Self = serde_json::from_slice(&data)?;
@@ -657,16 +657,7 @@ impl AppSettings {
                 }
                 Ok(settings)
             }
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                if let Some(mut settings) = import() {
-                    settings.normalize_double_tap_settings();
-                    settings.repair_hotkey_conflict();
-                    settings.write_to(path)?;
-                    tracing::info!("imported preferences from Swift HEX");
-                    return Ok(settings);
-                }
-                Ok(Self::default())
-            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Self::default()),
             Err(error) => Err(error.into()),
         }
     }
@@ -685,7 +676,7 @@ impl AppSettings {
             .ok_or_else(|| eyre!("settings path has no parent"))?;
         fs::create_dir_all(parent)?;
         if !path.exists() {
-            // New preferences, including Swift imports, are not legacy onboarding completion.
+            // Saving new preferences does not imply onboarding completion.
             crate::onboarding::record_pending_at(parent)?;
         }
         let temporary = settings_temporary_path(path);
@@ -1001,12 +992,12 @@ mod tests {
     }
 
     #[test]
-    fn swift_import_requires_onboarding_across_settings_reloads() {
+    fn new_settings_require_onboarding_across_reloads() {
         use crate::onboarding::{completion_recorded_at, record_completion_at};
         use std::os::unix::fs::PermissionsExt;
 
         let directory = std::env::temp_dir().join(format!(
-            "hex-swift-onboarding-{}-{}",
+            "hex-new-onboarding-{}-{}",
             std::process::id(),
             SETTINGS_TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed),
         ));
@@ -1014,17 +1005,12 @@ mod tests {
         let path = directory.join("settings.json");
         assert!(!completion_recorded_at(&directory));
 
-        // Fixture for the converted preferences returned by the Swift importer.
-        let imported = AppSettings::load_from(&path, || {
-            Some(AppSettings {
-                sound_effects: false,
-                double_tap_lock: false,
-                ..Default::default()
-            })
-        })
-        .unwrap();
-        assert!(!imported.sound_effects);
-        assert!(!imported.double_tap_lock);
+        let mut settings = AppSettings::load_from(&path).unwrap();
+        assert!(!path.exists());
+        assert_eq!(settings.sound_effects, AppSettings::default().sound_effects);
+        settings.sound_effects = false;
+        settings.double_tap_lock = false;
+        settings.write_to(&path).unwrap();
         assert!(path.is_file());
         assert!(!directory.join("models").exists());
         assert!(!completion_recorded_at(&directory));
@@ -1037,9 +1023,9 @@ mod tests {
                 & 0o777,
             0o600,
         );
-        drop(imported);
+        drop(settings);
 
-        let reloaded = AppSettings::load_from(&path, || panic!("must not import twice")).unwrap();
+        let reloaded = AppSettings::load_from(&path).unwrap();
         assert!(!reloaded.sound_effects);
         assert!(!reloaded.double_tap_lock);
         reloaded.write_to(&path).unwrap();
@@ -1049,7 +1035,7 @@ mod tests {
         record_completion_at(&directory).unwrap();
         assert!(completion_recorded_at(&directory));
         drop(reloaded);
-        AppSettings::load_from(&path, || panic!("must not import after completion")).unwrap();
+        AppSettings::load_from(&path).unwrap();
         assert!(completion_recorded_at(&directory));
         fs::remove_dir_all(directory).unwrap();
     }
@@ -1065,8 +1051,7 @@ mod tests {
         let path = directory.join("settings.json");
         fs::write(&path, b"{}").unwrap();
 
-        let settings =
-            AppSettings::load_from(&path, || panic!("legacy settings must win")).unwrap();
+        let settings = AppSettings::load_from(&path).unwrap();
         settings.write_to(&path).unwrap();
         assert!(!directory.join("onboarding-pending").exists());
         assert!(crate::onboarding::completion_recorded_at(&directory));
@@ -1085,7 +1070,7 @@ mod tests {
         fs::create_dir(directory.join("onboarding-pending")).unwrap();
         let path = directory.join("settings.json");
 
-        assert!(AppSettings::load_from(&path, || Some(AppSettings::default())).is_err());
+        assert!(AppSettings::default().write_to(&path).is_err());
         assert!(!path.exists());
         fs::remove_dir_all(directory).unwrap();
     }

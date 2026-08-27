@@ -27,13 +27,14 @@ stop_bundle() {
 }
 
 mkdir -p "$install_dir"
-stop_bundle "$installed_bundle"
-for previous_bundle in "$install_dir/HEX.app" "$install_dir/Hex.app" "$install_dir/Voice Control.app"; do
-  if [ "$previous_bundle" != "$installed_bundle" ]; then
-    stop_bundle "$previous_bundle"
-    rm -rf "$previous_bundle"
+if [ -e "$installed_bundle" ] || [ -L "$installed_bundle" ]; then
+  existing_id=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$installed_bundle/Contents/Info.plist" 2>/dev/null || true)
+  if [ "$existing_id" != ly.anoma.Hex ]; then
+    echo "Refusing to replace $installed_bundle: it is not the Anomaly Hex app. Install the new app manually." >&2
+    exit 1
   fi
-done
+fi
+stop_bundle "$installed_bundle"
 rm -rf "$installed_bundle"
 /usr/bin/ditto "$source_bundle" "$installed_bundle"
 /usr/bin/open "$installed_bundle"

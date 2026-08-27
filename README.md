@@ -19,6 +19,10 @@ pastes the result into the app you are using.
 HEX checks for signed updates automatically. Use **HEX > Check for Updates...**
 to check immediately.
 
+Coming from the original Swift app? Install the new app manually and complete
+setup. Settings and history are not transferred. Quit the old app before
+dictating in the new one so their shortcuts do not compete.
+
 ## Dictate Anywhere
 
 Hold **Option**, speak, then release. HEX transcribes and pastes at the current
