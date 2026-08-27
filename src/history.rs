@@ -499,6 +499,28 @@ mod tests {
     }
 
     #[test]
+    fn choosing_week_retention_from_month_keeps_entries_newer_than_a_week() {
+        let day_ms = 24 * 60 * 60 * 1_000;
+        let now = 30 * day_ms;
+        let path = temp_path("month-to-week");
+        let mut store = HistoryStore::open(path, HistoryRetention::Month, 0);
+        store
+            .record(draft("twenty days old"), now - 20 * day_ms)
+            .unwrap();
+        store
+            .record(draft("two days old"), now - 2 * day_ms)
+            .unwrap();
+
+        store.set_retention(HistoryRetention::Week, now).unwrap();
+
+        let texts: Vec<_> = store
+            .entries()
+            .map(|entry| entry.final_text.as_str())
+            .collect();
+        assert_eq!(texts, ["two days old"]);
+    }
+
+    #[test]
     fn off_records_nothing_but_preserves_existing_entries() {
         let path = temp_path("off");
         let mut store = HistoryStore::open(path, HistoryRetention::Week, 1_000);

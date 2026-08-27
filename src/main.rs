@@ -189,6 +189,9 @@ enum Command {
         /// Show the selected dictation model as missing without changing local files.
         #[arg(long)]
         model_missing: bool,
+        /// Open the explicit history retention choices in the History preview.
+        #[arg(long)]
+        open_history_retention: bool,
     },
     /// Listen and transcribe until interrupted.
     Listen {
@@ -440,6 +443,7 @@ fn main() -> Result<()> {
             opencode_unavailable,
             permissions_missing,
             model_missing,
+            open_history_retention,
         } => {
             if matches!(target, AppPreviewTarget::DictationHud) {
                 return meeting_watcher::run(&SHUTDOWN, false, None, true);
@@ -484,6 +488,7 @@ fn main() -> Result<()> {
                     opencode_unavailable,
                     permissions_missing,
                     model_missing,
+                    open_history_retention,
                 },
             )
         }

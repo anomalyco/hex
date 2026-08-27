@@ -13,7 +13,7 @@ use gpui::{
     KeyDownEvent, Modifiers as GpuiModifiers, ModifiersChangedEvent, MouseButton, MouseDownEvent,
     MouseMoveEvent, PathPromptOptions, Pixels, Point, Render, ScrollHandle, SharedString,
     Subscription, Timer, TitlebarOptions, Window, WindowBounds, WindowHandle, WindowOptions,
-    actions, div, img, prelude::*, px, relative, rgb, rgba, size,
+    actions, deferred, div, img, prelude::*, px, relative, rgb, rgba, size,
 };
 
 use crate::app_settings::{
@@ -250,6 +250,7 @@ pub struct AppWindowPreview {
     pub opencode_unavailable: bool,
     pub permissions_missing: bool,
     pub model_missing: bool,
+    pub open_history_retention: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -822,6 +823,7 @@ pub struct AppWindow {
     selected_history: Option<u64>,
     history_error: Option<String>,
     history_clear_armed: bool,
+    history_retention_open: bool,
     history_copied: Option<u64>,
 }
 
@@ -1262,6 +1264,9 @@ impl AppWindow {
             selected_history: None,
             history_error: None,
             history_clear_armed: false,
+            history_retention_open: preview
+                .as_ref()
+                .is_some_and(|preview| preview.open_history_retention),
             history_copied: None,
         };
         if !window.preview {
@@ -1307,6 +1312,7 @@ impl AppWindow {
     fn select_pane(&mut self, pane: Pane, cx: &mut Context<Self>) {
         self.pane = pane;
         self.mode_context_menu = None;
+        self.history_retention_open = false;
         match pane {
             Pane::HudLab => self.apply_hud_lab(),
             Pane::Meetings => self.reload_meetings(),
@@ -1967,16 +1973,49 @@ impl AppWindow {
         let search = div().w(px(220.0)).child(self.history_search.entity.clone());
         let retention_control = header_button(format!("Keep: {}", retention.label()))
             .id("history-retention")
-            .on_click(cx.listener(move |this, _, _, cx| {
-                let all = HistoryRetention::ALL;
-                let index = all
-                    .iter()
-                    .position(|choice| *choice == this.settings.history_retention)
-                    .unwrap_or(0);
-                let next = all[(index + 1) % all.len()];
-                this.set_history_retention(next, cx);
-            }))
-            .into_any_element();
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.history_retention_open = true;
+                cx.notify();
+            }));
+        let retention_control = div().relative().child(retention_control).when(
+            self.history_retention_open,
+            |control| {
+                control.child(deferred(
+                    div()
+                        .id("history-retention-menu")
+                        .absolute()
+                        .top(px(36.0))
+                        .right_0()
+                        .w(px(160.0))
+                        .p_1()
+                        .rounded_md()
+                        .border_1()
+                        .border_color(rgb(LINE))
+                        .bg(rgb(SURFACE))
+                        .occlude()
+                        .on_mouse_down_out(cx.listener(|this, _, _, cx| {
+                            this.history_retention_open = false;
+                            cx.notify();
+                        }))
+                        .children(HistoryRetention::ALL.into_iter().enumerate().map(
+                            |(index, choice)| {
+                                compact_button(choice.label())
+                                    .id(("history-retention-choice", index))
+                                    .w_full()
+                                    .when(choice == retention, |item| {
+                                        item.bg(rgb(SURFACE_SELECTED))
+                                    })
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        cx.stop_propagation();
+                                        this.history_retention_open = false;
+                                        this.set_history_retention(choice, cx);
+                                        cx.notify();
+                                    }))
+                            },
+                        )),
+                ))
+            },
+        );
         let clear = header_button(if self.history_clear_armed {
             "Really clear all?"
         } else {
@@ -2532,6 +2571,7 @@ impl AppWindow {
                         .into_iter()
                         .enumerate()
                         .map(|(index, (label, side))| {
+                            let candidate = hotkey_side_binding(&self.settings, kind, side);
                             segmented_item(selected == side)
                                 .id(("hotkey-side", hotkey_kind_index(kind) * 3 + index))
                                 .w(px(side_widths[index]))
@@ -2540,12 +2580,18 @@ impl AppWindow {
                                 .justify_center()
                                 .bg(rgba(0x00000000))
                                 .text_size(px(9.0))
+                                .when(candidate.is_none(), |item| item.opacity(0.35))
                                 .child(label)
                                 .on_click(cx.listener(move |this, _, _, cx| {
+                                    let Some(candidate) =
+                                        hotkey_side_binding(&this.settings, kind, side)
+                                    else {
+                                        return;
+                                    };
                                     let Some(binding) = this.hotkey_binding_mut(kind) else {
                                         return;
                                     };
-                                    set_standalone_modifier_side(binding, side);
+                                    *binding = candidate;
                                     this.hotkey_side_selection_springs[hotkey_kind_index(kind)]
                                         .set_target(index as f32);
                                     this.save_settings(cx);
@@ -2706,24 +2752,7 @@ impl AppWindow {
             HotkeyCaptureState::Listening { kind, .. } => kind,
             HotkeyCaptureState::Idle | HotkeyCaptureState::Saved { .. } => return,
         };
-        let mut others = match kind {
-            HotkeyKind::Dictation => vec![self.settings.edit_hotkey.clone()],
-            HotkeyKind::Edit => vec![self.settings.dictation_hotkey.clone()],
-            HotkeyKind::PasteLast => vec![
-                self.settings.dictation_hotkey.clone(),
-                self.settings.edit_hotkey.clone(),
-            ],
-        };
-        if kind != HotkeyKind::PasteLast
-            && let Some(paste) = &self.settings.paste_last_hotkey
-        {
-            others.push(paste.clone());
-        }
-        if crate::DEVELOPER_FEATURES_ENABLED {
-            others.push(HotkeyBinding::paste_meeting_default());
-        }
-        let conflicts = crate::app_settings::hotkey_conflicts(&binding, others);
-        if conflicts {
+        if hotkey_binding_conflicts(&self.settings, kind, &binding) {
             self.set_hotkey_capture_message("Already in use", cx);
             return;
         }
@@ -2793,9 +2822,6 @@ impl AppWindow {
                             .flex_none()
                             .text_size(px(14.0))
                             .text_color(rgb(MUTED))
-                            .hover(|button| {
-                                button.bg(rgb(SURFACE_HOVER)).text_color(rgb(TEXT_SOFT))
-                            })
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 this.mode_inputs_mut(selection).replacements.remove(index);
                                 this.mode_settings_mut(selection).replacements.remove(index);
@@ -3621,6 +3647,7 @@ impl AppWindow {
 
         div()
             .id("setup-backdrop")
+            .occlude()
             .absolute()
             .top_0()
             .left_0()
@@ -7179,6 +7206,12 @@ impl Render for AppWindow {
         window_frame()
             .track_focus(&self.window_focus)
             .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                if event.keystroke.key == "escape" && this.history_retention_open {
+                    this.history_retention_open = false;
+                    cx.stop_propagation();
+                    cx.notify();
+                    return;
+                }
                 if event.keystroke.key == "escape" && this.mode_context_menu.take().is_some() {
                     cx.stop_propagation();
                     cx.notify();
@@ -7401,6 +7434,46 @@ fn set_standalone_modifier_side(binding: &mut HotkeyBinding, side: ModifierSide)
     } else if binding.modifiers.command.is_some() {
         binding.modifiers.command = Some(side);
     }
+}
+
+fn hotkey_binding_conflicts(
+    settings: &AppSettings,
+    kind: HotkeyKind,
+    binding: &HotkeyBinding,
+) -> bool {
+    let mut others = match kind {
+        HotkeyKind::Dictation => vec![settings.edit_hotkey.clone()],
+        HotkeyKind::Edit => vec![settings.dictation_hotkey.clone()],
+        HotkeyKind::PasteLast => vec![
+            settings.dictation_hotkey.clone(),
+            settings.edit_hotkey.clone(),
+        ],
+    };
+    if kind != HotkeyKind::PasteLast
+        && let Some(paste) = &settings.paste_last_hotkey
+    {
+        others.push(paste.clone());
+    }
+    if crate::DEVELOPER_FEATURES_ENABLED {
+        others.push(HotkeyBinding::paste_meeting_default());
+    }
+    crate::app_settings::hotkey_conflicts(binding, others)
+}
+
+fn hotkey_side_binding(
+    settings: &AppSettings,
+    kind: HotkeyKind,
+    side: ModifierSide,
+) -> Option<HotkeyBinding> {
+    let mut binding = match kind {
+        HotkeyKind::Dictation => &settings.dictation_hotkey,
+        HotkeyKind::Edit => &settings.edit_hotkey,
+        HotkeyKind::PasteLast => settings.paste_last_hotkey.as_ref()?,
+    }
+    .clone();
+    standalone_modifier_side(&binding)?;
+    set_standalone_modifier_side(&mut binding, side);
+    (!hotkey_binding_conflicts(settings, kind, &binding)).then_some(binding)
 }
 
 fn hotkey_control_width(active: bool, idle_width: f32, animated_width: f32) -> f32 {
@@ -7992,8 +8065,11 @@ const fn permission_warning_id(kind: PermissionKind) -> &'static str {
 }
 
 fn hotkey_modifiers(modifiers: GpuiModifiers) -> HotkeyModifiers {
-    let physical =
-        crate::app_settings::modifiers_from_flags(crate::suppression::physical_modifier_flags());
+    hotkey_modifiers_with_flags(modifiers, crate::suppression::physical_modifier_flags())
+}
+
+fn hotkey_modifiers_with_flags(modifiers: GpuiModifiers, flags: u64) -> HotkeyModifiers {
+    let physical = crate::app_settings::modifiers_from_flags(flags);
     if !physical.is_empty() {
         return physical;
     }
@@ -8392,6 +8468,40 @@ mod tests {
     }
 
     #[test]
+    fn shortcut_side_changes_reject_overlap_without_changing_the_saved_binding() {
+        let mut settings = AppSettings::default();
+        settings.dictation_hotkey.modifiers.option = Some(ModifierSide::Left);
+        settings.edit_hotkey = HotkeyBinding {
+            modifiers: HotkeyModifiers {
+                option: Some(ModifierSide::Right),
+                ..Default::default()
+            },
+            key: None,
+        };
+        let original = settings.dictation_hotkey.clone();
+
+        assert!(
+            hotkey_side_binding(&settings, HotkeyKind::Dictation, ModifierSide::Right).is_none()
+        );
+        assert!(
+            hotkey_side_binding(&settings, HotkeyKind::Dictation, ModifierSide::Either).is_none()
+        );
+        assert_eq!(settings.dictation_hotkey, original);
+        assert_eq!(
+            hotkey_side_binding(&settings, HotkeyKind::Dictation, ModifierSide::Left),
+            Some(original)
+        );
+
+        settings.edit_hotkey = HotkeyBinding::edit_default();
+        let candidate =
+            hotkey_side_binding(&settings, HotkeyKind::Dictation, ModifierSide::Right).unwrap();
+        assert_eq!(
+            standalone_modifier_side(&candidate),
+            Some(ModifierSide::Right)
+        );
+    }
+
+    #[test]
     fn side_selection_only_changes_a_standalone_modifier() {
         let mut standalone = HotkeyBinding {
             modifiers: HotkeyModifiers {
@@ -8447,10 +8557,13 @@ mod tests {
 
     #[test]
     fn hotkey_capture_preserves_the_function_modifier() {
-        let modifiers = hotkey_modifiers(GpuiModifiers {
-            function: true,
-            ..Default::default()
-        });
+        let modifiers = hotkey_modifiers_with_flags(
+            GpuiModifiers {
+                function: true,
+                ..Default::default()
+            },
+            0,
+        );
 
         assert!(modifiers.function);
         assert_eq!(modifiers.count(), 1);
