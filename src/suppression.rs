@@ -175,6 +175,17 @@ impl InputActivity {
     pub fn invalidate(&self) {
         self.0.fetch_add(1, Ordering::AcqRel);
     }
+
+    fn observe(&self, input: InputEvent, suppressed: bool) {
+        if !suppressed
+            && matches!(
+                input,
+                InputEvent::Key { down: true, .. } | InputEvent::MouseDown
+            )
+        {
+            self.invalidate();
+        }
+    }
 }
 
 impl InputMonitor {
@@ -443,13 +454,8 @@ unsafe extern "C" fn event_callback(
     };
     // SAFETY: CoreGraphics supplied a valid event to this callback.
     let capture_at = CaptureInstant::from_mach_ticks(unsafe { CGEventGetTimestamp(event) });
-    if matches!(
-        input,
-        InputEvent::Key { down: true, .. } | InputEvent::MouseDown
-    ) {
-        context.activity.invalidate();
-    }
     if crate::app_settings::hotkey_capture_active() {
+        context.activity.observe(input, false);
         context
             .shortcut_suppression
             .lock()
@@ -468,6 +474,7 @@ unsafe extern "C" fn event_callback(
             delivered,
             context.escape_cancels.load(Ordering::Acquire),
         ) || suppression.process_all(input, crate::app_settings::runtime_hotkeys(), delivered);
+    context.activity.observe(input, suppress);
     if suppress { ptr::null_mut() } else { event }
 }
 
@@ -977,6 +984,51 @@ mod tests {
         RuntimeHotkey {
             modifiers: crate::app_settings::modifiers_from_flags(FUNCTION),
             key_code: None,
+        }
+    }
+
+    #[test]
+    fn consumed_dictation_keys_preserve_continuation_but_typing_and_clicks_do_not() {
+        for flags in [NO_FLAGS, SHIFT_KEY_MASK] {
+            let activity = InputActivity::default();
+            let mut suppression = ShortcutSuppression::default();
+            let binding = RuntimeHotkey {
+                modifiers: crate::app_settings::modifiers_from_flags(flags),
+                key_code: Some(96),
+            };
+            let revision = activity.revision();
+            for down in [true, true, false] {
+                let input = InputEvent::Key {
+                    code: 96,
+                    down,
+                    flags,
+                };
+                let suppressed = suppression.process(input, 47, binding, true);
+                assert!(suppressed);
+                activity.observe(input, suppressed);
+            }
+            assert_eq!(activity.revision(), revision);
+
+            let typed = InputEvent::Key {
+                code: 0,
+                down: true,
+                flags: NO_FLAGS,
+            };
+            activity.observe(typed, suppression.process(typed, 47, binding, true));
+            assert_eq!(activity.revision(), revision + 1);
+            activity.observe(InputEvent::MouseDown, false);
+            assert_eq!(activity.revision(), revision + 2);
+
+            let undelivered = InputEvent::Key {
+                code: 96,
+                down: true,
+                flags,
+            };
+            activity.observe(
+                undelivered,
+                suppression.process(undelivered, 47, binding, false),
+            );
+            assert_eq!(activity.revision(), revision + 3);
         }
     }
 

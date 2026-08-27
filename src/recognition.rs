@@ -2228,6 +2228,9 @@ mod tests {
             },
         );
 
+        dictation.suspend();
+        edit.suspend();
+
         // Option down: plain dictation starts, no Voice Action gesture yet.
         let event = InputEvent::Flags(OPTION);
         let edit_action = edit.process(event, now);

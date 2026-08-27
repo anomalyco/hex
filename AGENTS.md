@@ -305,6 +305,7 @@ cargo run -- preview onboarding
 cargo run -- preview transcription-picker --language zh --model-state installed
 ./scripts/capture-preview.sh /tmp/hex-preview.png settings
 ./scripts/capture-preview.sh /tmp/hex-model-missing.png settings --model-missing
+./scripts/capture-preview.sh /tmp/hex-history-retention.png history --open-history-retention
 ./scripts/capture-preview.sh /tmp/hex-modes.png modes
 ./scripts/capture-preview.sh /tmp/hex-modes-collapsed.png modes --collapse-mode-processing
 ./scripts/capture-preview.sh /tmp/hex-modes-picker.png modes --collapse-mode-processing --open-transformation-picker
