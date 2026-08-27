@@ -186,6 +186,9 @@ enum Command {
         /// Show missing post-onboarding permissions in Settings.
         #[arg(long)]
         permissions_missing: bool,
+        /// Show the selected dictation model as missing without changing local files.
+        #[arg(long)]
+        model_missing: bool,
     },
     /// Listen and transcribe until interrupted.
     Listen {
@@ -436,6 +439,7 @@ fn main() -> Result<()> {
             select_global_mode,
             opencode_unavailable,
             permissions_missing,
+            model_missing,
         } => {
             if matches!(target, AppPreviewTarget::DictationHud) {
                 return meeting_watcher::run(&SHUTDOWN, false, None, true);
@@ -479,6 +483,7 @@ fn main() -> Result<()> {
                     select_global_mode,
                     opencode_unavailable,
                     permissions_missing,
+                    model_missing,
                 },
             )
         }
