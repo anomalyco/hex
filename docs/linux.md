@@ -138,10 +138,11 @@ isolated app data and no microphone; CI runs it with the display-free suite and
 Xvfb hotkey tests.
 
 `scripts/test-linux-dictation.sh /path/to/voice-control /path/to/parakeet-unified-en-0.6b-Q8_0.gguf /path/to/jfk.wav`
-checks the complete X11 dictation path with a private PulseAudio virtual
-microphone and Xvfb display. It replays the public JFK sample from whisper.cpp,
-holds and releases the real shortcut, verifies the transcribed words in a GTK
-editor, and checks orderly listener shutdown. It needs PulseAudio, its ALSA
+checks the complete X11 app dictation path with a private PulseAudio virtual
+microphone and Xvfb display. It verifies Settings stays visible without a tray,
+replays the public JFK sample from whisper.cpp, holds and releases the real
+shortcut, verifies the transcribed words in a GTK editor, and checks orderly
+application shutdown and microphone release. It needs PulseAudio, its ALSA
 plugin, `xdotool`, Xvfb, and the GTK development libraries. It runs as a normal
 user with temporary settings; it does not use physical audio devices or personal
 recordings. CI downloads and verifies the pinned model and sample for this check.

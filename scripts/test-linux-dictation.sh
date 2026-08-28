@@ -47,8 +47,9 @@ trap 'exit 143' TERM
 export HOME="$work/home" XDG_RUNTIME_DIR="$work/runtime"
 export HEX_APPLICATION_SUPPORT_DIR="$work/support"
 export PULSE_SERVER="unix:$work/pulse" PULSE_SOURCE=hex-fixture.monitor
-export GDK_BACKEND=x11 VK_ICD_FILENAMES=/nonexistent
-unset WAYLAND_DISPLAY
+# GPUI still needs software Vulkan; only inference uses the CPU in this fixture.
+export GDK_BACKEND=x11 GGML_VK_VISIBLE_DEVICES=""
+unset WAYLAND_DISPLAY VK_ICD_FILENAMES
 mkdir -m 700 "$HOME" "$XDG_RUNTIME_DIR" "$HEX_APPLICATION_SUPPORT_DIR"
 mkdir "$HEX_APPLICATION_SUPPORT_DIR/models"
 ln -s "$model" "$HEX_APPLICATION_SUPPORT_DIR/models/$(basename "$model")"
@@ -68,7 +69,7 @@ cc "$root/tests/fixtures/wayland-paste-target.c" $(pkg-config --cflags --libs gt
 target=$!
 window=$(xdotool search --sync --name '^Hex Wayland Test$' | head -n 1)
 xdotool windowfocus --sync "$window"
-"$binary" dictate >"$work/listener.log" 2>&1 &
+"$binary" app --hidden >"$work/listener.log" 2>&1 &
 listener=$!
 echo 'Waiting for the model and virtual microphone...'
 for ((attempt = 0; attempt < 1200; attempt++)); do
@@ -77,6 +78,8 @@ for ((attempt = 0; attempt < 1200; attempt++)); do
   sleep 0.05
 done
 grep -q 'HEX dictation is ready' "$work/listener.log"
+xdotool search --onlyvisible --name '^HEX$' >/dev/null
+xdotool windowfocus --sync "$window"
 echo 'Replaying speech through the held dictation shortcut...'
 xdotool keydown Alt_L keydown space
 sleep 0.5
