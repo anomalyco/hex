@@ -648,10 +648,7 @@ impl Owner {
             RecoveringAudioInputEvent::OpenFailed(error) => {
                 let was_recording = self.pending_capture.take().is_some();
                 self.state.recording.store(false, Ordering::Release);
-                if !self.release_while_idle {
-                    self.input.request_recovery();
-                    self.state.recovering.store(true, Ordering::Release);
-                }
+                self.reconcile_input();
                 if was_recording {
                     let _ = self.events.send(DictationAudioEvent::OpenFailed {
                         capture_generation: self.state.capture_generation.load(Ordering::Acquire),
@@ -731,7 +728,7 @@ impl Owner {
             {
                 self.close_input();
             }
-        } else if !self.input.is_open() && !self.input.is_opening() {
+        } else if !self.input.is_open() && !self.input.is_opening() && !self.input.is_recovering() {
             // A key release is acknowledged after its synchronous controls return;
             // waiting for that acknowledgment here can leave the owner asleep.
             self.input.request_recovery();

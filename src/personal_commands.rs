@@ -305,9 +305,7 @@ fn workspace_effect_update(workspace: &Path, sdk: &Path) -> Result<Option<Vec<u8
     let required = sdk_manifest["peerDependencies"]["effect"]
         .as_str()
         .filter(|version| {
-            regex::Regex::new(r"^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$")
-                .expect("valid exact-version pattern")
-                .is_match(version)
+            semver::Version::parse(version).is_ok_and(|version| version.build.is_empty())
         })
         .ok_or_else(|| {
             eyre!("personal command SDK peerDependencies.effect must be an exact version")
@@ -458,24 +456,37 @@ fn refresh_managed_sdk_at(workspace: &Path, sdk: &Path) -> Result<bool> {
         }
     }
     if let Some(encoded) = &manifest_update {
-        let path = workspace.join("package.json");
-        let temporary = path.with_extension(format!("json.{}.tmp", std::process::id()));
-        (|| -> Result<()> {
-            fs::write(&temporary, encoded)?;
-            match fs::metadata(&path) {
-                Ok(metadata) => fs::set_permissions(&temporary, metadata.permissions())?,
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-                Err(error) => return Err(error.into()),
-            }
-            fs::rename(&temporary, &path)?;
-            Ok(())
-        })()
-        .wrap_err_with(|| format!(
-            "could not update {}; the SDK may already be refreshed; fix filesystem access or space (including {}), then rerun `hex commands init`",
-            path.display(), temporary.display()
-        ))?;
+        write_workspace_manifest(&workspace.join("package.json"), encoded)?;
     }
     Ok(sdk_changed || manifest_update.is_some())
+}
+
+fn write_workspace_manifest(path: &Path, encoded: &[u8]) -> Result<()> {
+    let temporary = path.with_extension(format!("json.{}.tmp", std::process::id()));
+    fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&temporary)
+        .and_then(|mut file| {
+            let result = (|| {
+                file.write_all(encoded)?;
+                match fs::metadata(path) {
+                    Ok(metadata) => file.set_permissions(metadata.permissions())?,
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(error) => return Err(error),
+                }
+                fs::rename(&temporary, path)
+            })();
+            drop(file);
+            if result.is_err() {
+                let _ = fs::remove_file(&temporary);
+            }
+            result
+        })
+    .wrap_err_with(|| format!(
+        "could not update {}; the SDK may already be refreshed; fix filesystem access or space (including {}), then rerun `hex commands init`",
+        path.display(), temporary.display()
+    ))
 }
 
 fn directory_manifest(root: &Path) -> Result<Vec<(PathBuf, Option<Vec<u8>>)>> {
@@ -3979,6 +3990,33 @@ mod tests {
     }
 
     #[test]
+    fn workspace_manifest_write_cleans_up_after_rename_failure() {
+        let (workspace, _) = workspace_upgrade_fixture();
+        let path = workspace.join("package.json");
+        let temporary = path.with_extension(format!("json.{}.tmp", std::process::id()));
+        fs::create_dir(&path).unwrap();
+
+        assert!(write_workspace_manifest(&path, b"{}").is_err());
+        assert!(path.is_dir());
+        assert!(!temporary.exists());
+        fs::remove_dir_all(workspace.parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn workspace_manifest_write_preserves_preexisting_temporary_file() {
+        let (workspace, _) = workspace_upgrade_fixture();
+        let path = workspace.join("package.json");
+        let temporary = path.with_extension(format!("json.{}.tmp", std::process::id()));
+        fs::write(&path, b"original manifest").unwrap();
+        fs::write(&temporary, b"existing temporary file").unwrap();
+
+        assert!(write_workspace_manifest(&path, b"{}").is_err());
+        assert_eq!(fs::read(&path).unwrap(), b"original manifest");
+        assert_eq!(fs::read(&temporary).unwrap(), b"existing temporary file");
+        fs::remove_dir_all(workspace.parent().unwrap()).unwrap();
+    }
+
+    #[test]
     fn invalid_sdk_effect_requirement_does_not_mutate_workspace() {
         let (workspace, sdk) = workspace_upgrade_fixture();
         assert!(initialize_workspace_at(&workspace, &sdk).unwrap());
@@ -3988,6 +4026,9 @@ mod tests {
             "[]",
             "{}",
             r#"{"peerDependencies":{"effect":"^4.0.0-rc.999"}}"#,
+            r#"{"peerDependencies":{"effect":"4.0.0-rc.999+build"}}"#,
+            r#"{"peerDependencies":{"effect":"04.0.0"}}"#,
+            r#"{"peerDependencies":{"effect":"4.0.0-01"}}"#,
         ] {
             fs::write(sdk.join("package.json"), invalid).unwrap();
             assert!(refresh_managed_sdk_at(&workspace, &sdk).is_err());
