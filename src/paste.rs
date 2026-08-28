@@ -27,6 +27,13 @@ pub struct Paster {
     prepared_clipboard: Option<PreparedClipboard>,
 }
 
+#[derive(Clone, Copy)]
+pub enum PasteMode {
+    Continue,
+    Send,
+    Standalone,
+}
+
 struct PreparedClipboard {
     change_count: isize,
     snapshot: ClipboardSnapshot,
@@ -157,14 +164,14 @@ impl Drop for PasteboardHandle {
 }
 
 impl Paster {
-    pub fn new(activity: InputActivity) -> Result<Self> {
-        Ok(Self {
+    pub fn new(activity: InputActivity) -> Self {
+        Self {
             clipboard: NSPasteboard::generalPasteboard(),
             activity,
             continuation: None,
             clipboard_restore: Arc::new(Mutex::new(ClipboardRestore::default())),
             prepared_clipboard: None,
-        })
+        }
     }
 
     pub fn prepare(&mut self) {
@@ -194,55 +201,85 @@ impl Paster {
         }
     }
 
-    pub fn paste(&mut self, text: &str) -> Result<()> {
-        self.paste_text(text)
+    /// Commit only after clipboard preparation, immediately before the first write.
+    /// A rejected commit leaves both the clipboard and continuation unchanged.
+    pub fn paste(
+        &mut self,
+        text: &str,
+        mode: PasteMode,
+        commit: impl FnOnce() -> bool,
+    ) -> Result<()> {
+        if matches!(mode, PasteMode::Send) {
+            send_after_paste(|| self.paste_text(text, mode, commit), keyboard::post_enter)?;
+            self.continuation = None;
+            Ok(())
+        } else {
+            self.paste_text(text, mode, commit)
+        }
     }
 
-    fn paste_text(&mut self, text: &str) -> Result<()> {
+    fn paste_text(
+        &mut self,
+        text: &str,
+        mode: PasteMode,
+        commit: impl FnOnce() -> bool,
+    ) -> Result<()> {
         let revision = self.activity.revision();
         let text = self
             .continuation
             .as_ref()
-            .filter(|continuation| continuation.revision == revision)
+            .filter(|continuation| {
+                !matches!(mode, PasteMode::Standalone) && continuation.revision == revision
+            })
             .map_or_else(
                 || text.to_string(),
                 |continuation| join(&continuation.inserted, text),
             );
-        let mut restore = self
-            .clipboard_restore
-            .lock()
-            .unwrap_or_else(|error| error.into_inner());
-        let previous_change_count = self.clipboard.changeCount();
-        let prepared = self.prepared_clipboard.take();
-        let previous = if let Some(prepared) = prepared
-            && prepared.change_count == previous_change_count
-        {
-            tracing::debug!(
-                clipboard_capture_ms = prepared.capture_ms,
-                "used eagerly captured clipboard"
-            );
-            prepared.snapshot
-        } else {
-            let started = Instant::now();
-            let snapshot = capture_clipboard(&self.clipboard)?;
-            tracing::debug!(
-                clipboard_capture_ms = started.elapsed().as_millis(),
-                "captured clipboard at paste time"
-            );
-            snapshot
-        };
-        if self.clipboard.changeCount() != previous_change_count {
-            return Err(eyre!("clipboard changed while HEX was preserving it"));
-        }
-        if let Err(error) = write_clipboard_text(&self.clipboard, &text) {
-            if let Err(restore_error) = restore_clipboard(&self.clipboard, &previous) {
-                tracing::error!(%restore_error, "could not recover the clipboard after a failed write");
-            }
-            return Err(error);
-        }
-        let inserted_change_count = self.clipboard.changeCount();
-        let generation = restore.register(previous, previous_change_count, inserted_change_count);
-        drop(restore);
+        let generation = commit_prepared_paste(
+            || {
+                let restore = self
+                    .clipboard_restore
+                    .lock()
+                    .unwrap_or_else(|error| error.into_inner());
+                let previous_change_count = self.clipboard.changeCount();
+                let prepared = self.prepared_clipboard.take();
+                let previous = if let Some(prepared) = prepared
+                    && prepared.change_count == previous_change_count
+                {
+                    tracing::debug!(
+                        clipboard_capture_ms = prepared.capture_ms,
+                        "used eagerly captured clipboard"
+                    );
+                    prepared.snapshot
+                } else {
+                    let started = Instant::now();
+                    let snapshot = capture_clipboard(&self.clipboard)?;
+                    tracing::debug!(
+                        clipboard_capture_ms = started.elapsed().as_millis(),
+                        "captured clipboard at paste time"
+                    );
+                    snapshot
+                };
+                if self.clipboard.changeCount() != previous_change_count {
+                    return Err(eyre!("clipboard changed while HEX was preserving it"));
+                }
+                Ok((restore, previous, previous_change_count))
+            },
+            commit,
+            |(mut restore, previous, previous_change_count)| {
+                if matches!(mode, PasteMode::Standalone) {
+                    self.continuation = None;
+                }
+                if let Err(error) = write_clipboard_text(&self.clipboard, &text) {
+                    if let Err(restore_error) = restore_clipboard(&self.clipboard, &previous) {
+                        tracing::error!(%restore_error, "could not recover the clipboard after a failed write");
+                    }
+                    return Err(error);
+                }
+                let inserted_change_count = self.clipboard.changeCount();
+                Ok(restore.register(previous, previous_change_count, inserted_change_count))
+            },
+        )?;
 
         let clipboard_restore = self.clipboard_restore.clone();
         complete_paste(
@@ -274,25 +311,26 @@ impl Paster {
             },
             thread::sleep,
         )?;
-        self.continuation = Some(Continuation {
+        self.continuation = (!matches!(mode, PasteMode::Standalone)).then_some(Continuation {
             revision,
             inserted: text,
         });
         Ok(())
     }
+}
 
-    pub fn paste_and_send(&mut self, text: &str) -> Result<()> {
-        send_after_paste(|| self.paste(text), keyboard::post_enter)?;
-        self.continuation = None;
-        Ok(())
+pub(crate) fn commit_prepared_paste<P, T>(
+    prepare: impl FnOnce() -> Result<P>,
+    commit: impl FnOnce() -> bool,
+    paste: impl FnOnce(P) -> Result<T>,
+) -> Result<T> {
+    let prepared = prepare()?;
+    // Waiting for restoration and materializing promised clipboard data remain cancellable.
+    // Once committed, even a failed first write may have changed the clipboard.
+    if !commit() {
+        return Err(eyre!("paste was cancelled"));
     }
-
-    pub fn paste_standalone(&mut self, text: &str) -> Result<()> {
-        self.continuation = None;
-        self.paste(text)?;
-        self.continuation = None;
-        Ok(())
-    }
+    paste(prepared)
 }
 
 fn complete_paste(
@@ -631,6 +669,54 @@ mod tests {
     use objc2_foundation::NSData;
 
     static PASTEBOARD_TEST: Mutex<()> = Mutex::new(());
+
+    #[test]
+    fn rejected_commit_does_not_write_paste_restore_or_send() {
+        let steps = RefCell::new(Vec::new());
+        let result = send_after_paste(
+            || {
+                commit_prepared_paste(
+                    || {
+                        steps.borrow_mut().push("prepare");
+                        Ok(())
+                    },
+                    || {
+                        steps.borrow_mut().push("commit");
+                        false
+                    },
+                    |()| {
+                        steps.borrow_mut().push("write");
+                        complete_paste(
+                            || {
+                                steps.borrow_mut().push("post");
+                                Ok(())
+                            },
+                            || steps.borrow_mut().push("restore"),
+                            |_| steps.borrow_mut().push("settle"),
+                        )
+                    },
+                )
+            },
+            || {
+                steps.borrow_mut().push("enter");
+                Ok(())
+            },
+        );
+
+        assert_eq!(result.unwrap_err().to_string(), "paste was cancelled");
+        assert_eq!(steps.into_inner(), ["prepare", "commit"]);
+    }
+
+    #[test]
+    fn failed_preparation_does_not_commit_or_write() {
+        let result = commit_prepared_paste(
+            || Err::<(), _>(eyre!("snapshot failed")),
+            || panic!("failed preparation must remain cancellable"),
+            |()| -> Result<()> { panic!("failed preparation must not mutate the clipboard") },
+        );
+
+        assert_eq!(result.unwrap_err().to_string(), "snapshot failed");
+    }
 
     #[test]
     fn sequential_pastes_settle_before_overwrite_and_enter() {

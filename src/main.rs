@@ -189,6 +189,9 @@ enum Command {
         /// Show the selected dictation model as missing without changing local files.
         #[arg(long)]
         model_missing: bool,
+        /// Show command-model recovery while dictation remains ready.
+        #[arg(long)]
+        command_model_missing: bool,
         /// Open the explicit history retention choices in the History preview.
         #[arg(long)]
         open_history_retention: bool,
@@ -443,6 +446,7 @@ fn main() -> Result<()> {
             opencode_unavailable,
             permissions_missing,
             model_missing,
+            command_model_missing,
             open_history_retention,
         } => {
             if matches!(target, AppPreviewTarget::DictationHud) {
@@ -488,6 +492,7 @@ fn main() -> Result<()> {
                     opencode_unavailable,
                     permissions_missing,
                     model_missing,
+                    command_model_missing,
                     open_history_retention,
                 },
             )

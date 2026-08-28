@@ -130,15 +130,65 @@ pub struct TextInput {
     multiline: bool,
     height: Pixels,
     picker: bool,
-    undo_stack: Vec<EditState>,
-    redo_stack: Vec<EditState>,
+    history: EditHistory,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct EditState {
     content: SharedString,
     selected_range: Range<usize>,
     selection_reversed: bool,
+}
+
+#[derive(Default)]
+struct EditHistory {
+    undo: Vec<EditState>,
+    redo: Vec<EditState>,
+    composition: Option<EditState>,
+}
+
+impl EditHistory {
+    fn replace(&mut self, before: EditState, content: &str, is_marked: bool) {
+        if is_marked {
+            // Candidates share the state from before the first marked edit.
+            self.composition.get_or_insert(before);
+        } else {
+            let before = self.composition.take().unwrap_or(before);
+            self.record(before, content);
+        }
+    }
+
+    fn finish_composition(&mut self, content: &str) {
+        if let Some(before) = self.composition.take() {
+            self.record(before, content);
+        }
+    }
+
+    fn record(&mut self, before: EditState, content: &str) {
+        // Cancelling back to the original text must also preserve redo.
+        if before.content.as_ref() == content {
+            return;
+        }
+        if self.undo.len() == 100 {
+            self.undo.remove(0);
+        }
+        self.undo.push(before);
+        self.redo.clear();
+    }
+
+    fn undo(&mut self, current: EditState) -> Option<EditState> {
+        self.finish_composition(&current.content);
+        let state = self.undo.pop()?;
+        self.redo.push(current);
+        Some(state)
+    }
+
+    fn redo(&mut self, current: EditState) -> Option<EditState> {
+        self.finish_composition(&current.content);
+        let state = self.redo.pop()?;
+        self.undo.push(current);
+        Some(state)
+    }
 }
 
 #[derive(Clone)]
@@ -266,8 +316,7 @@ impl TextInput {
                 TEXT_INPUT_HEIGHT
             }),
             picker,
-            undo_stack: Vec::new(),
-            redo_stack: Vec::new(),
+            history: EditHistory::default(),
         }
     }
 
@@ -286,8 +335,7 @@ impl TextInput {
         self.selection_reversed = false;
         self.marked_range = None;
         self.preferred_x = None;
-        self.undo_stack.clear();
-        self.redo_stack.clear();
+        self.history = EditHistory::default();
         cx.notify();
     }
 
@@ -442,24 +490,22 @@ impl TextInput {
     }
 
     fn undo(&mut self, _: &Undo, _: &mut Window, cx: &mut Context<Self>) {
-        let Some(state) = self.undo_stack.pop() else {
-            return;
-        };
-        let current = self.edit_state();
-        self.restore_edit_state(state);
-        self.redo_stack.push(current);
-        cx.emit(Changed);
+        let state = self.history.undo(self.edit_state());
+        self.marked_range = None;
+        if let Some(state) = state {
+            self.restore_edit_state(state);
+            cx.emit(Changed);
+        }
         cx.notify();
     }
 
     fn redo(&mut self, _: &Redo, _: &mut Window, cx: &mut Context<Self>) {
-        let Some(state) = self.redo_stack.pop() else {
-            return;
-        };
-        let current = self.edit_state();
-        self.restore_edit_state(state);
-        self.undo_stack.push(current);
-        cx.emit(Changed);
+        let state = self.history.redo(self.edit_state());
+        self.marked_range = None;
+        if let Some(state) = state {
+            self.restore_edit_state(state);
+            cx.emit(Changed);
+        }
         cx.notify();
     }
 
@@ -807,6 +853,18 @@ impl TextInput {
         );
 
         let is_marked = marked_selection_utf16.is_some();
+        let before = if is_marked {
+            self.edit_state()
+        } else {
+            EditState {
+                content: self.content.clone(),
+                selected_range: range.clone(),
+                selection_reversed: false,
+            }
+        };
+        // An empty marked replacement ends composition even without a later unmark.
+        self.history
+            .replace(before, &content, is_marked && !new_text.is_empty());
         if let Some(selection) = marked_selection_utf16.as_ref() {
             self.marked_range =
                 (!new_text.is_empty()).then_some(range.start..range.start + new_text.len());
@@ -822,17 +880,6 @@ impl TextInput {
         self.preferred_x = None;
 
         if self.content.as_ref() != content {
-            if !is_marked {
-                if self.undo_stack.len() == 100 {
-                    self.undo_stack.remove(0);
-                }
-                self.undo_stack.push(EditState {
-                    content: self.content.clone(),
-                    selected_range: range.clone(),
-                    selection_reversed: false,
-                });
-                self.redo_stack.clear();
-            }
             self.content = content.into();
             cx.emit(Changed);
         }
@@ -882,8 +929,10 @@ impl EntityInputHandler for TextInput {
             .map(|range| self.range_to_utf16(range))
     }
 
-    fn unmark_text(&mut self, _: &mut Window, _: &mut Context<Self>) {
+    fn unmark_text(&mut self, _: &mut Window, cx: &mut Context<Self>) {
+        self.history.finish_composition(&self.content);
         self.marked_range = None;
+        cx.notify();
     }
 
     fn replace_text_in_range(
@@ -1415,6 +1464,153 @@ fn utf8_offset_for_utf16(text: &str, offset: usize) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn edit_state(content: &str) -> EditState {
+        EditState {
+            content: content.to_owned().into(),
+            selected_range: content.len()..content.len(),
+            selection_reversed: false,
+        }
+    }
+
+    #[test]
+    fn same_text_composition_commit_restores_original_selection() {
+        let mut history = EditHistory::default();
+        let before = EditState {
+            selected_range: 0..3,
+            selection_reversed: true,
+            ..edit_state("old")
+        };
+        let marked = edit_state("candidate");
+        history.replace(before.clone(), "candidate", true);
+        assert!(history.undo.is_empty());
+        history.replace(marked.clone(), "candidate", false);
+        history.finish_composition("candidate");
+
+        assert_eq!(history.undo.len(), 1);
+        assert_eq!(history.undo(marked.clone()), Some(before.clone()));
+        assert_eq!(history.redo(before), Some(marked));
+        assert!(history.composition.is_none());
+    }
+
+    #[test]
+    fn different_final_candidate_undo_skips_all_intermediate_text() {
+        let mut history = EditHistory::default();
+        let before = EditState {
+            selected_range: 0..3,
+            selection_reversed: true,
+            ..edit_state("old")
+        };
+        // Marking unchanged text still starts the transaction before selection changes.
+        history.replace(before.clone(), "old", true);
+        history.replace(edit_state("old"), "draft", true);
+        history.replace(edit_state("draft"), "candidate", true);
+        history.replace(edit_state("candidate"), "final", false);
+
+        assert_eq!(history.undo.len(), 1);
+        assert_eq!(history.undo(edit_state("final")), Some(before.clone()));
+        assert_eq!(history.redo(before), Some(edit_state("final")));
+    }
+
+    #[test]
+    fn unmark_commits_once_and_following_regular_edit_is_separate() {
+        let mut history = EditHistory::default();
+        let before = edit_state("");
+        let committed = edit_state("candidate");
+        let typed = edit_state("candidate!");
+        history.replace(before.clone(), "draft", true);
+        history.replace(edit_state("draft"), "candidate", true);
+        history.finish_composition("candidate");
+        history.finish_composition("candidate");
+        history.replace(committed.clone(), "candidate!", false);
+
+        assert_eq!(history.undo.len(), 2);
+        assert_eq!(history.undo(typed.clone()), Some(committed.clone()));
+        assert_eq!(history.undo(committed.clone()), Some(before.clone()));
+        assert_eq!(history.redo(before), Some(committed.clone()));
+        assert_eq!(history.redo(committed), Some(typed));
+    }
+
+    #[test]
+    fn cancelled_composition_is_a_noop_and_preserves_redo() {
+        for unmark in [false, true] {
+            let mut history = EditHistory::default();
+            let before = edit_state("");
+            let future = edit_state("future");
+            history.replace(before.clone(), "future", false);
+            assert_eq!(history.undo(future.clone()), Some(before.clone()));
+            history.replace(before.clone(), "draft", true);
+            history.replace(edit_state("draft"), "", unmark);
+            if unmark {
+                history.finish_composition("");
+            }
+
+            assert!(history.undo.is_empty());
+            assert!(history.composition.is_none());
+            assert_eq!(history.redo(before.clone()), Some(future.clone()));
+            assert_eq!(history.undo(future), Some(before.clone()));
+            history.replace(before.clone(), "next", false);
+            assert!(history.redo.is_empty());
+            assert_eq!(history.undo(edit_state("next")), Some(before));
+        }
+    }
+
+    #[test]
+    fn committed_composition_invalidates_redo_but_candidates_do_not() {
+        let mut history = EditHistory::default();
+        let before = edit_state("");
+        history.replace(before.clone(), "old", false);
+        assert_eq!(history.undo(edit_state("old")), Some(before.clone()));
+        history.replace(before.clone(), "new", true);
+        assert_eq!(history.redo.len(), 1);
+        history.replace(edit_state("new"), "new", false);
+
+        assert!(history.redo.is_empty());
+        assert_eq!(history.undo(edit_state("new")), Some(before));
+    }
+
+    #[test]
+    fn undo_during_composition_finishes_then_undoes_the_composition() {
+        let mut history = EditHistory::default();
+        let before = edit_state("prefix");
+        let marked = edit_state("prefix candidate");
+        history.replace(before.clone(), &marked.content, true);
+
+        assert_eq!(history.undo(marked.clone()), Some(before.clone()));
+        assert!(history.composition.is_none());
+        assert_eq!(history.redo(before), Some(marked));
+    }
+
+    #[test]
+    fn redo_during_changed_composition_does_not_restore_stale_text() {
+        let mut history = EditHistory::default();
+        let before = edit_state("");
+        history.replace(before.clone(), "old", false);
+        assert_eq!(history.undo(edit_state("old")), Some(before.clone()));
+        let marked = edit_state("new");
+        history.replace(before.clone(), &marked.content, true);
+
+        assert_eq!(history.redo(marked.clone()), None);
+        assert!(history.composition.is_none());
+        assert_eq!(history.undo(marked), Some(before));
+    }
+
+    #[test]
+    fn regular_edits_keep_noop_and_bounded_history_behavior() {
+        let mut history = EditHistory::default();
+        for index in 0..101 {
+            history.replace(
+                edit_state(&index.to_string()),
+                &(index + 1).to_string(),
+                false,
+            );
+        }
+        assert_eq!(history.undo.len(), 100);
+        assert_eq!(history.undo.first(), Some(&edit_state("1")));
+        assert_eq!(history.undo(edit_state("101")), Some(edit_state("100")));
+        history.replace(edit_state("100"), "100", false);
+        assert_eq!(history.redo(edit_state("100")), Some(edit_state("101")));
+    }
 
     #[test]
     fn single_line_inputs_flatten_pasted_line_breaks() {
