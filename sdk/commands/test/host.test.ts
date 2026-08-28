@@ -92,7 +92,10 @@ describe("command host", () => {
     })
   })
 
-  it("adapts vanilla handlers and round-trips tool calls", async () => {
+  it.each([
+    "https://example.com",
+    "slack://channel?team=T_EXAMPLE&id=C_EXAMPLE",
+  ])("adapts vanilla handlers and round-trips %s", async (url) => {
     const output: HostOutput[] = []
     let observedApplication: string | undefined
     await runHost({
@@ -102,7 +105,7 @@ describe("command host", () => {
             phrases: ["open example"],
             run: async ({ hex, context }: HandlerArguments) => {
               observedApplication = context.application
-              await hex.openUrl("https://example.com")
+              await hex.openUrl(url)
             },
           },
         },
@@ -133,7 +136,7 @@ describe("command host", () => {
       type: "toolCall",
       invocationId: "inv-1",
       toolCallId: "1",
-      action: { type: "openUrl", url: "https://example.com" },
+      action: { type: "openUrl", url },
     })
     expect(observedApplication).toBe("Brave Browser")
   })
@@ -583,7 +586,7 @@ describe("command host", () => {
     })).toThrow("repeat must be")
     expect(() => prepareConfig({
       commands: { bad: { phrases: ["bad"], run: { type: "openUrl", url: "file:///tmp/example" } } },
-    })).toThrow("must use http or https")
+    })).toThrow("scheme is not supported")
     expect(() => prepareConfig({
       commands: {
         bad: {
@@ -596,6 +599,33 @@ describe("command host", () => {
     expect(() => prepareConfig({
       commands: { bad: { phrases: ["bad"], action: { type: "press", key: "x", modifiers: ["meta"] } } },
     })).toThrow("unsupported modifier")
+  })
+
+  it.each([
+    "slack://channel?team=T_EXAMPLE&id=C_EXAMPLE",
+    "obsidian://open?vault=Work%20Notes&file=Plans%2FToday#section",
+    "mailto:hello@example.com?subject=Hello%20there",
+    "x-example+test://route?value=one%26two",
+    "SLACK://channel?team=T_EXAMPLE&id=C_EXAMPLE",
+  ])("registers deep links unchanged: %s", (url) => {
+    for (const field of ["action", "run"]) {
+      const prepared = prepareConfig({
+        commands: { link: { phrases: ["open link"], [field]: openUrl(url) } },
+      })
+      expect(prepared.registration.commands[0]?.execution).toEqual({
+        type: "native", action: { type: "openUrl", url },
+      })
+    }
+  })
+
+  it.each([
+    "relative/path", "//example.com", "", "slack://channel\u0000",
+    "javascript:alert(1)", "JaVaScRiPt:alert(1)", "data:text/plain,hello",
+    "vbscript:msgbox(1)", "file:///tmp/example",
+  ])("rejects invalid or non-launchable URLs: %s", (url) => {
+    expect(() => prepareConfig({
+      commands: { link: { phrases: ["open link"], action: openUrl(url) } },
+    })).toThrow()
   })
 
   it("bounds every dictation protocol phrase list", () => {

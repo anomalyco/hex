@@ -20,8 +20,10 @@ export interface PressOptions {
   readonly repeat?: number
 }
 
+/** Open an absolute web URL or app deep link with its macOS handler. */
 export const openUrl = (url: string): NativeAction => Object.freeze({ type: "openUrl", url })
 
+/** Launch an application by name or path. Use openUrl for app deep links. */
 export const openApplication = (application: string): NativeAction =>
   Object.freeze({ type: "openApplication", application })
 
@@ -41,7 +43,9 @@ export function press(input: string | PressOptions): NativeAction {
 export const typeText = (text: string): NativeAction => Object.freeze({ type: "typeText", text })
 
 export interface HexCapabilities<Result> {
+  /** Open an absolute web URL or app deep link, such as slack://channel?team=...&id=... . */
   readonly openUrl: (url: string) => Result
+  /** Launch an application by name or path. Use openUrl for app deep links. */
   readonly openApplication: (application: string) => Result
   readonly openPath: (path: string) => Result
   readonly press: (input: string | PressOptions) => Result

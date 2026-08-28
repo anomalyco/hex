@@ -267,14 +267,17 @@ const validateNativeAction = (value: unknown, label: string): NativeAction | und
     case "openUrl": {
       if (typeof action.url !== "string") return undefined
       const url = boundedString(action.url, `${label}.url`, MAX_VALUE_BYTES)
+      if (/[\u0000-\u001f\u007f]/.test(url)) {
+        throw new Error(`${label}.url must not contain control characters`)
+      }
       let parsed: URL
       try {
         parsed = new URL(url)
       } catch {
         throw new Error(`${label}.url must be an absolute URL`)
       }
-      if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-        throw new Error(`${label}.url must use http or https`)
+      if (["file:", "javascript:", "data:", "vbscript:"].includes(parsed.protocol)) {
+        throw new Error(`${label}.url scheme is not supported; use openPath for files`)
       }
       return openUrl(url)
     }

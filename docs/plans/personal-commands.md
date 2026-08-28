@@ -34,6 +34,13 @@ Available capabilities are `openUrl`, `openApplication`, `openPath`, `press`,
 and `typeText`. Handlers may compose several capabilities and may use ordinary
 TypeScript, local modules, Effect, and installed npm packages.
 
+`openUrl` accepts absolute web URLs and app deep links, for example
+`hex.openUrl("slack://channel?team=T_EXAMPLE&id=C_EXAMPLE")`. The URL is passed
+unchanged to macOS, which requires an installed handler for its scheme. Use
+`openApplication("Slack")` to launch an app by name or path, not to navigate a
+deep link. The API spelling is `openUrl`, not `openURL`. File URLs and inline
+script/data URLs remain unsupported; use `openPath` for filesystem paths.
+
 ## Dictation Transformations
 
 The config may register named string transformations. They appear as optional
