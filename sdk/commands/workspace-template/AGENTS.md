@@ -49,6 +49,10 @@ files and third-party dependencies.
   `run`.
 - Capabilities are `openUrl`, `openApplication`, `openPath`, `press`, and
   `typeText`.
+- `openUrl` opens absolute web URLs and app deep links such as
+  `slack://channel?team=T_EXAMPLE&id=C_EXAMPLE` using an installed macOS handler.
+  `openApplication` takes an app name or path, not a deep link. Use `openPath`
+  for files; file, inline-script, and data URLs are unsupported.
 - Structured native action descriptors are available for fixed single actions,
   but handlers are the clearest default and compose multiple capabilities.
 - Effect `run` accepts an Effect value or a function that returns an Effect.

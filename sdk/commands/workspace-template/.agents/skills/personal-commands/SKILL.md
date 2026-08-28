@@ -61,6 +61,17 @@ export default defineHexConfig({
 })
 ```
 
+To navigate inside an app, use `openUrl` (lowercase `rl`) with its deep link.
+`openApplication` takes an app name or path, not a URL. macOS must have an
+installed handler for the URL scheme:
+
+```ts
+run: ({ hex }) => hex.openUrl("slack://channel?team=T_EXAMPLE&id=C_EXAMPLE")
+```
+
+URLs are passed unchanged, including their query and fragment. File URLs and
+inline script/data URLs are unsupported; use `openPath` for filesystem paths.
+
 Handlers may issue several calls. HEX waits for all calls started by the handler,
 including calls that were not explicitly awaited:
 

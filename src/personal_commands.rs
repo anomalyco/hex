@@ -2217,9 +2217,16 @@ impl NativeAction {
         Ok(match self {
             Self::OpenUrl { url } => {
                 validate_text(&url, "URL", 4096)?;
+                if url.bytes().any(|byte| byte.is_ascii_control()) {
+                    return Err(eyre!(
+                        "personal command URL must not contain control characters"
+                    ));
+                }
                 let parsed = url::Url::parse(&url).wrap_err("personal command URL is invalid")?;
-                if !matches!(parsed.scheme(), "http" | "https") {
-                    return Err(eyre!("personal command URL must use http or https"));
+                if matches!(parsed.scheme(), "file" | "javascript" | "data" | "vbscript") {
+                    return Err(eyre!(
+                        "personal command URL scheme is not supported; use openPath for files"
+                    ));
                 }
                 Action::OpenUrl(url)
             }
@@ -2654,9 +2661,48 @@ mod tests {
     use std::time::UNIX_EPOCH;
 
     #[test]
+    fn native_url_actions_preserve_deep_links() {
+        for url in [
+            "https://example.com",
+            "slack://channel?team=T_EXAMPLE&id=C_EXAMPLE",
+            "obsidian://open?vault=Work%20Notes&file=Plans%2FToday#section",
+            "mailto:hello@example.com?subject=Hello%20there",
+            "x-example+test://route?value=one%26two",
+            "SLACK://channel?team=T_EXAMPLE&id=C_EXAMPLE",
+        ] {
+            let action = NativeAction::OpenUrl { url: url.into() }
+                .into_action()
+                .unwrap();
+            assert!(matches!(action, Action::OpenUrl(value) if value == url));
+        }
+    }
+
+    #[test]
+    fn native_url_actions_reject_invalid_and_non_launchable_urls() {
+        for url in [
+            "relative/path",
+            "//example.com",
+            "",
+            "slack://channel\0",
+            "javascript:alert(1)",
+            "JaVaScRiPt:alert(1)",
+            "data:text/plain,hello",
+            "vbscript:msgbox(1)",
+            "file:///tmp/example",
+        ] {
+            assert!(
+                NativeAction::OpenUrl { url: url.into() }
+                    .into_action()
+                    .is_err(),
+                "{url:?}"
+            );
+        }
+    }
+
+    #[test]
     fn registration_compiles_native_and_handler_commands() {
         let registration: HostOutput = serde_json::from_str(
-            r#"{"type":"registration","protocolVersion":2,"commands":[{"id":"native","phrases":["open example"],"execution":{"type":"native","action":{"type":"openUrl","url":"https://example.com"}}},{"id":"handled","phrases":["do work"],"group":"Work","when":{"application":"Slack"},"execution":{"type":"handler"}}]}"#,
+            r#"{"type":"registration","protocolVersion":2,"commands":[{"id":"native","phrases":["open example"],"execution":{"type":"native","action":{"type":"openUrl","url":"slack://channel?team=T_EXAMPLE&id=C_EXAMPLE"}}},{"id":"handled","phrases":["do work"],"group":"Work","when":{"application":"Slack"},"execution":{"type":"handler"}}]}"#,
         )
         .unwrap();
         let HostOutput::Registration {
@@ -2679,7 +2725,7 @@ mod tests {
 
         assert!(matches!(
             compiled.commands.resolve(Mode::Listening, "open example", &ContextSnapshot::default()),
-            Decision::Execute { action: Action::OpenUrl(url), .. } if url == "https://example.com"
+            Decision::Execute { action: Action::OpenUrl(url), .. } if url == "slack://channel?team=T_EXAMPLE&id=C_EXAMPLE"
         ));
         let slack = ContextSnapshot {
             application: Some("Slack".into()),
