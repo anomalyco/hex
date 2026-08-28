@@ -106,7 +106,8 @@ impl Add<Duration> for CaptureInstant {
 }
 
 pub struct AudioInput {
-    _stream: Stream,
+    // Tests can deliver PCM through channels without opening a native microphone.
+    _stream: Option<Stream>,
     chunks: Receiver<(Vec<f32>, CaptureInstant)>,
     pub sample_rate: u32,
     pub device_name: String,
@@ -122,13 +123,15 @@ pub enum AudioInputEvent {
     StreamFailed(String),
 }
 
+type InputOpenResult = (u64, Result<AudioInput, String>);
+
 pub struct RecoveringAudioInput {
     input: Option<AudioInput>,
     device_override: Option<String>,
     selected_device: Option<String>,
     active_revision: u64,
     recovery: MicrophoneRecovery,
-    replacement: Option<Receiver<(u64, Result<AudioInput, String>)>>,
+    replacement: Option<Receiver<InputOpenResult>>,
 }
 
 pub enum RecoveringAudioInputEvent {
@@ -211,6 +214,22 @@ impl MicrophoneRecovery {
 }
 
 impl AudioInput {
+    #[cfg(test)]
+    pub fn channel_for_test() -> (Self, Sender<(Vec<f32>, CaptureInstant)>) {
+        let (sender, chunks) = mpsc::channel();
+        let (_, stream_errors) = mpsc::channel();
+        (
+            Self {
+                _stream: None,
+                chunks,
+                stream_errors,
+                sample_rate: 48_000,
+                device_name: "Test microphone".into(),
+            },
+            sender,
+        )
+    }
+
     pub fn open(device_queries: &[&str]) -> Result<Self> {
         let host = cpal::default_host();
         let device = find_device(&host, device_queries)?;
@@ -272,7 +291,7 @@ impl AudioInput {
             .wrap_err("could not start microphone capture")?;
 
         Ok(Self {
-            _stream: stream,
+            _stream: Some(stream),
             chunks,
             sample_rate,
             device_name,
@@ -310,16 +329,22 @@ impl RecoveringAudioInput {
         device_override: Option<&str>,
         selection_revision: u64,
         selected_device: Option<&str>,
-    ) -> Result<Self> {
-        let input = open_configured_input(device_override, selected_device, true)?;
-        Ok(Self {
-            input: Some(input),
-            device_override: device_override.map(str::to_owned),
-            selected_device: selected_device.map(str::to_owned),
-            active_revision: selection_revision,
-            recovery: MicrophoneRecovery::default(),
-            replacement: None,
-        })
+    ) -> Self {
+        let mut input = Self::closed(device_override, selection_revision, selected_device);
+        let opened = open_configured_input(device_override, selected_device, true);
+        input.finish_initial_open(opened, Instant::now());
+        input
+    }
+
+    fn finish_initial_open(&mut self, opened: Result<AudioInput>, now: Instant) {
+        match opened {
+            Ok(opened) => self.input = Some(opened),
+            Err(error) => {
+                tracing::warn!(%error, "could not open dictation microphone at startup; retrying");
+                self.recovery.request_stream_recovery(now);
+                self.recovery.failed(now);
+            }
+        }
     }
 
     pub fn closed(
@@ -337,10 +362,30 @@ impl RecoveringAudioInput {
         }
     }
 
+    #[cfg(test)]
+    pub fn pending_for_test() -> (Self, Sender<InputOpenResult>) {
+        let mut input = Self::closed(
+            Some("HEX nonexistent microphone for pending open test"),
+            0,
+            None,
+        );
+        let (sender, receiver) = mpsc::channel();
+        input.replacement = Some(receiver);
+        (input, sender)
+    }
+
     pub fn request_open(&mut self) {
-        if self.input.is_none() && self.replacement.is_none() {
+        if self.input.is_none() && self.replacement.is_none() && !self.is_recovering() {
             self.start_replacement();
         }
+    }
+
+    pub fn request_recovery(&mut self) {
+        self.recovery.request_stream_recovery(Instant::now());
+    }
+
+    pub fn is_recovering(&self) -> bool {
+        self.recovery.blocks_audio()
     }
 
     pub fn close(&mut self) {
@@ -358,6 +403,10 @@ impl RecoveringAudioInput {
     }
 
     pub fn cancel_open(&mut self) {
+        // Cancelling a capture must not cancel the warm microphone's recovery.
+        if self.is_recovering() {
+            return;
+        }
         self.replacement = None;
         if self.input.is_none() {
             self.recovery.recovered();
@@ -369,7 +418,7 @@ impl RecoveringAudioInput {
             return;
         }
         self.selected_device = selected_device.map(str::to_owned);
-        if self.input.is_none() {
+        if self.input.is_none() && !self.is_recovering() {
             let was_opening = self.replacement.take().is_some();
             self.active_revision = revision;
             self.recovery.recovered();
@@ -409,20 +458,22 @@ impl RecoveringAudioInput {
                     self.recovery.failed(now);
                 }
                 Err(error) => {
-                    if self.input.is_none() {
+                    if self.input.is_none() && !self.is_recovering() {
                         self.recovery.recovered();
                         return RecoveringAudioInputEvent::OpenFailed(error);
                     }
                     self.recovery.failed(now);
                     tracing::warn!(
                         %error,
-                        device = %self.device_name(),
                         "could not reopen dictation microphone; retrying"
                     );
                 }
             }
         }
-        if capture_idle && self.recovery.should_attempt(now) && self.replacement.is_none() {
+        if (capture_idle || self.input.is_none())
+            && self.recovery.should_attempt(now)
+            && self.replacement.is_none()
+        {
             self.start_replacement();
         }
         if self.recovery.blocks_audio() {
@@ -486,7 +537,7 @@ impl RecoveringAudioInput {
         self.replacement = Some(receiver);
     }
 
-    fn poll_replacement(&mut self) -> Option<(u64, Result<AudioInput, String>)> {
+    fn poll_replacement(&mut self) -> Option<InputOpenResult> {
         let result = match self.replacement.as_ref()?.try_recv() {
             Ok(result) => result,
             Err(TryRecvError::Empty) => return None,
@@ -695,6 +746,121 @@ mod tests {
         assert_eq!(input.active_revision, 4);
         assert_eq!(input.selected_device.as_deref(), Some("Next microphone"));
         assert!(input.replacement.is_none());
+    }
+
+    #[test]
+    fn failed_startup_retry_keeps_backoff_without_an_open_stream() {
+        let mut input = RecoveringAudioInput::closed(None, 3, Some("Missing microphone"));
+        let started = Instant::now();
+        input.finish_initial_open(Err(eyre!("device unavailable")), started);
+        assert!(input.is_recovering());
+        assert!(
+            !input
+                .recovery
+                .should_attempt(started + Duration::from_millis(249))
+        );
+        assert!(
+            input
+                .recovery
+                .should_attempt(started + Duration::from_millis(250))
+        );
+        let (sender, receiver) = mpsc::channel();
+        input.replacement = Some(receiver);
+        sender.send((3, Err("device unavailable".into()))).unwrap();
+
+        let before = Instant::now();
+        assert!(matches!(
+            input.recv_timeout(Duration::ZERO, true),
+            RecoveringAudioInputEvent::Timeout
+        ));
+        let after = Instant::now();
+        assert!(!input.is_open());
+        assert!(!input.is_opening());
+        assert!(input.is_recovering());
+        let next_attempt = input.recovery.next_attempt.unwrap();
+        assert!(next_attempt >= before + Duration::from_millis(500));
+        assert!(next_attempt <= after + Duration::from_millis(500));
+
+        input.cancel_open();
+        input.request_open();
+        assert!(input.is_recovering());
+        assert!(!input.is_opening());
+        assert_eq!(input.recovery.next_attempt, Some(next_attempt));
+
+        input.request_selection(4, Some("Next microphone"));
+        assert!(input.is_recovering());
+        assert_eq!(input.recovery.target_revision, Some(4));
+        assert_eq!(input.active_revision, 3);
+        assert_eq!(input.selected_device.as_deref(), Some("Next microphone"));
+        assert!(input.recovery.should_attempt(Instant::now()));
+    }
+
+    #[test]
+    fn startup_retry_recovers_metadata_and_audio_without_restarting() {
+        let mut input = RecoveringAudioInput::closed(None, 3, Some("Test microphone"));
+        input.finish_initial_open(Err(eyre!("device unavailable")), Instant::now());
+        let (sender, receiver) = mpsc::channel();
+        input.replacement = Some(receiver);
+        let (opened, samples) = AudioInput::channel_for_test();
+        sender.send((3, Ok(opened))).unwrap();
+
+        assert!(matches!(
+            input.recv_timeout(Duration::ZERO, true),
+            RecoveringAudioInputEvent::Reopened
+        ));
+        assert!(!input.is_recovering());
+        assert!(!input.is_opening());
+        assert!(input.recovery.next_attempt.is_none());
+        assert_eq!(input.sample_rate(), 48_000);
+        assert_eq!(input.device_name(), "Test microphone");
+        let at = CaptureInstant::from_nanos(60_000_000_000);
+        samples.send((vec![0.25; 480], at)).unwrap();
+        assert!(matches!(
+            input.recv_timeout(Duration::ZERO, true),
+            RecoveringAudioInputEvent::Chunk { samples, captured_through }
+                if samples == vec![0.25; 480] && captured_through == at
+        ));
+    }
+
+    #[test]
+    fn startup_recovery_opens_even_when_a_capture_is_pending() {
+        let mut input = RecoveringAudioInput::closed(
+            Some("HEX nonexistent microphone for pending recovery test"),
+            3,
+            None,
+        );
+        input.request_recovery();
+        input.request_selection(4, Some("Ignored selection under CLI override"));
+        assert_eq!(input.active_revision, 3);
+        assert!(input.selected_device.is_none());
+
+        assert!(matches!(
+            input.recv_timeout(Duration::ZERO, false),
+            RecoveringAudioInputEvent::Timeout
+        ));
+        assert!(input.is_opening());
+        input.cancel_open();
+        assert!(input.is_opening());
+        input.close();
+        assert!(!input.is_opening());
+        assert!(!input.is_recovering());
+        assert!(input.recovery.next_attempt.is_none());
+    }
+
+    #[test]
+    fn failed_on_demand_open_does_not_retry_while_idle() {
+        let mut input = RecoveringAudioInput::closed(None, 3, None);
+        let (sender, receiver) = mpsc::channel();
+        input.replacement = Some(receiver);
+        sender.send((3, Err("device unavailable".into()))).unwrap();
+
+        assert!(matches!(
+            input.recv_timeout(Duration::ZERO, true),
+            RecoveringAudioInputEvent::OpenFailed(error) if error == "device unavailable"
+        ));
+        assert!(!input.is_recovering());
+        assert!(!input.is_opening());
+        assert!(input.recovery.next_attempt.is_none());
     }
 
     #[test]

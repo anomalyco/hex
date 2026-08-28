@@ -267,30 +267,42 @@ pub fn listen(
     events.emit(&VoiceEvent::SessionStarted {
         timestamp_ms: now_ms(),
     })?;
+    if input.is_recovering() {
+        hotkey.suspend();
+        edit_hotkey.as_mut().and_then(DictationHotkey::suspend);
+    }
     if hotkey.is_recording() {
-        input.start(if microphone_policy.release_while_idle {
+        let accepted = input.start(if microphone_policy.release_while_idle {
             CaptureInstant::now()
         } else {
             input.captured_through()
         })?;
-        events.dictation(DictationPhase::Started, "")?;
-        if let Some(indicator) = &indicator {
-            indicator.send(DictationIndicatorEvent::Started);
+        if accepted {
+            events.dictation(DictationPhase::Started, "")?;
+            if let Some(indicator) = &indicator {
+                indicator.send(DictationIndicatorEvent::Started);
+            }
+        } else {
+            hotkey.suspend();
         }
     }
     if edit_hotkey
         .as_ref()
         .is_some_and(DictationHotkey::is_recording)
     {
-        input.start(if microphone_policy.release_while_idle {
+        let accepted = input.start(if microphone_policy.release_while_idle {
             CaptureInstant::now()
         } else {
             input.captured_through()
         })?;
-        edit_context = Some(voice_action_context_snapshot(&context));
-        events.dictation(DictationPhase::Started, "")?;
-        if let Some(indicator) = &indicator {
-            indicator.send(DictationIndicatorEvent::EditingStarted);
+        if accepted {
+            edit_context = Some(voice_action_context_snapshot(&context));
+            events.dictation(DictationPhase::Started, "")?;
+            if let Some(indicator) = &indicator {
+                indicator.send(DictationIndicatorEvent::EditingStarted);
+            }
+        } else {
+            edit_hotkey.as_mut().and_then(DictationHotkey::suspend);
         }
     }
     emit_state(
@@ -333,7 +345,7 @@ pub fn listen(
                             &input.device_name(),
                             &mut events,
                             indicator.as_ref(),
-                        )?
+                        )?;
                     }
                     RecognitionControl::PasteLast => {}
                     RecognitionControl::StartDictation {
@@ -829,7 +841,7 @@ pub fn listen(
                 if voice_action_takeover {
                     let _ = hotkey.suspend();
                 } else if voice_protocol.is_none() {
-                    handle_hotkey_action(
+                    let accepted = handle_hotkey_action(
                         action,
                         capture_at,
                         &mut recognizer,
@@ -841,6 +853,9 @@ pub fn listen(
                         &mut events,
                         indicator.as_ref(),
                     )?;
+                    if !accepted {
+                        hotkey.suspend();
+                    }
                 }
             }
             if let Some(action) = edit_action
@@ -1516,10 +1531,12 @@ fn handle_hotkey_action(
     device: &str,
     events: &mut EventLog,
     indicator: Option<&DictationIndicatorSender>,
-) -> Result<()> {
+) -> Result<bool> {
     match action {
         HotkeyAction::Start => {
-            dictation.start(action_at)?;
+            if !dictation.start(action_at)? {
+                return Ok(false);
+            }
             reset_command_recognizer(dictation, recognizer)?;
             worker.prepare_paste();
             events.dictation(DictationPhase::Started, "")?;
@@ -1583,7 +1600,8 @@ fn handle_hotkey_action(
             }
             emit_engine_state(events, false, worker, mode, device)
         }
-    }
+    }?;
+    Ok(true)
 }
 
 fn voice_action_context_snapshot(fallback: &ContextSnapshot) -> ContextSnapshot {
@@ -1627,7 +1645,10 @@ fn handle_edit_hotkey_action(
             }
             let promoted = dictation.is_recording();
             if !promoted {
-                dictation.start(action_at)?;
+                if !dictation.start(action_at)? {
+                    *edit_context = None;
+                    return Ok(false);
+                }
                 reset_command_recognizer(dictation, recognizer)?;
             }
             let became_intentional = dictation.become_intentional(CaptureInstant::now())?;

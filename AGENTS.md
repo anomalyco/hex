@@ -202,7 +202,9 @@ CoreAudio formats, AppleScript details, or event serialization.
   `--device` remains authoritative for that listener process. A runtime stream
   failure cancels an incomplete capture, discards stale chunks, and retries the
   same selection with bounded backoff; it must not require a settings change or
-  process restart.
+  process restart. An initial open failure uses the same bounded recovery without
+  stopping the listener. Cancellation does not stop warm-microphone retries;
+  enabling release-while-idle stops them once capture is idle.
 - Feedback volume is persisted from zero through one; zero disables tones.
   Volume changes apply immediately and preview one recording-start tone.
 - Launch at Login uses `SMAppService` for the signed main app. Treat both
