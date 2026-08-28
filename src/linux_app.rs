@@ -53,11 +53,11 @@ struct TranscriptionPreparation {
     canceled: Arc<AtomicBool>,
     model: crate::transcription_models::TranscriptionModelId,
     progress: Arc<AtomicU64>,
-    result: Receiver<PreparationResult>,
     stage: Arc<AtomicU8>,
-    worker: Option<JoinHandle<()>>,
+    worker: JoinHandle<PreparationResult>,
 }
 
+#[derive(Clone)]
 enum SettingsChange {
     Capture,
     Hotkey(crate::linux_settings::LinuxHotkey),
@@ -66,8 +66,7 @@ enum SettingsChange {
 }
 
 struct SettingsEdit {
-    change: Option<SettingsChange>,
-    capturing: bool,
+    change: SettingsChange,
     resume: bool,
     canceled: Arc<AtomicBool>,
     worker: Option<JoinHandle<Result<crate::linux_settings::LinuxSettings>>>,
@@ -78,8 +77,7 @@ struct LinuxDesktopHost {
     event_reader: EventReader,
     activity: DesktopActivity,
     listener_stop: Arc<Mutex<Option<Arc<AtomicBool>>>>,
-    listener_result: Option<Receiver<ListenerResult>>,
-    listener_worker: Option<JoinHandle<()>>,
+    listener_worker: Option<JoinHandle<ListenerResult>>,
     session_before_start: Option<u64>,
     awaiting_session_start: bool,
     listen_when_ready: bool,
@@ -418,7 +416,6 @@ impl LinuxDesktopHost {
             event_path,
             activity,
             listener_stop,
-            listener_result: None,
             listener_worker: None,
             session_before_start: None,
             awaiting_session_start: false,
@@ -441,7 +438,7 @@ impl LinuxDesktopHost {
             return;
         }
         self.listen_when_ready = true;
-        if self.listener_result.is_some() || self.transcription_preparation.is_some() {
+        if self.is_running() || self.transcription_preparation.is_some() {
             return;
         }
         let model = crate::transcription_models::definition(self.settings.transcription.model);
@@ -455,7 +452,6 @@ impl LinuxDesktopHost {
             .listener_stop
             .lock()
             .unwrap_or_else(|error| error.into_inner()) = Some(stop.clone());
-        let (result_sender, result_receiver) = mpsc::channel();
         let event_path = self.event_path.clone();
         let prepared_transcriber = self.prepared_transcriber.take();
         let worker = std::thread::spawn(move || {
@@ -471,11 +467,9 @@ impl LinuxDesktopHost {
                     crate::linux_dictation::run(&event_path, None, &stop)
                 }
             });
-            let result = result.map_err(|error| format!("{error:#}"));
-            let _ = result_sender.send(result);
+            result.map_err(|error| format!("{error:#}"))
         });
         self.listener_worker = Some(worker);
-        self.listener_result = Some(result_receiver);
         self.session_before_start = self.activity.session_started_at;
         self.awaiting_session_start = true;
         self.status = "Starting".into();
@@ -524,32 +518,18 @@ impl LinuxDesktopHost {
             };
         }
 
-        let transcription_result = self
+        let mut start_listener = false;
+        if self
             .transcription_preparation
             .as_ref()
-            .filter(|preparation| {
-                preparation
-                    .worker
-                    .as_ref()
-                    .is_none_or(JoinHandle::is_finished)
-            })
-            .and_then(|preparation| match preparation.result.try_recv() {
-                Ok(result) => Some(result),
-                Err(TryRecvError::Disconnected) => {
-                    Some(Err("model preparation worker stopped unexpectedly".into()))
-                }
-                Err(TryRecvError::Empty) => None,
-            });
-        let mut start_listener = false;
-        if let Some(result) = transcription_result {
-            let mut preparation = self
-                .transcription_preparation
-                .take()
-                .expect("completed transcription preparation exists");
+            .is_some_and(|preparation| preparation.worker.is_finished())
+            && let Some(preparation) = self.transcription_preparation.take()
+        {
             let was_canceled = preparation.canceled.load(Ordering::Relaxed);
-            if let Some(worker) = preparation.worker.take() {
-                let _ = worker.join();
-            }
+            let result = preparation
+                .worker
+                .join()
+                .unwrap_or_else(|_| Err("model preparation worker stopped unexpectedly".into()));
             if was_canceled {
                 self.transcription_error = None;
             } else {
@@ -586,30 +566,22 @@ impl LinuxDesktopHost {
         if self
             .listener_worker
             .as_ref()
-            .is_none_or(JoinHandle::is_finished)
-            && let Some(receiver) = &self.listener_result
+            .is_some_and(JoinHandle::is_finished)
+            && let Some(worker) = self.listener_worker.take()
         {
-            let result = match receiver.try_recv() {
-                Ok(result) => Some(result),
-                Err(TryRecvError::Empty) => None,
-                Err(TryRecvError::Disconnected) => {
-                    Some(Err("listener worker stopped unexpectedly".into()))
-                }
-            };
-            if let Some(result) = result {
-                self.awaiting_session_start = false;
-                self.listener_result = None;
-                self.join_listener();
-                self.listener_stop
-                    .lock()
-                    .unwrap_or_else(|error| error.into_inner())
-                    .take();
-                match result {
-                    Ok(()) => self.status = "Ready".into(),
-                    Err(error) => {
-                        self.status = "Unavailable".into();
-                        self.error = Some(error);
-                    }
+            let result = worker
+                .join()
+                .unwrap_or_else(|_| Err("listener worker stopped unexpectedly".into()));
+            self.awaiting_session_start = false;
+            self.listener_stop
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .take();
+            match result {
+                Ok(()) => self.status = "Ready".into(),
+                Err(error) => {
+                    self.status = "Unavailable".into();
+                    self.error = Some(error);
                 }
             }
         }
@@ -622,7 +594,7 @@ impl LinuxDesktopHost {
         {
             self.awaiting_session_start = false;
         }
-        if self.listener_result.is_some()
+        if self.is_running()
             && self.listen_when_ready
             && !self.awaiting_session_start
             && let Some(status) = self.activity.state_label()
@@ -632,18 +604,7 @@ impl LinuxDesktopHost {
     }
 
     fn is_running(&self) -> bool {
-        self.listener_result.is_some()
-    }
-
-    fn join_listener(&mut self) {
-        if self
-            .listener_worker
-            .as_ref()
-            .is_some_and(JoinHandle::is_finished)
-            && let Some(worker) = self.listener_worker.take()
-        {
-            let _ = worker.join();
-        }
+        self.listener_worker.is_some()
     }
 
     fn set_dictation_hotkey(&mut self, shortcut: DesktopShortcut) -> Result<()> {
@@ -666,9 +627,8 @@ impl LinuxDesktopHost {
             },
         };
         if let Some(edit) = &mut self.settings_edit {
-            if matches!(edit.change, Some(SettingsChange::Capture)) && edit.worker.is_none() {
-                edit.change = Some(SettingsChange::Hotkey(binding));
-                edit.capturing = false;
+            if matches!(edit.change, SettingsChange::Capture) && edit.worker.is_none() {
+                edit.change = SettingsChange::Hotkey(binding);
             }
         } else {
             self.begin_settings_edit(SettingsChange::Hotkey(binding));
@@ -688,8 +648,7 @@ impl LinuxDesktopHost {
         self.stop();
         self.error = None;
         self.settings_edit = Some(SettingsEdit {
-            capturing: matches!(change, SettingsChange::Capture),
-            change: Some(change),
+            change,
             resume,
             canceled: Arc::new(AtomicBool::new(false)),
             worker: None,
@@ -703,9 +662,9 @@ impl LinuxDesktopHost {
     }
 
     fn capturing_hotkey(&self) -> bool {
-        self.settings_edit
-            .as_ref()
-            .is_some_and(|edit| !edit.canceled.load(Ordering::Acquire) && edit.capturing)
+        self.settings_edit.as_ref().is_some_and(|edit| {
+            !edit.canceled.load(Ordering::Acquire) && matches!(edit.change, SettingsChange::Capture)
+        })
     }
 
     fn has_pending_work(&self) -> bool {
@@ -747,14 +706,12 @@ impl LinuxDesktopHost {
             }
         } else if !canceled {
             let wayland = LinuxSession::detect().is_wayland();
-            if !wayland && matches!(edit.change, Some(SettingsChange::Capture)) {
+            if !wayland && matches!(edit.change, SettingsChange::Capture) {
                 // X11 uses focused GPUI keystrokes, never raw input-device access.
                 self.status = "Press a shortcut".into();
                 return;
             }
-            let Some(change) = edit.change.take() else {
-                return;
-            };
+            let change = edit.change.clone();
             let mut candidate = self.settings.clone();
             let canceled = edit.canceled.clone();
             edit.worker = Some(std::thread::spawn(move || {
@@ -836,9 +793,8 @@ impl LinuxDesktopHost {
         let worker_canceled = canceled.clone();
         let worker_progress = progress.clone();
         let worker_stage = stage.clone();
-        let (sender, receiver) = mpsc::sync_channel(1);
         let worker = std::thread::spawn(move || {
-            let result = (|| {
+            (|| {
                 crate::transcription_models::download_with_stage_progress(
                     definition,
                     &worker_canceled,
@@ -858,16 +814,14 @@ impl LinuxDesktopHost {
                     transcriber,
                 })
             })()
-            .map_err(|error| format!("{error:#}"));
-            let _ = sender.send(result);
+            .map_err(|error| format!("{error:#}"))
         });
         self.transcription_preparation = Some(TranscriptionPreparation {
             canceled,
             model,
             progress,
-            result: receiver,
             stage,
-            worker: Some(worker),
+            worker,
         });
         self.transcription_error = None;
         Ok(())
@@ -931,15 +885,21 @@ impl Drop for LinuxDesktopHost {
             .lock()
             .unwrap_or_else(|error| error.into_inner())
             .take();
-        self.join_listener();
-        if let Some(preparation) = &mut self.transcription_preparation
-            && preparation
-                .worker
-                .as_ref()
-                .is_some_and(JoinHandle::is_finished)
-            && let Some(worker) = preparation.worker.take()
+        if self
+            .listener_worker
+            .as_ref()
+            .is_some_and(JoinHandle::is_finished)
+            && let Some(worker) = self.listener_worker.take()
         {
             let _ = worker.join();
+        }
+        if self
+            .transcription_preparation
+            .as_ref()
+            .is_some_and(|preparation| preparation.worker.is_finished())
+            && let Some(preparation) = self.transcription_preparation.take()
+        {
+            let _ = preparation.worker.join();
         }
         if let Some(edit) = &mut self.settings_edit
             && edit.worker.as_ref().is_some_and(JoinHandle::is_finished)
@@ -1451,8 +1411,7 @@ mod tests {
             UpdateState::Unmanaged,
         );
         if running {
-            let (_, result) = mpsc::channel();
-            host.listener_result = Some(result);
+            host.listener_worker = Some(std::thread::spawn(|| Ok(())));
             *host.listener_stop.lock().unwrap() = Some(Arc::new(AtomicBool::new(false)));
             host.listen_when_ready = true;
         }
@@ -1468,6 +1427,89 @@ mod tests {
             std::thread::yield_now();
         }
         host.settings_edit.as_mut().unwrap().worker = Some(worker);
+    }
+
+    #[test]
+    fn listener_completion_waits_for_the_worker_and_preserves_errors() {
+        for outcome in [Some(Ok(())), Some(Err("listener failed".into())), None] {
+            let expected = outcome
+                .clone()
+                .unwrap_or_else(|| Err("listener worker stopped unexpectedly".into()))
+                .err();
+            let mut host = host_for_edit(true);
+            let (release, held) = mpsc::channel();
+            host.listener_worker = Some(std::thread::spawn(move || {
+                held.recv_timeout(Duration::from_secs(5)).unwrap();
+                outcome.expect("fixture listener panic")
+            }));
+            host.refresh();
+            assert!(host.is_running());
+            assert!(host.listener_stop.lock().unwrap().is_some());
+            release.send(()).unwrap();
+            while !host.listener_worker.as_ref().unwrap().is_finished() {
+                std::thread::yield_now();
+            }
+            host.refresh();
+            assert!(!host.is_running());
+            assert!(host.listener_stop.lock().unwrap().is_none());
+            assert_eq!(host.error, expected);
+            assert_eq!(
+                host.status,
+                if expected.is_some() {
+                    "Unavailable"
+                } else {
+                    "Ready"
+                }
+            );
+        }
+    }
+
+    #[test]
+    fn preparation_completion_preserves_selection_and_honors_cancellation() {
+        for (canceled, panics) in [(false, false), (false, true), (true, false), (true, true)] {
+            let mut host = host_for_edit(false);
+            let original = host.settings.clone();
+            let (release, held) = mpsc::channel();
+            host.transcription_preparation = Some(TranscriptionPreparation {
+                canceled: Arc::new(AtomicBool::new(false)),
+                model: TranscriptionModelId::default(),
+                progress: Arc::new(AtomicU64::new(0)),
+                stage: Arc::new(AtomicU8::new(ModelPreparationStage::Loading as u8)),
+                worker: std::thread::spawn(move || {
+                    held.recv_timeout(Duration::from_secs(5)).unwrap();
+                    assert!(!panics, "fixture preparation panic");
+                    Err("model unavailable".into())
+                }),
+            });
+            if canceled {
+                host.cancel_transcription_preparation();
+            }
+            host.refresh();
+            assert!(host.has_pending_work());
+            release.send(()).unwrap();
+            while !host
+                .transcription_preparation
+                .as_ref()
+                .unwrap()
+                .worker
+                .is_finished()
+            {
+                std::thread::yield_now();
+            }
+            host.refresh();
+            assert!(!host.has_pending_work());
+            assert_eq!(host.settings, original);
+            assert_eq!(
+                host.transcription_error.as_deref(),
+                if canceled {
+                    None
+                } else if panics {
+                    Some("model preparation worker stopped unexpectedly")
+                } else {
+                    Some("model unavailable")
+                }
+            );
+        }
     }
 
     #[test]
@@ -1499,7 +1541,7 @@ mod tests {
                 assert!(host.settings_edit.as_ref().unwrap().worker.is_none());
                 assert_ne!(host.settings, candidate);
             }
-            host.listener_result = None;
+            host.listener_worker = None;
             host.listener_stop.lock().unwrap().take();
             set_finished_edit(&mut host, Ok(candidate.clone()));
             host.refresh_settings_edit();
@@ -1516,7 +1558,8 @@ mod tests {
                 let mut host = host_for_edit(running);
                 let original = host.settings.clone();
                 host.begin_settings_edit(SettingsChange::Capture);
-                host.listener_result = None;
+                assert!(host.capturing_hotkey());
+                host.listener_worker = None;
                 host.listener_stop.lock().unwrap().take();
                 if cancel {
                     host.cancel_settings_edit();
@@ -1531,6 +1574,7 @@ mod tests {
                 assert_eq!(host.listen_when_ready, running);
                 assert_eq!(host.error.is_some(), !cancel);
                 assert!(host.settings_edit.is_none());
+                assert!(!host.capturing_hotkey());
             }
         }
     }
@@ -1539,7 +1583,7 @@ mod tests {
     fn cancel_signals_worker_and_does_not_wait_or_restart_until_it_finishes() {
         let mut host = host_for_edit(true);
         host.begin_settings_edit(SettingsChange::Capture);
-        host.listener_result = None;
+        host.listener_worker = None;
         host.listener_stop.lock().unwrap().take();
         let (release, held) = mpsc::channel();
         host.settings_edit.as_mut().unwrap().worker = Some(std::thread::spawn(move || {
@@ -1583,7 +1627,7 @@ mod tests {
         let edit = app.host.settings_edit.as_ref().unwrap();
         assert!(!edit.resume);
         assert!(edit.canceled.load(Ordering::Acquire));
-        app.host.listener_result = None;
+        app.host.listener_worker = None;
         app.host.listener_stop.lock().unwrap().take();
         app.host.refresh_settings_edit();
         assert!(!app.host.listen_when_ready);
@@ -1635,14 +1679,12 @@ mod tests {
             None,
             UpdateState::Unmanaged,
         );
-        let (_sender, result) = mpsc::sync_channel(1);
         host.transcription_preparation = Some(TranscriptionPreparation {
             canceled: Arc::new(AtomicBool::new(false)),
             model: TranscriptionModelId::default(),
             progress: Arc::new(AtomicU64::new(0)),
-            result,
             stage: Arc::new(AtomicU8::new(ModelPreparationStage::Downloading as u8)),
-            worker: None,
+            worker: std::thread::spawn(|| Err("fixture preparation".into())),
         });
 
         host.dispatch(DesktopAction::StartListening).unwrap();

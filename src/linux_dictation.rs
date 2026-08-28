@@ -23,11 +23,6 @@ struct Job {
     audio_ms: u64,
 }
 
-struct JobResult {
-    text: Option<String>,
-    result: Result<(), String>,
-}
-
 struct OutputWorker {
     stop: Arc<AtomicBool>,
     worker: Option<thread::JoinHandle<()>>,
@@ -109,17 +104,7 @@ fn run_with_settings(
                 elapsed_ms = started.elapsed().as_millis(),
                 "completed Linux dictation job"
             );
-            let event = match result {
-                Ok(text) => JobResult {
-                    text: Some(text),
-                    result: Ok(()),
-                },
-                Err(error) => JobResult {
-                    text: None,
-                    result: Err(error),
-                },
-            };
-            if result_sender.send(event).is_err() {
+            if result_sender.send(result).is_err() {
                 break;
             }
         }
@@ -181,9 +166,8 @@ fn run_with_settings(
         }
         while let Ok(result) = results.try_recv() {
             pending = pending.saturating_sub(1);
-            match result.result {
-                Ok(()) => {
-                    let text = result.text.unwrap_or_default();
+            match result {
+                Ok(text) => {
                     events.emit(&VoiceEvent::Transcript {
                         timestamp_ms: now_ms(),
                         phase: TranscriptPhase::Completed,

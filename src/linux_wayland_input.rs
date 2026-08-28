@@ -462,7 +462,7 @@ impl Keyboards {
                 changes.push(Input::Disconnected(keyboard.path.clone()));
                 return false;
             }
-            pending.extend(events.into_iter().filter(|event| event.event_type() == EventType::KEY)
+            pending.extend(events.into_iter().filter(|event| event.event_type() == EventType::KEY && matches!(event.value(), 0 | 1))
                 .map(|event| (event.timestamp(), Input::Key(keyboard.path.clone(), KeyCode::new(event.code()), event.value()))));
             true
         });
@@ -570,11 +570,9 @@ pub(crate) fn wayland_modifiers_held(stop: &AtomicBool) -> Result<bool> {
     }
     // Use the same fail-closed permissions check as monitor startup, not a weaker paste-only view.
     let (_keyboards, initial) = Keyboards::open(stop)?;
-    let mut pressed = Pressed::default();
-    for input in initial {
-        pressed.update(input);
-    }
-    Ok(pressed.modifiers().into_iter().any(|held| held))
+    Ok(initial.iter().any(|input| {
+        matches!(input, Input::Connected(_, keys) if MODIFIERS.iter().flatten().any(|key| keys.contains(key)))
+    }))
 }
 
 #[cfg(test)]
