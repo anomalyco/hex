@@ -7,7 +7,7 @@
   <key>CFBundleExecutable</key>
   <string>hex</string>
   <key>CFBundleIdentifier</key>
-  <string>ly.anoma.Hex</string>
+  <string>com.kitlangton.hex2</string>
   <key>CFBundleInfoDictionaryVersion</key>
   <string>6.0</string>
   <key>CFBundleIconFile</key>

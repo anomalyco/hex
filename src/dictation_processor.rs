@@ -320,8 +320,12 @@ fn model_is_available(model: &ModelInfo) -> bool {
 }
 
 pub fn load_model_catalog() -> Result<ModelCatalog> {
-    let models: ModelsResponse = opencode_api("/api/model")?;
-    let default: DefaultModelResponse = opencode_api("/api/model/default")?;
+    let (endpoint, password) =
+        discover_opencode_service(Duration::from_secs(10), &AtomicBool::new(false))?;
+    let workspace = crate::app_paths::opencode_workspace()?;
+    let models: ModelsResponse = opencode_api(&endpoint, &password, &workspace, "/api/model")?;
+    let default: DefaultModelResponse =
+        opencode_api(&endpoint, &password, &workspace, "/api/model/default")?;
     Ok(build_model_catalog(models.data, default.data))
 }
 
@@ -383,12 +387,17 @@ fn is_executable(path: &std::path::Path) -> bool {
         .is_ok_and(|metadata| metadata.is_file() && metadata.permissions().mode() & 0o111 != 0)
 }
 
-fn opencode_api<T: for<'de> Deserialize<'de>>(path: &str) -> Result<T> {
-    let mut command = opencode_command()?;
-    command.args(["get", path]).stdin(Stdio::null());
+fn opencode_api<T: for<'de> Deserialize<'de>>(
+    endpoint: &str,
+    password: &str,
+    workspace: &Path,
+    path: &str,
+) -> Result<T> {
+    // The CLI can truncate large catalog responses when stdout is piped.
+    let (command, input) = opencode_http_command(endpoint, password, path, None, Some(workspace))?;
     let output = run_command(
         command,
-        None,
+        Some(input),
         Duration::from_secs(10),
         path,
         &AtomicBool::new(false),
@@ -505,7 +514,8 @@ fn generate_cancellable(
                 deadline.as_secs()
             ));
         }
-        let (command, input) = generation_command(&endpoint, &password, &data)?;
+        let (command, input) =
+            opencode_http_command(&endpoint, &password, "/api/generate", Some(&data), None)?;
         let output = run_command(command, Some(input), remaining, "/api/generate", cancelled)?;
         let status = output.status;
         if !status.success() {
@@ -638,7 +648,13 @@ fn read_service_registration(state: &Path, pid: u32, version: &str) -> Result<(S
     found.ok_or_else(|| eyre!("OpenCode active service registration is unavailable"))
 }
 
-fn generation_command(endpoint: &str, password: &str, data: &str) -> Result<(Command, Vec<u8>)> {
+fn opencode_http_command(
+    endpoint: &str,
+    password: &str,
+    path: &str,
+    data: Option<&str>,
+    workspace: Option<&Path>,
+) -> Result<(Command, Vec<u8>)> {
     let mut url = url::Url::parse(endpoint).wrap_err("invalid OpenCode service endpoint")?;
     if url.scheme() != "http"
         || !url.username().is_empty()
@@ -658,14 +674,46 @@ fn generation_command(endpoint: &str, password: &str, data: &str) -> Result<(Com
         Some(url::Host::Ipv6(ip)) if ip.is_loopback() => {}
         _ => return Err(eyre!("OpenCode service must use a loopback HTTP endpoint")),
     }
-    url.set_path("/api/generate");
-    let mut input = String::new();
-    for (key, value) in [
+    url.set_path(path);
+    let mut command = Command::new("/usr/bin/curl");
+    let directory = if let Some(workspace) = workspace {
+        fs::create_dir_all(workspace).wrap_err_with(|| {
+            format!(
+                "could not create OpenCode workspace {}",
+                workspace.display()
+            )
+        })?;
+        let workspace = workspace.canonicalize().wrap_err_with(|| {
+            format!(
+                "could not resolve OpenCode workspace {}",
+                workspace.display()
+            )
+        })?;
+        let directory = workspace
+            .to_str()
+            .ok_or_else(|| eyre!("OpenCode workspace path is not valid UTF-8"))?;
+        command.current_dir(&workspace);
+        Some(format!(
+            "x-opencode-directory:{}",
+            encode_uri_component(directory)
+        ))
+    } else {
+        None
+    };
+    let user = format!("opencode:{password}");
+    let mut options = vec![
         ("url", url.as_str()),
-        ("user", &format!("opencode:{password}")),
+        ("user", user.as_str()),
         ("header", "Content-Type: application/json"),
-        ("data-binary", data),
-    ] {
+    ];
+    if let Some(data) = data {
+        options.push(("data-binary", data));
+    }
+    if let Some(directory) = directory.as_deref() {
+        options.push(("header", directory));
+    }
+    let mut input = String::new();
+    for (key, value) in options {
         input.push_str(key);
         input.push_str(" = \"");
         for ch in value.chars() {
@@ -683,7 +731,6 @@ fn generation_command(endpoint: &str, password: &str, data: &str) -> Result<(Com
         }
         input.push_str("\"\n");
     }
-    let mut command = Command::new("/usr/bin/curl");
     // Ignore curlrc, proxies, and redirects. Both credentials and body stay off argv and disk.
     command.args([
         "--disable",
@@ -954,36 +1001,6 @@ fn version_manager_candidates(home: Option<&Path>) -> Vec<PathBuf> {
         .collect()
 }
 
-fn opencode_command() -> Result<Command> {
-    opencode_command_in(&crate::app_paths::opencode_workspace()?)
-}
-
-fn opencode_command_in(workspace: &Path) -> Result<Command> {
-    fs::create_dir_all(workspace).wrap_err_with(|| {
-        format!(
-            "could not create OpenCode workspace {}",
-            workspace.display()
-        )
-    })?;
-    let workspace = workspace.canonicalize().wrap_err_with(|| {
-        format!(
-            "could not resolve OpenCode workspace {}",
-            workspace.display()
-        )
-    })?;
-    let directory = workspace
-        .to_str()
-        .ok_or_else(|| eyre!("OpenCode workspace path is not valid UTF-8"))?;
-    let directory = encode_uri_component(directory);
-    let mut command = Command::new(opencode_executable());
-    command.current_dir(&workspace).args([
-        "api",
-        "--header",
-        &format!("x-opencode-directory:{directory}"),
-    ]);
-    Ok(command)
-}
-
 fn encode_uri_component(value: &str) -> String {
     let mut encoded = String::with_capacity(value.len());
     for byte in value.bytes() {
@@ -1045,33 +1062,105 @@ mod tests {
     }
 
     #[test]
-    fn opencode_requests_are_scoped_to_the_hex_workspace() {
+    fn catalog_http_decodes_large_responses_with_private_auth_and_workspace_scope() {
+        use std::io::BufRead;
+
         let root = std::env::temp_dir().join(format!(
             "hex-opencode-workspace-{}-{:?}",
             std::process::id(),
             thread::current().id()
         ));
-        let root = root.join("scope %2F café");
-
-        let command = opencode_command_in(&root).unwrap();
+        let root = root.join("scope %2F caf\u{00e9}");
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let endpoint = format!("http://{}", listener.local_addr().unwrap());
+        let (command, _) = opencode_http_command(
+            &endpoint,
+            "fixture-password",
+            "/api/model",
+            None,
+            Some(&root),
+        )
+        .unwrap();
         let workspace = root.canonicalize().unwrap();
-        let args = command
-            .get_args()
-            .map(|arg| arg.to_string_lossy().into_owned())
-            .collect::<Vec<_>>();
-
+        assert_eq!(command.get_program(), OsStr::new("/usr/bin/curl"));
         assert_eq!(command.get_current_dir(), Some(workspace.as_path()));
-        assert_eq!(
-            args,
-            [
-                "api",
-                "--header",
-                &format!(
-                    "x-opencode-directory:{}",
-                    encode_uri_component(workspace.to_str().unwrap())
-                )
-            ]
+        for arg in command.get_args() {
+            assert!(!arg.to_string_lossy().contains("fixture-password"));
+            assert!(
+                !arg.to_string_lossy()
+                    .contains("b3BlbmNvZGU6Zml4dHVyZS1wYXNzd29yZA==")
+            );
+        }
+        let scope_header = format!(
+            "x-opencode-directory:{}\r\n",
+            encode_uri_component(workspace.to_str().unwrap())
         );
+        let wire_models: Vec<_> = (0..2048)
+            .map(|index| {
+                serde_json::json!({
+                    "id": format!("rewrite-{index}"),
+                    "providerID": "example",
+                    "name": format!("Example Rewrite {index}"),
+                    "enabled": true,
+                    "capabilities": { "output": ["text"] },
+                    "variants": [{ "id": "high" }]
+                })
+            })
+            .collect();
+        let models = serde_json::json!({ "data": wire_models }).to_string();
+        let default = serde_json::json!({ "data": wire_models.last().unwrap() }).to_string();
+        assert!(models.len() > 256 * 1024);
+        let server = thread::spawn(move || {
+            for (path, response) in [("/api/model", models), ("/api/model/default", default)] {
+                let (mut stream, _) = listener.accept().unwrap();
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(5)))
+                    .unwrap();
+                stream
+                    .set_write_timeout(Some(Duration::from_secs(5)))
+                    .unwrap();
+                let mut reader = std::io::BufReader::new(&mut stream);
+                let mut headers = String::new();
+                loop {
+                    let mut line = String::new();
+                    assert!(reader.read_line(&mut line).unwrap() > 0);
+                    if line == "\r\n" {
+                        break;
+                    }
+                    headers.push_str(&line);
+                }
+                assert!(headers.starts_with(&format!("GET {path} HTTP/1.1\r\n")));
+                assert!(
+                    headers
+                        .contains("Authorization: Basic b3BlbmNvZGU6Zml4dHVyZS1wYXNzd29yZA==\r\n")
+                );
+                assert!(headers.contains(&scope_header));
+                assert!(!headers.to_ascii_lowercase().contains("content-length:"));
+                write!(
+                    stream,
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{response}",
+                    response.len()
+                )
+                .unwrap();
+            }
+        });
+        let models: ModelsResponse =
+            opencode_api(&endpoint, "fixture-password", &root, "/api/model").unwrap();
+        let default: DefaultModelResponse =
+            opencode_api(&endpoint, "fixture-password", &root, "/api/model/default").unwrap();
+        server.join().unwrap();
+        let catalog = build_model_catalog(models.data, default.data);
+        assert_eq!(catalog.models.len(), 2048);
+        assert_eq!(catalog.default_key.as_deref(), Some("example/rewrite-2047"));
+        assert_eq!(
+            catalog.default_name.as_deref(),
+            Some("Example Rewrite 2047")
+        );
+        for (index, model) in catalog.models.iter().enumerate() {
+            assert_eq!(model.key, format!("example/rewrite-{index}"));
+            assert_eq!(model.name, format!("Example Rewrite {index}"));
+            assert_eq!(model.variants, ["high"]);
+        }
         std::fs::remove_dir_all(root.parent().unwrap()).unwrap();
     }
 
@@ -1510,7 +1599,14 @@ mod tests {
             model: None,
         })
         .unwrap();
-        let (command, input) = generation_command(&endpoint, "fixture-password", &data).unwrap();
+        let (command, input) = opencode_http_command(
+            &endpoint,
+            "fixture-password",
+            "/api/generate",
+            Some(&data),
+            None,
+        )
+        .unwrap();
         for arg in command.get_args() {
             assert!(!arg.to_string_lossy().contains("fixture"));
             assert!(!arg.to_string_lossy().contains(&prompt));
@@ -1543,7 +1639,16 @@ mod tests {
             "http://127.0.0.1:0",
             "file:///tmp/fixture",
         ] {
-            assert!(generation_command(endpoint, "fixture-password", "{}").is_err());
+            assert!(
+                opencode_http_command(
+                    endpoint,
+                    "fixture-password",
+                    "/api/generate",
+                    Some("{}"),
+                    None,
+                )
+                .is_err()
+            );
         }
         for (endpoint, expected) in [
             (
@@ -1553,7 +1658,14 @@ mod tests {
             ("http://0.0.0.0:1234", "http://127.0.0.1:1234/api/generate"),
             ("http://[::]:1234", "http://[::1]:1234/api/generate"),
         ] {
-            let (_, input) = generation_command(endpoint, "fixture-password", "{}").unwrap();
+            let (_, input) = opencode_http_command(
+                endpoint,
+                "fixture-password",
+                "/api/generate",
+                Some("{}"),
+                None,
+            )
+            .unwrap();
             assert!(String::from_utf8(input).unwrap().contains(expected));
         }
     }
@@ -1572,7 +1684,14 @@ mod tests {
                 let mut byte = [0];
                 assert_eq!(stream.read(&mut byte).unwrap(), 0);
             });
-            let (command, input) = generation_command(&endpoint, "fixture-password", "{}").unwrap();
+            let (command, input) = opencode_http_command(
+                &endpoint,
+                "fixture-password",
+                "/api/generate",
+                Some("{}"),
+                None,
+            )
+            .unwrap();
             let started = Instant::now();
             let error = run_command(
                 command,
@@ -1609,6 +1728,14 @@ mod tests {
         .unwrap();
         assert!(error.to_string().contains("exceeded"));
         assert!(started.elapsed() < Duration::from_secs(1));
+    }
+
+    #[test]
+    #[ignore = "requires the installed opencode2 CLI and its managed service"]
+    fn live_catalog() {
+        let catalog =
+            load_model_catalog().unwrap_or_else(|_| panic!("could not load live model catalog"));
+        println!("{}", catalog.models.len());
     }
 
     #[test]

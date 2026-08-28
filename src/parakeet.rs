@@ -18,7 +18,7 @@ use crate::dictation::{DictationClip, DictationProtocol, pad_for_parakeet};
 use crate::dictation_processor::ProcessingObservation;
 use crate::history::{History, HistoryDraft, HistoryKind};
 use crate::meeting::{self, TranscriptEntry, TranscriptPublication};
-use crate::paste::Paster;
+use crate::paste::{PasteMode, Paster};
 use crate::suppression::InputActivity;
 #[cfg(test)]
 use crate::text_replacements::ReplacementSet;
@@ -225,7 +225,6 @@ pub struct DictationWorker {
 }
 
 struct WorkerState {
-    output_available: bool,
     next_sequence: u64,
     jobs: BTreeMap<DictationJobId, Arc<JobControl>>,
     pending_pastes: usize,
@@ -233,9 +232,6 @@ struct WorkerState {
 
 impl WorkerState {
     fn next_output_sequence(&self) -> Result<u64, &'static str> {
-        if !self.output_available {
-            return Err("dictation worker is unavailable");
-        }
         // Count accepted work even after it leaves a channel for ordered buffering.
         if self.jobs.len() + self.pending_pastes >= MAX_PENDING_OUTPUTS {
             return Err("dictation queue is full");
@@ -263,7 +259,6 @@ impl DictationWorker {
         let (output_jobs, output_receiver) = mpsc::sync_channel::<OutputJob>(8);
         let (event_sender, events) = mpsc::channel();
         let state = Arc::new(Mutex::new(WorkerState {
-            output_available: true,
             next_sequence: 0,
             jobs: BTreeMap::new(),
             pending_pastes: 0,
@@ -272,19 +267,7 @@ impl DictationWorker {
         let output_state = state.clone();
         let output_events = event_sender.clone();
         let output_worker = thread::spawn(move || {
-            let mut paster = match Paster::new(activity) {
-                Ok(paster) => paster,
-                Err(error) => {
-                    let mut state = output_state
-                        .lock()
-                        .unwrap_or_else(|error| error.into_inner());
-                    state.output_available = false;
-                    state.jobs.clear();
-                    state.pending_pastes = 0;
-                    let _ = output_events.send(WorkerEvent::ModelFailed(error.to_string()));
-                    return;
-                }
-            };
+            let mut paster = Paster::new(activity);
             let mut last_transcript = None;
             let mut meeting_cursor = MeetingPasteCursor::default();
             let mut ordered = OrderedOutputs::default();
@@ -296,7 +279,7 @@ impl DictationWorker {
                 for job in ordered.push(job) {
                     let event = finish_output(
                         job,
-                        &mut paster,
+                        &mut |text, mode, commit| paster.paste(text, mode, commit),
                         &mut last_transcript,
                         &mut meeting_cursor,
                         history.as_ref(),
@@ -744,7 +727,7 @@ fn queue_error(error: TrySendError<impl Sized>) -> &'static str {
 
 fn finish_output(
     job: OutputJob,
-    paster: &mut Paster,
+    paste: &mut impl FnMut(&str, PasteMode, &dyn Fn() -> bool) -> Result<()>,
     last_transcript: &mut Option<String>,
     meeting_cursor: &mut MeetingPasteCursor,
     history: Option<&History>,
@@ -776,21 +759,22 @@ fn finish_output(
                 }
                 let paste_started = Instant::now();
                 if !completed.text.trim().is_empty() {
-                    if !control.begin_output() {
-                        return Err("dictation was cancelled".into());
-                    }
+                    let commit = || control.begin_output();
                     match target {
-                        TranscriptionTarget::Paste => paster
-                            .paste(&completed.text)
-                            .map_err(|error| error.to_string())?,
-                        TranscriptionTarget::Send => paster
-                            .paste_and_send(&completed.text)
-                            .map_err(|error| error.to_string())?,
-                        TranscriptionTarget::VoiceAction => paster
-                            .paste_standalone(&completed.text)
-                            .map_err(|error| error.to_string())?,
-                        TranscriptionTarget::Service => {}
+                        TranscriptionTarget::Paste => {
+                            paste(&completed.text, PasteMode::Continue, &commit)
+                        }
+                        TranscriptionTarget::Send => {
+                            paste(&completed.text, PasteMode::Send, &commit)
+                        }
+                        TranscriptionTarget::VoiceAction => {
+                            paste(&completed.text, PasteMode::Standalone, &commit)
+                        }
+                        TranscriptionTarget::Service => commit()
+                            .then_some(())
+                            .ok_or_else(|| eyre!("dictation was cancelled")),
                     }
+                    .map_err(|error| error.to_string())?;
                     if matches!(
                         target,
                         TranscriptionTarget::Paste | TranscriptionTarget::Send
@@ -832,11 +816,12 @@ fn finish_output(
                     .as_deref()
                     .ok_or_else(|| "no previous transcript is available".to_string())
                     .and_then(|text| {
-                        paster.paste(text).map_err(|error| error.to_string())?;
+                        paste(text, PasteMode::Continue, &|| true)
+                            .map_err(|error| error.to_string())?;
                         Ok(text.to_string())
                     }),
                 PasteKind::MeetingDelta => {
-                    paste_meeting_delta(paster, meeting_cursor).map_err(|error| error.to_string())
+                    paste_meeting_delta(paste, meeting_cursor).map_err(|error| error.to_string())
                 }
             };
             WorkerEvent::Pasted { kind, result }
@@ -898,7 +883,10 @@ struct MeetingPasteCursor {
     seen: HashSet<TranscriptEntry>,
 }
 
-fn paste_meeting_delta(paster: &mut Paster, cursor: &mut MeetingPasteCursor) -> Result<String> {
+fn paste_meeting_delta(
+    paste: &mut impl FnMut(&str, PasteMode, &dyn Fn() -> bool) -> Result<()>,
+    cursor: &mut MeetingPasteCursor,
+) -> Result<String> {
     let meetings = meeting::list()?;
     let selected = meeting::active_or_latest(&meetings)
         .ok_or_else(|| eyre!("no meeting transcript is available"))?;
@@ -913,7 +901,7 @@ fn paste_meeting_delta(paster: &mut Paster, cursor: &mut MeetingPasteCursor) -> 
     };
     let transcript = meeting::completed_transcript(&selected.id, publication)?;
     let (text, pasted_entries) = prepare_meeting_delta(&transcript.entries, seen)?;
-    paster.paste_standalone(&text)?;
+    paste(&text, PasteMode::Standalone, &|| true)?;
     if !same_meeting {
         cursor.seen.clear();
     }
@@ -1315,7 +1303,6 @@ mod tests {
             output_jobs: Some(output_sender),
             events,
             state: Arc::new(Mutex::new(WorkerState {
-                output_available: true,
                 next_sequence: 1,
                 jobs: BTreeMap::from([(DictationJobId(0), Arc::new(JobControl::default()))]),
                 pending_pastes: 0,
@@ -1393,13 +1380,160 @@ mod tests {
     }
 
     #[test]
+    fn output_stays_cancellable_through_preparation_but_not_after_mutation() {
+        use std::cell::{Cell, RefCell};
+        use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+        use crate::history::{HistoryRetention, HistoryStore};
+        use crate::paste::commit_prepared_paste;
+
+        let completed = |text: &str| CompletedTranscript {
+            text: text.into(),
+            raw: text.into(),
+            application: None,
+            total_started: Instant::now(),
+            queue_ms: 0,
+            audio_ms: 1_000,
+            prepare_ms: 0,
+            inference_ms: 0,
+            processing: None,
+        };
+        for target in [
+            TranscriptionTarget::Paste,
+            TranscriptionTarget::Send,
+            TranscriptionTarget::VoiceAction,
+        ] {
+            for cancel_during_preparation in [true, false] {
+                let path = std::env::temp_dir().join(format!(
+                    "hex-output-cancellation-{}-{}.json",
+                    std::process::id(),
+                    SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .unwrap()
+                        .as_nanos()
+                ));
+                let history = History::new(HistoryStore::open(
+                    path.clone(),
+                    HistoryRetention::Forever,
+                    crate::history::now_ms(),
+                ));
+                record_history(&history, TranscriptionTarget::Paste, &completed("previous"));
+                let saved_history = std::fs::read(&path).unwrap();
+                let mut last_transcript = Some("previous".into());
+                let clipboard = RefCell::new("original clipboard".to_string());
+                let pasted = RefCell::new(Vec::new());
+                let sent = Cell::new(false);
+                let control = Arc::new(JobControl::default());
+                let (blocked, blocking) = mpsc::channel();
+                let (resume, resumed) = mpsc::channel();
+                let cancelling = control.clone();
+                let cancellation = thread::spawn(move || {
+                    blocking.recv_timeout(Duration::from_secs(5)).unwrap();
+                    let accepted = cancelling.cancel();
+                    resume.send(()).unwrap();
+                    accepted
+                });
+                let pause = || {
+                    blocked.send(()).unwrap();
+                    resumed.recv_timeout(Duration::from_secs(5)).unwrap();
+                };
+                let event = finish_output(
+                    OutputJob::Completed {
+                        job_id: DictationJobId(0),
+                        control: control.clone(),
+                        target,
+                        result: Box::new(Ok(completed("new output"))),
+                    },
+                    &mut |text, mode, commit| {
+                        assert!(matches!(
+                            (target, mode),
+                            (TranscriptionTarget::Paste, PasteMode::Continue)
+                                | (TranscriptionTarget::Send, PasteMode::Send)
+                                | (TranscriptionTarget::VoiceAction, PasteMode::Standalone)
+                        ));
+                        commit_prepared_paste(
+                            || {
+                                // Model a blocked restore lock or lazy clipboard provider.
+                                if cancel_during_preparation {
+                                    pause();
+                                }
+                                Ok(clipboard.borrow().clone())
+                            },
+                            commit,
+                            |_previous| {
+                                *clipboard.borrow_mut() = text.into();
+                                if !cancel_during_preparation {
+                                    pause();
+                                }
+                                pasted.borrow_mut().push(text.to_string());
+                                Ok(())
+                            },
+                        )?;
+                        if matches!(mode, PasteMode::Send) {
+                            sent.set(true);
+                        }
+                        Ok(())
+                    },
+                    &mut last_transcript,
+                    &mut MeetingPasteCursor::default(),
+                    Some(&history),
+                );
+
+                assert_eq!(cancellation.join().unwrap(), cancel_during_preparation);
+                assert_eq!(control.is_cancelled(), cancel_during_preparation);
+                if cancel_during_preparation {
+                    assert!(matches!(
+                        event,
+                        WorkerEvent::Cancelled {
+                            job_id: DictationJobId(0)
+                        }
+                    ));
+                    assert_eq!(*clipboard.borrow(), "original clipboard");
+                    assert!(pasted.borrow().is_empty());
+                    assert!(!sent.get());
+                    assert_eq!(last_transcript.as_deref(), Some("previous"));
+                    assert_eq!(history.search("").len(), 1);
+                    assert_eq!(std::fs::read(&path).unwrap(), saved_history);
+                } else {
+                    assert!(matches!(
+                        event,
+                        WorkerEvent::Completed { result: Ok(ref text), .. } if text == "new output"
+                    ));
+                    assert_eq!(*clipboard.borrow(), "new output");
+                    assert_eq!(*pasted.borrow(), ["new output"]);
+                    assert_eq!(sent.get(), matches!(target, TranscriptionTarget::Send));
+                    let expected_last = if matches!(target, TranscriptionTarget::VoiceAction) {
+                        "previous"
+                    } else {
+                        "new output"
+                    };
+                    assert_eq!(last_transcript.as_deref(), Some(expected_last));
+                    let entries = history.search("");
+                    assert_eq!(entries.len(), 2);
+                    assert_eq!(entries[0].final_text, "new output");
+                    assert_eq!(
+                        entries[0].kind,
+                        match target {
+                            TranscriptionTarget::Paste => HistoryKind::Dictation,
+                            TranscriptionTarget::Send => HistoryKind::Send,
+                            TranscriptionTarget::VoiceAction => HistoryKind::VoiceAction,
+                            TranscriptionTarget::Service => unreachable!(),
+                        }
+                    );
+                }
+                drop(history);
+                std::fs::remove_file(path).unwrap();
+            }
+        }
+    }
+
+    #[test]
     fn repeated_cancellation_walks_back_through_pending_jobs() {
         let jobs = [0, 1, 2]
             .into_iter()
             .map(|sequence| (DictationJobId(sequence), Arc::new(JobControl::default())))
             .collect();
         let state = WorkerState {
-            output_available: true,
             next_sequence: 3,
             jobs,
             pending_pastes: 0,

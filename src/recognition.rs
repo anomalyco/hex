@@ -1,8 +1,8 @@
 use std::collections::{BTreeMap, VecDeque};
 use std::path::Path;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, SyncSender, TryRecvError, TrySendError};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use color_eyre::Result;
@@ -33,6 +33,28 @@ const UPDATE_INTERVAL: Duration = Duration::from_millis(200);
 const ACTIVATION_STABILITY_WINDOW: Duration = Duration::from_millis(750);
 const PROGRAMMATIC_LEASE: Duration = Duration::from_secs(10);
 const PROGRAMMATIC_COMPLETION_LIMIT: usize = 16;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CommandModelStatus {
+    Disabled,
+    Loading,
+    Ready,
+    Failed,
+}
+
+static COMMAND_MODEL_STATUS: Mutex<CommandModelStatus> = Mutex::new(CommandModelStatus::Disabled);
+
+pub fn command_model_status() -> CommandModelStatus {
+    *COMMAND_MODEL_STATUS
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+}
+
+fn set_command_model_status(status: CommandModelStatus) {
+    *COMMAND_MODEL_STATUS
+        .lock()
+        .unwrap_or_else(|error| error.into_inner()) = status;
+}
 
 #[derive(Default)]
 struct ActivationStability {
@@ -75,6 +97,7 @@ enum FinishResult {
 #[derive(Debug)]
 pub enum RecognitionControl {
     PasteLast,
+    RetryCommands,
     StartDictation {
         source: String,
         owner_token: String,
@@ -178,10 +201,10 @@ pub fn listen(
     feedback::preload()?;
     let mut microphone_policy = crate::app_settings::microphone_policy();
     let mut commands_enabled = microphone_policy.commands_enabled;
-    let mut recognizer = commands_enabled
-        .then(|| Moonshine::load(project_root))
-        .transpose()?;
-    let mut command_loader = None;
+    let mut recognizer = None;
+    set_command_model_status(CommandModelStatus::Disabled);
+    let mut command_loader =
+        commands_enabled.then(|| load_command_recognizer(project_root.to_path_buf()));
     let mut events = events;
     let input_monitor = InputMonitor::start()?;
     let context_monitor = ContextMonitor::start();
@@ -222,7 +245,7 @@ pub fn listen(
         history,
     );
     let (mut transcription_revision, _) = crate::app_settings::transcription_selection();
-    let mut action_executor = commands_enabled.then(ActionExecutor::start);
+    let mut action_executor: Option<ActionExecutor> = None;
     let mut personal_host_enabled =
         commands_enabled || crate::app_settings::custom_transformations_enabled();
     let mut personal_commands = personal_host_enabled
@@ -281,6 +304,15 @@ pub fn listen(
         if let Some(controls) = &controls {
             while let Ok(control) = controls.try_recv() {
                 match control {
+                    RecognitionControl::RetryCommands => {
+                        if crate::app_settings::commands_enabled()
+                            && command_loader.is_none()
+                            && recognizer.is_none()
+                        {
+                            command_loader =
+                                Some(load_command_recognizer(project_root.to_path_buf()));
+                        }
+                    }
                     RecognitionControl::PasteLast if programmatic.is_none() => {
                         handle_hotkey_action(
                             HotkeyAction::PasteLast,
@@ -574,12 +606,16 @@ pub fn listen(
             commands_enabled = next_commands_enabled;
             mode = Mode::Listening;
             if commands_enabled {
-                command_loader = Some(load_command_recognizer(project_root.to_path_buf()));
+                if command_loader.is_none() {
+                    command_loader = Some(load_command_recognizer(project_root.to_path_buf()));
+                } else {
+                    set_command_model_status(CommandModelStatus::Loading);
+                }
                 tracing::info!("voice commands enabled; loading command model");
             } else {
-                command_loader = None;
                 recognizer = None;
                 action_executor = None;
+                set_command_model_status(CommandModelStatus::Disabled);
                 tracing::info!("voice commands disabled");
             }
         }
@@ -608,17 +644,24 @@ pub fn listen(
                     recognition_origin = None;
                     action_executor = Some(ActionExecutor::start());
                     command_loader = None;
+                    set_command_model_status(CommandModelStatus::Ready);
                     tracing::info!("voice command model loaded");
                 }
                 Ok(Ok(_)) => command_loader = None,
                 Ok(Err(error)) => {
                     command_loader = None;
                     tracing::error!(%error, "could not enable voice commands");
+                    if commands_enabled {
+                        set_command_model_status(CommandModelStatus::Failed);
+                    }
                 }
                 Err(TryRecvError::Empty) => {}
                 Err(TryRecvError::Disconnected) => {
                     command_loader = None;
                     tracing::error!("voice command model loader stopped");
+                    if commands_enabled {
+                        set_command_model_status(CommandModelStatus::Failed);
+                    }
                 }
             }
         }
@@ -1349,12 +1392,18 @@ fn amplitude_db(amplitude: f32) -> f32 {
 fn load_command_recognizer(
     project_root: std::path::PathBuf,
 ) -> Receiver<Result<Moonshine, String>> {
+    set_command_model_status(CommandModelStatus::Loading);
+    spawn_command_load(move || {
+        crate::moonshine::install_model().and_then(|_| Moonshine::load(&project_root))
+    })
+}
+
+fn spawn_command_load<T: Send + 'static>(
+    load: impl FnOnce() -> Result<T> + Send + 'static,
+) -> Receiver<Result<T, String>> {
     let (sender, receiver) = mpsc::sync_channel(1);
     std::thread::spawn(move || {
-        let result = crate::moonshine::install_model()
-            .and_then(|_| Moonshine::load(&project_root))
-            .map_err(|error| error.to_string());
-        let _ = sender.send(result);
+        let _ = sender.send(load().map_err(|error| error.to_string()));
     });
     receiver
 }
@@ -2109,6 +2158,32 @@ fn handle_dictation_event(
 mod tests {
     use super::*;
 
+    #[test]
+    fn command_preparation_does_not_block_the_listener_or_propagate_failure() {
+        let (release, wait) = mpsc::sync_channel(1);
+        let (loaded, receiver) = mpsc::sync_channel(1);
+        let caller = std::thread::spawn(move || {
+            let pending = spawn_command_load(move || {
+                wait.recv().unwrap();
+                Err::<(), _>(color_eyre::eyre::eyre!("fixture download failed"))
+            });
+            loaded.send(pending).unwrap();
+        });
+        let pending = receiver
+            .recv_timeout(Duration::from_secs(2))
+            .expect("listener must not wait for the command model");
+        assert!(matches!(pending.try_recv(), Err(TryRecvError::Empty)));
+        release.send(()).unwrap();
+        assert_eq!(
+            pending
+                .recv_timeout(Duration::from_secs(2))
+                .unwrap()
+                .unwrap_err(),
+            "fixture download failed"
+        );
+        caller.join().unwrap();
+    }
+
     fn say_protocol() -> DictationProtocol {
         DictationProtocol::try_new(
             vec!["say".into()],
@@ -2227,6 +2302,9 @@ mod tests {
                 key_code: None,
             },
         );
+
+        dictation.suspend();
+        edit.suspend();
 
         // Option down: plain dictation starts, no Voice Action gesture yet.
         let event = InputEvent::Flags(OPTION);

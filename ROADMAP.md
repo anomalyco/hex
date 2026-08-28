@@ -6,8 +6,9 @@ post-processing, a Metal HUD, bounded paste workers, settings, and a signed GPUI
 app bundle. Streaming commands are a disabled-by-default experimental opt-in;
 meetings remain a developer prototype until their product surface is redesigned.
 An x86_64 Arch/i3 X11 beta now provides hotkey dictation, automatic paste, a
-GPUI shell, and signed user-local updates; it does not yet include commands,
-meetings, native Wayland support, or a package-manager channel.
+GPUI shell, and signed user-local updates; it does not yet include commands or
+meetings. Native wlroots-compatible Wayland and Nix packaging are implemented
+and awaiting supported-host validation before release.
 The authenticated local transcription service now implements discovery,
 direct-child embedding, model preparation, and bounded host-audio transcription;
 Promise and Effect TypeScript wrappers pass fake-helper tests. Signed helper
@@ -41,14 +42,14 @@ Keep Swift and Rust separate. Prefer the old app's existing Sparkle update windo
 with a website-only informational item to install the new app manually, with no
 data import or automatic replacement.
 Follow [`docs/plans/swift-app-handoff.md`](docs/plans/swift-app-handoff.md).
-The new app uses Anomaly identity `ly.anoma.Hex`, display name `Hex`, and filename
-`Hex.app`, while retaining the Rust `voice-control` data root. Configure the
-Anomaly signing team and validate the new identity before release. The legacy
+The new app uses identity `com.kitlangton.hex2`, display name `Hex`, and filename
+`Hex.app`, while retaining the Rust `voice-control` data root. Use Kit's approved
+Developer ID signing team and validate the new identity before release. The legacy
 S3 feed must never install a Rust payload. Publish
 the updated Rust artifact first, then the separately validated legacy feed notice.
 No Swift rebuild should be necessary for the notice.
 
-## Validate The Linux X11 Beta
+## Validate The Linux Beta
 
 Run a genuine signed update between two published versions on the target
 Arch/i3 machine. Verify exact artifact validation, atomic activation, restart,
@@ -57,8 +58,12 @@ microphone override, hotkey rebinding, locked capture, cancellation, automatic
 paste, tray behavior, autostart, and startup without a tray host.
 
 Keep app-managed updates limited to the user-local direct-install layout. A
-future Arch package must leave updates to the package manager. Add commands,
-context, meetings, or Wayland only as explicit later capability slices.
+future Arch package must leave updates to the package manager. Nix owns its
+packaged installation and optional Home Manager service. Validate the Wayland
+beta on a compatible compositor with physical keyboard reconnect, microphone,
+foreground paste, click-through HUD, and tray-less shutdown. See
+[`docs/plans/linux.md`](docs/plans/linux.md). Add commands, context, meetings, or
+broader Wayland support only as explicit later capability slices.
 
 Converge the separate macOS and Linux GPUI roots on one capability-driven
 product shell without merging their lifecycle or platform behavior. Follow

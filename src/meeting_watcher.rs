@@ -360,6 +360,14 @@ fn run_with_shell_preview(
         cx.on_action(|_: &crate::app_window::CheckForUpdates, _| {
             crate::sparkle::check_for_updates()
         });
+        let retry_commands = recognition_control_sender.clone();
+        cx.on_action(move |_: &crate::app_window::RetryCommands, _| {
+            if let Err(error) =
+                retry_commands.try_send(crate::recognition::RecognitionControl::RetryCommands)
+            {
+                tracing::warn!(%error, "could not request command model retry");
+            }
+        });
         cx.on_action(|_: &crate::app_window::HideApplication, _| {
             crate::app_settings::hide_application()
         });

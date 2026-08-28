@@ -1,5 +1,11 @@
 # @kitlangton/hex
 
+## 0.2.1
+
+### Patch Changes
+
+- c5ba7d4: Stop dictation heartbeat timers after terminal capture errors while preserving retries for transient failures.
+
 ## 0.2.0
 
 ### Minor Changes

@@ -9,8 +9,9 @@
 use std::fs;
 use std::io::{self, Write};
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::sync::{Arc, Mutex, TryLockError, mpsc};
+use std::thread;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
@@ -20,6 +21,7 @@ const MAX_TEXT_BYTES: usize = 16 * 1024;
 const MAX_LABEL_BYTES: usize = 256;
 const MAX_FALLBACK_BYTES: usize = 1_024;
 const MAX_TOTAL_TEXT_BYTES: usize = 4 * 1024 * 1024;
+const PRUNE_INTERVAL: Duration = Duration::from_secs(60);
 pub const MAX_SEARCH_RESULTS: usize = 200;
 
 /// How long successful results remain in retained history.
@@ -162,6 +164,8 @@ pub struct HistoryStore {
     entries: Vec<HistoryEntry>,
     next_id: u64,
     retention: HistoryRetention,
+    prune_pending: bool,
+    prune_error_reported: bool,
 }
 
 impl HistoryStore {
@@ -174,6 +178,8 @@ impl HistoryStore {
             entries: Vec::new(),
             next_id: 1,
             retention,
+            prune_pending: false,
+            prune_error_reported: false,
         };
         match fs::read(&store.path) {
             Ok(bytes) => match serde_json::from_slice::<LoadedHistory>(&bytes) {
@@ -199,11 +205,7 @@ impl HistoryStore {
                 tracing::warn!(%error, path = %store.path.display(), "could not read history");
             }
         }
-        if store.prune(now_ms)
-            && let Err(error) = store.persist()
-        {
-            tracing::warn!(%error, "could not persist pruned history");
-        }
+        store.expire(now_ms);
         store
     }
 
@@ -291,15 +293,29 @@ impl HistoryStore {
 
     /// Case-insensitive substring search over text, application, and
     /// processing profile. Newest first and bounded.
-    pub fn search(&self, query: &str) -> Vec<&HistoryEntry> {
+    pub fn search(&self, query: &str, now_ms: u64) -> Vec<&HistoryEntry> {
         let needle = query.trim().to_lowercase();
-        if needle.is_empty() {
-            return self.entries().take(MAX_SEARCH_RESULTS).collect();
-        }
+        let cutoff = self
+            .retention
+            .max_age_ms()
+            .map(|max_age| now_ms.saturating_sub(max_age));
         self.entries()
-            .filter(|entry| entry.matches(&needle))
+            .filter(|entry| cutoff.is_none_or(|cutoff| entry.timestamp_ms >= cutoff))
+            .filter(|entry| needle.is_empty() || entry.matches(&needle))
             .take(MAX_SEARCH_RESULTS)
             .collect()
+    }
+
+    fn expire(&mut self, now_ms: u64) {
+        self.prune(now_ms);
+        if self.prune_pending
+            && let Err(error) = self.persist()
+        {
+            if !self.prune_error_reported {
+                tracing::warn!(%error, "could not persist pruned history; will retry");
+            }
+            self.prune_error_reported = true;
+        }
     }
 
     fn prune(&mut self, now_ms: u64) -> bool {
@@ -319,10 +335,11 @@ impl HistoryStore {
             total -= self.entries.remove(0).text_bytes();
             changed = true;
         }
+        self.prune_pending |= changed;
         changed
     }
 
-    fn persist(&self) -> io::Result<()> {
+    fn persist(&mut self) -> io::Result<()> {
         let saved = SavedHistory {
             version: VERSION,
             next_id: self.next_id,
@@ -339,7 +356,10 @@ impl HistoryStore {
             file.write_all(&json)?;
             file.sync_all()?;
         }
-        fs::rename(&temporary, &self.path)
+        fs::rename(&temporary, &self.path)?;
+        self.prune_pending = false;
+        self.prune_error_reported = false;
+        Ok(())
     }
 
     fn preserve_corrupt(&self) {
@@ -354,12 +374,41 @@ impl HistoryStore {
 #[derive(Clone)]
 pub struct History {
     store: Arc<Mutex<HistoryStore>>,
+    // Only handles own senders: dropping the last clone wakes and stops the worker.
+    _shutdown: mpsc::Sender<()>,
 }
 
 impl History {
     pub fn new(store: HistoryStore) -> Self {
+        Self::with_clock(store, PRUNE_INTERVAL, now_ms)
+    }
+
+    fn with_clock(
+        store: HistoryStore,
+        interval: Duration,
+        clock: impl Fn() -> u64 + Send + 'static,
+    ) -> Self {
+        let store = Arc::new(Mutex::new(store));
+        let (shutdown, stopped) = mpsc::channel();
+        let worker_store = Arc::clone(&store);
+        if let Err(error) = thread::Builder::new()
+            .name("history-retention".into())
+            .spawn(move || {
+                while let Err(mpsc::RecvTimeoutError::Timeout) = stopped.recv_timeout(interval) {
+                    let mut store = match worker_store.try_lock() {
+                        Ok(store) => store,
+                        Err(TryLockError::WouldBlock) => continue,
+                        Err(TryLockError::Poisoned(error)) => error.into_inner(),
+                    };
+                    store.expire(clock());
+                }
+            })
+        {
+            tracing::warn!(%error, "could not start history retention worker");
+        }
         Self {
-            store: Arc::new(Mutex::new(store)),
+            store,
+            _shutdown: shutdown,
         }
     }
 
@@ -387,7 +436,11 @@ impl History {
 
     /// Bounded snapshot of matching entries, newest first.
     pub fn search(&self, query: &str) -> Vec<HistoryEntry> {
-        self.locked().search(query).into_iter().cloned().collect()
+        self.locked()
+            .search(query, now_ms())
+            .into_iter()
+            .cloned()
+            .collect()
     }
 
     fn locked(&self) -> std::sync::MutexGuard<'_, HistoryStore> {
@@ -499,14 +552,164 @@ mod tests {
     }
 
     #[test]
+    fn search_hides_expired_entries_before_the_next_idle_prune() {
+        let path = temp_path("search-expiry");
+        let day_ms = HistoryRetention::Day.max_age_ms().unwrap();
+        let mut store = HistoryStore::open(path.clone(), HistoryRetention::Day, 0);
+        store.record(draft("old"), 1_000).unwrap();
+        store.record(draft("fresh"), 2_000).unwrap();
+        fs::File::open(&path)
+            .unwrap()
+            .set_modified(UNIX_EPOCH)
+            .unwrap();
+
+        assert_eq!(store.search("", day_ms + 1_000).len(), 2);
+        assert!(store.search("old", day_ms + 1_001).is_empty());
+        let matches = store.search("", day_ms + 1_001);
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].final_text, "fresh");
+        assert_eq!(
+            store.len(),
+            2,
+            "reads filter without writing on the UI thread"
+        );
+        assert_eq!(fs::metadata(&path).unwrap().modified().unwrap(), UNIX_EPOCH);
+    }
+
+    #[test]
+    fn idle_worker_expires_entries_on_disk_without_recording_or_reading() {
+        use std::sync::atomic::{AtomicU64, Ordering};
+
+        let path = temp_path("idle-expiry");
+        let day_ms = HistoryRetention::Day.max_age_ms().unwrap();
+        let mut store = HistoryStore::open(path.clone(), HistoryRetention::Day, 0);
+        store.record(draft("old"), 1_000).unwrap();
+        store.record(draft("fresh"), 2_000).unwrap();
+        let clock = Arc::new(AtomicU64::new(2_000));
+        let worker_clock = Arc::clone(&clock);
+        let (ticks, ticked) = mpsc::channel();
+        let history = History::with_clock(store, Duration::from_millis(10), move || {
+            let now = worker_clock.load(Ordering::SeqCst);
+            let _ = ticks.send(now);
+            now
+        });
+        let tick = |now| {
+            clock.store(now, Ordering::SeqCst);
+            while ticked.recv_timeout(Duration::from_secs(2)).unwrap() != now {}
+            // The clock is sampled under the lock; acquiring it waits for that prune.
+            drop(history.locked());
+        };
+        fs::File::open(&path)
+            .unwrap()
+            .set_modified(UNIX_EPOCH)
+            .unwrap();
+
+        tick(day_ms + 1_000);
+        assert_eq!(fs::metadata(&path).unwrap().modified().unwrap(), UNIX_EPOCH);
+
+        tick(day_ms + 1_001);
+        let saved: LoadedHistory = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        assert_eq!(saved.entries.len(), 1);
+        assert_eq!(saved.entries[0].final_text, "fresh");
+
+        tick(day_ms + 2_001);
+        let saved: LoadedHistory = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        assert!(saved.entries.is_empty());
+        fs::File::open(&path)
+            .unwrap()
+            .set_modified(UNIX_EPOCH)
+            .unwrap();
+        tick(2 * day_ms);
+        assert_eq!(fs::metadata(&path).unwrap().modified().unwrap(), UNIX_EPOCH);
+    }
+
+    #[test]
+    fn failed_expiry_persistence_retries_without_new_removals() {
+        let path = temp_path("expiry-retry");
+        let day_ms = HistoryRetention::Day.max_age_ms().unwrap();
+        let mut store = HistoryStore::open(path.clone(), HistoryRetention::Day, 0);
+        store.record(draft("old"), 1_000).unwrap();
+        let temporary = path.with_extension("json.tmp");
+        fs::create_dir(&temporary).unwrap();
+
+        store.expire(day_ms + 1_001);
+        assert!(store.entries.is_empty());
+        assert!(store.prune_pending);
+        assert!(store.prune_error_reported);
+        let saved: LoadedHistory = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        assert_eq!(saved.entries.len(), 1);
+        store.expire(day_ms + 1_002);
+        assert!(store.prune_pending);
+        assert!(store.prune_error_reported);
+
+        fs::remove_dir(temporary).unwrap();
+        store.expire(day_ms + 1_003);
+        assert!(!store.prune_pending);
+        assert!(!store.prune_error_reported);
+        let saved: LoadedHistory = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        assert!(saved.entries.is_empty());
+    }
+
+    #[test]
+    fn idle_worker_stops_when_the_last_history_handle_is_dropped() {
+        let path = temp_path("worker-lifecycle");
+        let store = HistoryStore::open(path, HistoryRetention::Day, 0);
+        let (alive, stopped) = mpsc::channel::<()>();
+        let history = History::with_clock(store, Duration::from_secs(24 * 60 * 60), move || {
+            let _alive = &alive;
+            0
+        });
+        let clone = history.clone();
+        drop(history);
+        assert_eq!(stopped.try_recv(), Err(mpsc::TryRecvError::Empty));
+
+        drop(clone);
+        assert_eq!(
+            stopped.recv_timeout(Duration::from_secs(2)),
+            Err(mpsc::RecvTimeoutError::Disconnected),
+            "shutdown must wake the worker rather than wait for its timer"
+        );
+    }
+
+    #[test]
+    fn choosing_week_retention_from_month_keeps_entries_newer_than_a_week() {
+        let day_ms = 24 * 60 * 60 * 1_000;
+        let now = 30 * day_ms;
+        let path = temp_path("month-to-week");
+        let mut store = HistoryStore::open(path, HistoryRetention::Month, 0);
+        store
+            .record(draft("twenty days old"), now - 20 * day_ms)
+            .unwrap();
+        store
+            .record(draft("two days old"), now - 2 * day_ms)
+            .unwrap();
+
+        store.set_retention(HistoryRetention::Week, now).unwrap();
+
+        let texts: Vec<_> = store
+            .entries()
+            .map(|entry| entry.final_text.as_str())
+            .collect();
+        assert_eq!(texts, ["two days old"]);
+    }
+
+    #[test]
     fn off_records_nothing_but_preserves_existing_entries() {
         let path = temp_path("off");
-        let mut store = HistoryStore::open(path, HistoryRetention::Week, 1_000);
+        let mut store = HistoryStore::open(path.clone(), HistoryRetention::Week, 1_000);
         store.record(draft("kept"), 1_000).unwrap();
         store.set_retention(HistoryRetention::Off, 1_500).unwrap();
+        fs::File::open(&path)
+            .unwrap()
+            .set_modified(UNIX_EPOCH)
+            .unwrap();
 
         assert_eq!(store.record(draft("dropped"), 2_000).unwrap(), None);
+        let later = HistoryRetention::Month.max_age_ms().unwrap() + 2_000;
+        store.expire(later);
         assert_eq!(store.len(), 1);
+        assert_eq!(store.search("kept", later).len(), 1);
+        assert_eq!(fs::metadata(&path).unwrap().modified().unwrap(), UNIX_EPOCH);
     }
 
     #[test]
@@ -550,11 +753,15 @@ mod tests {
         store.record(draft("Hello World"), 1_000).unwrap();
         store.record(draft("other text"), 2_000).unwrap();
 
-        assert_eq!(store.search("hello world").len(), 1);
-        assert_eq!(store.search("zed").len(), 2);
-        assert_eq!(store.search("messages").len(), 2);
-        assert_eq!(store.search("absent").len(), 0);
-        assert_eq!(store.search("  ").len(), 2, "blank queries list everything");
+        assert_eq!(store.search("hello world", 2_000).len(), 1);
+        assert_eq!(store.search("zed", 2_000).len(), 2);
+        assert_eq!(store.search("messages", 2_000).len(), 2);
+        assert_eq!(store.search("absent", 2_000).len(), 0);
+        assert_eq!(
+            store.search("  ", 2_000).len(),
+            2,
+            "blank queries list everything"
+        );
     }
 
     #[test]

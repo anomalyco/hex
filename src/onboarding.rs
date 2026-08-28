@@ -43,7 +43,6 @@ pub struct SetupStatus {
     pub microphone: PermissionState,
     pub input_monitoring: PermissionState,
     pub accessibility: PermissionState,
-    pub command_model: bool,
     pub transcription_model: bool,
 }
 
@@ -52,7 +51,6 @@ impl SetupStatus {
         self.microphone == PermissionState::Ready
             && self.input_monitoring == PermissionState::Ready
             && self.accessibility == PermissionState::Ready
-            && self.command_model
             && self.transcription_model
     }
 }
@@ -153,8 +151,6 @@ pub fn status_with_transcription_model(transcription_model: bool) -> SetupStatus
         microphone: microphone_state(),
         input_monitoring: settings(CGPreflightListenEventAccess()),
         accessibility: settings(CGPreflightPostEventAccess()),
-        command_model: !crate::app_settings::commands_enabled()
-            || crate::moonshine::model_installed(),
         transcription_model,
     }
 }
@@ -237,16 +233,24 @@ mod tests {
     use super::*;
 
     #[test]
-    fn setup_requires_every_required_capability() {
+    fn missing_commands_model_does_not_block_dictation_setup() {
         let mut status = SetupStatus {
             microphone: PermissionState::Ready,
             input_monitoring: PermissionState::Ready,
             accessibility: PermissionState::Ready,
-            command_model: true,
             transcription_model: true,
         };
         assert!(status.ready());
-        status.command_model = false;
+        status.transcription_model = false;
+        assert!(!status.ready());
+        status.transcription_model = true;
+        status.microphone = PermissionState::NeedsRequest;
+        assert!(!status.ready());
+        status.microphone = PermissionState::Ready;
+        status.input_monitoring = PermissionState::NeedsSettings;
+        assert!(!status.ready());
+        status.input_monitoring = PermissionState::Ready;
+        status.accessibility = PermissionState::NeedsSettings;
         assert!(!status.ready());
     }
 
@@ -341,7 +345,6 @@ mod tests {
             microphone: PermissionState::Ready,
             input_monitoring: PermissionState::Ready,
             accessibility: PermissionState::Ready,
-            command_model: true,
             transcription_model: true,
         }
     }

@@ -144,7 +144,9 @@ CoreAudio formats, AppleScript details, or event serialization.
   recognizer and executor.
 - On a new Mac, release dictation starts only after Microphone, Input Monitoring,
   Accessibility, and the selected dictation model are ready. Opt-in command
-  recognition additionally requires Moonshine.
+  recognition additionally requires Moonshine, but its background preparation or
+  failure must never block hotkey dictation. Failed preparation exposes explicit
+  retry and disable actions without silently changing the command opt-in.
 - Among recognized voice commands, sleeping mode accepts only standalone wake
   phrases. Dictation and explicit paste shortcuts remain available.
 - Unmatched completed speech is ignored and logged.
@@ -216,8 +218,9 @@ CoreAudio formats, AppleScript details, or event serialization.
   rewriting, then selected TypeScript transformations. A failed step preserves
   the previous pipeline output. It applies to Paste and Send, but not meetings.
 - OpenCode availability checks stay off the UI thread. When the app finds the
-  `opencode2` executable, it loads the catalog through `opencode2 api`, which
-  automatically starts or reuses the managed service. HEX never invokes
+  `opencode2` executable, `opencode2 api` discovers or starts the managed service;
+  the catalog uses authenticated loopback HTTP to avoid large CLI pipe truncation.
+  HEX never invokes
   `opencode2 serve --service` or owns that service's lifecycle directly. A
   missing beta install is retried at a coarse interval so installing
   `opencode2` while Settings is open refreshes the model catalog without
@@ -241,6 +244,8 @@ CoreAudio formats, AppleScript details, or event serialization.
   final text plus bounded metadata, never audio, full browser URLs, or window
   titles. Every retention window remains subject to hard entry and byte caps,
   and recording stops while retention is Off.
+  Time-based retention expires during idle uptime through the shared history
+  owner; searches never return expired entries while waiting for disk cleanup.
 - Developer-only meeting detection may inspect process audio metadata but must
   not capture samples. Detection can offer recording; it must never start
   automatically. Release builds must not start the meeting controller.
@@ -327,6 +332,9 @@ cargo run -- app --preview-dictation
 cargo run -- preview onboarding
 cargo run -- preview transcription-picker --language zh --model-state installed
 ./scripts/capture-preview.sh /tmp/hex-preview.png settings
+./scripts/capture-preview.sh /tmp/hex-model-missing.png settings --model-missing
+./scripts/capture-preview.sh /tmp/hex-command-model-missing.png settings --command-model-missing
+./scripts/capture-preview.sh /tmp/hex-history-retention.png history --open-history-retention
 ./scripts/capture-preview.sh /tmp/hex-modes.png modes
 ./scripts/capture-preview.sh /tmp/hex-modes-collapsed.png modes --collapse-mode-processing
 ./scripts/capture-preview.sh /tmp/hex-modes-picker.png modes --collapse-mode-processing --open-transformation-picker
@@ -386,11 +394,20 @@ precedence while available; override everything with `--device`. The app bundle
 build requires Xcode 26 for Icon Composer compilation and a Developer ID signing
 identity. `scripts/release-app.sh` prepares a notarized and stapled DMG plus its
 signed Sparkle appcast; run `scripts/release-app.sh publish` only after validating
-the prepared artifact. The Anomaly app is named `Hex`, packaged as `Hex.app`,
-with bundle identifier `ly.anoma.Hex` and executable `hex`. Signing requires an
-explicit Anomaly `VOICE_CONTROL_TEAM_ID` and `HEX_NOTARY_PROFILE`; the main app
-build and release scripts must not default to the personal signing team.
+the prepared artifact. The Rust app is named `Hex`, packaged as `Hex.app`,
+with bundle identifier `com.kitlangton.hex2` and executable `hex`. Kit has approved
+his personal Developer ID signing team `QC99C9JE59` for this app. Signing requires
+an explicit `VOICE_CONTROL_TEAM_ID` and matching `HEX_NOTARY_PROFILE`; the build
+and release scripts verify the selected team rather than assuming an Anomaly team.
 `scripts/validate-app.sh` checks this identity before preparation and publication.
+The manual DMG contains `Hex.app`; the signed Sparkle ZIP preserves `HEX.app`
+as its archive root so existing Rust 2.0.x installations can discover the update
+despite the new bundle ID. Both artifacts contain the same signed, stapled app.
+Sparkle compares `CFBundleVersion`, not source changes or signing timestamps.
+Public releases must advance beyond distributed beta builds as well as the feed;
+the older local Rust 2.1.0 beta already used build 20100. Do not reuse a released
+version/build for changed code. Validate updates from both the public 2.0.x app
+and the older 2.1.0 beta when changing update identity or packaging.
 There is no Swift migration: never import Swift preferences or data, adopt its
 bundle identifier, publish Rust artifacts to its S3 feed, or automatically quit,
 delete, or replace the Swift app. Prefer a website-only informational item in
@@ -398,7 +415,7 @@ the legacy Sparkle feed, with no enclosure, pointing to the new app for manual
 installation and fresh setup. Publish it only after the new artifact is live. See
 `docs/plans/swift-app-handoff.md`. The Rust data root remains unchanged, but the
 new app identity requires fresh macOS permission grants. Validate signed
-distribution with the Anomaly team before publishing an app update.
+distribution with the selected signing team before publishing an app update.
 
 `SMAppService` is meaningful only from a signed app installed in
 `/Applications`. When replacing a local bundle outside Finder during a login-item
