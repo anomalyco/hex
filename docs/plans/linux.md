@@ -1,36 +1,46 @@
 # Linux Plan
 
-**Status:** Active validation and capability plan. The x86_64 Arch/i3 X11 beta
-is implemented. The immediate blocker is validating a genuine signed update on
-the target machine.
+**Status:** Active validation and capability plan. The x86_64 X11 beta,
+wlroots-compatible native Wayland path, and Nix packaging are implemented.
+Physical desktop/input validation and a genuine signed update remain release
+gates; automated checks alone do not establish those behaviors.
 
 ## The Supported Contract Is Narrow
 
-HEX currently supports one Linux beta contract:
+The Linux beta keeps its contracts explicit:
 
 | Area | Contract |
 | --- | --- |
-| Distribution | User-local direct install with signed automatic updates |
-| Host | x86_64 Arch Linux rolling |
-| Desktop | i3 on X11 |
+| Distribution | Signed user-local direct install, or Nix-owned package updates |
+| Host | x86_64 Linux; Arch/i3 reference and NixOS packaging |
+| Desktop | i3/X11 or compatible wlroots Wayland compositor |
 | Audio | CPAL through ALSA, typically backed by PipeWire |
 | Inference | Vulkan with CPU fallback |
 | Shortcut | Configurable key-containing chord; default `Alt+Space` |
-| Insertion | X11 clipboard and synthetic paste |
-| UI | GPUI settings shell and tray |
+| Insertion | Clipboard plus Ctrl-V, with a Ctrl-Shift-V terminal setting |
+| UI | GPUI shell; X11 tray where available; Wayland layer-shell HUD |
 
 The beta does not claim voice commands, application or browser context,
-meetings, native Wayland support, or package-manager installation. XWayland is
-not native Wayland support.
+meetings, or universal Wayland support. Wayland needs explicit read access to
+all event devices, `wl-copy`, `wtype`, and compatible compositor protocols.
+There is no hidden XWayland or privileged injection fallback. See
+[`../linux.md`](../linux.md) and [`../nix.md`](../nix.md).
 
 ## What Is Implemented
 
 - Global hold/release dictation, Escape cancellation, and double-tap lock.
 - Configurable persisted shortcut binding.
 - Local model installation and transcription.
-- Automatic clipboard insertion and restoration.
+- Automatic clipboard insertion with bounded settling. The transcript remains
+  on the clipboard; arbitrary previous formats are not restored.
 - CLI microphone override.
 - GPUI shell, tray integration, desktop launcher, and autostart entry.
+- Native Wayland evdev input with explicit key mapping, cancellation, and
+  device rediscovery; persistent click-through recording/processing overlay.
+- Visible listener controls, transactional shortcut edits, and orderly tray-less
+  shutdown instead of a detached invisible microphone.
+- Nix package and matching development shell, NixOS installation, optional
+  Home Manager user service, and evaluated session-readiness checks.
 - XDG paths, diagnostics, and exclusive listener ownership.
 - Signed user-local updates with bounded download, exact size and SHA-256
   verification, atomic version activation, and restart handoff.
@@ -98,9 +108,12 @@ links without recording samples. Normalize process and media metadata into the
 existing meeting-candidate model. Detection remains offer-only and never starts
 recording automatically.
 
-### 5. Choose A Native Wayland Contract
+### 5. Expand Wayland Only With Explicit Capabilities
 
-Wayland support requires an explicit capability decision:
+The implemented beta uses read-only evdev observation plus compositor-provided
+clipboard and virtual-keyboard protocols. It does not suppress the shortcut;
+users may need a compositor no-op binding. It does not grant input permissions.
+Broader or less-privileged support requires a separate capability decision:
 
 | Contract | Input and insertion behavior |
 | --- | --- |
@@ -116,10 +129,11 @@ that handles keyboard hotplug, crash-safe key release, access policy, and exact
 re-injection of non-suppressed events. Do not build a general-purpose root
 daemon.
 
-### 6. Add Distribution Channels Deliberately
+### 6. Validate Distribution Channels Deliberately
 
-The app-managed updater owns only the user-local direct-install layout. A future
-Arch package must leave updates to the package manager. Add architectures,
+The app-managed updater owns only the user-local direct-install layout. Nix owns
+its packaged installation and optional user service; a future Arch package must
+also leave updates to the package manager. Add architectures,
 distros, or package formats one validated channel at a time.
 
 ## Preserve The Portable Core
@@ -160,6 +174,7 @@ cargo test
 cargo clippy --all-targets --all-features -- -D warnings
 git diff --check
 ./scripts/test-install-linux-release.sh
+nix flake check
 ```
 
 Run behavior tests against real adapters rather than mocks that repeat
@@ -193,6 +208,10 @@ implementation assumptions.
 - Target x86_64 Arch Linux rolling on i3/X11.
 - Ship through a signed user-local direct-install channel.
 - Require automatic insertion and a key-containing shortcut.
-- Exclude meetings and native Wayland from the first beta.
+- Exclude meetings; scope native Wayland to compatible wlroots protocols and
+  explicit raw-input permissions rather than claiming every compositor.
 - Keep package-manager and app-managed update ownership separate.
 - Do not install a privileged helper for the X11 contract.
+- Rebuild the proposals in [#28](https://github.com/anomalyco/hex/pull/28) and
+  [#29](https://github.com/anomalyco/hex/pull/29) with regression coverage for
+  input state, GTK ownership, helper I/O, settings restart, and Nix environments.

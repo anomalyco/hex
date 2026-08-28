@@ -1,4 +1,6 @@
+use std::cell::Cell;
 use std::path::PathBuf;
+use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::sync::{Arc, Mutex};
@@ -7,11 +9,9 @@ use std::time::{Duration, Instant};
 
 use color_eyre::Result;
 use gpui::{
-    AnyElement, App, Application, Bounds, Context, Keystroke, Timer, TitlebarOptions, Window,
-    WindowBounds, WindowKind, WindowOptions, div, prelude::*, px, rgb, size,
+    AnyElement, App, Application, Bounds, Context, Keystroke, Timer, Window, WindowBounds,
+    WindowKind, WindowOptions, div, prelude::*, px, rgb, size,
 };
-use tray_icon::menu::{Menu, MenuEvent, MenuItem};
-use tray_icon::{Icon, MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use x11rb::connection::Connection;
 use x11rb::protocol::xproto::ConnectionExt;
 
@@ -27,10 +27,12 @@ use crate::desktop_transcription_picker::{
 };
 use crate::desktop_ui::{
     LINE, MUTED, NavigationIcon, SIDEBAR_WIDTH, SURFACE, TEXT_SOFT, compact_button,
-    disclosure_button, hotkey_keycaps, navigation_item, pane_header, settings_panel, settings_row,
-    settings_section_label, sidebar_frame, toggle, window_frame,
+    disclosure_button, hotkey_keycaps, navigation_item, pane_body, pane_content, pane_header,
+    settings_panel, settings_row, settings_section_label, sidebar_frame, toggle, window_frame,
 };
 use crate::events::EventReader;
+use crate::linux_desktop::TrayCommand;
+use crate::linux_session::LinuxSession;
 use crate::linux_updater::InstalledUpdate;
 
 const WINDOW_WIDTH: f32 = 1040.0;
@@ -56,29 +58,19 @@ struct TranscriptionPreparation {
     worker: Option<JoinHandle<()>>,
 }
 
-#[derive(Clone, Copy)]
-enum TrayCommand {
-    Show,
-    ToggleListening,
-    Quit,
+enum SettingsChange {
+    Capture,
+    Hotkey(crate::linux_settings::LinuxHotkey),
+    DoubleTap(bool),
+    PasteWithShift(bool),
 }
 
-struct TrayRuntime {
-    worker: Mutex<Option<JoinHandle<()>>>,
-}
-
-impl TrayRuntime {
-    fn shutdown(&self) {
-        if let Some(worker) = self
-            .worker
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
-            .take()
-        {
-            gtk::glib::MainContext::default().invoke(gtk::main_quit);
-            let _ = worker.join();
-        }
-    }
+struct SettingsEdit {
+    change: Option<SettingsChange>,
+    capturing: bool,
+    resume: bool,
+    canceled: Arc<AtomicBool>,
+    worker: Option<JoinHandle<Result<crate::linux_settings::LinuxSettings>>>,
 }
 
 struct LinuxDesktopHost {
@@ -93,8 +85,10 @@ struct LinuxDesktopHost {
     listen_when_ready: bool,
     status: String,
     error: Option<String>,
+    dismissed_failure_at: Option<u64>,
     settings_error: Option<String>,
     settings: crate::linux_settings::LinuxSettings,
+    settings_edit: Option<SettingsEdit>,
     prepared_transcriber: Option<crate::linux_transcriber::LinuxTranscriber>,
     transcription_preparation: Option<TranscriptionPreparation>,
     transcription_error: Option<String>,
@@ -103,7 +97,8 @@ struct LinuxDesktopHost {
 
 struct LinuxApp {
     host: LinuxDesktopHost,
-    capturing_hotkey: bool,
+    quitting: bool,
+    restart_requested: bool,
     transcription_picker: TranscriptionPickerState,
 }
 
@@ -130,18 +125,20 @@ enum UpdateState {
     Ready(InstalledUpdate),
 }
 
-pub fn open(event_path: PathBuf, start_hidden: bool) -> Result<()> {
+pub fn open(event_path: PathBuf, start_hidden: bool, shutdown: &'static AtomicBool) -> Result<()> {
     let listener_stop = Arc::new(Mutex::new(None));
     let quit_stop = listener_stop.clone();
     let (tray_sender, tray_commands) = mpsc::channel();
-    let tray = match spawn_tray(tray_sender) {
-        Ok(tray) => Some(tray),
-        Err(error) => {
-            tracing::warn!(%error, "system tray is unavailable; closing HEX will quit");
-            None
-        }
-    };
-    let close_to_tray = tray.is_some();
+    let session = LinuxSession::detect();
+    // GPUI cannot hide/reopen a native Wayland toplevel. Keep it manageable without a tray.
+    let close_to_tray = !session.is_wayland()
+        && match crate::linux_desktop::start_tray(tray_sender) {
+            Ok(()) => true,
+            Err(error) => {
+                tracing::warn!(%error, "system tray is unavailable; closing HEX will quit");
+                false
+            }
+        };
     let (settings, settings_error) = match crate::linux_settings::LinuxSettings::load() {
         Ok(settings) => (settings, None),
         Err(error) => (
@@ -162,10 +159,7 @@ pub fn open(event_path: PathBuf, start_hidden: bool) -> Result<()> {
                     window_bounds: Some(WindowBounds::Windowed(bounds)),
                     window_min_size: Some(size(px(MINIMUM_WIDTH), px(MINIMUM_HEIGHT))),
                     kind: WindowKind::Floating,
-                    titlebar: Some(TitlebarOptions {
-                        title: Some("HEX".into()),
-                        ..Default::default()
-                    }),
+                    app_id: Some("hex".into()),
                     ..Default::default()
                 },
                 |_, cx| {
@@ -177,14 +171,16 @@ pub fn open(event_path: PathBuf, start_hidden: bool) -> Result<()> {
                             settings_error.clone(),
                             update,
                         ),
-                        capturing_hotkey: false,
+                        quitting: false,
+                        restart_requested: false,
                         transcription_picker: TranscriptionPickerState::Closed,
                     })
                 },
             )
-            .expect("could not open the HEX X11 window");
+            .expect("could not open the HEX window");
         let app = window.update(cx, |_, _, cx| cx.entity()).unwrap();
-        let x11_window = find_hex_window().ok();
+        let quit_app = app.downgrade();
+        let x11_window = Rc::new(Cell::new(None));
         app.update(cx, |app, cx| {
             let _ = app.host.dispatch(DesktopAction::StartListening);
             cx.notify();
@@ -199,14 +195,22 @@ pub fn open(event_path: PathBuf, start_hidden: bool) -> Result<()> {
         })
         .detach();
         let tray_window = window;
+        let tray_x11_window = x11_window.clone();
         cx.spawn(async move |cx| {
+            let mut had_tray = close_to_tray;
             loop {
                 Timer::after(Duration::from_millis(250)).await;
+                let has_tray = close_to_tray && crate::linux_desktop::tray_available();
+                if had_tray && !has_tray && !session.is_wayland() {
+                    let _ = set_x11_window_mapped(&tray_x11_window, true);
+                    let _ = tray_window.update(cx, |_, window, _| window.activate_window());
+                }
+                had_tray = has_tray;
                 while let Ok(command) = tray_commands.try_recv() {
                     match command {
                         TrayCommand::Show => {
-                            if let Some(window) = x11_window {
-                                set_x11_window_mapped(window, true);
+                            if !session.is_wayland() {
+                                let _ = set_x11_window_mapped(&tray_x11_window, true);
                             }
                             let _ = tray_window.update(cx, |_, window, _| {
                                 window.activate_window();
@@ -214,14 +218,9 @@ pub fn open(event_path: PathBuf, start_hidden: bool) -> Result<()> {
                         }
                         TrayCommand::ToggleListening => {
                             let _ = tray_window.update(cx, |app, _, cx| {
-                                if app
-                                    .host
-                                    .snapshot()
-                                    .listener
-                                    .is_some_and(|listener| listener.running)
-                                {
+                                if !app.quitting && app.host.is_running() {
                                     let _ = app.host.dispatch(DesktopAction::StopListening);
-                                } else {
+                                } else if !app.quitting {
                                     let _ = app.host.dispatch(DesktopAction::StartListening);
                                 }
                                 cx.notify();
@@ -229,16 +228,31 @@ pub fn open(event_path: PathBuf, start_hidden: bool) -> Result<()> {
                         }
                         TrayCommand::Quit => {
                             let _ = tray_window.update(cx, |app, _, cx| {
-                                let _ = app.host.dispatch(DesktopAction::StopListening);
-                                cx.quit();
+                                app.request_quit();
+                                cx.notify();
                             });
-                            return;
                         }
                     }
                 }
                 if app
                     .update(cx, |this, cx| {
+                        if shutdown.load(Ordering::Relaxed) {
+                            this.request_quit();
+                        }
                         this.host.refresh();
+                        if this.quitting && !this.host.has_pending_work() {
+                            if this.restart_requested
+                                && this
+                                    .host
+                                    .dispatch(DesktopAction::RestartIntoUpdate)
+                                    .is_err()
+                            {
+                                this.restart_requested = false;
+                                this.quitting = false;
+                            } else {
+                                cx.quit();
+                            }
+                        }
                         if matches!(
                             this.transcription_picker,
                             TranscriptionPickerState::Preparing(_)
@@ -266,25 +280,37 @@ pub fn open(event_path: PathBuf, start_hidden: bool) -> Result<()> {
         .detach();
         window
             .update(cx, |_, window, cx| {
-                if close_to_tray {
-                    window.on_window_should_close(cx, move |_, _| {
-                        if let Some(window) = x11_window {
-                            set_x11_window_mapped(window, false);
-                        }
-                        false
-                    });
-                }
+                window.set_window_title("HEX");
+                let close_app = cx.entity().downgrade();
+                let close_x11_window = x11_window.clone();
+                window.on_window_should_close(cx, move |_, cx| {
+                    if close_to_tray
+                        && crate::linux_desktop::tray_available()
+                        && set_x11_window_mapped(&close_x11_window, false)
+                    {
+                        return false;
+                    }
+                    // A missing X11 handle must not swallow close and strand a microphone.
+                    if close_app
+                        .update(cx, |app, cx| {
+                            app.request_quit();
+                            cx.notify();
+                        })
+                        .is_err()
+                    {
+                        cx.quit();
+                    }
+                    false
+                });
                 window.activate_window();
             })
             .ok();
         cx.activate(true);
-        if start_hidden
-            && close_to_tray
-            && let Some(window) = x11_window
-        {
-            set_x11_window_mapped(window, false);
+        if start_hidden && close_to_tray {
+            let _ = set_x11_window_mapped(&x11_window, false);
         }
-        cx.on_app_quit(move |_| {
+        cx.on_app_quit(move |cx| {
+            let _ = quit_app.update(cx, |app, _| app.request_quit());
             if let Some(stop) = quit_stop
                 .lock()
                 .unwrap_or_else(|error| error.into_inner())
@@ -292,13 +318,12 @@ pub fn open(event_path: PathBuf, start_hidden: bool) -> Result<()> {
             {
                 stop.store(true, Ordering::Relaxed);
             }
-            if let Some(tray) = &tray {
-                tray.shutdown();
-            }
+            crate::linux_desktop::shutdown();
             async {}
         })
         .detach();
     });
+    crate::linux_desktop::shutdown();
     Ok(())
 }
 
@@ -320,6 +345,7 @@ fn find_hex_window() -> color_eyre::Result<u32> {
         )?
         .reply()?;
     let windows = clients.value32().into_iter().flatten();
+    let pid_atom = connection.intern_atom(false, b"_NET_WM_PID")?.reply()?.atom;
     let mut hex_window = None;
     for window in windows {
         let title = connection
@@ -333,7 +359,19 @@ fn find_hex_window() -> color_eyre::Result<u32> {
             )?
             .reply()?
             .value;
-        if title == b"HEX" {
+        let pid = connection
+            .get_property(
+                false,
+                window,
+                pid_atom,
+                x11rb::protocol::xproto::AtomEnum::CARDINAL,
+                0,
+                1,
+            )?
+            .reply()?;
+        if title == b"HEX"
+            && pid.value32().and_then(|mut values| values.next()) == Some(std::process::id())
+        {
             hex_window = Some(window);
             break;
         }
@@ -341,7 +379,12 @@ fn find_hex_window() -> color_eyre::Result<u32> {
     hex_window.ok_or_else(|| color_eyre::eyre::eyre!("HEX window not found"))
 }
 
-fn set_x11_window_mapped(window: u32, mapped: bool) {
+fn set_x11_window_mapped(cache: &Cell<Option<u32>>, mapped: bool) -> bool {
+    // Keep a successful lookup so an unmapped window can be reopened, but never cache
+    // failure: the WM may not have published its client list during login yet.
+    let Some(window) = cache.get().or_else(|| find_hex_window().ok()) else {
+        return false;
+    };
     let result = (|| -> color_eyre::Result<()> {
         let (connection, _) = x11rb::rust_connection::RustConnection::connect(None)?;
         if mapped {
@@ -352,82 +395,11 @@ fn set_x11_window_mapped(window: u32, mapped: bool) {
         connection.flush()?;
         Ok(())
     })();
-    if let Err(error) = result {
+    if let Err(error) = &result {
         tracing::warn!(%error, mapped, "could not change HEX window visibility");
     }
-}
-
-fn spawn_tray(commands: mpsc::Sender<TrayCommand>) -> Result<TrayRuntime> {
-    let (ready_sender, ready_receiver) = mpsc::sync_channel(1);
-    let worker = std::thread::spawn(move || {
-        let result = (|| -> Result<()> {
-            gtk::init()?;
-            let menu = Menu::new();
-            let show = MenuItem::with_id("show", "Show HEX", true, None);
-            let toggle = MenuItem::with_id("toggle", "Start / Stop Listening", true, None);
-            let quit = MenuItem::with_id("quit", "Quit HEX", true, None);
-            menu.append(&show)?;
-            menu.append(&toggle)?;
-            menu.append(&quit)?;
-
-            let menu_commands = commands.clone();
-            MenuEvent::set_event_handler(Some(move |event: MenuEvent| {
-                let command = match event.id.as_ref() {
-                    "show" => Some(TrayCommand::Show),
-                    "toggle" => Some(TrayCommand::ToggleListening),
-                    "quit" => Some(TrayCommand::Quit),
-                    _ => None,
-                };
-                if let Some(command) = command {
-                    let _ = menu_commands.send(command);
-                }
-            }));
-            TrayIconEvent::set_event_handler(Some(move |event| {
-                if matches!(
-                    event,
-                    TrayIconEvent::Click {
-                        button: MouseButton::Left,
-                        button_state: MouseButtonState::Up,
-                        ..
-                    }
-                ) {
-                    let _ = commands.send(TrayCommand::Show);
-                }
-            }));
-
-            let _tray = TrayIconBuilder::new()
-                .with_tooltip("HEX Dictation")
-                .with_icon(tray_icon()?)
-                .with_menu(Box::new(menu))
-                .build()?;
-            let _ = ready_sender.send(Ok(()));
-            gtk::main();
-            Ok(())
-        })();
-        if let Err(error) = result {
-            let _ = ready_sender.try_send(Err(error));
-        }
-    });
-    ready_receiver
-        .recv_timeout(Duration::from_secs(2))
-        .map_err(|_| color_eyre::eyre::eyre!("timed out starting the system tray"))??;
-    Ok(TrayRuntime {
-        worker: Mutex::new(Some(worker)),
-    })
-}
-
-fn tray_icon() -> Result<Icon> {
-    const SIZE: u32 = 22;
-    let mut data = vec![0_u8; (SIZE * SIZE * 4) as usize];
-    for y in 3..19 {
-        for x in 4..18 {
-            if matches!(x, 4..=7 | 14..=17) || (9..=12).contains(&y) {
-                let index = ((y * SIZE + x) * 4) as usize;
-                data[index..index + 4].copy_from_slice(&[0xd9, 0xff, 0x68, 0xff]);
-            }
-        }
-    }
-    Ok(Icon::from_rgba(data, SIZE, SIZE)?)
+    cache.set(result.is_ok().then_some(window));
+    result.is_ok()
 }
 
 impl LinuxDesktopHost {
@@ -453,8 +425,10 @@ impl LinuxDesktopHost {
             listen_when_ready: false,
             status: "Ready".into(),
             error: None,
+            dismissed_failure_at: None,
             settings_error: error,
             settings,
+            settings_edit: None,
             prepared_transcriber: None,
             transcription_preparation: None,
             transcription_error: None,
@@ -463,6 +437,9 @@ impl LinuxDesktopHost {
     }
 
     fn start(&mut self) {
+        if self.settings_edit.is_some() {
+            return;
+        }
         self.listen_when_ready = true;
         if self.listener_result.is_some() || self.transcription_preparation.is_some() {
             return;
@@ -502,11 +479,14 @@ impl LinuxDesktopHost {
         self.session_before_start = self.activity.session_started_at;
         self.awaiting_session_start = true;
         self.status = "Starting".into();
-        self.error = None;
     }
 
     fn stop(&mut self) {
         self.listen_when_ready = false;
+        if let Some(edit) = &mut self.settings_edit {
+            edit.resume = false;
+            edit.canceled.store(true, Ordering::Release);
+        }
         if let Some(stop) = self
             .listener_stop
             .lock()
@@ -544,16 +524,22 @@ impl LinuxDesktopHost {
             };
         }
 
-        let transcription_result =
-            self.transcription_preparation
-                .as_ref()
-                .and_then(|preparation| match preparation.result.try_recv() {
-                    Ok(result) => Some(result),
-                    Err(TryRecvError::Disconnected) => {
-                        Some(Err("model preparation worker stopped unexpectedly".into()))
-                    }
-                    Err(TryRecvError::Empty) => None,
-                });
+        let transcription_result = self
+            .transcription_preparation
+            .as_ref()
+            .filter(|preparation| {
+                preparation
+                    .worker
+                    .as_ref()
+                    .is_none_or(JoinHandle::is_finished)
+            })
+            .and_then(|preparation| match preparation.result.try_recv() {
+                Ok(result) => Some(result),
+                Err(TryRecvError::Disconnected) => {
+                    Some(Err("model preparation worker stopped unexpectedly".into()))
+                }
+                Err(TryRecvError::Empty) => None,
+            });
         let mut start_listener = false;
         if let Some(result) = transcription_result {
             let mut preparation = self
@@ -597,39 +583,38 @@ impl LinuxDesktopHost {
             self.start();
         }
 
-        if let Some(receiver) = &self.listener_result {
-            match receiver.try_recv() {
-                Ok(Ok(())) => {
-                    self.status = "Ready".into();
-                    self.awaiting_session_start = false;
-                    self.listener_result = None;
-                    self.join_listener();
-                    self.listener_stop
-                        .lock()
-                        .unwrap_or_else(|error| error.into_inner())
-                        .take();
-                }
-                Ok(Err(error)) => {
-                    self.status = "Unavailable".into();
-                    self.awaiting_session_start = false;
-                    self.error = Some(error);
-                    self.listener_result = None;
-                    self.join_listener();
-                    self.listener_stop
-                        .lock()
-                        .unwrap_or_else(|error| error.into_inner())
-                        .take();
-                }
-                Err(TryRecvError::Empty) => {}
+        if self
+            .listener_worker
+            .as_ref()
+            .is_none_or(JoinHandle::is_finished)
+            && let Some(receiver) = &self.listener_result
+        {
+            let result = match receiver.try_recv() {
+                Ok(result) => Some(result),
+                Err(TryRecvError::Empty) => None,
                 Err(TryRecvError::Disconnected) => {
-                    self.status = "Unavailable".into();
-                    self.awaiting_session_start = false;
-                    self.error = Some("listener worker stopped unexpectedly".into());
-                    self.listener_result = None;
-                    self.join_listener();
+                    Some(Err("listener worker stopped unexpectedly".into()))
+                }
+            };
+            if let Some(result) = result {
+                self.awaiting_session_start = false;
+                self.listener_result = None;
+                self.join_listener();
+                self.listener_stop
+                    .lock()
+                    .unwrap_or_else(|error| error.into_inner())
+                    .take();
+                match result {
+                    Ok(()) => self.status = "Ready".into(),
+                    Err(error) => {
+                        self.status = "Unavailable".into();
+                        self.error = Some(error);
+                    }
                 }
             }
         }
+
+        self.refresh_settings_edit();
 
         self.activity.refresh(&mut self.event_reader);
         if self.awaiting_session_start
@@ -638,6 +623,7 @@ impl LinuxDesktopHost {
             self.awaiting_session_start = false;
         }
         if self.listener_result.is_some()
+            && self.listen_when_ready
             && !self.awaiting_session_start
             && let Some(status) = self.activity.state_label()
         {
@@ -650,16 +636,22 @@ impl LinuxDesktopHost {
     }
 
     fn join_listener(&mut self) {
-        if let Some(worker) = self.listener_worker.take() {
+        if self
+            .listener_worker
+            .as_ref()
+            .is_some_and(JoinHandle::is_finished)
+            && let Some(worker) = self.listener_worker.take()
+        {
             let _ = worker.join();
         }
     }
 
     fn set_dictation_hotkey(&mut self, shortcut: DesktopShortcut) -> Result<()> {
         if shortcut.function {
-            self.error = Some("The Fn modifier cannot be registered on X11".into());
+            self.error = Some("The Fn modifier cannot be registered on Linux".into());
+            self.cancel_settings_edit();
             return Err(color_eyre::eyre::eyre!(
-                "the Fn modifier cannot be registered on X11"
+                "the Fn modifier cannot be registered on Linux"
             ));
         }
         let binding = crate::linux_settings::LinuxHotkey {
@@ -673,22 +665,137 @@ impl LinuxDesktopHost {
                 shortcut.key.to_ascii_lowercase()
             },
         };
-        if let Err(error) = binding.validate().and_then(|()| {
-            crate::linux_input::X11HotkeyMonitor::start(binding.clone(), false).map(drop)
-        }) {
-            self.error = Some(format!("Could not register {}: {error:#}", binding.label()));
-            return Err(error);
+        if let Some(edit) = &mut self.settings_edit {
+            if matches!(edit.change, Some(SettingsChange::Capture)) && edit.worker.is_none() {
+                edit.change = Some(SettingsChange::Hotkey(binding));
+                edit.capturing = false;
+            }
+        } else {
+            self.begin_settings_edit(SettingsChange::Hotkey(binding));
         }
-        let mut candidate = self.settings.clone();
-        candidate.dictation_hotkey = binding;
-        if let Err(error) = candidate.save() {
-            self.error = Some(format!("Could not save shortcut: {error:#}"));
-            return Err(error);
-        }
-        self.settings = candidate;
-        self.error = None;
-        self.settings_error = None;
         Ok(())
+    }
+
+    fn begin_settings_edit(&mut self, change: SettingsChange) {
+        if self.settings_edit.is_some() {
+            return;
+        }
+        if self.transcription_preparation.is_some() {
+            self.error = Some("Wait for model preparation before editing shortcut settings".into());
+            return;
+        }
+        let resume = self.is_running() && self.listen_when_ready;
+        self.stop();
+        self.error = None;
+        self.settings_edit = Some(SettingsEdit {
+            capturing: matches!(change, SettingsChange::Capture),
+            change: Some(change),
+            resume,
+            canceled: Arc::new(AtomicBool::new(false)),
+            worker: None,
+        });
+    }
+
+    fn cancel_settings_edit(&mut self) {
+        if let Some(edit) = &self.settings_edit {
+            edit.canceled.store(true, Ordering::Release);
+        }
+    }
+
+    fn capturing_hotkey(&self) -> bool {
+        self.settings_edit
+            .as_ref()
+            .is_some_and(|edit| !edit.canceled.load(Ordering::Acquire) && edit.capturing)
+    }
+
+    fn has_pending_work(&self) -> bool {
+        self.is_running()
+            || self.settings_edit.is_some()
+            || self.transcription_preparation.is_some()
+    }
+
+    fn refresh_settings_edit(&mut self) {
+        if self.is_running() {
+            return;
+        }
+        let Some(edit) = &mut self.settings_edit else {
+            return;
+        };
+        if edit
+            .worker
+            .as_ref()
+            .is_some_and(|worker| !worker.is_finished())
+        {
+            return;
+        }
+        let canceled = edit.canceled.load(Ordering::Acquire);
+        if let Some(worker) = edit.worker.take() {
+            match worker.join() {
+                // Once persistence completed, keep the in-memory projection consistent even
+                // if Cancel raced with the final atomic save.
+                Ok(Ok(settings)) => {
+                    self.settings = settings;
+                    self.settings_error = None;
+                }
+                Ok(Err(error)) if !canceled => {
+                    self.error = Some(format!("Could not update dictation settings: {error:#}"));
+                }
+                Err(_) if !canceled => {
+                    self.error = Some("Settings worker stopped unexpectedly".into())
+                }
+                _ => {}
+            }
+        } else if !canceled {
+            let wayland = LinuxSession::detect().is_wayland();
+            if !wayland && matches!(edit.change, Some(SettingsChange::Capture)) {
+                // X11 uses focused GPUI keystrokes, never raw input-device access.
+                self.status = "Press a shortcut".into();
+                return;
+            }
+            let Some(change) = edit.change.take() else {
+                return;
+            };
+            let mut candidate = self.settings.clone();
+            let canceled = edit.canceled.clone();
+            edit.worker = Some(std::thread::spawn(move || {
+                let binding = match change {
+                    SettingsChange::Capture => {
+                        Some(crate::linux_input::capture_wayland_binding(&canceled)?)
+                    }
+                    SettingsChange::Hotkey(binding) => Some(binding),
+                    SettingsChange::DoubleTap(enabled) => {
+                        candidate.double_tap_lock = enabled;
+                        None
+                    }
+                    SettingsChange::PasteWithShift(enabled) => {
+                        candidate.paste_with_shift = enabled;
+                        None
+                    }
+                };
+                if let Some(binding) = binding {
+                    binding.validate()?;
+                    crate::linux_input::LinuxHotkeyMonitor::start(binding.clone(), false)?;
+                    candidate.dictation_hotkey = binding;
+                }
+                if canceled.load(Ordering::Acquire) {
+                    return Err(color_eyre::eyre::eyre!("Shortcut edit canceled"));
+                }
+                candidate.save()?;
+                Ok(candidate)
+            }));
+            self.status = if self.capturing_hotkey() {
+                "Press a shortcut"
+            } else {
+                "Saving settings"
+            }
+            .into();
+            return;
+        }
+        let resume = self.settings_edit.take().is_some_and(|edit| edit.resume);
+        self.status = "Ready".into();
+        if resume {
+            self.start();
+        }
     }
 
     fn restart_into_update(&self) -> Result<()> {
@@ -703,8 +810,8 @@ impl LinuxDesktopHost {
         model: crate::transcription_models::TranscriptionModelId,
         language: String,
     ) -> Result<()> {
-        if self.is_running() {
-            let error = "Stop listening before changing the transcription model".to_string();
+        if self.is_running() || self.settings_edit.is_some() {
+            let error = "Stop listening and finish shortcut editing before changing the transcription model".to_string();
             self.transcription_error = Some(error.clone());
             return Err(color_eyre::eyre::eyre!(error));
         }
@@ -775,13 +882,22 @@ impl LinuxDesktopHost {
 }
 
 impl LinuxApp {
+    fn request_quit(&mut self) {
+        self.quitting = true;
+        self.host.stop();
+        self.host.cancel_transcription_preparation();
+    }
+
     fn capture_hotkey(&mut self, keystroke: &Keystroke) -> bool {
-        if !self.capturing_hotkey {
+        if !self.host.capturing_hotkey() {
             return false;
         }
         if keystroke.key == "escape" {
-            self.capturing_hotkey = false;
+            self.host.cancel_settings_edit();
             return true;
+        }
+        if LinuxSession::detect().is_wayland() || self.host.is_running() {
+            return false;
         }
         let shortcut = DesktopShortcut {
             alt: keystroke.modifiers.alt,
@@ -791,13 +907,9 @@ impl LinuxApp {
             platform: keystroke.modifiers.platform,
             shift: keystroke.modifiers.shift,
         };
-        if self
+        let _ = self
             .host
-            .dispatch(DesktopAction::SetDictationShortcut(shortcut))
-            .is_ok()
-        {
-            self.capturing_hotkey = false;
-        }
+            .dispatch(DesktopAction::SetDictationShortcut(shortcut));
         true
     }
 }
@@ -813,18 +925,25 @@ fn start_update_check() -> Receiver<Result<Option<InstalledUpdate>, String>> {
 
 impl Drop for LinuxDesktopHost {
     fn drop(&mut self) {
+        self.stop();
         self.cancel_transcription_preparation();
-        if let Some(stop) = self
-            .listener_stop
+        self.listener_stop
             .lock()
             .unwrap_or_else(|error| error.into_inner())
-            .take()
-        {
-            stop.store(true, Ordering::Relaxed);
-        }
+            .take();
         self.join_listener();
-        if let Some(mut preparation) = self.transcription_preparation.take()
+        if let Some(preparation) = &mut self.transcription_preparation
+            && preparation
+                .worker
+                .as_ref()
+                .is_some_and(JoinHandle::is_finished)
             && let Some(worker) = preparation.worker.take()
+        {
+            let _ = worker.join();
+        }
+        if let Some(edit) = &mut self.settings_edit
+            && edit.worker.as_ref().is_some_and(JoinHandle::is_finished)
+            && let Some(worker) = edit.worker.take()
         {
             let _ = worker.join();
         }
@@ -855,7 +974,17 @@ impl DesktopHost for LinuxDesktopHost {
                 running: self.is_running(),
                 status: self.status.clone(),
             }),
-            operation_error: self.error.clone().or_else(|| self.settings_error.clone()),
+            operation_error: self
+                .error
+                .clone()
+                .or_else(|| self.settings_error.clone())
+                .or_else(|| {
+                    self.activity
+                        .last_failure
+                        .as_ref()
+                        .filter(|(at, _)| Some(*at) != self.dismissed_failure_at)
+                        .map(|(_, message)| message.clone())
+                }),
             observations_path: self.event_path.display().to_string(),
             transcription: DesktopTranscriptionSnapshot {
                 downloaded_bytes: self
@@ -880,7 +1009,11 @@ impl DesktopHost for LinuxDesktopHost {
 
     fn dispatch(&mut self, action: DesktopAction) -> Result<()> {
         match action {
-            DesktopAction::ClearError => self.error = None,
+            DesktopAction::ClearError => {
+                self.error = None;
+                self.settings_error = None;
+                self.dismissed_failure_at = self.activity.last_failure.as_ref().map(|(at, _)| *at);
+            }
             DesktopAction::RestartIntoUpdate => {
                 if let Err(error) = self.restart_into_update() {
                     self.error = Some(format!("Could not restart HEX: {error:#}"));
@@ -891,22 +1024,18 @@ impl DesktopHost for LinuxDesktopHost {
                 self.set_dictation_hotkey(shortcut)?;
             }
             DesktopAction::SetDoubleTapLock(enabled) => {
-                let mut candidate = self.settings.clone();
-                candidate.double_tap_lock = enabled;
-                if let Err(error) = candidate.save() {
-                    self.error = Some(format!("Could not save double-tap setting: {error:#}"));
-                    return Err(error);
-                }
-                self.settings = candidate;
-                self.error = None;
-                self.settings_error = None;
+                self.begin_settings_edit(SettingsChange::DoubleTap(enabled));
             }
             DesktopAction::SetDoubleTapOnly(_) => {
                 return Err(color_eyre::eyre::eyre!(
                     "double-tap-only is unavailable on X11"
                 ));
             }
-            DesktopAction::StartListening => self.start(),
+            DesktopAction::StartListening => {
+                self.error = None;
+                self.dismissed_failure_at = self.activity.last_failure.as_ref().map(|(at, _)| *at);
+                self.start();
+            }
             DesktopAction::StopListening => self.stop(),
         }
         Ok(())
@@ -941,7 +1070,9 @@ impl LinuxApp {
             .listener
             .as_ref()
             .is_some_and(|listener| listener.running);
-        let shortcut = if self.capturing_hotkey {
+        let editing = self.host.settings_edit.is_some();
+        let paste_with_shift = self.host.settings.paste_with_shift;
+        let shortcut = if self.host.capturing_hotkey() {
             div()
                 .w(px(180.0))
                 .h(px(34.0))
@@ -953,7 +1084,11 @@ impl LinuxApp {
                 .border_color(rgb(TEXT_SOFT))
                 .bg(rgb(SURFACE))
                 .text_size(px(11.0))
-                .child("Press a shortcut...")
+                .child(if running {
+                    "Stopping listener..."
+                } else {
+                    "Press a shortcut..."
+                })
                 .into_any_element()
         } else {
             hotkey_keycaps(snapshot.dictation_shortcut.clone(), 1.0)
@@ -973,7 +1108,7 @@ impl LinuxApp {
             .flex_col()
             .child(pane_header("Settings"))
             .child(
-                div()
+                pane_body().child(div()
                     .id("settings-scroll")
                     .flex_1()
                     .overflow_y_scroll()
@@ -982,10 +1117,50 @@ impl LinuxApp {
                     .pb_7()
                     .child(
                         div().w_full().flex().justify_center().child(
-                            div()
-                                .w_full()
-                                .max_w(px(788.0))
+                            pane_content()
                                 .relative()
+                                .child(settings_section_label("LISTENER"))
+                                .child(settings_panel().child(settings_row(
+                                    "Dictation",
+                                    "Global hotkey dictation",
+                                    div().flex().items_center().gap_3()
+                                        .child(div().text_size(px(12.0)).text_color(rgb(MUTED))
+                                            .child(snapshot.listener.as_ref().map_or_else(|| "Ready".to_string(), |listener| listener.status.clone())))
+                                        .child(compact_button(if running { "Stop" } else { "Start" })
+                                        .id("linux-listener-toggle")
+                                        .on_click(cx.listener(move |this, _, _, cx| {
+                                            if !this.quitting {
+                                                let _ = this.host.dispatch(if running {
+                                                    DesktopAction::StopListening
+                                                } else {
+                                                    DesktopAction::StartListening
+                                                });
+                                                cx.notify();
+                                            }
+                                        }))),
+                                )))
+                                .when_some(snapshot.operation_error.clone(), |content, error| {
+                                    content.child(
+                                        div().mt_3().p_3().rounded(px(6.0)).border_1().border_color(rgb(LINE))
+                                            .child(div().text_size(px(12.0)).child(error))
+                                            .child(div().mt_2().flex().gap_2()
+                                                .when(!running, |buttons| buttons.child(compact_button("Retry").id("linux-error-retry")
+                                                    .on_click(cx.listener(|this, _, _, cx| {
+                                                        if !this.quitting {
+                                                            let _ = this.host.dispatch(DesktopAction::StartListening);
+                                                            cx.notify();
+                                                        }
+                                                    }))))
+                                                .child(compact_button("Dismiss").id("linux-error-dismiss")
+                                                    .on_click(cx.listener(|this, _, _, cx| {
+                                                        let _ = this.host.dispatch(DesktopAction::ClearError);
+                                                        cx.notify();
+                                                    })))),
+                                    )
+                                })
+                                .when_some(crate::linux_desktop::hud_limitation(), |content, limitation| {
+                                    content.child(div().mt_3().text_size(px(12.0)).text_color(rgb(MUTED)).child(limitation))
+                                })
                                 .child(settings_section_label("DICTATION"))
                                 .child(
                                     settings_panel()
@@ -1015,20 +1190,28 @@ impl LinuxApp {
                                             )
                                             .border_b_0()
                                             .id("dictation-hotkey-setting")
-                                            .when(running, |row| row.opacity(0.5))
                                             .on_click(
                                                 cx.listener(move |this, _, _, cx| {
-                                                    if !running {
-                                                        this.capturing_hotkey =
-                                                            !this.capturing_hotkey;
-                                                        let _ = this
-                                                            .host
-                                                            .dispatch(DesktopAction::ClearError);
+                                                    if !this.quitting {
+                                                        if this.host.capturing_hotkey() {
+                                                            this.host.cancel_settings_edit();
+                                                        } else {
+                                                            this.host.begin_settings_edit(SettingsChange::Capture);
+                                                        }
                                                         cx.notify();
                                                     }
                                                 }),
                                             ),
-                                        ),
+                                        )
+                                        .when(editing, |panel| panel.child(settings_row(
+                                            "Updating shortcut settings",
+                                            "Listening resumes after the change if it was previously running.",
+                                            compact_button("Cancel").id("linux-cancel-shortcut")
+                                                .on_click(cx.listener(|this, _, _, cx| {
+                                                    this.host.cancel_settings_edit();
+                                                    cx.notify();
+                                                })),
+                                        ))),
                                 )
                                 .child(settings_section_label("BEHAVIOR"))
                                 .child(
@@ -1042,12 +1225,11 @@ impl LinuxApp {
                                                 0.0
                                             }),
                                         )
-                                        .border_b_0()
                                         .id("double-tap-setting")
-                                        .when(running, |row| row.opacity(0.5))
+                                        .when(editing, |row| row.opacity(0.5))
                                         .on_click(
                                             cx.listener(move |this, _, _, cx| {
-                                                if !running {
+                                                if !this.quitting && !editing {
                                                     let enabled =
                                                         !this.host.snapshot().double_tap_lock;
                                                     let _ = this.host.dispatch(
@@ -1057,6 +1239,21 @@ impl LinuxApp {
                                                 }
                                             }),
                                         ),
+                                    ).child(
+                                        settings_row(
+                                            "Terminal paste shortcut",
+                                            "Use Ctrl-Shift-V instead of Ctrl-V",
+                                            toggle(if paste_with_shift { 1.0 } else { 0.0 }),
+                                        )
+                                        .border_b_0()
+                                        .id("terminal-paste-setting")
+                                        .when(editing, |row| row.opacity(0.5))
+                                        .on_click(cx.listener(move |this, _, _, cx| {
+                                            if !this.quitting && !editing {
+                                                this.host.begin_settings_edit(SettingsChange::PasteWithShift(!paste_with_shift));
+                                                cx.notify();
+                                            }
+                                        })),
                                     ),
                                 )
                                 .child(settings_section_label("APPLICATION"))
@@ -1069,6 +1266,16 @@ impl LinuxApp {
                                                 format!("Version {}", env!("CARGO_PKG_VERSION")),
                                             ),
                                         ))
+                                        .child(settings_row(
+                                            "Quit HEX",
+                                            "Stop listening and close the application",
+                                            compact_button(if self.quitting { "Stopping..." } else { "Quit" })
+                                                .id("linux-quit")
+                                                .on_click(cx.listener(|this, _, _, cx| {
+                                                    this.request_quit();
+                                                    cx.notify();
+                                                })),
+                                        ))
                                         .when(update_ready, |panel| {
                                             panel.child(settings_row(
                                                 "Update ready",
@@ -1078,26 +1285,15 @@ impl LinuxApp {
                                                     .border_1()
                                                     .border_color(rgb(LINE))
                                                     .on_click(cx.listener(|this, _, _, cx| {
-                                                        if this
-                                                            .host
-                                                            .dispatch(
-                                                                DesktopAction::RestartIntoUpdate,
-                                                            )
-                                                            .is_ok()
-                                                        {
-                                                            let _ = this.host.dispatch(
-                                                                DesktopAction::StopListening,
-                                                            );
-                                                            cx.quit();
-                                                        } else {
-                                                            cx.notify();
-                                                        }
+                                                        this.restart_requested = true;
+                                                        this.request_quit();
+                                                        cx.notify();
                                                     })),
                                             ))
                                         }),
                                 ),
                         ),
-                    ),
+                    )),
             )
             .into_any_element()
     }
@@ -1177,6 +1373,9 @@ impl TranscriptionPickerDelegate for LinuxApp {
         language: String,
         _cx: &mut Context<Self>,
     ) {
+        if self.quitting {
+            return;
+        }
         if self
             .host
             .choose_transcription(model, language.clone())
@@ -1216,7 +1415,14 @@ impl Render for LinuxApp {
                 });
         window_frame()
             .child(self.render_shared_navigation())
-            .child(div().flex_1().h_full().overflow_hidden().child(content))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w(px(0.0))
+                    .h_full()
+                    .overflow_hidden()
+                    .child(content),
+            )
             .children(model_picker)
     }
 }
@@ -1227,6 +1433,190 @@ mod tests {
     use crate::transcription_models::{
         ModelPreparationStage, TranscriptionModelId, TranscriptionSelection,
     };
+
+    fn host_for_edit(running: bool) -> LinuxDesktopHost {
+        let settings = crate::linux_settings::LinuxSettings {
+            transcription: TranscriptionSelection {
+                // Prevent the restart assertions from opening a real microphone.
+                model: TranscriptionModelId::AppleSpeech,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let mut host = LinuxDesktopHost::new(
+            PathBuf::new(),
+            Arc::new(Mutex::new(None)),
+            settings,
+            None,
+            UpdateState::Unmanaged,
+        );
+        if running {
+            let (_, result) = mpsc::channel();
+            host.listener_result = Some(result);
+            *host.listener_stop.lock().unwrap() = Some(Arc::new(AtomicBool::new(false)));
+            host.listen_when_ready = true;
+        }
+        host
+    }
+
+    fn set_finished_edit(
+        host: &mut LinuxDesktopHost,
+        result: Result<crate::linux_settings::LinuxSettings>,
+    ) {
+        let worker = std::thread::spawn(move || result);
+        while !worker.is_finished() {
+            std::thread::yield_now();
+        }
+        host.settings_edit.as_mut().unwrap().worker = Some(worker);
+    }
+
+    #[test]
+    fn preference_edits_wait_for_stop_and_only_restart_a_previously_running_listener() {
+        for (running, paste) in [(false, false), (true, false), (false, true), (true, true)] {
+            let mut host = host_for_edit(running);
+            let mut candidate = host.settings.clone();
+            if paste {
+                candidate.paste_with_shift = !candidate.paste_with_shift;
+                host.begin_settings_edit(SettingsChange::PasteWithShift(
+                    candidate.paste_with_shift,
+                ));
+            } else {
+                candidate.double_tap_lock = !candidate.double_tap_lock;
+                host.dispatch(DesktopAction::SetDoubleTapLock(candidate.double_tap_lock))
+                    .unwrap();
+            }
+            assert_eq!(host.settings_edit.as_ref().unwrap().resume, running);
+            if running {
+                host.refresh_settings_edit();
+                assert!(
+                    host.listener_stop
+                        .lock()
+                        .unwrap()
+                        .as_ref()
+                        .unwrap()
+                        .load(Ordering::Relaxed)
+                );
+                assert!(host.settings_edit.as_ref().unwrap().worker.is_none());
+                assert_ne!(host.settings, candidate);
+            }
+            host.listener_result = None;
+            host.listener_stop.lock().unwrap().take();
+            set_finished_edit(&mut host, Ok(candidate.clone()));
+            host.refresh_settings_edit();
+            assert_eq!(host.settings, candidate);
+            assert!(host.settings_edit.is_none());
+            assert_eq!(host.listen_when_ready, running);
+        }
+    }
+
+    #[test]
+    fn canceled_or_failed_capture_restores_prior_listening_without_changing_settings() {
+        for running in [false, true] {
+            for cancel in [false, true] {
+                let mut host = host_for_edit(running);
+                let original = host.settings.clone();
+                host.begin_settings_edit(SettingsChange::Capture);
+                host.listener_result = None;
+                host.listener_stop.lock().unwrap().take();
+                if cancel {
+                    host.cancel_settings_edit();
+                } else {
+                    set_finished_edit(
+                        &mut host,
+                        Err(color_eyre::eyre::eyre!("input permission denied")),
+                    );
+                }
+                host.refresh_settings_edit();
+                assert_eq!(host.settings, original);
+                assert_eq!(host.listen_when_ready, running);
+                assert_eq!(host.error.is_some(), !cancel);
+                assert!(host.settings_edit.is_none());
+            }
+        }
+    }
+
+    #[test]
+    fn cancel_signals_worker_and_does_not_wait_or_restart_until_it_finishes() {
+        let mut host = host_for_edit(true);
+        host.begin_settings_edit(SettingsChange::Capture);
+        host.listener_result = None;
+        host.listener_stop.lock().unwrap().take();
+        let (release, held) = mpsc::channel();
+        host.settings_edit.as_mut().unwrap().worker = Some(std::thread::spawn(move || {
+            let _ = held.recv();
+            Err(color_eyre::eyre::eyre!("capture canceled"))
+        }));
+        host.cancel_settings_edit();
+        host.refresh_settings_edit();
+        let edit = host.settings_edit.as_mut().unwrap();
+        assert!(edit.canceled.load(Ordering::Acquire));
+        assert!(edit.worker.is_some());
+        assert!(!host.listen_when_ready);
+        release.send(()).unwrap();
+        let _ = host
+            .settings_edit
+            .as_mut()
+            .unwrap()
+            .worker
+            .take()
+            .unwrap()
+            .join()
+            .unwrap()
+            .unwrap_err();
+        host.refresh_settings_edit();
+        assert!(host.listen_when_ready);
+        assert!(host.settings_edit.is_none());
+    }
+
+    #[test]
+    fn quit_during_edit_cancels_capture_and_suppresses_restart() {
+        let mut app = LinuxApp {
+            host: host_for_edit(true),
+            quitting: false,
+            restart_requested: false,
+            transcription_picker: TranscriptionPickerState::Closed,
+        };
+        app.host.begin_settings_edit(SettingsChange::Capture);
+        app.request_quit();
+        assert!(app.quitting);
+        assert!(app.host.has_pending_work());
+        let edit = app.host.settings_edit.as_ref().unwrap();
+        assert!(!edit.resume);
+        assert!(edit.canceled.load(Ordering::Acquire));
+        app.host.listener_result = None;
+        app.host.listener_stop.lock().unwrap().take();
+        app.host.refresh_settings_edit();
+        assert!(!app.host.listen_when_ready);
+        assert!(!app.host.has_pending_work());
+    }
+
+    #[test]
+    fn dismiss_clears_operational_and_settings_errors() {
+        let mut host = host_for_edit(false);
+        host.error = Some("listener failed".into());
+        host.settings_error = Some("settings failed".into());
+        host.dispatch(DesktopAction::ClearError).unwrap();
+        assert!(host.snapshot().operation_error.is_none());
+    }
+
+    #[test]
+    fn output_failures_are_visible_and_dismissal_only_acknowledges_that_failure() {
+        let mut host = host_for_edit(false);
+        host.activity.last_failure = Some((10, "paste helper failed".into()));
+        assert_eq!(
+            host.snapshot().operation_error.as_deref(),
+            Some("paste helper failed")
+        );
+        host.dispatch(DesktopAction::ClearError).unwrap();
+        assert!(host.snapshot().operation_error.is_none());
+        host.activity.last_failure = Some((11, "paste helper failed".into()));
+        assert_eq!(
+            host.snapshot().operation_error.as_deref(),
+            Some("paste helper failed")
+        );
+        host.dispatch(DesktopAction::StartListening).unwrap();
+        assert!(host.snapshot().operation_error.is_none());
+    }
 
     #[test]
     fn start_during_preparation_defers_listening_and_stop_clears_the_request() {

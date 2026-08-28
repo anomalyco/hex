@@ -13,9 +13,10 @@ use crate::linux_input::{Keymap, XK_ALT_L, XK_ALT_R};
 #[serde(default)]
 pub struct LinuxSettings {
     pub schema_version: u32,
-    pub platform: String,
     pub dictation_hotkey: LinuxHotkey,
     pub double_tap_lock: bool,
+    #[serde(default = "legacy_paste_with_shift")]
+    pub paste_with_shift: bool,
     pub transcription: crate::transcription_models::TranscriptionSelection,
 }
 
@@ -33,12 +34,17 @@ impl Default for LinuxSettings {
     fn default() -> Self {
         Self {
             schema_version: 1,
-            platform: "x11".into(),
             dictation_hotkey: LinuxHotkey::default(),
             double_tap_lock: true,
+            paste_with_shift: false,
             transcription: crate::transcription_models::TranscriptionSelection::default(),
         }
     }
+}
+
+fn legacy_paste_with_shift() -> bool {
+    // Existing X11 settings predate this preference and always used Ctrl-Shift-V.
+    true
 }
 
 impl Default for LinuxHotkey {
@@ -61,12 +67,6 @@ impl LinuxSettings {
         }
         let settings: Self = serde_json::from_slice(&fs::read(&path)?)
             .wrap_err_with(|| format!("could not parse {}", path.display()))?;
-        if settings.platform != "x11" {
-            return Err(eyre!(
-                "unsupported Linux settings platform: {}",
-                settings.platform
-            ));
-        }
         settings.dictation_hotkey.validate()?;
         crate::transcription_models::validate(&settings.transcription)?;
         Ok(settings)
@@ -202,5 +202,33 @@ mod tests {
             settings.transcription,
             crate::transcription_models::TranscriptionSelection::default()
         );
+    }
+
+    #[test]
+    fn legacy_settings_are_shared_between_display_sessions() {
+        let legacy = r#"{"platform":"x11","double_tap_lock":false}"#;
+        let settings: LinuxSettings = serde_json::from_str(legacy).unwrap();
+        assert!(!settings.double_tap_lock);
+        assert!(settings.paste_with_shift);
+        // Display selection is runtime state, not a preference that survives logout.
+        let saved = serde_json::to_value(&settings).unwrap();
+        assert!(saved.get("platform").is_none());
+        assert_eq!(
+            serde_json::from_value::<LinuxSettings>(saved).unwrap(),
+            settings
+        );
+    }
+
+    #[test]
+    fn fresh_settings_use_standard_paste_and_preserve_an_explicit_choice() {
+        let settings = LinuxSettings::default();
+        assert!(!settings.paste_with_shift);
+        let saved = serde_json::to_value(&settings).unwrap();
+        assert_eq!(
+            serde_json::from_value::<LinuxSettings>(saved).unwrap(),
+            settings
+        );
+        let legacy: LinuxSettings = serde_json::from_str(r#"{"paste_with_shift":false}"#).unwrap();
+        assert!(!legacy.paste_with_shift);
     }
 }

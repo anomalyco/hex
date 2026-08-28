@@ -6,7 +6,8 @@ override shipped behavior.
 ## User Guides
 
 - [`../README.md`](../README.md): install and use HEX on macOS.
-- [`linux.md`](linux.md): install the supported Linux X11 beta from source.
+- [`linux.md`](linux.md): Linux X11 and native Wayland beta requirements and installation.
+- [`nix.md`](nix.md): Nix packaging, development, and per-user autostart.
 - [`../ios/README.md`](../ios/README.md): build and test the iOS prototype.
 
 ## Engineering Reference
@@ -29,7 +30,7 @@ override shipped behavior.
   and Linux GPUI applications on one capability-driven product shell.
 - [`plans/typescript-sdk.md`](plans/typescript-sdk.md): private SDK packaging,
   validation, and first-consumer work.
-- [`plans/linux.md`](plans/linux.md): Linux X11 validation and later capability
+- [`plans/linux.md`](plans/linux.md): Linux X11/Wayland validation and later capability
   slices.
 
 When a plan disagrees with `AGENTS.md` about shipped behavior, update the plan.

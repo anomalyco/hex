@@ -1,5 +1,6 @@
 #[cfg(target_os = "macos")]
 mod accessibility;
+#[cfg_attr(target_os = "linux", allow(dead_code))]
 mod app_paths;
 #[cfg(target_os = "macos")]
 mod app_settings;
@@ -24,10 +25,12 @@ mod dashboard;
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 mod desktop_activity;
 #[cfg(any(target_os = "macos", target_os = "linux"))]
+#[cfg_attr(target_os = "linux", allow(dead_code))]
 mod desktop_host;
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 mod desktop_transcription_picker;
 #[cfg(any(target_os = "macos", target_os = "linux"))]
+#[cfg_attr(target_os = "linux", allow(dead_code))]
 mod desktop_ui;
 #[cfg(target_os = "macos")]
 mod developer_control;
@@ -45,6 +48,7 @@ pub mod dictation_processor;
 mod events;
 #[cfg(target_os = "macos")]
 mod feedback;
+#[cfg_attr(target_os = "linux", allow(dead_code))]
 mod history;
 mod instance;
 #[cfg(target_os = "macos")]
@@ -54,17 +58,23 @@ mod linux;
 #[cfg(target_os = "linux")]
 mod linux_app;
 #[cfg(target_os = "linux")]
+mod linux_desktop;
+#[cfg(target_os = "linux")]
 mod linux_dictation;
 #[cfg(target_os = "linux")]
 mod linux_input;
 #[cfg(target_os = "linux")]
 mod linux_paste;
 #[cfg(target_os = "linux")]
+mod linux_session;
+#[cfg(target_os = "linux")]
 mod linux_settings;
 #[cfg(target_os = "linux")]
 mod linux_transcriber;
 #[cfg(target_os = "linux")]
 mod linux_updater;
+#[cfg(target_os = "linux")]
+mod linux_wayland_input;
 #[cfg(target_os = "macos")]
 mod local_api;
 #[cfg(target_os = "macos")]

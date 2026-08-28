@@ -22,9 +22,9 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Open the Linux X11 transcription shell.
+    /// Open the Linux transcription shell.
     App {
-        /// Start with only the tray icon visible.
+        /// Start hidden when a working system tray is available.
         #[arg(long)]
         hidden: bool,
     },
@@ -34,7 +34,7 @@ enum Command {
         #[arg(long)]
         device: Option<String>,
     },
-    /// Run X11 hotkey dictation and automatic paste until interrupted.
+    /// Run X11 or Wayland hotkey dictation and automatic paste until interrupted.
     Dictate {
         /// Select an input device by a case-insensitive name fragment.
         #[arg(long)]
@@ -70,6 +70,14 @@ enum ModelCommand {
 }
 
 pub fn run(shutdown: &'static AtomicBool) -> Result<()> {
+    // This is the Linux entry point, before signal handlers or any worker threads.
+    // GTK and GPUI must connect to the same display backend.
+    unsafe {
+        std::env::set_var(
+            "GDK_BACKEND",
+            crate::linux_session::LinuxSession::detect().as_str(),
+        );
+    }
     color_eyre::install()?;
     let log_dir = crate::app_paths::logs_dir()?;
     fs::create_dir_all(&log_dir)?;
@@ -87,11 +95,11 @@ pub fn run(shutdown: &'static AtomicBool) -> Result<()> {
 
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let event_path = log_dir.join("live.ndjson");
-    match Cli::parse()
+    let result = (|| match Cli::parse()
         .command
         .unwrap_or(Command::App { hidden: false })
     {
-        Command::App { hidden } => crate::linux_app::open(event_path, hidden),
+        Command::App { hidden } => crate::linux_app::open(event_path, hidden, shutdown),
         Command::Listen { device } => {
             let _instance = crate::instance::acquire("listener")?;
             listen(&root, &event_path, device.as_deref(), shutdown)
@@ -142,7 +150,9 @@ pub fn run(shutdown: &'static AtomicBool) -> Result<()> {
                 Ok(())
             }
         },
-    }
+    })();
+    crate::linux_desktop::shutdown();
+    result
 }
 
 pub(crate) fn listen(

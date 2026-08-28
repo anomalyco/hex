@@ -1,4 +1,4 @@
-use crate::events::{EventReader, TranscriptPhase, VoiceEvent, VoiceState};
+use crate::events::{DictationPhase, EventReader, TranscriptPhase, VoiceEvent, VoiceState};
 
 const TRANSCRIPT_LIMIT: usize = 8;
 
@@ -9,6 +9,7 @@ pub(crate) struct DesktopActivity {
     pub(crate) device: Option<String>,
     pub(crate) transcripts: Vec<String>,
     pub(crate) error: Option<String>,
+    pub(crate) last_failure: Option<(u64, String)>,
 }
 
 impl DesktopActivity {
@@ -49,6 +50,13 @@ impl DesktopActivity {
                     ..
                 } if activity.transcripts.len() < TRANSCRIPT_LIMIT && !text.trim().is_empty() => {
                     activity.transcripts.push(text.clone());
+                }
+                VoiceEvent::Dictation {
+                    timestamp_ms,
+                    phase: DictationPhase::Failed(message),
+                    ..
+                } if activity.last_failure.is_none() => {
+                    activity.last_failure = Some((*timestamp_ms, message.clone()));
                 }
                 _ => {}
             }
@@ -131,5 +139,34 @@ mod tests {
         let activity = DesktopActivity::from_events(events.iter().rev());
 
         assert_eq!(activity.transcripts, ["Current session"]);
+    }
+
+    #[test]
+    fn projects_the_latest_failure_only_from_the_current_session() {
+        let mut events = vec![
+            VoiceEvent::SessionStarted { timestamp_ms: 1 },
+            VoiceEvent::Dictation {
+                timestamp_ms: 2,
+                phase: DictationPhase::Failed("first".into()),
+                text: String::new(),
+                processing: None,
+            },
+            VoiceEvent::Dictation {
+                timestamp_ms: 3,
+                phase: DictationPhase::Failed("second".into()),
+                text: String::new(),
+                processing: None,
+            },
+        ];
+        assert_eq!(
+            DesktopActivity::from_events(events.iter().rev()).last_failure,
+            Some((3, "second".into()))
+        );
+        events.push(VoiceEvent::SessionStarted { timestamp_ms: 4 });
+        assert!(
+            DesktopActivity::from_events(events.iter().rev())
+                .last_failure
+                .is_none()
+        );
     }
 }

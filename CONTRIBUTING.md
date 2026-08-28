@@ -1,8 +1,8 @@
 # Contributing To HEX
 
-HEX is a native Rust macOS application with an explicit x86_64 Arch Linux X11
-beta. Read [`AGENTS.md`](AGENTS.md) before changing behavior; it defines the
-architecture and invariants.
+HEX is a native Rust macOS application with an explicit x86_64 Linux beta for
+X11 and compatible wlroots Wayland compositors. Read [`AGENTS.md`](AGENTS.md)
+before changing behavior; it defines the architecture and invariants.
 
 ## Set Up
 
@@ -14,7 +14,11 @@ On macOS:
 ```
 
 Linux dependencies and installation are documented in
-[`docs/linux.md`](docs/linux.md).
+[`docs/linux.md`](docs/linux.md); Nix development is covered in
+[`docs/nix.md`](docs/nix.md). The Linux pull-request workflow builds and tests
+native code, exercises X11 grabs on Xvfb, and tests native Wayland clipboard
+insertion into a GTK target under isolated headless Sway. It does not replace
+physical input, microphone, or broader target-application smoke tests.
 
 ## Validate Changes
 

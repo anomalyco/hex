@@ -11,3 +11,5 @@ __pycache__/
 *.rmeta
 /ios/*DerivedData
 /ios/HEXMobile.xcodeproj
+/result
+/result-*
