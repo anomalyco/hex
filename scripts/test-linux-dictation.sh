@@ -9,7 +9,7 @@ if [[ ${1:-} != --inside ]]; then
   for command in cc pkg-config pulseaudio pactl paplay xdotool xvfb-run timeout; do
     command -v "$command" >/dev/null
   done
-  exec timeout 180 xvfb-run -a --server-args="-screen 0 1280x900x24 -noreset" \
+  exec timeout --kill-after=10 180 xvfb-run -a --server-args="-screen 0 1280x900x24 -noreset" \
     "$0" --inside "$(realpath "$1")" "$(realpath "$2")" "$(realpath "$3")"
 fi
 shift
@@ -23,10 +23,16 @@ target=
 pulse=
 finish() {
   status=$?
-  trap - EXIT
+  trap - EXIT INT TERM
   for pid in "$listener" "$target" "$pulse"; do
     if [[ -n "$pid" ]]; then kill "$pid" 2>/dev/null || true; fi
   done
+  for ((attempt = 0; attempt < 100; attempt++)); do
+    if [[ -z $(jobs -pr) ]]; then break; fi
+    sleep 0.05
+  done
+  for pid in $(jobs -pr); do kill -KILL "$pid" 2>/dev/null || true; done
+  wait 2>/dev/null || true
   if [[ $status != 0 ]]; then
     for log in "$work"/*.log "$work"/support/logs/live.ndjson; do
       if [[ -f "$log" ]]; then printf '\n%s\n' "$log"; cat "$log"; fi
@@ -89,5 +95,6 @@ printf 'Captured, transcribed, and pasted: %s\n' "$(<"$work/pasted.txt")"
 kill -TERM "$listener"
 wait "$listener"
 listener=
-test -z "$(pactl list short source-outputs)"
+outputs=$(pactl list short source-outputs)
+test -z "$outputs"
 echo 'Linux virtual-microphone dictation and orderly shutdown passed.'
