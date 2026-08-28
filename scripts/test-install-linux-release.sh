@@ -85,6 +85,8 @@ until curl --fail --silent "http://127.0.0.1:$port/linux-update.json" >/dev/null
 done
 
 home="$temporary/home"
+export XDG_DATA_HOME="$home/.local/share"
+export XDG_CONFIG_HOME="$home/.config"
 install_dir="$home/.local/bin"
 support_dir="$home/.local/share/voice-control"
 mkdir -p "$support_dir"

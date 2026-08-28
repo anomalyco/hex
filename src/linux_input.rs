@@ -10,7 +10,10 @@ use x11rb::protocol::Event;
 use x11rb::protocol::xproto::{ConnectionExt, GrabMode, ModMask, Window};
 use x11rb::rust_connection::RustConnection;
 
+use crate::linux_session::LinuxSession;
 use crate::linux_settings::LinuxHotkey;
+
+pub(crate) use crate::linux_wayland_input::{capture_wayland_binding, wayland_modifiers_held};
 
 const XK_SPACE: u32 = 0x20;
 const XK_ESCAPE: u32 = 0xff1b;
@@ -18,7 +21,7 @@ pub(crate) const XK_ALT_L: u32 = 0xffe9;
 pub(crate) const XK_ALT_R: u32 = 0xffea;
 const XK_NUM_LOCK: u32 = 0xff7f;
 const RELEASE_GRACE: Duration = Duration::from_millis(50);
-const DOUBLE_TAP_WINDOW: Duration = Duration::from_millis(300);
+pub(crate) const DOUBLE_TAP_WINDOW: Duration = Duration::from_millis(300);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum HotkeyEvent {
@@ -27,15 +30,23 @@ pub enum HotkeyEvent {
     Cancel,
 }
 
-pub struct X11HotkeyMonitor {
+pub struct LinuxHotkeyMonitor {
     pub events: Receiver<HotkeyEvent>,
     pub errors: Receiver<String>,
     stop: Arc<AtomicBool>,
     worker: Option<JoinHandle<()>>,
 }
 
-impl X11HotkeyMonitor {
+impl LinuxHotkeyMonitor {
     pub fn start(binding: LinuxHotkey, double_tap_enabled: bool) -> Result<Self> {
+        Self::start_for(binding, double_tap_enabled, LinuxSession::detect())
+    }
+
+    fn start_for(
+        binding: LinuxHotkey,
+        double_tap_enabled: bool,
+        session: LinuxSession,
+    ) -> Result<Self> {
         let (events_sender, events) = mpsc::sync_channel(16);
         let (error_sender, errors) = mpsc::channel();
         let (ready_sender, ready_receiver) = mpsc::sync_channel(1);
@@ -44,7 +55,11 @@ impl X11HotkeyMonitor {
         let worker_stop = stop.clone();
         let worker_started = started.clone();
         let worker = thread::spawn(move || {
-            let result = run(
+            let run_backend = match session {
+                LinuxSession::X11 => run,
+                LinuxSession::Wayland => crate::linux_wayland_input::run,
+            };
+            let result = run_backend(
                 events_sender,
                 worker_stop,
                 ready_sender.clone(),
@@ -57,23 +72,25 @@ impl X11HotkeyMonitor {
                 if worker_started.load(Ordering::Acquire) {
                     let _ = error_sender.send(message);
                 } else {
-                    let _ = ready_sender.send(Err(eyre!(message)));
+                    let _ = ready_sender.try_send(Err(eyre!(message)));
                 }
             }
         });
-        ready_receiver
-            .recv_timeout(Duration::from_secs(2))
-            .map_err(|_| eyre!("timed out registering Alt+Space with X11"))??;
-        Ok(Self {
+        // Own the worker before waiting so every startup failure stops and joins it.
+        let monitor = Self {
             events,
             errors,
             stop,
             worker: Some(worker),
-        })
+        };
+        ready_receiver
+            .recv_timeout(Duration::from_secs(2))
+            .map_err(|_| eyre!("timed out registering the Linux dictation shortcut"))??;
+        Ok(monitor)
     }
 }
 
-impl Drop for X11HotkeyMonitor {
+impl Drop for LinuxHotkeyMonitor {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::Release);
         if let Some(worker) = self.worker.take() {
@@ -108,8 +125,8 @@ fn run(
         )
     })?;
     connection.flush()?;
-    ready.send(Ok(())).ok();
     started.store(true, Ordering::Release);
+    ready.try_send(Ok(())).ok();
 
     let mut active = false;
     let mut second_tap = false;
@@ -209,10 +226,10 @@ fn run(
     Ok(())
 }
 
-fn send_event(sender: &SyncSender<HotkeyEvent>, event: HotkeyEvent) -> Result<bool> {
+pub(crate) fn send_event(sender: &SyncSender<HotkeyEvent>, event: HotkeyEvent) -> Result<bool> {
     match sender.try_send(event) {
         Ok(()) => Ok(true),
-        Err(TrySendError::Full(_)) => Err(eyre!("X11 hotkey event queue overflow")),
+        Err(TrySendError::Full(_)) => Err(eyre!("Linux hotkey event queue overflow")),
         Err(TrySendError::Disconnected(_)) => Ok(false),
     }
 }
@@ -374,12 +391,46 @@ mod tests {
     }
 
     #[test]
+    fn full_event_queue_returns_an_error_instead_of_blocking_the_worker() {
+        let (sender, receiver) = mpsc::sync_channel(1);
+        assert!(send_event(&sender, HotkeyEvent::Start).unwrap());
+        assert!(send_event(&sender, HotkeyEvent::Finish).is_err());
+        assert_eq!(receiver.try_recv().unwrap(), HotkeyEvent::Start);
+        drop(receiver);
+        assert!(!send_event(&sender, HotkeyEvent::Cancel).unwrap());
+    }
+
+    #[test]
+    fn dropping_a_monitor_stops_and_joins_its_worker() {
+        let (_, events) = mpsc::sync_channel(1);
+        let (_, errors) = mpsc::channel();
+        let stop = Arc::new(AtomicBool::new(false));
+        let stopped = Arc::new(AtomicBool::new(false));
+        let worker_stop = stop.clone();
+        let worker_stopped = stopped.clone();
+        let worker = thread::spawn(move || {
+            while !worker_stop.load(Ordering::Acquire) {
+                thread::yield_now();
+            }
+            worker_stopped.store(true, Ordering::Release);
+        });
+        drop(LinuxHotkeyMonitor {
+            events,
+            errors,
+            stop,
+            worker: Some(worker),
+        });
+        assert!(stopped.load(Ordering::Acquire));
+    }
+
+    #[test]
     #[ignore = "requires the active X11 desktop"]
     fn grabbed_alt_space_delivers_press_and_release() {
         let _guard = X11_TEST_LOCK
             .lock()
             .unwrap_or_else(|error| error.into_inner());
-        let monitor = X11HotkeyMonitor::start(LinuxHotkey::default(), true).unwrap();
+        let monitor =
+            LinuxHotkeyMonitor::start_for(LinuxHotkey::default(), true, LinuxSession::X11).unwrap();
         let (connection, screen) = RustConnection::connect(None).unwrap();
         let root = connection.setup().roots[screen].root;
         let keymap = Keymap::read(&connection).unwrap();
@@ -409,7 +460,8 @@ mod tests {
         let _guard = X11_TEST_LOCK
             .lock()
             .unwrap_or_else(|error| error.into_inner());
-        let monitor = X11HotkeyMonitor::start(LinuxHotkey::default(), true).unwrap();
+        let monitor =
+            LinuxHotkeyMonitor::start_for(LinuxHotkey::default(), true, LinuxSession::X11).unwrap();
         let (connection, screen) = RustConnection::connect(None).unwrap();
         let root = connection.setup().roots[screen].root;
         let keymap = Keymap::read(&connection).unwrap();
@@ -460,7 +512,7 @@ mod tests {
             key: "f24".into(),
             ..LinuxHotkey::default()
         };
-        let monitor = X11HotkeyMonitor::start(binding, false).unwrap();
+        let monitor = LinuxHotkeyMonitor::start_for(binding, false, LinuxSession::X11).unwrap();
         let (connection, screen) = RustConnection::connect(None).unwrap();
         let root = connection.setup().roots[screen].root;
         let trigger = Keymap::read(&connection)

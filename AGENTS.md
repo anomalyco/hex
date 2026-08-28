@@ -2,10 +2,10 @@
 
 ## Purpose
 
-Build HEX as a local, observable macOS voice appliance with an explicit Linux
-X11 beta contract. Keep the engine native Rust and keep consequential behavior
-explicit. Protected commands and typed captures remain compiled Rust; ordinary
-literal commands live in the explicit TypeScript user config. User-facing
+Build HEX as a local, observable macOS voice appliance with explicit Linux
+X11 and wlroots-compatible Wayland beta contracts. Keep the engine native Rust
+and keep consequential behavior explicit. Protected commands and typed captures
+remain compiled Rust; ordinary literal commands live in the explicit TypeScript user config. User-facing
 runtime settings persist in Application Support.
 
 The distributed release starts in hotkey-dictation-only mode. Voice commands and
@@ -83,9 +83,15 @@ only in debug builds.
   installation, the release startup gate, and opt-in command-model setup.
 - `sparkle`: packaged-app-only Sparkle lifecycle and manual update checks.
 - `linux`, `linux_app`, `linux_dictation`, `linux_input`, `linux_paste`,
-  `linux_settings`, `linux_transcriber`: the X11 beta CLI, GPUI shell and tray,
-  hotkey capture-transcribe-paste loop, X11 grabs and synthetic paste,
-  persisted Linux settings, and the `transcribe.cpp` session.
+  `linux_settings`, `linux_transcriber`: the Linux beta CLI, GPUI shell,
+  hotkey capture-transcribe-paste loop, persisted settings, and `transcribe.cpp`.
+- `linux_session`: display-backend selection matching GPUI's nonempty
+  `WAYLAND_DISPLAY` rule, independent of persisted preferences.
+- `linux_wayland_input`: read-only evdev input, explicit physical key mappings,
+  cancellable shortcut capture, exact chord state, and bounded device rediscovery.
+- `linux_desktop`: the single process-owned GTK thread for the X11 tray and
+  focus-free, click-through Wayland recording/processing HUD. A listener never
+  initializes or shuts down a separate GTK runtime.
 - `linux_updater`: signed direct-install updates, bounded downloads, atomic
   version activation, and restart handoff for user-local Linux installs.
 - `history`: the owner-only bounded retained-dictation store: retention
@@ -266,6 +272,23 @@ CoreAudio formats, AppleScript details, or event serialization.
   x86_64 manifest, verify exact size and SHA-256 from a content-addressed
   artifact, and atomically switch the user-local `current` version. Never
   overwrite development, root, or package-manager-owned binaries.
+- The Wayland beta requires compatible clipboard, virtual-keyboard, and
+  layer-shell protocols plus explicit read access to all `/dev/input/event*`
+  nodes. Do not silently fall back to XWayland or privileged input injection.
+  Raw input observes, but does not suppress, physical US-labeled keys. Explain
+  the broad keystroke access; never grant device permissions automatically.
+- X11 shortcut capture uses focused GPUI input, not evdev permissions. Editing
+  shortcut/double-tap settings stops and restores only a previously running
+  listener; cancellation restores the old binding unless its save already
+  committed. Settings must expose listener state, recovery, and errors. Without
+  a usable tray, closing Settings quits after draining workers, never detaches
+  an unmanageable microphone. HUD teardown only hides that listener's HUD.
+- Linux paste keeps transcripts off helper argv, bounds helper I/O, and waits
+  for physical modifiers without discarding accepted output. Shutdown cancels
+  that wait. New installs use Ctrl-V; the terminal-paste preference selects
+  Ctrl-Shift-V and defaults on for persisted legacy X11 settings. The beta retains
+  the transcript clipboard; arbitrary MIME restoration and consumption
+  acknowledgments remain unimplemented.
 
 ## Development
 
@@ -349,15 +372,21 @@ native build dependencies with:
 
 ```sh
 sudo pacman -S --needed base-devel git rustup python alsa-lib curl jq openssl xxd \
-  util-linux gtk3 libappindicator-gtk3 libxkbcommon \
+  util-linux gtk3 gtk-layer-shell libappindicator-gtk3 libxkbcommon \
   libxkbcommon-x11 libx11 libxcb openblas vulkan-headers vulkan-icd-loader \
-  shaderc spirv-headers clang cmake pkgconf
+  shaderc spirv-headers clang cmake pkgconf wl-clipboard wtype
 rustup default stable
 ```
 
 For a source install, run `scripts/install-linux.sh`, then `hex model install`.
 The installer owns the user-local version layout, desktop entry, and autostart
 entry; only that managed layout participates in automatic updates.
+
+`nix develop` supplies the same native build environment as the Nix package;
+`nix flake check` checks modules, shell configuration, session readiness, and
+the display-free Rust suite. See `docs/nix.md`. Nix owns package updates and
+optional Home Manager autostart. Native Linux PR checks do not replace real
+X11/Wayland, keyboard hotplug, microphone, and target-application smoke tests.
 
 Automatic microphone selection follows the compiled preference order in
 `src/config.rs`, then falls back to the macOS default. A saved microphone takes
@@ -438,6 +467,8 @@ seam once there are two real adapters or a current test requires substitution.
 
 - Validate public onboarding from a clean macOS account and signed Linux updates
   on the supported Arch/i3 host.
+- Validate native Wayland on a real compatible compositor, including physical
+  device reconnect, focus/click-through, target paste, and tray-less shutdown.
 - Add a second real browser adapter before generalizing browser context.
 - Do not turn concrete macOS, Linux X11, or command modules into hypothetical
   platform or plugin frameworks.
