@@ -19,8 +19,9 @@ Linux dependencies and installation are documented in
 native code, exercises X11 grabs on Xvfb, and tests native Wayland clipboard
 insertion into a GTK target with Settings open under isolated headless Sway.
 It also builds the Nix package with its tests and checks the installed wrapper.
-It does not replace physical input, microphone, or broader target-application
-smoke tests.
+An X11 virtual-microphone test exercises real capture, local inference, paste,
+and shutdown using a public speech sample. These checks do not replace physical
+input, microphone, or broader target-application smoke tests.
 
 ## Validate Changes
 

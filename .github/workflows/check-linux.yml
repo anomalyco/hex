@@ -12,6 +12,8 @@ on:
       - "assets/**"
       - "tests/fixtures/**"
       - "scripts/test-wayland-paste.sh"
+      - "scripts/test-linux-dictation.sh"
+      - "scripts/*install-linux*.sh"
       - "flake.*"
       - "nix/**"
       - ".github/workflows/check-linux.yml"
@@ -27,6 +29,8 @@ on:
       - "assets/**"
       - "tests/fixtures/**"
       - "scripts/test-wayland-paste.sh"
+      - "scripts/test-linux-dictation.sh"
+      - "scripts/*install-linux*.sh"
       - "flake.*"
       - "nix/**"
       - ".github/workflows/check-linux.yml"
@@ -41,7 +45,7 @@ concurrency:
 jobs:
   test:
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 60
     env:
       CARGO_BUILD_JOBS: "2"
       CARGO_PROFILE_DEV_DEBUG: "0"
@@ -64,7 +68,8 @@ jobs:
             libxkbcommon-x11-dev libx11-xcb-dev libfontconfig1-dev libfreetype-dev \
             libxcursor-dev libxi-dev libxrandr-dev libopenblas-dev libvulkan-dev \
             glslc libshaderc-dev xvfb xauth x11-xserver-utils \
-            sway wl-clipboard wtype dbus-x11 jq mesa-vulkan-drivers
+            sway wl-clipboard wtype dbus-x11 jq mesa-vulkan-drivers \
+            pulseaudio pulseaudio-utils libasound2-plugins xdotool
       - run: cargo fmt --all --check
       - run: cargo test --locked --bin voice-control
       - name: Exercise X11 grabs on an isolated display
@@ -80,6 +85,26 @@ jobs:
           app=$(cargo build --locked --bin voice-control --message-format=json |
             jq -r 'select(.reason == "compiler-artifact" and .target.name == "voice-control") | .executable // empty')
           scripts/test-wayland-paste.sh "$binary" "$app"
+      - uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/hex-model-test/models
+          key: linux-dictation-model-${{ hashFiles('src/transcription_models.rs') }}
+      - name: Exercise capture, inference, and paste through a virtual microphone
+        env:
+          HEX_APPLICATION_SUPPORT_DIR: ${{ runner.temp }}/hex-model-test
+        run: |
+          target/debug/voice-control model install
+          curl --fail --location --silent --show-error --max-time 60 \
+            https://raw.githubusercontent.com/ggml-org/whisper.cpp/b0a11594aec50892a02cd8d129eee2dfe93a8bb8/samples/jfk.wav \
+            --output "$RUNNER_TEMP/jfk.wav"
+          printf '%s  %s\n' \
+            59dfb9a4acb36fe2a2affc14bacbee2920ff435cb13cc314a08c13f66ba7860e \
+            "$RUNNER_TEMP/jfk.wav" | sha256sum --check
+          scripts/test-linux-dictation.sh target/debug/voice-control \
+            "$HEX_APPLICATION_SUPPORT_DIR/models/parakeet-unified-en-0.6b-Q8_0.gguf" \
+            "$RUNNER_TEMP/jfk.wav"
+      - name: Exercise signed installer and tamper rejection
+        run: scripts/test-install-linux-release.sh
       - run: cargo clippy --locked --bin voice-control --tests -- -D warnings
 
   nix:
