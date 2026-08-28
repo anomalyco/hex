@@ -56,6 +56,7 @@ use crate::onboarding::{
     PermissionAction, PermissionKind, PermissionState, PermissionWarning, SetupStatus,
 };
 use crate::personal_commands::{HostState, StatusContext, StatusSnapshot, StatusTransformation};
+use crate::recognition::CommandModelStatus;
 use crate::text_input::{
     Changed as TextChanged, Dismissed as TextDismissed, Navigate as TextNavigate,
     Submitted as TextSubmitted, TextInput,
@@ -82,6 +83,7 @@ actions!(
     [
         CloseWindow,
         CheckForUpdates,
+        RetryCommands,
         HideApplication,
         MinimizeWindow,
         QuitApplication,
@@ -250,6 +252,7 @@ pub struct AppWindowPreview {
     pub opencode_unavailable: bool,
     pub permissions_missing: bool,
     pub model_missing: bool,
+    pub command_model_missing: bool,
     pub open_history_retention: bool,
 }
 
@@ -758,6 +761,7 @@ pub struct AppWindow {
     update_status: crate::sparkle::UpdateStatus,
     update_status_changed_at: Instant,
     commands_toggle: ToggleSpring,
+    command_model_status: CommandModelStatus,
     release_microphone_toggle: ToggleSpring,
     pending_microphone_policy: Option<MicrophonePolicyChange>,
     double_tap_toggle: ToggleSpring,
@@ -859,6 +863,14 @@ impl AppWindow {
                         let application_catalog_changed = window.poll_application_catalog();
                         let transcription_changed = window.poll_transcription_download();
                         let setup_changed = window.poll_setup(false);
+                        let command_model_status = if window.preview {
+                            window.command_model_status
+                        } else {
+                            crate::recognition::command_model_status()
+                        };
+                        let command_model_changed =
+                            window.command_model_status != command_model_status;
+                        window.command_model_status = command_model_status;
                         let login_item_changed = window.poll_login_item();
                         let personal_commands_changed = window.poll_personal_commands();
                         let personal_workspace_changed = window.poll_personal_workspace();
@@ -887,6 +899,7 @@ impl AppWindow {
                             || application_catalog_changed
                             || transcription_changed
                             || setup_changed
+                            || command_model_changed
                             || login_item_changed
                             || personal_commands_changed
                             || personal_workspace_changed
@@ -907,7 +920,10 @@ impl AppWindow {
         let preview_mode = preview.is_some();
         let preview_choices = crate::transcription_models::choices_for_runtime;
         let (settings, settings_load_error) = if let Some(preview) = &preview {
-            let mut settings = AppSettings::default();
+            let mut settings = AppSettings {
+                commands_enabled: preview.command_model_missing,
+                ..AppSettings::default()
+            };
             if let Some((language, _)) = &preview.transcription_picker
                 && let Some(choice) = preview_choices(language).first()
             {
@@ -1053,7 +1069,6 @@ impl AppWindow {
                 microphone: PermissionState::NeedsRequest,
                 input_monitoring: PermissionState::NeedsRequest,
                 accessibility: PermissionState::NeedsRequest,
-                command_model: false,
                 transcription_model: false,
             }
         } else if preview
@@ -1064,7 +1079,6 @@ impl AppWindow {
                 microphone: PermissionState::NeedsRequest,
                 input_monitoring: PermissionState::NeedsSettings,
                 accessibility: PermissionState::NeedsSettings,
-                command_model: true,
                 transcription_model: !preview_model_missing,
             }
         } else if preview_mode {
@@ -1072,7 +1086,6 @@ impl AppWindow {
                 microphone: PermissionState::Ready,
                 input_monitoring: PermissionState::Ready,
                 accessibility: PermissionState::Ready,
-                command_model: true,
                 transcription_model: !preview_model_missing,
             }
         } else {
@@ -1141,6 +1154,16 @@ impl AppWindow {
             update_status: crate::sparkle::status(),
             update_status_changed_at: Instant::now(),
             commands_toggle: ToggleSpring::new(settings.commands_enabled),
+            command_model_status: if preview
+                .as_ref()
+                .is_some_and(|preview| preview.command_model_missing)
+            {
+                CommandModelStatus::Failed
+            } else if preview_mode {
+                CommandModelStatus::Disabled
+            } else {
+                crate::recognition::command_model_status()
+            },
             release_microphone_toggle: ToggleSpring::new(settings.release_microphone_while_idle),
             pending_microphone_policy: None,
             double_tap_toggle: ToggleSpring::new(settings.double_tap_lock),
@@ -1649,9 +1672,6 @@ impl AppWindow {
                 String::new()
             },
         };
-        let install_command_model = self.setup_visible
-            && self.settings.commands_enabled
-            && !crate::moonshine::model_installed();
         self.transcription_picker_error = None;
         if self.preview {
             self.apply_transcription_selection(selection);
@@ -1662,8 +1682,7 @@ impl AppWindow {
             model,
             &selection.language,
             self.transcription_model_installed(model, &selection.language),
-        ) && !install_command_model
-        {
+        ) {
             self.transcription_picker_language = None;
             return;
         }
@@ -1678,9 +1697,6 @@ impl AppWindow {
         self.transcription_activation_started = Some(Instant::now());
         thread::spawn(move || {
             let result = (|| {
-                if install_command_model {
-                    crate::moonshine::install_model()?;
-                }
                 if matches!(model.runtime, ModelRuntime::Gguf(_)) {
                     crate::transcription_models::download_with_progress(
                         model, &canceled, &progress,
@@ -3058,8 +3074,53 @@ impl AppWindow {
         if self.setup_visible {
             return None;
         }
-        let (title, description) =
-            dictation_model_notice(self.setup_status, self.transcription_downloading.is_some())?;
+        let dictation_notice =
+            dictation_model_notice(self.setup_status, self.transcription_downloading.is_some());
+        let (title, description) = dictation_notice.or_else(|| {
+            self.settings
+                .commands_enabled
+                .then(|| command_model_notice(&self.command_model_status))
+                .flatten()
+        })?;
+        let action = if dictation_notice.is_some() {
+            compact_button("Choose model")
+                .id("choose-required-model")
+                .bg(rgb(ACCENT))
+                .text_color(rgb(TEXT))
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.transcription_picker_language =
+                        Some(this.settings.transcription.language.clone());
+                    cx.notify();
+                }))
+                .into_any_element()
+        } else {
+            div()
+                .flex()
+                .items_center()
+                .gap_2()
+                .when(
+                    matches!(self.command_model_status, CommandModelStatus::Failed),
+                    |controls| {
+                        controls.child(compact_button("Retry").id("retry-command-model").on_click(
+                            cx.listener(|this, _, _, cx| {
+                                if !this.preview {
+                                    cx.dispatch_action(&RetryCommands);
+                                }
+                            }),
+                        ))
+                    },
+                )
+                .child(
+                    compact_button("Turn off commands")
+                        .id("disable-unavailable-commands")
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            if let Err(error) = this.developer_set_commands_enabled(false, cx) {
+                                tracing::warn!(%error, "could not disable voice commands");
+                            }
+                        })),
+                )
+                .into_any_element()
+        };
         Some(
             div()
                 .id("dictation-model-notice")
@@ -3088,18 +3149,7 @@ impl AppWindow {
                                 .pl_3()
                                 .child(settings_copy(title, description)),
                         )
-                        .child(
-                            compact_button("Choose model")
-                                .id("choose-required-model")
-                                .flex_shrink_0()
-                                .bg(rgb(ACCENT))
-                                .text_color(rgb(TEXT))
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.transcription_picker_language =
-                                        Some(this.settings.transcription.language.clone());
-                                    cx.notify();
-                                })),
-                        ),
+                        .child(div().flex_shrink_0().child(action)),
                 )
                 .into_any_element(),
         )
@@ -3493,10 +3543,7 @@ impl AppWindow {
                                             .border_1()
                                             .border_color(rgb(LINE))
                                             .bg(rgb(CANVAS))
-                                            .on_click(cx.listener(|this, _, _, cx| {
-                                                this.update_status =
-                                                    crate::sparkle::UpdateStatus::Checking;
-                                                this.update_status_changed_at = Instant::now();
+                                            .on_click(cx.listener(|_this, _, _, cx| {
                                                 cx.dispatch_action(&CheckForUpdates);
                                                 cx.notify();
                                             })),
@@ -3640,7 +3687,7 @@ impl AppWindow {
                 accessibility,
             ));
         }
-        let models_ready = status.command_model && status.transcription_model;
+        let models_ready = status.transcription_model;
         let model_notice = dictation_model_notice(status, self.transcription_downloading.is_some());
         let models = if models_ready {
             setup_ready_badge()
@@ -3695,11 +3742,7 @@ impl AppWindow {
                                     .text_size(px(12.0))
                                     .line_height(px(19.0))
                                     .text_color(rgb(MUTED))
-                                    .child(if self.settings.commands_enabled {
-                                        "Everything stays on this Mac. HEX starts listening after the required permissions and local models are ready."
-                                    } else {
-                                        "Everything stays on this Mac. HEX is ready once permissions and your local dictation model are set up."
-                                    }),
+                                    .child("Everything stays on this Mac. HEX is ready once permissions and your local dictation model are set up."),
                             ),
                     )
                     .when(!permission_rows.is_empty(), |setup| {
@@ -3719,15 +3762,11 @@ impl AppWindow {
                                 div().border_t_1().border_color(rgb(LINE)).child(setup_row(
                                     if let Some((title, _)) = model_notice {
                                         title
-                                    } else if self.settings.commands_enabled {
-                                        "Local speech models"
                                     } else {
                                         "Local dictation model"
                                     },
                                     if let Some((_, description)) = model_notice {
                                         description
-                                    } else if self.settings.commands_enabled {
-                                        "Command recognition and the selected dictation model."
                                     } else {
                                         "The selected model transcribes speech entirely on this Mac."
                                     },
@@ -8001,6 +8040,20 @@ fn dictation_model_notice(
     })
 }
 
+fn command_model_notice(status: &CommandModelStatus) -> Option<(&'static str, &'static str)> {
+    match status {
+        CommandModelStatus::Disabled | CommandModelStatus::Ready => None,
+        CommandModelStatus::Loading => Some((
+            "Preparing voice commands",
+            "The command model is loading. Hotkey dictation does not require it.",
+        )),
+        CommandModelStatus::Failed => Some((
+            "Voice commands are unavailable",
+            "The command model could not load. Retry or turn off commands; hotkey dictation is unaffected.",
+        )),
+    }
+}
+
 fn setup_row(title: &'static str, description: &'static str, control: AnyElement) -> Div {
     div()
         .w_full()
@@ -8443,13 +8496,27 @@ mod tests {
     use crate::personal_commands::StatusExecution;
 
     #[test]
+    fn command_model_failure_has_recovery_without_blocking_dictation() {
+        assert!(command_model_notice(&CommandModelStatus::Ready).is_none());
+        assert!(command_model_notice(&CommandModelStatus::Disabled).is_none());
+        assert_eq!(
+            command_model_notice(&CommandModelStatus::Loading)
+                .unwrap()
+                .0,
+            "Preparing voice commands"
+        );
+        let (_, description) = command_model_notice(&CommandModelStatus::Failed).unwrap();
+        assert!(description.contains("Retry"));
+        assert!(description.contains("dictation is unaffected"));
+    }
+
+    #[test]
     fn opening_the_app_prioritizes_settings_and_missing_permissions() {
         assert_eq!(Pane::default(), Pane::Settings);
         let ready = SetupStatus {
             microphone: PermissionState::Ready,
             input_monitoring: PermissionState::Ready,
             accessibility: PermissionState::Ready,
-            command_model: true,
             transcription_model: true,
         };
         assert_eq!(Pane::Modes.on_reopen(ready), Pane::Modes);
@@ -8480,7 +8547,6 @@ mod tests {
             microphone: PermissionState::Ready,
             input_monitoring: PermissionState::Ready,
             accessibility: PermissionState::Ready,
-            command_model: true,
             transcription_model: false,
         };
         let (title, description) = dictation_model_notice(status, false).unwrap();
@@ -8499,9 +8565,8 @@ mod tests {
         assert!(dictation_model_notice(status, false).is_none());
         assert!(dictation_model_notice(status, true).is_none());
 
-        // Permission and opt-in command-model failures have their own setup UI.
+        // Permission failures have their own setup UI.
         status.microphone = PermissionState::NeedsRequest;
-        status.command_model = false;
         assert!(dictation_model_notice(status, false).is_none());
     }
 

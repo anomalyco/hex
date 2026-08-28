@@ -138,7 +138,9 @@ CoreAudio formats, AppleScript details, or event serialization.
   recognizer and executor.
 - On a new Mac, release dictation starts only after Microphone, Input Monitoring,
   Accessibility, and the selected dictation model are ready. Opt-in command
-  recognition additionally requires Moonshine.
+  recognition additionally requires Moonshine, but its background preparation or
+  failure must never block hotkey dictation. Failed preparation exposes explicit
+  retry and disable actions without silently changing the command opt-in.
 - Among recognized voice commands, sleeping mode accepts only standalone wake
   phrases. Dictation and explicit paste shortcuts remain available.
 - Unmatched completed speech is ignored and logged.
@@ -236,6 +238,8 @@ CoreAudio formats, AppleScript details, or event serialization.
   final text plus bounded metadata, never audio, full browser URLs, or window
   titles. Every retention window remains subject to hard entry and byte caps,
   and recording stops while retention is Off.
+  Time-based retention expires during idle uptime through the shared history
+  owner; searches never return expired entries while waiting for disk cleanup.
 - Developer-only meeting detection may inspect process audio metadata but must
   not capture samples. Detection can offer recording; it must never start
   automatically. Release builds must not start the meeting controller.
@@ -306,6 +310,7 @@ cargo run -- preview onboarding
 cargo run -- preview transcription-picker --language zh --model-state installed
 ./scripts/capture-preview.sh /tmp/hex-preview.png settings
 ./scripts/capture-preview.sh /tmp/hex-model-missing.png settings --model-missing
+./scripts/capture-preview.sh /tmp/hex-command-model-missing.png settings --command-model-missing
 ./scripts/capture-preview.sh /tmp/hex-history-retention.png history --open-history-retention
 ./scripts/capture-preview.sh /tmp/hex-modes.png modes
 ./scripts/capture-preview.sh /tmp/hex-modes-collapsed.png modes --collapse-mode-processing
