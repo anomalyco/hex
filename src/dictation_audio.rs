@@ -167,8 +167,30 @@ impl DictationAudio {
         let input = if release_while_idle {
             RecoveringAudioInput::closed(device_override, selection_revision, selected_device)
         } else {
-            RecoveringAudioInput::open(device_override, selection_revision, selected_device)?
+            RecoveringAudioInput::open(device_override, selection_revision, selected_device)
         };
+        let device_name = input
+            .is_open()
+            .then(|| input.device_name().to_owned())
+            .or_else(|| device_override.map(str::to_owned))
+            .or_else(|| selected_device.map(str::to_owned))
+            .unwrap_or_else(|| "Default microphone".into());
+        Self::with_input(
+            input,
+            device_name,
+            recording_environment,
+            pending_input,
+            release_while_idle,
+        )
+    }
+
+    fn with_input(
+        input: RecoveringAudioInput,
+        device_name: String,
+        recording_environment: RecordingEnvironmentController,
+        pending_input: PendingInputEvents,
+        release_while_idle: bool,
+    ) -> Result<Self> {
         let state = Arc::new(State {
             sample_rate: AtomicU64::new(if input.is_open() {
                 u64::from(input.sample_rate())
@@ -176,16 +198,9 @@ impl DictationAudio {
                 0
             }),
             captured_through: AtomicU64::new(0),
-            device_name: Mutex::new(
-                input
-                    .is_open()
-                    .then(|| input.device_name().to_owned())
-                    .or_else(|| device_override.map(str::to_owned))
-                    .or_else(|| selected_device.map(str::to_owned))
-                    .unwrap_or_else(|| "Default microphone".into()),
-            ),
+            device_name: Mutex::new(device_name),
             recording: AtomicBool::new(false),
-            recovering: AtomicBool::new(false),
+            recovering: AtomicBool::new(input.is_recovering()),
             recognition_generation: AtomicU64::new(0),
             outstanding_recognition_frames: Arc::new(AtomicU64::new(0)),
             capture_generation: AtomicU64::new(0),
@@ -296,14 +311,16 @@ impl DictationAudio {
         while self.recognition.try_recv().is_ok() {}
     }
 
-    pub fn start(&self, at: CaptureInstant) -> Result<()> {
-        let _ = self.start_capture(at, false, false, None)?;
-        Ok(())
+    pub fn start(&self, at: CaptureInstant) -> Result<bool> {
+        self.start_capture(at, false, false, None)
     }
 
     pub fn start_programmatic(&self, at: CaptureInstant) -> Result<()> {
-        let _ = self.start_capture(at, false, true, None)?;
-        Ok(())
+        if self.start_capture(at, false, true, None)? {
+            Ok(())
+        } else {
+            Err(eyre!("microphone-unavailable"))
+        }
     }
 
     pub fn start_voice(&self, at: CaptureInstant, recognition_generation: u64) -> Result<bool> {
@@ -378,19 +395,19 @@ impl Owner {
                     if !self.handle(command) {
                         break;
                     }
-                    self.close_if_idle();
+                    self.reconcile_input();
                     continue;
                 }
                 Err(TryRecvError::Disconnected) => break,
                 Err(TryRecvError::Empty) => {}
             }
-            if !self.input.is_open() && !self.input.is_opening() {
+            if !self.input.is_open() && !self.input.is_opening() && !self.input.is_recovering() {
                 match self.commands.recv() {
                     Ok(command) => {
                         if !self.handle(command) {
                             break;
                         }
-                        self.close_if_idle();
+                        self.reconcile_input();
                         continue;
                     }
                     Err(_) => break,
@@ -401,7 +418,7 @@ impl Owner {
                 .input
                 .recv_timeout(Duration::from_millis(10), capture_idle);
             self.handle_input(event);
-            self.close_if_idle();
+            self.reconcile_input();
         }
     }
 
@@ -414,10 +431,12 @@ impl Owner {
                 expected_recognition_generation,
                 reply,
             } => {
-                if expected_recognition_generation.is_some_and(|generation| {
-                    generation != self.recognition_generation
-                        || self.pending_input.oldest().is_some()
-                }) {
+                if self.input.is_recovering()
+                    || expected_recognition_generation.is_some_and(|generation| {
+                        generation != self.recognition_generation
+                            || self.pending_input.oldest().is_some()
+                    })
+                {
                     let _ = reply.send(false);
                     return true;
                 }
@@ -482,13 +501,6 @@ impl Owner {
             }
             Command::SetReleaseWhileIdle(release) => {
                 self.release_while_idle = release;
-                if self.capture_idle() {
-                    if release {
-                        self.close_input();
-                    } else if !self.input.is_open() {
-                        self.input.request_open();
-                    }
-                }
             }
             Command::InvalidateRecognition { reply } => {
                 let generation = self.next_recognition_generation();
@@ -634,12 +646,18 @@ impl Owner {
                 let _ = self.events.send(DictationAudioEvent::Reopened);
             }
             RecoveringAudioInputEvent::OpenFailed(error) => {
-                self.pending_capture = None;
+                let was_recording = self.pending_capture.take().is_some();
                 self.state.recording.store(false, Ordering::Release);
-                let _ = self.events.send(DictationAudioEvent::OpenFailed {
-                    capture_generation: self.state.capture_generation.load(Ordering::Acquire),
-                    error,
-                });
+                if !self.release_while_idle {
+                    self.input.request_recovery();
+                    self.state.recovering.store(true, Ordering::Release);
+                }
+                if was_recording {
+                    let _ = self.events.send(DictationAudioEvent::OpenFailed {
+                        capture_generation: self.state.capture_generation.load(Ordering::Acquire),
+                        error,
+                    });
+                }
             }
         }
     }
@@ -706,9 +724,18 @@ impl Owner {
         }
     }
 
-    fn close_if_idle(&mut self) {
-        if self.release_while_idle && self.input.is_open() && self.capture_idle() {
-            self.close_input();
+    fn reconcile_input(&mut self) {
+        if self.release_while_idle {
+            if self.capture_idle()
+                && (self.input.is_open() || self.input.is_opening() || self.input.is_recovering())
+            {
+                self.close_input();
+            }
+        } else if !self.input.is_open() && !self.input.is_opening() {
+            // A key release is acknowledged after its synchronous controls return;
+            // waiting for that acknowledgment here can leave the owner asleep.
+            self.input.request_recovery();
+            self.state.recovering.store(true, Ordering::Release);
         }
     }
 
@@ -737,6 +764,125 @@ mod tests {
 
     fn capture_time() -> CaptureInstant {
         CaptureInstant::from_nanos(60_000_000_000)
+    }
+
+    #[test]
+    fn startup_microphone_failure_keeps_audio_owner_alive() {
+        let input = DictationAudio::open(
+            Some("HEX nonexistent microphone for startup recovery test"),
+            0,
+            None,
+            RecordingEnvironmentController::start(),
+            PendingInputEvents::default(),
+            false,
+        )
+        .expect("a missing microphone should enter recovery, not stop the listener");
+
+        assert!(input.is_recovering());
+        assert_eq!(input.sample_rate(), 0);
+        assert!(
+            input
+                .recv_timeout(Duration::from_millis(20))
+                .unwrap()
+                .is_none()
+        );
+        assert_eq!(
+            input
+                .start_programmatic(capture_time())
+                .unwrap_err()
+                .to_string(),
+            "microphone-unavailable"
+        );
+        assert!(!input.is_recording());
+        assert_eq!(input.capture_generation(), 0);
+        assert!(!input.start(capture_time()).unwrap());
+        assert!(!input.is_recording());
+        assert!(matches!(
+            input.finish(capture_time()).unwrap(),
+            Finish::Discard
+        ));
+        input.cancel().unwrap();
+        assert!(input.is_recovering());
+
+        input.set_release_while_idle(true);
+        input.cancel().unwrap();
+        assert!(!input.is_recovering());
+        input.set_release_while_idle(false);
+        input.cancel().unwrap();
+        assert!(input.is_recovering());
+    }
+
+    #[test]
+    fn enabling_warm_microphone_preserves_pending_capture_and_recovers_after_cancellation() {
+        for finish in [false, true] {
+            let (input, _opened) = RecoveringAudioInput::pending_for_test();
+            let (pending_input, acknowledge) =
+                PendingInputEvents::with_pending_for_test(capture_time());
+            let input = DictationAudio::with_input(
+                input,
+                "Test microphone".into(),
+                RecordingEnvironmentController::start(),
+                pending_input,
+                false,
+            )
+            .unwrap();
+            assert!(input.start(capture_time()).unwrap());
+            assert!(input.is_recording());
+            input.set_release_while_idle(true);
+            input.invalidate_recognition().unwrap();
+
+            input.set_release_while_idle(false);
+            input.invalidate_recognition().unwrap();
+            assert!(!input.is_recovering());
+            assert!(input.is_recording());
+
+            if finish {
+                assert!(matches!(
+                    input.finish(capture_time()).unwrap(),
+                    Finish::Discard
+                ));
+            } else {
+                input.cancel().unwrap();
+            }
+            input.invalidate_recognition().unwrap();
+            assert!(!input.is_recording());
+            assert!(input.is_recovering());
+            acknowledge();
+        }
+    }
+
+    #[test]
+    fn recovered_owner_delivers_audio_and_accepts_a_new_capture() {
+        let (mut input, opened) = RecoveringAudioInput::pending_for_test();
+        input.request_recovery();
+        let input = DictationAudio::with_input(
+            input,
+            "Missing microphone".into(),
+            RecordingEnvironmentController::start(),
+            PendingInputEvents::default(),
+            false,
+        )
+        .unwrap();
+        assert!(!input.start(capture_time()).unwrap());
+        let (replacement, samples) = crate::audio::AudioInput::channel_for_test();
+        opened.send((0, Ok(replacement))).unwrap();
+        assert!(matches!(
+            input.events.recv_timeout(Duration::from_secs(2)).unwrap(),
+            DictationAudioEvent::Reopened
+        ));
+        assert!(!input.is_recovering());
+        assert_eq!(input.sample_rate(), 48_000);
+        assert_eq!(input.device_name(), "Test microphone");
+        samples.send((vec![0.25; 480], capture_time())).unwrap();
+        let audio = input.recv_timeout(Duration::from_secs(2)).unwrap().unwrap();
+        assert_eq!(audio.samples, vec![0.25; 480]);
+        assert!(audio.is_current(input.recognition_generation()));
+        assert_eq!(input.captured_through(), capture_time());
+        assert!(input.start(capture_time()).unwrap());
+        assert!(input.is_recording());
+        input.cancel().unwrap();
+        assert!(!input.is_recording());
+        assert!(!input.is_recovering());
     }
 
     #[test]

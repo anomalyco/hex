@@ -120,6 +120,14 @@ pub struct ObservedInputEvent {
 pub struct PendingInputEvents(Arc<Mutex<VecDeque<(u64, CaptureInstant)>>>);
 
 impl PendingInputEvents {
+    #[cfg(test)]
+    pub fn with_pending_for_test(at: CaptureInstant) -> (Self, impl FnOnce()) {
+        let pending = Self::default();
+        pending.push(0, at);
+        let acknowledge = pending.clone();
+        (pending, move || acknowledge.acknowledge(0))
+    }
+
     pub fn oldest(&self) -> Option<CaptureInstant> {
         self.0
             .lock()

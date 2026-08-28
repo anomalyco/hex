@@ -111,11 +111,35 @@ Provisioning installs:
 
 `.hex-sdk` is bundled and managed by HEX; it is not an npm package and must not
 be edited. On startup, HEX atomically refreshes it from the running app bundle
-and reinstalls only the managed `@hex/commands` dependency when its contents
-change. User config, package metadata, and third-party dependencies are
-preserved. Run `bun run check` after changing the config. HEX watches the
-workspace, activates valid changes, and reports the last reload error in the
-Commands pane.
+and runs the targeted `bun update @hex/commands` when its contents or required
+workspace dependencies change. A plain install can retain stale Effect peer
+metadata for the local SDK in `bun.lock`. User config, unrelated package metadata, scripts, and third-party
+dependencies are preserved. There is one narrow metadata exception: on init
+and startup, HEX adds a missing Effect dependency or upgrades the exact legacy
+pins `4.0.0-beta.97` and `4.0.0-beta.107` to the bundled SDK's exact
+`peerDependencies.effect` version. The current exact pin is left untouched.
+Effect entries in dependency, dev/optional/peer dependency, override, and
+resolution maps are checked together so duplicate pins cannot conflict.
+Custom Effect specifications are never silently replaced. Effect-targeting
+indirect selectors (such as `**/effect` or `@hex/commands>effect`) and nested
+Effect overrides/resolutions must be removed rather than automatically rewritten;
+use the SDK-required exact version in `dependencies.effect`. Unrelated scoped
+packages such as `@effect/platform` and `@other/effect` are preserved. Bun 1.3.14
+honors `resolutions["**/effect"]`; some other selector forms are currently ignored
+or warned about, but HEX rejects them rather than relying on that behavior.
+
+Manifest validation failures leave existing files unchanged and report how to
+repair the manifest. A symlinked `package.json` is retained when already current;
+links needing migration and dangling links are never replaced automatically.
+Update the linked manifest manually or use a regular manifest before retrying. Rewrites
+preserve regular-file permissions. SDK refresh and manifest replacement are
+separate operations, not a multi-file transaction: if writing the manifest
+fails, the SDK may already be refreshed while the old manifest remains. Fix
+the reported filesystem problem and rerun `hex commands init`; the unchanged
+legacy pin still triggers migration and installation on retry.
+
+Run `bun run check` after changing the config. HEX watches the workspace,
+activates valid changes, and reports the last reload error in the Commands pane.
 
 ## Runtime Boundary
 

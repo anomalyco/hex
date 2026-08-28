@@ -18,17 +18,17 @@ const ErrorFields = {
   cause: Schema.optionalKey(Schema.Defect()),
 }
 
-export class StartupError extends Schema.TaggedErrorClass<StartupError>()(
+export class StartupError extends Schema.TaggedError<StartupError>()(
   "Hex.StartupError",
   ErrorFields,
 ) {}
 
-export class ProtocolError extends Schema.TaggedErrorClass<ProtocolError>()(
+export class ProtocolError extends Schema.TaggedError<ProtocolError>()(
   "Hex.ProtocolError",
   ErrorFields,
 ) {}
 
-export class RequestError extends Schema.TaggedErrorClass<RequestError>()(
+export class RequestError extends Schema.TaggedError<RequestError>()(
   "Hex.RequestError",
   {
     ...ErrorFields,
@@ -37,7 +37,7 @@ export class RequestError extends Schema.TaggedErrorClass<RequestError>()(
   },
 ) {}
 
-export class ModelPreparationError extends Schema.TaggedErrorClass<ModelPreparationError>()(
+export class ModelPreparationError extends Schema.TaggedError<ModelPreparationError>()(
   "Hex.ModelPreparationError",
   {
     ...ErrorFields,
@@ -45,7 +45,7 @@ export class ModelPreparationError extends Schema.TaggedErrorClass<ModelPreparat
   },
 ) {}
 
-export class CancellationError extends Schema.TaggedErrorClass<CancellationError>()(
+export class CancellationError extends Schema.TaggedError<CancellationError>()(
   "Hex.CancellationError",
   ErrorFields,
 ) {}

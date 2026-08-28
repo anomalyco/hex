@@ -38,7 +38,7 @@
     "prepublishOnly": "bun run check && bun run test && bun run build"
   },
   "peerDependencies": {
-    "effect": ">=4.0.0-beta.97 <5.0.0"
+    "effect": ">=4.0.0-rc.112 <5.0.0"
   },
   "peerDependenciesMeta": {
     "effect": {
@@ -47,7 +47,7 @@
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
-    "effect": "4.0.0-beta.97",
+    "effect": "4.0.0-rc.112",
     "typescript": "^7.0.0",
     "vitest": "^3.2.4"
   }

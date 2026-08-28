@@ -276,9 +276,9 @@ fn validate_status(status: &StatusSnapshot) -> Result<()> {
 pub fn initialize_workspace() -> Result<PathBuf> {
     let workspace = crate::app_paths::personal_commands_workspace()?;
     let sdk = crate::app_paths::personal_commands_sdk()?;
-    let sdk_changed = initialize_workspace_at(&workspace, &sdk)?;
+    let workspace_changed = initialize_workspace_at(&workspace, &sdk)?;
     let bun = find_bun().ok_or_else(|| eyre!("Bun is required to install personal commands"))?;
-    if sdk_changed {
+    if workspace_changed {
         remove_installed_managed_sdk(&workspace)?;
     }
     install_workspace_dependencies(&workspace, &bun)?;
@@ -293,16 +293,140 @@ pub fn initialize_workspace_at(workspace: &Path, sdk: &Path) -> Result<bool> {
     {
         return Err(eyre!("personal command SDK resources are incomplete"));
     }
-    fs::create_dir_all(workspace)?;
-    let sdk_changed = refresh_managed_sdk_at(workspace, sdk)?;
+    let workspace_changed = refresh_managed_sdk_at(workspace, sdk)?;
     copy_directory(&template, workspace, false)?;
-    Ok(sdk_changed)
+    Ok(workspace_changed)
+}
+
+fn workspace_effect_update(workspace: &Path, sdk: &Path) -> Result<Option<Vec<u8>>> {
+    let sdk_manifest: serde_json::Value =
+        serde_json::from_slice(&fs::read(sdk.join("package.json"))?)
+            .wrap_err("personal command SDK package.json is invalid")?;
+    let required = sdk_manifest["peerDependencies"]["effect"]
+        .as_str()
+        .filter(|version| {
+            regex::Regex::new(r"^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$")
+                .expect("valid exact-version pattern")
+                .is_match(version)
+        })
+        .ok_or_else(|| {
+            eyre!("personal command SDK peerDependencies.effect must be an exact version")
+        })?;
+    let path = workspace.join("package.json");
+    let linked = match fs::symlink_metadata(&path) {
+        Ok(metadata) => metadata.file_type().is_symlink(),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+        Err(error) => return Err(error.into()),
+    };
+    let linked_error = || {
+        eyre!(
+            "{} is a symlink; update the linked manifest to Effect \"{required}\" or replace the link with a regular package.json, then retry",
+            path.display()
+        )
+    };
+    let (bytes, mut changed) = match fs::read(&path) {
+        Ok(bytes) => (bytes, false),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            if linked {
+                return Err(linked_error());
+            }
+            (fs::read(sdk.join("workspace-template/package.json"))?, true)
+        }
+        Err(error) => return Err(error.into()),
+    };
+    let mut manifest: serde_json::Value = serde_json::from_slice(&bytes)
+        .wrap_err_with(|| format!("{} is invalid JSON; repair it and retry", path.display()))?;
+    let manifest = manifest
+        .as_object_mut()
+        .ok_or_else(|| eyre!("{} must be a JSON object", path.display()))?;
+    let mut has_dependency = false;
+    for section in [
+        "dependencies",
+        "devDependencies",
+        "optionalDependencies",
+        "peerDependencies",
+        "overrides",
+        "resolutions",
+    ] {
+        let Some(entries) = manifest.get_mut(section) else {
+            continue;
+        };
+        let entries = entries
+            .as_object_mut()
+            .ok_or_else(|| eyre!("{} {section} must be a JSON object", path.display()))?;
+        if matches!(section, "overrides" | "resolutions") {
+            let mut pending = vec![(section.to_string(), &*entries)];
+            while let Some((location, entries)) = pending.pop() {
+                for (selector, value) in entries {
+                    let mut parts = selector.rsplit('>').next().unwrap_or(selector).split('/');
+                    let mut targets_effect = false;
+                    while let Some(part) = parts.next() {
+                        targets_effect = part == "effect" || part.starts_with("effect@");
+                        // The slash in @scope/package is not a dependency selector.
+                        if part.starts_with('@') {
+                            let _ = parts.next();
+                            targets_effect = false;
+                        }
+                    }
+                    if targets_effect && (location != section || selector != "effect") {
+                        return Err(eyre!(
+                            "{} has unsupported Effect selector {location}[{selector:?}]; remove this selector and set dependencies.effect to \"{required}\", the version required by the HEX SDK, then retry",
+                            path.display()
+                        ));
+                    }
+                    if let Some(nested) = value.as_object() {
+                        pending.push((format!("{location}[{selector:?}]"), nested));
+                    }
+                }
+            }
+        }
+        let Some(effect) = entries.get_mut("effect") else {
+            continue;
+        };
+        has_dependency |= matches!(
+            section,
+            "dependencies" | "devDependencies" | "optionalDependencies"
+        );
+        match effect.as_str() {
+            Some(version) if version == required => {}
+            Some("4.0.0-beta.97" | "4.0.0-beta.107") => {
+                *effect = required.into();
+                changed = true;
+            }
+            _ => {
+                return Err(eyre!(
+                    "{} has incompatible {section}.effect ({effect}); set it to \"{required}\", the version required by the HEX SDK, then retry",
+                    path.display()
+                ));
+            }
+        }
+    }
+    if !has_dependency {
+        manifest
+            .entry("dependencies")
+            .or_insert_with(|| serde_json::json!({}))
+            .as_object_mut()
+            .expect("dependencies was validated")
+            .insert("effect".into(), required.into());
+        changed = true;
+    }
+    if !changed {
+        return Ok(None);
+    }
+    if linked {
+        return Err(linked_error());
+    }
+    let mut encoded = serde_json::to_vec_pretty(manifest)?;
+    encoded.push(b'\n');
+    Ok(Some(encoded))
 }
 
 fn refresh_managed_sdk_at(workspace: &Path, sdk: &Path) -> Result<bool> {
     if !sdk.join("package.json").is_file() || !sdk.join("dist/bin.js").is_file() {
         return Err(eyre!("personal command SDK resources are incomplete"));
     }
+    // Validate both manifests before touching the installed SDK or user files.
+    let manifest_update = workspace_effect_update(workspace, sdk)?;
     fs::create_dir_all(workspace)?;
     let staged_sdk = workspace.join(".hex-sdk.tmp");
     let installed_sdk = workspace.join(".hex-sdk");
@@ -312,27 +436,46 @@ fn refresh_managed_sdk_at(workspace: &Path, sdk: &Path) -> Result<bool> {
     fs::create_dir(&staged_sdk)?;
     fs::copy(sdk.join("package.json"), staged_sdk.join("package.json"))?;
     copy_directory(&sdk.join("dist"), &staged_sdk.join("dist"), true)?;
-    if directory_manifest(&staged_sdk)? == directory_manifest(&installed_sdk)? {
+    let sdk_changed = directory_manifest(&staged_sdk)? != directory_manifest(&installed_sdk)?;
+    if !sdk_changed {
         fs::remove_dir_all(staged_sdk)?;
-        return Ok(false);
-    }
-    let previous_sdk = workspace.join(".hex-sdk.previous");
-    if previous_sdk.exists() {
-        fs::remove_dir_all(&previous_sdk)?;
-    }
-    if installed_sdk.exists() {
-        fs::rename(&installed_sdk, &previous_sdk)?;
-    }
-    if let Err(error) = fs::rename(&staged_sdk, &installed_sdk) {
+    } else {
+        let previous_sdk = workspace.join(".hex-sdk.previous");
         if previous_sdk.exists() {
-            let _ = fs::rename(&previous_sdk, &installed_sdk);
+            fs::remove_dir_all(&previous_sdk)?;
         }
-        return Err(error.into());
+        if installed_sdk.exists() {
+            fs::rename(&installed_sdk, &previous_sdk)?;
+        }
+        if let Err(error) = fs::rename(&staged_sdk, &installed_sdk) {
+            if previous_sdk.exists() {
+                let _ = fs::rename(&previous_sdk, &installed_sdk);
+            }
+            return Err(error.into());
+        }
+        if previous_sdk.exists() {
+            fs::remove_dir_all(previous_sdk)?;
+        }
     }
-    if previous_sdk.exists() {
-        fs::remove_dir_all(previous_sdk)?;
+    if let Some(encoded) = &manifest_update {
+        let path = workspace.join("package.json");
+        let temporary = path.with_extension(format!("json.{}.tmp", std::process::id()));
+        (|| -> Result<()> {
+            fs::write(&temporary, encoded)?;
+            match fs::metadata(&path) {
+                Ok(metadata) => fs::set_permissions(&temporary, metadata.permissions())?,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error.into()),
+            }
+            fs::rename(&temporary, &path)?;
+            Ok(())
+        })()
+        .wrap_err_with(|| format!(
+            "could not update {}; the SDK may already be refreshed; fix filesystem access or space (including {}), then rerun `hex commands init`",
+            path.display(), temporary.display()
+        ))?;
     }
-    Ok(true)
+    Ok(sdk_changed || manifest_update.is_some())
 }
 
 fn directory_manifest(root: &Path) -> Result<Vec<(PathBuf, Option<Vec<u8>>)>> {
@@ -367,7 +510,8 @@ fn directory_manifest(root: &Path) -> Result<Vec<(PathBuf, Option<Vec<u8>>)>> {
 
 fn install_workspace_dependencies(workspace: &Path, bun: &Path) -> Result<()> {
     let status = Command::new(bun)
-        .arg("install")
+        // A plain install reuses stale peer metadata for file:.hex-sdk in bun.lock.
+        .args(["update", "@hex/commands"])
         .current_dir(workspace)
         .status()
         .wrap_err("could not install the personal command workspace")?;
@@ -1057,7 +1201,7 @@ fn run_worker(
             return;
         }
     };
-    let sdk_changed = match refresh_managed_sdk_at(&workspace, &sdk) {
+    let workspace_changed = match refresh_managed_sdk_at(&workspace, &sdk) {
         Ok(changed) => changed,
         Err(error) => {
             status.host_state = HostState::Unavailable;
@@ -1068,9 +1212,9 @@ fn run_worker(
         }
     };
     let managed_host = workspace.join("node_modules/@hex/commands/dist/bin.js");
-    if sdk_changed || !managed_host.is_file() {
+    if workspace_changed || !managed_host.is_file() {
         let refreshed = (|| {
-            if sdk_changed {
+            if workspace_changed {
                 remove_installed_managed_sdk(&workspace)?;
             }
             install_workspace_dependencies(&workspace, &bun)
@@ -1082,7 +1226,10 @@ fn run_worker(
             tracing::warn!(%error, "could not activate the current personal command SDK");
             return;
         }
-        tracing::info!(sdk_changed, "refreshed the managed personal command SDK");
+        tracing::info!(
+            workspace_changed,
+            "refreshed the managed personal command SDK"
+        );
     }
     let host_entrypoint = match crate::app_paths::personal_commands_host() {
         Ok(path) => path,
@@ -3512,6 +3659,372 @@ mod tests {
             .unwrap();
         kill_and_wait(&mut child);
         assert!(child.try_wait().unwrap().is_some());
+    }
+
+    #[test]
+    fn workspace_effect_migration_preserves_user_fields_and_is_idempotent() {
+        let (workspace, sdk) = workspace_upgrade_fixture();
+        let required = "4.0.0-rc.999";
+        for old in [None, Some("4.0.0-beta.97"), Some("4.0.0-beta.107")] {
+            let mut manifest = serde_json::json!({
+                "name": "my-commands", "private": true, "custom": { "keep": [1, 2] },
+                "scripts": { "check": "custom-check", "start": "custom-start" },
+                "dependencies": { "user-library": "^1.2.3" },
+                "devDependencies": { "typescript": "7.0.2" }
+            });
+            if let Some(old) = old {
+                manifest["dependencies"]["effect"] = old.into();
+            }
+            fs::write(workspace.join("package.json"), manifest.to_string()).unwrap();
+            fs::write(workspace.join("hex.config.ts"), "// user config\n").unwrap();
+            assert!(initialize_workspace_at(&workspace, &sdk).unwrap());
+            manifest["dependencies"]["effect"] = required.into();
+            let bytes = fs::read(workspace.join("package.json")).unwrap();
+            assert_eq!(
+                serde_json::from_slice::<serde_json::Value>(&bytes).unwrap(),
+                manifest
+            );
+            assert_eq!(
+                fs::read_to_string(workspace.join("hex.config.ts")).unwrap(),
+                "// user config\n"
+            );
+            assert!(!initialize_workspace_at(&workspace, &sdk).unwrap());
+            assert_eq!(fs::read(workspace.join("package.json")).unwrap(), bytes);
+        }
+        fs::remove_dir_all(workspace.parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn unchanged_sdk_with_stale_effect_requires_install_on_startup() {
+        let (workspace, sdk) = workspace_upgrade_fixture();
+        assert!(initialize_workspace_at(&workspace, &sdk).unwrap());
+        let sdk_before = directory_manifest(&workspace.join(".hex-sdk")).unwrap();
+        fs::write(
+            workspace.join("package.json"),
+            r#"{"dependencies":{"effect":"4.0.0-beta.97"}}"#,
+        )
+        .unwrap();
+        assert!(refresh_managed_sdk_at(&workspace, &sdk).unwrap());
+        assert_eq!(
+            directory_manifest(&workspace.join(".hex-sdk")).unwrap(),
+            sdk_before
+        );
+        assert!(!refresh_managed_sdk_at(&workspace, &sdk).unwrap());
+        // A compatible manifest is not even reformatted.
+        let current = r#"{ "dependencies": { "effect": "4.0.0-rc.999" } }"#;
+        fs::write(workspace.join("package.json"), current).unwrap();
+        assert!(!refresh_managed_sdk_at(&workspace, &sdk).unwrap());
+        assert_eq!(
+            fs::read_to_string(workspace.join("package.json")).unwrap(),
+            current
+        );
+        fs::remove_dir_all(workspace.parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn workspace_effect_migration_reconciles_duplicate_pins() {
+        let (workspace, sdk) = workspace_upgrade_fixture();
+        let mut manifest = serde_json::json!({});
+        for section in [
+            "dependencies",
+            "devDependencies",
+            "optionalDependencies",
+            "peerDependencies",
+            "overrides",
+            "resolutions",
+        ] {
+            manifest[section] = serde_json::json!({"effect": "4.0.0-beta.107", "other": "1.0.0"});
+        }
+        fs::write(workspace.join("package.json"), manifest.to_string()).unwrap();
+        assert!(refresh_managed_sdk_at(&workspace, &sdk).unwrap());
+        for entries in manifest.as_object_mut().unwrap().values_mut() {
+            entries["effect"] = "4.0.0-rc.999".into();
+        }
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(
+                &fs::read(workspace.join("package.json")).unwrap()
+            )
+            .unwrap(),
+            manifest
+        );
+        fs::remove_dir_all(workspace.parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn workspace_effect_conflicts_leave_manifest_config_and_sdk_untouched() {
+        let (workspace, sdk) = workspace_upgrade_fixture();
+        assert!(initialize_workspace_at(&workspace, &sdk).unwrap());
+        fs::write(sdk.join("dist/bin.js"), "// new SDK\n").unwrap();
+        let before = directory_manifest(&workspace.join(".hex-sdk")).unwrap();
+        for invalid in [
+            "{",
+            "[]",
+            r#"{"dependencies":null}"#,
+            r#"{"devDependencies":[]}"#,
+        ] {
+            fs::write(workspace.join("package.json"), invalid).unwrap();
+            assert!(initialize_workspace_at(&workspace, &sdk).is_err());
+            assert_eq!(
+                fs::read_to_string(workspace.join("package.json")).unwrap(),
+                invalid
+            );
+            assert_eq!(
+                directory_manifest(&workspace.join(".hex-sdk")).unwrap(),
+                before
+            );
+        }
+        for section in [
+            "dependencies",
+            "devDependencies",
+            "optionalDependencies",
+            "peerDependencies",
+            "overrides",
+            "resolutions",
+        ] {
+            for custom in [
+                serde_json::json!("^4.0.0-beta.97"),
+                serde_json::json!("4.0.0-beta.108"),
+                serde_json::json!("file:../effect"),
+                serde_json::json!({".": "4.0.0-beta.97"}),
+                serde_json::Value::Null,
+            ] {
+                let mut manifest = serde_json::json!({"dependencies": {"effect": "4.0.0-beta.97"}});
+                manifest[section] = serde_json::json!({"effect": custom});
+                let original = manifest.to_string();
+                fs::write(workspace.join("package.json"), &original).unwrap();
+                let error = refresh_managed_sdk_at(&workspace, &sdk)
+                    .unwrap_err()
+                    .to_string();
+                assert!(error.contains(&format!("{section}.effect")), "{error}");
+                assert!(error.contains("set it to \"4.0.0-rc.999\""), "{error}");
+                assert_eq!(
+                    fs::read_to_string(workspace.join("package.json")).unwrap(),
+                    original
+                );
+                assert_eq!(
+                    directory_manifest(&workspace.join(".hex-sdk")).unwrap(),
+                    before
+                );
+            }
+        }
+        assert_eq!(
+            fs::read_to_string(workspace.join("hex.config.ts")).unwrap(),
+            "// template config\n"
+        );
+        fs::remove_dir_all(workspace.parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn workspace_rejects_indirect_effect_selectors_but_preserves_scoped_packages() {
+        let (workspace, sdk) = workspace_upgrade_fixture();
+        assert!(initialize_workspace_at(&workspace, &sdk).unwrap());
+        fs::write(sdk.join("dist/bin.js"), "// new SDK\n").unwrap();
+        let before = directory_manifest(&workspace.join(".hex-sdk")).unwrap();
+        for section in ["overrides", "resolutions"] {
+            for selectors in [
+                serde_json::json!({"**/effect": "4.0.0-beta.97"}),
+                serde_json::json!({"@hex/commands>effect": "4.0.0-beta.97"}),
+                serde_json::json!({"effect@4.0.0-beta.97": "4.0.0-beta.97"}),
+                serde_json::json!({"@hex/commands/effect": "4.0.0-beta.97"}),
+                serde_json::json!({"@hex/commands": {"effect": "4.0.0-beta.97"}}),
+                serde_json::json!({"other": {"@hex/commands": {"**/effect": "4.0.0-rc.999"}}}),
+            ] {
+                let mut manifest = serde_json::json!({"dependencies": {"effect": "4.0.0-beta.97"}});
+                manifest[section] = selectors;
+                let original = manifest.to_string();
+                fs::write(workspace.join("package.json"), &original).unwrap();
+                let error = initialize_workspace_at(&workspace, &sdk)
+                    .unwrap_err()
+                    .to_string();
+                assert!(
+                    error.contains(&format!("unsupported Effect selector {section}[")),
+                    "{error}"
+                );
+                assert!(error.contains("remove this selector"), "{error}");
+                assert!(error.contains("4.0.0-rc.999"), "{error}");
+                assert_eq!(
+                    fs::read_to_string(workspace.join("package.json")).unwrap(),
+                    original
+                );
+                assert_eq!(
+                    directory_manifest(&workspace.join(".hex-sdk")).unwrap(),
+                    before
+                );
+            }
+        }
+        let unrelated = serde_json::json!({
+            "@effect/platform": "1.0.0", "@other/effect": "2.0.0",
+            "**/@other/effect": "2.0.0", "@hex/commands>@other/effect": "2.0.0",
+            "@scope/package": {"@effect/platform": "1.0.0", "unrelated": "1.0.0"}
+        });
+        let mut manifest = serde_json::json!({
+            "dependencies": {"effect": "4.0.0-beta.97"},
+            "overrides": unrelated, "resolutions": unrelated
+        });
+        fs::write(workspace.join("package.json"), manifest.to_string()).unwrap();
+        assert!(initialize_workspace_at(&workspace, &sdk).unwrap());
+        manifest["dependencies"]["effect"] = "4.0.0-rc.999".into();
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(
+                &fs::read(workspace.join("package.json")).unwrap()
+            )
+            .unwrap(),
+            manifest
+        );
+        assert_eq!(
+            fs::read_to_string(workspace.join("hex.config.ts")).unwrap(),
+            "// template config\n"
+        );
+        fs::remove_dir_all(workspace.parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn workspace_only_rejects_manifest_symlinks_that_need_migration() {
+        let (workspace, sdk) = workspace_upgrade_fixture();
+        assert!(initialize_workspace_at(&workspace, &sdk).unwrap());
+        fs::write(sdk.join("dist/bin.js"), "// new SDK\n").unwrap();
+        let before = directory_manifest(&workspace.join(".hex-sdk")).unwrap();
+        let path = workspace.join("package.json");
+        let target = workspace.parent().unwrap().join("user-package.json");
+        let original = r#"{"dependencies":{"effect":"4.0.0-beta.97"}}"#;
+        fs::remove_file(&path).unwrap();
+        for present in [true, false] {
+            if present {
+                fs::write(&target, original).unwrap();
+            } else {
+                fs::remove_file(&target).unwrap();
+            }
+            std::os::unix::fs::symlink(&target, &path).unwrap();
+            let error = initialize_workspace_at(&workspace, &sdk)
+                .unwrap_err()
+                .to_string();
+            assert!(error.contains("is a symlink"), "{error}");
+            assert!(
+                error.contains("update the linked manifest to Effect"),
+                "{error}"
+            );
+            assert_eq!(fs::read_link(&path).unwrap(), target);
+            if present {
+                assert_eq!(fs::read_to_string(&target).unwrap(), original);
+            } else {
+                assert!(!target.exists());
+            }
+            assert_eq!(
+                directory_manifest(&workspace.join(".hex-sdk")).unwrap(),
+                before
+            );
+            fs::remove_file(&path).unwrap();
+        }
+        let current = r#"{"dependencies":{"effect":"4.0.0-rc.999"}}"#;
+        fs::write(&target, current).unwrap();
+        std::os::unix::fs::symlink(&target, &path).unwrap();
+        assert!(initialize_workspace_at(&workspace, &sdk).unwrap());
+        assert!(!initialize_workspace_at(&workspace, &sdk).unwrap());
+        assert_eq!(fs::read_link(&path).unwrap(), target);
+        assert_eq!(fs::read_to_string(&target).unwrap(), current);
+        assert_eq!(
+            fs::read_to_string(workspace.join("hex.config.ts")).unwrap(),
+            "// template config\n"
+        );
+        fs::remove_dir_all(workspace.parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn workspace_effect_migration_preserves_manifest_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let (workspace, sdk) = workspace_upgrade_fixture();
+        let path = workspace.join("package.json");
+        for mode in [0o600, 0o640] {
+            fs::write(&path, r#"{"dependencies":{"effect":"4.0.0-beta.97"}}"#).unwrap();
+            fs::set_permissions(&path, fs::Permissions::from_mode(mode)).unwrap();
+            assert!(refresh_managed_sdk_at(&workspace, &sdk).unwrap());
+            assert_eq!(
+                fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+                mode
+            );
+        }
+        fs::remove_dir_all(workspace.parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn workspace_effect_write_failure_is_retryable_after_sdk_refresh() {
+        let (workspace, sdk) = workspace_upgrade_fixture();
+        assert!(initialize_workspace_at(&workspace, &sdk).unwrap());
+        fs::write(sdk.join("dist/bin.js"), "// new SDK\n").unwrap();
+        let path = workspace.join("package.json");
+        let original = r#"{"dependencies":{"effect":"4.0.0-beta.97"}}"#;
+        fs::write(&path, original).unwrap();
+        let obstruction = path.with_extension(format!("json.{}.tmp", std::process::id()));
+        fs::create_dir(&obstruction).unwrap();
+        let error = refresh_managed_sdk_at(&workspace, &sdk)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("SDK may already be refreshed"), "{error}");
+        assert!(error.contains("rerun `hex commands init`"), "{error}");
+        assert_eq!(fs::read_to_string(&path).unwrap(), original);
+        assert_eq!(
+            fs::read_to_string(workspace.join(".hex-sdk/dist/bin.js")).unwrap(),
+            "// new SDK\n"
+        );
+        fs::remove_dir(&obstruction).unwrap();
+        // Reconciliation still requests installation, even though the SDK is current.
+        assert!(refresh_managed_sdk_at(&workspace, &sdk).unwrap());
+        assert!(!refresh_managed_sdk_at(&workspace, &sdk).unwrap());
+        assert_eq!(
+            fs::read_to_string(workspace.join("hex.config.ts")).unwrap(),
+            "// template config\n"
+        );
+        fs::remove_dir_all(workspace.parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn invalid_sdk_effect_requirement_does_not_mutate_workspace() {
+        let (workspace, sdk) = workspace_upgrade_fixture();
+        assert!(initialize_workspace_at(&workspace, &sdk).unwrap());
+        let before = directory_manifest(&workspace).unwrap();
+        for invalid in [
+            "{",
+            "[]",
+            "{}",
+            r#"{"peerDependencies":{"effect":"^4.0.0-rc.999"}}"#,
+        ] {
+            fs::write(sdk.join("package.json"), invalid).unwrap();
+            assert!(refresh_managed_sdk_at(&workspace, &sdk).is_err());
+            assert_eq!(directory_manifest(&workspace).unwrap(), before);
+        }
+        fs::remove_dir_all(workspace.parent().unwrap()).unwrap();
+    }
+
+    fn workspace_upgrade_fixture() -> (PathBuf, PathBuf) {
+        static NEXT_FIXTURE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let sequence = NEXT_FIXTURE.fetch_add(1, Ordering::Relaxed);
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!(
+            "hex-workspace-upgrade-{}-{unique}-{sequence}",
+            std::process::id()
+        ));
+        let workspace = root.join("workspace");
+        let sdk = root.join("sdk");
+        fs::create_dir_all(&workspace).unwrap();
+        fs::create_dir_all(sdk.join("dist")).unwrap();
+        fs::create_dir_all(sdk.join("workspace-template")).unwrap();
+        fs::write(sdk.join("dist/bin.js"), "// SDK\n").unwrap();
+        fs::write(
+            sdk.join("package.json"),
+            r#"{"peerDependencies":{"effect":"4.0.0-rc.999"}}"#,
+        )
+        .unwrap();
+        fs::write(sdk.join("workspace-template/package.json"), "{}").unwrap();
+        fs::write(
+            sdk.join("workspace-template/hex.config.ts"),
+            "// template config\n",
+        )
+        .unwrap();
+        (workspace, sdk)
     }
 
     #[test]
