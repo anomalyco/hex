@@ -7,6 +7,7 @@ release gates; passing container tests alone does not establish those behaviors.
   input-device permissions and a click-through recording/processing indicator.
 - Keep shortcut changes, cancellation, keyboard reconnects, and tray-less
   listener recovery manageable from Settings.
+- Cancelling a new capture keeps older pending transcription visible in Settings.
 - Add Nix packaging and a matching development shell, plus optional per-user
   Home Manager autostart. Nix installations leave updates to Nix.
 

@@ -84,7 +84,7 @@ jobs:
 
   nix:
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
       - uses: cachix/install-nix-action@v31
@@ -95,3 +95,7 @@ jobs:
             .#checks.x86_64-linux.shell-environment \
             .#checks.x86_64-linux.modules \
             .#checks.x86_64-linux.session-readiness
+      - name: Build and test the installed Nix package
+        run: |
+          nix build --no-link --print-build-logs --max-jobs 1 --cores 1 \
+            .#checks.x86_64-linux.package

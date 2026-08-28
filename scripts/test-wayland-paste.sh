@@ -54,6 +54,30 @@ if [[ "${1:-}" == --inside ]]; then
     sleep 0.05
   done
   swaymsg -t get_tree -r | grep '"name": "HEX"' >/dev/null
+
+  # Keep GPUI connected while the paste helper creates a virtual keyboard.
+  export HEX_WAYLAND_PASTE_OUTPUT="$HEX_WAYLAND_PASTE_OUTPUT-coexist"
+  "$HEX_WAYLAND_TEST_TARGET" "$HEX_WAYLAND_PASTE_OUTPUT" &
+  target=$!
+  for ((attempt = 0; attempt < 100; attempt++)); do
+    if swaymsg -t get_tree -r | grep '"name": "Hex Wayland Test"' >/dev/null; then break; fi
+    sleep 0.05
+  done
+  swaymsg -t get_tree -r | grep '"name": "Hex Wayland Test"' >/dev/null
+  wtype -p v -p VoidSymbol -s 60000 &
+  keyboard=$!
+  for ((attempt = 0; attempt < 100; attempt++)); do
+    if [[ -f "$HEX_WAYLAND_PASTE_OUTPUT.ready" ]]; then break; fi
+    sleep 0.05
+  done
+  test -f "$HEX_WAYLAND_PASTE_OUTPUT.ready"
+  "$HEX_WAYLAND_TEST_BINARY" --exact linux_paste::tests::native_wayland_clipboard_shortcut \
+    --ignored --nocapture --test-threads=1
+  kill -0 "$app"
+  kill "$target"
+  wait "$target" 2>/dev/null || true
+  target=
+
   swaymsg '[app_id="hex"] kill' >/dev/null
   wait "$app"
   app=

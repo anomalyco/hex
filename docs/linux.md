@@ -130,8 +130,8 @@ input-state, lifecycle, and paste regression coverage. Physical device,
 compositor, and target-application smoke tests remain necessary before a release.
 `scripts/test-wayland-paste.sh /path/to/compiled-test-executable /path/to/voice-control` runs the real
 paste helpers against a GTK target under an isolated headless Sway compositor.
-It also launches Settings with `--hidden` and verifies that the tray-less native
-window remains visible and closes cleanly. It requires the GTK development
+It also launches Settings with `--hidden`, repeats paste while Settings remains
+open, and verifies that the tray-less native window closes cleanly. It requires the GTK development
 libraries, Sway, `wl-clipboard`, `wtype`, `dbus-run-session`, and a Vulkan driver
 (Mesa's software driver is sufficient), and must run as a non-root user. It uses
 isolated app data and no microphone; CI runs it with the display-free suite and

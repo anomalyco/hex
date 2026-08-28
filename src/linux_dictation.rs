@@ -162,11 +162,7 @@ fn run_with_settings(
                     )?;
                     emit_state(
                         &mut events,
-                        if pending > 0 {
-                            VoiceState::Transcribing
-                        } else {
-                            VoiceState::Listening
-                        },
+                        active_state(recording, pending),
                         &input.device_name,
                     )?;
                 }
@@ -174,7 +170,11 @@ fn run_with_settings(
                     capture.cancel();
                     recording = false;
                     events.dictation(DictationPhase::Cancelled, "")?;
-                    emit_state(&mut events, VoiceState::Listening, &input.device_name)?;
+                    emit_state(
+                        &mut events,
+                        active_state(recording, pending),
+                        &input.device_name,
+                    )?;
                 }
                 _ => {}
             }
@@ -196,13 +196,7 @@ fn run_with_settings(
             }
             emit_state(
                 &mut events,
-                if recording {
-                    VoiceState::Dictating
-                } else if pending > 0 {
-                    VoiceState::Transcribing
-                } else {
-                    VoiceState::Listening
-                },
+                active_state(recording, pending),
                 &input.device_name,
             )?;
         }
@@ -279,6 +273,16 @@ fn submit_capture(
     Ok(())
 }
 
+fn active_state(recording: bool, pending: usize) -> VoiceState {
+    if recording {
+        VoiceState::Dictating
+    } else if pending > 0 {
+        VoiceState::Transcribing
+    } else {
+        VoiceState::Listening
+    }
+}
+
 fn emit_state(events: &mut EventLog, state: VoiceState, device: &str) -> Result<()> {
     events.emit(&VoiceEvent::State {
         timestamp_ms: now_ms(),
@@ -291,6 +295,15 @@ fn emit_state(events: &mut EventLog, state: VoiceState, device: &str) -> Result<
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cancelled_capture_keeps_pending_output_visible() {
+        assert_eq!(active_state(true, 2), VoiceState::Dictating);
+        assert_eq!(active_state(false, 2), VoiceState::Transcribing);
+        assert_eq!(active_state(false, 1), VoiceState::Transcribing);
+        assert_eq!(active_state(false, 0), VoiceState::Listening);
+        assert_eq!(active_state(true, 0), VoiceState::Dictating);
+    }
 
     #[test]
     fn output_guard_cancels_and_joins_even_on_listener_error() {
