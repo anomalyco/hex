@@ -4,6 +4,25 @@ import * as Hex from "../src/effect.js"
 import { options, processIsAlive } from "./support.js"
 
 describe("Effect client", () => {
+  it.each([
+    Hex.StartupError,
+    Hex.ProtocolError,
+    Hex.RequestError,
+    Hex.ModelPreparationError,
+    Hex.CancellationError,
+  ])("preserves tagged error fields and yieldable failures for %s", async (ErrorClass) => {
+    const cause = new Error("underlying failure")
+    const error = new ErrorClass({ code: "test-failure", message: "operation failed", cause })
+    expect(error).toBeInstanceOf(Error)
+    expect(error._tag).toBe(`Hex.${ErrorClass.name}`)
+    expect(error.message).toBe("operation failed")
+    expect(error.cause).toBe(cause)
+    const failure = await Effect.runPromise(Effect.gen(function* () {
+      return yield* error
+    }).pipe(Effect.flip))
+    expect(failure).toBe(error)
+  })
+
   it("scopes the helper and exposes Effect and Stream operations", async () => {
     let pid = 0
     const result = await Effect.runPromise(Effect.scoped(Effect.gen(function* () {

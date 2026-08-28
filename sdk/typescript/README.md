@@ -78,6 +78,9 @@ deadline.
 
 ## Effect API
 
+Install Effect 4.0.0-rc.112 or newer within v4 to use `@kitlangton/hex/effect`.
+Effect remains optional for the Promise API.
+
 The Effect entrypoint exposes scoped acquisition, typed schema-backed errors,
 Effect operations, and a progress `Stream`:
 

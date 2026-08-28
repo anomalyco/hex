@@ -23,7 +23,7 @@ import type {
   NativeAction,
 } from "./model.js"
 
-export class ToolCallError extends Schema.TaggedErrorClass<ToolCallError>()(
+export class ToolCallError extends Schema.TaggedError<ToolCallError>()(
   "Hex.ToolCallError",
   { message: Schema.String, code: Schema.optionalKey(Schema.String) },
 ) {}
