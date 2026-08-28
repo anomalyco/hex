@@ -10,7 +10,7 @@ mkdir -p "$bundle/Contents"
 plist="$bundle/Contents/Info.plist"
 cp "$root/app/Info.plist" "$plist"
 
-[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$plist")" = ly.anoma.Hex ]
+[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$plist")" = com.kitlangton.hex2 ]
 [ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$plist")" = hex ]
 [ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleDisplayName' "$plist")" = Hex ]
 [ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleName' "$plist")" = Hex ]
@@ -28,6 +28,8 @@ expect_rejection 'wrong bundle identifier'
 /usr/libexec/PlistBuddy -c 'Set :CFBundleIdentifier com.kitlangton.voice-control.agent' "$plist"
 expect_rejection 'wrong bundle identifier'
 /usr/libexec/PlistBuddy -c 'Set :CFBundleIdentifier ly.anoma.Hex' "$plist"
+expect_rejection 'wrong bundle identifier'
+/usr/libexec/PlistBuddy -c 'Set :CFBundleIdentifier com.kitlangton.hex2' "$plist"
 /usr/libexec/PlistBuddy -c 'Set :CFBundleExecutable voice-control-watch' "$plist"
 expect_rejection 'wrong executable name'
 
@@ -36,7 +38,7 @@ for script in build-app.sh release-app.sh; do
     echo "Unexpectedly allowed $script without an explicit signing team." >&2
     exit 1
   fi
-  printf '%s\n' "$output" | grep -Fq 'Set VOICE_CONTROL_TEAM_ID to the Anomaly Apple Developer Team ID'
+  printf '%s\n' "$output" | grep -Fq 'Set VOICE_CONTROL_TEAM_ID to the Apple Developer signing team'
 done
 
 for identity in 'Developer ID Application: Fixture (WRONGTEAM0)' 'Apple Development: Fixture (TESTTEAM00)'; do
