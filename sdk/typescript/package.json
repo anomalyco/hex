@@ -1,6 +1,6 @@
 {
   "name": "@kitlangton/hex",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "TypeScript client for the HEX local transcription service",
   "license": "MIT",
   "type": "module",

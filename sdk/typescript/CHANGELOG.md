@@ -1,5 +1,11 @@
 # @kitlangton/hex
 
+## 0.2.2
+
+### Patch Changes
+
+- e163753: Support Effect 4.0.0-rc.112 and newer in the Effect client, using the current tagged-error API.
+
 ## 0.2.1
 
 ### Patch Changes
