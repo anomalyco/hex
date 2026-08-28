@@ -111,8 +111,9 @@ Provisioning installs:
 
 `.hex-sdk` is bundled and managed by HEX; it is not an npm package and must not
 be edited. On startup, HEX atomically refreshes it from the running app bundle
-and runs `bun install` when its contents or required workspace dependencies
-change. User config, unrelated package metadata, scripts, and third-party
+and runs the targeted `bun update @hex/commands` when its contents or required
+workspace dependencies change. A plain install can retain stale Effect peer
+metadata for the local SDK in `bun.lock`. User config, unrelated package metadata, scripts, and third-party
 dependencies are preserved. There is one narrow metadata exception: on init
 and startup, HEX adds a missing Effect dependency or upgrades the exact legacy
 pins `4.0.0-beta.97` and `4.0.0-beta.107` to the bundled SDK's exact

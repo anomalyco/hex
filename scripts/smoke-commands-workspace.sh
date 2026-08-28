@@ -22,6 +22,7 @@ for fixture in fresh 4.0.0-beta.97 4.0.0-beta.107; do
       const manifest = await Bun.file("package.json").json()
       const sdk = await Bun.file(".hex-sdk/package.json").json()
       manifest.dependencies.effect = sdk.peerDependencies.effect = process.argv[1]
+      sdk.devDependencies.effect = process.argv[1]
       manifest.scripts.custom = "echo preserved"
       manifest.userMetadata = { keep: true }
       await Bun.write("package.json", JSON.stringify(manifest, null, 2))
@@ -38,7 +39,7 @@ for fixture in fresh 4.0.0-beta.97 4.0.0-beta.107; do
     ')
   fi
 
-  (cd "$workspace" && bun install && bun run check && bun -e '
+  (cd "$workspace" && bun update @hex/commands && bun run check && bun -e '
     import assert from "node:assert/strict"
     import { Effect } from "effect"
     import { ToolCallError } from "@hex/commands/effect"

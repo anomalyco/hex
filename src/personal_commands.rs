@@ -510,7 +510,8 @@ fn directory_manifest(root: &Path) -> Result<Vec<(PathBuf, Option<Vec<u8>>)>> {
 
 fn install_workspace_dependencies(workspace: &Path, bun: &Path) -> Result<()> {
     let status = Command::new(bun)
-        .arg("install")
+        // A plain install reuses stale peer metadata for file:.hex-sdk in bun.lock.
+        .args(["update", "@hex/commands"])
         .current_dir(workspace)
         .status()
         .wrap_err("could not install the personal command workspace")?;
