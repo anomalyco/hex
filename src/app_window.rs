@@ -253,7 +253,7 @@ pub struct AppWindowPreview {
     pub open_history_retention: bool,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 enum Pane {
     HudLab,
     Meetings,
@@ -263,6 +263,7 @@ enum Pane {
     History,
     Modes,
     VoiceAction,
+    #[default]
     Settings,
 }
 
@@ -288,6 +289,14 @@ enum HudControl {
 const HUD_MAX_SPEED: f32 = 24.0;
 
 impl Pane {
+    fn on_reopen(self, status: SetupStatus) -> Self {
+        if crate::onboarding::permission_warnings(status).is_empty() {
+            self
+        } else {
+            Self::Settings
+        }
+    }
+
     const ALL: [Self; 8] = [
         Self::Settings,
         Self::Modes,
@@ -849,7 +858,7 @@ impl AppWindow {
                         window.retry_model_catalog();
                         let application_catalog_changed = window.poll_application_catalog();
                         let transcription_changed = window.poll_transcription_download();
-                        let setup_changed = window.poll_setup();
+                        let setup_changed = window.poll_setup(false);
                         let login_item_changed = window.poll_login_item();
                         let personal_commands_changed = window.poll_personal_commands();
                         let personal_workspace_changed = window.poll_personal_workspace();
@@ -979,7 +988,7 @@ impl AppWindow {
             cx.observe_window_activation(native_window, |this, window, cx| {
                 if window.is_window_active() {
                     this.permission_refresh_at = Instant::now();
-                    if this.poll_setup() {
+                    if this.poll_setup(true) {
                         cx.notify();
                     }
                 }
@@ -1106,7 +1115,7 @@ impl AppWindow {
             preview: preview_mode,
             pane: preview
                 .as_ref()
-                .map_or(Pane::Modes, |preview| Pane::from_preview(preview.pane)),
+                .map_or(Pane::default(), |preview| Pane::from_preview(preview.pane)),
             event_reader: EventReader::open(event_path),
             activity: DesktopActivity::default(),
             meeting_requests,
@@ -1305,7 +1314,11 @@ impl AppWindow {
             self.ensure_application_catalog_load();
         }
         self.permission_refresh_at = Instant::now();
-        self.poll_setup();
+        self.poll_setup(true);
+        let pane = self.pane.on_reopen(self.setup_status);
+        if pane != self.pane {
+            self.select_pane(pane, cx);
+        }
         cx.notify();
     }
 
@@ -1483,13 +1496,14 @@ impl AppWindow {
         true
     }
 
-    fn poll_setup(&mut self) -> bool {
+    fn poll_setup(&mut self, force: bool) -> bool {
         if self.preview
-            || Instant::now() < self.permission_refresh_at
-            || !self.setup_visible
-                && self.recognition_start.is_none()
-                && self.pane != Pane::Settings
-                && self.setup_status.transcription_model
+            || !force
+                && (Instant::now() < self.permission_refresh_at
+                    || !self.setup_visible
+                        && self.recognition_start.is_none()
+                        && self.pane != Pane::Settings
+                        && self.setup_status.transcription_model)
         {
             return false;
         }
@@ -3472,7 +3486,7 @@ impl AppWindow {
                                     ))
                                     .child(settings_row(
                                         "Software updates",
-                                        "Download signed updates automatically in the background",
+                                        "Check for signed updates automatically in the background",
                                         compact_button(update_button_label)
                                             .id("check-for-updates-setting")
                                             .h(px(32.0))
@@ -8427,6 +8441,38 @@ mod tests {
 
     use super::*;
     use crate::personal_commands::StatusExecution;
+
+    #[test]
+    fn opening_the_app_prioritizes_settings_and_missing_permissions() {
+        assert_eq!(Pane::default(), Pane::Settings);
+        let ready = SetupStatus {
+            microphone: PermissionState::Ready,
+            input_monitoring: PermissionState::Ready,
+            accessibility: PermissionState::Ready,
+            command_model: true,
+            transcription_model: true,
+        };
+        assert_eq!(Pane::Modes.on_reopen(ready), Pane::Modes);
+        for status in [
+            SetupStatus {
+                microphone: PermissionState::NeedsRequest,
+                ..ready
+            },
+            SetupStatus {
+                input_monitoring: PermissionState::NeedsSettings,
+                ..ready
+            },
+            SetupStatus {
+                accessibility: PermissionState::NeedsSettings,
+                ..ready
+            },
+        ] {
+            assert_eq!(Pane::Modes.on_reopen(status), Pane::Settings);
+            assert_eq!(Pane::VoiceAction.on_reopen(status), Pane::Settings);
+            assert_eq!(Pane::Settings.on_reopen(status), Pane::Settings);
+        }
+        assert_eq!(Pane::from_preview(PreviewPane::Modes), Pane::Modes);
+    }
 
     #[test]
     fn missing_dictation_model_has_a_notice_even_with_all_permissions_granted() {

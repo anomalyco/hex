@@ -210,8 +210,9 @@ CoreAudio formats, AppleScript details, or event serialization.
   rewriting, then selected TypeScript transformations. A failed step preserves
   the previous pipeline output. It applies to Paste and Send, but not meetings.
 - OpenCode availability checks stay off the UI thread. When the app finds the
-  `opencode2` executable, it loads the catalog through `opencode2 api`, which
-  automatically starts or reuses the managed service. HEX never invokes
+  `opencode2` executable, `opencode2 api` discovers or starts the managed service;
+  the catalog uses authenticated loopback HTTP to avoid large CLI pipe truncation.
+  HEX never invokes
   `opencode2 serve --service` or owns that service's lifecycle directly. A
   missing beta install is retried at a coarse interval so installing
   `opencode2` while Settings is open refreshes the model catalog without
@@ -368,6 +369,11 @@ and release scripts verify the selected team rather than assuming an Anomaly tea
 The manual DMG contains `Hex.app`; the signed Sparkle ZIP preserves `HEX.app`
 as its archive root so existing Rust 2.0.x installations can discover the update
 despite the new bundle ID. Both artifacts contain the same signed, stapled app.
+Sparkle compares `CFBundleVersion`, not source changes or signing timestamps.
+Public releases must advance beyond distributed beta builds as well as the feed;
+the older local Rust 2.1.0 beta already used build 20100. Do not reuse a released
+version/build for changed code. Validate updates from both the public 2.0.x app
+and the older 2.1.0 beta when changing update identity or packaging.
 There is no Swift migration: never import Swift preferences or data, adopt its
 bundle identifier, publish Rust artifacts to its S3 feed, or automatically quit,
 delete, or replace the Swift app. Prefer a website-only informational item in
