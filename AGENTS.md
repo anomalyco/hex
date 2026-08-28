@@ -359,11 +359,15 @@ precedence while available; override everything with `--device`. The app bundle
 build requires Xcode 26 for Icon Composer compilation and a Developer ID signing
 identity. `scripts/release-app.sh` prepares a notarized and stapled DMG plus its
 signed Sparkle appcast; run `scripts/release-app.sh publish` only after validating
-the prepared artifact. The Anomaly app is named `Hex`, packaged as `Hex.app`,
-with bundle identifier `ly.anoma.Hex` and executable `hex`. Signing requires an
-explicit Anomaly `VOICE_CONTROL_TEAM_ID` and `HEX_NOTARY_PROFILE`; the main app
-build and release scripts must not default to the personal signing team.
+the prepared artifact. The Rust app is named `Hex`, packaged as `Hex.app`,
+with bundle identifier `com.kitlangton.hex2` and executable `hex`. Kit has approved
+his personal Developer ID signing team `QC99C9JE59` for this app. Signing requires
+an explicit `VOICE_CONTROL_TEAM_ID` and matching `HEX_NOTARY_PROFILE`; the build
+and release scripts verify the selected team rather than assuming an Anomaly team.
 `scripts/validate-app.sh` checks this identity before preparation and publication.
+The manual DMG contains `Hex.app`; the signed Sparkle ZIP preserves `HEX.app`
+as its archive root so existing Rust 2.0.x installations can discover the update
+despite the new bundle ID. Both artifacts contain the same signed, stapled app.
 There is no Swift migration: never import Swift preferences or data, adopt its
 bundle identifier, publish Rust artifacts to its S3 feed, or automatically quit,
 delete, or replace the Swift app. Prefer a website-only informational item in
@@ -371,7 +375,7 @@ the legacy Sparkle feed, with no enclosure, pointing to the new app for manual
 installation and fresh setup. Publish it only after the new artifact is live. See
 `docs/plans/swift-app-handoff.md`. The Rust data root remains unchanged, but the
 new app identity requires fresh macOS permission grants. Validate signed
-distribution with the Anomaly team before publishing an app update.
+distribution with the selected signing team before publishing an app update.
 
 `SMAppService` is meaningful only from a signed app installed in
 `/Applications`. When replacing a local bundle outside Finder during a login-item

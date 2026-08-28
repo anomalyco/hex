@@ -10,7 +10,7 @@ bundle=$1
 expected_name=$2
 version=$3
 build_number=$4
-team_id=${VOICE_CONTROL_TEAM_ID:?Set VOICE_CONTROL_TEAM_ID to the Anomaly Apple Developer Team ID}
+team_id=${VOICE_CONTROL_TEAM_ID:?Set VOICE_CONTROL_TEAM_ID to the Apple Developer signing team}
 feed_url=${HEX_EXPECTED_APP_FEED_URL:-https://pub-089d681d41754031a4aefa7017d8c2fb.r2.dev/appcast.xml}
 sparkle_key=mIek27lttJe8cIBqVZFhh6reRKjpTx1h9ZY9OKWPtuM=
 plist="$bundle/Contents/Info.plist"
@@ -26,7 +26,7 @@ plist_value() {
 
 [ -d "$bundle" ] || fail "$bundle does not exist"
 [ "$(basename "$bundle")" = "$expected_name" ] || fail "expected $expected_name, found $(basename "$bundle")"
-[ "$(plist_value CFBundleIdentifier)" = ly.anoma.Hex ] || fail "wrong bundle identifier"
+[ "$(plist_value CFBundleIdentifier)" = com.kitlangton.hex2 ] || fail "wrong bundle identifier"
 [ "$(plist_value CFBundleExecutable)" = hex ] || fail "wrong executable name"
 [ "$(plist_value CFBundleDisplayName)" = Hex ] || fail "wrong display name"
 [ "$(plist_value CFBundleName)" = Hex ] || fail "wrong bundle name"
@@ -42,7 +42,7 @@ plist_value() {
 
 codesign --verify --deep --strict --verbose=2 "$bundle"
 signature=$(codesign -d --verbose=4 "$bundle" 2>&1)
-printf '%s\n' "$signature" | grep -Fq 'Identifier=ly.anoma.Hex' || fail "code signature has the wrong identifier"
+printf '%s\n' "$signature" | grep -Fq 'Identifier=com.kitlangton.hex2' || fail "code signature has the wrong identifier"
 printf '%s\n' "$signature" | grep -Fq "TeamIdentifier=$team_id" || fail "code signature has the wrong team"
 printf '%s\n' "$signature" | grep -Fq 'Authority=Developer ID Application:' || fail "not signed for Developer ID distribution"
 entitlements=$(codesign -d --entitlements - "$bundle" 2>/dev/null)

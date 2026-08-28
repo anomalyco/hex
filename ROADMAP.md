@@ -41,9 +41,9 @@ Keep Swift and Rust separate. Prefer the old app's existing Sparkle update windo
 with a website-only informational item to install the new app manually, with no
 data import or automatic replacement.
 Follow [`docs/plans/swift-app-handoff.md`](docs/plans/swift-app-handoff.md).
-The new app uses Anomaly identity `ly.anoma.Hex`, display name `Hex`, and filename
-`Hex.app`, while retaining the Rust `voice-control` data root. Configure the
-Anomaly signing team and validate the new identity before release. The legacy
+The new app uses identity `com.kitlangton.hex2`, display name `Hex`, and filename
+`Hex.app`, while retaining the Rust `voice-control` data root. Use Kit's approved
+Developer ID signing team and validate the new identity before release. The legacy
 S3 feed must never install a Rust payload. Publish
 the updated Rust artifact first, then the separately validated legacy feed notice.
 No Swift rebuild should be necessary for the notice.

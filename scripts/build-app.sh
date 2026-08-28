@@ -2,7 +2,7 @@
 set -eu
 
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-team_id=${VOICE_CONTROL_TEAM_ID:?Set VOICE_CONTROL_TEAM_ID to the Anomaly Apple Developer Team ID}
+team_id=${VOICE_CONTROL_TEAM_ID:?Set VOICE_CONTROL_TEAM_ID to the Apple Developer signing team}
 identity=${VOICE_CONTROL_CODESIGN_IDENTITY:-}
 if [ -z "$identity" ]; then
   identity=$(security find-identity -v -p codesigning | sed -n "s/.*\"\(Developer ID Application:.*($team_id)\)\"/\1/p" | head -1)
@@ -24,14 +24,15 @@ sparkle_dir=$("$root/scripts/setup-sparkle.sh")
 version=${HEX_VERSION:-$(cargo metadata --no-deps --format-version 1 --manifest-path "$root/Cargo.toml" | jq -r '.packages[0].version')}
 build_number=${HEX_BUILD_NUMBER:-$(printf '%s\n' "$version" | awk -F. '{ print ($1 * 10000) + ($2 * 100) + $3 }')}
 bundle_name=Hex.app
-bundle_id=ly.anoma.Hex
+bundle_id=com.kitlangton.hex2
 executable_name=hex
 
 bundle="$root/target/app/$bundle_name"
 executable="$bundle/Contents/MacOS/$executable_name"
 frameworks="$bundle/Contents/Frameworks"
 
-cargo build --release --manifest-path "$root/Cargo.toml"
+export MACOSX_DEPLOYMENT_TARGET=15.0
+cargo build --locked --release --manifest-path "$root/Cargo.toml"
 rm -rf "$bundle"
 mkdir -p "$bundle/Contents/MacOS" "$bundle/Contents/Resources" "$frameworks"
 cp "$root/target/release/voice-control" "$executable"
