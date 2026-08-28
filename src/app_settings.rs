@@ -387,7 +387,7 @@ fn side_from_flags(flags: u64, general: u64, left: u64, right: u64) -> Option<Mo
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct RuntimeHotkeys {
     pub dictation: RuntimeHotkey,
-    pub edit: RuntimeHotkey,
+    pub edit: Option<RuntimeHotkey>,
     pub paste_last: Option<RuntimeHotkey>,
     pub paste_meeting: Option<RuntimeHotkey>,
 }
@@ -396,7 +396,7 @@ impl Default for RuntimeHotkeys {
     fn default() -> Self {
         Self {
             dictation: HotkeyBinding::default().runtime(),
-            edit: HotkeyBinding::edit_default().runtime(),
+            edit: None,
             paste_last: Some(HotkeyBinding::paste_last_default().runtime()),
             paste_meeting: crate::DEVELOPER_FEATURES_ENABLED
                 .then(|| HotkeyBinding::paste_meeting_default().runtime()),
@@ -456,6 +456,7 @@ pub struct DictationPostProcessing {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(default)]
 pub struct VoiceActionSettings {
+    pub enabled: bool,
     pub model: Option<String>,
     pub variant: Option<String>,
     pub deadline_seconds: u64,
@@ -464,6 +465,7 @@ pub struct VoiceActionSettings {
 impl Default for VoiceActionSettings {
     fn default() -> Self {
         Self {
+            enabled: false,
             model: None,
             variant: None,
             deadline_seconds: 60,
@@ -713,13 +715,7 @@ impl AppSettings {
         *HOTKEYS
             .get_or_init(Default::default)
             .write()
-            .unwrap_or_else(|error| error.into_inner()) = RuntimeHotkeys {
-            dictation: self.dictation_hotkey.runtime(),
-            edit: self.edit_hotkey.runtime(),
-            paste_last: self.paste_last_hotkey.as_ref().map(HotkeyBinding::runtime),
-            paste_meeting: crate::DEVELOPER_FEATURES_ENABLED
-                .then(|| HotkeyBinding::paste_meeting_default().runtime()),
-        };
+            .unwrap_or_else(|error| error.into_inner()) = self.runtime_hotkeys();
         set_transcription_selection(&self.transcription);
         set_microphone_selection(self.microphone.as_deref());
         crate::config::update_dictation_profiles(&self.dictation_processing);
@@ -761,8 +757,23 @@ impl AppSettings {
         true
     }
 
+    pub fn runtime_hotkeys(&self) -> RuntimeHotkeys {
+        RuntimeHotkeys {
+            dictation: self.dictation_hotkey.runtime(),
+            edit: self
+                .voice_action
+                .enabled
+                .then(|| self.edit_hotkey.runtime()),
+            paste_last: self.paste_last_hotkey.as_ref().map(HotkeyBinding::runtime),
+            paste_meeting: crate::DEVELOPER_FEATURES_ENABLED
+                .then(|| HotkeyBinding::paste_meeting_default().runtime()),
+        }
+    }
+
     fn repair_hotkey_conflict(&mut self) {
-        if !hotkeys_conflict(&self.dictation_hotkey, &self.edit_hotkey) {
+        if !self.voice_action.enabled
+            || !hotkeys_conflict(&self.dictation_hotkey, &self.edit_hotkey)
+        {
             return;
         }
         let edit_with_key = crate::keyboard::key_code_for('e')
@@ -894,7 +905,7 @@ pub fn dictation_hotkey() -> RuntimeHotkey {
     runtime_hotkeys().dictation
 }
 
-pub fn edit_hotkey() -> RuntimeHotkey {
+pub fn edit_hotkey() -> Option<RuntimeHotkey> {
     runtime_hotkeys().edit
 }
 
@@ -1172,9 +1183,23 @@ mod tests {
     }
 
     #[test]
+    fn voice_action_requires_explicit_opt_in_for_new_and_existing_settings() {
+        for json in [
+            r#"{}"#,
+            r#"{"voice_action":{"model":"example/model-a","variant":"fast"}}"#,
+        ] {
+            let settings: AppSettings = serde_json::from_str(json).unwrap();
+            assert!(settings.runtime_hotkeys().edit.is_none());
+            let saved = serde_json::to_value(settings).unwrap();
+            assert_eq!(saved["voice_action"]["enabled"], false);
+        }
+    }
+
+    #[test]
     fn voice_action_settings_round_trip() {
         let settings = AppSettings {
             voice_action: VoiceActionSettings {
+                enabled: true,
                 model: Some("example/rewrite-model".into()),
                 variant: Some("fast".into()),
                 deadline_seconds: 12,
@@ -1185,6 +1210,11 @@ mod tests {
         let encoded = serde_json::to_string(&settings).unwrap();
         let decoded: AppSettings = serde_json::from_str(&encoded).unwrap();
 
+        assert!(decoded.voice_action.enabled);
+        assert_eq!(
+            decoded.runtime_hotkeys().edit,
+            Some(decoded.edit_hotkey.runtime())
+        );
         assert_eq!(decoded.voice_action.model, settings.voice_action.model);
         assert_eq!(decoded.voice_action.variant, settings.voice_action.variant);
         assert_eq!(decoded.voice_action.deadline_seconds, 12);
@@ -1383,6 +1413,7 @@ mod tests {
             edit_hotkey: HotkeyBinding::edit_default(),
             ..Default::default()
         };
+        settings.voice_action.enabled = true;
 
         settings.repair_hotkey_conflict();
 
@@ -1390,5 +1421,25 @@ mod tests {
             &settings.dictation_hotkey,
             &settings.edit_hotkey
         ));
+    }
+
+    #[test]
+    fn disabled_voice_action_preserves_its_binding_without_reserving_it() {
+        let mut settings = AppSettings {
+            dictation_hotkey: HotkeyBinding::edit_default(),
+            ..Default::default()
+        };
+        let saved_binding = settings.edit_hotkey.clone();
+        settings.repair_hotkey_conflict();
+        assert_eq!(settings.edit_hotkey, saved_binding);
+        assert!(settings.runtime_hotkeys().edit.is_none());
+        settings.voice_action.enabled = true;
+        assert_eq!(
+            settings.runtime_hotkeys().edit,
+            Some(saved_binding.runtime())
+        );
+        settings.voice_action.enabled = false;
+        assert!(settings.runtime_hotkeys().edit.is_none());
+        assert_eq!(settings.edit_hotkey, saved_binding);
     }
 }

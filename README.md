@@ -42,7 +42,9 @@ pasted.
 [OpenCode](https://v2.opencode.ai/) is optional. Ordinary dictation does not
 require it.
 
-- **Voice Action:** hold **Option-Command** and describe what you want. HEX sends
+- **Voice Action:** enable it in the Voice Action pane, then hold
+  **Option-Command** and describe what you want. It defaults off, independently
+  of your dictation shortcut. HEX sends
   that instruction, selected text when Accessibility makes it available, and
   the foreground application and Brave website hostname. It pastes the result
   at the current focus.

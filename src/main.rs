@@ -190,6 +190,9 @@ enum Command {
         /// Select the Global row in the representative Modes preview.
         #[arg(long)]
         select_global_mode: bool,
+        /// Enable Voice Action in the preview; it is off by default.
+        #[arg(long)]
+        voice_action_enabled: bool,
         /// Preview OpenCode-dependent controls without an available installation.
         #[arg(long)]
         opencode_unavailable: bool,
@@ -453,6 +456,7 @@ fn main() -> Result<()> {
             collapse_mode_processing,
             open_transformation_picker,
             select_global_mode,
+            voice_action_enabled,
             opencode_unavailable,
             permissions_missing,
             model_missing,
@@ -499,6 +503,7 @@ fn main() -> Result<()> {
                     collapse_mode_processing,
                     open_transformation_picker,
                     select_global_mode,
+                    voice_action_enabled,
                     opencode_unavailable,
                     permissions_missing,
                     model_missing,
@@ -712,7 +717,38 @@ fn is_bundled_app_executable(name: Option<&std::ffi::OsStr>) -> bool {
 
 #[cfg(all(test, target_os = "macos"))]
 mod tests {
-    use super::is_bundled_app_executable;
+    use super::{Cli, Command, is_bundled_app_executable};
+    use clap::Parser;
+
+    #[test]
+    fn voice_action_preview_requires_explicit_opt_in() {
+        let cli = Cli::try_parse_from(["hex", "preview", "voice-action"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Some(Command::Preview {
+                voice_action_enabled: false,
+                opencode_unavailable: false,
+                ..
+            })
+        ));
+
+        let cli = Cli::try_parse_from([
+            "hex",
+            "preview",
+            "voice-action",
+            "--voice-action-enabled",
+            "--opencode-unavailable",
+        ])
+        .unwrap();
+        assert!(matches!(
+            cli.command,
+            Some(Command::Preview {
+                voice_action_enabled: true,
+                opencode_unavailable: true,
+                ..
+            })
+        ));
+    }
 
     #[test]
     fn both_packaged_executable_names_launch_the_app() {

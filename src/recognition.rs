@@ -216,11 +216,13 @@ pub fn listen(
         crate::app_settings::dictation_hotkey(),
     );
     hotkey.set_double_tap_only(crate::app_settings::double_tap_only());
-    let mut edit_hotkey = DictationHotkey::new_without_paste(
-        CaptureInstant::now(),
-        input_monitor.paste_key_code,
-        crate::app_settings::edit_hotkey(),
-    );
+    let mut edit_hotkey = crate::app_settings::edit_hotkey().map(|binding| {
+        DictationHotkey::new_without_paste(
+            CaptureInstant::now(),
+            input_monitor.paste_key_code,
+            binding,
+        )
+    });
     let mut edit_context = None;
     let mut edit_pending_since = None;
     let mut mode = Mode::Listening;
@@ -276,7 +278,10 @@ pub fn listen(
             indicator.send(DictationIndicatorEvent::Started);
         }
     }
-    if edit_hotkey.is_recording() {
+    if edit_hotkey
+        .as_ref()
+        .is_some_and(DictationHotkey::is_recording)
+    {
         input.start(if microphone_policy.release_while_idle {
             CaptureInstant::now()
         } else {
@@ -290,7 +295,10 @@ pub fn listen(
     }
     emit_state(
         &mut events,
-        hotkey.is_recording() || edit_hotkey.is_recording(),
+        hotkey.is_recording()
+            || edit_hotkey
+                .as_ref()
+                .is_some_and(DictationHotkey::is_recording),
         mode,
         &input.device_name(),
     )?;
@@ -337,7 +345,9 @@ pub fn listen(
                         if programmatic.is_some()
                             || input.is_recording()
                             || hotkey.is_recording()
-                            || edit_hotkey.is_recording()
+                            || edit_hotkey
+                                .as_ref()
+                                .is_some_and(DictationHotkey::is_recording)
                             || voice_protocol.is_some()
                         {
                             let _ = reply.send(Err("dictation-busy".into()));
@@ -668,7 +678,44 @@ pub fn listen(
         hotkey.set_double_tap_enabled(crate::app_settings::double_tap_lock());
         hotkey.set_double_tap_only(crate::app_settings::double_tap_only());
         hotkey.set_binding(crate::app_settings::dictation_hotkey());
-        edit_hotkey.set_binding(crate::app_settings::edit_hotkey());
+        match crate::app_settings::edit_hotkey() {
+            Some(binding) => match &mut edit_hotkey {
+                Some(edit) => edit.set_binding(binding),
+                None => {
+                    let mut edit = DictationHotkey::new_without_paste(
+                        CaptureInstant::now(),
+                        input_monitor.paste_key_code,
+                        binding,
+                    );
+                    edit.wait_for_release();
+                    edit_hotkey = Some(edit);
+                }
+            },
+            None => {
+                if let Some(mut edit) = edit_hotkey.take() {
+                    let was_recording = edit.suspend().is_some();
+                    let was_pending = edit_pending_since.take().is_some();
+                    if (was_recording || was_pending || edit_context.is_some())
+                        && voice_protocol.is_none()
+                    {
+                        hotkey.suppress_until_release();
+                        handle_edit_hotkey_action(
+                            HotkeyAction::Cancel,
+                            CaptureInstant::now(),
+                            &mut edit_context,
+                            &mut recognizer,
+                            &input,
+                            &dictation_worker,
+                            mode,
+                            &context,
+                            &input.device_name(),
+                            &mut events,
+                            indicator.as_ref(),
+                        )?;
+                    }
+                }
+            }
+        }
         let (next_microphone_revision, microphone) = crate::app_settings::microphone_selection();
         if next_microphone_revision != microphone_revision {
             input.request_selection(next_microphone_revision, microphone.as_deref());
@@ -683,7 +730,7 @@ pub fn listen(
         if hotkey_capture_suspended && voice_protocol.is_none() {
             edit_pending_since = None;
             let normal_action = hotkey.suspend();
-            let edit_action = edit_hotkey.suspend();
+            let edit_action = edit_hotkey.as_mut().and_then(DictationHotkey::suspend);
             if normal_action.is_some() || edit_action.is_some() {
                 edit_context = None;
                 handle_hotkey_action(
@@ -740,7 +787,9 @@ pub fn listen(
                 continue;
             }
             if !hotkey.is_recording()
-                && !edit_hotkey.is_recording()
+                && !edit_hotkey
+                    .as_ref()
+                    .is_some_and(DictationHotkey::is_recording)
                 && input_event.is_escape_down()
                 && let Some(job_id) = dictation_worker.cancel_latest()
             {
@@ -753,7 +802,9 @@ pub fn listen(
                 }
                 continue;
             }
-            let edit_action = edit_hotkey.process(input_event, capture_at);
+            let edit_action = edit_hotkey
+                .as_mut()
+                .and_then(|edit| edit.process(input_event, capture_at));
             if matches!(edit_action, Some(HotkeyAction::Start)) && voice_protocol.is_none() {
                 start_pending_voice_action(
                     &mut edit_pending_since,
@@ -770,7 +821,9 @@ pub fn listen(
                 let voice_action_takeover = voice_action_owns_action(
                     action,
                     edit_pending_since.is_some(),
-                    edit_hotkey.is_recording(),
+                    edit_hotkey
+                        .as_ref()
+                        .is_some_and(DictationHotkey::is_recording),
                     edit_action,
                 );
                 if voice_action_takeover {
@@ -811,7 +864,7 @@ pub fn listen(
                             indicator.as_ref(),
                         )?;
                         if !accepted {
-                            edit_hotkey.suspend();
+                            edit_hotkey.as_mut().and_then(DictationHotkey::suspend);
                         }
                     }
                     Some(started_at)
@@ -879,7 +932,9 @@ pub fn listen(
             })
             .duration_since(started)
                 >= MINIMUM_HOLD_DURATION
-        }) && edit_hotkey.is_recording()
+        }) && edit_hotkey
+            .as_ref()
+            .is_some_and(DictationHotkey::is_recording)
         {
             let capture_at = edit_pending_since.expect("pending voice action has a boundary");
             edit_pending_since = None;
@@ -897,7 +952,7 @@ pub fn listen(
                 None,
             )?;
             if !accepted {
-                edit_hotkey.suspend();
+                edit_hotkey.as_mut().and_then(DictationHotkey::suspend);
                 if let Some(indicator) = &indicator {
                     indicator.send(DictationIndicatorEvent::Failed);
                 }
@@ -960,7 +1015,9 @@ pub fn listen(
         }
         input_monitor.set_escape_cancels(
             hotkey.is_recording()
-                || edit_hotkey.is_recording()
+                || edit_hotkey
+                    .as_ref()
+                    .is_some_and(DictationHotkey::is_recording)
                 || voice_protocol.is_some()
                 || programmatic.is_some()
                 || dictation_worker.pending_count() > 0,
@@ -968,7 +1025,11 @@ pub fn listen(
         if received_worker_event {
             emit_engine_state(
                 &mut events,
-                hotkey.is_recording() || edit_hotkey.is_recording() || voice_protocol.is_some(),
+                hotkey.is_recording()
+                    || edit_hotkey
+                        .as_ref()
+                        .is_some_and(DictationHotkey::is_recording)
+                    || voice_protocol.is_some(),
                 &dictation_worker,
                 mode,
                 &input.device_name(),
@@ -991,7 +1052,7 @@ pub fn listen(
                     }
                     programmatic = None;
                     hotkey.suspend();
-                    edit_hotkey.suspend();
+                    edit_hotkey.as_mut().and_then(DictationHotkey::suspend);
                     edit_context = None;
                     edit_pending_since = None;
                     feedback::play(Tone::Error);
@@ -1043,7 +1104,7 @@ pub fn listen(
                     if was_recording {
                         programmatic = None;
                         hotkey.suspend();
-                        edit_hotkey.suspend();
+                        edit_hotkey.as_mut().and_then(DictationHotkey::suspend);
                         voice_protocol = None;
                         edit_context = None;
                         edit_pending_since = None;
@@ -1089,7 +1150,7 @@ pub fn listen(
                     edit_context = None;
                     edit_pending_since = None;
                     hotkey.suspend();
-                    edit_hotkey.suspend();
+                    edit_hotkey.as_mut().and_then(DictationHotkey::suspend);
                     input.discard_recognition_backlog();
                     reset_recognizer(&mut recognizer)?;
                     recognition_origin = None;
@@ -1136,7 +1197,9 @@ pub fn listen(
             && recognizer.is_some()
             && programmatic.is_none()
             && !hotkey.suppresses_recognition()
-            && !edit_hotkey.suppresses_recognition()
+            && !edit_hotkey
+                .as_ref()
+                .is_some_and(DictationHotkey::suppresses_recognition)
         {
             let generation = input.recognition_generation();
             if recognition_origin.is_none_or(|(current, _)| current != generation) {
@@ -1159,7 +1222,9 @@ pub fn listen(
             Some(audio)
                 if programmatic.is_some()
                     || hotkey.suppresses_recognition()
-                    || edit_hotkey.suppresses_recognition() =>
+                    || edit_hotkey
+                        .as_ref()
+                        .is_some_and(DictationHotkey::suppresses_recognition) =>
             {
                 if let Some(indicator) = &indicator {
                     indicator.meter(&audio.samples);
@@ -1183,7 +1248,9 @@ pub fn listen(
         if !input.is_recovering()
             && programmatic.is_none()
             && !hotkey.suppresses_recognition()
-            && !edit_hotkey.suppresses_recognition()
+            && !edit_hotkey
+                .as_ref()
+                .is_some_and(DictationHotkey::suppresses_recognition)
             && last_update.elapsed() >= UPDATE_INTERVAL
             && let Some(recognizer) = &mut recognizer
             && let Some(action_executor) = &action_executor

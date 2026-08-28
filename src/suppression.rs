@@ -1,4 +1,4 @@
-use std::collections::{HashSet, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::ffi::c_void;
 use std::ptr;
 use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU64, Ordering};
@@ -498,20 +498,21 @@ fn send_input(context: &EventTapContext, event: InputEvent, capture_at: CaptureI
 
 #[derive(Default)]
 struct ShortcutSuppression {
-    shortcut_keys_pressed: HashSet<u16>,
+    // Repeats and releases keep the original press's suppression decision.
+    key_presses: HashMap<u16, bool>,
     escape_pressed: bool,
 }
 
 impl ShortcutSuppression {
     fn reset(&mut self) {
-        self.shortcut_keys_pressed.clear();
+        self.key_presses.clear();
         self.escape_pressed = false;
     }
 
     fn process_all(&mut self, input: InputEvent, hotkeys: RuntimeHotkeys, delivered: bool) -> bool {
         let bindings = [
             Some(hotkeys.dictation),
-            Some(hotkeys.edit),
+            hotkeys.edit,
             hotkeys.paste_last,
             hotkeys.paste_meeting,
         ];
@@ -520,18 +521,16 @@ impl ShortcutSuppression {
                 code,
                 down: true,
                 flags,
-            } if delivered
-                && bindings
-                    .iter()
-                    .flatten()
-                    .any(|hotkey| hotkey.matches_key_press(code, flags)) =>
-            {
-                self.shortcut_keys_pressed.insert(code);
-                true
-            }
+            } => *self.key_presses.entry(code).or_insert_with(|| {
+                delivered
+                    && bindings
+                        .iter()
+                        .flatten()
+                        .any(|hotkey| hotkey.matches_key_press(code, flags))
+            }),
             InputEvent::Key {
                 code, down: false, ..
-            } => self.shortcut_keys_pressed.remove(&code),
+            } => self.key_presses.remove(&code).unwrap_or(false),
             _ => false,
         }
     }
@@ -552,7 +551,7 @@ impl ShortcutSuppression {
             input,
             RuntimeHotkeys {
                 dictation: hotkey,
-                edit: RuntimeHotkey::default(),
+                edit: None,
                 paste_last: Some(paste_last),
                 paste_meeting: Some(paste_meeting),
             },
@@ -655,6 +654,7 @@ pub struct DictationHotkey {
     last_release_at: Option<CaptureInstant>,
     binding: RuntimeHotkey,
     paste_actions_enabled: bool,
+    ignore_before: Option<CaptureInstant>,
 }
 
 impl DictationHotkey {
@@ -711,6 +711,7 @@ impl DictationHotkey {
             last_release_at: None,
             binding,
             paste_actions_enabled: true,
+            ignore_before: None,
         }
     }
 
@@ -760,7 +761,48 @@ impl DictationHotkey {
         was_recording.then_some(HotkeyAction::Cancel)
     }
 
+    pub fn wait_for_release(&mut self) {
+        // A settings transition is not a new press; preserve held-key suppression.
+        let now = CaptureInstant::now();
+        // SAFETY: These are read-only queries of the documented HID system state.
+        let flags = unsafe { CGEventSourceFlagsState(HID_SYSTEM_STATE) };
+        let key_down = self
+            .binding
+            .key_code
+            .is_some_and(|code| unsafe { CGEventSourceKeyState(HID_SYSTEM_STATE, code) });
+        self.wait_for_release_with_state(now, flags, key_down);
+    }
+
+    pub fn suppress_until_release(&mut self) {
+        self.state = State::Dirty;
+        self.last_release_at = None;
+    }
+
+    fn wait_for_release_with_state(&mut self, now: CaptureInstant, flags: u64, key_down: bool) {
+        self.suspend();
+        self.ignore_before = Some(now);
+        if key_down && let Some(code) = self.binding.key_code {
+            self.pressed_keys.insert(code);
+        }
+        if flags & HOTKEY_MODIFIERS_MASK != 0 || !self.pressed_keys.is_empty() {
+            self.state = State::Dirty;
+        }
+    }
+
     pub fn process(&mut self, event: InputEvent, now: CaptureInstant) -> Option<HotkeyAction> {
+        if matches!(event, InputEvent::TapDisabled) {
+            let was_recording = self.is_recording();
+            self.state = State::Dirty;
+            self.last_release_at = None;
+            return was_recording.then_some(HotkeyAction::Cancel);
+        }
+        // Queued edges from before an opt-in transition cannot start a new capture.
+        if self
+            .ignore_before
+            .is_some_and(|changed_at| now < changed_at)
+        {
+            return None;
+        }
         let fresh_key_down = match event {
             InputEvent::Key { code, down, .. } => {
                 if down {
@@ -773,12 +815,6 @@ impl DictationHotkey {
             InputEvent::Flags(_) | InputEvent::MouseDown | InputEvent::TapDisabled => false,
         };
 
-        if matches!(event, InputEvent::TapDisabled) {
-            let was_recording = self.is_recording();
-            self.state = State::Dirty;
-            self.last_release_at = None;
-            return was_recording.then_some(HotkeyAction::Cancel);
-        }
         if self.paste_actions_enabled
             && fresh_key_down
             && let Some(action) = paste_action(event, crate::app_settings::runtime_hotkeys())
@@ -1313,6 +1349,207 @@ mod tests {
                 now + Duration::from_secs(1),
             ),
             Some(HotkeyAction::Finish)
+        );
+    }
+
+    #[test]
+    fn voice_action_uses_separate_binding_after_dictation_is_rebound() {
+        use crate::app_settings::{
+            AppSettings, COMMAND_KEY_MASK, CONTROL_KEY_MASK, LEFT_COMMAND_MASK, LEFT_CONTROL_MASK,
+            LEFT_OPTION_MASK, RIGHT_CONTROL_MASK,
+        };
+
+        let mut settings: AppSettings = serde_json::from_str(
+            r#"{"dictation_hotkey":{"modifiers":{"control":"right"},"key":null}}"#,
+        )
+        .unwrap();
+        settings.voice_action.enabled = true;
+        let now = capture_time();
+        let mut dictation = DictationHotkey::with_binding(
+            false,
+            now,
+            42,
+            false,
+            settings.dictation_hotkey.runtime(),
+        );
+        let mut edit = DictationHotkey::with_binding(
+            false,
+            now,
+            42,
+            false,
+            settings.runtime_hotkeys().edit.unwrap(),
+        );
+        assert_eq!(
+            dictation.process(InputEvent::Flags(CONTROL_KEY_MASK | LEFT_CONTROL_MASK), now),
+            None
+        );
+        assert_eq!(dictation.process(InputEvent::Flags(0), now), None);
+        assert_eq!(
+            dictation.process(
+                InputEvent::Flags(CONTROL_KEY_MASK | RIGHT_CONTROL_MASK),
+                now
+            ),
+            Some(HotkeyAction::Start)
+        );
+        assert_eq!(
+            dictation.process(InputEvent::Flags(0), now + Duration::from_secs(1)),
+            Some(HotkeyAction::Finish)
+        );
+
+        let chord = InputEvent::Flags(
+            OPTION_KEY_MASK | COMMAND_KEY_MASK | LEFT_OPTION_MASK | LEFT_COMMAND_MASK,
+        );
+        assert_eq!(dictation.process(chord, now + Duration::from_secs(2)), None);
+        assert_eq!(
+            edit.process(chord, now + Duration::from_secs(2)),
+            Some(HotkeyAction::Start)
+        );
+    }
+
+    #[test]
+    fn voice_action_toggle_preserves_ownership_of_in_progress_key_gestures() {
+        use crate::app_settings::{AppSettings, HotkeyKey};
+
+        let mut settings = AppSettings::default();
+        settings.edit_hotkey.key = Some(HotkeyKey {
+            code: 40,
+            label: "K".into(),
+        });
+        let event = |down| InputEvent::Key {
+            code: 40,
+            down,
+            flags: OPTION_KEY_MASK | crate::app_settings::COMMAND_KEY_MASK,
+        };
+        for enabled in [false, true] {
+            let mut suppression = ShortcutSuppression::default();
+            settings.voice_action.enabled = enabled;
+            assert_eq!(
+                suppression.process_all(event(true), settings.runtime_hotkeys(), true),
+                enabled
+            );
+            settings.voice_action.enabled = !enabled;
+            for delivered in [true, false] {
+                assert_eq!(
+                    suppression.process_all(event(true), settings.runtime_hotkeys(), delivered),
+                    enabled
+                );
+            }
+            assert_eq!(
+                suppression.process_all(event(false), settings.runtime_hotkeys(), true),
+                enabled
+            );
+            assert_eq!(
+                suppression.process_all(event(true), settings.runtime_hotkeys(), true),
+                !enabled
+            );
+            assert_eq!(
+                suppression.process_all(event(false), settings.runtime_hotkeys(), true),
+                !enabled
+            );
+        }
+    }
+
+    #[test]
+    fn tap_failure_cancels_recording_after_live_opt_in() {
+        let now = capture_time();
+        let mut hotkey = test_hotkey(false, now);
+        hotkey.wait_for_release_with_state(now, 0, false);
+        assert_eq!(
+            hotkey.process(InputEvent::Flags(OPTION_KEY_MASK), now),
+            Some(HotkeyAction::Start)
+        );
+        assert_eq!(
+            hotkey.process(InputEvent::TapDisabled, CaptureInstant::ZERO),
+            Some(HotkeyAction::Cancel)
+        );
+        assert!(!hotkey.is_recording());
+    }
+
+    #[test]
+    fn enabling_a_held_key_binding_waits_for_a_fresh_press() {
+        let now = capture_time();
+        let binding = RuntimeHotkey {
+            modifiers: Default::default(),
+            key_code: Some(40),
+        };
+        let mut hotkey = DictationHotkey::with_binding(false, now, 42, false, binding);
+        let event = |down| InputEvent::Key {
+            code: 40,
+            down,
+            flags: 0,
+        };
+        hotkey.wait_for_release_with_state(now, 0, true);
+        assert_eq!(hotkey.process(event(true), now), None);
+        assert_eq!(hotkey.process(InputEvent::Flags(0), now), None);
+        assert_eq!(hotkey.process(event(false), now), None);
+        assert_eq!(hotkey.process(event(true), now), Some(HotkeyAction::Start));
+    }
+
+    #[test]
+    fn changing_voice_action_does_not_activate_a_remaining_option_modifier() {
+        let now = capture_time();
+        let chord = OPTION_KEY_MASK | crate::app_settings::COMMAND_KEY_MASK;
+        let mut hotkey = test_hotkey(false, now);
+        hotkey.suppress_until_release();
+        assert_eq!(hotkey.process(InputEvent::Flags(chord), now), None);
+        assert_eq!(
+            hotkey.process(InputEvent::Flags(OPTION_KEY_MASK), now),
+            None
+        );
+        assert_eq!(hotkey.process(InputEvent::Flags(0), now), None);
+        assert_eq!(
+            hotkey.process(InputEvent::Flags(OPTION_KEY_MASK), now),
+            Some(HotkeyAction::Start)
+        );
+    }
+
+    #[test]
+    fn waiting_for_release_does_not_block_explicit_paste() {
+        let now = capture_time();
+        let mut hotkey = test_hotkey(false, now);
+        hotkey.suppress_until_release();
+        let binding = HotkeyBinding::paste_last_default();
+        assert_eq!(
+            hotkey.process(
+                InputEvent::Key {
+                    code: binding.key.unwrap().code,
+                    down: true,
+                    flags: OPTION_KEY_MASK | SHIFT_KEY_MASK,
+                },
+                now
+            ),
+            Some(HotkeyAction::PasteLast)
+        );
+    }
+
+    #[test]
+    fn enabling_with_no_keys_held_accepts_the_next_gesture() {
+        let now = capture_time();
+        let mut hotkey = test_hotkey(false, now);
+        hotkey.wait_for_release_with_state(now, 0, false);
+        assert_eq!(
+            hotkey.process(InputEvent::Flags(OPTION_KEY_MASK), now),
+            Some(HotkeyAction::Start)
+        );
+    }
+
+    #[test]
+    fn opt_in_transitions_ignore_queued_old_shortcut_edges() {
+        let now = capture_time();
+        let mut hotkey = test_hotkey(false, now);
+        let changed_at = now + Duration::from_secs(1);
+        hotkey.wait_for_release_with_state(changed_at, 0, false);
+        assert_eq!(
+            hotkey.process(InputEvent::Flags(OPTION_KEY_MASK), now),
+            None
+        );
+        assert_eq!(
+            hotkey.process(InputEvent::Flags(0), now + Duration::from_millis(500)),
+            None
+        );
+        assert_eq!(
+            hotkey.process(InputEvent::Flags(OPTION_KEY_MASK), changed_at),
+            Some(HotkeyAction::Start)
         );
     }
 
