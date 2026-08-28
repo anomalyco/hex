@@ -10,6 +10,8 @@ runtime settings persist in Application Support.
 
 The distributed release starts in hotkey-dictation-only mode. Voice commands and
 their catalog remain available as a persisted opt-in that defaults off.
+Voice Action also requires its own persisted opt-in, defaulting off even for
+existing settings without an explicit enabled flag.
 `DEVELOPER_FEATURES_ENABLED` keeps meetings and their UI/CLI surfaces available
 only in debug builds.
 
@@ -207,8 +209,11 @@ CoreAudio formats, AppleScript details, or event serialization.
   `NotRegistered` and `NotFound` as disabled before registration, represent
   `RequiresApproval` with a link to Login Items settings, and poll macOS as the
   source of truth instead of persisting a parallel Boolean.
-- Voice Action is an explicit second capture target, defaulting to
-  Option-Command. Promoting an active Option capture preserves all recorded
+- Voice Action is an optional second capture target. Its saved shortcut defaults
+  to Option-Command, but no shortcut is active or reserved until the user enables
+  Voice Action. Disabling it cancels its active capture, not accepted jobs, and
+  preserves the saved shortcut and model. The toggle remains reachable when
+  OpenCode is unavailable. Promoting an active Option capture preserves all recorded
   audio. Selected text is optional prompt context; inaccessible or empty
   selections act as no selection. Use the dedicated OpenCode model and deadline,
   return only paste-ready text, and paste at the current focus. Failed, empty,
@@ -339,7 +344,8 @@ cargo run -- preview transcription-picker --language zh --model-state installed
 ./scripts/capture-preview.sh /tmp/hex-modes-collapsed.png modes --collapse-mode-processing
 ./scripts/capture-preview.sh /tmp/hex-modes-picker.png modes --collapse-mode-processing --open-transformation-picker
 ./scripts/capture-preview.sh /tmp/hex-modes-global.png modes --collapse-mode-processing --select-global-mode
-./scripts/capture-preview.sh /tmp/hex-voice-action-unavailable.png voice-action --opencode-unavailable
+./scripts/capture-preview.sh /tmp/hex-voice-action-off.png voice-action
+./scripts/capture-preview.sh /tmp/hex-voice-action-unavailable.png voice-action --voice-action-enabled --opencode-unavailable
 HEX_PREVIEW_SKIP_BUILD=1 ./scripts/capture-preview.sh /tmp/hex-modes.png modes
 ./scripts/install-app.sh
 cargo fmt --check

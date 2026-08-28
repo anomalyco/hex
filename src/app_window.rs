@@ -249,6 +249,7 @@ pub struct AppWindowPreview {
     pub collapse_mode_processing: bool,
     pub open_transformation_picker: bool,
     pub select_global_mode: bool,
+    pub voice_action_enabled: bool,
     pub opencode_unavailable: bool,
     pub permissions_missing: bool,
     pub model_missing: bool,
@@ -476,6 +477,8 @@ struct ProcessingInputs {
 
 struct VoiceActionInputs {
     model: ProcessingInput,
+    enabled_toggle: ToggleSpring,
+    error: Option<String>,
 }
 
 struct ReplacementInputs {
@@ -924,6 +927,7 @@ impl AppWindow {
                 commands_enabled: preview.command_model_missing,
                 ..AppSettings::default()
             };
+            settings.voice_action.enabled = preview.voice_action_enabled;
             if let Some((language, _)) = &preview.transcription_picker
                 && let Some(choice) = preview_choices(language).first()
             {
@@ -2622,6 +2626,9 @@ impl AppWindow {
                                         return;
                                     };
                                     *binding = candidate;
+                                    if kind == HotkeyKind::Edit {
+                                        this.voice_action_inputs.error = None;
+                                    }
                                     this.hotkey_side_selection_springs[hotkey_kind_index(kind)]
                                         .set_target(index as f32);
                                     this.save_settings(cx);
@@ -2791,7 +2798,10 @@ impl AppWindow {
             .set_target(hotkey_saved_width(binding.keycaps().len()));
         match kind {
             HotkeyKind::Dictation => self.settings.dictation_hotkey = binding,
-            HotkeyKind::Edit => self.settings.edit_hotkey = binding,
+            HotkeyKind::Edit => {
+                self.settings.edit_hotkey = binding;
+                self.voice_action_inputs.error = None;
+            }
             HotkeyKind::PasteLast => self.settings.paste_last_hotkey = Some(binding),
         }
         if kind == HotkeyKind::Dictation && !key_based {
@@ -3790,7 +3800,47 @@ impl AppWindow {
     }
 
     fn render_voice_action(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        if let Some(copy) = opencode_unavailable_copy(&self.model_catalog) {
+        let enabled = self.settings.voice_action.enabled;
+        let compact = window.viewport_size().width < px(980.0);
+        let (status, description) = voice_action_status_copy(enabled);
+        let position = self
+            .voice_action_inputs
+            .enabled_toggle
+            .render_position(window);
+        let enabled_control = div()
+            .id("voice-action-enabled")
+            .flex()
+            .items_center()
+            .gap_3()
+            .child(
+                div()
+                    .text_size(px(11.0))
+                    .text_color(rgb(MUTED))
+                    .child(status),
+            )
+            .child(toggle(position))
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.cancel_hotkey_capture(cx);
+                let enabled = !this.settings.voice_action.enabled;
+                let result = set_voice_action_enabled(&mut this.settings, enabled)
+                    .map_err(|message| color_eyre::eyre::eyre!(message))
+                    .and_then(|()| this.persist_settings());
+                match result {
+                    Ok(()) => {
+                        this.voice_action_inputs.enabled_toggle.set_enabled(enabled);
+                        this.voice_action_inputs.error = None;
+                    }
+                    Err(error) => {
+                        this.settings.voice_action.enabled = !enabled;
+                        this.voice_action_inputs.error = Some(error.to_string());
+                    }
+                }
+                cx.notify();
+            }));
+        let hotkey = self.render_hotkey_setting_control(HotkeyKind::Edit, window, cx);
+        let processing = if !enabled {
+            None
+        } else if let Some(copy) = opencode_unavailable_copy(&self.model_catalog) {
             let error = copy.error.map(str::to_owned);
             let show_actions = copy.can_retry || copy.can_open_setup;
             let retry_label = copy.retry_label;
@@ -3813,60 +3863,40 @@ impl AppWindow {
                             .on_click(|_, _, _| open_opencode_beta_docs()),
                     )
                 });
-            return div()
-                .size_full()
-                .flex()
-                .flex_col()
-                .child(pane_header("Voice Action"))
-                .child(
-                    div().flex_1().flex().items_center().justify_center().child(
-                        div()
-                            .w(px(420.0))
-                            .p_5()
-                            .rounded_md()
-                            .border_1()
-                            .border_color(rgb(LINE))
-                            .bg(rgb(SURFACE))
-                            .child(settings_copy(copy.title, copy.description))
-                            .when_some(error, |card, error| {
-                                card.child(
-                                    div()
-                                        .mt_3()
-                                        .rounded_sm()
-                                        .border_1()
-                                        .border_color(rgb(0x613b3b))
-                                        .bg(rgb(0x271b1b))
-                                        .child(error_message("OpenCode reported:", error)),
-                                )
-                            })
-                            .when(show_actions, |card| card.child(actions)),
-                    ),
-                )
-                .into_any_element();
-        }
-        let compact = window.viewport_size().width < px(980.0);
-        let hotkey = self.render_hotkey_setting_control(HotkeyKind::Edit, window, cx);
-        let processing = self.render_voice_action_processing(window, cx);
+            Some(
+                compact_panel()
+                    .p_5()
+                    .child(settings_copy(copy.title, copy.description))
+                    .when_some(error, |card, error| {
+                        card.child(
+                            div()
+                                .mt_3()
+                                .rounded_sm()
+                                .border_1()
+                                .border_color(rgb(0x613b3b))
+                                .bg(rgb(0x271b1b))
+                                .child(error_message("OpenCode reported:", error)),
+                        )
+                    })
+                    .when(show_actions, |card| card.child(actions))
+                    .into_any_element(),
+            )
+        } else {
+            Some(self.render_voice_action_processing(window, cx))
+        };
         div()
             .size_full()
             .flex()
             .flex_col()
             .child(pane_header("Voice Action"))
             .child(
-                div()
-                    .id("voice-action-scroll")
-                    .flex_1()
-                    .overflow_y_scroll()
+                pane_body()
                     .px(if compact { px(20.0) } else { px(32.0) })
                     .py(px(22.0))
-                    .flex()
-                    .justify_center()
                     .child(
-                        div()
-                            .w_full()
-                            .max_w(px(PANE_CONTENT_WIDTH))
-                            .flex()
-                            .flex_col()
+                        pane_content()
+                            .id("voice-action-scroll")
+                            .overflow_y_scroll()
                             .gap(px(18.0))
                             .child(
                                 div()
@@ -3876,12 +3906,23 @@ impl AppWindow {
                                     .line_height(px(17.0))
                                     .text_color(rgb(MUTED))
                                     .child(
-                                        "Hold the shortcut and speak an instruction. HEX sends \
-                                         it, along with any text you have selected, to the model \
-                                         below and pastes the reply at your cursor. If the model \
-                                         returns nothing, nothing is pasted.",
+                                        "Voice Action is an optional OpenCode feature, separate \
+                                         from dictation. Speak an instruction, optionally with \
+                                         text selected, and HEX pastes the model's reply at your \
+                                         cursor. The default shortcut is Command-Option. Changing \
+                                         your dictation shortcut does not change this shortcut.",
                                     ),
                             )
+                            .child(compact_panel().child(voice_action_setting_row(
+                                "Enable Voice Action",
+                                description,
+                                enabled_control,
+                                false,
+                                compact,
+                            )))
+                            .when_some(self.voice_action_inputs.error.clone(), |column, error| {
+                                column.child(error_message("Could not update Voice Action:", error))
+                            })
                             .child(
                                 div()
                                     .flex()
@@ -3892,7 +3933,11 @@ impl AppWindow {
                                         compact_panel().child(
                                             voice_action_setting_row(
                                                 "Shortcut",
-                                                "Hold to speak; selected text is included automatically",
+                                                if enabled {
+                                                    "Hold to speak; selected text is included automatically."
+                                                } else {
+                                                    "Saved for when Voice Action is enabled."
+                                                },
                                                 hotkey,
                                                 false,
                                                 compact,
@@ -3901,14 +3946,14 @@ impl AppWindow {
                                         ),
                                     ),
                             )
-                            .child(
+                            .when_some(processing, |column, processing| column.child(
                                 div()
                                     .flex()
                                     .flex_col()
                                     .gap_2()
                                     .child(compact_section_label("PROCESSING"))
                                     .child(processing),
-                            ),
+                            )),
                     ),
             )
             .into_any_element()
@@ -3991,7 +4036,11 @@ impl AppWindow {
             settings.voice_action.model.as_deref().unwrap_or_default(),
             cx,
         );
-        VoiceActionInputs { model }
+        VoiceActionInputs {
+            model,
+            enabled_toggle: ToggleSpring::new(settings.voice_action.enabled),
+            error: None,
+        }
     }
 
     fn synchronized_processing_input(
@@ -7182,14 +7231,7 @@ impl DesktopHost for AppWindow {
                 {
                     return Err(color_eyre::eyre::eyre!("shortcut requires a modifier"));
                 }
-                let mut others = vec![self.settings.edit_hotkey.clone()];
-                if let Some(paste) = &self.settings.paste_last_hotkey {
-                    others.push(paste.clone());
-                }
-                if crate::DEVELOPER_FEATURES_ENABLED {
-                    others.push(HotkeyBinding::paste_meeting_default());
-                }
-                if crate::app_settings::hotkey_conflicts(&binding, others) {
+                if hotkey_binding_conflicts(&self.settings, HotkeyKind::Dictation, &binding) {
                     return Err(color_eyre::eyre::eyre!("shortcut is already in use"));
                 }
                 let mut candidate = self.settings.clone();
@@ -7397,6 +7439,30 @@ fn preview_history() -> Option<History> {
     Some(History::new(store))
 }
 
+fn voice_action_status_copy(enabled: bool) -> (&'static str, &'static str) {
+    if enabled {
+        (
+            "Enabled",
+            "Use the shortcut below with OpenCode to run spoken instructions.",
+        )
+    } else {
+        (
+            "Off",
+            "Off by default. Its saved shortcut is not reserved until you enable Voice Action.",
+        )
+    }
+}
+
+fn set_voice_action_enabled(settings: &mut AppSettings, enabled: bool) -> Result<(), &'static str> {
+    if enabled && hotkey_binding_conflicts(settings, HotkeyKind::Edit, &settings.edit_hotkey) {
+        return Err(
+            "The Voice Action shortcut is already in use. Change it below or change the other shortcut before enabling Voice Action.",
+        );
+    }
+    settings.voice_action.enabled = enabled;
+    Ok(())
+}
+
 fn voice_action_setting_row(
     title: &'static str,
     description: impl Into<SharedString>,
@@ -7416,6 +7482,7 @@ fn voice_action_setting_row(
         .child(
             div()
                 .min_w(px(0.0))
+                .when(!compact, |copy| copy.flex_1())
                 .flex()
                 .flex_col()
                 .gap_1()
@@ -7495,13 +7562,12 @@ fn hotkey_binding_conflicts(
     binding: &HotkeyBinding,
 ) -> bool {
     let mut others = match kind {
-        HotkeyKind::Dictation => vec![settings.edit_hotkey.clone()],
-        HotkeyKind::Edit => vec![settings.dictation_hotkey.clone()],
-        HotkeyKind::PasteLast => vec![
-            settings.dictation_hotkey.clone(),
-            settings.edit_hotkey.clone(),
-        ],
+        HotkeyKind::Dictation => Vec::new(),
+        HotkeyKind::Edit | HotkeyKind::PasteLast => vec![settings.dictation_hotkey.clone()],
     };
+    if kind != HotkeyKind::Edit && settings.voice_action.enabled {
+        others.push(settings.edit_hotkey.clone());
+    }
     if kind != HotkeyKind::PasteLast
         && let Some(paste) = &settings.paste_last_hotkey
     {
@@ -8579,8 +8645,95 @@ mod tests {
     }
 
     #[test]
+    fn voice_action_defaults_off_and_explains_its_inactive_shortcut() {
+        let settings = AppSettings::default();
+        assert!(!settings.voice_action.enabled);
+        let (status, description) = voice_action_status_copy(settings.voice_action.enabled);
+        assert_eq!(status, "Off");
+        assert!(description.contains("Off by default"));
+        assert!(description.contains("not reserved"));
+
+        let (status, description) = voice_action_status_copy(true);
+        assert_eq!(status, "Enabled");
+        assert!(description.contains("OpenCode"));
+        assert!(!description.contains("not reserved"));
+    }
+
+    #[test]
+    fn disabled_voice_action_does_not_reserve_its_shortcut() {
+        let mut settings = AppSettings::default();
+        for enabled in [false, true] {
+            settings.voice_action.enabled = enabled;
+            for kind in [HotkeyKind::Dictation, HotkeyKind::PasteLast] {
+                assert_eq!(
+                    hotkey_binding_conflicts(&settings, kind, &settings.edit_hotkey),
+                    enabled,
+                );
+            }
+        }
+        settings.voice_action.enabled = false;
+        assert!(hotkey_binding_conflicts(
+            &settings,
+            HotkeyKind::Edit,
+            &settings.dictation_hotkey,
+        ));
+    }
+
+    #[test]
+    fn voice_action_opt_in_rejects_active_conflicts_without_rebinding() {
+        let defaults = AppSettings::default();
+        let mut active = vec![
+            defaults.dictation_hotkey,
+            defaults.paste_last_hotkey.unwrap(),
+        ];
+        if crate::DEVELOPER_FEATURES_ENABLED {
+            active.push(HotkeyBinding::paste_meeting_default());
+        }
+        for binding in active {
+            let mut settings = AppSettings {
+                edit_hotkey: binding,
+                ..AppSettings::default()
+            };
+            let before = serde_json::to_value(&settings).unwrap();
+            let error = set_voice_action_enabled(&mut settings, true).unwrap_err();
+
+            assert!(error.contains("already in use"));
+            assert!(error.contains("Change it below"));
+            assert_eq!(serde_json::to_value(&settings).unwrap(), before);
+        }
+    }
+
+    #[test]
+    fn voice_action_toggle_preserves_configuration_and_can_always_disable() {
+        let mut settings: AppSettings = serde_json::from_value(serde_json::json!({
+            "voice_action": {
+                "model": "example/saved-model",
+                "variant": "high",
+                "deadline_seconds": 45
+            },
+            "edit_hotkey": {
+                "modifiers": { "control": "left" }
+            }
+        }))
+        .unwrap();
+        assert!(!settings.voice_action.enabled);
+        let mut expected = serde_json::to_value(&settings).unwrap();
+        for enabled in [true, false] {
+            set_voice_action_enabled(&mut settings, enabled).unwrap();
+            expected["voice_action"]["enabled"] = serde_json::json!(enabled);
+            assert_eq!(serde_json::to_value(&settings).unwrap(), expected);
+        }
+
+        set_voice_action_enabled(&mut settings, true).unwrap();
+        settings.dictation_hotkey = settings.edit_hotkey.clone();
+        set_voice_action_enabled(&mut settings, false).unwrap();
+        assert!(!settings.voice_action.enabled);
+    }
+
+    #[test]
     fn shortcut_side_changes_reject_overlap_without_changing_the_saved_binding() {
         let mut settings = AppSettings::default();
+        settings.voice_action.enabled = true;
         settings.dictation_hotkey.modifiers.option = Some(ModifierSide::Left);
         settings.edit_hotkey = HotkeyBinding {
             modifiers: HotkeyModifiers {
