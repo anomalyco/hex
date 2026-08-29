@@ -29,7 +29,8 @@ const EVENT_TAP_DISABLED_BY_USER_INPUT: u32 = u32::MAX;
 const KEYBOARD_EVENT_KEYCODE: u32 = 9;
 const EVENT_SOURCE_USER_DATA: u32 = 42;
 
-const HID_EVENT_TAP: u32 = 0;
+// Assistive keyboards inject downstream of HID; observe them alongside hardware input.
+const ANNOTATED_SESSION_EVENT_TAP: u32 = 2;
 const HEAD_INSERT_EVENT_TAP: u32 = 0;
 const DEFAULT_EVENT_TAP: u32 = 0;
 const LISTEN_ONLY_EVENT_TAP: u32 = 1;
@@ -311,7 +312,7 @@ fn run_event_tap(
     // SAFETY: The callback context remains allocated until this run loop stops.
     let key_tap = unsafe {
         CGEventTapCreate(
-            HID_EVENT_TAP,
+            ANNOTATED_SESSION_EVENT_TAP,
             HEAD_INSERT_EVENT_TAP,
             DEFAULT_EVENT_TAP,
             key_mask,
@@ -331,7 +332,7 @@ fn run_event_tap(
     // flagsChanged events unchanged. Observe modifiers and mouse clicks with a passive tap.
     let observation_tap = unsafe {
         CGEventTapCreate(
-            HID_EVENT_TAP,
+            ANNOTATED_SESSION_EVENT_TAP,
             HEAD_INSERT_EVENT_TAP,
             LISTEN_ONLY_EVENT_TAP,
             observation_mask,
@@ -1356,6 +1357,64 @@ mod tests {
                 InputEvent::Flags(SHIFT_KEY_MASK),
                 now + Duration::from_secs(1),
             ),
+            Some(HotkeyAction::Finish)
+        );
+    }
+
+    #[test]
+    fn remapped_control_does_not_start_or_hold_right_control_dictation() {
+        use crate::app_settings::{HotkeyModifiers, ModifierSide, RIGHT_CONTROL_MASK};
+
+        let now = capture_time();
+        let binding = RuntimeHotkey {
+            modifiers: HotkeyModifiers {
+                control: Some(ModifierSide::Right),
+                ..Default::default()
+            },
+            key_code: None,
+        };
+        let mut hotkey = DictationHotkey::with_binding(false, now, 9, false, binding);
+        // Remapped Caps Lock may carry the general Control flag without a side.
+        assert_eq!(
+            hotkey.process(InputEvent::Flags(CONTROL_KEY_MASK), now),
+            None
+        );
+        assert!(!hotkey.is_recording());
+        assert_eq!(hotkey.process(InputEvent::Flags(0), now), None);
+        assert_eq!(
+            hotkey.process(
+                InputEvent::Flags(CONTROL_KEY_MASK | RIGHT_CONTROL_MASK),
+                now
+            ),
+            Some(HotkeyAction::Start)
+        );
+        assert_eq!(
+            hotkey.process(
+                InputEvent::Flags(CONTROL_KEY_MASK),
+                now + Duration::from_secs(1)
+            ),
+            Some(HotkeyAction::Finish)
+        );
+
+        let mut either = DictationHotkey::with_binding(
+            false,
+            now,
+            9,
+            false,
+            RuntimeHotkey {
+                modifiers: HotkeyModifiers {
+                    control: Some(ModifierSide::Either),
+                    ..Default::default()
+                },
+                key_code: None,
+            },
+        );
+        assert_eq!(
+            either.process(InputEvent::Flags(CONTROL_KEY_MASK), now),
+            Some(HotkeyAction::Start)
+        );
+        assert_eq!(
+            either.process(InputEvent::Flags(0), now + Duration::from_secs(1)),
             Some(HotkeyAction::Finish)
         );
     }
