@@ -333,10 +333,25 @@ impl RuntimeHotkey {
 
     pub fn exact_modifiers(self, flags: u64) -> bool {
         modifiers_from_flags(flags).matches_exactly(self.modifiers)
+            && self.required_modifiers_down(flags)
     }
 
     pub fn required_modifiers_down(self, flags: u64) -> bool {
         modifiers_from_flags(flags).contains(self.modifiers)
+            // `Either` also represents side-less input and both sides held. Only the
+            // original device flags distinguish those cases for a sided binding.
+            && [
+                (self.modifiers.control, LEFT_CONTROL_MASK, RIGHT_CONTROL_MASK),
+                (self.modifiers.option, LEFT_OPTION_MASK, RIGHT_OPTION_MASK),
+                (self.modifiers.shift, LEFT_SHIFT_MASK, RIGHT_SHIFT_MASK),
+                (self.modifiers.command, LEFT_COMMAND_MASK, RIGHT_COMMAND_MASK),
+            ]
+            .into_iter()
+            .all(|(side, left, right)| match side {
+                Some(ModifierSide::Left) => flags & left != 0,
+                Some(ModifierSide::Right) => flags & right != 0,
+                Some(ModifierSide::Either) | None => true,
+            })
     }
 
     pub fn matches_key_press(self, code: u16, flags: u64) -> bool {
@@ -1367,6 +1382,63 @@ mod tests {
                 .runtime()
                 .matches_key_press(0, OPTION_KEY_MASK | RIGHT_OPTION_MASK,)
         );
+    }
+
+    #[test]
+    fn runtime_side_constraints_require_the_requested_device_flag() {
+        for (modifier, general, left, right) in [
+            (
+                "control",
+                CONTROL_KEY_MASK,
+                LEFT_CONTROL_MASK,
+                RIGHT_CONTROL_MASK,
+            ),
+            (
+                "option",
+                OPTION_KEY_MASK,
+                LEFT_OPTION_MASK,
+                RIGHT_OPTION_MASK,
+            ),
+            ("shift", SHIFT_KEY_MASK, LEFT_SHIFT_MASK, RIGHT_SHIFT_MASK),
+            (
+                "command",
+                COMMAND_KEY_MASK,
+                LEFT_COMMAND_MASK,
+                RIGHT_COMMAND_MASK,
+            ),
+        ] {
+            for side in ["left", "right", "either"] {
+                let binding: HotkeyBinding = serde_json::from_value(serde_json::json!({
+                    "modifiers": { (modifier): side },
+                    "key": { "code": 0, "label": "A" },
+                }))
+                .unwrap();
+                let binding = binding.runtime();
+                for (device_flags, matches) in [
+                    (0, side == "either"),
+                    (left, side != "right"),
+                    (right, side != "left"),
+                    (left | right, true),
+                ] {
+                    let flags = general | device_flags;
+                    assert_eq!(
+                        binding.required_modifiers_down(flags),
+                        matches,
+                        "{side:?}, flags={flags:#x}"
+                    );
+                    assert_eq!(
+                        binding.matches_key_press(0, flags),
+                        matches,
+                        "{side:?}, flags={flags:#x}"
+                    );
+                    assert!(!binding.exact_modifiers(flags | FUNCTION_KEY_MASK));
+                    assert_eq!(
+                        binding.required_modifiers_down(flags | FUNCTION_KEY_MASK),
+                        matches
+                    );
+                }
+            }
+        }
     }
 
     #[test]
