@@ -4407,16 +4407,24 @@ impl AppWindow {
         };
         let processing_enabled = self.selected_mode_settings().post_processing.enabled;
         let processing_can_toggle = processing_enabled || self.opencode_available();
-        let processing_unavailable = opencode_unavailable_copy(&self.model_catalog).map(|copy| {
-            (
-                copy.title,
-                copy.description,
-                copy.error.map(str::to_owned),
-                copy.can_retry,
-                copy.retry_label,
-                copy.can_open_setup,
-            )
-        });
+        let processing_unavailable =
+            opencode_unavailable_copy(&self.model_catalog).map(|mut copy| {
+                if matches!(self.model_catalog, ModelCatalogState::Loading) {
+                    copy.description =
+                        "OpenCode transformation will be available after HEX connects to OpenCode.";
+                } else if matches!(self.model_catalog, ModelCatalogState::Missing) {
+                    copy.title = "Transformation requires OpenCode";
+                    copy.description = "Install and configure OpenCode to transform dictated text.";
+                }
+                (
+                    copy.title,
+                    copy.description,
+                    copy.error.map(str::to_owned),
+                    copy.can_retry,
+                    copy.retry_label,
+                    copy.can_open_setup,
+                )
+            });
         let corrections = self.render_mode_replacements(selection, cx);
         let transformations = self.render_mode_transformations(selection, cx);
         let application_picker =

@@ -935,6 +935,7 @@ fn find_opencode_executable(
         .map(|directory| absolute_path(directory.join("opencode2"), current_directory));
     let home_candidates = home.into_iter().flat_map(|home| {
         [
+            home.join(".opencode/bin/opencode2"),
             home.join(".bun/bin/opencode2"),
             home.join("Library/pnpm/opencode2"),
             home.join("Library/pnpm/bin/opencode2"),
