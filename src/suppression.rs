@@ -29,7 +29,9 @@ const EVENT_TAP_DISABLED_BY_USER_INPUT: u32 = u32::MAX;
 const KEYBOARD_EVENT_KEYCODE: u32 = 9;
 const EVENT_SOURCE_USER_DATA: u32 = 42;
 
-const HID_EVENT_TAP: u32 = 0;
+// Accessibility Keyboard injects events downstream of the HID tap. The
+// annotated-session boundary receives both physical and assistive keyboard input.
+const ANNOTATED_SESSION_EVENT_TAP: u32 = 2;
 const HEAD_INSERT_EVENT_TAP: u32 = 0;
 const DEFAULT_EVENT_TAP: u32 = 0;
 const LISTEN_ONLY_EVENT_TAP: u32 = 1;
@@ -311,7 +313,7 @@ fn run_event_tap(
     // SAFETY: The callback context remains allocated until this run loop stops.
     let key_tap = unsafe {
         CGEventTapCreate(
-            HID_EVENT_TAP,
+            ANNOTATED_SESSION_EVENT_TAP,
             HEAD_INSERT_EVENT_TAP,
             DEFAULT_EVENT_TAP,
             key_mask,
@@ -331,7 +333,7 @@ fn run_event_tap(
     // flagsChanged events unchanged. Observe modifiers and mouse clicks with a passive tap.
     let observation_tap = unsafe {
         CGEventTapCreate(
-            HID_EVENT_TAP,
+            ANNOTATED_SESSION_EVENT_TAP,
             HEAD_INSERT_EVENT_TAP,
             LISTEN_ONLY_EVENT_TAP,
             observation_mask,

@@ -47,7 +47,8 @@ use crate::desktop_ui::{
 use crate::dictation_indicator::{DictationIndicatorEvent, DictationIndicatorSender, HudTuning};
 use crate::dictation_processor::{ModelCatalog, ModelChoice};
 use crate::events::{
-    CommandOutcome, DictationPhase, EventReader, TranscriptPhase, VoiceEvent, VoiceState, now_ms,
+    CommandOutcome, DictationPhase, EventReader, ShortcutAction, ShortcutKind, TranscriptPhase,
+    VoiceEvent, VoiceState, now_ms,
 };
 use crate::history::{History, HistoryEntry, HistoryKind, HistoryRetention};
 use crate::login_item::LoginItemStatus;
@@ -8527,6 +8528,9 @@ fn event_summary(event: &VoiceEvent) -> String {
                     )
                 })
         }
+        VoiceEvent::Shortcut {
+            shortcut, action, ..
+        } => shortcut_summary(*shortcut, *action),
         VoiceEvent::Context {
             application,
             browser_url,
@@ -8546,6 +8550,10 @@ fn event_summary(event: &VoiceEvent) -> String {
     }
 }
 
+fn shortcut_summary(shortcut: ShortcutKind, action: ShortcutAction) -> String {
+    format!("{} hotkey {}", shortcut.name(), action.description())
+}
+
 fn text_or(prefix: &str, text: &str) -> String {
     if text.is_empty() {
         prefix.into()
@@ -8560,6 +8568,22 @@ mod tests {
 
     use super::*;
     use crate::personal_commands::StatusExecution;
+
+    #[test]
+    fn activity_summarizes_configured_shortcut_actions() {
+        assert_eq!(
+            shortcut_summary(ShortcutKind::Dictation, ShortcutAction::Started),
+            "Dictation hotkey activated"
+        );
+        assert_eq!(
+            shortcut_summary(ShortcutKind::VoiceAction, ShortcutAction::Finished),
+            "Voice Action hotkey finished capture"
+        );
+        assert_eq!(
+            shortcut_summary(ShortcutKind::PasteLast, ShortcutAction::Pressed),
+            "Paste Last hotkey pressed"
+        );
+    }
 
     #[test]
     fn command_model_failure_has_recovery_without_blocking_dictation() {

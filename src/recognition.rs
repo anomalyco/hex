@@ -16,8 +16,8 @@ use crate::dictation::{
 use crate::dictation_audio::{DictationAudio, DictationAudioEvent};
 use crate::dictation_indicator::{DictationIndicatorEvent, DictationIndicatorSender};
 use crate::events::{
-    CommandOutcome, DictationPhase, DictationProcessing, EventLog, TranscriptPhase, VoiceEvent,
-    VoiceState, now_ms,
+    CommandOutcome, DictationPhase, DictationProcessing, EventLog, ShortcutAction, ShortcutKind,
+    TranscriptPhase, VoiceEvent, VoiceState, now_ms,
 };
 use crate::feedback::{self, Tone};
 use crate::meeting::MeetingRequest;
@@ -817,6 +817,11 @@ pub fn listen(
             let edit_action = edit_hotkey
                 .as_mut()
                 .and_then(|edit| edit.process(input_event, capture_at));
+            if let Some(action) = edit_action
+                && voice_protocol.is_none()
+            {
+                emit_shortcut_action(&events, ShortcutKind::VoiceAction, action);
+            }
             if matches!(edit_action, Some(HotkeyAction::Start)) && voice_protocol.is_none() {
                 start_pending_voice_action(
                     &mut edit_pending_since,
@@ -841,6 +846,7 @@ pub fn listen(
                 if voice_action_takeover {
                     let _ = hotkey.suspend();
                 } else if voice_protocol.is_none() {
+                    emit_shortcut_action(&events, ShortcutKind::Dictation, action);
                     let accepted = handle_hotkey_action(
                         action,
                         capture_at,
@@ -1517,6 +1523,18 @@ fn start_voice_capture(
     }
     emit_state(events, true, mode, device)?;
     Ok(true)
+}
+
+fn emit_shortcut_action(events: &EventLog, shortcut: ShortcutKind, action: HotkeyAction) {
+    let (shortcut, action) = match action {
+        HotkeyAction::Start => (shortcut, ShortcutAction::Started),
+        HotkeyAction::Finish => (shortcut, ShortcutAction::Finished),
+        HotkeyAction::Discard => (shortcut, ShortcutAction::Discarded),
+        HotkeyAction::Cancel => (shortcut, ShortcutAction::Cancelled),
+        HotkeyAction::PasteLast => (ShortcutKind::PasteLast, ShortcutAction::Pressed),
+        HotkeyAction::PasteMeeting => (ShortcutKind::PasteMeeting, ShortcutAction::Pressed),
+    };
+    events.shortcut(shortcut, action);
 }
 
 #[allow(clippy::too_many_arguments)]

@@ -45,6 +45,11 @@ pub enum VoiceEvent {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         processing: Option<DictationProcessing>,
     },
+    Shortcut {
+        timestamp_ms: u64,
+        shortcut: ShortcutKind,
+        action: ShortcutAction,
+    },
     Context {
         timestamp_ms: u64,
         application: Option<String>,
@@ -72,6 +77,7 @@ impl VoiceEvent {
             | Self::Transcript { timestamp_ms, .. }
             | Self::Command { timestamp_ms, .. }
             | Self::Dictation { timestamp_ms, .. }
+            | Self::Shortcut { timestamp_ms, .. }
             | Self::Context { timestamp_ms, .. }
             | Self::ApiServerStarted { timestamp_ms, .. }
             | Self::ApiServerStopped { timestamp_ms }
@@ -86,6 +92,7 @@ impl VoiceEvent {
             Self::Transcript { .. } => "transcript",
             Self::Command { .. } => "command",
             Self::Dictation { .. } => "dictation",
+            Self::Shortcut { .. } => "shortcut",
             Self::Context { .. } => "context",
             Self::ApiServerStarted { .. } => "api_server_started",
             Self::ApiServerStopped { .. } => "api_server_stopped",
@@ -127,6 +134,48 @@ pub struct DictationProcessing {
     pub latency_ms: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fallback: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ShortcutKind {
+    Dictation,
+    VoiceAction,
+    PasteLast,
+    PasteMeeting,
+}
+
+impl ShortcutKind {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Dictation => "Dictation",
+            Self::VoiceAction => "Voice Action",
+            Self::PasteLast => "Paste Last",
+            Self::PasteMeeting => "Paste Meeting",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ShortcutAction {
+    Started,
+    Finished,
+    Discarded,
+    Cancelled,
+    Pressed,
+}
+
+impl ShortcutAction {
+    pub fn description(self) -> &'static str {
+        match self {
+            Self::Started => "activated",
+            Self::Finished => "finished capture",
+            Self::Discarded => "interrupted",
+            Self::Cancelled => "cancelled",
+            Self::Pressed => "pressed",
+        }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -207,7 +256,9 @@ impl EventLog {
             .ok_or_else(|| io::Error::new(io::ErrorKind::BrokenPipe, "event writer stopped"))?;
         match sender.try_send(WriterMessage::Event(event.clone())) {
             Ok(()) => Ok(()),
-            Err(TrySendError::Full(WriterMessage::Event(event))) if event.is_replaceable() => {
+            Err(TrySendError::Full(WriterMessage::Event(event)))
+                if event.may_drop_under_pressure() =>
+            {
                 Ok(())
             }
             Err(TrySendError::Full(message)) => sender
@@ -273,16 +324,25 @@ impl EventLog {
             processing,
         })
     }
+
+    pub fn shortcut(&self, shortcut: ShortcutKind, action: ShortcutAction) {
+        let _ = self.emit(&VoiceEvent::Shortcut {
+            timestamp_ms: now_ms(),
+            shortcut,
+            action,
+        });
+    }
 }
 
 impl VoiceEvent {
-    fn is_replaceable(&self) -> bool {
+    fn may_drop_under_pressure(&self) -> bool {
         matches!(
             self,
             Self::Transcript {
                 phase: TranscriptPhase::Started | TranscriptPhase::Updated,
                 ..
-            } | Self::Context { .. }
+            } | Self::Shortcut { .. }
+                | Self::Context { .. }
         )
     }
 }
@@ -504,6 +564,56 @@ mod tests {
                 ..
             } if profile == "slack" && fallback == "deadline exceeded"
         ));
+    }
+
+    #[test]
+    fn shortcut_observation_round_trips() {
+        let event = VoiceEvent::Shortcut {
+            timestamp_ms: 42,
+            shortcut: ShortcutKind::VoiceAction,
+            action: ShortcutAction::Finished,
+        };
+
+        let json = serde_json::to_string(&event).unwrap();
+        assert_eq!(
+            json,
+            r#"{"kind":"shortcut","timestamp_ms":42,"shortcut":"voice_action","action":"finished"}"#
+        );
+        assert!(matches!(
+            serde_json::from_str(&json).unwrap(),
+            VoiceEvent::Shortcut {
+                timestamp_ms: 42,
+                shortcut: ShortcutKind::VoiceAction,
+                action: ShortcutAction::Finished,
+            }
+        ));
+    }
+
+    #[test]
+    fn shortcut_observations_drop_when_the_writer_queue_is_full() {
+        let (sender, receiver) = mpsc::sync_channel(1);
+        let log = EventLog {
+            inner: Arc::new(EventLogInner {
+                sender: Some(sender),
+                error: Arc::new(Mutex::new(None)),
+                worker: None,
+            }),
+        };
+        log.emit(&VoiceEvent::SessionStarted { timestamp_ms: 1 })
+            .unwrap();
+        let (done, completed) = mpsc::channel();
+        let observer = thread::spawn(move || {
+            log.shortcut(ShortcutKind::Dictation, ShortcutAction::Started);
+            done.send(()).unwrap();
+        });
+
+        let result = completed.recv_timeout(std::time::Duration::from_secs(1));
+        drop(receiver);
+        observer.join().unwrap();
+        assert!(
+            result.is_ok(),
+            "shortcut observation blocked on a full queue"
+        );
     }
 
     #[test]

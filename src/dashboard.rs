@@ -110,6 +110,7 @@ fn draw(
         | VoiceEvent::Transcript { .. }
         | VoiceEvent::Command { .. }
         | VoiceEvent::Dictation { .. }
+        | VoiceEvent::Shortcut { .. }
         | VoiceEvent::Context { .. }
         | VoiceEvent::ApiServerStarted { .. }
         | VoiceEvent::ApiServerStopped { .. }
@@ -134,6 +135,7 @@ fn draw(
         | VoiceEvent::State { .. }
         | VoiceEvent::Command { .. }
         | VoiceEvent::Dictation { .. }
+        | VoiceEvent::Shortcut { .. }
         | VoiceEvent::Context { .. }
         | VoiceEvent::ApiServerStarted { .. }
         | VoiceEvent::ApiServerStopped { .. }
@@ -428,6 +430,16 @@ fn draw_activity(
                     Span::styled(processing, Style::default().fg(Color::DarkGray)),
                 ]))
             }
+            VoiceEvent::Shortcut {
+                shortcut, action, ..
+            } => Some(Line::from(vec![
+                Span::styled("◇ hotkey      ", Style::default().fg(Color::Yellow)),
+                Span::raw(shortcut.name()),
+                Span::styled(
+                    format!("  {}", action.description()),
+                    Style::default().fg(Color::DarkGray),
+                ),
+            ])),
             VoiceEvent::SessionStarted { .. }
             | VoiceEvent::State { .. }
             | VoiceEvent::Transcript { .. }
