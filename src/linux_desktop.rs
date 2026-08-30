@@ -5,6 +5,7 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use color_eyre::eyre::{Result, eyre};
+use gdk_pixbuf::Pixbuf;
 use gtk::prelude::*;
 use gtk_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 use tray_icon::menu::{Menu, MenuEvent, MenuItem};
@@ -402,21 +403,46 @@ fn create_tray(commands: Sender<TrayCommand>) -> Result<TrayIcon> {
             let _ = commands.send(TrayCommand::Show);
         }
     }));
-    const SIZE: u32 = 22;
-    let mut data = vec![0_u8; (SIZE * SIZE * 4) as usize];
-    for y in 3..19 {
-        for x in 4..18 {
-            if matches!(x, 4..=7 | 14..=17) || (9..=12).contains(&y) {
-                let index = ((y * SIZE + x) * 4) as usize;
-                data[index..index + 4].copy_from_slice(&[0xd9, 0xff, 0x68, 0xff]);
-            }
-        }
-    }
+    let (data, width, height) = hex_tray_rgba()?;
     Ok(TrayIconBuilder::new()
         .with_tooltip("HEX Dictation")
-        .with_icon(Icon::from_rgba(data, SIZE, SIZE)?)
+        .with_icon(Icon::from_rgba(data, width, height)?)
         .with_menu(Box::new(menu))
         .build()?)
+}
+
+fn hex_tray_rgba() -> Result<(Vec<u8>, u32, u32)> {
+    const SIZE: i32 = 22;
+    let source = Pixbuf::from_read(std::io::Cursor::new(include_bytes!(
+        "../app/AppIcon.icon/Assets/Image.png"
+    )))
+    .map_err(|error| eyre!("could not decode HEX icon: {error}"))?;
+    let scaled = source
+        .scale_simple(SIZE, SIZE, gdk_pixbuf::InterpType::Bilinear)
+        .ok_or_else(|| eyre!("could not scale HEX icon"))?;
+    let width = scaled.width() as u32;
+    let height = scaled.height() as u32;
+    let rowstride = scaled.rowstride() as usize;
+    let channels = scaled.n_channels() as usize;
+    let pixels = scaled.read_pixel_bytes();
+    let mut rgba = Vec::with_capacity((width * height * 4) as usize);
+    for y in 0..height as usize {
+        let row = y * rowstride;
+        for x in 0..width as usize {
+            let index = row + x * channels;
+            rgba.extend_from_slice(&[
+                pixels[index],
+                pixels[index + 1],
+                pixels[index + 2],
+                if channels == 4 {
+                    pixels[index + 3]
+                } else {
+                    255
+                },
+            ]);
+        }
+    }
+    Ok((rgba, width, height))
 }
 
 fn tray_host_available() -> bool {
@@ -497,5 +523,14 @@ mod tests {
         assert_eq!(slot.state, IndicatorState::Recording);
         slot.set(current, IndicatorState::Hidden);
         assert_eq!(slot.state, IndicatorState::Hidden);
+    }
+
+    #[test]
+    fn tray_icon_uses_the_hex_logo() {
+        let (rgba, width, height) = hex_tray_rgba().unwrap();
+        assert_eq!((width, height), (22, 22));
+        assert_eq!(rgba.len(), 22 * 22 * 4);
+        assert!(rgba.iter().any(|byte| *byte > 200));
+        assert!(rgba.iter().any(|byte| *byte < 50));
     }
 }

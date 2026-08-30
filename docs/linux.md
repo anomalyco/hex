@@ -75,10 +75,12 @@ and restores the previous running state after the edit. Cancelling shortcut
 capture restores the old binding and running state.
 
 With a working X11 tray, closing Settings hides the window. Without a working
-tray, closing Settings quits after stopping its workers; it never leaves an
-unmanageable microphone running. `--hidden` is honored only with a usable tray.
-On Wayland, leave Settings open while dictating; the recording/processing pill
-uses layer-shell without taking focus or intercepting clicks.
+X11 tray, closing Settings quits after stopping its workers; it never leaves an
+unmanageable microphone running. `--hidden` is honored only with a usable X11
+tray. On Wayland, a StatusNotifier tray icon is shown when a host is present,
+and closing Settings leaves dictation running until Quit HEX or SIGTERM. The
+recording/processing pill uses layer-shell without taking focus or intercepting
+clicks.
 
 Insertion uses the clipboard and **Ctrl-V** for new installations. Enable
 **Terminal paste shortcut** in Settings for targets that require **Ctrl-Shift-V**.
@@ -131,7 +133,8 @@ compositor, and target-application smoke tests remain necessary before a release
 `scripts/test-wayland-paste.sh /path/to/compiled-test-executable /path/to/voice-control` runs the real
 paste helpers against a GTK target under an isolated headless Sway compositor.
 It also launches Settings with `--hidden`, repeats paste while Settings remains
-open, and verifies that the tray-less native window closes cleanly. It requires the GTK development
+open, and verifies that the tray-less native window closes without exiting the
+process until SIGTERM. It requires the GTK development
 libraries, Sway, `wl-clipboard`, `wtype`, `dbus-run-session`, and a Vulkan driver
 (Mesa's software driver is sufficient), and must run as a non-root user. It uses
 isolated app data and no microphone; CI runs it with the display-free suite and

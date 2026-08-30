@@ -91,6 +91,7 @@ struct LinuxDesktopHost {
     transcription_preparation: Option<TranscriptionPreparation>,
     transcription_error: Option<String>,
     update: UpdateState,
+    keep_listening: Arc<AtomicBool>,
 }
 
 struct LinuxApp {
@@ -126,17 +127,19 @@ enum UpdateState {
 pub fn open(event_path: PathBuf, start_hidden: bool, shutdown: &'static AtomicBool) -> Result<()> {
     let listener_stop = Arc::new(Mutex::new(None));
     let quit_stop = listener_stop.clone();
+    let listener_stop_after_shell = listener_stop.clone();
+    let keep_listening = Arc::new(AtomicBool::new(true));
+    let keep_listening_after_shell = keep_listening.clone();
     let (tray_sender, tray_commands) = mpsc::channel();
     let session = LinuxSession::detect();
-    // GPUI cannot hide/reopen a native Wayland toplevel. Keep it manageable without a tray.
-    let close_to_tray = !session.is_wayland()
-        && match crate::linux_desktop::start_tray(tray_sender) {
-            Ok(()) => true,
-            Err(error) => {
-                tracing::warn!(%error, "system tray is unavailable; closing HEX will quit");
-                false
-            }
-        };
+    let tray_started = match crate::linux_desktop::start_tray(tray_sender) {
+        Ok(()) => true,
+        Err(error) => {
+            tracing::warn!(%error, "system tray is unavailable");
+            false
+        }
+    };
+    let close_to_tray = !session.is_wayland() && tray_started;
     let (settings, settings_error) = match crate::linux_settings::LinuxSettings::load() {
         Ok(settings) => (settings, None),
         Err(error) => (
@@ -161,17 +164,21 @@ pub fn open(event_path: PathBuf, start_hidden: bool, shutdown: &'static AtomicBo
                     ..Default::default()
                 },
                 |_, cx| {
-                    cx.new(|_| LinuxApp {
-                        host: LinuxDesktopHost::new(
+                    cx.new(|_| {
+                        let mut host = LinuxDesktopHost::new(
                             event_path.clone(),
                             listener_stop.clone(),
                             settings.clone(),
                             settings_error.clone(),
                             update,
-                        ),
-                        quitting: false,
-                        restart_requested: false,
-                        transcription_picker: TranscriptionPickerState::Closed,
+                        );
+                        host.keep_listening = keep_listening.clone();
+                        LinuxApp {
+                            host,
+                            quitting: false,
+                            restart_requested: false,
+                            transcription_picker: TranscriptionPickerState::Closed,
+                        }
                     })
                 },
             )
@@ -288,6 +295,9 @@ pub fn open(event_path: PathBuf, start_hidden: bool, shutdown: &'static AtomicBo
                     {
                         return false;
                     }
+                    if session.is_wayland() {
+                        return true;
+                    }
                     // A missing X11 handle must not swallow close and strand a microphone.
                     if close_app
                         .update(cx, |app, cx| {
@@ -308,19 +318,41 @@ pub fn open(event_path: PathBuf, start_hidden: bool, shutdown: &'static AtomicBo
             let _ = set_x11_window_mapped(&x11_window, false);
         }
         cx.on_app_quit(move |cx| {
-            let _ = quit_app.update(cx, |app, _| app.request_quit());
-            if let Some(stop) = quit_stop
-                .lock()
-                .unwrap_or_else(|error| error.into_inner())
-                .take()
-            {
-                stop.store(true, Ordering::Relaxed);
+            if !keep_listening.load(Ordering::Relaxed) {
+                let _ = quit_app.update(cx, |app, _| app.request_quit());
+                if let Some(stop) = quit_stop
+                    .lock()
+                    .unwrap_or_else(|error| error.into_inner())
+                    .take()
+                {
+                    stop.store(true, Ordering::Relaxed);
+                }
+                crate::linux_desktop::shutdown();
             }
-            crate::linux_desktop::shutdown();
             async {}
         })
         .detach();
     });
+    if keep_listening_after_shell.load(Ordering::Relaxed) {
+        while !shutdown.load(Ordering::Relaxed) {
+            let stopped = listener_stop_after_shell
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .as_ref()
+                .is_none_or(|stop| stop.load(Ordering::Relaxed));
+            if stopped {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(250));
+        }
+        if let Some(stop) = listener_stop_after_shell
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .take()
+        {
+            stop.store(true, Ordering::Relaxed);
+        }
+    }
     crate::linux_desktop::shutdown();
     Ok(())
 }
@@ -430,6 +462,7 @@ impl LinuxDesktopHost {
             transcription_preparation: None,
             transcription_error: None,
             update,
+            keep_listening: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -837,6 +870,7 @@ impl LinuxDesktopHost {
 
 impl LinuxApp {
     fn request_quit(&mut self) {
+        self.host.keep_listening.store(false, Ordering::Relaxed);
         self.quitting = true;
         self.host.stop();
         self.host.cancel_transcription_preparation();
@@ -879,6 +913,10 @@ fn start_update_check() -> Receiver<Result<Option<InstalledUpdate>, String>> {
 
 impl Drop for LinuxDesktopHost {
     fn drop(&mut self) {
+        if self.keep_listening.load(Ordering::Relaxed) {
+            let _ = self.listener_worker.take();
+            return;
+        }
         self.stop();
         self.cancel_transcription_preparation();
         self.listener_stop
@@ -1632,6 +1670,40 @@ mod tests {
         app.host.refresh_settings_edit();
         assert!(!app.host.listen_when_ready);
         assert!(!app.host.has_pending_work());
+    }
+
+    #[test]
+    fn dropping_settings_can_leave_the_wayland_listener_running() {
+        let stop = Arc::new(AtomicBool::new(false));
+        let listener_stop = Arc::new(Mutex::new(Some(stop.clone())));
+        let worker_stop = stop.clone();
+        let worker = std::thread::spawn(move || {
+            while !worker_stop.load(Ordering::Relaxed) {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            Ok(())
+        });
+        {
+            let mut host = LinuxDesktopHost::new(
+                PathBuf::new(),
+                listener_stop.clone(),
+                crate::linux_settings::LinuxSettings::default(),
+                None,
+                UpdateState::Unmanaged,
+            );
+            host.keep_listening = Arc::new(AtomicBool::new(true));
+            host.listener_worker = Some(worker);
+            host.listen_when_ready = true;
+        }
+        assert!(!stop.load(Ordering::Relaxed));
+        assert!(
+            listener_stop
+                .lock()
+                .unwrap()
+                .as_ref()
+                .is_some_and(|flag| !flag.load(Ordering::Relaxed))
+        );
+        stop.store(true, Ordering::Relaxed);
     }
 
     #[test]

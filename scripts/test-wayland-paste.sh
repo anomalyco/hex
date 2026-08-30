@@ -79,6 +79,19 @@ if [[ "${1:-}" == --inside ]]; then
   target=
 
   swaymsg '[app_id="hex"] kill' >/dev/null
+  for ((attempt = 0; attempt < 100; attempt++)); do
+    kill -0 "$app"
+    if ! swaymsg -t get_tree -r | grep '"name": "HEX"' >/dev/null; then
+      break
+    fi
+    sleep 0.05
+  done
+  kill -0 "$app"
+  if swaymsg -t get_tree -r | grep '"name": "HEX"' >/dev/null; then
+    echo "HEX Settings window did not close" >&2
+    exit 1
+  fi
+  kill -TERM "$app"
   wait "$app"
   app=
   exit 0

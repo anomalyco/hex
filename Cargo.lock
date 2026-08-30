@@ -8694,6 +8694,7 @@ dependencies = [
  "ed25519-dalek",
  "evdev",
  "fs2",
+ "gdk-pixbuf",
  "getrandom 0.4.3",
  "gpui",
  "gpui-symbols",
