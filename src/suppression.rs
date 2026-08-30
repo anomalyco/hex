@@ -461,8 +461,10 @@ unsafe extern "C" fn event_callback(
         }
         _ => return event,
     };
+    // Both taps are annotated-session taps: their timestamps are nanoseconds.
+    // Physical HID events used raw Mach ticks on the tested Apple Silicon system.
     // SAFETY: CoreGraphics supplied a valid event to this callback.
-    let capture_at = CaptureInstant::from_mach_ticks(unsafe { CGEventGetTimestamp(event) });
+    let capture_at = CaptureInstant::from_nanos(unsafe { CGEventGetTimestamp(event) });
     if crate::app_settings::hotkey_capture_active() {
         context.activity.observe(input, false);
         context
@@ -736,20 +738,26 @@ impl DictationHotkey {
         self.double_tap_enabled = enabled;
         if !enabled {
             self.last_release_at = None;
+            if let State::Recording {
+                previous_release, ..
+            } = &mut self.state
+            {
+                *previous_release = None;
+            }
         }
     }
 
     pub fn set_double_tap_only(&mut self, enabled: bool) {
         self.double_tap_only =
             enabled && self.binding.key_code.is_some() && self.double_tap_enabled;
-        if (self.double_tap_only && matches!(self.state, State::Recording { .. }))
-            || (!self.double_tap_only
-                && matches!(
-                    self.state,
-                    State::FirstTapPressed
-                        | State::AwaitingSecondTap { .. }
-                        | State::SecondTapPressed { .. }
-                ))
+        // Active captures still need their release or Escape to reach the audio owner.
+        if !self.double_tap_only
+            && matches!(
+                self.state,
+                State::FirstTapPressed
+                    | State::AwaitingSecondTap { .. }
+                    | State::SecondTapPressed { .. }
+            )
         {
             self.state = State::Idle;
         }
@@ -1009,6 +1017,241 @@ fn trigger_is_physically_down(binding: RuntimeHotkey, exact_modifiers: bool) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[link(name = "ApplicationServices", kind = "framework")]
+    unsafe extern "C" {
+        fn CGEventCreate(source: *mut c_void) -> EventRef;
+        fn CGEventSetTimestamp(event: EventRef, timestamp: u64);
+        fn CGEventSetType(event: EventRef, event_type: u32);
+        fn CGEventSetFlags(event: EventRef, flags: u64);
+        fn CGEventSetIntegerValueField(event: EventRef, field: u32, value: i64);
+    }
+
+    // Drive the real callback without installing a tap or posting global input.
+    fn callback_input(timestamps_and_events: &[(u64, InputEvent)]) -> Vec<ObservedInputEvent> {
+        let (sender, receiver) = mpsc::channel();
+        let mut context = EventTapContext {
+            sender,
+            activity: InputActivity::default(),
+            escape_cancels: Arc::new(AtomicBool::new(false)),
+            key_tap: AtomicPtr::new(ptr::null_mut()),
+            observation_tap: AtomicPtr::new(ptr::null_mut()),
+            shortcut_suppression: Mutex::new(ShortcutSuppression::default()),
+            pending: PendingInputEvents::default(),
+            next_sequence: AtomicU64::new(0),
+        };
+        for &(timestamp, input) in timestamps_and_events {
+            // SAFETY: This locally owned event and context live through the callback.
+            unsafe {
+                let event = CGEventCreate(ptr::null_mut());
+                assert!(!event.is_null());
+                CGEventSetTimestamp(event, timestamp);
+                let event_type = match input {
+                    InputEvent::Flags(flags) => {
+                        CGEventSetType(event, EVENT_FLAGS_CHANGED);
+                        CGEventSetFlags(event, flags);
+                        EVENT_FLAGS_CHANGED
+                    }
+                    InputEvent::Key { code, down, flags } => {
+                        CGEventSetType(event, if down { EVENT_KEY_DOWN } else { EVENT_KEY_UP });
+                        CGEventSetFlags(event, flags);
+                        CGEventSetIntegerValueField(event, KEYBOARD_EVENT_KEYCODE, i64::from(code));
+                        assert_eq!(
+                            CGEventGetIntegerValueField(event, KEYBOARD_EVENT_KEYCODE),
+                            i64::from(code)
+                        );
+                        if down { EVENT_KEY_DOWN } else { EVENT_KEY_UP }
+                    }
+                    _ => panic!("expected a keyboard event"),
+                };
+                let returned = event_callback(
+                    ptr::null_mut(),
+                    event_type,
+                    event,
+                    (&mut context as *mut EventTapContext).cast(),
+                );
+                CFRelease(event.cast_const());
+                if matches!(input, InputEvent::Flags(_)) {
+                    assert_eq!(returned, event, "modifier observation must remain passive");
+                }
+            }
+        }
+        receiver.try_iter().collect()
+    }
+
+    #[test]
+    fn callback_timestamps_preserve_nanoseconds_and_short_tap_discard() {
+        let start = 60_000_000_000;
+        let edges = callback_input(&[
+            (start, InputEvent::Flags(OPTION_KEY_MASK)),
+            (start + 80_000_000, InputEvent::Flags(0)),
+        ]);
+        assert_eq!(edges.len(), 2);
+        let mut capture = crate::dictation::DictationCapture::new(16_000);
+        capture.start_at(edges[0].capture_at);
+        assert!(matches!(
+            capture.finish(edges[1].capture_at),
+            crate::dictation::Finish::Discard
+        ));
+        assert_eq!(edges[0].capture_at.as_nanos(), start);
+        assert_eq!(edges[1].capture_at.as_nanos(), start + 80_000_000);
+    }
+
+    #[test]
+    fn callback_release_trims_delayed_audio_at_the_physical_boundary() {
+        let start = 60_000_000_000;
+        let edges = callback_input(&[
+            (start, InputEvent::Flags(OPTION_KEY_MASK)),
+            (start + 1_000_000_000, InputEvent::Flags(0)),
+        ]);
+        let mut capture = crate::dictation::DictationCapture::new(16_000);
+        // Handle both edges late: the timeline already includes post-release audio.
+        capture.ingest(&vec![0.25; 16_000], CaptureInstant::from_nanos(start));
+        capture.ingest(
+            &vec![0.5; 16_000],
+            CaptureInstant::from_nanos(start + 1_000_000_000),
+        );
+        capture.ingest(
+            &vec![0.75; 8_000],
+            CaptureInstant::from_nanos(start + 1_500_000_000),
+        );
+        capture.start_at(edges[0].capture_at);
+        let crate::dictation::Finish::Transcribe(clip) = capture.finish(edges[1].capture_at) else {
+            panic!("one second hold must transcribe");
+        };
+        assert_eq!(clip.duration_ms(), 1_450);
+        let samples = clip.into_transcription_samples();
+        assert_eq!(&samples[..7_200], &[0.25; 7_200]);
+        assert_eq!(&samples[7_200..], &[0.5; 16_000]);
+    }
+
+    #[test]
+    fn callback_double_tap_locks_for_modifier_and_key_bindings() {
+        let command =
+            crate::app_settings::COMMAND_KEY_MASK | crate::app_settings::RIGHT_COMMAND_MASK;
+        let right_command = RuntimeHotkey {
+            modifiers: crate::app_settings::HotkeyModifiers {
+                command: Some(crate::app_settings::ModifierSide::Right),
+                ..Default::default()
+            },
+            key_code: None,
+        };
+        let key_chord = RuntimeHotkey {
+            key_code: Some(49),
+            ..right_command
+        };
+        for (binding, flags) in [
+            (option_binding(), OPTION_KEY_MASK),
+            (right_command, command),
+            (function_binding(), FUNCTION),
+            (key_chord, command),
+        ] {
+            let start = 60_000_000_000;
+            let mut hotkey =
+                DictationHotkey::with_binding(false, capture_time(), 42, true, binding);
+            let press = binding
+                .key_code
+                .map_or(InputEvent::Flags(flags), |code| InputEvent::Key {
+                    code,
+                    down: true,
+                    flags,
+                });
+            let release = binding
+                .key_code
+                .map_or(InputEvent::Flags(0), |code| InputEvent::Key {
+                    code,
+                    down: false,
+                    flags,
+                });
+            let edges = callback_input(&[
+                (start, press),
+                (start + 80_000_000, release),
+                (start + 180_000_000, press),
+                (start + 260_000_000, release),
+                (start + 1_000_000_000, press),
+                (start + 1_080_000_000, release),
+            ]);
+            let mut capture = crate::dictation::DictationCapture::new(16_000);
+            capture.ingest(&vec![0.25; 16_000], CaptureInstant::from_nanos(start));
+            capture.ingest(
+                &vec![0.5; 16_000],
+                CaptureInstant::from_nanos(start + 1_000_000_000),
+            );
+            capture.ingest(
+                &vec![0.75; 8_000],
+                CaptureInstant::from_nanos(start + 1_500_000_000),
+            );
+            let mut discarded = 0;
+            let mut clips = Vec::new();
+            let actions: Vec<_> = edges
+                .into_iter()
+                .map(|edge| {
+                    let action = hotkey.process(edge.event, edge.capture_at);
+                    match action {
+                        Some(HotkeyAction::Start) => capture.start_at(edge.capture_at),
+                        Some(HotkeyAction::Finish) => match capture.finish(edge.capture_at) {
+                            crate::dictation::Finish::Discard => discarded += 1,
+                            crate::dictation::Finish::Transcribe(clip) => clips.push(clip),
+                        },
+                        None => {}
+                        _ => panic!("unexpected hotkey action"),
+                    }
+                    assert_eq!(hotkey.is_recording(), capture.is_recording());
+                    action
+                })
+                .collect();
+            assert_eq!(
+                actions,
+                vec![
+                    Some(HotkeyAction::Start),
+                    Some(HotkeyAction::Finish),
+                    Some(HotkeyAction::Start),
+                    None,
+                    Some(HotkeyAction::Finish),
+                    None,
+                ]
+            );
+            assert!(!hotkey.is_recording());
+            assert_eq!(discarded, 1);
+            assert_eq!(clips.len(), 1);
+            let clip = clips.pop().unwrap();
+            assert_eq!(clip.duration_ms(), 1_270);
+            let samples = clip.into_transcription_samples();
+            assert_eq!(&samples[..4_320], &[0.25; 4_320]);
+            assert_eq!(&samples[4_320..], &[0.5; 16_000]);
+        }
+    }
+
+    #[test]
+    fn callback_hold_and_double_tap_boundaries_are_milliseconds() {
+        for duration_ms in [299, 300, 301] {
+            let start = 60_000_000_000;
+            let press = InputEvent::Flags(OPTION_KEY_MASK);
+            let release = InputEvent::Flags(0);
+            let edges =
+                callback_input(&[(start, press), (start + duration_ms * 1_000_000, release)]);
+            let mut capture = crate::dictation::DictationCapture::new(16_000);
+            capture.start_at(edges[0].capture_at);
+            assert_eq!(
+                matches!(
+                    capture.finish(edges[1].capture_at),
+                    crate::dictation::Finish::Discard
+                ),
+                duration_ms < 300
+            );
+            let edges = callback_input(&[
+                (start, press),
+                (start + 80_000_000, release),
+                (start + 180_000_000, press),
+                (start + (80 + duration_ms) * 1_000_000, release),
+            ]);
+            let mut hotkey = test_hotkey(false, capture_time());
+            for edge in edges {
+                hotkey.process(edge.event, edge.capture_at);
+            }
+            assert_eq!(hotkey.is_recording(), duration_ms < 300);
+        }
+    }
 
     const NO_FLAGS: u64 = 0;
     const SHIFT: u64 = 1 << 17;
@@ -1710,6 +1953,111 @@ mod tests {
             Some(HotkeyAction::Finish)
         );
         assert!(!hotkey.is_recording());
+    }
+
+    #[test]
+    fn live_double_tap_only_change_preserves_capture_until_release_or_escape() {
+        use crate::dictation::{DictationCapture, Finish};
+
+        let now = capture_time();
+        let binding = RuntimeHotkey {
+            modifiers: crate::app_settings::modifiers_from_flags(SHIFT_KEY_MASK),
+            key_code: Some(49),
+        };
+        for cancel in [false, true] {
+            let mut hotkey = DictationHotkey::with_binding(false, now, 42, true, binding);
+            let mut capture = DictationCapture::new(16_000);
+            let key = |code, down| InputEvent::Key {
+                code,
+                down,
+                flags: SHIFT_KEY_MASK,
+            };
+            assert_eq!(
+                hotkey.process(key(49, true), now),
+                Some(HotkeyAction::Start)
+            );
+            capture.start_at(now);
+            capture.ingest(&[0.5; 8_000], now + Duration::from_millis(500));
+
+            hotkey.set_double_tap_only(true);
+            hotkey.set_double_tap_only(true);
+            assert!(hotkey.is_recording());
+            assert!(capture.is_recording());
+
+            let ended_at = now + Duration::from_millis(600);
+            capture.ingest(&[0.5; 1_600], ended_at);
+            let event = if cancel {
+                key(ESCAPE_KEY_CODE, true)
+            } else {
+                key(49, false)
+            };
+            let action = hotkey.process(event, ended_at);
+            if cancel {
+                assert_eq!(action, Some(HotkeyAction::Cancel));
+                capture.cancel();
+                hotkey.process(key(ESCAPE_KEY_CODE, false), ended_at);
+                hotkey.process(key(49, false), ended_at);
+            } else {
+                assert_eq!(action, Some(HotkeyAction::Finish));
+                let Finish::Transcribe(clip) = capture.finish(ended_at) else {
+                    panic!("the active hold must finish after changing double-tap-only");
+                };
+                assert_eq!(clip.duration_ms(), 600);
+            }
+            assert!(!hotkey.is_recording());
+            assert!(!capture.is_recording());
+
+            hotkey.process(InputEvent::Flags(0), ended_at);
+            assert_eq!(
+                hotkey.process(key(49, true), now + Duration::from_secs(1)),
+                None,
+                "the next gesture must use double-tap-only"
+            );
+            assert!(!hotkey.is_recording());
+        }
+    }
+
+    #[test]
+    fn live_double_tap_disable_prevents_the_second_release_from_locking() {
+        use crate::dictation::{DictationCapture, Finish};
+
+        let now = capture_time();
+        let mut hotkey = test_hotkey(false, now);
+        let mut capture = DictationCapture::new(16_000);
+        assert_eq!(
+            hotkey.process(InputEvent::Flags(OPTION_KEY_MASK), now),
+            Some(HotkeyAction::Start)
+        );
+        capture.start_at(now);
+        let first_release = now + Duration::from_millis(80);
+        capture.ingest(&[0.5; 1_280], first_release);
+        assert_eq!(
+            hotkey.process(InputEvent::Flags(0), first_release),
+            Some(HotkeyAction::Finish)
+        );
+        assert!(matches!(capture.finish(first_release), Finish::Discard));
+
+        let second_press = now + Duration::from_millis(180);
+        capture.ingest(&[0.5; 1_600], second_press);
+        assert_eq!(
+            hotkey.process(InputEvent::Flags(OPTION_KEY_MASK), second_press),
+            Some(HotkeyAction::Start)
+        );
+        capture.start_at(second_press);
+        hotkey.set_double_tap_enabled(false);
+        hotkey.set_double_tap_only(false);
+        assert!(hotkey.is_recording());
+        assert!(capture.is_recording());
+
+        let second_release = now + Duration::from_millis(260);
+        capture.ingest(&[0.5; 1_280], second_release);
+        assert_eq!(
+            hotkey.process(InputEvent::Flags(0), second_release),
+            Some(HotkeyAction::Finish)
+        );
+        assert!(matches!(capture.finish(second_release), Finish::Discard));
+        assert!(!hotkey.is_recording());
+        assert!(!capture.is_recording());
     }
 
     #[test]

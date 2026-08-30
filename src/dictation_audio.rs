@@ -263,7 +263,7 @@ impl DictationAudio {
         self.state.recording.load(Ordering::Acquire)
     }
 
-    pub fn capture_generation(&self) -> u64 {
+    fn capture_generation(&self) -> u64 {
         self.state.capture_generation.load(Ordering::Acquire)
     }
 
@@ -364,7 +364,35 @@ impl DictationAudio {
     }
 
     pub fn try_recv_event(&self) -> Option<DictationAudioEvent> {
-        self.events.try_recv().ok()
+        while let Ok(event) = self.events.try_recv() {
+            let generation = match &event {
+                DictationAudioEvent::OpenFailed {
+                    capture_generation, ..
+                }
+                | DictationAudioEvent::ReadyIntentional { capture_generation }
+                | DictationAudioEvent::Interrupted {
+                    capture_generation, ..
+                }
+                | DictationAudioEvent::CaptureDiscontinuity {
+                    capture_generation, ..
+                } => Some(*capture_generation),
+                _ => None,
+            };
+            // Only accepted synchronous starts advance this generation. Finish/Cancel retain
+            // terminal failures. The sole control caller also consumes events, so no newer
+            // capture can start between this check and use.
+            if let Some(generation) = generation
+                && generation != self.capture_generation()
+            {
+                tracing::debug!(
+                    capture_generation = generation,
+                    "ignored stale capture notification"
+                );
+                continue;
+            }
+            return Some(event);
+        }
+        None
     }
 
     fn call<T>(&self, command: impl FnOnce(SyncSender<T>) -> Command) -> Result<T> {
@@ -431,6 +459,11 @@ impl Owner {
                 expected_recognition_generation,
                 reply,
             } => {
+                // Draining can discover a failure belonging to the previous capture or idle
+                // period. Validate and advance the new capture only after that drain.
+                if self.input.is_open() && !self.input.is_recovering() {
+                    self.drain_through(at);
+                }
                 if self.input.is_recovering()
                     || expected_recognition_generation.is_some_and(|generation| {
                         generation != self.recognition_generation
@@ -446,7 +479,6 @@ impl Owner {
                 }
                 self.state.capture_generation.fetch_add(1, Ordering::AcqRel);
                 if self.input.is_open() {
-                    self.drain_through(at);
                     if voice {
                         self.capture.start_voice_at(at)
                     } else if programmatic {
@@ -761,6 +793,365 @@ mod tests {
 
     fn capture_time() -> CaptureInstant {
         CaptureInstant::from_nanos(60_000_000_000)
+    }
+
+    // Drive the real serialized owner without a worker so input/control ordering is exact.
+    fn owner_for_test(open: bool) -> (Owner, DictationAudio, Sender<(Vec<f32>, CaptureInstant)>) {
+        let (mut input, opened) = RecoveringAudioInput::pending_for_test();
+        let (replacement, samples) = crate::audio::AudioInput::channel_for_test();
+        opened.send((0, Ok(replacement))).unwrap();
+        if open {
+            assert!(matches!(
+                input.recv_timeout(Duration::ZERO, true),
+                RecoveringAudioInputEvent::Reopened
+            ));
+        }
+        let state = Arc::new(State {
+            sample_rate: AtomicU64::new(if open { 48_000 } else { 0 }),
+            captured_through: AtomicU64::new(0),
+            device_name: Mutex::new("Test microphone".into()),
+            recording: AtomicBool::new(false),
+            recovering: AtomicBool::new(false),
+            recognition_generation: AtomicU64::new(0),
+            outstanding_recognition_frames: Arc::new(AtomicU64::new(0)),
+            capture_generation: AtomicU64::new(0),
+        });
+        let (commands, command_receiver) = mpsc::channel();
+        let (recognition_sender, recognition) = mpsc::sync_channel(RECOGNITION_QUEUE_CAPACITY);
+        let (events_sender, events) = mpsc::channel();
+        let recording_environment = RecordingEnvironmentController::start();
+        let owner = Owner {
+            input,
+            release_while_idle: false,
+            pending_capture: None,
+            capture: new_capture(if open { 48_000 } else { 16_000 }, &recording_environment),
+            recording_environment,
+            commands: command_receiver,
+            recognition: recognition_sender,
+            events: events_sender,
+            state: state.clone(),
+            dropped_recognition_frames: 0,
+            recognition_generation: 0,
+            recognition_overflowed: false,
+            pending_input: PendingInputEvents::default(),
+            last_captured_through: None,
+        };
+        let input = DictationAudio {
+            commands,
+            recognition,
+            events,
+            state,
+            worker: None,
+        };
+        (owner, input, samples)
+    }
+
+    fn control<T>(owner: &mut Owner, command: impl FnOnce(SyncSender<T>) -> Command) -> T {
+        let (reply, response) = mpsc::sync_channel(1);
+        assert!(owner.handle(command(reply)));
+        response.recv().unwrap()
+    }
+
+    fn start(owner: &mut Owner, at: CaptureInstant) {
+        assert!(control(owner, |reply| Command::Start {
+            at,
+            voice: false,
+            programmatic: false,
+            expected_recognition_generation: None,
+            reply,
+        }));
+    }
+
+    #[test]
+    fn capture_failures_survive_terminal_controls_but_not_a_new_capture() {
+        for interrupted in [false, true] {
+            for recording in [false, true] {
+                for boundary in ["current", "finish", "cancel", "start", "start-finish"] {
+                    let (mut owner, input, _samples) = owner_for_test(true);
+                    let at = capture_time();
+                    owner.handle_input(RecoveringAudioInputEvent::Chunk {
+                        samples: vec![0.25; 480],
+                        captured_through: at,
+                    });
+                    if recording {
+                        start(&mut owner, at);
+                    }
+                    if interrupted {
+                        owner.handle_input(RecoveringAudioInputEvent::Interrupted);
+                    } else {
+                        owner.handle_input(RecoveringAudioInputEvent::Chunk {
+                            samples: vec![0.25; 480],
+                            captured_through: at + Duration::from_millis(110),
+                        });
+                    }
+                    assert!(!input.is_recording());
+                    match boundary {
+                        "finish" => {
+                            control(&mut owner, |reply| Command::Finish { at, reply });
+                        }
+                        "cancel" => control(&mut owner, |reply| Command::Cancel { reply }),
+                        "start" | "start-finish" => {
+                            start(&mut owner, at);
+                            if boundary == "start-finish" {
+                                control(&mut owner, |reply| Command::Finish { at, reply });
+                            }
+                        }
+                        _ => {}
+                    }
+                    let event = input.try_recv_event();
+                    if matches!(boundary, "current" | "finish" | "cancel") {
+                        assert!(matches!(
+                            event,
+                            Some(DictationAudioEvent::Interrupted { was_recording, .. }
+                                | DictationAudioEvent::CaptureDiscontinuity { was_recording, .. })
+                                if was_recording == recording
+                        ));
+                    } else {
+                        assert!(
+                            event.is_none(),
+                            "interrupted={interrupted} recording={recording} {boundary}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn pending_capture_notifications_follow_control_boundaries() {
+        for ready in [false, true] {
+            for boundary in ["current", "finish", "cancel", "start"] {
+                let (mut owner, input, _samples) = owner_for_test(false);
+                let at = capture_time();
+                start(&mut owner, at);
+                control(&mut owner, |reply| Command::BecomeIntentional {
+                    at: at + crate::dictation::MINIMUM_HOLD_DURATION,
+                    reply,
+                });
+                if ready {
+                    let event = owner.input.recv_timeout(Duration::ZERO, false);
+                    owner.handle_input(event);
+                } else {
+                    owner
+                        .handle_input(RecoveringAudioInputEvent::OpenFailed("test failure".into()));
+                }
+                match boundary {
+                    "finish" => {
+                        control(&mut owner, |reply| Command::Finish { at, reply });
+                    }
+                    "cancel" => control(&mut owner, |reply| Command::Cancel { reply }),
+                    "start" => start(&mut owner, CaptureInstant::from_nanos(0)),
+                    _ => {}
+                }
+                if boundary != "start" {
+                    assert!(matches!(
+                        (ready, input.try_recv_event()),
+                        (true, Some(DictationAudioEvent::ReadyIntentional { .. }))
+                            | (false, Some(DictationAudioEvent::OpenFailed { .. }))
+                    ));
+                }
+                // Stream-wide events still pass through after a stale capture event.
+                if ready {
+                    assert!(matches!(
+                        input.try_recv_event(),
+                        Some(DictationAudioEvent::Reopened)
+                    ));
+                }
+                assert!(input.try_recv_event().is_none(), "ready={ready} {boundary}");
+            }
+        }
+    }
+
+    #[test]
+    fn cold_capture_restart_rejects_late_open_results_and_closes_after_finish() {
+        for cancel in [false, true] {
+            let (mut owner, input, _unused_samples) = owner_for_test(false);
+            owner.release_while_idle = true;
+            // Substitute only the asynchronous device opener, not owner events or captures.
+            let (first_input, first_opened) = RecoveringAudioInput::pending_for_test();
+            owner.input = first_input;
+            let at = capture_time();
+            start(&mut owner, at);
+            owner.reconcile_input();
+            let first_generation = input.capture_generation();
+            assert!(owner.input.is_opening());
+            if cancel {
+                control(&mut owner, |reply| Command::Cancel { reply });
+            } else {
+                assert!(matches!(
+                    control(&mut owner, |reply| Command::Finish {
+                        at: at + Duration::from_millis(80),
+                        reply,
+                    }),
+                    Finish::Discard
+                ));
+            }
+            owner.reconcile_input();
+            assert!(!input.is_recording());
+            assert!(!owner.input.is_opening());
+            assert!(!owner.input.is_open());
+            let idle_generation = input.capture_generation();
+            assert_eq!(idle_generation, first_generation);
+
+            let (second_input, second_opened) = RecoveringAudioInput::pending_for_test();
+            owner.input = second_input;
+            let second_press = at + Duration::from_millis(180);
+            start(&mut owner, second_press);
+            owner.reconcile_input();
+            let second_generation = input.capture_generation();
+            assert_ne!(second_generation, idle_generation);
+            assert_ne!(second_generation, first_generation);
+
+            let (late_input, late_samples) = crate::audio::AudioInput::channel_for_test();
+            assert!(first_opened.send((0, Ok(late_input))).is_err());
+            assert!(late_samples.send((vec![0.75; 480], second_press)).is_err());
+            let event = owner.input.recv_timeout(Duration::ZERO, false);
+            assert!(matches!(event, RecoveringAudioInputEvent::Timeout));
+            owner.handle_input(event);
+            assert!(input.try_recv_event().is_none());
+            assert!(input.is_recording());
+
+            // A locked second tap stays pending beyond its physical release. Readiness
+            // occurs later, but the intentional threshold must still use this press.
+            assert!(!control(&mut owner, |reply| Command::BecomeIntentional {
+                at: second_press + crate::dictation::MINIMUM_HOLD_DURATION,
+                reply,
+            }));
+            let (replacement, samples) = crate::audio::AudioInput::channel_for_test();
+            second_opened.send((0, Ok(replacement))).unwrap();
+            let event = owner.input.recv_timeout(Duration::ZERO, false);
+            assert!(matches!(event, RecoveringAudioInputEvent::Reopened));
+            owner.handle_input(event);
+            owner.reconcile_input();
+            assert!(owner.input.is_open());
+            assert!(input.is_recording());
+            assert!(matches!(
+                input.try_recv_event(),
+                Some(DictationAudioEvent::ReadyIntentional { capture_generation })
+                    if capture_generation == second_generation
+            ));
+            assert!(matches!(
+                input.try_recv_event(),
+                Some(DictationAudioEvent::Reopened)
+            ));
+
+            let finished_at = at + Duration::from_millis(700);
+            samples.send((vec![0.25; 4_800], finished_at)).unwrap();
+            let finish = control(&mut owner, |reply| Command::Finish {
+                at: finished_at,
+                reply,
+            });
+            let Finish::Transcribe(clip) = finish else {
+                panic!("second capture must preserve its original press and produce one clip");
+            };
+            assert_eq!(clip.duration_ms(), 100);
+            owner.reconcile_input();
+            assert!(!input.is_recording());
+            assert!(!owner.input.is_open());
+            assert!(!owner.input.is_opening());
+            assert!(samples.send((vec![0.25; 480], finished_at)).is_err());
+            assert!(matches!(
+                control(&mut owner, |reply| Command::Finish {
+                    at: finished_at,
+                    reply
+                }),
+                Finish::Discard
+            ));
+            assert!(input.try_recv_event().is_none());
+        }
+    }
+
+    #[test]
+    fn boundary_drain_preserves_finish_failure_but_does_not_fail_a_new_capture() {
+        for starting in [false, true] {
+            let (mut owner, input, samples) = owner_for_test(true);
+            let at = capture_time();
+            owner.handle_input(RecoveringAudioInputEvent::Chunk {
+                samples: vec![0.25; 480],
+                captured_through: at,
+            });
+            start(&mut owner, at);
+            owner.handle_input(RecoveringAudioInputEvent::Chunk {
+                samples: vec![0.25; 19_200],
+                captured_through: at + Duration::from_millis(400),
+            });
+            let boundary = at + Duration::from_millis(510);
+            samples.send((vec![0.25; 480], boundary)).unwrap();
+            if starting {
+                start(&mut owner, boundary);
+            } else {
+                assert!(matches!(
+                    control(&mut owner, |reply| Command::Finish {
+                        at: boundary,
+                        reply
+                    }),
+                    Finish::Discard
+                ));
+            }
+            assert_eq!(input.is_recording(), starting);
+            if starting {
+                assert!(input.try_recv_event().is_none());
+            } else {
+                assert!(matches!(
+                    input.try_recv_event(),
+                    Some(DictationAudioEvent::CaptureDiscontinuity {
+                        was_recording: true,
+                        ..
+                    })
+                ));
+            }
+        }
+    }
+
+    #[test]
+    fn start_revalidates_microphone_and_voice_generation_after_boundary_drain() {
+        for interrupted in [false, true] {
+            let (mut owner, input, samples) = owner_for_test(true);
+            let at = capture_time();
+            owner.handle_input(RecoveringAudioInputEvent::Chunk {
+                samples: vec![0.25; 480],
+                captured_through: at,
+            });
+            let boundary = at + Duration::from_millis(110);
+            if interrupted {
+                drop(samples);
+            } else {
+                samples.send((vec![0.25; 480], boundary)).unwrap();
+            }
+            let generation = input.capture_generation();
+            assert!(!control(&mut owner, |reply| Command::Start {
+                at: boundary,
+                voice: !interrupted,
+                programmatic: false,
+                expected_recognition_generation: (!interrupted)
+                    .then_some(input.recognition_generation()),
+                reply,
+            }));
+            assert_eq!(input.capture_generation(), generation);
+            assert!(!input.is_recording());
+            assert!(input.try_recv_event().is_some());
+        }
+    }
+
+    #[test]
+    fn capture_generation_advances_only_when_a_new_capture_is_accepted() {
+        let (mut owner, input, _samples) = owner_for_test(true);
+        let at = CaptureInstant::from_nanos(0);
+        for _ in 0..2 {
+            let generation = input.capture_generation();
+            control(&mut owner, |reply| Command::Cancel { reply });
+            assert_eq!(input.capture_generation(), generation);
+            let generation = input.capture_generation();
+            control(&mut owner, |reply| Command::Finish { at, reply });
+            assert_eq!(input.capture_generation(), generation);
+        }
+        let generation = input.capture_generation();
+        start(&mut owner, at);
+        assert_ne!(input.capture_generation(), generation);
+        let generation = input.capture_generation();
+        control(&mut owner, |reply| Command::Finish { at, reply });
+        control(&mut owner, |reply| Command::Cancel { reply });
+        assert_eq!(input.capture_generation(), generation);
     }
 
     #[test]

@@ -175,11 +175,13 @@ CoreAudio formats, AppleScript details, or event serialization.
 - Dictation remains available while command recognition sleeps.
 - Model inference, optional post-processing, paste, and application actions must
   never block authoritative audio capture. Their queues remain bounded.
-- CoreAudio capture timestamps and CGEvent shortcut timestamps share the macOS
-  boot-time clock, but raw CGEvent Mach ticks must be converted through the
-  current timebase before comparison. Delayed press handling reconstructs the
-  original onset from the timeline; delayed release handling excludes audio
-  captured after the physical release.
+- CoreAudio capture timestamps and annotated-session CGEvent shortcut timestamps
+  share the macOS boot-time nanosecond clock. Do not apply the Mach timebase to
+  annotated-session timestamps. Physical HID-tap timestamps arrived as raw Mach
+  ticks on the tested Apple Silicon system, while some HID events already used
+  nanoseconds; changing tap location requires revalidating timestamp units.
+  Delayed press handling reconstructs the original onset from the timeline;
+  delayed release handling excludes audio captured after the physical release.
 - Active dictation capture is lossless with respect to Moonshine, event, UI,
   context, and worker stalls. Command recognition is explicitly best-effort:
   its backlog is bounded by duration, and pressure invalidates the generation,
