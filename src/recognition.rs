@@ -1098,21 +1098,19 @@ pub fn listen(
                     recognition_origin = None;
                 }
                 DictationAudioEvent::CaptureDiscontinuity {
-                    was_recording: _,
+                    was_recording,
                     capture_generation,
                     gap_ms,
-                } if input.is_recording() && input.capture_generation() != capture_generation => {
-                    tracing::debug!(
-                        capture_generation,
-                        gap_ms,
-                        "ignored stale audio discontinuity"
-                    );
-                }
-                DictationAudioEvent::CaptureDiscontinuity {
-                    was_recording,
-                    gap_ms,
-                    ..
                 } => {
+                    if capture_generation != input.capture_generation() {
+                        tracing::debug!(
+                            capture_generation,
+                            current = input.capture_generation(),
+                            gap_ms,
+                            "ignored stale audio discontinuity"
+                        );
+                        continue;
+                    }
                     input.discard_recognition_backlog();
                     reset_recognizer(&mut recognizer)?;
                     recognition_origin = None;
@@ -1151,12 +1149,17 @@ pub fn listen(
                     }
                 }
                 DictationAudioEvent::Interrupted {
-                    was_recording: _,
+                    was_recording,
                     capture_generation,
-                } if input.is_recording() && input.capture_generation() != capture_generation => {
-                    tracing::debug!(capture_generation, "ignored stale microphone interruption");
-                }
-                DictationAudioEvent::Interrupted { was_recording, .. } => {
+                } => {
+                    if capture_generation != input.capture_generation() {
+                        tracing::debug!(
+                            capture_generation,
+                            current = input.capture_generation(),
+                            "ignored stale microphone interruption"
+                        );
+                        continue;
+                    }
                     if was_recording {
                         programmatic = None;
                     }
