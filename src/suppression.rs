@@ -15,7 +15,15 @@ use crate::app_settings::{HOTKEY_MODIFIERS_MASK, RuntimeHotkey, RuntimeHotkeys};
 use crate::audio::CaptureInstant;
 use crate::dictation::MINIMUM_HOLD_DURATION;
 
+// The double-tap-only gesture is a deliberate, tight two-tap sequence, so it
+// stays gated on the hold threshold.
 const DOUBLE_TAP_WINDOW: Duration = MINIMUM_HOLD_DURATION;
+// A press-and-hold double-tap-to-lock spans a full press, release, press, and
+// release. Measuring that whole gesture against the 300 ms hold threshold was
+// too tight: a deliberate double-tap routinely landed outside the window and
+// fell back to two ordinary captures instead of locking (#47). Allow a window
+// closer to the macOS default double-click interval.
+const DOUBLE_TAP_LOCK_WINDOW: Duration = Duration::from_millis(500);
 const ESCAPE_KEY_CODE: u16 = 53;
 
 const EVENT_LEFT_MOUSE_DOWN: u32 = 1;
@@ -926,7 +934,8 @@ impl DictationHotkey {
             }
             State::Idle if trigger_pressed => {
                 let previous_release = self.last_release_at.take().filter(|released| {
-                    self.double_tap_enabled && now.duration_since(*released) < DOUBLE_TAP_WINDOW
+                    self.double_tap_enabled
+                        && now.duration_since(*released) < DOUBLE_TAP_LOCK_WINDOW
                 });
                 self.state = State::Recording {
                     started_at: now,
@@ -937,7 +946,7 @@ impl DictationHotkey {
             State::Recording {
                 previous_release: Some(released),
                 ..
-            } if trigger_released && now.duration_since(released) < DOUBLE_TAP_WINDOW => {
+            } if trigger_released && now.duration_since(released) < DOUBLE_TAP_LOCK_WINDOW => {
                 self.state = State::Locked;
                 None
             }
@@ -1713,6 +1722,38 @@ mod tests {
     }
 
     #[test]
+    fn a_natural_paced_double_tap_still_locks() {
+        // A deliberate double-tap spans four events and easily runs past the
+        // 300 ms hold threshold; it must still lock rather than fall back to two
+        // ordinary press-and-hold captures (#47).
+        let now = capture_time();
+        let mut hotkey = test_hotkey(false, now);
+
+        hotkey.process(InputEvent::Flags(OPTION_KEY_MASK), now);
+        hotkey.process(InputEvent::Flags(NO_FLAGS), now + Duration::from_millis(90));
+        hotkey.process(
+            InputEvent::Flags(OPTION_KEY_MASK),
+            now + Duration::from_millis(250),
+        );
+        assert_eq!(
+            hotkey.process(
+                InputEvent::Flags(NO_FLAGS),
+                now + Duration::from_millis(450)
+            ),
+            None
+        );
+        assert!(hotkey.is_recording());
+        assert_eq!(
+            hotkey.process(
+                InputEvent::Flags(OPTION_KEY_MASK),
+                now + Duration::from_secs(2)
+            ),
+            Some(HotkeyAction::Finish)
+        );
+        assert!(!hotkey.is_recording());
+    }
+
+    #[test]
     fn a_slow_second_release_does_not_lock() {
         let now = capture_time();
         let mut hotkey = test_hotkey(false, now);
@@ -1726,7 +1767,7 @@ mod tests {
         assert_eq!(
             hotkey.process(
                 InputEvent::Flags(NO_FLAGS),
-                now + Duration::from_millis(450)
+                now + Duration::from_millis(800)
             ),
             Some(HotkeyAction::Finish)
         );

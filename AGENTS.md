@@ -159,8 +159,9 @@ CoreAudio formats, AppleScript details, or event serialization.
   300 ms discard. A 450 ms hotkey pre-roll and one-second voice-trigger pre-roll
   protect speech onset. Capture has no automatic duration limit; release,
   explicit stop, or Escape ends it.
-- When enabled, a second shortcut tap within 300 ms locks dictation. Press the
-  shortcut again to finish or Escape to cancel.
+- When enabled, a second shortcut tap within 500 ms locks dictation. Press the
+  shortcut again to finish or Escape to cancel. Double-tap-only mode keeps the
+  tighter 300 ms window for its deliberate two-tap gesture.
 - When commands are enabled, every dictation or paste hotkey action resets
   Moonshine so shortcut audio cannot leak into a later command.
 - Recording audio behavior and idle-sleep prevention begin only after the
