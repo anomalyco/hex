@@ -28,9 +28,23 @@ const EVENT_TAP_DISABLED_BY_TIMEOUT: u32 = u32::MAX - 1;
 const EVENT_TAP_DISABLED_BY_USER_INPUT: u32 = u32::MAX;
 const KEYBOARD_EVENT_KEYCODE: u32 = 9;
 const EVENT_SOURCE_USER_DATA: u32 = 42;
+// The key tap filters key events only; assistive keyboards inject downstream of HID, so this
+// tap must sit at the annotated session to observe their input too.
+const KEY_TAP_EVENT_MASK: u64 = (1_u64 << EVENT_KEY_DOWN) | (1_u64 << EVENT_KEY_UP);
+// Side-specific modifier-only transitions, including Right Command, are only reliably
+// delivered at the HID boundary. flagsChanged is never suppressed (shortcut suppression never
+// matches Flags) and never invalidates input activity, so a listen-only tap is behaviorally
+// identical for the suppression state machine.
+const MODIFIER_TAP_EVENT_MASK: u64 = 1_u64 << EVENT_FLAGS_CHANGED;
+// Mouse clicks stay passive: a modifying tap at this boundary disrupts Finder's Option-driven
+// alternate menu items even when it returns events unchanged.
+const OBSERVATION_TAP_EVENT_MASK: u64 = (1_u64 << EVENT_LEFT_MOUSE_DOWN)
+    | (1_u64 << EVENT_RIGHT_MOUSE_DOWN)
+    | (1_u64 << EVENT_OTHER_MOUSE_DOWN);
 
-// Assistive keyboards inject downstream of HID; observe them alongside hardware input.
+// The annotated session observes both hardware events and input injected downstream of HID.
 const ANNOTATED_SESSION_EVENT_TAP: u32 = 2;
+const HID_EVENT_TAP: u32 = 0;
 const HEAD_INSERT_EVENT_TAP: u32 = 0;
 const DEFAULT_EVENT_TAP: u32 = 0;
 const LISTEN_ONLY_EVENT_TAP: u32 = 1;
@@ -273,6 +287,7 @@ struct EventTapContext {
     activity: InputActivity,
     escape_cancels: Arc<AtomicBool>,
     key_tap: AtomicPtr<c_void>,
+    modifier_tap: AtomicPtr<c_void>,
     observation_tap: AtomicPtr<c_void>,
     shortcut_suppression: Mutex<ShortcutSuppression>,
     pending: PendingInputEvents,
@@ -293,29 +308,19 @@ fn run_event_tap(
         activity,
         escape_cancels,
         key_tap: AtomicPtr::new(ptr::null_mut()),
+        modifier_tap: AtomicPtr::new(ptr::null_mut()),
         observation_tap: AtomicPtr::new(ptr::null_mut()),
         shortcut_suppression: Mutex::new(ShortcutSuppression::default()),
         pending,
         next_sequence: AtomicU64::new(0),
     }));
-    let key_mask = [EVENT_KEY_DOWN, EVENT_KEY_UP]
-        .into_iter()
-        .fold(0, |mask, event| mask | 1_u64 << event);
-    let observation_mask = [
-        EVENT_LEFT_MOUSE_DOWN,
-        EVENT_RIGHT_MOUSE_DOWN,
-        EVENT_FLAGS_CHANGED,
-        EVENT_OTHER_MOUSE_DOWN,
-    ]
-    .into_iter()
-    .fold(0, |mask, event| mask | 1_u64 << event);
     // SAFETY: The callback context remains allocated until this run loop stops.
     let key_tap = unsafe {
         CGEventTapCreate(
             ANNOTATED_SESSION_EVENT_TAP,
             HEAD_INSERT_EVENT_TAP,
             DEFAULT_EVENT_TAP,
-            key_mask,
+            KEY_TAP_EVENT_MASK,
             event_callback,
             context.cast(),
         )
@@ -328,14 +333,35 @@ fn run_event_tap(
         )));
         return;
     }
-    // A modifying tap disrupts Finder's Option-driven alternate menu items even when it returns
-    // flagsChanged events unchanged. Observe modifiers and mouse clicks with a passive tap.
+    // Modifier-only transitions are observed listen-only at the HID boundary; see
+    // MODIFIER_TAP_EVENT_MASK for why passive observation is behaviorally identical.
+    let modifier_tap = unsafe {
+        CGEventTapCreate(
+            HID_EVENT_TAP,
+            HEAD_INSERT_EVENT_TAP,
+            LISTEN_ONLY_EVENT_TAP,
+            MODIFIER_TAP_EVENT_MASK,
+            event_callback,
+            context.cast(),
+        )
+    };
+    if modifier_tap.is_null() {
+        // SAFETY: The modifier tap was not created, so no callback can use the context.
+        unsafe {
+            CGEventTapEnable(key_tap, false);
+            CFRelease(key_tap.cast_const());
+            drop(Box::from_raw(context));
+        }
+        let _ = ready.send(Err(eyre!("could not create modifier event tap")));
+        return;
+    }
+    // The mouse-only observation tap stays passive at the annotated session.
     let observation_tap = unsafe {
         CGEventTapCreate(
             ANNOTATED_SESSION_EVENT_TAP,
             HEAD_INSERT_EVENT_TAP,
             LISTEN_ONLY_EVENT_TAP,
-            observation_mask,
+            OBSERVATION_TAP_EVENT_MASK,
             event_callback,
             context.cast(),
         )
@@ -344,7 +370,9 @@ fn run_event_tap(
         // SAFETY: The observation tap was not created, so no callback can use the context.
         unsafe {
             CGEventTapEnable(key_tap, false);
+            CGEventTapEnable(modifier_tap, false);
             CFRelease(key_tap.cast_const());
+            CFRelease(modifier_tap.cast_const());
             drop(Box::from_raw(context));
         }
         let _ = ready.send(Err(eyre!("could not create input observation event tap")));
@@ -354,25 +382,34 @@ fn run_event_tap(
     unsafe {
         (*context).key_tap.store(key_tap, Ordering::Release);
         (*context)
+            .modifier_tap
+            .store(modifier_tap, Ordering::Release);
+        (*context)
             .observation_tap
             .store(observation_tap, Ordering::Release);
     }
-    // SAFETY: Both taps are valid CFMachPorts returned above.
+    // SAFETY: All taps are valid CFMachPorts returned above.
     let key_source = unsafe { CFMachPortCreateRunLoopSource(ptr::null(), key_tap, 0) };
+    let modifier_source = unsafe { CFMachPortCreateRunLoopSource(ptr::null(), modifier_tap, 0) };
     let observation_source =
         unsafe { CFMachPortCreateRunLoopSource(ptr::null(), observation_tap, 0) };
-    if key_source.is_null() || observation_source.is_null() {
-        // SAFETY: Neither source has been attached to the run loop yet.
+    if key_source.is_null() || modifier_source.is_null() || observation_source.is_null() {
+        // SAFETY: No source has been attached to the run loop yet.
         unsafe {
             if !key_source.is_null() {
                 CFRelease(key_source.cast_const());
+            }
+            if !modifier_source.is_null() {
+                CFRelease(modifier_source.cast_const());
             }
             if !observation_source.is_null() {
                 CFRelease(observation_source.cast_const());
             }
             CGEventTapEnable(key_tap, false);
+            CGEventTapEnable(modifier_tap, false);
             CGEventTapEnable(observation_tap, false);
             CFRelease(key_tap.cast_const());
+            CFRelease(modifier_tap.cast_const());
             CFRelease(observation_tap.cast_const());
             drop(Box::from_raw(context));
         }
@@ -385,26 +422,32 @@ fn run_event_tap(
     // SAFETY: All values belong to this thread and remain alive while the run loop runs.
     unsafe {
         CFRunLoopAddSource(current_run_loop, key_source, kCFRunLoopCommonModes);
+        CFRunLoopAddSource(current_run_loop, modifier_source, kCFRunLoopCommonModes);
         CFRunLoopAddSource(current_run_loop, observation_source, kCFRunLoopCommonModes);
         CGEventTapEnable(key_tap, true);
+        CGEventTapEnable(modifier_tap, true);
         CGEventTapEnable(observation_tap, true);
     }
     let _ = ready.send(Ok(()));
-    // SAFETY: This dedicated thread exists solely to dispatch the event tap.
+    // SAFETY: This dedicated thread exists solely to dispatch the event taps.
     unsafe { CFRunLoopRun() };
-    // SAFETY: Disable the tap before releasing its callback context.
+    // SAFETY: Disable the taps before releasing their shared callback context.
     unsafe {
         CGEventTapEnable(key_tap, false);
+        CGEventTapEnable(modifier_tap, false);
         CGEventTapEnable(observation_tap, false);
         CFRunLoopRemoveSource(current_run_loop, key_source, kCFRunLoopCommonModes);
+        CFRunLoopRemoveSource(current_run_loop, modifier_source, kCFRunLoopCommonModes);
         CFRunLoopRemoveSource(current_run_loop, observation_source, kCFRunLoopCommonModes);
     }
     run_loop.store(ptr::null_mut(), Ordering::Release);
-    // SAFETY: The source is detached and the tap is disabled, so no callback can use context.
+    // SAFETY: The sources are detached and the taps are disabled, so no callback can use context.
     unsafe {
         CFRelease(key_source.cast_const());
+        CFRelease(modifier_source.cast_const());
         CFRelease(observation_source.cast_const());
         CFRelease(key_tap.cast_const());
+        CFRelease(modifier_tap.cast_const());
         CFRelease(observation_tap.cast_const());
         drop(Box::from_raw(context));
     }
@@ -425,7 +468,11 @@ unsafe extern "C" fn event_callback(
         event_type,
         EVENT_TAP_DISABLED_BY_TIMEOUT | EVENT_TAP_DISABLED_BY_USER_INPUT
     ) {
-        for tap in [&context.key_tap, &context.observation_tap] {
+        for tap in [
+            &context.key_tap,
+            &context.modifier_tap,
+            &context.observation_tap,
+        ] {
             let tap = tap.load(Ordering::Acquire);
             if !tap.is_null() {
                 // SAFETY: `tap` is a CFMachPort returned by `CGEventTapCreate`.
@@ -846,7 +893,6 @@ impl DictationHotkey {
             return Some(HotkeyAction::Cancel);
         }
 
-        let trigger_pressed = self.trigger_pressed(event, fresh_key_down);
         let flags = match event {
             InputEvent::Flags(flags) | InputEvent::Key { flags, .. } => Some(flags),
             InputEvent::MouseDown | InputEvent::TapDisabled => None,
@@ -859,6 +905,7 @@ impl DictationHotkey {
                     .is_none_or(|code| self.pressed_keys.contains(&code))
         });
         let trigger_released = flags.is_some() && !trigger_down;
+        let trigger_pressed = self.trigger_pressed(event, fresh_key_down);
         let unrelated_key_down = matches!(
             event,
             InputEvent::Key {
@@ -1013,9 +1060,36 @@ mod tests {
     const NO_FLAGS: u64 = 0;
     const SHIFT: u64 = 1 << 17;
     const FUNCTION: u64 = 1 << 23;
+    const COMMAND: u64 = crate::app_settings::COMMAND_KEY_MASK;
+    const LEFT_COMMAND: u64 = crate::app_settings::LEFT_COMMAND_MASK;
+    const RIGHT_COMMAND: u64 = crate::app_settings::RIGHT_COMMAND_MASK;
 
     fn capture_time() -> CaptureInstant {
         CaptureInstant::from_nanos(60_000_000_000)
+    }
+
+    #[test]
+    fn event_tap_topology_splits_keys_modifiers_and_mouse_across_three_taps() {
+        // Keyboard: keyDown | keyUp only, filtered at the annotated session so assistive
+        // input injected downstream of HID stays observable.
+        assert_eq!(KEY_TAP_EVENT_MASK, 0xC00);
+        // Modifier: flagsChanged only, listen-only at the HID boundary.
+        assert_eq!(MODIFIER_TAP_EVENT_MASK, 0x1000);
+        // Observation: left | right | other mouse down, passive at the annotated session.
+        // (1 << 1) | (1 << 3) | (1 << 25) — kCGEventOtherMouseDown is event type 25.
+        assert_eq!(OBSERVATION_TAP_EVENT_MASK, 0x0200_000A);
+        // Every event is owned by exactly one tap.
+        assert_eq!(KEY_TAP_EVENT_MASK & MODIFIER_TAP_EVENT_MASK, 0);
+        assert_eq!(KEY_TAP_EVENT_MASK & OBSERVATION_TAP_EVENT_MASK, 0);
+        assert_eq!(MODIFIER_TAP_EVENT_MASK & OBSERVATION_TAP_EVENT_MASK, 0);
+        // Tap locations: the filtering key tap and the passive mouse tap share the annotated
+        // session; the listen-only modifier tap observes at the HID boundary.
+        assert_eq!(ANNOTATED_SESSION_EVENT_TAP, 2);
+        assert_eq!(HID_EVENT_TAP, 0);
+        assert_ne!(HID_EVENT_TAP, ANNOTATED_SESSION_EVENT_TAP);
+        assert_eq!(HEAD_INSERT_EVENT_TAP, 0);
+        assert_eq!(DEFAULT_EVENT_TAP, 0);
+        assert_eq!(LISTEN_ONLY_EVENT_TAP, 1);
     }
 
     fn option_binding() -> RuntimeHotkey {
@@ -1028,6 +1102,16 @@ mod tests {
     fn function_binding() -> RuntimeHotkey {
         RuntimeHotkey {
             modifiers: crate::app_settings::modifiers_from_flags(FUNCTION),
+            key_code: None,
+        }
+    }
+
+    fn right_command_binding() -> RuntimeHotkey {
+        RuntimeHotkey {
+            modifiers: crate::app_settings::HotkeyModifiers {
+                command: Some(crate::app_settings::ModifierSide::Right),
+                ..Default::default()
+            },
             key_code: None,
         }
     }
@@ -1130,6 +1214,81 @@ mod tests {
             hotkey.process(InputEvent::Flags(NO_FLAGS), now + Duration::from_secs(1)),
             Some(HotkeyAction::Finish)
         );
+    }
+
+    #[test]
+    fn right_command_press_and_release_finishes() {
+        let now = capture_time();
+        let mut hotkey =
+            DictationHotkey::with_binding(false, now, 42, true, right_command_binding());
+
+        assert_eq!(
+            hotkey.process(InputEvent::Flags(COMMAND | RIGHT_COMMAND), now),
+            Some(HotkeyAction::Start)
+        );
+        assert_eq!(
+            hotkey.process(InputEvent::Flags(NO_FLAGS), now + Duration::from_secs(1)),
+            Some(HotkeyAction::Finish)
+        );
+    }
+
+    #[test]
+    fn right_command_double_tap_locks_until_pressed_again() {
+        let now = capture_time();
+        let mut hotkey =
+            DictationHotkey::with_binding(false, now, 42, true, right_command_binding());
+        let press = InputEvent::Flags(COMMAND | RIGHT_COMMAND);
+        let release = InputEvent::Flags(NO_FLAGS);
+
+        assert_eq!(hotkey.process(press, now), Some(HotkeyAction::Start));
+        assert_eq!(
+            hotkey.process(release, now + Duration::from_millis(80)),
+            Some(HotkeyAction::Finish)
+        );
+        assert_eq!(
+            hotkey.process(press, now + Duration::from_millis(180)),
+            Some(HotkeyAction::Start)
+        );
+        assert_eq!(
+            hotkey.process(release, now + Duration::from_millis(260)),
+            None
+        );
+        assert!(hotkey.is_recording());
+        assert_eq!(
+            hotkey.process(press, now + Duration::from_secs(1)),
+            Some(HotkeyAction::Finish)
+        );
+        assert!(!hotkey.is_recording());
+    }
+
+    #[test]
+    fn duplicate_right_command_flags_changed_edges_do_not_repeat_actions() {
+        let now = capture_time();
+        let mut hotkey =
+            DictationHotkey::with_binding(false, now, 42, true, right_command_binding());
+        let press = InputEvent::Flags(COMMAND | RIGHT_COMMAND);
+        let release = InputEvent::Flags(NO_FLAGS);
+
+        assert_eq!(hotkey.process(press, now), Some(HotkeyAction::Start));
+        assert_eq!(hotkey.process(press, now), None);
+        assert_eq!(
+            hotkey.process(release, now + Duration::from_secs(1)),
+            Some(HotkeyAction::Finish)
+        );
+        assert_eq!(hotkey.process(release, now + Duration::from_secs(1)), None);
+        assert!(!hotkey.is_recording());
+    }
+
+    #[test]
+    fn right_command_binding_rejects_left_and_general_command_flags() {
+        let now = capture_time();
+        for flags in [COMMAND | LEFT_COMMAND, COMMAND] {
+            let mut hotkey =
+                DictationHotkey::with_binding(false, now, 42, true, right_command_binding());
+            assert_eq!(hotkey.process(InputEvent::Flags(flags), now), None);
+            assert!(!hotkey.is_recording());
+            assert_eq!(hotkey.process(InputEvent::Flags(NO_FLAGS), now), None);
+        }
     }
 
     #[test]
