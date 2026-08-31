@@ -208,6 +208,9 @@ enum Command {
         /// Open the explicit history retention choices in the History preview.
         #[arg(long)]
         open_history_retention: bool,
+        /// Show the idle microphone release confirmation with Commands enabled.
+        #[arg(long)]
+        confirm_release_microphone: bool,
     },
     /// Listen and transcribe until interrupted.
     Listen {
@@ -462,6 +465,7 @@ fn main() -> Result<()> {
             model_missing,
             command_model_missing,
             open_history_retention,
+            confirm_release_microphone,
         } => {
             if matches!(target, AppPreviewTarget::DictationHud) {
                 return meeting_watcher::run(&SHUTDOWN, false, None, true);
@@ -509,6 +513,7 @@ fn main() -> Result<()> {
                     model_missing,
                     command_model_missing,
                     open_history_retention,
+                    confirm_release_microphone,
                 },
             )
         }
@@ -748,6 +753,28 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    #[test]
+    fn microphone_confirmation_requires_an_explicit_preview_flag() {
+        for (args, expected) in [
+            (vec!["hex", "preview", "settings"], false),
+            (
+                vec!["hex", "preview", "settings", "--confirm-release-microphone"],
+                true,
+            ),
+        ] {
+            let cli = Cli::try_parse_from(args).unwrap();
+            let Some(Command::Preview {
+                confirm_release_microphone,
+                ..
+            }) = cli.command
+            else {
+                panic!("expected preview command");
+            };
+            assert_eq!(confirm_release_microphone, expected);
+        }
+        assert!(Cli::try_parse_from(["hex", "app", "--confirm-release-microphone"]).is_err());
     }
 
     #[test]

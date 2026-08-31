@@ -374,6 +374,10 @@ pub fn listen(
                         };
                         match input.start_programmatic(boundary) {
                             Ok(()) => {
+                                hotkey.disarm_pending_gesture();
+                                if let Some(edit) = &mut edit_hotkey {
+                                    edit.disarm_pending_gesture();
+                                }
                                 reset_command_recognizer(&input, &mut recognizer)?;
                                 tracing::info!(
                                     dictation_id = id,
@@ -763,6 +767,12 @@ pub fn listen(
             let _acknowledge = input_monitor.acknowledge_after(observed);
             let input_event = observed.event;
             let capture_at = observed.capture_at;
+            if programmatic.is_some() {
+                hotkey.track_key_state(input_event, capture_at);
+                if let Some(edit) = &mut edit_hotkey {
+                    edit.track_key_state(input_event, capture_at);
+                }
+            }
             if programmatic.is_some() && input_event.is_escape_down() {
                 let cancelled = programmatic
                     .take()
@@ -929,6 +939,16 @@ pub fn listen(
                 }
             }
         }
+        if programmatic.is_none()
+            && voice_protocol.is_none()
+            && !hotkey_capture_suspended
+            && input_monitor.pending_events().oldest().is_none()
+        {
+            hotkey.recover_stale_keys();
+            if let Some(edit) = &mut edit_hotkey {
+                edit.recover_stale_keys();
+            }
+        }
         if hotkey.is_recording()
             && edit_pending_since.is_none()
             && input.become_intentional(if microphone_policy.release_while_idle {
@@ -1053,18 +1073,12 @@ pub fn listen(
 
         while let Some(audio_event) = input.try_recv_event() {
             match audio_event {
-                DictationAudioEvent::ReadyIntentional { capture_generation } => {
-                    if capture_generation == input.capture_generation() && input.is_recording() {
+                DictationAudioEvent::ReadyIntentional { .. } => {
+                    if input.is_recording() {
                         feedback::play(Tone::DictationStart);
                     }
                 }
-                DictationAudioEvent::OpenFailed {
-                    capture_generation,
-                    error,
-                } => {
-                    if capture_generation != input.capture_generation() {
-                        continue;
-                    }
+                DictationAudioEvent::OpenFailed { error, .. } => {
                     programmatic = None;
                     hotkey.suspend();
                     edit_hotkey.as_mut().and_then(DictationHotkey::suspend);
@@ -1096,17 +1110,6 @@ pub fn listen(
                     input.discard_recognition_backlog();
                     reset_recognizer(&mut recognizer)?;
                     recognition_origin = None;
-                }
-                DictationAudioEvent::CaptureDiscontinuity {
-                    was_recording: _,
-                    capture_generation,
-                    gap_ms,
-                } if input.is_recording() && input.capture_generation() != capture_generation => {
-                    tracing::debug!(
-                        capture_generation,
-                        gap_ms,
-                        "ignored stale audio discontinuity"
-                    );
                 }
                 DictationAudioEvent::CaptureDiscontinuity {
                     was_recording,
@@ -1149,12 +1152,6 @@ pub fn listen(
                     if !input.is_recording() {
                         emit_state(&mut events, false, mode, &input.device_name())?;
                     }
-                }
-                DictationAudioEvent::Interrupted {
-                    was_recording: _,
-                    capture_generation,
-                } if input.is_recording() && input.capture_generation() != capture_generation => {
-                    tracing::debug!(capture_generation, "ignored stale microphone interruption");
                 }
                 DictationAudioEvent::Interrupted { was_recording, .. } => {
                     if was_recording {

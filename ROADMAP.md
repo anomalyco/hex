@@ -86,12 +86,23 @@ cancellation, foreground insertion, and both reserved paste shortcuts.
 
 The first installed timestamped-timeline build regressed physical dictation:
 shortcut input arrived, but long captures discarded and one accepted job reached
-inference with zero milliseconds of audio. The source treated raw CGEvent Mach
-ticks as nanoseconds; on the development Mac's `125/3` timebase, a three-second
-hold appeared to last roughly 72 ms and CoreAudio release trimming removed the
-whole clip. Source timestamps now convert through the Mach timebase. Physically
-verify non-empty captures, exact delayed release boundaries, and immediate HUD
-onset before considering the new owner validated.
+inference with zero milliseconds of audio. At the HID tap, physical timestamps
+arrived as raw Mach ticks; on the development Mac's `125/3` timebase, treating
+them as nanoseconds made a three-second hold appear to last roughly 72 ms.
+The 2.1.7 move to annotated-session taps retained that conversion even though
+timestamps at this boundary are already nanoseconds. This stretched short taps
+by 41.67 times, breaking double-tap lock and admitting accidental short captures.
+A simultaneous passive HID/annotated probe confirmed the different units for
+real modifier events. Annotated-session timestamps now enter the audio timeline
+without scaling; callback-level regressions cover lock, short-tap discard, and
+exact delayed release trimming. Keep physical shortcuts, assistive modifier and
+key chords, non-empty captures, and immediate HUD onset in the release smoke
+checks; changing tap location requires revalidating the clock as well as routing.
+
+After this reliability fix, evaluate an explicit press-once-to-start,
+press-again-to-finish option, especially for key chords and standalone function
+keys. Keep it distinct from hold-to-dictate and double-tap-only activation;
+do not add new shortcut modes to the regression release.
 
 Keep the microphone and dictation model warm by default. Add an explicit
 `Release microphone while idle` option that is effective only when commands are
