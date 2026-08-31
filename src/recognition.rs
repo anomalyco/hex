@@ -374,6 +374,10 @@ pub fn listen(
                         };
                         match input.start_programmatic(boundary) {
                             Ok(()) => {
+                                hotkey.disarm_pending_gesture();
+                                if let Some(edit) = &mut edit_hotkey {
+                                    edit.disarm_pending_gesture();
+                                }
                                 reset_command_recognizer(&input, &mut recognizer)?;
                                 tracing::info!(
                                     dictation_id = id,
@@ -763,6 +767,12 @@ pub fn listen(
             let _acknowledge = input_monitor.acknowledge_after(observed);
             let input_event = observed.event;
             let capture_at = observed.capture_at;
+            if programmatic.is_some() {
+                hotkey.track_key_state(input_event, capture_at);
+                if let Some(edit) = &mut edit_hotkey {
+                    edit.track_key_state(input_event, capture_at);
+                }
+            }
             if programmatic.is_some() && input_event.is_escape_down() {
                 let cancelled = programmatic
                     .take()
@@ -927,6 +937,16 @@ pub fn listen(
                         emit_state(&mut events, false, mode, &input.device_name())?;
                     }
                 }
+            }
+        }
+        if programmatic.is_none()
+            && voice_protocol.is_none()
+            && !hotkey_capture_suspended
+            && input_monitor.pending_events().oldest().is_none()
+        {
+            hotkey.recover_stale_keys();
+            if let Some(edit) = &mut edit_hotkey {
+                edit.recover_stale_keys();
             }
         }
         if hotkey.is_recording()
