@@ -211,6 +211,9 @@ enum Command {
         /// Show the idle microphone release confirmation with Commands enabled.
         #[arg(long)]
         confirm_release_microphone: bool,
+        /// Show the sidebar update action without starting the updater.
+        #[arg(long)]
+        update_available: bool,
     },
     /// Listen and transcribe until interrupted.
     Listen {
@@ -466,6 +469,7 @@ fn main() -> Result<()> {
             command_model_missing,
             open_history_retention,
             confirm_release_microphone,
+            update_available,
         } => {
             if matches!(target, AppPreviewTarget::DictationHud) {
                 return meeting_watcher::run(&SHUTDOWN, false, None, true);
@@ -514,6 +518,7 @@ fn main() -> Result<()> {
                     command_model_missing,
                     open_history_retention,
                     confirm_release_microphone,
+                    update_available,
                 },
             )
         }
@@ -775,6 +780,27 @@ mod tests {
             assert_eq!(confirm_release_microphone, expected);
         }
         assert!(Cli::try_parse_from(["hex", "app", "--confirm-release-microphone"]).is_err());
+    }
+
+    #[test]
+    fn available_update_requires_an_explicit_preview_flag() {
+        for (args, expected) in [
+            (vec!["hex", "preview", "settings"], false),
+            (
+                vec!["hex", "preview", "settings", "--update-available"],
+                true,
+            ),
+        ] {
+            let cli = Cli::try_parse_from(args).unwrap();
+            let Some(Command::Preview {
+                update_available, ..
+            }) = cli.command
+            else {
+                panic!("expected preview command");
+            };
+            assert_eq!(update_available, expected);
+        }
+        assert!(Cli::try_parse_from(["hex", "app", "--update-available"]).is_err());
     }
 
     #[test]

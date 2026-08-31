@@ -341,6 +341,7 @@ cargo run -- app --preview-dictation
 cargo run -- preview onboarding
 cargo run -- preview transcription-picker --language zh --model-state installed
 ./scripts/capture-preview.sh /tmp/hex-preview.png settings
+./scripts/capture-preview.sh /tmp/hex-update.png settings --update-available
 ./scripts/capture-preview.sh /tmp/hex-model-missing.png settings --model-missing
 ./scripts/capture-preview.sh /tmp/hex-command-model-missing.png settings --command-model-missing
 ./scripts/capture-preview.sh /tmp/hex-microphone-confirmation.png settings --confirm-release-microphone

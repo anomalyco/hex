@@ -78,6 +78,53 @@ const MAX_OPENCODE_ERROR_BYTES: usize = 4 * 1024;
 const ACTIVITY_LIMIT: usize = 100;
 const OPENCODE_BETA_DOCS_URL: &str = "https://v2.opencode.ai/";
 
+fn sidebar_update_button(status: crate::sparkle::UpdateStatus) -> Option<Div> {
+    (status == crate::sparkle::UpdateStatus::UpdateAvailable).then(|| {
+        div()
+            .h(px(30.0))
+            .px_3()
+            .flex()
+            .items_center()
+            .rounded_sm()
+            .text_size(px(12.0))
+            .flex_none()
+            .bg(rgb(ACCENT))
+            .text_color(rgb(TEXT))
+            .font_weight(FontWeight::SEMIBOLD)
+            .cursor_pointer()
+            .hover(|button| button.bg(mix_color(rgb(ACCENT), rgb(TEXT), 0.12)))
+            .child("Update")
+    })
+}
+
+fn settings_pane(content: Div) -> AnyElement {
+    div()
+        .size_full()
+        .flex()
+        .flex_col()
+        .child(pane_header("Settings"))
+        .child(
+            div()
+                .id("settings-scroll")
+                .flex_1()
+                .overflow_y_scroll()
+                .px_8()
+                .pt_1()
+                .pb_7()
+                .child(
+                    div().w_full().flex().justify_center().child(
+                        content
+                            .w_full()
+                            .max_w(px(PANE_CONTENT_WIDTH))
+                            .min_w_0()
+                            .relative()
+                            .debug_selector(|| "settings-content".into()),
+                    ),
+                ),
+        )
+        .into_any_element()
+}
+
 actions!(
     hex,
     [
@@ -256,6 +303,7 @@ pub struct AppWindowPreview {
     pub command_model_missing: bool,
     pub open_history_retention: bool,
     pub confirm_release_microphone: bool,
+    pub update_available: bool,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -905,7 +953,11 @@ impl AppWindow {
                         let personal_commands_changed = window.poll_personal_commands();
                         let personal_workspace_changed = window.poll_personal_workspace();
                         let history_changed = window.poll_history(cx);
-                        let update_status = crate::sparkle::status();
+                        let update_status = if window.preview {
+                            window.update_status
+                        } else {
+                            crate::sparkle::status()
+                        };
                         let update_status_changed = window.update_status != update_status;
                         if update_status_changed {
                             window.update_status = update_status;
@@ -1183,7 +1235,15 @@ impl AppWindow {
             launch_at_login_toggle: ToggleSpring::new(
                 launch_at_login_status == LoginItemStatus::Enabled,
             ),
-            update_status: crate::sparkle::status(),
+            update_status: if let Some(preview) = &preview {
+                if preview.update_available {
+                    crate::sparkle::UpdateStatus::UpdateAvailable
+                } else {
+                    crate::sparkle::UpdateStatus::Idle
+                }
+            } else {
+                crate::sparkle::status()
+            },
             update_status_changed_at: Instant::now(),
             commands_toggle: ToggleSpring::new(settings.commands_enabled),
             command_model_status: if preview
@@ -2375,6 +2435,37 @@ impl AppWindow {
             .flex_col()
             .child(div().flex().flex_col().gap(px(2.0)).children(items))
             .child(div().flex_1())
+            .child(
+                div()
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .gap_2()
+                    .h(px(30.0))
+                    .mt_3()
+                    .child(
+                        div()
+                            .flex_none()
+                            .pl_2()
+                            .text_size(px(11.0))
+                            .text_color(rgb(MUTED))
+                            .child(format!("Version {}", env!("CARGO_PKG_VERSION"))),
+                    )
+                    .when_some(
+                        sidebar_update_button(self.update_status),
+                        |footer, button| {
+                            footer.child(button.id("check-for-updates-sidebar").on_click(
+                                cx.listener(|this, _, _, cx| {
+                                    if !this.preview {
+                                        cx.dispatch_action(&CheckForUpdates);
+                                        cx.notify();
+                                    }
+                                }),
+                            ))
+                        },
+                    ),
+            )
             .into_any_element()
     }
 
@@ -3313,18 +3404,6 @@ impl AppWindow {
         let recording_audio_position = self.recording_audio_spring.render_position(window);
         let audio_widths = [50.0, 90.0, 80.0];
         let (audio_left, audio_width) = segmented_geometry(recording_audio_position, audio_widths);
-        let update_button_label = match self.update_status {
-            crate::sparkle::UpdateStatus::Checking => "Checking…",
-            crate::sparkle::UpdateStatus::UpToDate
-                if self.update_status_changed_at.elapsed() < Duration::from_secs(4) =>
-            {
-                "Up to date"
-            }
-            crate::sparkle::UpdateStatus::UpdateAvailable => "Update available",
-            crate::sparkle::UpdateStatus::Unavailable
-            | crate::sparkle::UpdateStatus::Idle
-            | crate::sparkle::UpdateStatus::UpToDate => "Check now",
-        };
         let audio_behavior = segmented_control()
             .relative()
             .child(
@@ -3465,29 +3544,8 @@ impl AppWindow {
                         ),
                 )
         });
-        div()
-            .size_full()
-            .flex()
-            .flex_col()
-            .child(pane_header("Settings"))
-            .child(
-                div()
-                    .id("settings-scroll")
-                    .flex_1()
-                    .overflow_y_scroll()
-                    .px_8()
-                    .pt_1()
-                    .pb_7()
-                    .child(
-                        div()
-                            .w_full()
-                            .flex()
-                            .justify_center()
-                            .child(
-                                div()
-                                    .w_full()
-                                    .max_w(px(PANE_CONTENT_WIDTH))
-                                    .relative()
+        settings_pane(
+            div()
                                     .children(permission_warnings)
                                     .child(settings_section_label("DICTATION"))
                                     .child(
@@ -3650,35 +3708,6 @@ impl AppWindow {
                             .child(settings_section_label("APPLICATION"))
                             .child(
                                 settings_panel()
-                                    .child(settings_row(
-                                        "HEX",
-                                        if self.settings.commands_enabled {
-                                            "Local voice commands and private dictation"
-                                        } else {
-                                            "Private local dictation for your Mac"
-                                        },
-                                        div()
-                                            .text_size(px(11.0))
-                                            .text_color(rgb(MUTED))
-                                            .child(format!(
-                                                "Version {}",
-                                                env!("CARGO_PKG_VERSION")
-                                            )),
-                                    ))
-                                    .child(settings_row(
-                                        "Software updates",
-                                        "Check for signed updates automatically in the background",
-                                        compact_button(update_button_label)
-                                            .id("check-for-updates-setting")
-                                            .h(px(32.0))
-                                            .border_1()
-                                            .border_color(rgb(LINE))
-                                            .bg(rgb(CANVAS))
-                                            .on_click(cx.listener(|_this, _, _, cx| {
-                                                cx.dispatch_action(&CheckForUpdates);
-                                                cx.notify();
-                                            })),
-                                    ))
                                     .child(
                                         settings_row(
                                             "Launch at login",
@@ -3744,11 +3773,8 @@ impl AppWindow {
                                         .id("sound-effects-setting"),
                                     ),
                             )
-                            .children(microphone_picker),
-                    ),
-            )
-            )
-            .into_any_element()
+                             .children(microphone_picker),
+        )
     }
 
     fn render_setup(&mut self, cx: &mut Context<Self>) -> AnyElement {
@@ -8694,6 +8720,49 @@ mod tests {
     use super::*;
     use crate::personal_commands::StatusExecution;
 
+    #[gpui::test]
+    fn settings_content_stays_inside_the_pane_at_supported_widths(cx: &mut gpui::TestAppContext) {
+        struct SettingsLayout;
+
+        impl Render for SettingsLayout {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                window_frame()
+                    .child(sidebar_frame().w(px(SIDEBAR_WIDTH)))
+                    .child(
+                        div().flex_1().min_w_0().h_full().child(settings_pane(
+                            div()
+                                .child(settings_panel().child(settings_row(
+                                    "Microphone",
+                                    "Automatically chooses the preferred available input",
+                                    disclosure_button("Automatic"),
+                                )))
+                                .child(settings_copy(
+                                    "Release the microphone when idle?",
+                                    "HEX will open the microphone when you press the shortcut. This adds a start-up delay and removes pre-roll, so the beginning of speech may be missed if you speak right away.",
+                                )),
+                        )),
+                    )
+            }
+        }
+
+        let (_, cx) = cx.add_window_view(|_, _| SettingsLayout);
+        for width in [MINIMUM_WIDTH, WINDOW_WIDTH, 1400.0] {
+            cx.simulate_resize(size(px(width), px(MINIMUM_HEIGHT)));
+            cx.update(|window, _| window.refresh());
+            cx.run_until_parked();
+            let column = cx
+                .debug_bounds("settings-content")
+                .expect("content was rendered");
+            let available = width - SIDEBAR_WIDTH - 64.0;
+            let expected_width = available.min(PANE_CONTENT_WIDTH);
+            assert_eq!(column.size.width, px(expected_width));
+            assert_eq!(
+                column.origin.x,
+                px(SIDEBAR_WIDTH + 32.0 + (available - expected_width) / 2.0)
+            );
+        }
+    }
+
     #[test]
     fn command_model_failure_has_recovery_without_blocking_dictation() {
         assert!(command_model_notice(&CommandModelStatus::Ready).is_none());
@@ -8767,6 +8836,21 @@ mod tests {
         // Permission failures have their own setup UI.
         status.microphone = PermissionState::NeedsRequest;
         assert!(dictation_model_notice(status, false).is_none());
+    }
+
+    #[test]
+    fn sidebar_update_button_only_appears_for_an_available_update() {
+        use crate::sparkle::UpdateStatus;
+
+        for (status, visible) in [
+            (UpdateStatus::Unavailable, false),
+            (UpdateStatus::Idle, false),
+            (UpdateStatus::Checking, false),
+            (UpdateStatus::UpToDate, false),
+            (UpdateStatus::UpdateAvailable, true),
+        ] {
+            assert_eq!(sidebar_update_button(status).is_some(), visible);
+        }
     }
 
     #[test]
