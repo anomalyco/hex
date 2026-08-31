@@ -1,12 +1,14 @@
 # HEX Local Transcription Service and SDK
 
-**Status:** The internal service, direct-child mode, and Promise and Effect
-wrappers are implemented. The npm packages are private previews; signed helper
-packaging, clean-consumer validation, and a real consumer remain.
+**Status:** The internal service and direct-child mode are implemented.
+`@kitlangton/hex@0.3.0` publishes ready transcribers through Promise and Effect
+entrypoints. Local Electron integration has been exercised, but the native helper
+package remains private and is not included as a client dependency. An explicit
+helper command is still required; signed consumer distribution remains unverified.
 
-**Authority:** This document defines implemented internal service behavior and
-the target private SDK contract. It does not claim a published package.
-Implementation sequencing lives in
+**Authority:** This document describes the embedded service protocol and labels
+proposed distribution separately. The [SDK README](../../sdk/typescript/README.md)
+is the current consumer guide. Delivery scope, evidence, and acceptance gates live in
 [`../plans/typescript-sdk.md`](../plans/typescript-sdk.md).
 
 ## Product Boundary
@@ -25,9 +27,9 @@ capture UX                 ---------->   final raw transcript
 settings and model choice
 ```
 
-This gives macOS permission to the application the user intentionally used. An
-OpenCode Desktop microphone button prompts for OpenCode microphone access, not
-HEX access. HEX Service has no microphone entitlement and never captures audio.
+The host's signed app owns the microphone grant. A correctly configured packaged
+host prompts under its own identity, not HEX; a development Electron runtime may
+appear as Electron. The embedded helper never opens the microphone.
 
 ## Decisions
 
@@ -44,14 +46,14 @@ HEX access. HEX Service has no microphone entitlement and never captures audio.
 | Host-spawned helper | The host owns the process, endpoint, and lifetime instead of discovering an independently elected service. |
 | Shared model artifacts, private warm runtime | Hosts reuse verified downloads without coupling their model choice or process lifecycle. |
 
-## Service Distribution
+## Proposed Embedded Distribution (Not Yet Shipping)
 
-The SDK declares signed, notarized helpers as optional architecture-specific
-packages and selects the current platform package automatically. Applications
-call `create()` without locating an executable. On explicit host use, the SDK
-spawns the included helper directly as a child without an npm install script,
-administrator access, login-item approval, Dock icon, or foreground window. The
-host must not launch the helper through Launch Services.
+The target SDK will declare signed, notarized helpers as optional
+architecture-specific packages and select the current platform package
+automatically. Applications will call `create()` without locating an executable.
+On explicit host use, the SDK will spawn the included helper directly as a child
+without an npm install script, administrator access, login-item approval, Dock icon,
+or foreground window. The host must not launch the helper through Launch Services.
 
 Because the service does not capture audio, it does not need microphone TCC
 identity. Full `Hex.app` remains responsible for its own global-hotkey capture and
@@ -88,9 +90,10 @@ Every request requires `Authorization: Bearer <token>`. The token is delivered
 only over the child's stdout pipe. The server deliberately sends no CORS
 headers. A malformed or incorrect credential returns an empty `401` response.
 The standalone HEX application may still publish owner-only discovery for its
-own existing local API; SDK hosts do not use it.
+own existing local API. Embedded `create()` uses the child handshake; desktop
+`connect()` remains a separate discovery-based path.
 
-## Wire Protocol V1
+## Wire Protocol (API 2)
 
 ```text
 GET  /health
@@ -103,15 +106,18 @@ POST /transcriptions          audio/wav body, final transcript response
 `POST /transcriptions` accepts completed PCM WAV audio. The service reads
 request bodies incrementally, validates the declared format and resource use
 before allocation and inference, downmixes and resamples internally, and does
-not persist audio. V1 accepts 8 kHz through 192 kHz audio with one through eight
-channels and a 64 MiB upload and normalized-audio memory budget.
+not persist audio. API 2 accepts 8 kHz through 192 kHz audio with one through eight
+channels. Upload and normalized-audio limits are each 64 MiB; source-frame limits
+also apply. These limits are not a total process-memory cap.
 
 There is no public duration limit. One upload owns the audio-memory admission
 slot until its queued or active inference releases the clip. Absolute header
 and upload deadlines, byte and normalized-sample budgets, and typed resource
-refusal prevent a defective local client from exhausting the process. A socket
-abort or service shutdown cancels queued work and suppresses a result; native
-inference may finish internally when it cannot be interrupted safely.
+refusal bound admission from defective local clients. Detected client cancellation
+or service shutdown suppresses results, but native inference may finish internally.
+The ready SDK transcriber instead closes its owned helper on in-flight cancellation
+and waits for cleanup before rejecting; low-level request abortion alone does not
+prove native work stopped.
 
 ### Health
 
@@ -149,6 +155,7 @@ export interface ModelInfo {
   managed: boolean;
   downloadBytes: number | null;
   languages: readonly string[];
+  supportsLanguageDetection: boolean;
 }
 
 export type ModelProgress =
@@ -164,7 +171,38 @@ preparation does not select the model or change full `Hex.app` settings. The
 service serializes preparation and preserves the existing artifact and warm
 runtime when a replacement fails.
 
-### TypeScript Surface
+### Ready Transcriber
+
+SDK `0.3.0` adds a model-bound operation to both entrypoints:
+
+```ts
+import { create } from "@kitlangton/hex"
+
+const transcriber = await create({
+  command: ["/path/to/hex-service", "service", "--embedded"],
+  model: "parakeet_unified_en",
+  language: "en",
+  onProgress,
+})
+try {
+  const result = await transcriber.transcribe(wav, { signal })
+  input.insert(result.transcript)
+} finally {
+  await transcriber.close()
+}
+```
+
+Creation resolves after preparation. Reuse the transcriber across recordings;
+close when the host no longer needs it. Cancelling an in-flight request closes the
+helper, so subsequent work needs a new transcriber. An already-aborted request
+does not close a healthy transcriber. Failed cleanup is reported, not hidden.
+Effect provides the same ready shape with scope-owned cleanup instead of `close()`.
+
+Progress callbacks describe model setup, not inference percentage. Transcription
+returns only final text; partial transcripts and numerical transcription progress
+are not exposed by this protocol.
+
+### Low-Level TypeScript Surface
 
 ```typescript
 export function create(options?: CreateOptions): Promise<HexHost>;
@@ -226,7 +264,7 @@ const result = await client.transcribe({
 input.insert(result.transcript);
 ```
 
-The `@hex-ai/client/effect` entrypoint provides scoped helper acquisition,
+The `@kitlangton/hex/effect` entrypoint provides scoped helper acquisition,
 schema-backed typed errors, Effect operations, an Effect `Stream` for model
 preparation progress, and a `Layer` for dependency injection. Closing the scope
 closes the host lease and bounds exact-child termination.
@@ -235,7 +273,7 @@ closes the host lease and bounds exact-child termination.
 artifact has not been prepared. It may transparently reload an installed but
 cold model because model residency is transient.
 
-## Non-Goals V1
+## First Embedded Release Non-Goals
 
 - No service-owned microphone capture, levels, hotkeys, paste, or clipboard.
 - No partial transcripts.

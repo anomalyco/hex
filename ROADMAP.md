@@ -11,8 +11,11 @@ meetings. Native wlroots-compatible Wayland and Nix packaging are implemented
 and awaiting supported-host validation before release.
 The authenticated local transcription service now implements discovery,
 direct-child embedding, model preparation, and bounded host-audio transcription;
-Promise and Effect TypeScript wrappers pass fake-helper tests. Signed helper
-package validation, an Electron bridge, and a first real consumer remain.
+`@kitlangton/hex@0.3.0` publishes ready transcribers through Promise and Effect
+entrypoints. Local Electron capture and native transcription have been exercised;
+signed helper packaging and a signed first-consumer integration remain. Follow the
+[embedded desktop delivery plan](docs/plans/typescript-sdk.md); Apple Silicon
+macOS is the proposed first target, not a cross-platform availability promise.
 
 ## Validate The macOS Release
 
