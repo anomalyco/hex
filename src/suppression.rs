@@ -930,7 +930,13 @@ impl DictationHotkey {
         {
             // A key can go down during the non-atomic scan. Retain its edge but
             // require a later neutral event before accepting another gesture.
-            if matches!(self.state, State::Idle | State::Dirty) {
+            // An old neutral release cannot invalidate the recovery's neutral sample.
+            let neutral = matches!(
+                event,
+                InputEvent::Flags(flags) | InputEvent::Key { flags, .. }
+                    if flags & HOTKEY_MODIFIERS_MASK == 0 && self.pressed_keys.is_empty()
+            );
+            if !neutral && matches!(self.state, State::Idle | State::Dirty) {
                 self.state = State::Dirty;
             }
             return None;
@@ -1602,6 +1608,88 @@ mod tests {
             panic!("the fresh hold must transcribe");
         };
         assert_eq!(clip.duration_ms(), 500);
+    }
+
+    #[test]
+    fn delayed_neutral_callback_after_recovery_preserves_the_next_hold() {
+        for double_tap_enabled in [false, true] {
+            for (neutral_event, offset_ms) in [
+                (InputEvent::Flags(0), 0),
+                (InputEvent::Flags(0), 100),
+                (
+                    InputEvent::Key {
+                        code: 48,
+                        down: false,
+                        flags: 0,
+                    },
+                    0,
+                ),
+                (
+                    InputEvent::Key {
+                        code: 48,
+                        down: false,
+                        flags: 0,
+                    },
+                    100,
+                ),
+            ] {
+                let now = capture_time();
+                let mut hotkey = test_hotkey(false, now);
+                hotkey.set_double_tap_enabled(double_tap_enabled);
+                let down = callback_input(&[(
+                    now.as_nanos(),
+                    InputEvent::Key {
+                        code: 48,
+                        down: true,
+                        flags: crate::app_settings::COMMAND_KEY_MASK,
+                    },
+                )])[0];
+                hotkey.process(down.event, down.capture_at);
+
+                // Two native neutral samples repair the missing key-up, but an old
+                // neutral release has not reached its tap callback yet.
+                let first_sample = now + Duration::from_secs(1);
+                let repaired = first_sample + STALE_KEY_NEUTRAL_DURATION;
+                hotkey.recover_stale_keys_with(|| first_sample, || 0, |_| false);
+                hotkey.recover_stale_keys_with(|| repaired, || 0, |_| false);
+                let neutral_at = first_sample + Duration::from_millis(offset_ms);
+                let neutral = callback_input(&[(neutral_at.as_nanos(), neutral_event)])[0];
+                assert_eq!(hotkey.process(neutral.event, neutral.capture_at), None);
+
+                for attempt in 0..3 {
+                    let press = repaired + Duration::from_secs(1 + attempt * 2);
+                    let release = press + Duration::from_secs(1);
+                    let edges = callback_input(&[
+                        (press.as_nanos(), InputEvent::Flags(OPTION_KEY_MASK)),
+                        (release.as_nanos(), InputEvent::Flags(0)),
+                    ]);
+                    let mut capture = crate::dictation::DictationCapture::new(16_000);
+                    capture.ingest(&vec![0.25; 16_000], press);
+                    capture.ingest(&vec![0.5; 16_000], release);
+                    capture.ingest(&vec![0.75; 8_000], release + Duration::from_millis(500));
+                    assert_eq!(
+                        hotkey.process(edges[0].event, edges[0].capture_at),
+                        Some(HotkeyAction::Start),
+                        "attempt {attempt}, double_tap_enabled={double_tap_enabled}"
+                    );
+                    capture.start_at(edges[0].capture_at);
+                    assert_eq!(
+                        hotkey.process(edges[1].event, edges[1].capture_at),
+                        Some(HotkeyAction::Finish)
+                    );
+                    let crate::dictation::Finish::Transcribe(clip) =
+                        capture.finish(edges[1].capture_at)
+                    else {
+                        panic!("the hold must produce a clip");
+                    };
+                    assert_eq!(clip.duration_ms(), 1_450);
+                    let samples = clip.into_transcription_samples();
+                    assert_eq!(&samples[..7_200], &[0.25; 7_200]);
+                    assert_eq!(&samples[7_200..], &[0.5; 16_000]);
+                    assert!(!hotkey.is_recording());
+                }
+            }
+        }
     }
 
     #[test]
