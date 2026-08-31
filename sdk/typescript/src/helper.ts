@@ -38,6 +38,6 @@ const packagedExecutable = (): string => {
 }
 
 export const resolveCommand = (
-  options: CreateOptions,
+  options: Pick<CreateOptions, "command">,
 ): readonly [executable: string, ...arguments: readonly string[]] =>
   options.command ?? [packagedExecutable(), "service", "--embedded"]

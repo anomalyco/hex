@@ -20,4 +20,6 @@ export type {
   RequestOptions,
   TranscriptionRequest,
   TranscriptionResult,
+  Transcriber,
+  TranscriberOptions,
 } from "./types.js"

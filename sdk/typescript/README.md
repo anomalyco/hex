@@ -1,22 +1,144 @@
 # HEX TypeScript Client
 
-`@kitlangton/hex` connects TypeScript applications to the locally installed HEX
-desktop app. HEX owns its warm microphone and local transcription engine; the
-client controls capture and receives transcripts, levels, and optional PCM.
+`@kitlangton/hex` provides local transcription through a native HEX helper, with
+Promise and optional Effect APIs. The host application owns recording, microphone
+permission, settings, and what happens to the resulting text. HEX owns model
+preparation and inference.
 
-Host the native HEX transcription helper as a direct child process. The host
-application owns microphone capture and settings; HEX owns local model
-preparation and transcription. Model artifacts remain shared per user while the
-helper process and warm model belong to the host.
+**Distribution status:** a bundled native helper is not published yet. Embedded
+consumers must currently supply an explicit native command. The examples below
+use the HEX executable's `service --embedded` mode; users do not need to launch
+the HEX desktop app. This package alone is not yet a turnkey native distribution.
 
-Alternatively, connect to the running HEX desktop app to use its already-warm
-native microphone and recognition engine:
+## Promise API
+
+Pass a model to `create()` to get a ready-to-use transcriber:
+
+```ts
+import * as Hex from "@kitlangton/hex"
+
+const transcriber = await Hex.create({
+  command: ["/path/to/hex-service", "service", "--embedded"],
+  model: "parakeet_unified_en",
+  language: "en",
+  onProgress: console.log,
+})
+
+try {
+  // WAV is an ArrayBuffer or Uint8Array supplied by your recording code.
+  const result = await transcriber.transcribe(wav, {
+    signal: abortController.signal,
+  })
+  console.log(result.transcript, result.durationMs)
+} finally {
+  await transcriber.close()
+}
+```
+
+`create({ model })` starts the helper and waits for download (if necessary),
+verification, and model loading. Progress reports `downloading`, `verifying`, and
+`loading`. Model and language are captured when creation starts; language defaults
+to `en`, independently of desktop settings. A failed or cancelled creation closes
+the helper before rejecting. The optional creation `signal` covers startup and
+preparation, not the returned transcriber's entire lifetime.
+
+Keep the transcriber alive across recordings to reuse its loaded model. It exposes
+the bound `model`, `language`, and diagnostic `pid`; audio requests need only WAV
+bytes. `transcribe()` never initiates a download. Inference remains bounded by the
+native service's admission limits; simultaneous requests can receive a busy error
+instead of entering an unbounded client queue.
+
+### Cancellation and ownership
+
+`close()` is idempotent. It closes the helper's stdin lease, waits for graceful
+shutdown, then terminates the exact child if it does not exit within the bounded
+deadline. Close when the feature or application shuts down, not after every clip.
+No model files are deleted.
+
+Cancelling an **in-flight** `transcribe()` closes this transcriber's helper before
+rejecting. This is intentional: aborting HTTP alone cannot interrupt native
+inference. All other work on that transcriber also ends; create a new transcriber
+before the next recording. An already-aborted request is rejected without closing
+an otherwise usable transcriber. Ordinary request errors do not close it.
+
+This distinction lets hosts that retain recording resources until cancellation
+settles know that native inference has stopped. Cleanup failures remain visible;
+they are not reported as successful cancellation. The host owns temporary audio
+cleanup and any operation deadline, for example through `AbortSignal.timeout()`.
+
+## Effect API
+
+Effect is an optional peer. Use Effect `>=4.0.0-rc.112 <5.0.0` for this entrypoint;
+older v4 betas are not supported. Promise-only consumers do not need Effect and
+can adapt the Promise API to their own framework/runtime version.
+
+```ts
+import { Effect } from "effect"
+import * as Hex from "@kitlangton/hex/effect"
+
+const program = Effect.scoped(Effect.gen(function* () {
+  const transcriber = yield* Hex.create({
+    command: ["/path/to/hex-service", "service", "--embedded"],
+    model: "parakeet_unified_en",
+    language: "en",
+    onProgress: console.log,
+  })
+
+  return yield* transcriber.transcribe(wav)
+}))
+
+const result = await Effect.runPromise(program)
+```
+
+The scope owns helper cleanup; there is no manual `close()` on the Effect
+transcriber. Put that scope around the voice feature's lifetime when reusing the
+model. Model preparation is interruptible after bounded helper startup, and
+interrupting active transcription waits for helper cleanup even when the owning
+scope remains open. Errors are schema-backed tagged failures; a scope finalizer
+that cannot close the helper fails as a defect rather than silently leaking it.
+The progress callback is synchronous, as in the Promise API.
+
+## Low-Level Client
+
+Existing `create()` calls **without a model** still return `{ pid, client, close }`
+in the Promise API and a scoped `{ pid, client }` in the Effect API. This is useful
+for catalog browsing and explicit model management:
+
+```ts
+const host = await Hex.create({
+  command: ["/path/to/hex-service", "service", "--embedded"],
+})
+try {
+  const models = await host.client.models.list()
+  await host.client.models.prepare("parakeet_unified_en", {
+    language: "en",
+    onProgress: console.log,
+  })
+  const result = await host.client.transcribe({
+    audio: { data: wav, contentType: "audio/wav" },
+    model: "parakeet_unified_en",
+    language: "en",
+  })
+} finally {
+  await host.close()
+}
+```
+
+The low-level client retains request-only cancellation; callers own helper
+shutdown if native work must stop. Effect's low-level `client.models.prepare()`
+remains a progress `Stream`. `Hex.layer(options)` still supplies the low-level
+`Hex.Service` and owns its helper for the layer scope.
+
+## Connect to HEX Desktop
+
+Alternatively, reuse the microphone and engine owned by the running HEX desktop
+app through the Promise entrypoint:
 
 ```ts
 import { connect } from "@kitlangton/hex"
 
 const hex = await connect()
-const recording = await hex.dictation.start({ source: "tp7" })
+const recording = await hex.dictation.start({ source: "my-app" })
 
 void (async () => {
   for await (const { rmsDb, peakDb } of recording.levels) {
@@ -24,109 +146,27 @@ void (async () => {
   }
 })()
 
-// Optional: subscribing activates a bounded best-effort mono Float32 PCM tap.
-void (async () => {
-  for await (const samples of recording.audio) {
-    consumePcm(samples, recording.sampleRate)
-  }
-})()
-
 const { transcript, durationMs } = await recording.finish()
 ```
 
-Call `recording.cancel()` to discard instead. Desktop capture returns the raw
-local transcript and never pastes into the focused application. Check
-`capabilities().serviceCapture`: it is true only for a running desktop endpoint,
-and false for the direct-child transcription helper.
-
-The handle maintains a short server lease while capture is active. If its
-process exits, HEX cancels the abandoned capture after lease expiry. Every
-capture operation and observation stream is scoped by the handle's unguessable
-`ownerToken`; callers normally do not need to use it directly.
-
-Embedded hosting is also available for callers that provide an explicit native
-service command. A bundled native helper is not published yet.
-
-## Promise API
-
-```ts
-import { create } from "@kitlangton/hex"
-
-const host = await create({ command: ["/path/to/hex-service", "service", "--embedded"] })
-
-try {
-  const models = await host.client.models.list()
-  await host.client.models.prepare("parakeet_unified_en", {
-    language: "en",
-    onProgress: console.log,
-  })
-
-  const result = await host.client.transcribe({
-    audio: { data: wav, contentType: "audio/wav" },
-    model: "parakeet_unified_en",
-    language: "en",
-  })
-  console.log(result.transcript)
-} finally {
-  await host.close()
-}
-```
-
-`close()` is idempotent. It closes the helper's stdin lease, waits for graceful
-shutdown, then terminates the exact child if it does not exit within the bounded
-deadline.
-
-## Effect API
-
-Install Effect 4.0.0-rc.112 or newer within v4 to use `@kitlangton/hex/effect`.
-Effect remains optional for the Promise API.
-
-The Effect entrypoint exposes scoped acquisition, typed schema-backed errors,
-Effect operations, and a progress `Stream`:
-
-```ts
-import { Effect, Stream } from "effect"
-import * as Hex from "@kitlangton/hex/effect"
-
-const program = Effect.scoped(Effect.gen(function* () {
-  const host = yield* Hex.create({ command: ["/path/to/hex-service", "service", "--embedded"] })
-
-  yield* host.client.models.prepare("parakeet_unified_en", {
-    language: "en",
-  }).pipe(Stream.runForEach((progress) => Effect.logInfo(progress)))
-
-  return yield* host.client.transcribe({
-    audio: { data: wav, contentType: "audio/wav" },
-    model: "parakeet_unified_en",
-    language: "en",
-  })
-}))
-
-const result = await Effect.runPromise(program)
-```
-
-For dependency injection, `Hex.layer(options)` provides `Hex.Service` and owns
-the helper for the layer's scope.
-
-## Permissions
-
-The direct-child helper needs zero macOS TCC permissions. The host application captures
-microphone audio itself and sends encoded WAV, so the microphone prompt,
-`NSMicrophoneUsageDescription`, orange-dot indicator, and Privacy & Security
-entry all belong to the host's own bundle and signature. There is no second
-permission identity to sign, prompt for, or keep in sync.
-
-This is a deliberate decomposition: direct-child hosts own capture and consent,
-while clients connected to the desktop app reuse capture owned by HEX's signed
-desktop process. Neither mode opens a second microphone stream.
+Call `recording.cancel()` to discard. Subscribing to `recording.audio` enables a
+bounded best-effort mono Float32 PCM tap at `recording.sampleRate`. Desktop capture
+returns raw text and never pastes. `capabilities().serviceCapture` distinguishes
+desktop capture from the transcription-only helper. The recording handle renews
+a short lease; abandoned captures expire. Its unguessable `ownerToken` scopes
+capture operations and observations automatically.
 
 ## Host Boundary
 
-- Use from Node or Electron main/preload code, not an untrusted renderer.
-- The client automatically selects and locates its installed native helper
-  package. Applications do not provide an executable path.
-- Capture and encode audio in the host application.
-- Persist model selection in the host application.
-- Keep the helper executable signed and spawn it directly. Do not use
-  LaunchServices, `open`, or `NSWorkspace`.
-- Never expose the startup bearer token to renderer or web content.
+- Use the SDK in Node or Electron main code, not an untrusted renderer. Expose
+  only narrow, validated recording/model operations across the renderer bridge.
+- The direct-child helper does not capture microphone audio. Permissions,
+  `NSMicrophoneUsageDescription`, the recording indicator, and recording consent
+  belong to the host application. Desktop `connect()` instead uses HEX's capture.
+- Encode PCM WAV in the host. Do not send compressed recordings such as M4A or
+  WebM and label them as WAV.
+- Persist the host's model selection in the host, not in HEX desktop preferences.
+- Spawn the signed helper directly. Do not use LaunchServices, `open`, or
+  `NSWorkspace`. Validate native packaging/signing in the final consuming app.
+- Never expose the startup bearer token to renderer or web content. Credentials
+  are exchanged over the child pipe and used for authenticated loopback requests.

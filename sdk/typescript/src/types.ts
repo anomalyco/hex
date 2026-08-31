@@ -103,7 +103,9 @@ export interface HexClient {
 }
 
 export interface CreateOptions {
-  /** Advanced override for development and tests. Normal consumers omit this. */
+  /** Omit the model for the low-level host. */
+  readonly model?: never
+  /** Required until bundled native helper packages are published. */
   readonly command?: readonly [executable: string, ...arguments: readonly string[]]
   readonly cwd?: string
   readonly env?: Readonly<Record<string, string | undefined>>
@@ -112,6 +114,23 @@ export interface CreateOptions {
   readonly signal?: AbortSignal
   /** Platform transport override, primarily for tests and Electron adapters. */
   readonly fetch?: typeof globalThis.fetch
+}
+
+/** Creates a ready, model-bound transcriber. Preparation may download the model. */
+export interface TranscriberOptions extends Omit<CreateOptions, "model"> {
+  readonly model: ModelId
+  /** Defaults to English, independently of the desktop app's settings. */
+  readonly language?: string
+  readonly onProgress?: (progress: ModelProgress) => void
+}
+
+export interface Transcriber {
+  readonly pid: number
+  readonly model: ModelId
+  readonly language: string
+  /** PCM WAV bytes. Cancelling in-flight work closes this transcriber before rejecting. */
+  transcribe(audio: ArrayBuffer | Uint8Array, options?: RequestOptions): Promise<TranscriptionResult>
+  close(): Promise<void>
 }
 
 export interface ConnectOptions extends RequestOptions {

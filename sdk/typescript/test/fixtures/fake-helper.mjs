@@ -1,6 +1,8 @@
 import http from "node:http"
 import fs from "node:fs"
+import path from "node:path"
 
+if (process.env.HEX_FAKE_PID_PATH) fs.writeFileSync(process.env.HEX_FAKE_PID_PATH, String(process.pid))
 if (process.env.HEX_FAKE_MODE === "exit-before-ready") process.exit(23)
 if (process.env.HEX_FAKE_MODE === "bad-handshake") {
   process.stdout.write('{"type":"ready","url":"https://example.com"}\n')
@@ -84,6 +86,11 @@ if (process.env.HEX_FAKE_MODE === "bad-handshake") {
       request.on("data", (chunk) => chunks.push(chunk))
       request.on("end", () => {
         response.setHeader("content-type", "application/json")
+        if (process.env.HEX_FAKE_TRANSCRIBE_HANG === "1") {
+          response.writeHead(200)
+          response.flushHeaders()
+          return
+        }
         response.end(JSON.stringify({ transcript: "hello from hex", durationMs: 750 }))
       })
       return
@@ -163,13 +170,25 @@ if (process.env.HEX_FAKE_MODE === "bad-handshake") {
           pid: process.pid,
         }))
       }
-      process.stdout.write(`${JSON.stringify({
+      const announce = () => process.stdout.write(`${JSON.stringify({
         type: "ready",
         url: `http://127.0.0.1:${address.port}`,
         token,
         apiVersion: "2",
         pid: process.pid,
       })}\n`)
+      const gate = process.env.HEX_FAKE_HANDSHAKE_GATE
+      if (gate) {
+        const check = () => {
+          if (!fs.existsSync(gate)) return
+          watcher.close()
+          announce()
+        }
+        const watcher = fs.watch(path.dirname(gate), check)
+        check()
+      } else {
+        announce()
+      }
     }
   })
 
