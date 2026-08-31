@@ -564,19 +564,45 @@ struct OpenCodeUnavailableCopy<'a> {
     can_open_setup: bool,
 }
 
-fn opencode_unavailable_copy(state: &ModelCatalogState) -> Option<OpenCodeUnavailableCopy<'_>> {
+#[derive(Clone, Copy)]
+enum OpenCodeFeature {
+    VoiceAction,
+    Transformation,
+}
+
+fn opencode_unavailable_copy(
+    state: &ModelCatalogState,
+    feature: OpenCodeFeature,
+) -> Option<OpenCodeUnavailableCopy<'_>> {
     match state {
         ModelCatalogState::Loading => Some(OpenCodeUnavailableCopy {
             title: "Checking for OpenCode",
-            description: "Voice Action will be available after HEX connects to OpenCode.",
+            description: match feature {
+                OpenCodeFeature::VoiceAction => {
+                    "Voice Action will be available after HEX connects to OpenCode."
+                }
+                OpenCodeFeature::Transformation => {
+                    "OpenCode transformation will be available after HEX connects to OpenCode."
+                }
+            },
             error: None,
             can_retry: false,
             retry_label: "Retry",
             can_open_setup: false,
         }),
         ModelCatalogState::Missing => Some(OpenCodeUnavailableCopy {
-            title: "Voice Action requires OpenCode",
-            description: "Install and configure OpenCode to turn spoken instructions into paste-ready text.",
+            title: match feature {
+                OpenCodeFeature::VoiceAction => "Voice Action requires OpenCode",
+                OpenCodeFeature::Transformation => "Transformation requires OpenCode",
+            },
+            description: match feature {
+                OpenCodeFeature::VoiceAction => {
+                    "Install and configure OpenCode to turn spoken instructions into paste-ready text."
+                }
+                OpenCodeFeature::Transformation => {
+                    "Install and configure OpenCode to transform dictated text."
+                }
+            },
             error: None,
             can_retry: true,
             retry_label: "Check again",
@@ -3935,7 +3961,9 @@ impl AppWindow {
         let hotkey = self.render_hotkey_setting_control(HotkeyKind::Edit, window, cx);
         let processing = if !enabled {
             None
-        } else if let Some(copy) = opencode_unavailable_copy(&self.model_catalog) {
+        } else if let Some(copy) =
+            opencode_unavailable_copy(&self.model_catalog, OpenCodeFeature::VoiceAction)
+        {
             let error = copy.error.map(str::to_owned);
             let show_actions = copy.can_retry || copy.can_open_setup;
             let retry_label = copy.retry_label;
@@ -4502,16 +4530,19 @@ impl AppWindow {
         };
         let processing_enabled = self.selected_mode_settings().post_processing.enabled;
         let processing_can_toggle = processing_enabled || self.opencode_available();
-        let processing_unavailable = opencode_unavailable_copy(&self.model_catalog).map(|copy| {
-            (
-                copy.title,
-                copy.description,
-                copy.error.map(str::to_owned),
-                copy.can_retry,
-                copy.retry_label,
-                copy.can_open_setup,
-            )
-        });
+        let processing_unavailable =
+            opencode_unavailable_copy(&self.model_catalog, OpenCodeFeature::Transformation).map(
+                |copy| {
+                    (
+                        copy.title,
+                        copy.description,
+                        copy.error.map(str::to_owned),
+                        copy.can_retry,
+                        copy.retry_label,
+                        copy.can_open_setup,
+                    )
+                },
+            );
         let corrections = self.render_mode_replacements(selection, cx);
         let transformations = self.render_mode_transformations(selection, cx);
         let application_picker =
@@ -9091,7 +9122,7 @@ mod tests {
             "OpenCode /api/model failed: config.providers was invalid".into(),
         );
 
-        let copy = opencode_unavailable_copy(&state).unwrap();
+        let copy = opencode_unavailable_copy(&state, OpenCodeFeature::VoiceAction).unwrap();
 
         assert_eq!(copy.title, "OpenCode is unavailable");
         assert_eq!(
@@ -9108,12 +9139,59 @@ mod tests {
 
     #[test]
     fn opencode_missing_copy_offers_setup_without_an_error() {
-        let copy = opencode_unavailable_copy(&ModelCatalogState::Missing).unwrap();
+        let copy =
+            opencode_unavailable_copy(&ModelCatalogState::Missing, OpenCodeFeature::VoiceAction)
+                .unwrap();
 
         assert_eq!(copy.title, "Voice Action requires OpenCode");
         assert_eq!(copy.error, None);
         assert!(copy.can_retry);
         assert!(copy.can_open_setup);
+    }
+
+    #[test]
+    fn opencode_transformation_copy_describes_modes_without_changing_actions() {
+        let loading =
+            opencode_unavailable_copy(&ModelCatalogState::Loading, OpenCodeFeature::Transformation)
+                .unwrap();
+        assert_eq!(loading.title, "Checking for OpenCode");
+        assert_eq!(
+            loading.description,
+            "OpenCode transformation will be available after HEX connects to OpenCode."
+        );
+        assert!(!loading.can_retry);
+        assert!(!loading.can_open_setup);
+
+        let missing =
+            opencode_unavailable_copy(&ModelCatalogState::Missing, OpenCodeFeature::Transformation)
+                .unwrap();
+        assert_eq!(missing.title, "Transformation requires OpenCode");
+        assert_eq!(
+            missing.description,
+            "Install and configure OpenCode to transform dictated text."
+        );
+        assert_eq!(missing.error, None);
+        assert!(missing.can_retry);
+        assert_eq!(missing.retry_label, "Check again");
+        assert!(missing.can_open_setup);
+
+        let failed = ModelCatalogState::Failed("catalog failure".into());
+        let error = opencode_unavailable_copy(&failed, OpenCodeFeature::Transformation).unwrap();
+        assert_eq!(error.title, "OpenCode is unavailable");
+        assert_eq!(error.error, Some("catalog failure"));
+        assert!(error.can_retry);
+        assert!(!error.can_open_setup);
+        let loaded = ModelCatalogState::Loaded(ModelCatalog {
+            models: Vec::new(),
+            default_key: None,
+            default_name: None,
+        });
+        for feature in [
+            OpenCodeFeature::VoiceAction,
+            OpenCodeFeature::Transformation,
+        ] {
+            assert!(opencode_unavailable_copy(&loaded, feature).is_none());
+        }
     }
 
     #[test]

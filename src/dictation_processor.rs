@@ -935,6 +935,7 @@ fn find_opencode_executable(
         .map(|directory| absolute_path(directory.join("opencode2"), current_directory));
     let home_candidates = home.into_iter().flat_map(|home| {
         [
+            home.join(".opencode/bin/opencode2"),
             home.join(".bun/bin/opencode2"),
             home.join("Library/pnpm/opencode2"),
             home.join("Library/pnpm/bin/opencode2"),
@@ -1037,28 +1038,30 @@ mod tests {
     }
 
     #[test]
-    fn standard_package_manager_location_finds_opencode_outside_the_gui_path() {
+    fn standard_install_location_finds_opencode_outside_the_gui_path() {
         let root = std::env::temp_dir().join(format!(
             "hex-opencode-discovery-{}-{:?}",
             std::process::id(),
             thread::current().id()
         ));
-        let executable = root.join("Library/pnpm/bin/opencode2");
-        std::fs::create_dir_all(executable.parent().unwrap()).unwrap();
-        std::fs::write(&executable, "#!/bin/sh\n").unwrap();
-        let mut permissions = executable.metadata().unwrap().permissions();
-        permissions.set_mode(0o755);
-        std::fs::set_permissions(&executable, permissions).unwrap();
+        for location in [".opencode/bin/opencode2", "Library/pnpm/bin/opencode2"] {
+            let executable = root.join(location);
+            std::fs::create_dir_all(executable.parent().unwrap()).unwrap();
+            std::fs::write(&executable, "#!/bin/sh\n").unwrap();
+            let mut permissions = executable.metadata().unwrap().permissions();
+            permissions.set_mode(0o755);
+            std::fs::set_permissions(&executable, permissions).unwrap();
 
-        let found = find_opencode_executable(
-            None,
-            Some(OsStr::new("/usr/bin:/bin")),
-            Some(&root),
-            Some(&root),
-        );
+            let found = find_opencode_executable(
+                None,
+                Some(OsStr::new("/usr/bin:/bin")),
+                Some(&root),
+                Some(&root),
+            );
 
-        assert_eq!(found, Some(executable));
-        std::fs::remove_dir_all(root).unwrap();
+            assert_eq!(found, Some(executable));
+            std::fs::remove_dir_all(&root).unwrap();
+        }
     }
 
     #[test]
@@ -1176,6 +1179,38 @@ mod tests {
         );
 
         assert_eq!(found, Some(current.join("bin/opencode2")));
+    }
+
+    #[test]
+    fn official_install_preserves_override_path_and_executable_checks() {
+        let root = std::env::temp_dir().join(format!(
+            "hex-opencode-precedence-{}-{:?}",
+            std::process::id(),
+            thread::current().id()
+        ));
+        let official = root.join(".opencode/bin/opencode2");
+        let path_executable = root.join("path/opencode2");
+        let fallback = root.join(".bun/bin/opencode2");
+        for executable in [&official, &path_executable, &fallback] {
+            fs::create_dir_all(executable.parent().unwrap()).unwrap();
+            fs::write(executable, "#!/bin/sh\n").unwrap();
+            fs::set_permissions(executable, fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let path = root.join("path");
+        let find =
+            |configured, path| find_opencode_executable(configured, path, Some(&root), Some(&root));
+        assert_eq!(
+            find(Some("override/opencode2".into()), Some(path.as_os_str())),
+            Some(root.join("override/opencode2"))
+        );
+        assert_eq!(find(None, Some(path.as_os_str())), Some(path_executable));
+        assert_eq!(find(None, None), Some(official.clone()));
+        fs::set_permissions(&official, fs::Permissions::from_mode(0o644)).unwrap();
+        assert_eq!(find(None, None), Some(fallback.clone()));
+        fs::remove_file(&official).unwrap();
+        fs::create_dir(&official).unwrap();
+        assert_eq!(find(None, None), Some(fallback));
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
