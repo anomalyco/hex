@@ -255,6 +255,7 @@ pub struct AppWindowPreview {
     pub model_missing: bool,
     pub command_model_missing: bool,
     pub open_history_retention: bool,
+    pub confirm_release_microphone: bool,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -924,7 +925,8 @@ impl AppWindow {
         let preview_choices = crate::transcription_models::choices_for_runtime;
         let (settings, settings_load_error) = if let Some(preview) = &preview {
             let mut settings = AppSettings {
-                commands_enabled: preview.command_model_missing,
+                commands_enabled: preview.command_model_missing
+                    || preview.confirm_release_microphone,
                 ..AppSettings::default()
             };
             settings.voice_action.enabled = preview.voice_action_enabled;
@@ -1169,7 +1171,10 @@ impl AppWindow {
                 crate::recognition::command_model_status()
             },
             release_microphone_toggle: ToggleSpring::new(settings.release_microphone_while_idle),
-            pending_microphone_policy: None,
+            pending_microphone_policy: preview
+                .as_ref()
+                .filter(|preview| preview.confirm_release_microphone)
+                .map(|_| MicrophonePolicyChange::DisableCommandsAndRelease),
             double_tap_toggle: ToggleSpring::new(settings.double_tap_lock),
             double_tap_only_visibility: ToggleSpring::new(
                 settings.double_tap_lock && settings.dictation_hotkey.key.is_some(),
@@ -1353,6 +1358,7 @@ impl AppWindow {
         self.pane = pane;
         self.mode_context_menu = None;
         self.history_retention_open = false;
+        self.pending_microphone_policy = None;
         match pane {
             Pane::HudLab => self.apply_hud_lab(),
             Pane::Meetings => self.reload_meetings(),
@@ -3332,41 +3338,107 @@ impl AppWindow {
                         }))
                 }),
             );
-        let release_microphone_control = if self.pending_microphone_policy
-            == Some(MicrophonePolicyChange::DisableCommandsAndRelease)
-        {
-            compact_button("Disable Commands & Release Microphone")
-                .id("confirm-release-microphone")
-                .on_click(cx.listener(|this, _, _, cx| {
-                    if let Err(error) = this.update_microphone_policy(
-                        MicrophonePolicyChange::DisableCommandsAndRelease,
-                        cx,
-                    ) {
-                        tracing::error!(%error, "could not update microphone policy");
-                    }
-                }))
-                .into_any_element()
-        } else {
+        let microphone_mode = segmented_control()
+            .id("microphone-mode")
+            .relative()
+            .child(
+                div()
+                    .absolute()
+                    .left(px(2.0 + release_microphone_position * 114.0))
+                    .top(px(2.0))
+                    .w(px(114.0))
+                    .h(px(26.0))
+                    .rounded(px(4.0))
+                    .bg(rgb(SURFACE_SELECTED)),
+            )
+            .children(
+                [("Keep ready (fast)", false), ("Release when idle", true)]
+                    .into_iter()
+                    .enumerate()
+                    .map(|(index, (label, release))| {
+                        segmented_item(self.settings.release_microphone_while_idle == release)
+                            .id(("microphone-mode", index))
+                            .w(px(114.0))
+                            .px(px(0.0))
+                            .justify_center()
+                            .bg(rgba(0x00000000))
+                            .child(label)
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                if release && !this.settings.release_microphone_while_idle {
+                                    this.pending_microphone_policy =
+                                        Some(MicrophonePolicyChange::DisableCommandsAndRelease);
+                                    cx.notify();
+                                    return;
+                                }
+                                this.pending_microphone_policy = None;
+                                if this.settings.release_microphone_while_idle != release
+                                    && let Err(error) = this.update_microphone_policy(
+                                        MicrophonePolicyChange::SetReleaseWhileIdle(release),
+                                        cx,
+                                    )
+                                {
+                                    tracing::error!(%error, "could not update microphone policy");
+                                }
+                                cx.notify();
+                            }))
+                    }),
+            );
+        let microphone_confirmation = (self.pending_microphone_policy
+            == Some(MicrophonePolicyChange::DisableCommandsAndRelease))
+        .then(|| {
             div()
-                .id("release-microphone-while-idle")
-                .child(toggle(release_microphone_position))
-                .on_click(cx.listener(|this, _, _, cx| {
-                    let enabled = !this.settings.release_microphone_while_idle;
-                    if enabled && this.settings.commands_enabled {
-                        this.pending_microphone_policy =
-                            Some(MicrophonePolicyChange::DisableCommandsAndRelease);
-                        cx.notify();
-                        return;
-                    }
-                    if let Err(error) = this.update_microphone_policy(
-                        MicrophonePolicyChange::SetReleaseWhileIdle(enabled),
-                        cx,
-                    ) {
-                        tracing::error!(%error, "could not update microphone policy");
-                    }
-                }))
-                .into_any_element()
-        };
+                .px_4()
+                .py_3()
+                .flex()
+                .flex_col()
+                .gap_2()
+                .border_b_1()
+                .border_color(rgb(LINE))
+                .bg(rgb(CANVAS))
+                .child(settings_copy(
+                    "Release the microphone when idle?",
+                    "HEX will open the microphone when you press the shortcut. This adds a start-up delay and removes pre-roll, so the beginning of speech may be missed if you speak right away.",
+                ))
+                .child(
+                    div()
+                        .text_size(px(11.0))
+                        .text_color(rgb(MUTED))
+                        .child(if self.settings.commands_enabled {
+                            "Commands need an open microphone. Confirming will also turn Commands off. You can switch back to Keep ready at any time."
+                        } else {
+                            "Commands need an open microphone and will remain off. You can switch back to Keep ready at any time."
+                        }),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .justify_end()
+                        .gap_2()
+                        .child(
+                            compact_button("Cancel")
+                                .id("cancel-release-microphone")
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.pending_microphone_policy = None;
+                                    cx.notify();
+                                })),
+                        )
+                        .child(
+                            compact_button("Release microphone")
+                                .id("confirm-release-microphone")
+                                .border_1()
+                                .border_color(rgb(LINE))
+                                .bg(rgb(SURFACE_SELECTED))
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    if let Err(error) = this.update_microphone_policy(
+                                        MicrophonePolicyChange::DisableCommandsAndRelease,
+                                        cx,
+                                    ) {
+                                        tracing::error!(%error, "could not update microphone policy");
+                                    }
+                                })),
+                        ),
+                )
+        });
         div()
             .size_full()
             .flex()
@@ -3458,11 +3530,34 @@ impl AppWindow {
                                         )
                                         .id("recording-audio-setting"),
                                     )
-                                    .child(settings_row(
-                                        "Release microphone while idle",
-                                        "Adds first-capture latency and disables audio pre-roll",
-                                        release_microphone_control,
-                                    ))
+                                    .child(
+                                        div()
+                                            .w_full()
+                                            .min_h(px(72.0))
+                                            .px_4()
+                                            .py_3()
+                                            .flex()
+                                            .items_center()
+                                            .justify_between()
+                                            .gap_4()
+                                            .border_b_1()
+                                            .border_color(rgb(LINE))
+                                            .child(
+                                                div()
+                                                    .flex_1()
+                                                    .min_w_0()
+                                                    .child(settings_copy(
+                                                        "Microphone mode",
+                                                        if self.settings.release_microphone_while_idle {
+                                                            "Opens on the shortcut, with a start-up delay and no pre-roll. Commands are off."
+                                                        } else {
+                                                            "Default: keeps the microphone open for the fastest start. A short pre-roll helps catch the beginning of speech. Audio is not saved by default."
+                                                        },
+                                                    )),
+                                            )
+                                            .child(microphone_mode),
+                                    )
+                                    .children(microphone_confirmation)
                                     .child(
                                         settings_row(
                                             "Double-tap to lock",
@@ -7315,6 +7410,13 @@ impl Render for AppWindow {
                 if event.keystroke.key == "escape" && this.transcription_picker_language.is_some() {
                     cx.stop_propagation();
                     this.dismiss_transcription_picker(cx);
+                    return;
+                }
+                if event.keystroke.key == "escape"
+                    && this.pending_microphone_policy.take().is_some()
+                {
+                    cx.stop_propagation();
+                    cx.notify();
                 }
             }))
             .on_mouse_down(
