@@ -1,15 +1,17 @@
-import { Cause, Context, Effect, Layer, Queue, Schema, Scope, Stream } from "effect"
+import { Context, Effect, Layer, Queue, Schema, Scope, Stream } from "effect"
 import { HexError as PromiseHexError } from "./errors.js"
-import { create as createPromiseHost } from "./host.js"
+import { prepareTranscriber, startHost as createPromiseHost } from "./host.js"
 import type {
   Capabilities,
   CreateOptions as PromiseCreateOptions,
   Health,
+  HexHost,
   ModelId,
   ModelInfo,
   ModelProgress,
   TranscriptionRequest,
   TranscriptionResult,
+  TranscriberOptions as PromiseTranscriberOptions,
 } from "./types.js"
 
 const ErrorFields = {
@@ -58,6 +60,15 @@ export type HexError =
   | CancellationError
 
 export type CreateOptions = Omit<PromiseCreateOptions, "signal">
+
+export type TranscriberOptions = Omit<PromiseTranscriberOptions, "signal">
+
+export interface Transcriber {
+  readonly pid: number
+  readonly model: ModelId
+  readonly language: string
+  readonly transcribe: (audio: ArrayBuffer | Uint8Array) => Effect.Effect<TranscriptionResult, HexError>
+}
 
 export interface PrepareModelOptions {
   readonly language?: string
@@ -140,28 +151,14 @@ const makeClient = (client: Awaited<ReturnType<typeof createPromiseHost>>["clien
       }))
     }),
     prepare: (id, options) => Stream.callback<ModelProgress, HexError>(
-      (queue) =>
-        Effect.acquireRelease(
-          Effect.sync(() => {
-            const controller = new AbortController()
-            void client.models.prepare(id, {
-              ...(options?.language === undefined ? {} : { language: options.language }),
-              signal: controller.signal,
-              onProgress: (progress) => {
-                Queue.offerUnsafe(queue, progress)
-              },
-            }).then(
-              () => {
-                Queue.endUnsafe(queue)
-              },
-              (error: unknown) => {
-                Queue.failCauseUnsafe(queue, Cause.fail(toHexError(error)))
-              },
-            )
-            return controller
-          }),
-          (controller) => Effect.sync(() => controller.abort()),
-        ),
+      (queue) => fromPromise((signal) => client.models.prepare(id, {
+        ...options,
+        signal,
+        onProgress: (progress) => { Queue.offerUnsafe(queue, progress) },
+      })).pipe(Effect.matchEffect({
+        onFailure: (error) => Queue.fail(queue, error),
+        onSuccess: () => Queue.end(queue),
+      })),
       { bufferSize: 32, strategy: "sliding" },
     ),
   },
@@ -170,14 +167,43 @@ const makeClient = (client: Awaited<ReturnType<typeof createPromiseHost>>["clien
   }),
 })
 
-export const create = (options: CreateOptions = {}): Effect.Effect<Host, HexError, Scope.Scope> =>
-  Effect.acquireRelease(
-    fromPromise((signal) => createPromiseHost({ ...options, signal })),
-    (host) =>
-      Effect.tryPromise({ try: () => host.close(), catch: toHexError }).pipe(
-        Effect.catch((error) => Effect.logError(error)),
-      ),
-  ).pipe(Effect.map((host) => ({ pid: host.pid, client: makeClient(host.client) })))
+export function create(options: TranscriberOptions): Effect.Effect<Transcriber, HexError, Scope.Scope>
+export function create(options?: CreateOptions): Effect.Effect<Host, HexError, Scope.Scope>
+export function create(options: CreateOptions | TranscriberOptions = {}): Effect.Effect<Host | Transcriber, HexError, Scope.Scope> {
+  const snapshot = { ...options }
+  return withHost(snapshot, (host) => {
+    if (snapshot.model === undefined) {
+      return Effect.succeed<Host | Transcriber>({ pid: host.pid, client: makeClient(host.client) })
+    }
+    return fromPromise((signal) => prepareTranscriber(host, { ...snapshot, signal })).pipe(
+      Effect.map((transcriber): Host | Transcriber => ({
+        pid: transcriber.pid,
+        model: transcriber.model,
+        language: transcriber.language,
+        transcribe: (audio) => fromPromise((signal) => transcriber.transcribe(audio, { signal })).pipe(
+          Effect.onInterrupt(() => closeHost(transcriber)),
+        ),
+      })),
+    )
+  })
+}
+
+const closeHost = (host: Pick<HexHost, "close">) =>
+  Effect.tryPromise({ try: host.close, catch: toHexError }).pipe(Effect.orDie)
+
+const withHost = <A>(
+  options: Omit<CreateOptions, "model">,
+  use: (host: HexHost) => Effect.Effect<A, HexError>,
+): Effect.Effect<A, HexError, Scope.Scope> => Effect.uninterruptibleMask((restore) =>
+  Effect.gen(function* () {
+    const host = yield* Effect.acquireRelease(
+      fromPromise((signal) => createPromiseHost({ ...options, signal })),
+      closeHost,
+    )
+    // Install cleanup before restoring interruption, including interruption during startup.
+    return yield* restore(use(host)).pipe(Effect.onInterrupt(() => closeHost(host)))
+  }),
+)
 
 export const layer = (options: CreateOptions = {}): Layer.Layer<Service, HexError> =>
-  Layer.effect(Service, create(options).pipe(Effect.map((host) => Service.of(host.client))))
+  Layer.effect(Service, withHost(options, (host) => Effect.succeed(Service.of(makeClient(host.client)))))

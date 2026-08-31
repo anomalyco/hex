@@ -6,7 +6,7 @@ import { HexError } from "./errors.js"
 import { makeClient } from "./client.js"
 import { resolveCommand } from "./helper.js"
 import { decodeEndpoint } from "./protocol.js"
-import type { ConnectOptions, CreateOptions, HexClient, HexHost } from "./types.js"
+import type { ConnectOptions, CreateOptions, HexClient, HexHost, Transcriber, TranscriberOptions } from "./types.js"
 
 const DEFAULT_STARTUP_TIMEOUT_MS = 10_000
 const DEFAULT_SHUTDOWN_TIMEOUT_MS = 5_500
@@ -109,7 +109,10 @@ const readHandshake = (
   if (signal?.aborted === true) onAbort()
 })
 
-export const create = async (options: CreateOptions = {}): Promise<HexHost> => {
+export const startHost = async (options: Omit<CreateOptions, "model"> = {}): Promise<HexHost> => {
+  if (options.signal?.aborted) {
+    throw new HexError("cancelled", "HEX startup was cancelled", { cause: options.signal.reason })
+  }
   const [executable, ...arguments_] = resolveCommand(options)
   const child = spawn(executable, arguments_, {
     cwd: options.cwd,
@@ -132,22 +135,72 @@ export const create = async (options: CreateOptions = {}): Promise<HexHost> => {
       throw new HexError("invalid-handshake", "HEX reported a different process identifier")
     }
     child.stderr.resume()
+    child.stdout.resume()
     child.once("exit", (code, exitSignal) => {
       lifetime.abort(new HexError(
         "service-exited",
         `Embedded HEX exited (${code ?? exitSignal ?? "unknown"})`,
       ))
     })
+    if (child.exitCode !== null || child.signalCode !== null) {
+      throw new HexError("service-exited", "HEX exited after its startup handshake")
+    }
     const client = makeClient(endpoint, options.fetch ?? globalThis.fetch, lifetime.signal)
     return { pid: endpoint.pid, client, close }
   } catch (error) {
-    try {
-      await close()
-    } catch {
-      // Preserve the startup failure; close reports shutdown failures after acquisition.
-    }
+    await close()
     throw error
   }
+}
+
+export const prepareTranscriber = async (host: HexHost, options: TranscriberOptions): Promise<Transcriber> => {
+  const { model, language = "en", signal, onProgress } = options
+  try {
+    await host.client.models.prepare(model, {
+      language,
+      ...(signal === undefined ? {} : { signal }),
+      ...(onProgress === undefined ? {} : { onProgress }),
+    })
+    if (signal?.aborted) throw new HexError("cancelled", "HEX preparation was cancelled", { cause: signal.reason })
+  } catch (error) {
+    await host.close()
+    throw error
+  }
+  return {
+    pid: host.pid,
+    model,
+    language,
+    close: host.close,
+    async transcribe(audio, { signal } = {}) {
+      if (signal?.aborted) {
+        throw new HexError("cancelled", "HEX transcription was cancelled", { cause: signal.reason })
+      }
+      try {
+        const result = await host.client.transcribe({
+          audio: { data: audio, contentType: "audio/wav" }, model, language,
+          ...(signal === undefined ? {} : { signal }),
+        })
+        if (signal?.aborted) throw new HexError("cancelled", "HEX transcription was cancelled", { cause: signal.reason })
+        return result
+      } catch (error) {
+        // Socket cancellation alone cannot stop native inference. Wait for its owner to exit.
+        if (signal?.aborted || error instanceof HexError && error.code === "service-exited") {
+          await host.close()
+        }
+        throw error
+      }
+    },
+  }
+}
+
+export function create(options: TranscriberOptions): Promise<Transcriber>
+export function create(options?: CreateOptions): Promise<HexHost>
+export async function create(options: CreateOptions | TranscriberOptions = {}): Promise<HexHost | Transcriber> {
+  if (options.model !== undefined) {
+    const snapshot = { ...options }
+    return prepareTranscriber(await startHost(snapshot), snapshot)
+  }
+  return startHost(options)
 }
 
 export const connect = async (options: ConnectOptions = {}): Promise<HexClient> => {
