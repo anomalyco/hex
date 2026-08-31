@@ -1202,6 +1202,18 @@ mod tests {
     }
 
     #[test]
+    fn callback_press_reaches_intentional_hold_on_the_audio_clock() {
+        let now = capture_time();
+        let press = callback_input(&[(now.as_nanos(), InputEvent::Flags(OPTION_KEY_MASK))])[0];
+        // This capture has no recording environment, so threshold checks cannot mute audio.
+        let mut capture = crate::dictation::DictationCapture::new(16_000);
+        capture.start_at(press.capture_at);
+        assert!(!capture.become_intentional(now + Duration::from_millis(299)));
+        assert!(capture.become_intentional(now + Duration::from_millis(300)));
+        assert!(!capture.become_intentional(now + Duration::from_millis(301)));
+    }
+
+    #[test]
     fn suspended_key_tracking_preserves_held_keys_and_observes_releases() {
         let now = capture_time();
         let ordinary = |down| InputEvent::Key {

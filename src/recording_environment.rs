@@ -69,6 +69,8 @@ impl RecordingEnvironment {
 enum EnvironmentCommand {
     Start,
     Stop,
+    #[cfg(test)]
+    Barrier(Sender<()>),
 }
 
 #[derive(Clone)]
@@ -78,6 +80,15 @@ pub struct RecordingEnvironmentController {
 
 impl RecordingEnvironmentController {
     pub fn start() -> Self {
+        Self::with_environment(RecordingEnvironment::start)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn for_test() -> Self {
+        Self::with_environment(|| ())
+    }
+
+    fn with_environment<E>(start: impl Fn() -> E + Send + 'static) -> Self {
         let (commands, receiver) = mpsc::channel();
         thread::spawn(move || {
             let mut sessions = 0_u32;
@@ -87,7 +98,7 @@ impl RecordingEnvironmentController {
                     EnvironmentCommand::Start => {
                         sessions = sessions.saturating_add(1);
                         if sessions == 1 {
-                            _environment = Some(RecordingEnvironment::start());
+                            _environment = Some(start());
                         }
                     }
                     EnvironmentCommand::Stop => {
@@ -95,6 +106,10 @@ impl RecordingEnvironmentController {
                         if sessions == 0 {
                             _environment = None;
                         }
+                    }
+                    #[cfg(test)]
+                    EnvironmentCommand::Barrier(reply) => {
+                        let _ = reply.send(());
                     }
                 }
             }
@@ -334,5 +349,106 @@ fn resume_media(players: &[String]) {
             "could not resume media after dictation"
         ),
         Err(error) => tracing::warn!(%error, "could not resume media after dictation"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::mpsc::{Receiver, RecvTimeoutError};
+    use std::time::Duration;
+
+    #[derive(Debug, PartialEq)]
+    enum Event {
+        Started,
+        Restored,
+    }
+
+    struct ObservedEnvironment(Sender<Event>);
+
+    impl Drop for ObservedEnvironment {
+        fn drop(&mut self) {
+            let _ = self.0.send(Event::Restored);
+        }
+    }
+
+    fn observed_controller() -> (RecordingEnvironmentController, Receiver<Event>) {
+        let (events, receiver) = mpsc::channel();
+        let controller = RecordingEnvironmentController::with_environment(move || {
+            let _ = events.send(Event::Started);
+            ObservedEnvironment(events.clone())
+        });
+        (controller, receiver)
+    }
+
+    fn assert_events(
+        commands: &Sender<EnvironmentCommand>,
+        events: &Receiver<Event>,
+        expected: &[Event],
+    ) {
+        let (reply, response) = mpsc::channel();
+        commands.send(EnvironmentCommand::Barrier(reply)).unwrap();
+        response.recv_timeout(Duration::from_secs(2)).unwrap();
+        assert_eq!(events.try_iter().collect::<Vec<_>>(), expected);
+    }
+
+    #[test]
+    fn overlapping_sessions_restore_only_after_the_last_session() {
+        let (controller, events) = observed_controller();
+        assert_events(&controller.commands, &events, &[]);
+
+        let first = controller.begin();
+        let second = controller.begin();
+        assert_events(&controller.commands, &events, &[Event::Started]);
+
+        drop(first);
+        assert_events(&controller.commands, &events, &[]);
+
+        let third = controller.begin();
+        drop(second);
+        assert_events(&controller.commands, &events, &[]);
+
+        drop(third);
+        assert_events(&controller.commands, &events, &[Event::Restored]);
+    }
+
+    #[test]
+    fn a_new_session_reacquires_the_environment_after_restoration() {
+        let (controller, events) = observed_controller();
+        for _ in 0..2 {
+            let session = controller.begin();
+            assert_events(&controller.commands, &events, &[Event::Started]);
+            drop(session);
+            assert_events(&controller.commands, &events, &[Event::Restored]);
+        }
+    }
+
+    #[test]
+    fn controller_moves_and_clones_do_not_restore_a_live_session() {
+        let (controller, events) = observed_controller();
+        let session = controller.begin();
+        assert_events(&controller.commands, &events, &[Event::Started]);
+
+        let cloned = controller.clone();
+        let moved = controller;
+        drop(moved);
+        assert_events(&cloned.commands, &events, &[]);
+
+        let overlapping = cloned.begin();
+        drop(cloned);
+        assert_events(&session.commands, &events, &[]);
+
+        drop(session);
+        assert_events(&overlapping.commands, &events, &[]);
+
+        drop(overlapping);
+        assert_eq!(
+            events.recv_timeout(Duration::from_secs(2)).unwrap(),
+            Event::Restored
+        );
+        assert_eq!(
+            events.recv_timeout(Duration::from_secs(2)),
+            Err(RecvTimeoutError::Disconnected)
+        );
     }
 }
