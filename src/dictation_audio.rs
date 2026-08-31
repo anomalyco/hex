@@ -819,7 +819,7 @@ mod tests {
         let (commands, command_receiver) = mpsc::channel();
         let (recognition_sender, recognition) = mpsc::sync_channel(RECOGNITION_QUEUE_CAPACITY);
         let (events_sender, events) = mpsc::channel();
-        let recording_environment = RecordingEnvironmentController::start();
+        let recording_environment = RecordingEnvironmentController::for_test();
         let owner = Owner {
             input,
             release_while_idle: false,
@@ -1160,7 +1160,7 @@ mod tests {
             Some("HEX nonexistent microphone for startup recovery test"),
             0,
             None,
-            RecordingEnvironmentController::start(),
+            RecordingEnvironmentController::for_test(),
             PendingInputEvents::default(),
             false,
         )
@@ -1209,7 +1209,7 @@ mod tests {
             let input = DictationAudio::with_input(
                 input,
                 "Test microphone".into(),
-                RecordingEnvironmentController::start(),
+                RecordingEnvironmentController::for_test(),
                 pending_input,
                 false,
             )
@@ -1246,7 +1246,7 @@ mod tests {
         let input = DictationAudio::with_input(
             input,
             "Missing microphone".into(),
-            RecordingEnvironmentController::start(),
+            RecordingEnvironmentController::for_test(),
             PendingInputEvents::default(),
             false,
         )
