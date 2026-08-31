@@ -1,6 +1,6 @@
 [package]
 name = "voice-control"
-version = "2.1.9"
+version = "2.1.10"
 edition = "2024"
 default-run = "voice-control"
 license = "MIT"
@@ -59,6 +59,9 @@ objc2-quartz-core = { version = "0.3.2", features = ["CALayer"] }
 objc2-service-management = { version = "0.3.2", features = ["SMAppService"] }
 raw-window-handle = "0.6.2"
 screencapturekit = { version = "=8.0.1", features = ["macos_15_0"] }
+
+[target.'cfg(target_os = "macos")'.dev-dependencies]
+gpui = { version = "0.2.2", default-features = false, features = ["test-support"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 base64 = "0.22.1"

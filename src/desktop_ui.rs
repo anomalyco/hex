@@ -416,6 +416,7 @@ pub(crate) fn settings_section_label(label: &'static str) -> AnyElement {
 #[allow(dead_code)]
 pub(crate) fn settings_copy(title: &'static str, description: &'static str) -> AnyElement {
     div()
+        .debug_selector(|| "settings-copy".into())
         .flex()
         .flex_col()
         .gap_1()
@@ -542,9 +543,15 @@ pub(crate) fn settings_row(
         .flex()
         .items_center()
         .justify_between()
+        .gap_4()
         .border_b_1()
         .border_color(rgb(LINE))
-        .child(settings_copy(title, description))
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .child(settings_copy(title, description)),
+        )
         .child(control)
 }
 
@@ -635,5 +642,66 @@ mod tests {
         assert_eq!(split_sided_keycap("L⌥"), (Some("L"), "⌥".into()));
         assert_eq!(split_sided_keycap("R⌘"), (Some("R"), "⌘".into()));
         assert_eq!(split_sided_keycap("Return"), (None, "Return".into()));
+    }
+}
+
+#[cfg(all(test, target_os = "macos"))]
+mod layout_tests {
+    use super::*;
+    use gpui::{Context, Render, TestAppContext, Window, size};
+
+    struct SettingsRow;
+
+    impl Render for SettingsRow {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div().w_full().child(
+                settings_row(
+                    "Microphone mode",
+                    "Default: keeps the microphone open for the fastest start. A short pre-roll helps catch the beginning of speech. Audio is not saved by default.",
+                    div()
+                        .debug_selector(|| "settings-control".into())
+                        .w(px(220.0))
+                        .h(px(CONTROL_HEIGHT))
+                        .flex_none(),
+                )
+                .debug_selector(|| "settings-row".into()),
+            )
+        }
+    }
+
+    #[gpui::test]
+    fn settings_row_wraps_copy_without_displacing_fixed_control(cx: &mut TestAppContext) {
+        // Real GPUI/Taffy layout with deterministic test-platform text metrics.
+        let (_, cx) = cx.add_window_view(|_, _| SettingsRow);
+        let mut heights = Vec::new();
+        for width in [940.0, 756.0, 576.0] {
+            cx.simulate_resize(size(px(width), px(400.0)));
+            cx.run_until_parked();
+            let row = cx.debug_bounds("settings-row").unwrap();
+            let copy = cx.debug_bounds("settings-copy").unwrap();
+            let control = cx.debug_bounds("settings-control").unwrap();
+            assert_eq!(row.size.width, px(width));
+            assert_eq!(control.size.width, px(220.0));
+            assert_eq!(control.size.height, px(CONTROL_HEIGHT));
+            assert!(
+                control.right() <= row.right(),
+                "{width}: {control:?} outside {row:?}"
+            );
+            assert!(copy.left() >= row.left());
+            assert!(
+                copy.right() + px(16.0) <= control.left(),
+                "{width}: gap between {copy:?} and {control:?} is below 16px"
+            );
+            assert!(copy.top() >= row.top() && copy.bottom() <= row.bottom());
+            heights.push((row.size.height, copy.size.height));
+        }
+        assert!(
+            heights[2].0 > heights[0].0,
+            "narrow row must grow: {heights:?}"
+        );
+        assert!(
+            heights[2].1 > heights[0].1,
+            "narrow copy must wrap: {heights:?}"
+        );
     }
 }
