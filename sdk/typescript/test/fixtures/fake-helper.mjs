@@ -7,7 +7,10 @@ if (process.env.HEX_FAKE_MODE === "exit-before-ready") process.exit(23)
 if (process.env.HEX_FAKE_MODE === "bad-handshake") {
   process.stdout.write('{"type":"ready","url":"https://example.com"}\n')
   process.stdin.resume()
-  process.stdin.on("end", () => process.exit(0))
+  process.stdin.on("end", () => {
+    if (process.env.HEX_FAKE_IGNORE_LEASE === "1") setInterval(() => {}, 1_000)
+    else process.exit(0)
+  })
 } else {
   const token = "hex_0000000000000000000000000000000000000000000000000000000000000000"
   const models = [{

@@ -153,10 +153,15 @@ describe("Effect client", () => {
 
   it("interrupts an in-flight preparation when its stream scope closes", async () => {
     let pid = 0
+    let requestSignal: AbortSignal | null | undefined
     await Effect.runPromise(Effect.scoped(Effect.gen(function* () {
       const host = yield* Hex.create({
         ...options(),
         env: { HEX_FAKE_PREPARE_HANG: "1" },
+        fetch: (url, init) => {
+          if (String(url).includes("/prepare")) requestSignal = init?.signal
+          return fetch(url, init)
+        },
       })
       pid = host.pid
       const progress = yield* Deferred.make<void>()
@@ -167,8 +172,22 @@ describe("Effect client", () => {
       )
       yield* Deferred.await(progress)
       yield* Fiber.interrupt(fiber)
+      expect(requestSignal?.aborted).toBe(true)
+      expect(processIsAlive(host.pid)).toBe(true)
+      expect((yield* host.client.health()).apiVersion).toBe("2")
     })))
 
     expect(processIsAlive(pid)).toBe(false)
+  })
+
+  it("preserves typed preparation failures through the progress stream", async () => {
+    await Effect.runPromise(Effect.scoped(Effect.gen(function* () {
+      const host = yield* Hex.create({ ...options(), env: { HEX_FAKE_PREPARE_ERROR: "1" } })
+      const error = yield* host.client.models.prepare("parakeet_v2").pipe(Stream.runDrain, Effect.flip)
+      expect(error).toMatchObject({
+        _tag: "Hex.ModelPreparationError", code: "model-prepare-failed", remoteCode: "load-failed",
+      })
+      expect(processIsAlive(host.pid)).toBe(true)
+    })))
   })
 })

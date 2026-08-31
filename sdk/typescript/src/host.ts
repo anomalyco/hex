@@ -148,11 +148,7 @@ export const startHost = async (options: Omit<CreateOptions, "model"> = {}): Pro
     const client = makeClient(endpoint, options.fetch ?? globalThis.fetch, lifetime.signal)
     return { pid: endpoint.pid, client, close }
   } catch (error) {
-    try {
-      await close()
-    } catch {
-      // Preserve the startup failure; close reports shutdown failures after acquisition.
-    }
+    await close()
     throw error
   }
 }
@@ -180,10 +176,12 @@ export const prepareTranscriber = async (host: HexHost, options: TranscriberOpti
         throw new HexError("cancelled", "HEX transcription was cancelled", { cause: signal.reason })
       }
       try {
-        return await host.client.transcribe({
+        const result = await host.client.transcribe({
           audio: { data: audio, contentType: "audio/wav" }, model, language,
           ...(signal === undefined ? {} : { signal }),
         })
+        if (signal?.aborted) throw new HexError("cancelled", "HEX transcription was cancelled", { cause: signal.reason })
+        return result
       } catch (error) {
         // Socket cancellation alone cannot stop native inference. Wait for its owner to exit.
         if (signal?.aborted || error instanceof HexError && error.code === "service-exited") {

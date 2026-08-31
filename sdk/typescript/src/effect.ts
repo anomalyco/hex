@@ -1,4 +1,4 @@
-import { Cause, Context, Effect, Layer, Queue, Schema, Scope, Stream } from "effect"
+import { Context, Effect, Layer, Queue, Schema, Scope, Stream } from "effect"
 import { HexError as PromiseHexError } from "./errors.js"
 import { prepareTranscriber, startHost as createPromiseHost } from "./host.js"
 import type {
@@ -151,28 +151,14 @@ const makeClient = (client: Awaited<ReturnType<typeof createPromiseHost>>["clien
       }))
     }),
     prepare: (id, options) => Stream.callback<ModelProgress, HexError>(
-      (queue) =>
-        Effect.acquireRelease(
-          Effect.sync(() => {
-            const controller = new AbortController()
-            void client.models.prepare(id, {
-              ...(options?.language === undefined ? {} : { language: options.language }),
-              signal: controller.signal,
-              onProgress: (progress) => {
-                Queue.offerUnsafe(queue, progress)
-              },
-            }).then(
-              () => {
-                Queue.endUnsafe(queue)
-              },
-              (error: unknown) => {
-                Queue.failCauseUnsafe(queue, Cause.fail(toHexError(error)))
-              },
-            )
-            return controller
-          }),
-          (controller) => Effect.sync(() => controller.abort()),
-        ),
+      (queue) => fromPromise((signal) => client.models.prepare(id, {
+        ...options,
+        signal,
+        onProgress: (progress) => { Queue.offerUnsafe(queue, progress) },
+      })).pipe(Effect.matchEffect({
+        onFailure: (error) => Queue.fail(queue, error),
+        onSuccess: () => Queue.end(queue),
+      })),
       { bufferSize: 32, strategy: "sliding" },
     ),
   },

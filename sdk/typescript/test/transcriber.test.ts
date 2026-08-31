@@ -1,7 +1,9 @@
 import { mkdtemp, readFile, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { describe, expect, it } from "vitest"
+import { ChildProcess } from "node:child_process"
+import { once } from "node:events"
+import { describe, expect, it, vi } from "vitest"
 import { create, type ModelProgress } from "../src/index.js"
 import { options, processIsAlive } from "./support.js"
 
@@ -69,6 +71,54 @@ describe("ready transcriber", () => {
       expect((await transcriber.transcribe(new Uint8Array(4))).transcript).toBe("hello from hex")
     } finally {
       await transcriber.close()
+    }
+  })
+
+  it("does not let buffered success overtake cancellation", async () => {
+    const controller = new AbortController()
+    const transcriber = await create({
+      ...options(), model: "parakeet_v2",
+      fetch: async (url, init) => {
+        const response = await fetch(url, init)
+        if (String(url).includes("/transcriptions")) {
+          const json = response.json.bind(response)
+          response.json = async () => {
+            const result: unknown = await json()
+            controller.abort()
+            return result
+          }
+        }
+        return response
+      },
+    })
+    try {
+      await expect(transcriber.transcribe(new Uint8Array(4), { signal: controller.signal }))
+        .rejects.toMatchObject({ code: "cancelled" })
+      expect(processIsAlive(transcriber.pid)).toBe(false)
+    } finally {
+      await transcriber.close()
+    }
+  })
+
+  it("reports failed startup cleanup instead of implying the child stopped", async () => {
+    const children: ChildProcess[] = []
+    const kill = vi.spyOn(ChildProcess.prototype, "kill").mockImplementation(function (this: ChildProcess) {
+      children.push(this)
+      throw new Error("Termination denied")
+    })
+    try {
+      await expect(create({
+        ...options(), model: "parakeet_v2", shutdownTimeoutMs: 1,
+        env: { HEX_FAKE_MODE: "bad-handshake", HEX_FAKE_IGNORE_LEASE: "1" },
+      })).rejects.toMatchObject({ code: "shutdown-failed" })
+    } finally {
+      kill.mockRestore()
+      for (const child of children) {
+        if (child.exitCode !== null || child.signalCode !== null) continue
+        const exited = once(child, "exit")
+        child.kill("SIGKILL")
+        await exited
+      }
     }
   })
 

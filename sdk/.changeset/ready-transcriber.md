@@ -12,5 +12,8 @@ Effect scope cleanup failures now surface as defects instead of being logged and
 discarded. The low-level and model-bound option types are distinct so shared
 configuration cannot accidentally change the returned resource's shape.
 
+Startup cleanup failures are surfaced instead of hiding a potentially live child.
+Cancellation also takes precedence over a buffered result that has not settled.
+
 Embedded use still requires an explicit native helper command until bundled
 platform artifacts are published.
