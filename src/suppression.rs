@@ -836,13 +836,17 @@ impl DictationHotkey {
         mut flags: impl FnMut() -> u64,
         mut key_down: impl FnMut(u16) -> bool,
     ) {
-        if !matches!(self.state, State::Idle | State::Dirty) || self.pressed_keys.is_empty() {
+        if !matches!(self.state, State::Idle | State::Dirty)
+            || (matches!(self.state, State::Idle) && self.pressed_keys.is_empty())
+        {
             self.stale_keys_neutral_since = None;
             return;
         }
-        // Only scan the full keyboard when a tracked key disagrees with native state.
+        // A missing modifier release can leave Dirty with no ordinary keys tracked.
+        // Avoid a full scan when a tracked key is still physically held.
         if flags() & HOTKEY_MODIFIERS_MASK != 0
-            || !self.pressed_keys.iter().any(|&code| !key_down(code))
+            || (!self.pressed_keys.is_empty()
+                && self.pressed_keys.iter().all(|&code| key_down(code)))
             || (0..128).any(&mut key_down)
             || flags() & HOTKEY_MODIFIERS_MASK != 0
         {
@@ -1689,6 +1693,103 @@ mod tests {
                     assert!(!hotkey.is_recording());
                 }
             }
+        }
+    }
+
+    #[test]
+    fn neutral_keyboard_rearms_after_a_missing_modifier_release() {
+        for double_tap_enabled in [false, true] {
+            for finish_locked in [false, true] {
+                if finish_locked && !double_tap_enabled {
+                    continue;
+                }
+                let now = capture_time();
+                let mut hotkey = test_hotkey(false, now);
+                hotkey.set_double_tap_enabled(double_tap_enabled);
+                let mut trace = vec![(0, OPTION_KEY_MASK, Some(HotkeyAction::Start))];
+                if finish_locked {
+                    trace.extend([
+                        (80, 0, Some(HotkeyAction::Finish)),
+                        (180, OPTION_KEY_MASK, Some(HotkeyAction::Start)),
+                        (260, 0, None),
+                        (1_000, OPTION_KEY_MASK, Some(HotkeyAction::Finish)),
+                    ]);
+                } else {
+                    trace.extend([
+                        (
+                            50,
+                            OPTION_KEY_MASK | SHIFT_KEY_MASK,
+                            Some(HotkeyAction::Discard),
+                        ),
+                        (100, SHIFT_KEY_MASK, None),
+                    ]);
+                }
+                let edges = callback_input(
+                    &trace
+                        .iter()
+                        .map(|(ms, flags, _)| {
+                            (
+                                (now + Duration::from_millis(*ms)).as_nanos(),
+                                InputEvent::Flags(*flags),
+                            )
+                        })
+                        .collect::<Vec<_>>(),
+                );
+                for (edge, (_, _, expected)) in edges.into_iter().zip(trace) {
+                    assert_eq!(hotkey.process(edge.event, edge.capture_at), expected);
+                }
+                assert!(matches!(hotkey.state, State::Dirty));
+                assert!(hotkey.pressed_keys.is_empty());
+
+                // The final modifier release never reached either callback. Native
+                // neutrality must repair suppression without synthesizing a capture.
+                let first = now + Duration::from_secs(2);
+                hotkey.recover_stale_keys_with(|| first, || 0, |_| false);
+                hotkey.recover_stale_keys_with(
+                    || first + STALE_KEY_NEUTRAL_DURATION,
+                    || 0,
+                    |_| false,
+                );
+                assert!(!hotkey.is_recording());
+                let press = now + Duration::from_secs(5);
+                assert_eq!(
+                    hotkey.process(InputEvent::Flags(OPTION_KEY_MASK), press),
+                    Some(HotkeyAction::Start),
+                    "double_tap_enabled={double_tap_enabled}, finish_locked={finish_locked}"
+                );
+                assert_eq!(
+                    hotkey.process(InputEvent::Flags(0), press + Duration::from_secs(1)),
+                    Some(HotkeyAction::Finish)
+                );
+                assert!(!hotkey.is_recording());
+            }
+        }
+    }
+
+    #[test]
+    fn blocked_modifier_recovery_requires_a_fully_neutral_keyboard() {
+        let now = capture_time();
+        for (flags, held_key) in [(OPTION_KEY_MASK, None), (0, Some(48))] {
+            let mut hotkey = test_hotkey(false, now);
+            hotkey.suppress_until_release();
+            for offset in [0, 100, 1_000] {
+                hotkey.recover_stale_keys_with(
+                    || now + Duration::from_millis(offset),
+                    || flags,
+                    |code| held_key == Some(code),
+                );
+                assert!(matches!(hotkey.state, State::Dirty));
+            }
+            let neutral = now + Duration::from_secs(2);
+            hotkey.recover_stale_keys_with(|| neutral, || 0, |_| false);
+            hotkey.recover_stale_keys_with(|| neutral + Duration::from_millis(99), || 0, |_| false);
+            assert!(matches!(hotkey.state, State::Dirty));
+            hotkey.recover_stale_keys_with(
+                || neutral + STALE_KEY_NEUTRAL_DURATION,
+                || 0,
+                |_| false,
+            );
+            assert!(matches!(hotkey.state, State::Idle));
         }
     }
 
