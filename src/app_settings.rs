@@ -18,6 +18,7 @@ static CUSTOM_TRANSFORMATIONS_ENABLED: AtomicBool = AtomicBool::new(false);
 static HOTKEYS: OnceLock<RwLock<RuntimeHotkeys>> = OnceLock::new();
 static PASTE_KEY_CODE: OnceLock<u16> = OnceLock::new();
 static REWRITE_LAST_KEY_CODE: OnceLock<u16> = OnceLock::new();
+static REWRITE_SELECTION_KEY_CODE: OnceLock<u16> = OnceLock::new();
 static HOTKEY_CAPTURE_ACTIVE: AtomicBool = AtomicBool::new(false);
 static SETTINGS_TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 static TRANSCRIPTION_SELECTION: OnceLock<RwLock<RuntimeTranscriptionSelection>> = OnceLock::new();
@@ -266,6 +267,20 @@ impl HotkeyBinding {
             }),
         }
     }
+
+    pub fn rewrite_selection_default() -> Self {
+        Self {
+            modifiers: HotkeyModifiers {
+                option: Some(ModifierSide::Either),
+                shift: Some(ModifierSide::Either),
+                ..Default::default()
+            },
+            key: Some(HotkeyKey {
+                code: rewrite_selection_key_code(),
+                label: "R".into(),
+            }),
+        }
+    }
 }
 
 fn paste_key_code() -> u16 {
@@ -274,6 +289,9 @@ fn paste_key_code() -> u16 {
 
 fn rewrite_last_key_code() -> u16 {
     *REWRITE_LAST_KEY_CODE.get_or_init(|| crate::keyboard::key_code_for('o').unwrap_or(31))
+}
+fn rewrite_selection_key_code() -> u16 {
+    *REWRITE_SELECTION_KEY_CODE.get_or_init(|| crate::keyboard::key_code_for('r').unwrap_or(15))
 }
 
 impl HotkeyBinding {
@@ -424,6 +442,7 @@ pub struct RuntimeHotkeys {
     pub edit: Option<RuntimeHotkey>,
     pub paste_last: Option<RuntimeHotkey>,
     pub rewrite_last: Option<RuntimeHotkey>,
+    pub rewrite_selection: Option<RuntimeHotkey>,
     pub paste_meeting: Option<RuntimeHotkey>,
 }
 
@@ -434,6 +453,7 @@ impl Default for RuntimeHotkeys {
             edit: None,
             paste_last: Some(HotkeyBinding::paste_last_default().runtime()),
             rewrite_last: Some(HotkeyBinding::rewrite_last_default().runtime()),
+            rewrite_selection: Some(HotkeyBinding::rewrite_selection_default().runtime()),
             paste_meeting: crate::DEVELOPER_FEATURES_ENABLED
                 .then(|| HotkeyBinding::paste_meeting_default().runtime()),
         }
@@ -576,6 +596,8 @@ pub struct AppSettings {
     pub paste_last_hotkey: Option<HotkeyBinding>,
     #[serde(default = "default_rewrite_last_hotkey")]
     pub rewrite_last_hotkey: Option<HotkeyBinding>,
+    #[serde(default = "default_rewrite_selection_hotkey")]
+    pub rewrite_selection_hotkey: Option<HotkeyBinding>,
     pub show_dock_icon: bool,
     pub transcription: TranscriptionSelection,
     pub dictation_processing: DictationProcessingSettings,
@@ -596,6 +618,9 @@ where
 fn default_rewrite_last_hotkey() -> Option<HotkeyBinding> {
     Some(HotkeyBinding::rewrite_last_default())
 }
+fn default_rewrite_selection_hotkey() -> Option<HotkeyBinding> {
+    Some(HotkeyBinding::rewrite_selection_default())
+}
 
 impl Default for AppSettings {
     fn default() -> Self {
@@ -612,6 +637,7 @@ impl Default for AppSettings {
             edit_hotkey: HotkeyBinding::edit_default(),
             paste_last_hotkey: Some(HotkeyBinding::paste_last_default()),
             rewrite_last_hotkey: default_rewrite_last_hotkey(),
+            rewrite_selection_hotkey: default_rewrite_selection_hotkey(),
             show_dock_icon: true,
             transcription: TranscriptionSelection::default(),
             dictation_processing: DictationProcessingSettings::default(),
@@ -696,11 +722,11 @@ impl AppSettings {
                 let transcription_migrated = settings.migrate_disabled_transcription_model();
                 crate::transcription_models::validate(&settings.transcription)?;
                 settings.repair_hotkey_conflict();
-                let rewrite_last_disabled = settings.normalize_rewrite_last_conflict();
+                let shortcut_conflicts_fixed = settings.normalize_shortcut_conflicts();
                 if (transcription_migrated
                     || microphone_policy_migrated
                     || mode_applications_migrated
-                    || rewrite_last_disabled)
+                    || shortcut_conflicts_fixed)
                     && let Err(error) = settings.write_to(path)
                 {
                     tracing::warn!(%error, "could not persist normalized settings");
@@ -841,6 +867,10 @@ impl AppSettings {
                 .rewrite_last_hotkey
                 .as_ref()
                 .map(HotkeyBinding::runtime),
+            rewrite_selection: self
+                .rewrite_selection_hotkey
+                .as_ref()
+                .map(HotkeyBinding::runtime),
             paste_meeting: crate::DEVELOPER_FEATURES_ENABLED
                 .then(|| HotkeyBinding::paste_meeting_default().runtime()),
         }
@@ -848,26 +878,59 @@ impl AppSettings {
 
     /// A persisted rewrite shortcut must never shadow the shortcuts users already
     /// rely on; disable it instead of silently changing their muscle memory.
-    fn normalize_rewrite_last_conflict(&mut self) -> bool {
-        let Some(rewrite_last) = &self.rewrite_last_hotkey else {
-            return false;
-        };
-        let mut conflicts = hotkeys_conflict(&self.dictation_hotkey, rewrite_last)
-            || self
-                .paste_last_hotkey
+    fn normalize_shortcut_conflicts(&mut self) -> bool {
+        let mut changed = false;
+        let rewrite_last_conflicts =
+            self.rewrite_last_hotkey
                 .as_ref()
-                .is_some_and(|paste_last| hotkeys_conflict(paste_last, rewrite_last))
-            || (self.voice_action.enabled && hotkeys_conflict(&self.edit_hotkey, rewrite_last));
-        if !conflicts
-            && crate::DEVELOPER_FEATURES_ENABLED
-            && hotkeys_conflict(&HotkeyBinding::paste_meeting_default(), rewrite_last)
-        {
-            conflicts = true;
-        }
-        if conflicts {
+                .is_some_and(|rewrite_last| {
+                    hotkeys_conflict(&self.dictation_hotkey, rewrite_last)
+                        || self
+                            .paste_last_hotkey
+                            .as_ref()
+                            .is_some_and(|x| hotkeys_conflict(x, rewrite_last))
+                        || (self.voice_action.enabled
+                            && hotkeys_conflict(&self.edit_hotkey, rewrite_last))
+                        || self
+                            .rewrite_selection_hotkey
+                            .as_ref()
+                            .is_some_and(|x| hotkeys_conflict(x, rewrite_last))
+                        || (crate::DEVELOPER_FEATURES_ENABLED
+                            && hotkeys_conflict(
+                                &HotkeyBinding::paste_meeting_default(),
+                                rewrite_last,
+                            ))
+                });
+        if rewrite_last_conflicts {
             self.rewrite_last_hotkey = None;
+            changed = true;
         }
-        conflicts
+        let selection_conflicts = self
+            .rewrite_selection_hotkey
+            .as_ref()
+            .is_some_and(|selection| {
+                hotkeys_conflict(&self.dictation_hotkey, selection)
+                    || self
+                        .paste_last_hotkey
+                        .as_ref()
+                        .is_some_and(|x| hotkeys_conflict(x, selection))
+                    || self
+                        .rewrite_last_hotkey
+                        .as_ref()
+                        .is_some_and(|x| hotkeys_conflict(x, selection))
+                    || (self.voice_action.enabled && hotkeys_conflict(&self.edit_hotkey, selection))
+                    || (crate::DEVELOPER_FEATURES_ENABLED
+                        && hotkeys_conflict(&HotkeyBinding::paste_meeting_default(), selection))
+            });
+        if selection_conflicts {
+            self.rewrite_selection_hotkey = None;
+            changed = true;
+        }
+        changed
+    }
+    #[cfg(test)]
+    fn normalize_rewrite_last_conflict(&mut self) -> bool {
+        self.normalize_shortcut_conflicts()
     }
 
     fn repair_hotkey_conflict(&mut self) {

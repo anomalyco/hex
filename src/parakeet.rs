@@ -87,6 +87,7 @@ pub enum TranscriptionTarget {
     Send,
     VoiceAction,
     RewriteLast,
+    RewriteSelection,
     Service,
 }
 
@@ -237,6 +238,7 @@ struct WorkerState {
     /// `last_transcript`, so without this guard repeated presses would queue
     /// duplicate generations of the same text.
     rewrite_job: Option<DictationJobId>,
+    rewrite_selection_job: Option<DictationJobId>,
 }
 
 impl WorkerState {
@@ -274,6 +276,7 @@ impl DictationWorker {
             pending_pastes: 0,
             last_transcript: None,
             rewrite_job: None,
+            rewrite_selection_job: None,
         }));
 
         let output_state = state.clone();
@@ -348,6 +351,14 @@ impl DictationWorker {
                     {
                         state.rewrite_job = None;
                     }
+                    if let (
+                        Some(rewrite_job),
+                        WorkerEvent::Completed { job_id, .. } | WorkerEvent::Cancelled { job_id },
+                    ) = (&state.rewrite_selection_job, &event)
+                        && rewrite_job == job_id
+                    {
+                        state.rewrite_selection_job = None;
+                    }
                     match &event {
                         WorkerEvent::Completed { job_id, .. }
                         | WorkerEvent::Cancelled { job_id } => {
@@ -389,7 +400,9 @@ impl DictationWorker {
                     let profiles = crate::config::dictation_profiles();
                     if matches!(
                         job.target,
-                        TranscriptionTarget::VoiceAction | TranscriptionTarget::RewriteLast
+                        TranscriptionTarget::VoiceAction
+                            | TranscriptionTarget::RewriteLast
+                            | TranscriptionTarget::RewriteSelection
                     ) || profiles.processes(&job.context)
                     {
                         let _ = processor_events.send(WorkerEvent::Stage {
@@ -404,7 +417,10 @@ impl DictationWorker {
                             &job.context,
                             &job.control.cancelled,
                         ))
-                    } else if matches!(job.target, TranscriptionTarget::RewriteLast) {
+                    } else if matches!(
+                        job.target,
+                        TranscriptionTarget::RewriteLast | TranscriptionTarget::RewriteSelection
+                    ) {
                         profiles
                             .rewrite_cancellable(&job.text, &job.context, &job.control.cancelled)
                             .map_err(|error| error.to_string())
@@ -737,7 +753,12 @@ impl DictationWorker {
         let Some(text) = state.last_transcript.clone() else {
             return Err("no previous transcript is available");
         };
-        if state.rewrite_job.is_some() {
+        // A paste that already committed cannot be taken back; keep the error
+        // path for that narrow window instead of pasting twice.
+        if let Some(old_job) = state.rewrite_job
+            && let Some(control) = state.jobs.get(&old_job)
+            && !control.cancel()
+        {
             return Err("a rewrite is already in progress");
         }
         let job_id = DictationJobId(state.next_output_sequence()?);
@@ -761,6 +782,44 @@ impl DictationWorker {
                 state.next_sequence += 1;
                 state.jobs.insert(job_id, control);
                 state.rewrite_job = Some(job_id);
+                job_id
+            })
+            .map_err(queue_error)
+    }
+
+    pub fn rewrite_selection(
+        &self,
+        text: String,
+        context: ContextSnapshot,
+    ) -> Result<DictationJobId, &'static str> {
+        let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+        if let Some(old_job) = state.rewrite_selection_job
+            && let Some(control) = state.jobs.get(&old_job)
+            && !control.cancel()
+        {
+            return Err("a rewrite is already in progress");
+        }
+        let job_id = DictationJobId(state.next_output_sequence()?);
+        let control = Arc::new(JobControl::default());
+        self.processor_jobs
+            .as_ref()
+            .ok_or("dictation worker is unavailable")?
+            .try_send(ProcessorJob {
+                job_id,
+                control: control.clone(),
+                target: TranscriptionTarget::RewriteSelection,
+                text,
+                context,
+                total_started: Instant::now(),
+                queue_ms: 0,
+                audio_ms: 0,
+                prepare_ms: 0,
+                inference_ms: 0,
+            })
+            .map(|()| {
+                state.next_sequence += 1;
+                state.jobs.insert(job_id, control);
+                state.rewrite_selection_job = Some(job_id);
                 job_id
             })
             .map_err(queue_error)
@@ -911,6 +970,9 @@ fn finish_output(
                         TranscriptionTarget::RewriteLast => {
                             paste(&completed.text, PasteMode::Standalone, &commit)
                         }
+                        TranscriptionTarget::RewriteSelection => {
+                            paste(&completed.text, PasteMode::Standalone, &commit)
+                        }
                         TranscriptionTarget::Service => commit()
                             .then_some(())
                             .ok_or_else(|| eyre!("dictation was cancelled")),
@@ -978,6 +1040,7 @@ fn record_history(history: &History, target: TranscriptionTarget, completed: &Co
         TranscriptionTarget::Send => HistoryKind::Send,
         TranscriptionTarget::VoiceAction => HistoryKind::VoiceAction,
         TranscriptionTarget::RewriteLast => HistoryKind::Rewrite,
+        TranscriptionTarget::RewriteSelection => HistoryKind::Rewrite,
         TranscriptionTarget::Service => return,
     };
     let draft = HistoryDraft {
@@ -1451,6 +1514,7 @@ mod tests {
                 pending_pastes: 0,
                 last_transcript: Some("previous".into()),
                 rewrite_job: None,
+                rewrite_selection_job: None,
             })),
             inference_worker: None,
             processor_workers: Vec::new(),
@@ -1666,7 +1730,9 @@ mod tests {
                             TranscriptionTarget::Paste => HistoryKind::Dictation,
                             TranscriptionTarget::Send => HistoryKind::Send,
                             TranscriptionTarget::VoiceAction => HistoryKind::VoiceAction,
-                            TranscriptionTarget::RewriteLast | TranscriptionTarget::Service => {
+                            TranscriptionTarget::RewriteLast
+                            | TranscriptionTarget::RewriteSelection
+                            | TranscriptionTarget::Service => {
                                 unreachable!()
                             }
                         }
@@ -1752,6 +1818,7 @@ mod tests {
                 pending_pastes: 0,
                 last_transcript: None,
                 rewrite_job: None,
+                rewrite_selection_job: None,
             })),
             inference_worker: None,
             processor_workers: Vec::new(),
@@ -1781,6 +1848,7 @@ mod tests {
                 pending_pastes: 0,
                 last_transcript: Some("garbled transcript".into()),
                 rewrite_job: None,
+                rewrite_selection_job: None,
             })),
             inference_worker: None,
             processor_workers: Vec::new(),
@@ -1794,10 +1862,83 @@ mod tests {
         assert!(matches!(job.target, TranscriptionTarget::RewriteLast));
         assert!(worker.state.lock().unwrap().jobs.contains_key(&job_id));
         assert!(worker.is_busy());
-        // A rewrite never updates the last dictation, so a second press while
-        // one is already generating must not queue a duplicate generation.
+        // A second press cancels the in-flight rewrite and starts a fresh one
+        // instead of queueing a duplicate generation of the same text.
+        let replacement = worker.rewrite_last(ContextSnapshot::default()).unwrap();
+        assert_ne!(replacement, job_id);
+        let replaced_job = processor_receiver.try_recv().unwrap();
+        assert_eq!(replaced_job.job_id, replacement);
+        assert!(
+            worker
+                .state
+                .lock()
+                .unwrap()
+                .jobs
+                .get(&job_id)
+                .expect("old job stays tracked until its cancellation is delivered")
+                .is_cancelled()
+        );
+    }
+
+    #[test]
+    fn rewrite_selection_enqueues_the_captured_text_and_replaces_in_flight() {
+        let (output_sender, _output_receiver) = mpsc::sync_channel(8);
+        let (_, events) = mpsc::channel();
+        let (processor_sender, processor_receiver) = mpsc::sync_channel(4);
+        let worker = DictationWorker {
+            inference_jobs: None,
+            processor_jobs: Some(processor_sender),
+            output_jobs: Some(output_sender),
+            events,
+            state: Arc::new(Mutex::new(WorkerState {
+                next_sequence: 5,
+                jobs: BTreeMap::new(),
+                pending_pastes: 0,
+                last_transcript: None,
+                rewrite_job: None,
+                rewrite_selection_job: None,
+            })),
+            inference_worker: None,
+            processor_workers: Vec::new(),
+            output_worker: None,
+        };
+        let job_id = worker
+            .rewrite_selection("selected text".into(), ContextSnapshot::default())
+            .unwrap();
+        assert_eq!(job_id, DictationJobId(5));
+        let job = processor_receiver.try_recv().unwrap();
+        assert_eq!(job.text, "selected text");
+        assert!(matches!(job.target, TranscriptionTarget::RewriteSelection));
+        // A second press cancels the in-flight rewrite and enqueues a fresh
+        // one built from the current selection.
+        let replacement = worker
+            .rewrite_selection("fresh selection".into(), ContextSnapshot::default())
+            .unwrap();
+        assert_ne!(replacement, job_id);
+        let replaced = processor_receiver.try_recv().unwrap();
+        assert_eq!(replaced.text, "fresh selection");
+        assert!(
+            worker
+                .state
+                .lock()
+                .unwrap()
+                .jobs
+                .get(&job_id)
+                .expect("old job stays tracked until cancellation is delivered")
+                .is_cancelled()
+        );
+        // A paste that already committed cannot be replaced; keep the error
+        // path instead of pasting a second time.
+        worker
+            .state
+            .lock()
+            .unwrap()
+            .jobs
+            .get(&replacement)
+            .unwrap()
+            .begin_output();
         assert_eq!(
-            worker.rewrite_last(ContextSnapshot::default()),
+            worker.rewrite_selection("again".into(), ContextSnapshot::default()),
             Err("a rewrite is already in progress")
         );
     }
@@ -1814,6 +1955,7 @@ mod tests {
             pending_pastes: 0,
             last_transcript: None,
             rewrite_job: None,
+            rewrite_selection_job: None,
         };
 
         assert_eq!(state.cancel_latest(), Some(DictationJobId(2)));

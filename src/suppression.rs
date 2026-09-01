@@ -528,6 +528,7 @@ impl ShortcutSuppression {
             hotkeys.edit,
             hotkeys.paste_last,
             hotkeys.rewrite_last,
+            hotkeys.rewrite_selection,
             hotkeys.paste_meeting,
         ];
         match input {
@@ -570,6 +571,7 @@ impl ShortcutSuppression {
                 edit: None,
                 paste_last: Some(paste_last),
                 rewrite_last: Some(rewrite_last),
+                rewrite_selection: Some(HotkeyBinding::rewrite_selection_default().runtime()),
                 paste_meeting: Some(paste_meeting),
             },
             delivered,
@@ -617,6 +619,12 @@ fn paste_action(input: InputEvent, hotkeys: RuntimeHotkeys) -> Option<HotkeyActi
         })
         .or_else(|| {
             hotkeys
+                .rewrite_selection
+                .filter(|binding| binding.matches_key_press(code, flags))
+                .map(|_| HotkeyAction::RewriteSelection)
+        })
+        .or_else(|| {
+            hotkeys
                 .paste_meeting
                 .filter(|binding| binding.matches_key_press(code, flags))
                 .map(|_| HotkeyAction::PasteMeeting)
@@ -649,6 +657,7 @@ pub enum HotkeyAction {
     Cancel,
     PasteLast,
     RewriteLast,
+    RewriteSelection,
     PasteMeeting,
 }
 
@@ -3225,6 +3234,7 @@ mod tests {
                 edit: None,
                 paste_last: None,
                 rewrite_last: Some(HotkeyBinding::rewrite_last_default().runtime()),
+                rewrite_selection: None,
                 paste_meeting: None,
             },
             true,
