@@ -726,6 +726,7 @@ enum HotkeyKind {
     Dictation,
     Edit,
     PasteLast,
+    RewriteLast,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -2481,6 +2482,11 @@ impl AppWindow {
                 .paste_last_hotkey
                 .as_ref()
                 .unwrap_or(&self.settings.dictation_hotkey),
+            HotkeyKind::RewriteLast => self
+                .settings
+                .rewrite_last_hotkey
+                .as_ref()
+                .unwrap_or(&self.settings.dictation_hotkey),
         };
         let binding_keycaps = match kind {
             HotkeyKind::Dictation => self.snapshot().dictation_shortcut,
@@ -2488,6 +2494,11 @@ impl AppWindow {
             HotkeyKind::PasteLast => self
                 .settings
                 .paste_last_hotkey
+                .as_ref()
+                .map_or_else(|| vec!["Off".into()], HotkeyBinding::keycaps),
+            HotkeyKind::RewriteLast => self
+                .settings
+                .rewrite_last_hotkey
                 .as_ref()
                 .map_or_else(|| vec!["Off".into()], HotkeyBinding::keycaps),
         };
@@ -2585,6 +2596,7 @@ impl AppWindow {
                                 HotkeyKind::Dictation => "cancel-dictation-hotkey-capture",
                                 HotkeyKind::Edit => "cancel-edit-hotkey-capture",
                                 HotkeyKind::PasteLast => "cancel-paste-last-hotkey-capture",
+                                HotkeyKind::RewriteLast => "cancel-rewrite-last-hotkey-capture",
                             })
                             .h(px(26.0))
                             .ml_1()
@@ -2638,6 +2650,7 @@ impl AppWindow {
                 HotkeyKind::Dictation => "dictation-hotkey-control",
                 HotkeyKind::Edit => "edit-hotkey-control",
                 HotkeyKind::PasteLast => "paste-last-hotkey-control",
+                HotkeyKind::RewriteLast => "rewrite-last-hotkey-control",
             })
             .track_focus(&self.hotkey_focus)
             .w(px(control_width))
@@ -2770,6 +2783,7 @@ impl AppWindow {
             HotkeyKind::Dictation => Some(&self.settings.dictation_hotkey),
             HotkeyKind::Edit => Some(&self.settings.edit_hotkey),
             HotkeyKind::PasteLast => self.settings.paste_last_hotkey.as_ref(),
+            HotkeyKind::RewriteLast => self.settings.rewrite_last_hotkey.as_ref(),
         }
     }
 
@@ -2777,6 +2791,7 @@ impl AppWindow {
         match kind {
             HotkeyKind::Dictation => Some(&mut self.settings.dictation_hotkey),
             HotkeyKind::Edit => Some(&mut self.settings.edit_hotkey),
+            HotkeyKind::RewriteLast => self.settings.rewrite_last_hotkey.as_mut(),
             HotkeyKind::PasteLast => self.settings.paste_last_hotkey.as_mut(),
         }
     }
@@ -2924,6 +2939,7 @@ impl AppWindow {
                 self.voice_action_inputs.error = None;
             }
             HotkeyKind::PasteLast => self.settings.paste_last_hotkey = Some(binding),
+            HotkeyKind::RewriteLast => self.settings.rewrite_last_hotkey = Some(binding),
         }
         if kind == HotkeyKind::Dictation && !key_based {
             self.settings.double_tap_only = false;
@@ -3306,6 +3322,7 @@ impl AppWindow {
         let permission_warnings = self.render_permission_warnings(cx);
         let hotkey_control = self.render_hotkey_setting_control(HotkeyKind::Dictation, window, cx);
         let paste_last_control = self.render_hotkey_control(HotkeyKind::PasteLast, window, cx);
+        let rewrite_last_control = self.render_hotkey_control(HotkeyKind::RewriteLast, window, cx);
         let transcription_model = definition(self.settings.transcription.model);
         let transcription_label = format!(
             "{} · {}",
@@ -3701,6 +3718,27 @@ impl AppWindow {
                                         )
                                         .border_b_0()
                                         .id("paste-last-hotkey-setting"),
+                                    )
+                                    .child(
+                                        settings_row(
+                                            "Rewrite last dictation",
+                                            "Sends the last ordinary dictation through OpenCode and pastes the cleaned-up result",
+                                            div()
+                                                .flex()
+                                                .items_center()
+                                                .gap_2()
+                                                .child(rewrite_last_control)
+                                                .child(
+                                                    compact_button("Disable")
+                                                        .id("disable-rewrite-last-hotkey")
+                                                        .on_click(cx.listener(|this, _, _, cx| {
+                                                            this.settings.rewrite_last_hotkey = None;
+                                                            this.save_settings(cx);
+                                                        })),
+                                                ),
+                                        )
+                                        .border_b_0()
+                                        .id("rewrite-last-hotkey-setting"),
                                     )
                             )
                             .child(settings_section_label("APPLICATION"))
@@ -7667,6 +7705,7 @@ const fn hotkey_kind_index(kind: HotkeyKind) -> usize {
         HotkeyKind::Dictation => 0,
         HotkeyKind::Edit => 1,
         HotkeyKind::PasteLast => 2,
+        HotkeyKind::RewriteLast => 3,
     }
 }
 
@@ -7712,7 +7751,9 @@ fn hotkey_binding_conflicts(
 ) -> bool {
     let mut others = match kind {
         HotkeyKind::Dictation => Vec::new(),
-        HotkeyKind::Edit | HotkeyKind::PasteLast => vec![settings.dictation_hotkey.clone()],
+        HotkeyKind::Edit | HotkeyKind::PasteLast | HotkeyKind::RewriteLast => {
+            vec![settings.dictation_hotkey.clone()]
+        }
     };
     if kind != HotkeyKind::Edit && settings.voice_action.enabled {
         others.push(settings.edit_hotkey.clone());
@@ -7721,6 +7762,11 @@ fn hotkey_binding_conflicts(
         && let Some(paste) = &settings.paste_last_hotkey
     {
         others.push(paste.clone());
+    }
+    if kind != HotkeyKind::RewriteLast
+        && let Some(rewrite) = &settings.rewrite_last_hotkey
+    {
+        others.push(rewrite.clone());
     }
     if crate::DEVELOPER_FEATURES_ENABLED {
         others.push(HotkeyBinding::paste_meeting_default());
@@ -7737,6 +7783,7 @@ fn hotkey_side_binding(
         HotkeyKind::Dictation => &settings.dictation_hotkey,
         HotkeyKind::Edit => &settings.edit_hotkey,
         HotkeyKind::PasteLast => settings.paste_last_hotkey.as_ref()?,
+        HotkeyKind::RewriteLast => settings.rewrite_last_hotkey.as_ref()?,
     }
     .clone();
     standalone_modifier_side(&binding)?;
@@ -8969,6 +9016,37 @@ mod tests {
         settings.dictation_hotkey = settings.edit_hotkey.clone();
         set_voice_action_enabled(&mut settings, false).unwrap();
         assert!(!settings.voice_action.enabled);
+    }
+
+    #[test]
+    fn rewrite_last_shortcut_cannot_shadow_existing_shortcuts() {
+        let mut settings = AppSettings::default();
+        let rewrite = HotkeyBinding::rewrite_last_default();
+        assert!(!hotkey_binding_conflicts(
+            &settings,
+            HotkeyKind::RewriteLast,
+            &rewrite
+        ));
+
+        settings.paste_last_hotkey = Some(rewrite.clone());
+        assert!(hotkey_binding_conflicts(
+            &settings,
+            HotkeyKind::RewriteLast,
+            &rewrite
+        ));
+        assert!(hotkey_binding_conflicts(
+            &settings,
+            HotkeyKind::PasteLast,
+            &rewrite
+        ));
+        settings.paste_last_hotkey = None;
+
+        settings.dictation_hotkey = rewrite.clone();
+        assert!(hotkey_binding_conflicts(
+            &settings,
+            HotkeyKind::RewriteLast,
+            &rewrite
+        ));
     }
 
     #[test]
