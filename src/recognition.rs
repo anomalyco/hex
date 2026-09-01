@@ -2200,7 +2200,7 @@ fn handle_dictation_event(
             let phase = match target {
                 TranscriptionTarget::VoiceAction => DictationPhase::VoiceAction,
                 TranscriptionTarget::Paste | TranscriptionTarget::Send => DictationPhase::Pasted,
-                TranscriptionTarget::RewriteLast => DictationPhase::Repasted,
+                TranscriptionTarget::RewriteLast => DictationPhase::Rewritten,
                 TranscriptionTarget::Service => return Ok(()),
             };
             events.processed_dictation(
@@ -2573,6 +2573,12 @@ mod tests {
     fn explicit_paste_shortcuts_stay_available_during_a_voice_action_gesture() {
         assert!(!voice_action_owns_action(
             HotkeyAction::PasteLast,
+            true,
+            true,
+            None,
+        ));
+        assert!(!voice_action_owns_action(
+            HotkeyAction::RewriteLast,
             true,
             true,
             None,

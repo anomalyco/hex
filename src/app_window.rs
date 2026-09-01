@@ -8701,6 +8701,9 @@ fn event_summary(event: &VoiceEvent) -> String {
                 DictationPhase::VoiceAction => text_or("Voice Action completed", text),
                 DictationPhase::Logged => text_or("Journal entry was saved", text),
                 DictationPhase::Repasted => text_or("The last dictation was pasted again", text),
+                DictationPhase::Rewritten => {
+                    text_or("The last dictation was rewritten with OpenCode", text)
+                }
                 DictationPhase::MeetingPasted => text_or("New meeting transcript was pasted", text),
                 DictationPhase::Failed(error) => format!("Dictation failed: {error}"),
             };
