@@ -7310,7 +7310,6 @@ impl DesktopHost for AppWindow {
     }
 
     fn snapshot(&self) -> DesktopSnapshot {
-        let dictation_shortcut = self.settings.dictation_hotkey.keycaps();
         let update_status = match self.update_status {
             crate::sparkle::UpdateStatus::Unavailable => DesktopUpdateStatus::Unavailable,
             crate::sparkle::UpdateStatus::Checking => DesktopUpdateStatus::Checking,
@@ -7321,18 +7320,11 @@ impl DesktopHost for AppWindow {
         };
         DesktopSnapshot {
             activity: self.activity.clone(),
-            dictation_shortcut_label: dictation_shortcut.join("+"),
-            dictation_shortcut,
+            dictation_shortcut: self.settings.dictation_hotkey.keycaps(),
             double_tap_lock: self.settings.double_tap_lock,
             double_tap_only: self.settings.double_tap_only,
-            paste_last_shortcut: self
-                .settings
-                .paste_last_hotkey
-                .as_ref()
-                .map(HotkeyBinding::keycaps),
             listener: None,
             operation_error: self.settings_load_error.clone(),
-            observations_path: self.event_reader.path().display().to_string(),
             transcription: DesktopTranscriptionSnapshot {
                 downloaded_bytes: self.transcription_downloaded_bytes,
                 error: self.transcription_picker_error.clone(),

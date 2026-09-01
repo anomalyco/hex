@@ -118,24 +118,20 @@ impl RecordingEnvironmentController {
     }
 
     pub fn begin(&self) -> RecordingEnvironmentSession {
-        let active = self.commands.send(EnvironmentCommand::Start).is_ok();
+        let _ = self.commands.send(EnvironmentCommand::Start);
         RecordingEnvironmentSession {
             commands: self.commands.clone(),
-            active,
         }
     }
 }
 
 pub struct RecordingEnvironmentSession {
     commands: Sender<EnvironmentCommand>,
-    active: bool,
 }
 
 impl Drop for RecordingEnvironmentSession {
     fn drop(&mut self) {
-        if self.active {
-            let _ = self.commands.send(EnvironmentCommand::Stop);
-        }
+        let _ = self.commands.send(EnvironmentCommand::Stop);
     }
 }
 
@@ -390,6 +386,14 @@ mod tests {
         commands.send(EnvironmentCommand::Barrier(reply)).unwrap();
         response.recv_timeout(Duration::from_secs(2)).unwrap();
         assert_eq!(events.try_iter().collect::<Vec<_>>(), expected);
+    }
+
+    #[test]
+    fn sessions_are_harmless_after_the_environment_worker_disconnects() {
+        let (commands, receiver) = mpsc::channel();
+        drop(receiver);
+        let controller = RecordingEnvironmentController { commands };
+        drop(controller.begin());
     }
 
     #[test]

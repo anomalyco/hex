@@ -85,8 +85,7 @@ if (process.env.HEX_FAKE_MODE === "bad-handshake") {
         response.end(JSON.stringify({ code: "model-not-ready" }))
         return
       }
-      const chunks = []
-      request.on("data", (chunk) => chunks.push(chunk))
+      request.resume()
       request.on("end", () => {
         response.setHeader("content-type", "application/json")
         if (process.env.HEX_FAKE_TRANSCRIBE_HANG === "1") {
