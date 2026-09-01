@@ -233,6 +233,10 @@ struct WorkerState {
     /// The last successfully pasted dictation, mirrored from the output worker
     /// so callers can submit rewrite jobs without racing the ordered output.
     last_transcript: Option<String>,
+    /// The in-flight rewrite job, if any. Rewrites never update
+    /// `last_transcript`, so without this guard repeated presses would queue
+    /// duplicate generations of the same text.
+    rewrite_job: Option<DictationJobId>,
 }
 
 impl WorkerState {
@@ -269,6 +273,7 @@ impl DictationWorker {
             jobs: BTreeMap::new(),
             pending_pastes: 0,
             last_transcript: None,
+            rewrite_job: None,
         }));
 
         let output_state = state.clone();
@@ -283,11 +288,36 @@ impl DictationWorker {
                     continue;
                 }
                 for job in ordered.push(job) {
+                    // Publish Paste/Send text before the paste runs so a rewrite
+                    // submitted while the paste is still in flight rewrites the
+                    // transcript the user just heard, not the previous one. The
+                    // snapshot is restored when that paste fails or is cancelled.
                     let mut last_transcript = output_state
                         .lock()
                         .unwrap_or_else(|error| error.into_inner())
                         .last_transcript
                         .clone();
+                    let published = match &job {
+                        OutputJob::Completed {
+                            target: TranscriptionTarget::Paste | TranscriptionTarget::Send,
+                            result,
+                            ..
+                        } => match result.as_ref() {
+                            Ok(completed) if !completed.text.trim().is_empty() => {
+                                let previous = last_transcript.replace(completed.text.clone());
+                                last_transcript = Some(completed.text.clone());
+                                Some(previous)
+                            }
+                            _ => None,
+                        },
+                        _ => None,
+                    };
+                    {
+                        let mut state = output_state
+                            .lock()
+                            .unwrap_or_else(|error| error.into_inner());
+                        state.last_transcript = last_transcript.clone();
+                    }
                     let event = finish_output(
                         job,
                         &mut |text, mode, commit| paster.paste(text, mode, commit),
@@ -295,10 +325,29 @@ impl DictationWorker {
                         &mut meeting_cursor,
                         history.as_ref(),
                     );
+                    // A published paste that failed or was cancelled must not
+                    // leave the newer text in the mirror.
+                    let failed = matches!(
+                        &event,
+                        WorkerEvent::Completed { result: Err(_), .. }
+                            | WorkerEvent::Cancelled { .. }
+                    );
+                    let last_transcript = match published {
+                        Some(previous) if failed => previous,
+                        _ => last_transcript,
+                    };
                     let mut state = output_state
                         .lock()
                         .unwrap_or_else(|error| error.into_inner());
                     state.last_transcript = last_transcript;
+                    if let (
+                        Some(rewrite_job),
+                        WorkerEvent::Completed { job_id, .. } | WorkerEvent::Cancelled { job_id },
+                    ) = (&state.rewrite_job, &event)
+                        && rewrite_job == job_id
+                    {
+                        state.rewrite_job = None;
+                    }
                     match &event {
                         WorkerEvent::Completed { job_id, .. }
                         | WorkerEvent::Cancelled { job_id } => {
@@ -369,11 +418,7 @@ impl DictationWorker {
                     let mut processed = match processed {
                         Ok(processed) => processed,
                         Err(error) => {
-                            if matches!(job.target, TranscriptionTarget::VoiceAction) {
-                                tracing::warn!(%error, "voice action processing failed");
-                            } else {
-                                tracing::warn!(%error, "rewrite processing failed");
-                            }
+                            tracing::warn!(%error, "rewrite processing failed");
                             if processor_output
                                 .send(OutputJob::Completed {
                                     job_id: job.job_id,
@@ -681,6 +726,9 @@ impl DictationWorker {
         let Some(text) = state.last_transcript.clone() else {
             return Err("no previous transcript is available");
         };
+        if state.rewrite_job.is_some() {
+            return Err("a rewrite is already in progress");
+        }
         let job_id = DictationJobId(state.next_output_sequence()?);
         let control = Arc::new(JobControl::default());
         self.processor_jobs
@@ -701,6 +749,7 @@ impl DictationWorker {
             .map(|()| {
                 state.next_sequence += 1;
                 state.jobs.insert(job_id, control);
+                state.rewrite_job = Some(job_id);
                 job_id
             })
             .map_err(queue_error)
@@ -751,10 +800,13 @@ impl DictationWorker {
     fn shutdown(&mut self) {
         self.inference_jobs.take();
         join_worker(self.inference_worker.take(), "dictation inference");
+        // Drop the stored processor sender before joining: processor workers
+        // exit only once every sender is gone, so joining first would block
+        // forever.
+        self.processor_jobs.take();
         for worker in self.processor_workers.drain(..) {
             join_worker(Some(worker), "dictation processing");
         }
-        self.processor_jobs.take();
         self.output_jobs.take();
         join_worker(self.output_worker.take(), "dictation output");
     }
@@ -1387,6 +1439,7 @@ mod tests {
                 jobs: BTreeMap::from([(DictationJobId(0), Arc::new(JobControl::default()))]),
                 pending_pastes: 0,
                 last_transcript: Some("previous".into()),
+                rewrite_job: None,
             })),
             inference_worker: None,
             processor_workers: Vec::new(),
@@ -1687,6 +1740,7 @@ mod tests {
                 jobs: BTreeMap::new(),
                 pending_pastes: 0,
                 last_transcript: None,
+                rewrite_job: None,
             })),
             inference_worker: None,
             processor_workers: Vec::new(),
@@ -1715,6 +1769,7 @@ mod tests {
                 jobs: BTreeMap::new(),
                 pending_pastes: 0,
                 last_transcript: Some("garbled transcript".into()),
+                rewrite_job: None,
             })),
             inference_worker: None,
             processor_workers: Vec::new(),
@@ -1728,6 +1783,12 @@ mod tests {
         assert!(matches!(job.target, TranscriptionTarget::RewriteLast));
         assert!(worker.state.lock().unwrap().jobs.contains_key(&job_id));
         assert!(worker.is_busy());
+        // A rewrite never updates the last dictation, so a second press while
+        // one is already generating must not queue a duplicate generation.
+        assert_eq!(
+            worker.rewrite_last(ContextSnapshot::default()),
+            Err("a rewrite is already in progress")
+        );
     }
 
     #[test]
@@ -1741,6 +1802,7 @@ mod tests {
             jobs,
             pending_pastes: 0,
             last_transcript: None,
+            rewrite_job: None,
         };
 
         assert_eq!(state.cancel_latest(), Some(DictationJobId(2)));

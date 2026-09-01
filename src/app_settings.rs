@@ -703,7 +703,7 @@ impl AppSettings {
                     || rewrite_last_disabled)
                     && let Err(error) = settings.write_to(path)
                 {
-                    tracing::warn!(%error, "could not persist the replacement transcription model");
+                    tracing::warn!(%error, "could not persist normalized settings");
                 }
                 Ok(settings)
             }
@@ -1112,11 +1112,33 @@ mod tests {
 
         let mut settings = AppSettings {
             rewrite_last_hotkey: Some(rewrite.clone()),
-            paste_last_hotkey: Some(rewrite),
+            paste_last_hotkey: Some(rewrite.clone()),
             ..AppSettings::default()
         };
         assert!(settings.normalize_rewrite_last_conflict());
         assert_eq!(settings.rewrite_last_hotkey, None);
+
+        let mut settings = AppSettings {
+            rewrite_last_hotkey: Some(rewrite.clone()),
+            voice_action: crate::app_settings::VoiceActionSettings {
+                enabled: true,
+                ..crate::app_settings::VoiceActionSettings::default()
+            },
+            edit_hotkey: rewrite.clone(),
+            ..AppSettings::default()
+        };
+        assert!(settings.normalize_rewrite_last_conflict());
+        assert_eq!(settings.rewrite_last_hotkey, None);
+
+        if crate::DEVELOPER_FEATURES_ENABLED {
+            let mut settings = AppSettings {
+                rewrite_last_hotkey: Some(rewrite),
+                ..AppSettings::default()
+            };
+            settings.rewrite_last_hotkey = Some(HotkeyBinding::paste_meeting_default());
+            assert!(settings.normalize_rewrite_last_conflict());
+            assert_eq!(settings.rewrite_last_hotkey, None);
+        }
     }
 
     #[test]

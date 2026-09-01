@@ -8952,7 +8952,11 @@ mod tests {
         let mut settings = AppSettings::default();
         for enabled in [false, true] {
             settings.voice_action.enabled = enabled;
-            for kind in [HotkeyKind::Dictation, HotkeyKind::PasteLast] {
+            for kind in [
+                HotkeyKind::Dictation,
+                HotkeyKind::PasteLast,
+                HotkeyKind::RewriteLast,
+            ] {
                 assert_eq!(
                     hotkey_binding_conflicts(&settings, kind, &settings.edit_hotkey),
                     enabled,

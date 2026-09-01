@@ -357,4 +357,24 @@ mod tests {
             ]
         );
     }
+
+    /// HIToolbox aborts the whole process when keyboard-layout queries run
+    /// concurrently; the layout lock must keep every caller inside the scan.
+    #[test]
+    fn concurrent_layout_queries_are_serialized() {
+        let handles: Vec<_> = (0..8)
+            .map(|_| {
+                std::thread::spawn(|| {
+                    for character in ['o', 'v', 'a'] {
+                        key_code_for(character).unwrap();
+                    }
+                })
+            })
+            .collect();
+        for handle in handles {
+            handle.join().unwrap();
+        }
+        initialize_layout().unwrap();
+        assert!(key_code_for('o').is_ok());
+    }
 }
