@@ -5,7 +5,8 @@ pub(crate) fn normalize(text: &str) -> String {
             if word.is_empty() {
                 return None;
             }
-            Some(match word.to_ascii_lowercase().as_str() {
+            let word = word.to_ascii_lowercase();
+            Some(match word.as_str() {
                 "zero" => "0".to_string(),
                 "one" => "1".to_string(),
                 "two" => "2".to_string(),
@@ -16,7 +17,7 @@ pub(crate) fn normalize(text: &str) -> String {
                 "seven" => "7".to_string(),
                 "eight" => "8".to_string(),
                 "nine" => "9".to_string(),
-                _ => word.to_ascii_lowercase(),
+                _ => word,
             })
         })
         .collect::<Vec<_>>()

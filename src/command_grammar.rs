@@ -474,8 +474,7 @@ fn schema_capture_pattern(
         parse: Box::new(move |heard| {
             let mut values = BTreeMap::new();
             let mut word_index = 0;
-            let phrase_parts = phrase.split_whitespace().collect::<Vec<_>>();
-            for part in phrase_parts {
+            for part in phrase.split_whitespace() {
                 if part.starts_with('{') {
                     let name = &part[1..part.len() - 1];
                     match parse_captures.get(name)? {

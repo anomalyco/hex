@@ -641,7 +641,7 @@ impl DictationCapture {
     }
 
     #[cfg(any(test, target_os = "linux"))]
-    pub fn ingest(&mut self, samples: &[f32], captured_through: CaptureInstant) -> bool {
+    pub fn ingest(&mut self, samples: &[f32], captured_through: CaptureInstant) {
         self.ingest_with_pending(samples, captured_through, None)
     }
 
@@ -650,7 +650,7 @@ impl DictationCapture {
         samples: &[f32],
         captured_through: CaptureInstant,
         oldest_pending: Option<CaptureInstant>,
-    ) -> bool {
+    ) {
         if let Some(recording) = &mut self.recording {
             recording.push_through(samples, captured_through);
         }
@@ -664,7 +664,6 @@ impl DictationCapture {
             .unwrap_or(TIMELINE_BUFFER_DURATION);
         self.keep_warm_for(samples, retention);
         self.ring_captured_through = Some(captured_through);
-        false
     }
 
     pub fn become_intentional(&mut self, now: CaptureInstant) -> bool {

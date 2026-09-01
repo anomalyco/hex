@@ -59,13 +59,10 @@ impl DesktopCapabilities {
 pub(crate) struct DesktopSnapshot {
     pub(crate) activity: DesktopActivity,
     pub(crate) dictation_shortcut: Vec<String>,
-    pub(crate) dictation_shortcut_label: String,
     pub(crate) double_tap_lock: bool,
     pub(crate) double_tap_only: bool,
-    pub(crate) paste_last_shortcut: Option<Vec<String>>,
     pub(crate) listener: Option<DesktopListenerSnapshot>,
     pub(crate) operation_error: Option<String>,
-    pub(crate) observations_path: String,
     pub(crate) transcription: DesktopTranscriptionSnapshot,
     pub(crate) update_status: DesktopUpdateStatus,
 }
@@ -143,13 +140,10 @@ mod tests {
             DesktopSnapshot {
                 activity: DesktopActivity::default(),
                 dictation_shortcut: Vec::new(),
-                dictation_shortcut_label: String::new(),
                 double_tap_lock: false,
                 double_tap_only: false,
-                paste_last_shortcut: None,
                 listener: None,
                 operation_error: None,
-                observations_path: String::new(),
                 transcription: DesktopTranscriptionSnapshot {
                     downloaded_bytes: 0,
                     error: None,

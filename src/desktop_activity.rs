@@ -1,13 +1,10 @@
-use crate::events::{DictationPhase, EventReader, TranscriptPhase, VoiceEvent, VoiceState};
-
-const TRANSCRIPT_LIMIT: usize = 8;
+use crate::events::{DictationPhase, EventReader, VoiceEvent, VoiceState};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub(crate) struct DesktopActivity {
     pub(crate) session_started_at: Option<u64>,
     pub(crate) state: Option<VoiceState>,
     pub(crate) device: Option<String>,
-    pub(crate) transcripts: Vec<String>,
     pub(crate) error: Option<String>,
     pub(crate) last_failure: Option<(u64, String)>,
 }
@@ -44,13 +41,6 @@ impl DesktopActivity {
                     activity.state = Some(*state);
                     activity.device = Some(device.clone());
                 }
-                VoiceEvent::Transcript {
-                    phase: TranscriptPhase::Completed,
-                    text,
-                    ..
-                } if activity.transcripts.len() < TRANSCRIPT_LIMIT && !text.trim().is_empty() => {
-                    activity.transcripts.push(text.clone());
-                }
                 VoiceEvent::Dictation {
                     timestamp_ms,
                     phase: DictationPhase::Failed(message),
@@ -59,12 +49,6 @@ impl DesktopActivity {
                     activity.last_failure = Some((*timestamp_ms, message.clone()));
                 }
                 _ => {}
-            }
-            if activity.session_started_at.is_some()
-                && activity.state.is_some()
-                && activity.transcripts.len() == TRANSCRIPT_LIMIT
-            {
-                break;
             }
         }
         activity
@@ -76,69 +60,51 @@ mod tests {
     use super::*;
 
     #[test]
-    fn projects_latest_state_and_completed_transcripts() {
-        let mut events = vec![
+    fn projects_latest_state_and_device() {
+        let events = [
             VoiceEvent::SessionStarted { timestamp_ms: 1 },
             VoiceEvent::State {
                 timestamp_ms: 2,
                 state: VoiceState::Listening,
                 device: "Old microphone".into(),
             },
+            VoiceEvent::State {
+                timestamp_ms: 3,
+                state: VoiceState::Dictating,
+                device: "Current microphone".into(),
+            },
         ];
-        events.extend((0..10).map(|index| VoiceEvent::Transcript {
-            timestamp_ms: index + 3,
-            phase: TranscriptPhase::Completed,
-            latency_ms: 10,
-            text: format!("Transcript {index}"),
-        }));
-        events.push(VoiceEvent::State {
-            timestamp_ms: 13,
-            state: VoiceState::Dictating,
-            device: "Current microphone".into(),
-        });
-        events.push(VoiceEvent::Transcript {
-            timestamp_ms: 14,
-            phase: TranscriptPhase::Updated,
-            latency_ms: 10,
-            text: "Partial".into(),
-        });
 
         let activity = DesktopActivity::from_events(events.iter().rev());
 
         assert_eq!(activity.session_started_at, Some(1));
         assert_eq!(activity.state, Some(VoiceState::Dictating));
         assert_eq!(activity.device.as_deref(), Some("Current microphone"));
-        assert_eq!(activity.transcripts.len(), TRANSCRIPT_LIMIT);
-        assert_eq!(activity.transcripts[0], "Transcript 9");
-        assert_eq!(activity.transcripts[7], "Transcript 2");
     }
 
     #[test]
-    fn session_boundary_excludes_older_transcripts() {
-        let events = [
-            VoiceEvent::Transcript {
+    fn session_boundary_excludes_older_state_and_device() {
+        let mut events = vec![
+            VoiceEvent::State {
                 timestamp_ms: 1,
-                phase: TranscriptPhase::Completed,
-                latency_ms: 10,
-                text: "Old session".into(),
+                state: VoiceState::Dictating,
+                device: "Old microphone".into(),
             },
             VoiceEvent::SessionStarted { timestamp_ms: 2 },
-            VoiceEvent::State {
-                timestamp_ms: 3,
-                state: VoiceState::Listening,
-                device: "Microphone".into(),
-            },
-            VoiceEvent::Transcript {
-                timestamp_ms: 4,
-                phase: TranscriptPhase::Completed,
-                latency_ms: 10,
-                text: "Current session".into(),
-            },
         ];
-
         let activity = DesktopActivity::from_events(events.iter().rev());
+        assert_eq!(activity.session_started_at, Some(2));
+        assert_eq!(activity.state, None);
+        assert_eq!(activity.device, None);
 
-        assert_eq!(activity.transcripts, ["Current session"]);
+        events.push(VoiceEvent::State {
+            timestamp_ms: 3,
+            state: VoiceState::Listening,
+            device: "Current microphone".into(),
+        });
+        let activity = DesktopActivity::from_events(events.iter().rev());
+        assert_eq!(activity.state, Some(VoiceState::Listening));
+        assert_eq!(activity.device.as_deref(), Some("Current microphone"));
     }
 
     #[test]

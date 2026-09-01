@@ -926,10 +926,8 @@ impl DesktopHost for LinuxDesktopHost {
         DesktopSnapshot {
             activity: self.activity.clone(),
             dictation_shortcut: self.settings.dictation_hotkey.keycaps(),
-            dictation_shortcut_label: self.settings.dictation_hotkey.label(),
             double_tap_lock: self.settings.double_tap_lock,
             double_tap_only: false,
-            paste_last_shortcut: None,
             listener: Some(DesktopListenerSnapshot {
                 running: self.is_running(),
                 status: self.status.clone(),
@@ -945,7 +943,6 @@ impl DesktopHost for LinuxDesktopHost {
                         .filter(|(at, _)| Some(*at) != self.dismissed_failure_at)
                         .map(|(_, message)| message.clone())
                 }),
-            observations_path: self.event_path.display().to_string(),
             transcription: DesktopTranscriptionSnapshot {
                 downloaded_bytes: self
                     .transcription_preparation

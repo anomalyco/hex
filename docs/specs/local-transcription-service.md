@@ -204,50 +204,10 @@ are not exposed by this protocol.
 
 ### Low-Level TypeScript Surface
 
-```typescript
-export function create(options?: CreateOptions): Promise<HexHost>;
-
-export interface HexHost {
-  pid: number;
-  client: HexClient;
-  close(): Promise<void>;
-}
-
-export interface HexClient {
-  health(): Promise<Health>;
-  capabilities(): Promise<Capabilities>;
-  models: {
-    list(options?: { language?: string; signal?: AbortSignal }): Promise<ModelInfo[]>;
-    prepare(
-      id: ModelId,
-      options?: {
-        language?: string;
-        onProgress?: (progress: ModelProgress) => void;
-        signal?: AbortSignal;
-      },
-    ): Promise<void>;
-  };
-  transcribe(request: TranscriptionRequest): Promise<TranscriptionResult>;
-}
-
-export interface AudioClip {
-  /** PCM WAV bytes. */
-  data: ArrayBuffer | Uint8Array;
-  contentType: "audio/wav";
-}
-
-export interface TranscriptionRequest {
-  audio: AudioClip;
-  model: ModelId;
-  language?: string;
-  signal?: AbortSignal;
-}
-
-export interface TranscriptionResult {
-  transcript: string;
-  durationMs: number;
-}
-```
+The [SDK README](../../sdk/typescript/README.md) documents host creation and
+client usage. The [public types](../../sdk/typescript/src/types.ts) define the
+complete client, audio, progress, and result contracts; this spec owns the wire
+protocol and lifecycle guarantees rather than a second copy of those interfaces.
 
 The common host flow is explicit about preparation:
 
