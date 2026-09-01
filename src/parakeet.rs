@@ -419,6 +419,17 @@ impl DictationWorker {
                         Ok(processed) => processed,
                         Err(error) => {
                             tracing::warn!(%error, "rewrite processing failed");
+                            // A user cancellation must surface as a clean
+                            // cancel, never as a failed rewrite.
+                            if job.control.is_cancelled() {
+                                if processor_output
+                                    .send(OutputJob::Cancelled { job_id: job.job_id })
+                                    .is_err()
+                                {
+                                    break;
+                                }
+                                continue;
+                            }
                             if processor_output
                                 .send(OutputJob::Completed {
                                     job_id: job.job_id,
