@@ -228,13 +228,13 @@ impl Profiles {
         context: &ContextSnapshot,
         cancelled: &AtomicBool,
     ) -> Result<Processed, String> {
+        if cancelled.load(Ordering::Acquire) {
+            return Err("rewrite was cancelled".into());
+        }
         let profile = self.select(context);
         let Some(model) = profile.model.as_ref() else {
             return Err("no OpenCode model is configured for the current mode".into());
         };
-        if cancelled.load(Ordering::Acquire) {
-            return Err("rewrite was cancelled".into());
-        }
         let prompt = prompt(profile, transcript, context);
         let deadline = profile.deadline.unwrap_or(self.deadline);
         let started = Instant::now();
