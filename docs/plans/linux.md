@@ -18,7 +18,7 @@ The Linux beta keeps its contracts explicit:
 | Inference | Vulkan with CPU fallback |
 | Shortcut | Configurable key-containing chord; default `Alt+Space` |
 | Insertion | Clipboard plus Ctrl-V, with a Ctrl-Shift-V terminal setting |
-| UI | GPUI shell; X11 tray where available; Wayland layer-shell HUD |
+| UI | Vulkan-backed GPUI shell; X11 tray where available; Wayland layer-shell HUD |
 
 The beta does not claim voice commands, application or browser context,
 meetings, or universal Wayland support. Wayland needs explicit read access to
@@ -48,11 +48,11 @@ There is no hidden XWayland or privileged injection fallback. See
 The update path is implemented but is not yet proven by a complete signed
 cross-version update on the supported Arch/i3 host.
 
-The direct installer is published as `install-linux.sh`. It verifies the same
-signed feed and content-addressed artifact as the in-app updater, creates the
-managed version layout, and installs XDG desktop and autostart entries. An AUR
-package is the preferred future Arch-native channel; pacman must own updates for
-that layout.
+The release script publishes the direct installer as `install-linux.sh`. The
+installer verifies the same signed feed and content-addressed artifact as the in-app
+updater, creates the managed version layout, and installs XDG desktop and
+autostart entries. An AUR package is the preferred future Arch-native channel;
+pacman must own updates for that layout.
 
 ## Remaining Work Is Sequenced By Capability
 
@@ -184,7 +184,8 @@ implementation assumptions.
 | --- | --- | --- | --- |
 | Command microphone and wake/sleep | Required | Required when shipped | Required when shipped |
 | Hold/release, lock, cancel | Required | Required | Required if advertised |
-| Foreground Paste and Send | Required | Required | Required if advertised |
+| Foreground paste | Required | Required | Required if advertised |
+| Send (paste plus Return) | Required | Required when shipped | Required when shipped |
 | Browser, terminal, editor, Electron insertion | Required | Required | Capability-dependent |
 | Application context | Required | Required when shipped | Capability-dependent |
 | GPUI shell and settings | Required | Required | Required |
@@ -197,7 +198,7 @@ implementation assumptions.
 | Risk | Severity | Mitigation |
 | --- | --- | --- |
 | Generic Wayland parity is not a stable contract | Critical | Publish one constrained contract |
-| Native Wayland insertion is compositor-controlled | High | Prove portal or libei behavior; otherwise use manual paste or an approved helper |
+| Native Wayland insertion is compositor-controlled | High | Validate `wl-copy`/`wtype` on compatible compositors; broader portal/libei or approved-helper support needs separate validation |
 | Foreground and browser context lack universal APIs | High | EWMH first; add a real browser adapter later |
 | PipeWire output monitoring includes HEX feedback | High | Suppress feedback or construct a filtered capture graph |
 | PipeWire metadata varies by package format | Medium | Build identity rules from observed fixtures |

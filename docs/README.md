@@ -9,6 +9,8 @@ override shipped behavior.
 - [`linux.md`](linux.md): Linux X11 and native Wayland beta requirements and installation.
 - [`nix.md`](nix.md): Nix packaging, development, and per-user autostart.
 - [`../ios/README.md`](../ios/README.md): build and test the iOS prototype.
+- [`../sdk/typescript/README.md`](../sdk/typescript/README.md): use the public
+  TypeScript transcription SDK with an explicitly supplied native helper.
 
 ## Engineering Reference
 
@@ -20,7 +22,7 @@ override shipped behavior.
 - [`plans/personal-commands.md`](plans/personal-commands.md): shipped personal
   command contract and remaining lifecycle work.
 - [`specs/local-transcription-service.md`](specs/local-transcription-service.md):
-  implemented internal service contract and private SDK target.
+  implemented macOS local-service protocol and lifecycle guarantees.
 
 ## Active Plans
 
@@ -28,8 +30,8 @@ override shipped behavior.
   handoff from Swift, without data import or automatic replacement.
 - [`plans/shared-desktop-ui.md`](plans/shared-desktop-ui.md): converge the macOS
   and Linux GPUI applications on one capability-driven product shell.
-- [`plans/typescript-sdk.md`](plans/typescript-sdk.md): private SDK packaging,
-  validation, and first-consumer work.
+- [`plans/typescript-sdk.md`](plans/typescript-sdk.md): published SDK status,
+  remaining signed-helper packaging, and first-consumer validation.
 - [`plans/linux.md`](plans/linux.md): Linux X11/Wayland validation and later capability
   slices.
 
@@ -44,5 +46,8 @@ When a plan disagrees with `AGENTS.md` about shipped behavior, update the plan.
 
 ## Releases
 
-`releases/` contains current Markdown inputs embedded in signed Sparkle updates.
-`../release-notes/` contains legacy inputs from versions 2.0.0 through 2.0.9.
+`releases/` contains version-specific Markdown inputs for signed Sparkle updates
+and draft release notes. `../release-notes/` contains legacy inputs from versions
+2.0.0 through 2.0.9. Published notes and the SDK changelog describe their release,
+not current behavior; preserve them as historical records. A draft note is not
+evidence that its release has been published.

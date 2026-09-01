@@ -5,6 +5,9 @@ Promise and optional Effect APIs. The host application owns recording, microphon
 permission, settings, and what happens to the resulting text. HEX owns model
 preparation and inference.
 
+The package is ESM-only and requires Node.js `>=20.3.0` or a compatible host
+runtime.
+
 **Distribution status:** a bundled native helper is not published yet. Embedded
 consumers must currently supply an explicit native command. The examples below
 use the HEX executable's `service --embedded` mode; users do not need to launch
@@ -36,7 +39,7 @@ try {
 ```
 
 `create({ model })` starts the helper and waits for download (if necessary),
-verification, and model loading. Progress reports `downloading`, `verifying`, and
+verification, and model loading. Progress can report `downloading`, `verifying`, and
 `loading`. Model and language are captured when creation starts; language defaults
 to `en`, independently of desktop settings. A failed or cancelled creation closes
 the helper before rejecting. The optional creation `signal` covers startup and
@@ -129,6 +132,12 @@ shutdown if native work must stop. Effect's low-level `client.models.prepare()`
 remains a progress `Stream`. `Hex.layer(options)` still supplies the low-level
 `Hex.Service` and owns its helper for the layer scope.
 
+Use `models.list()` to discover available models rather than treating the exported
+`MODEL_IDS` as an availability list. `apple_speech` remains in the public type but
+is currently unavailable in the native catalog. The optional `language` argument
+to `models.list()` affects readiness metadata, not language filtering; inspect
+each model's `languages` and `supportsLanguageDetection` fields.
+
 ## Connect to HEX Desktop
 
 Alternatively, reuse the microphone and engine owned by the running HEX desktop
@@ -153,8 +162,10 @@ Call `recording.cancel()` to discard. Subscribing to `recording.audio` enables a
 bounded best-effort mono Float32 PCM tap at `recording.sampleRate`. Desktop capture
 returns raw text and never pastes. `capabilities().serviceCapture` distinguishes
 desktop capture from the transcription-only helper. The recording handle renews
-a short lease; abandoned captures expire. Its unguessable `ownerToken` scopes
-capture operations and observations automatically.
+a ten-second lease with a heartbeat every three seconds; capture expires when
+renewal stops. Dropping the handle does not stop the heartbeat: always finish or
+cancel explicitly. Its unguessable `ownerToken` scopes capture operations and
+observations automatically.
 
 ## Host Boundary
 
@@ -164,7 +175,10 @@ capture operations and observations automatically.
   `NSMicrophoneUsageDescription`, the recording indicator, and recording consent
   belong to the host application. Desktop `connect()` instead uses HEX's capture.
 - Encode PCM WAV in the host. Do not send compressed recordings such as M4A or
-  WebM and label them as WAV.
+  WebM and label them as WAV. The service accepts 8-192 kHz audio with 1-8 channels,
+  subject to a 64 MiB upload limit and separate source-frame and normalized-audio
+  budgets. See the [service spec](https://github.com/anomalyco/hex/blob/main/docs/specs/local-transcription-service.md#wire-protocol-api-2)
+  for the exact limits; there is no promise of unlimited clip length.
 - Persist the host's model selection in the host, not in HEX desktop preferences.
 - Spawn the signed helper directly. Do not use LaunchServices, `open`, or
   `NSWorkspace`. Validate native packaging/signing in the final consuming app.

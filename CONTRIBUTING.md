@@ -6,12 +6,17 @@ before changing behavior; it defines the architecture and invariants.
 
 ## Set Up
 
-On macOS:
+On macOS, install Rust, Xcode 26 with the Metal toolchain, [uv](https://docs.astral.sh/uv/),
+and [Bun](https://bun.sh/), then run:
 
 ```sh
 ./scripts/setup.sh
 ./scripts/setup-parakeet.sh
+bun run --cwd sdk/commands build
 ```
+
+The command SDK build supplies `sdk/commands/dist`, which workspace-provisioning
+tests and source-run personal commands need. Repeat it after changing that SDK.
 
 Linux dependencies and installation are documented in
 [`docs/linux.md`](docs/linux.md); Nix development is covered in

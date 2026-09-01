@@ -9,12 +9,13 @@ pastes the result into the app you are using.
 ## Install HEX
 
 1. Download and open the DMG.
-2. Drag HEX into Applications, then launch it.
-3. Complete setup:
-   - **Microphone** lets HEX record while you dictate.
-   - **Input Monitoring** lets HEX detect its shortcut globally. Drag the HEX tile into the list.
-   - **Accessibility** lets HEX paste into the foreground app. Drag the HEX tile into the list.
-   - **Transcription model** downloads the speech model that runs locally.
+2. Drag `Hex.app` into Applications, then launch it.
+3. Complete the permission and model steps in setup.
+
+- **Microphone** lets HEX record while you dictate.
+- **Input Monitoring** lets HEX detect its shortcut globally. Drag the HEX tile into the list.
+- **Accessibility** lets HEX paste into the foreground app. Drag the HEX tile into the list.
+- **Transcription model** downloads the speech model that runs locally.
 
 HEX checks for signed updates automatically. Use **HEX > Check for Updates...**
 to check immediately.
@@ -34,13 +35,13 @@ focus.
 
 Settings let you change the shortcut, microphone, language, local model,
 recording behavior, feedback volume, launch-at-login behavior, and Dock
-visibility. Replacements correct names and preferred spellings before text is
-pasted.
+visibility. Corrections in Modes fix names and preferred spellings before text
+is pasted; modes can also apply optional rewriting and text transformations.
 
 ## Optional OpenCode Features
 
-[OpenCode](https://v2.opencode.ai/) is optional. Ordinary dictation does not
-require it.
+[OpenCode V2 beta](https://v2.opencode.ai/) (`opencode2`) is optional. Ordinary
+dictation does not require it.
 
 - **Voice Action:** enable it in the Voice Action pane, then hold
   **Option-Command** and describe what you want. It defaults off, independently
@@ -53,8 +54,10 @@ require it.
   hostname to the configured model provider. Modes can target applications and
   websites in Brave Browser.
 
-If post-processing fails, HEX pastes the local transcript. A failed Voice Action
-pastes nothing.
+If OpenCode rewriting fails, HEX keeps the corrected local transcript and still
+runs any selected text transformations. If that transformation stage fails, HEX
+keeps the text from before the stage, not partial transformation results. A
+failed Voice Action pastes nothing.
 
 ## Experimental Voice Commands
 
@@ -83,6 +86,13 @@ npx skills add anomalyco/hex --skill hex-personal-commands
 
 - Speech transcription and command recognition run locally.
 - HEX does not save dictation audio by default.
+- On macOS, History retains successfully pasted dictation and Voice Action text
+  for seven days by default, including the local transcript, final text, and
+  limited application and timing metadata. It never stores audio, full browser
+  URLs, or window titles. Every retention choice has entry and byte limits.
+- Use **History > Keep: Off** to stop adding entries, or **Clear all** to remove
+  existing history. Turning retention off does not delete existing entries or
+  disable diagnostic logging.
 - An explicit `HEX_RETAIN_DICTATION_AUDIO` diagnostic setting can retain a
   bounded number of owner-only WAV files.
 - Local diagnostic logs can contain transcript text, recognized command speech,
@@ -120,8 +130,9 @@ signed updates for direct installs. Native Wayland requires explicit input-devic
 access and compositor support for clipboard, virtual-keyboard, and layer-shell
 protocols. Voice commands and meetings are not included.
 
-See the [Linux installation guide](docs/linux.md) for the user-local
-installer, source-build fallback, requirements, and limitations.
+Use the [Linux installation guide](docs/linux.md) to build from source until
+the first signed Linux release is published. It also describes the planned
+user-local installer, requirements, and limitations.
 For Nix/NixOS packaging and per-user autostart, see the [Nix guide](docs/nix.md).
 
 ## Contributing

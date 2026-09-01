@@ -21,7 +21,8 @@ Or add `hex.url = "github:anomalyco/hex"` to your configuration's flake inputs
 and install `hex.packages.x86_64-linux.default`. The package supplies the
 `hex` command and desktop launcher, native libraries, and the `curl`,
 `wl-copy`, and `wtype` runtime dependencies. Your system still needs a
-working audio session and graphics drivers. On non-NixOS hosts, Nix GUI
+working audio session and a Vulkan driver for Settings, even when inference
+falls back to the CPU. On non-NixOS hosts, Nix GUI
 applications may require the host's usual Nix graphics integration.
 
 Models are downloaded into your user data directory, not the Nix store.
@@ -68,6 +69,8 @@ explicit `programs.hex.package` override. The flake also exports
 Autostart defaults to `false`. When enabled, HEX is a systemd **user**
 service, wanted by `graphical-session.target` by default. It waits for a
 Wayland socket or an X11 window manager before launching with `app --hidden`.
+Settings stays visible on Wayland or without a usable X11 tray; closing it quits
+HEX in those cases.
 The service stops with the configured target and retries failed starts
 without a tight restart loop. Quitting HEX normally leaves it stopped until
 the next session or an explicit `systemctl --user start hex.service`.

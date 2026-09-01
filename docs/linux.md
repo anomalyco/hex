@@ -3,7 +3,10 @@
 The Linux beta targets x86_64 Linux: i3/X11 and compatible wlroots-based Wayland
 compositors such as Hyprland or Sway. Audio uses ALSA, including PipeWire systems
 with ALSA compatibility. Inference uses Vulkan when available and can fall back
-to the CPU. See the Wayland requirements below before enabling native input.
+to the CPU. The GPUI Settings window still needs a Vulkan driver, even with CPU
+inference; `vulkan-icd-loader` alone is not a driver. Install a driver for your GPU
+or a software Vulkan driver. See the Wayland requirements below before enabling
+native input.
 
 The beta does not support voice commands, application or browser context, or
 meetings. This is not universal Wayland support: GNOME and KDE are not covered
@@ -63,16 +66,20 @@ cd hex
 ```
 
 Do not run the installer as root. It installs a user-local binary, desktop
-launcher, and autostart entry.
+launcher, and autostart entry in the same managed layout as published builds.
+Newer signed releases can therefore replace this installed source build through
+the in-app updater. `cargo run --release -- app` runs an unmanaged development
+binary instead.
 
 ## Dictate
 
 Hold **Alt-Space**, speak, then release. Double-tap the shortcut to keep
 recording, press the same chord again to finish, or press Escape to cancel the
 active recording. Settings shows listener state, Start/Stop, and operational
-errors. Changing the shortcut or double-tap setting temporarily stops listening
-and restores the previous running state after the edit. Cancelling shortcut
-capture restores the old binding and running state.
+errors. Changing the shortcut, double-tap, or terminal-paste setting temporarily
+stops listening and restores the previous running state after the edit.
+Cancelling shortcut capture preserves the old binding unless the new binding
+has already been saved; listening resumes only if it was previously running.
 
 With a working X11 tray, closing Settings hides the window. Without a working
 tray, closing Settings quits after stopping its workers; it never leaves an
@@ -118,10 +125,12 @@ application (see [#24](https://github.com/anomalyco/hex/issues/24)).
 
 ## Updates And Validation
 
-Managed installs check for signed updates at startup and every 24 hours. HEX
-downloads, verifies, and installs an available update, then asks before
-restarting into it. The signed update path is implemented but still awaiting a
-complete cross-version validation on the supported Arch/i3 host.
+Managed installs check for signed updates when `hex app` starts and every
+24 hours until an update is ready. HEX downloads, verifies, and activates an
+available update, then offers a **Restart** button in Settings. The next launch
+through `~/.local/bin/hex` also uses the activated version. The signed update
+path is implemented but still awaiting a complete cross-version validation on
+the supported Arch/i3 host.
 
 See [`plans/linux.md`](plans/linux.md) for the engineering contract and remaining
 validation work. The native Wayland implementation builds on the feature
@@ -143,6 +152,7 @@ microphone and Xvfb display. It verifies Settings stays visible without a tray,
 replays the public JFK sample from whisper.cpp, holds and releases the real
 shortcut, verifies the transcribed words in a GTK editor, and checks orderly
 application shutdown and microphone release. It needs PulseAudio, its ALSA
-plugin, `xdotool`, Xvfb, and the GTK development libraries. It runs as a normal
-user with temporary settings; it does not use physical audio devices or personal
-recordings. CI downloads and verifies the pinned model and sample for this check.
+plugin, `xdotool`, Xvfb, the GTK development libraries, and a Vulkan driver for
+Settings (Mesa's software driver is sufficient). It runs as a normal user with
+temporary settings; it does not use physical audio devices or personal recordings.
+CI downloads and verifies the pinned model and sample for this check.

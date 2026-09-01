@@ -3,8 +3,13 @@
 > **Status:** Private, unpublished platform artifact for Apple silicon macOS.
 > This checkout does not contain `bin/hex-service`.
 
-Platform artifact consumed automatically by `@hex-ai/client`. Applications do
-not import this package or locate its executable directly.
+`@hex-ai/service-darwin-arm64` is a placeholder for the planned native dependency
+of `@kitlangton/hex`. The public client does not declare this package as a
+dependency. Its platform resolver recognizes this name, but consumers currently
+must supply an explicit helper command to `create()`.
 
-The release workflow inserts the Developer ID signed and notarized
-`bin/hex-service` artifact before packing this package.
+The TypeScript release workflow does not build or insert `bin/hex-service`.
+The separate service-app scripts package the full desktop executable as
+`hex-service`; they do not produce a transcription-only npm payload. A validated
+signed artifact, consumer packaging, and helper publication remain planned in
+[`docs/plans/typescript-sdk.md`](../../docs/plans/typescript-sdk.md).

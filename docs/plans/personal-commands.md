@@ -1,14 +1,21 @@
 # Personal Commands
 
-**Status:** The literal-command MVP is implemented on macOS. This document
+**Status:** Personal commands, typed capture descriptors, dictation control
+phrases, and text transformations are implemented on macOS. This document
 records the shipped contract and the remaining workspace lifecycle work.
 
 ## What Users Can Configure
 
-Personal commands live in `~/.config/hex/hex.config.ts`. TypeScript owns ordinary
-literal commands, named text transformations, and optional dictation control phrases. Rust retains protected
-wake, sleep, cancellation, dictation lifecycle, meeting lifecycle, and typed
-capture behavior.
+Personal commands live in `~/.config/hex/hex.config.ts`. TypeScript defines
+ordinary commands, capture descriptors, named text transformations, and optional
+dictation control phrases. Rust validates and matches the grammar and retains
+wake, sleep, cancellation, and dictation lifecycle behavior. Meeting lifecycle
+commands are native and developer-only.
+
+Spoken commands and dictation control phrases require the persisted Commands
+opt-in, which defaults off. Creating a config does not enable it. Selected mode
+transformations can run with Commands off; hotkey dictation does not require
+voice commands.
 
 ```ts
 import { defineHexConfig } from "@hex/commands"
@@ -34,6 +41,12 @@ Available capabilities are `openUrl`, `openApplication`, `openPath`, `press`,
 and `typeText`. Handlers may compose several capabilities and may use ordinary
 TypeScript, local modules, Effect, and installed npm packages.
 
+Commands may use a trailing `{name}` placeholder for normalized text, or a
+`captures` schema built with `digit`, `letter`, `choice`, `union`, and trailing
+`text`. Schema-bearing commands bind every declared capture exactly once in
+every phrase alias and require a `run` handler. Rust matches these commands
+only on completed command transcripts, not partial updates.
+
 `openUrl` accepts absolute web URLs and app deep links, for example
 `hex.openUrl("slack://channel?team=T_EXAMPLE&id=C_EXAMPLE")`. The URL is passed
 unchanged to macOS, which requires an installed handler for its scheme. Use
@@ -43,22 +56,29 @@ script/data URLs remain unsupported; use `openPath` for filesystem paths.
 
 ## Dictation Transformations
 
-The config may register named string transformations. They appear as optional
-final steps in every dictation mode and run in their displayed order after the
-mode's corrections and optional OpenCode rewrite.
+The config may register named string transformations. Select them in a mode's
+Transformations section to run them in displayed order after that mode's
+corrections and optional OpenCode rewrite. This pipeline applies to Paste and
+Send, not Voice Action or meetings. If the transformation stage fails, HEX
+keeps the text from before that stage, not partially transformed output.
 
 ```ts
+import { defineHexConfig } from "@hex/commands"
+
 export default defineHexConfig({
   transformations: {
-    lowercase: {
-      name: "Lowercase",
-      description: "Convert the final text to lowercase",
-      transform: (text) => text.toLowerCase(),
+    "trim-whitespace": {
+      name: "Trim whitespace",
+      description: "Remove leading and trailing whitespace",
+      transform: (text) => text.trim(),
     },
   },
   commands: {},
 })
 ```
+
+Do not reuse the built-in transformation IDs `lowercase` or `spongebob-case`;
+those IDs execute Rust's built-ins rather than a registered TypeScript function.
 
 Each dictation selects one complete mode. The required Global mode applies
 unless a more specific application or browser-host mode matches. A mode owns
@@ -78,9 +98,12 @@ activation. Dictation remains available when Bun is absent or the config fails.
 
 ## Dictation Control Phrases
 
-The optional `dictation` section replaces the native voice-dictation protocol:
+The optional `dictation` section replaces the native voice-dictation phrases,
+not the native capture lifecycle:
 
 ```ts
+import { defineHexConfig } from "@hex/commands"
+
 export default defineHexConfig({
   dictation: {
     start: ["begin note"],
@@ -98,7 +121,7 @@ least one phrase. Omitting the section uses the native protocol.
 
 ## Workspace
 
-Create the workspace from the Commands pane or run:
+Install Bun separately, then choose Create Config in the Commands pane or run:
 
 ```sh
 hex commands init
@@ -116,16 +139,22 @@ Provisioning installs:
 └── .hex-sdk/
 ```
 
-`.hex-sdk` is bundled and managed by HEX; it is not an npm package and must not
-be edited. On startup, HEX atomically refreshes it from the running app bundle
-and runs the targeted `bun update @hex/commands` when its contents or required
-workspace dependencies change. A plain install can retain stale Effect peer
-metadata for the local SDK in `bun.lock`. User config, unrelated package metadata, scripts, and third-party
-dependencies are preserved. There is one narrow metadata exception: on init
-and startup, HEX adds a missing Effect dependency or upgrades the exact legacy
-pins `4.0.0-beta.97` and `4.0.0-beta.107` to the bundled SDK's exact
-`peerDependencies.effect` version. The current exact pin is left untouched.
-Effect entries in dependency, dev/optional/peer dependency, override, and
+`.hex-sdk` is a bundled local package managed by HEX, not a published npm
+dependency, and must not be edited. When the personal-command host starts, HEX
+stages and replaces it from the running app bundle and runs the targeted
+`bun update @hex/commands` when its contents or required workspace dependencies
+change, or the installed host is missing. A plain install can retain stale
+Effect peer metadata for the local SDK in `bun.lock`. User config, unrelated
+package metadata, scripts, and third-party dependencies are preserved. Existing
+scaffolded instructions and `tsconfig.json` are not overwritten by init or SDK
+refresh.
+
+There is one narrow metadata exception: on init and host startup, HEX adds a
+missing Effect dependency or upgrades the exact legacy pins `4.0.0-beta.97` and
+`4.0.0-beta.107` to the bundled SDK's exact
+`peerDependencies.effect` version (currently `4.0.0-rc.112`). Effect is required
+by the host even for Promise-only configs. The current exact pin is left
+untouched. Effect entries in dependency, dev/optional/peer dependency, override, and
 resolution maps are checked together so duplicate pins cannot conflict.
 Custom Effect specifications are never silently replaced. Effect-targeting
 indirect selectors (such as `**/effect` or `@hex/commands>effect`) and nested
@@ -145,8 +174,13 @@ fails, the SDK may already be refreshed while the old manifest remains. Fix
 the reported filesystem problem and rerun `hex commands init`; the unchanged
 legacy pin still triggers migration and installation on retry.
 
-Run `bun run check` after changing the config. HEX watches the workspace,
+Run `bun run check` in `~/.config/hex` after changing the config. This checks
+TypeScript, not Rust's phrase-overlap validation. While the personal-command
+host is running, HEX watches regular `.ts` and `.json` files in the workspace,
 activates valid changes, and reports the last reload error in the Commands pane.
+It does not watch `node_modules`, `.git`, or symlink targets. If host startup
+stopped because the config, Bun, or dependencies were unavailable, restart HEX
+after repairing them.
 
 ## Runtime Boundary
 
@@ -165,8 +199,6 @@ preserves native commands and the last valid runtime snapshot where possible.
   app updates.
 - Recover automatically when Bun or workspace dependencies become available
   without requiring an app restart.
-- Add typed capture descriptors only after real commands establish their
-  boundary and finalization needs.
 - Add CLI checks, listing, reload, and log inspection when the Commands pane is
   insufficient.
 - Add user-visible handler admission or timeout policy only if runtime evidence

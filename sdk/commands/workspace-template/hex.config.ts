@@ -3,10 +3,10 @@ import { choice, defineHexConfig, digit, letter, union } from "@hex/commands"
 export default defineHexConfig({
   // Transformations appear as optional final steps in every dictation mode.
   // transformations: {
-  //   lowercase: {
-  //     name: "Lowercase",
-  //     description: "Convert the final text to lowercase",
-  //     transform: (text) => text.toLowerCase(),
+  //   "trim-whitespace": {
+  //     name: "Trim whitespace",
+  //     description: "Remove leading and trailing whitespace",
+  //     transform: (text) => text.trim(),
   //   },
   // },
   // Uncomment this block to replace HEX's native voice-dictation protocol.

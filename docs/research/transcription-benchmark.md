@@ -1,8 +1,15 @@
 # Transcription Runtime Benchmark
 
-**Status:** Historical benchmark method and provisional M2 Max results. Use the
-commands here to reproduce measurements; do not treat the provisional corpus as
-a current model-selection decision.
+**Status:** Historical benchmark method and provisional M2 Max results from
+2026-07-16. These measurements are not a current model-selection decision.
+
+The commands below run the current harness, not a pinned historical runtime.
+As of 2026-09-01, omitting `--model` selects the compiled default GGUF model,
+Parakeet Unified English, rather than the app's saved selection or the Parakeet
+v2 model measured here. Pass `--model` to select the intended GGUF explicitly;
+the output filename does not select a model. Reproducing the archived comparison
+also requires its original runtime revisions, model artifacts, corpus, and
+hardware. See the [project README](../../README.md) for current model setup.
 
 Run every command from the repository root.
 

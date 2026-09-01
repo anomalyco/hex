@@ -1,6 +1,6 @@
 # Ship Hex Transcription Inside Another Desktop App
 
-**Status:** Updated 2026-08-31. `@kitlangton/hex@0.3.0` is published, and local
+**Status:** Updated 2026-09-01. `@kitlangton/hex@0.3.0` is published, and local
 Electron capture-to-transcript testing works on Apple Silicon macOS. The native
 helper package is still unpublished; embedding currently requires an explicit
 helper command. The remaining native distribution work below is a plan, not a
@@ -78,7 +78,7 @@ artifacts or public integration commitments.
 | Area | Evidence in the repository | Remaining work |
 | --- | --- | --- |
 | Embedded lifecycle | `src/main.rs` launches `LocalApi::start_embedded`, emits a pipe handshake, and observes stdin EOF. | Validate host death, startup failure, and shutdown while native work is blocked. |
-| Model/inference operations | `src/local_api.rs`, `src/transcription_service.rs`, and `src/transcription_models.rs` implement authenticated preparation and bounded host-audio transcription. | Real-model acceptance and concurrent-process validation. |
+| Model/inference operations | `src/local_api.rs`, `src/transcription_service.rs`, and `src/transcription_models.rs` implement authenticated preparation and bounded host-audio transcription. Apple Speech is currently unavailable despite its retained SDK identifier. | Consumer-specific real-model acceptance and concurrent-process validation. |
 | SDK | Published `0.3.0` adds model-bound `create({ model })`, raw-WAV transcription, and awaited cancellation cleanup in Promise and Effect. | Preserve low-level `create()`, `connect()`, and explicit-command use while completing native distribution. |
 | Native package | `sdk/service-darwin-arm64` is private at `0.0.0`; the client has no native optional dependency. | Publishable artifact, consumer bundling, and compatible client/helper release. |
 | Build | `scripts/build-service-app.sh` copies `target/release/voice-control` into a service bundle. | A transcription-only executable, not a renamed full desktop executable. |
@@ -149,8 +149,8 @@ lifecycle does not establish that every existing native path satisfies them.
   protocol mismatch before accepting operations.
 - The host owns microphone permission and recording. The helper must not ask for
   Microphone, Accessibility, Input Monitoring, Automation, or login-item access.
-  Initially omit Apple Speech from the embedded supported catalog unless its
-  separate OS/runtime behavior is explicitly validated.
+  Keep the currently unavailable Apple Speech runtime out of the embedded
+  supported catalog unless its separate OS/runtime behavior is explicitly validated.
 - Share only verified model artifacts through revision-safe storage. The current
   filename-based cache is not sufficient for independently versioned helpers.
   Preserve locking, cancellation, and atomic publication, and leave legacy Hex
@@ -311,9 +311,10 @@ transport's FIN/RST behavior; if disconnect detection cannot provide the contrac
 add explicit operation cancellation with compatible protocol/client changes.
 
 Add safe preparation-error classification where the current generic
-`download-failed`/`load-failed` codes cannot drive recovery. Do not send raw stderr,
-local paths, or credentials to the renderer. Test compatibility with shipped SDK
-errors while specifying the new client/helper pair's behavior.
+`download-failed`/`verification-failed`/`load-failed` codes cannot drive recovery.
+Do not send raw stderr, local paths, or credentials to the renderer. Test
+compatibility with shipped SDK errors while specifying the new client/helper
+pair's behavior.
 
 | Failure | Host recovery |
 | --- | --- |

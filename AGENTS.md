@@ -30,9 +30,10 @@ only in debug builds.
   disposable bounded command audio projection.
 - `recording_environment`: serialized RAII ownership of idle-sleep prevention,
   output muting, and supported media-player pause/resume behavior.
-- `dictation_processor`: context-selected, deadline-bounded OpenCode rewrite
-  profiles with raw-transcript fallback. The macOS app discovers the `opencode2`
-  beta executable, links missing installs to `https://v2.opencode.ai/`, and uses
+- `dictation_processor`: context-selected corrections and deadline-bounded
+  OpenCode rewrite profiles with corrected-transcript fallback. The macOS app
+  discovers the `opencode2` beta executable, links missing installs to
+  `https://v2.opencode.ai/`, and uses
   `opencode2 api get` to discover or start its managed service. Generation uses
   CLI-managed discovery with the matching owner-only service registration and
   authenticated loopback HTTP through the system curl; request bodies and
@@ -102,8 +103,8 @@ only in debug builds.
 - `events`: bounded asynchronous append-only NDJSON observations and bounded
   incremental reading; `dashboard` and the GPUI Activity pane are read-only
   projections.
-- `desktop_activity`: the shared listener, device, transcript, and session
-  projection over `EventReader`.
+- `desktop_activity`: the shared listener, device, session, and latest-failure
+  projection over `EventReader`. Transcript rows read retained events directly.
 - `desktop_host`: semantic desktop capabilities, portable UI snapshots, and
   typed actions implemented by the macOS root and contained Linux adapter.
 - `desktop_ui`: platform-neutral GPUI visual tokens and controls shared by both
@@ -116,8 +117,8 @@ only in debug builds.
 - `desktop_transcription_picker`: the single GPUI language/model picker used by
   both desktop roots over portable model presentation and platform preparation
   callbacks.
-- `app_window`: the production Settings, Modes with mode-owned processing,
-  Voice Action, History, Replacements, and opt-in Commands shell plus
+- `app_window`: the production Settings, Modes with mode-owned corrections and
+  processing, Voice Action, History, and opt-in Commands shell plus
   developer-only Meetings, Activity, and HUD Lab panes.
 - `status_item`: the persistent macOS menu-bar owner for Settings, Paste Last
   Dictation, update checks, and orderly application shutdown.
@@ -155,6 +156,11 @@ CoreAudio formats, AppleScript details, or event serialization.
 - The dictation shortcut defaults to Option but supports modifier-only,
   modifier-plus-key, standalone Globe/Fn, and standalone function-key bindings.
   Capturing a new binding suspends global matching.
+- Stale shortcut recovery requires at least 100 ms of sampled keyboard neutrality,
+  no pending input, and no active or pending gesture. It emits no capture actions.
+  Native `SecondaryFn` navigation metadata may be ignored only with timestamped
+  modifier-change evidence that Fn is up; the full key scan and delayed-event
+  fences remain required. Never strip Fn globally from shortcut matching.
 - Hold the shortcut to dictate and release to transcribe. Captures shorter than
   300 ms discard. A 450 ms hotkey pre-roll and one-second voice-trigger pre-roll
   protect speech onset. Capture has no automatic duration limit; release,
@@ -224,8 +230,9 @@ CoreAudio formats, AppleScript details, or event serialization.
   cancelled, or timed-out actions paste nothing. Voice Action jobs share normal
   queueing and cancellation but never update the last dictation.
 - Mode processing is best-effort and ordered: corrections, optional OpenCode
-  rewriting, then selected TypeScript transformations. A failed step preserves
-  the previous pipeline output. It applies to Paste and Send, but not meetings.
+  rewriting, then selected transformations. A failed stage preserves its input;
+  the transformation chain is one stage, so failure discards its partial results.
+  It applies to Paste and Send, but not Voice Action or meetings.
 - OpenCode availability checks stay off the UI thread. When the app finds the
   `opencode2` executable, `opencode2 api` discovers or starts the managed service;
   the catalog uses authenticated loopback HTTP to avoid large CLI pipe truncation.
@@ -251,8 +258,9 @@ CoreAudio formats, AppleScript details, or event serialization.
   explicit, bounded, owner-only opt-in through `HEX_RETAIN_DICTATION_AUDIO`.
 - Retained dictation history records only successful pasted output: raw and
   final text plus bounded metadata, never audio, full browser URLs, or window
-  titles. Every retention window remains subject to hard entry and byte caps,
-  and recording stops while retention is Off.
+  titles. History defaults to seven days, and every retention window remains
+  subject to hard entry and byte caps. No new entries are accepted while Off.
+  Turning retention Off preserves existing entries; clearing history is explicit.
   Time-based retention expires during idle uptime through the shared history
   owner; searches never return expired entries while waiting for disk cleanup.
 - Developer-only meeting detection may inspect process audio metadata but must
@@ -332,6 +340,7 @@ direct `npm publish`, after the bootstrap release.
 ```sh
 ./scripts/setup.sh
 ./scripts/setup-parakeet.sh
+bun run --cwd sdk/commands build
 cargo run -- listen
 cargo run -- status
 cargo run -- meeting record --title "Design sync"

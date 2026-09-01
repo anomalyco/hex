@@ -49,7 +49,8 @@ Swift S3 appcast while preserving every existing release and artifact:
 
 - `link`: `https://github.com/anomalyco/hex`, the public download page.
 - `sparkle:version`: reserve 93 if still unused; it must exceed installed build 92.
-- `sparkle:shortVersionString`: the advertised new release, initially 2.1.0.
+- `sparkle:shortVersionString`: the public Rust release advertised when the notice
+  is published; do not copy a stale version from this plan.
 - `sparkle:minimumSystemVersion`: 15.0.0.
 - `sparkle:hardwareRequirements`: arm64.
 - `sparkle:minimumUpdateVersion`: 92.

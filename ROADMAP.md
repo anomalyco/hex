@@ -38,8 +38,10 @@ and persist atomically; launch-at-login remains owned by macOS rather than the
 settings file. A persistent menu-bar item keeps Settings, Paste Last, updates,
 and Quit reachable when the Dock icon is hidden. Settings now surfaces revoked
 Microphone, Accessibility, or Input Monitoring access after onboarding, and
-supported transcription runtimes expose automatic language detection. Keep true
-processor chains as future work only if real profiles need composition.
+supported transcription runtimes expose automatic language detection. Modes own
+corrections, optional OpenCode rewriting, and ordered text transformations;
+stage failures preserve the preceding pipeline output. Do not add a generalized
+processor framework without a concrete need beyond this shipped sequence.
 
 Keep Swift and Rust separate. Prefer the old app's existing Sparkle update window
 with a website-only informational item to install the new app manually, with no
@@ -102,16 +104,23 @@ exact delayed release trimming. Keep physical shortcuts, assistive modifier and
 key chords, non-empty captures, and immediate HUD onset in the release smoke
 checks; changing tap location requires revalidating the clock as well as routing.
 
-After this reliability fix, evaluate an explicit press-once-to-start,
+Version 2.1.11 also recovers blocked modifier gestures after missed releases and
+navigation-key metadata. Recovery requires a neutral keyboard and emits no
+capture actions. Keep the callback regressions for delayed releases and Fn
+evidence alongside physical Option-hold checks; a physical Fn/Globe smoke test
+and general cross-tap delivery-order validation remain outstanding.
+
+After these reliability fixes, evaluate an explicit press-once-to-start,
 press-again-to-finish option, especially for key chords and standalone function
 keys. Keep it distinct from hold-to-dictate and double-tap-only activation;
 do not add new shortcut modes to the regression release.
 
-Keep the microphone and dictation model warm by default. Add an explicit
-`Release microphone while idle` option that is effective only when commands are
-disabled; document that it removes pre-roll and adds first-capture latency. `Do nothing` is the
-default recording-audio behavior. Idle-sleep prevention is automatic and scoped
-to intentional dictation and active meeting capture rather than persisted as a
+The microphone and dictation model remain warm by default. The shipped
+`Release when idle` microphone option opens the device on shortcut press, removes
+pre-roll, and adds first-capture latency. It is mutually exclusive with Commands
+through confirmed settings transitions. `Do nothing` is the default
+recording-audio behavior. Idle-sleep prevention is automatic and scoped to
+intentional dictation and active meeting capture rather than persisted as a
 user setting.
 
 Add end-of-speech detection only if it preserves explicit Send, Cancel, and
@@ -152,8 +161,9 @@ terms rather than Brave-specific types.
 Add one real second browser adapter before extracting a generalized adapter
 framework. Candidate implementations include Chromium-family AppleScript,
 Safari AppleScript, browser extensions, or Accessibility APIs. Diagnose Slack
-Huddle detection separately from generic browser context. Surface context age
-and failures instead of silently retaining an indefinitely stale snapshot.
+Huddle detection separately from generic browser context. Capture failures
+already log a warning and invalidate the cached context. Surface context age and
+failure health in the UI rather than relying only on diagnostics.
 
 Keep installed-application discovery lazy. Opening Settings must not recursively
 scan application bundles or rasterize their icons; start that work only after

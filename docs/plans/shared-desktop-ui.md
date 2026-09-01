@@ -3,7 +3,7 @@
 **Status:** In progress. The shared visual vocabulary and transcription picker
 are implemented. macOS and Linux both render with GPUI, but they still use
 separate root entities. This plan converges them on one product shell while
-keeping platform behavior in the existing macOS and X11 hosts.
+keeping platform behavior in the existing macOS and Linux X11/Wayland hosts.
 
 ## One Product Shell Should Represent The Same Product Concepts
 
@@ -45,8 +45,8 @@ Shared rendering decides how every common concept looks. Platform adapters must
 not inject arbitrary GPUI elements because that would preserve two visual
 systems behind a nominally shared shell.
 
-The first shared panes are Settings and Activity. Replacements, Modes, Voice
-Action, Commands, and Meetings can use the same shell immediately, but each pane
+The first shared panes are Settings and Activity. Modes (including corrections),
+Voice Action, History, Commands, and Meetings are later candidates; each pane
 appears on Linux only when its underlying behavior is implemented there.
 
 ## Desktop Hosts Own Consequential Behavior
@@ -57,10 +57,11 @@ The outer application hosts remain separate:
   `SMAppService`, Sparkle, meeting lifecycle, and the existing recognition
   coordinator.
 - The Linux host owns the GTK tray, X11 map and unmap behavior, close-to-tray,
-  X11 shortcut registration, listener lifecycle, and signed direct updates.
+  X11 shortcut registration or Wayland evdev input, listener lifecycle, the
+  layer-shell HUD, and signed direct updates.
 
-Both hosts open the shared `AppWindow`. The Linux host stops implementing its
-own `Render` tree.
+At completion, both hosts open the shared `AppWindow` and the Linux host stops
+implementing its own `Render` tree. Today they still use separate roots.
 
 Use one real seam between the shared window and the two existing hosts. The
 exact Rust types may evolve during the first slice, but the interface should
@@ -95,6 +96,7 @@ The initial set should cover only behavior that currently varies:
 struct DesktopCapabilities {
     activity: bool,
     commands: bool,
+    history: bool,
     hud_lab: bool,
     meetings: bool,
     modes: bool,
@@ -109,9 +111,10 @@ Navigation and settings composition derive from these values. Adding Linux
 command support later changes the Linux capability and adapter; it does not add
 a second Commands UI.
 
-Presentation state may normalize platform-specific behavior. For example, both
-updaters can expose `Unavailable`, `Checking`, `Current`, `ReadyToRestart`, and
-`Failed` while Sparkle and the signed Linux updater retain independent
+Presentation state normalizes platform-specific behavior through
+`DesktopUpdateStatus`. Both updaters use `Unavailable`, `Checking`, and `Current`.
+macOS also exposes `Available`; Linux adds `Failed` and uses `ReadyToRestart`
+after staging an update. Sparkle and the signed Linux updater retain independent
 implementations.
 
 ## Shortcut Presentation Is Shared But Validation Is Not
@@ -123,6 +126,8 @@ control. The host validates and persists the result.
   bindings and resolves active-layout key codes.
 - X11 requires a key-containing chord and verifies that the binding can be
   registered on the active X server.
+- Wayland uses explicit US-labeled physical keys through read-only evdev input,
+  with user-granted access to every `/dev/input/event*` node.
 
 The UI displays validation results without learning either representation.
 Existing macOS `settings.json` and Linux `linux-settings.json` remain compatible.
@@ -144,13 +149,14 @@ persistence behavior.
 
 ### 2. Share Activity And Listener Presentation
 
-**In progress.** `src/desktop_activity.rs` now projects the latest listener
-state, device, completed transcripts, and read failure from `EventReader` for
-both roots, and Linux no longer interprets the event stream independently. The
-macOS Activity header renders the shared listener-status control; the current
-Linux root shows only the shared Settings pane and toggles listening from the
-tray menu, so the detailed Activity pane remains macOS developer-only until the
-shared root window lands.
+**In progress.** `src/desktop_activity.rs` projects the latest listener state,
+device, session boundary, dictation failure, and read error from `EventReader`
+for both roots. Transcript rows still read retained events directly; the unused
+transcript cache has been removed. Linux no longer interprets the event stream
+independently. The macOS Activity header renders the shared listener-status
+control. The Linux root shows only Settings, with listener controls there and in
+the X11 tray menu; the detailed Activity pane remains macOS developer-only until
+the shared root window lands.
 
 - Move the common `EventReader` projection into the shared window state.
 - Render status, device, completed transcripts, and failures once.
@@ -159,9 +165,10 @@ shared root window lands.
 ### 3. Normalize Core Settings For Presentation
 
 **In progress.** Shortcut keycaps, the double-tap toggle, and the complete local
-transcription picker now use shared GPUI presentation. `DesktopSnapshot` now
-also normalizes shortcut labels, listener status, operation errors, update
-status, observation metadata, and transcription selection/preparation state.
+transcription picker now use shared GPUI presentation. `DesktopSnapshot` carries
+those shortcut values, activity, listener status, operation errors, update status,
+and transcription selection/preparation state. It no longer duplicates a
+shortcut label, paste-last shortcut, or observations path without a UI consumer.
 Shortcut captures cross the host seam as portable values. The shared picker
 delegates model preparation to each current root while macOS and Linux validate,
 prewarm, and persist their native runtime selections independently. Portable
@@ -206,7 +213,8 @@ Linux Settings composition disappears when the shared root extraction lands.
 
 - The refactor does not change dictation capture, audio boundaries, inference,
   paste, command resolution, or AppleScript behavior.
-- Linux exposes only the capabilities in the supported X11 beta contract.
+- Linux exposes only the capabilities in the X11 and compatible Wayland beta
+  contracts.
 - macOS retains onboarding, permissions, launch-at-login, Sparkle, commands,
   Voice Action, replacements, and developer-only meeting behavior.
 - Platform I/O and blocking work stay off the GPUI thread.
@@ -236,4 +244,4 @@ Linux Settings composition disappears when the shared root extraction lands.
 - Do not scatter `#[cfg(target_os = ...)]` through shared rendering.
 - Do not let platform adapters return arbitrary GPUI elements.
 - Do not create no-op adapters for unsupported features.
-- Do not generalize beyond the implemented macOS and X11 hosts.
+- Do not generalize beyond the implemented macOS and Linux X11/Wayland hosts.

@@ -22,7 +22,7 @@ Host application                         HEX Service
 microphone permission                    service discovery and authentication
 device selection                         model download and verification
 capture start/stop                       strict-Metal load and prewarm
-levels and waveform        WAV/PCM       resampling and inference
+levels and waveform        PCM WAV       resampling and inference
 capture UX                 ---------->   final raw transcript
 settings and model choice
 ```
@@ -39,10 +39,10 @@ appear as Electron. The embedded helper never opens the microphone.
 | Service owns models and inference | Hosts share verified model artifacts while each helper owns its warm runtime. |
 | Completed audio goes over localhost | Simple final-only contract; no partial transcripts or bidirectional session protocol. |
 | Model preparation is explicit | A transcription call never hides a large network download. |
-| Installed-but-cold models may reload automatically | Warmth is transient and can change because of another client or memory pressure. |
+| Installed-but-cold models may reload automatically | A request for a different model in the same helper replaces its warm runtime. |
 | No product duration limit | Hotkey capture and service transcription end explicitly; operational resource exhaustion remains a typed failure. |
 | Raw transcripts only | The host owns meaning, rewriting, and insertion. |
-| Node/Electron main or preload only | Browsers and renderers cannot read owner-only discovery state or bootstrap a native process. |
+| Trusted Node/Electron main process | Ordinary browser code and untrusted renderers must not receive native process authority or service credentials. |
 | Host-spawned helper | The host owns the process, endpoint, and lifetime instead of discovering an independently elected service. |
 | Shared model artifacts, private warm runtime | Hosts reuse verified downloads without coupling their model choice or process lifecycle. |
 
@@ -55,14 +55,16 @@ On explicit host use, the SDK will spawn the included helper directly as a child
 without an npm install script, administrator access, login-item approval, Dock icon,
 or foreground window. The host must not launch the helper through Launch Services.
 
-Because the service does not capture audio, it does not need microphone TCC
-identity. Full `Hex.app` remains responsible for its own global-hotkey capture and
-can submit completed audio to its own transcription runtime later.
+Because the embedded service does not capture audio, it does not need microphone
+TCC identity. Full `Hex.app` already owns its global-hotkey capture and
+transcription pipeline; desktop `connect()` can also use the app's microphone
+through its separate capture API.
 
 Verified model artifacts remain shared per user under Application Support.
 Each embedded helper has its own warm model and inference queue. Multiple hosts
-may read the same immutable artifact, but they do not share Metal allocations or
-runtime selection.
+may reuse the same verified file, but they do not share Metal allocations or
+runtime selection. The current cache is filename-based; immutable revision-safe
+storage for independently versioned helpers remains planned.
 
 ## Embedded Startup and Authentication
 
@@ -86,9 +88,14 @@ native work does not return. Embedded mode writes no shared discovery file and
 acquires no global service lock, so two host applications can run independent
 helpers.
 
+The current executable starts lease monitoring after local API initialization,
+not at process entry. Startup-failure and descendant-process cleanup remain
+native-distribution acceptance gates in the delivery plan.
+
 Every request requires `Authorization: Bearer <token>`. The token is delivered
 only over the child's stdout pipe. The server deliberately sends no CORS
-headers. A malformed or incorrect credential returns an empty `401` response.
+headers. A parsed request with a missing or incorrect bearer credential returns
+an empty `401` response; malformed HTTP can be rejected before authentication.
 The standalone HEX application may still publish owner-only discovery for its
 own existing local API. Embedded `create()` uses the child handshake; desktop
 `connect()` remains a separate discovery-based path.
@@ -103,14 +110,30 @@ POST /models/{id}/prepare     SSE preparation progress, then ok or error
 POST /transcriptions          audio/wav body, final transcript response
 ```
 
-`POST /transcriptions` accepts completed PCM WAV audio. The service reads
-request bodies incrementally, validates the declared format and resource use
-before allocation and inference, downmixes and resamples internally, and does
-not persist audio. API 2 accepts 8 kHz through 192 kHz audio with one through eight
-channels. Upload and normalized-audio limits are each 64 MiB; source-frame limits
-also apply. These limits are not a total process-memory cap.
+`POST /transcriptions` requires a `model` query parameter. Preparation and
+transcription accept an optional `language` query parameter, defaulting to `en`.
+`GET /models?language=...` uses that language for readiness metadata, not to filter
+the returned catalog. Transcription requires `Content-Length`; chunked transfer
+encoding is not supported.
 
-There is no public duration limit. One upload owns the audio-memory admission
+`POST /transcriptions` accepts completed PCM WAV audio. The service reads
+request bodies incrementally into a bounded buffer, then validates WAV metadata
+before allocating decoded samples and running inference. It downmixes and
+resamples internally. API 2 accepts integer PCM and 32-bit float WAV at 8 kHz
+through 192 kHz with one through eight channels. Uploads are capped at 64 MiB;
+source frames and normalized 16 kHz mono Float32 samples are each capped at
+16,777,216 (64 MiB of Float32 samples). The frame cap permits about 5.8 minutes at
+48 kHz or 17.5 minutes at 16 kHz, before other limits. Headers have a two-second
+deadline and uploads a thirty-second deadline. These limits are not a total
+process-memory cap.
+
+The HTTP transcription path does not save uploaded WAVs. The current executable
+still initializes shared process logging and inherits native diagnostic flags
+such as `TRANSCRIBE_DUMP_DIR`, which can write audio-derived tensors. Do not treat
+this as an audited no-persistence boundary; embedded diagnostic isolation remains
+part of the distribution plan.
+
+There is no separate duration cutoff. One upload owns the audio-memory admission
 slot until its queued or active inference releases the clip. Absolute header
 and upload deadlines, byte and normalized-sample budgets, and typed resource
 refusal bound admission from defective local clients. Detected client cancellation
@@ -131,8 +154,13 @@ export interface Capabilities {
   audioFormats: readonly ["audio/wav"];
   partialTranscripts: false;
   serviceCapture: false;
+  developerControl: false;
 }
 ```
+
+These capability values describe the embedded helper. The desktop local API can
+advertise capture and debug-only developer control. The SDK exposes
+`serviceCapture` as a boolean and omits the native-only `developerControl` field.
 
 ### Models
 
@@ -164,12 +192,19 @@ export type ModelProgress =
   | { type: "loading" };
 ```
 
-For managed GGUF models, preparation means download, checksum verification,
-strict-Metal load, and prewarm. System-managed runtimes such as Apple Speech
-perform their platform-specific availability and readiness checks instead. A
-preparation does not select the model or change full `Hex.app` settings. The
-service serializes preparation and preserves the existing artifact and warm
-runtime when a replacement fails.
+`ModelId` is the SDK's closed set of identifiers, not an availability guarantee.
+The native catalog currently excludes `apple_speech`, and preparation and
+transcription reject it. The retained Apple Speech implementation and
+system-managed metadata do not make it a supported service model.
+
+For the available GGUF models, preparation means download if needed, checksum
+verification (or reuse of a matching verification receipt), strict-Metal load, and
+prewarm. `managed` means system-managed, not downloaded by HEX, so these models
+report `managed: false`. Preparation activates the helper's warm model but does
+not change full `Hex.app` settings. The service serializes preparation, publishes
+only verified replacement files, and preserves the previous warm runtime if
+candidate loading fails. A verified download can remain installed after a load
+failure; artifact publication and runtime activation are separate steps.
 
 ### Ready Transcriber
 

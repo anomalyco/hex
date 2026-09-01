@@ -17,6 +17,10 @@ A provider-backed generation test also passed using CLI `0.0.0-dev-18334` and
 the already-running server `0.0.0-dev-18329`, without creating a session or
 restarting the service.
 
+This is a dated validation snapshot, not a claim about the newest CLI available
+today. The integration contract below describes HEX's current implementation;
+new provider-backed validation must record its own CLI and server versions.
+
 ## Integration Contract
 
 HEX discovers a separately installed `opencode2`, optionally overridden by
@@ -24,25 +28,28 @@ HEX discovers a separately installed `opencode2`, optionally overridden by
 managed service, or restart or update it. `opencode2 api` discovers or starts
 the service through OpenCode's own lifecycle.
 
-Generation uses `opencode2 api get /api/health` to identify the authenticated
-active server, starting it through the CLI when needed. `opencode2 debug paths`
-locates its state directory. HEX reads endpoint and password together from the
-bounded, owner-only service registration matching that server's PID and version.
+Catalog loading and generation use `opencode2 api get /api/health` to identify
+the authenticated active server, starting it through the CLI when needed.
+`opencode2 debug paths` locates its state directory. HEX reads endpoint and
+password together from the bounded, owner-only service registration matching
+that server's PID and version.
 It never reads or regenerates the configured password, changes service settings,
 or includes credentials in diagnostics.
 
 The system curl sends the authenticated request over loopback HTTP. Credentials
 and JSON travel in a curl configuration through stdin, never command arguments
 or temporary files. Curl configuration files, proxies, and redirects are not
-used. Non-loopback endpoints are rejected. Discovery, request writing, and
-response waiting share the generation deadline and cancellation signal.
+used. Wildcard bind addresses (`0.0.0.0` and `::`) and `localhost` are normalized
+to loopback; other non-loopback endpoints are rejected. Discovery, request writing,
+and response waiting share the generation deadline and cancellation signal.
 
-HEX reads `/api/model` and `/api/model/default` in its Application Support
-workspace. Model selections use the catalog's `id`, not the upstream provider's
-`modelID`. Available text-output models remain selectable regardless of release
-status, including alpha and beta. Selecting a thinking variant for the floating
-default saves the resolved catalog model alongside it; existing explicit model
-selections are preserved.
+HEX reads `/api/model` and `/api/model/default` through authenticated HTTP, avoiding
+large piped CLI responses. It supplies `x-opencode-directory` for its Application
+Support workspace. Model selections use the catalog's `id`, not the upstream
+provider's `modelID`. Available text-output models remain selectable regardless
+of release status, including alpha and beta. Selecting a thinking variant for the
+floating default saves the resolved catalog model alongside it; existing explicit
+model selections are preserved.
 
 `/api/generate` accepts a prompt and optional model reference and returns
 `data.text`. It is stateless and uses the server's base configuration, not the
@@ -54,10 +61,10 @@ fixed by reselecting the model; HEX does not guess an ID migration.
 
 Pin an exact CLI version and source commit for isolated release-validation runs,
 then deliberately update this baseline after testing the contracts above,
-deadlines, and cancellation. At this audit, the `v2` source branch published to
-npm's `dev` tag; `next` was an older beta, not the newest V2 build. Resolve the
-published version rather than assuming a moving tag identifies the desired
-source commit.
+deadlines, and cancellation. At the 2026-08-26 audit, the `v2` source branch
+published to npm's `dev` tag; `next` was an older beta, not the newest V2 build.
+Resolve the published version rather than assuming a moving tag identifies the
+desired source commit.
 
 Check the connected server's `/api/health` version as well as the CLI version:
 the CLI's `api` command permits a server version mismatch. Do not replace a
