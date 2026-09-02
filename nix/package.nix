@@ -78,6 +78,7 @@ rustPlatform.buildRustPackage (finalAttrs: {
       ../Cargo.lock
       ../build.rs
       ../src
+      ../tests
       ../native
       ../resources
       ../assets

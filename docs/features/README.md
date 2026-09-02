@@ -219,6 +219,11 @@ The [direct installer/updater](../../src/linux_updater.rs) and
 a published, supported-host-validated signed release. [Nix](../nix.md) owns its
 package updates; HEX updates only managed direct installs.
 
+Both Linux CI triggers include `tests/**`, and the
+[Nix source fileset](../../nix/package.nix) includes those sources. The
+`keyboard_layout` harness skips on Linux; packaging it does not provide macOS
+layout evidence.
+
 ```ts
 TypeScript SDK + macOS local service
 ├── Caller records audio -> Explicit helper -> Raw transcription
