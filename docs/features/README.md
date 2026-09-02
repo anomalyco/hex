@@ -186,6 +186,27 @@ Menu bar and Settings                    // maintenance
 └── Quit -> Orderly shutdown
 ```
 
+```ts
+Update available                         // maintain.updates
+├── Sidebar Update -> Sparkle update dialog
+└── Menu bar > Check for Updates -> Same dialog
+
+Remind Me Later -> Dismiss this offer -> Manual update -> Reopen the offer
+```
+
+The sidebar uses window-local deferred action dispatch in
+[app_window.rs](../../src/app_window.rs). The executed
+`sidebar_update_click_dispatches_only_outside_preview` regression clicks the
+production control in an active in-memory GPUI window: zero actions before the
+fix, one afterward, and no action in a preview. It does not start Sparkle.
+
+**Released-version defect:** 2.1.12 still uses app-global dispatch from inside
+the sidebar click, which loses the action while the active window is borrowed.
+The fix is in source, not yet released. The menu-bar path was exercised on the
+installed local 2.1.11 build and opened the native Software Update window; no
+installation was performed. That path is the current workaround, including
+after Remind Me Later. A repaired installed-sidebar click remains unverified.
+
 [Recovery](recovery.md) separates supported recovery from known defects.
 [login_item.rs](../../src/login_item.rs), [status_item.rs](../../src/status_item.rs),
 [sparkle.rs](../../src/sparkle.rs), the

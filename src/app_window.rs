@@ -78,9 +78,13 @@ const MAX_OPENCODE_ERROR_BYTES: usize = 4 * 1024;
 const ACTIVITY_LIMIT: usize = 100;
 const OPENCODE_BETA_DOCS_URL: &str = "https://v2.opencode.ai/";
 
-fn sidebar_update_button(status: crate::sparkle::UpdateStatus) -> Option<Div> {
+fn sidebar_update_button(
+    status: crate::sparkle::UpdateStatus,
+    preview: bool,
+) -> Option<gpui::Stateful<Div>> {
     (status == crate::sparkle::UpdateStatus::UpdateAvailable).then(|| {
         div()
+            .id("check-for-updates-sidebar")
             .h(px(30.0))
             .px_3()
             .flex()
@@ -94,6 +98,12 @@ fn sidebar_update_button(status: crate::sparkle::UpdateStatus) -> Option<Div> {
             .cursor_pointer()
             .hover(|button| button.bg(mix_color(rgb(ACCENT), rgb(TEXT), 0.12)))
             .child("Update")
+            .on_click(move |_, window, cx| {
+                if !preview {
+                    window.dispatch_action(Box::new(CheckForUpdates), cx);
+                    window.refresh();
+                }
+            })
     })
 }
 
@@ -2452,19 +2462,7 @@ impl AppWindow {
                             .text_color(rgb(MUTED))
                             .child(format!("Version {}", env!("CARGO_PKG_VERSION"))),
                     )
-                    .when_some(
-                        sidebar_update_button(self.update_status),
-                        |footer, button| {
-                            footer.child(button.id("check-for-updates-sidebar").on_click(
-                                cx.listener(|this, _, _, cx| {
-                                    if !this.preview {
-                                        cx.dispatch_action(&CheckForUpdates);
-                                        cx.notify();
-                                    }
-                                }),
-                            ))
-                        },
-                    ),
+                    .children(sidebar_update_button(self.update_status, self.preview)),
             )
             .into_any_element()
     }
@@ -8841,7 +8839,41 @@ mod tests {
             (UpdateStatus::UpToDate, false),
             (UpdateStatus::UpdateAvailable, true),
         ] {
-            assert_eq!(sidebar_update_button(status).is_some(), visible);
+            assert_eq!(sidebar_update_button(status, false).is_some(), visible);
+        }
+    }
+
+    #[gpui::test]
+    fn sidebar_update_click_dispatches_only_outside_preview(cx: &mut gpui::TestAppContext) {
+        struct UpdateButton {
+            preview: bool,
+        }
+
+        impl Render for UpdateButton {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                sidebar_update_button(crate::sparkle::UpdateStatus::UpdateAvailable, self.preview)
+                    .unwrap()
+                    .debug_selector(|| "sidebar-update".into())
+            }
+        }
+
+        let calls = Rc::new(std::cell::Cell::new(0));
+        cx.update(|cx| {
+            let calls = calls.clone();
+            cx.on_action(move |_: &CheckForUpdates, _| calls.set(calls.get() + 1));
+        });
+
+        for preview in [true, false] {
+            let (_, cx) = cx.add_window_view(|_, _| UpdateButton { preview });
+            cx.update(|window, cx| {
+                // Test windows do not activate automatically; an inactive window masks the bug.
+                window.activate_window();
+                assert!(cx.active_window() == Some(window.window_handle()));
+            });
+            cx.run_until_parked();
+            let button = cx.debug_bounds("sidebar-update").unwrap();
+            cx.simulate_click(button.center(), GpuiModifiers::default());
+            assert_eq!(calls.get(), usize::from(!preview), "preview={preview}");
         }
     }
 
