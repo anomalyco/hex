@@ -15,6 +15,30 @@ existing settings without an explicit enabled flag.
 `DEVELOPER_FEATURES_ENABLED` keeps meetings and their UI/CLI surfaces available
 only in debug builds.
 
+## Feature Map
+
+[`docs/features/README.md`](docs/features/README.md) indexes existing user-facing
+capabilities, entry points, checks, and gaps. Before designing, changing,
+debugging, or reviewing a user-facing feature, read the index and relevant
+feature files, then check their referenced implementation. The map is not a
+substitute for source inspection or a second roadmap.
+
+- Update the affected map in the same change when behavior, entry points,
+  defaults, prerequisites, platform availability, recovery, or verification
+  coverage changes. Do not churn unrelated maps for internal-only refactors.
+- Organize by user capability, not Rust module or UI pane. Dictation, Voice
+  Commands, and Voice Action are distinct features; link shared flows and
+  recovery rather than duplicating their descriptions. Keep the index current
+  when adding or splitting a feature file.
+- Prefer small action/outcome diagrams in `ts` fences with Unicode tree
+  characters, not tables. Preserve stable behavior IDs and keep source/check
+  references and proof limits beside the behavior they explain.
+- Distinguish implemented behavior, available checks, and observed verification.
+  A test's existence is not a passing run, and a preview is not native end-to-end
+  proof. Record missing coverage and known defects explicitly; never rewrite an
+  expected outcome merely to hide a regression. A map does not authorize live
+  device tests. Keep future work in `ROADMAP.md`.
+
 ## Architecture
 
 - `audio`: `cpal` device enumeration and timestamped mono float PCM delivery,
@@ -156,6 +180,11 @@ CoreAudio formats, AppleScript details, or event serialization.
 - The dictation shortcut defaults to Option but supports modifier-only,
   modifier-plus-key, standalone Globe/Fn, and standalone function-key bindings.
   Capturing a new binding suspends global matching.
+- GUI startup must successfully call `keyboard::initialize_layout` on the OS
+  main thread before settings, keyboard-using workers, or GPUI start. That
+  snapshot is fixed until restart; cached misses must not re-enter TIS/TSM.
+  Uncached headless lookups retain live-layout resolution, with all native
+  lookup and snapshot construction serialized by the same lock.
 - Stale shortcut recovery requires at least 100 ms of sampled keyboard neutrality,
   no pending input, and no active or pending gesture. It emits no capture actions.
   Native `SecondaryFn` navigation metadata may be ignored only with timestamped

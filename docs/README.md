@@ -17,6 +17,8 @@ override shipped behavior.
 - [`../AGENTS.md`](../AGENTS.md): architecture, invariants, development
   commands, and diagnostics. This is the implementation authority.
 - [`../ROADMAP.md`](../ROADMAP.md): prioritized product and engineering work.
+- [`features/README.md`](features/README.md): existing user-facing capabilities,
+  entry points, available verification, and gaps; detailed dictation and recovery maps.
 - [`opencode-compatibility.md`](opencode-compatibility.md): audited OpenCode V2
   source and CLI baseline, integration contract, and validation limits.
 - [`plans/personal-commands.md`](plans/personal-commands.md): shipped personal
