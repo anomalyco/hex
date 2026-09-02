@@ -5,8 +5,8 @@ This maps existing behavior. [ROADMAP.md](../../ROADMAP.md) owns future work;
 [AGENTS.md](../../AGENTS.md) owns implementation invariants.
 
 Initial source baseline: September 1, 2026, `9e9da53aa9ed`. Public macOS release:
-[2.1.12](../releases/2.1.12.md), including the later cleanup and keyboard-layout
-repair. The initial map was source-only. Listed
+[2.1.13](../releases/2.1.13.md), including the later cleanup, keyboard-layout
+repair, and sidebar update fix. The initial map was source-only. Listed
 checks are locators unless an executed result is explicitly recorded, as in
 the [keyboard-layout verification](recovery.md#keyboard-layout-resolution).
 
@@ -200,12 +200,18 @@ The sidebar uses window-local deferred action dispatch in
 production control in an active in-memory GPUI window: zero actions before the
 fix, one afterward, and no action in a preview. It does not start Sparkle.
 
-**Released-version defect:** 2.1.12 still uses app-global dispatch from inside
-the sidebar click, which loses the action while the active window is borrowed.
-The fix is in source, not yet released. The menu-bar path was exercised on the
-installed local 2.1.11 build and opened the native Software Update window; no
-installation was performed. That path is the current workaround, including
-after Remind Me Later. A repaired installed-sidebar click remains unverified.
+**Fixed in 2.1.13:** older releases through 2.1.12 used app-global dispatch from
+inside the sidebar click, losing the action while the active window was borrowed.
+The click regression passed in debug and optimized release builds. The menu-bar
+path was exercised on the installed local 2.1.11 build and opened the native
+Software Update window; no installation was performed. That path remains the
+workaround for older versions, including after Remind Me Later. A repaired
+installed-sidebar click remains unverified.
+
+Release `3675206`, build `20113`, was signed, notarized, stapled, and accepted by
+Gatekeeper. DMG and ZIP payloads matched across 207 entries. Public DMG, ZIP, and
+latest-DMG downloads matched their prepared SHA-256 checksums; the public feed
+led with `20113`, and its ZIP signature verified against the app's public key.
 
 [Recovery](recovery.md) separates supported recovery from known defects.
 [login_item.rs](../../src/login_item.rs), [status_item.rs](../../src/status_item.rs),
