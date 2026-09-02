@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::ffi::c_void;
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
 
 use color_eyre::eyre::{Result, eyre};
 
@@ -54,6 +54,10 @@ const CONTROL_FLAG: u64 = 1 << 18;
 const EVENT_SOURCE_USER_DATA: u32 = 42;
 pub const SYNTHETIC_EVENT_MARKER: i64 = 0x0056_4f49_4345;
 static KEY_CODES: OnceLock<HashMap<char, u16>> = OnceLock::new();
+static LAYOUT_ACCESS: Mutex<()> = Mutex::new(());
+#[cfg(test)]
+pub(crate) static INPUT_SOURCE_QUERIES: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
 
 #[link(name = "Carbon", kind = "framework")]
 unsafe extern "C" {
@@ -95,11 +99,24 @@ unsafe extern "C" {
 }
 
 pub fn key_code_for(character: char) -> Result<u16> {
-    if let Some(key_code) = KEY_CODES
-        .get()
-        .and_then(|codes| codes.get(&character.to_ascii_lowercase()))
-    {
-        return Ok(*key_code);
+    let cached = || {
+        KEY_CODES.get().map(|codes| {
+            codes
+                .get(&character.to_ascii_lowercase())
+                .copied()
+                .ok_or_else(|| eyre!("current keyboard layout has no key for {character:?}"))
+        })
+    };
+    if let Some(result) = cached() {
+        return result;
+    }
+    // Headless callers retain live-layout resolution. GUI callers must prewarm
+    // on the main thread; even a cache miss then returns without entering TIS.
+    let _access = LAYOUT_ACCESS
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    if let Some(result) = cached() {
+        return result;
     }
     let source = input_source()?;
     // SAFETY: The retained TIS source remains alive until after all property reads.
@@ -120,7 +137,15 @@ pub fn key_code_for(character: char) -> Result<u16> {
     result.ok_or_else(|| eyre!("current keyboard layout has no key for {character:?}"))
 }
 
+/// GUI startup must build this snapshot on the main thread before starting workers.
+/// Later lookups, including misses, never re-enter TIS/TSM from a worker thread.
 pub fn initialize_layout() -> Result<()> {
+    if KEY_CODES.get().is_some() {
+        return Ok(());
+    }
+    let _access = LAYOUT_ACCESS
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
     if KEY_CODES.get().is_some() {
         return Ok(());
     }
@@ -269,6 +294,8 @@ impl Drop for KeyboardEvent {
 }
 
 fn input_source() -> Result<InputSourceRef> {
+    #[cfg(test)]
+    INPUT_SOURCE_QUERIES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     // SAFETY: TIS copy functions return retained immutable input-source objects.
     let source = unsafe { TISCopyCurrentKeyboardLayoutInputSource() };
     if !source.is_null() {

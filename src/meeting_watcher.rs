@@ -123,6 +123,9 @@ fn run_with_shell_preview(
     dictation_preview: bool,
     shell_preview: Option<crate::app_window::AppWindowPreview>,
 ) -> Result<()> {
+    if objc2::MainThreadMarker::new().is_none() {
+        return Err(eyre!("desktop startup requires the main thread"));
+    }
     shutdown.store(false, Ordering::Relaxed);
     crate::keyboard::initialize_layout()?;
     let settings = if shell_preview.is_some() {

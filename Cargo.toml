@@ -6,6 +6,10 @@ default-run = "voice-control"
 license = "MIT"
 repository = "https://github.com/anomalyco/hex"
 
+[[test]]
+name = "keyboard_layout"
+harness = false
+
 [build-dependencies]
 cc = "1"
 
