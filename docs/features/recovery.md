@@ -296,8 +296,26 @@ loaded transcription model, and Listening, with no startup errors or panic.
 The settings file's SHA-256 was unchanged after restart. This local build was
 not notarized or published; the previous notarized app was retained for rollback.
 
-Proof limit: these are native layout-query and local app-startup checks, not
-physical shortcut/paste acceptance or validation of a distributed update.
+**Release verification for 2.1.12:** release commit `f76c115`, build `20112`,
+passed 435 Rust tests (nine ignored), all twelve layout-regression child runs in
+both debug and release profiles, 46 command-SDK tests, Clippy, formatting, and
+identity guards. Linux and Nix CI passed for source commit `f556f9b`; the release
+commit changes only the version and release notes.
+
+The app and DMG were Developer ID signed, notarized, and stapled; Gatekeeper
+accepted the DMG and its app. The DMG and Sparkle ZIP matched across 207 payload
+entries, including file bytes, permissions, and symlink targets. After
+artifact-first/feed-last publication, the public DMG, ZIP, and latest-DMG link
+matched the prepared SHA-256 checksums. The ZIP's Ed25519 signature verified
+against the app's public key, and the public appcast led with build `20112`.
+See [release notes](../releases/2.1.12.md) and
+[release checks](../../scripts/release-app.sh).
+
+Proof limit: these are native layout-query, local app-startup, and distribution
+artifact checks, not physical shortcut/paste acceptance or an exercised Sparkle
+installation. The signed release preview created a window, but screenshot
+capture failed with Screen Recording permission unavailable; no screenshot
+verification is claimed. The installed local app and its settings were not changed.
 Changing layouts during a running GUI session still requires a restart to
 refresh its snapshot; live GUI layout refresh is not part of this fix.
 

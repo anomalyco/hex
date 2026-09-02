@@ -4,8 +4,9 @@ What can the user do, how do they reach it, and what would prove it works?
 This maps existing behavior. [ROADMAP.md](../../ROADMAP.md) owns future work;
 [AGENTS.md](../../AGENTS.md) owns implementation invariants.
 
-Source baseline: September 1, 2026, `9e9da53aa9ed`. Public macOS release: 2.1.11;
-source also includes later cleanup. The initial map was source-only. Listed
+Initial source baseline: September 1, 2026, `9e9da53aa9ed`. Public macOS release:
+[2.1.12](../releases/2.1.12.md), including the later cleanup and keyboard-layout
+repair. The initial map was source-only. Listed
 checks are locators unless an executed result is explicitly recorded, as in
 the [keyboard-layout verification](recovery.md#keyboard-layout-resolution).
 
