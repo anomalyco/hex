@@ -87,9 +87,10 @@ pub fn metadata(path: &Path) -> Result<InstalledApplication> {
         let path_string = NSString::from_str(&path.to_string_lossy());
         let bundle = NSBundle::bundleWithPath(&path_string)
             .ok_or_else(|| eyre!("{} is not a readable application bundle", path.display()))?;
-        let name = NSFileManager::defaultManager()
+        let display_name = NSFileManager::defaultManager()
             .displayNameAtPath(&path_string)
             .to_string();
+        let name = crate::context::strip_bundle_extension(&display_name).to_owned();
         let bundle_id = bundle
             .bundleIdentifier()
             .map(|identifier| identifier.to_string());

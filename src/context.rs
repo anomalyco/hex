@@ -247,7 +247,22 @@ fn normalize_browser_host(host: &str) -> String {
 }
 
 fn application_names_equal(left: &str, right: &str) -> bool {
-    left.eq_ignore_ascii_case(right)
+    strip_bundle_extension(left).eq_ignore_ascii_case(strip_bundle_extension(right))
+}
+
+/// Removes a trailing `.app` from an application name.
+///
+/// `NSFileManager.displayNameAtPath` honors Finder's "Show all filename
+/// extensions" preference and then returns `Ghostty.app`, while the frontmost
+/// application's `localizedName` is always `Ghostty`. Names are normalized
+/// before they are stored and again when compared so settings written by
+/// either form keep matching.
+pub fn strip_bundle_extension(name: &str) -> &str {
+    let bytes = name.as_bytes();
+    match bytes.len().checked_sub(4) {
+        Some(split) if split > 0 && bytes[split..].eq_ignore_ascii_case(b".app") => &name[..split],
+        _ => name,
+    }
 }
 
 fn browser_hosts_equal(left: &str, right: &str) -> bool {
@@ -276,6 +291,29 @@ mod tests {
         };
 
         assert!(ContextSelector::application("Zed").matches(&context));
+    }
+
+    #[test]
+    fn application_matching_ignores_finder_bundle_extensions() {
+        let context = ContextSnapshot {
+            application: Some("Ghostty".into()),
+            ..ContextSnapshot::default()
+        };
+
+        assert!(ContextSelector::application("Ghostty.app").matches(&context));
+        assert!(ContextSelector::application("ghostty.APP").matches(&context));
+    }
+
+    #[test]
+    fn bundle_extension_stripping_only_removes_a_trailing_suffix() {
+        assert_eq!(strip_bundle_extension("Ghostty.app"), "Ghostty");
+        assert_eq!(
+            strip_bundle_extension("T3 Code (Nightly).app"),
+            "T3 Code (Nightly)"
+        );
+        assert_eq!(strip_bundle_extension("Ghostty"), "Ghostty");
+        assert_eq!(strip_bundle_extension("app.application"), "app.application");
+        assert_eq!(strip_bundle_extension(".app"), ".app");
     }
 
     #[test]
