@@ -1,0 +1,20 @@
+name: Feature request
+description: Suggest an improvement to HEX.
+body:
+  - type: markdown
+    attributes:
+      value: Please search existing issues first. A concrete example of what you are trying to do helps us assess the request.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do?
+      description: Describe the workflow or limitation, including the platform you use.
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: What would help?
+      description: Describe the outcome you want. A proposed solution or current workaround is welcome, but not required.
+    validations:
+      required: true

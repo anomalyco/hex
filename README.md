@@ -1,14 +1,41 @@
-# HEX
+<p align="center">
+  <img src=".github/assets/hex-icon.png" width="96" height="96" alt="HEX app icon" />
+</p>
+
+<h1 align="center">HEX</h1>
+
+<p align="center">
+  <strong>Speak. It appears.</strong><br />
+  Local-first voice dictation, built in Rust.
+</p>
+
+<p align="center">
+  <a href="https://pub-089d681d41754031a4aefa7017d8c2fb.r2.dev/releases/HEX-latest-arm64.dmg"><strong>Download for macOS</strong></a>
+  · <a href="https://hex.kitlangton.dev/">Website</a>
+  · <a href="docs/linux.md">Linux beta</a>
+  · <a href="sdk/typescript/README.md">TypeScript SDK</a>
+  · <a href="CONTRIBUTING.md">Contributing</a>
+</p>
 
 HEX is local-first voice dictation for Apple silicon Macs running macOS 15 or
 newer. Hold a shortcut, speak, and release. HEX transcribes on your Mac and
 pastes the result into the app you are using.
 
-[Download the latest signed DMG](https://pub-089d681d41754031a4aefa7017d8c2fb.r2.dev/releases/HEX-latest-arm64.dmg)
+- **On-device transcription.** Download a local speech model during setup;
+  ordinary dictation does not require OpenCode or a cloud transcription service.
+- **Your words, your way.** Choose a shortcut, language, and model. Use Modes for
+  corrections, application-specific behavior, and optional text processing.
+- **Optional voice tools.** Enable Voice Action or voice commands when you need
+  them. Both start off; provider-backed rewriting is separate from local speech
+  recognition.
+
+The macOS app is available now. The [Linux beta](#linux-beta) has a smaller feature
+set and requires a source build or Nix. See [Privacy and local data](#privacy-and-local-data)
+for what stays on your device and what optional features send to a provider.
 
 ## Install HEX
 
-1. Download and open the DMG.
+1. [Download the latest signed DMG](https://pub-089d681d41754031a4aefa7017d8c2fb.r2.dev/releases/HEX-latest-arm64.dmg) and open it.
 2. Drag `Hex.app` into Applications, then launch it.
 3. Complete the permission and model steps in setup.
 
@@ -19,6 +46,10 @@ pastes the result into the app you are using.
 
 HEX checks for signed updates automatically. Use **HEX > Check for Updates...**
 to check immediately.
+
+**Looking for the Mac app in GitHub Releases?** Those releases currently contain
+the TypeScript SDK. Use the DMG link above for the app and its built-in updater
+for subsequent releases.
 
 Coming from the original Swift app? Install the new app manually and complete
 setup. Settings and history are not transferred. Quit the old app before
@@ -117,6 +148,10 @@ Review and redact diagnostics before sharing them.
 
 Permission changes may require quitting and reopening HEX.
 
+Still stuck? [Report a bug](https://github.com/anomalyco/hex/issues/new?template=bug_report.yml)
+with your HEX version, operating system, and steps to reproduce. Review and
+redact any attachments; do not upload private dictation, recordings, or full logs.
+
 Diagnostics are stored at:
 
 - macOS: `~/Library/Application Support/voice-control/logs/`
@@ -134,6 +169,17 @@ Use the [Linux installation guide](docs/linux.md) to build from source until
 the first signed Linux release is published. It also describes the planned
 user-local installer, requirements, and limitations.
 For Nix/NixOS packaging and per-user autostart, see the [Nix guide](docs/nix.md).
+
+## Build With HEX
+
+[`@kitlangton/hex`](sdk/typescript/README.md) brings local transcription to your
+own application through Promise and optional Effect APIs. Your app supplies the
+recorded audio; HEX handles model preparation and transcription.
+
+The SDK is published on [npm](https://www.npmjs.com/package/@kitlangton/hex), but
+a bundled native helper is not yet published. You must supply a compatible HEX
+executable. Follow the [SDK guide](sdk/typescript/README.md) for requirements and
+examples.
 
 ## Contributing
 
