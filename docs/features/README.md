@@ -5,9 +5,10 @@ This maps existing behavior. [ROADMAP.md](../../ROADMAP.md) owns future work;
 [AGENTS.md](../../AGENTS.md) owns implementation invariants.
 
 Initial source baseline: September 1, 2026, `9e9da53aa9ed`. Public macOS release:
-[2.1.13](../releases/2.1.13.md), including the later cleanup, keyboard-layout
-repair, and sidebar update fix. The initial map was source-only. Listed
-checks are locators unless an executed result is explicitly recorded, as in
+[2.1.14](../releases/2.1.14.md), including Finder-extension mode matching,
+Parakeet language-selection clarification, and quiet menu-bar startup. The initial
+map was source-only. Listed checks are locators unless an executed result is
+explicitly recorded, as in
 the [keyboard-layout verification](recovery.md#keyboard-layout-resolution).
 
 ## Product Map
@@ -194,10 +195,11 @@ rewrites already persisted activations on load, checked by
 `application_matching_ignores_finder_bundle_extensions` and
 `loading_strips_finder_bundle_extensions_from_mode_applications`.
 
-**Released-version defect:** through 2.1.13, a mode saved with that Finder
+**Fixed in 2.1.14:** through 2.1.13, a mode saved with that Finder
 preference enabled never activates and every dictation falls back to Global.
-Workaround until the fix ships: quit HEX, remove the `.app` suffix from
-`dictation_processing.modes[].applications` in `settings.json`, relaunch.
+Update to repair saved selections automatically. For older builds, the workaround
+is to quit HEX, remove the `.app` suffix from
+`dictation_processing.modes[].applications` in `settings.json`, then relaunch.
 
 ## Use Voice Action
 
@@ -285,6 +287,27 @@ Release `3675206`, build `20113`, was signed, notarized, stapled, and accepted b
 Gatekeeper. DMG and ZIP payloads matched across 207 entries. Public DMG, ZIP, and
 latest-DMG downloads matched their prepared SHA-256 checksums; the public feed
 led with `20113`, and its ZIP signature verified against the app's public key.
+
+**Published September 3, 2026:** [2.1.14](../releases/2.1.14.md), release commit
+`cc7f843`, build `20114`. The combined release passed 442 Rust tests (nine opt-in
+tests ignored), all twelve keyboard-layout scenarios in debug and release,
+46 command-SDK tests, Clippy, formatting, and app identity guards. The first
+optimized harness attempt exceeded the command timeout during compilation;
+the rerun completed and all twelve scenarios passed.
+
+The app and DMG were Developer ID signed, notarized, and stapled; Gatekeeper
+accepted both. DMG and ZIP app payloads matched across 207 entries, including
+file bytes, permissions, and symlink targets. After artifact-first/feed-last
+publication, public DMG, ZIP, and latest-DMG downloads matched the prepared
+SHA-256 hashes. The public feed led with `20114`, and its ZIP signature verified
+against the app's public key. The publication script's recursive diff emitted
+framework directory-loop warnings; the separate no-follow manifest comparison
+verified the complete payloads without traversing symlinks.
+
+The installed app and live settings were not modified. The live quiet-startup,
+Finder/Spotlight reopen, and physical dictation smoke test was explicitly waived
+for this release; those paths remain unverified on the installed candidate.
+No Sparkle installation or Linux binary release was performed.
 
 [Recovery](recovery.md) separates supported recovery from known defects.
 [login_item.rs](../../src/login_item.rs), [status_item.rs](../../src/status_item.rs),
