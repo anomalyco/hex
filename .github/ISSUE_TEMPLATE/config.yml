@@ -1,0 +1,11 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Installation and troubleshooting
+    url: https://github.com/anomalyco/hex#install-hex
+    about: Download the macOS app, check permissions, and find troubleshooting steps.
+  - name: Linux beta requirements
+    url: https://github.com/anomalyco/hex/blob/main/docs/linux.md
+    about: Check supported X11/Wayland environments and installation requirements.
+  - name: Security vulnerabilities
+    url: https://github.com/anomalyco/hex/blob/main/SECURITY.md
+    about: Follow the security reporting instructions rather than opening a public issue.

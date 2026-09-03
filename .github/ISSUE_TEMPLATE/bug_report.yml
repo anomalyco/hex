@@ -1,0 +1,55 @@
+name: Bug report
+description: Report something that does not work as expected in HEX.
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve HEX. Please search existing issues first.
+        Do not share private dictation, audio recordings, credentials, or full logs.
+        Review and redact any diagnostic excerpts or screenshots before attaching them.
+  - type: input
+    id: version
+    attributes:
+      label: HEX version
+      description: Include the commit if you built from source, or the package version for an SDK issue.
+      placeholder: "2.1.13, installed from the signed DMG"
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - macOS
+        - Linux X11
+        - Linux Wayland
+        - TypeScript SDK
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: System details
+      description: OS version and hardware; on Linux, include your distribution and desktop/compositor.
+    validations:
+      required: true
+  - type: textarea
+    id: behavior
+    attributes:
+      label: What happened?
+      description: Describe the actual behavior and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: Include relevant shortcut, microphone, model/language, or Mode settings. If intermittent, describe when it happens.
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Additional context
+      description: Optional redacted errors, screenshots, or workarounds. Please do not upload your full settings file or logs.
