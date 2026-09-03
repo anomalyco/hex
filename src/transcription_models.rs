@@ -345,7 +345,8 @@ pub const MODELS: &[ModelDefinition] = &[
         timestamps: "Token timestamps",
         runtime: ModelRuntime::Gguf(&PARAKEET_V3_ARTIFACT),
         languages: PARAKEET_V3_LANGUAGES,
-        accepts_language_hint: true,
+        // The pinned v3 artifact detects language from audio and has no prompt input.
+        accepts_language_hint: false,
         supports_language_detection: false,
         supports_recognition_hints: false,
     },
@@ -999,6 +1000,33 @@ mod tests {
         assert_eq!(whisper.runtime_language_hint("fil"), Some("tl"));
         assert_eq!(qwen.runtime_language_hint(AUTO_LANGUAGE), None);
         assert_eq!(qwen.runtime_language_hint("zh"), Some("zh"));
+    }
+
+    #[test]
+    fn parakeet_v3_supports_portuguese_without_language_conditioning() {
+        let selection = TranscriptionSelection {
+            model: TranscriptionModelId::ParakeetV3,
+            language: "pt".into(),
+            recognition_hints: String::new(),
+        };
+        let model = validate(&selection).unwrap();
+        assert_eq!(model.id, TranscriptionModelId::ParakeetV3);
+        assert!(
+            choices_for_runtime("pt")
+                .iter()
+                .any(|choice| choice.model.id == model.id)
+        );
+        assert_eq!(model.runtime_language_hint(&selection.language), None);
+        assert_eq!(
+            definition(TranscriptionModelId::WhisperLargeV3Turbo)
+                .runtime_language_hint(&selection.language),
+            Some("pt")
+        );
+        assert!(
+            !choices_for_runtime(AUTO_LANGUAGE)
+                .iter()
+                .any(|choice| choice.model.id == model.id)
+        );
     }
 
     #[test]
