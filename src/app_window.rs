@@ -3743,7 +3743,7 @@ impl AppWindow {
                                     .child(
                                         settings_row(
                                             "Show Dock icon",
-                                            "Keep HEX visible in the Dock while it is running",
+                                            "When off, HEX starts quietly in the menu bar after setup",
                                             toggle(dock_icon_position),
                                         )
                                         .id("dock-icon-setting")

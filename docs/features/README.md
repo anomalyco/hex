@@ -230,6 +230,36 @@ Menu bar and Settings                    // maintenance
 ```
 
 ```ts
+Launch Hex                               // maintain.startup
+├── Setup incomplete / permissions or model missing -> Open setup or Settings
+├── Show Dock icon on -> Open Settings
+└── Show Dock icon off + usable menu-bar item -> No startup window
+    ├── Dictation starts independently of the Settings window
+    └── Menu-bar Settings / Finder or Spotlight reopen -> Open or focus the window
+
+Menu-bar installation fails -> Show Dock icon and open the window // recovery access
+```
+
+The existing **Show Dock icon** preference controls quiet startup; there is no
+additional launch-window setting. This applies to normal and login launches,
+does not change login registration, and does not hide an already open window
+when the preference changes. Explicit previews always open their requested pane.
+
+Checks in [meeting_watcher.rs](../../src/meeting_watcher.rs):
+`dockless_startup_stays_quiet_only_when_setup_and_menu_bar_are_ready` and
+`dock_visible_startup_always_opens_the_app` cover the startup decision. The
+existing `on_reopen` and status-item `OpenSettings` paths bypass that decision.
+These checks do not establish signed-app login behavior or native Finder/Spotlight
+reopening; those still need an installed-app smoke test. This addresses the
+menu-bar-only case in [#64](https://github.com/anomalyco/hex/issues/64), not an
+independent window preference for users keeping the Dock icon visible.
+
+**Executed September 3, 2026:** 441 Rust tests passed (nine opt-in tests ignored),
+along with all twelve keyboard-layout child scenarios, formatting, and Clippy.
+The release Settings preview built and launched, but window screenshot capture
+failed; no visual or installed-app startup verification is claimed.
+
+```ts
 Update available                         // maintain.updates
 ├── Sidebar Update -> Sparkle update dialog
 └── Menu bar > Check for Updates -> Same dialog

@@ -116,6 +116,15 @@ pub fn preview_shell(
     run_with_shell_preview(shutdown, false, None, false, Some(preview))
 }
 
+fn should_open_app_on_launch(
+    show_dock_icon: bool,
+    setup_ready: bool,
+    onboarding_completed: bool,
+    status_item_available: bool,
+) -> bool {
+    show_dock_icon || !setup_ready || !onboarding_completed || !status_item_available
+}
+
 fn run_with_shell_preview(
     shutdown: &'static AtomicBool,
     preview: bool,
@@ -135,6 +144,7 @@ fn run_with_shell_preview(
     };
     let show_dock_icon = settings.show_dock_icon;
     let setup_ready = crate::onboarding::status(&settings.transcription).ready();
+    let onboarding_completed = shell_preview.is_some() || crate::onboarding::completion_recorded();
     let history = if listener.is_some() {
         match crate::history::History::open_default(settings.history_retention) {
             Ok(history) => Some(history),
@@ -179,8 +189,6 @@ fn run_with_shell_preview(
     let shell_event_path = app_event_path
         .clone()
         .unwrap_or_else(|| meeting_project_root.join("logs/live.ndjson"));
-    let show_app_on_launch =
-        shell_preview.is_some() || app_event_path.is_some() && !dictation_preview;
     let (event_sender, event_receiver) = mpsc::sync_channel(32);
     let (command_sender, command_receiver) = mpsc::sync_channel(8);
     let (meeting_request_sender, meeting_request_receiver) = mpsc::sync_channel(8);
@@ -418,6 +426,12 @@ fn run_with_shell_preview(
             None
         };
         crate::app_settings::set_dock_icon_visible(show_dock_icon || status_actions.is_none());
+        let show_app_on_launch = should_open_app_on_launch(
+            show_dock_icon,
+            setup_ready,
+            onboarding_completed,
+            status_actions.is_some(),
+        );
         let open_result = match shell_preview.clone() {
             Some(preview) => Some(crate::app_window::open_preview(
                 &app_window,
@@ -428,7 +442,7 @@ fn run_with_shell_preview(
                 preview,
                 cx,
             )),
-            None => app_event_path.map(|event_path| {
+            None if show_app_on_launch => app_event_path.map(|event_path| {
                 crate::app_window::open_or_focus(
                     &app_window,
                     event_path,
@@ -440,8 +454,9 @@ fn run_with_shell_preview(
                     cx,
                 )
             }),
+            None => None,
         };
-        if show_app_on_launch && let Some(Err(error)) = open_result {
+        if let Some(Err(error)) = open_result {
             tracing::error!(%error, "could not open HEX");
         }
         let quit_shutdown = shutdown;
@@ -1091,4 +1106,45 @@ pub fn probe() -> Result<()> {
         );
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dockless_startup_stays_quiet_only_when_setup_and_menu_bar_are_ready() {
+        for setup_ready in [false, true] {
+            for onboarding_completed in [false, true] {
+                for status_item_available in [false, true] {
+                    assert_eq!(
+                        should_open_app_on_launch(
+                            false,
+                            setup_ready,
+                            onboarding_completed,
+                            status_item_available,
+                        ),
+                        !(setup_ready && onboarding_completed && status_item_available),
+                        "setup_ready={setup_ready}, onboarding_completed={onboarding_completed}, status_item_available={status_item_available}",
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn dock_visible_startup_always_opens_the_app() {
+        for setup_ready in [false, true] {
+            for onboarding_completed in [false, true] {
+                for status_item_available in [false, true] {
+                    assert!(should_open_app_on_launch(
+                        true,
+                        setup_ready,
+                        onboarding_completed,
+                        status_item_available,
+                    ));
+                }
+            }
+        }
+    }
 }
