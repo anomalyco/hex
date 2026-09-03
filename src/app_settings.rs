@@ -664,10 +664,13 @@ impl AppSettings {
                 settings.dictation_processing.default_mode.name = "Global".into();
                 settings.normalize_double_tap_settings();
                 settings.migrate_legacy_replacements();
+                let mode_applications_migrated = settings.normalize_mode_application_names();
                 let transcription_migrated = settings.migrate_disabled_transcription_model();
                 crate::transcription_models::validate(&settings.transcription)?;
                 settings.repair_hotkey_conflict();
-                if (transcription_migrated || microphone_policy_migrated)
+                if (transcription_migrated
+                    || microphone_policy_migrated
+                    || mode_applications_migrated)
                     && let Err(error) = settings.write_to(path)
                 {
                     tracing::warn!(%error, "could not persist the replacement transcription model");
@@ -738,6 +741,30 @@ impl AppSettings {
             .get_or_init(Default::default)
             .write()
             .unwrap_or_else(|error| error.into_inner()) = self.voice_action.clone();
+    }
+
+    /// Mode activations saved while Finder showed filename extensions carry a
+    /// `.app` suffix that never matched the foreground application name.
+    fn normalize_mode_application_names(&mut self) -> bool {
+        let mut migrated = false;
+        let modes = std::iter::once(&mut self.dictation_processing.default_mode)
+            .chain(self.dictation_processing.modes.iter_mut());
+        for mode in modes {
+            let mut mode_migrated = false;
+            for application in &mut mode.applications {
+                let normalized = crate::context::strip_bundle_extension(application).to_owned();
+                if normalized != *application {
+                    *application = normalized;
+                    mode_migrated = true;
+                }
+            }
+            if mode_migrated {
+                mode.applications.sort_by_key(|name| name.to_lowercase());
+                mode.applications.dedup();
+                migrated = true;
+            }
+        }
+        migrated
     }
 
     fn migrate_legacy_replacements(&mut self) {
@@ -1063,6 +1090,34 @@ mod tests {
         drop(reloaded);
         AppSettings::load_from(&path).unwrap();
         assert!(completion_recorded_at(&directory));
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn loading_strips_finder_bundle_extensions_from_mode_applications() {
+        let directory = std::env::temp_dir().join(format!(
+            "hex-mode-applications-{}-{}",
+            std::process::id(),
+            SETTINGS_TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed),
+        ));
+        fs::create_dir(&directory).unwrap();
+        let path = directory.join("settings.json");
+        fs::write(
+            &path,
+            br#"{"dictation_processing":{"modes":[{"name":"Code","applications":["Zed.app","Ghostty.app","Zed"]}]}}"#,
+        )
+        .unwrap();
+
+        let settings = AppSettings::load_from(&path).unwrap();
+        assert_eq!(
+            settings.dictation_processing.modes[0].applications,
+            vec!["Ghostty".to_string(), "Zed".to_string()]
+        );
+        let persisted: AppSettings = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        assert_eq!(
+            persisted.dictation_processing.modes[0].applications,
+            vec!["Ghostty".to_string(), "Zed".to_string()]
+        );
         fs::remove_dir_all(directory).unwrap();
     }
 

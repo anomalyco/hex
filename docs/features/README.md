@@ -156,6 +156,19 @@ Selection and stage checks start in
 [personal_commands.rs](../../src/personal_commands.rs). They do not prove live
 provider availability or real application/Brave context changes.
 
+Application activations compare the picker's bundle name with the foreground
+application's localized name. When Finder shows all filename extensions, the
+picker name arrives as `Ghostty.app`; [context.rs](../../src/context.rs) strips
+that suffix on both sides and [app_settings.rs](../../src/app_settings.rs)
+rewrites already persisted activations on load, checked by
+`application_matching_ignores_finder_bundle_extensions` and
+`loading_strips_finder_bundle_extensions_from_mode_applications`.
+
+**Released-version defect:** through 2.1.13, a mode saved with that Finder
+preference enabled never activates and every dictation falls back to Global.
+Workaround until the fix ships: quit HEX, remove the `.app` suffix from
+`dictation_processing.modes[].applications` in `settings.json`, relaunch.
+
 ## Use Voice Action
 
 [Voice Action](voice-action.md) maps the separate opt-in, hold-only shortcut,
