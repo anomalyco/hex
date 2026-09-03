@@ -48,6 +48,36 @@ Permissions revoked later
 Apple silicon, macOS 15+. Choices come from the compiled model/language catalog;
 Apple Speech is currently excluded from the desktop picker.
 
+```ts
+Choose a supported language              // setup.language-conditioning; macOS + Linux picker
+├── Parakeet v3 -> Detect language from audio; selected language does not constrain output
+└── Whisper -> Use selected language to guide decoding; accuracy is not guaranteed
+```
+
+Parakeet v3 remains available for Portuguese and its other existing language
+choices. Its card explains the limitation and suggests Whisper for
+language-guided transcription. This does not change saved selections or expand
+the Auto picker choices. Multilingual audio support is not language conditioning:
+the pinned v3 GGUF has no `stt.parakeet.prompt.num_prompts` metadata, which gates
+language prompting in `transcribe-cpp-sys` 0.1.3.
+
+Sources: [model catalog](../../src/transcription_models.rs),
+[shared picker](../../src/desktop_transcription_picker.rs), and the runtime
+options in [parakeet.rs](../../src/parakeet.rs) and
+[linux_transcriber.rs](../../src/linux_transcriber.rs). The regression
+`parakeet_v3_supports_portuguese_without_language_conditioning` checks that the
+Portuguese selection remains valid and available, sends no runtime language
+hint, and contrasts Whisper's `pt` hint. It does not run inference.
+The regression was observed failing with the old metadata and passing after the
+correction. The macOS release picker preview built, but screenshot capture was
+blocked by missing Screen Recording access; visual layout remains unverified.
+
+**Unreproduced recognition report:** [#68](https://github.com/anomalyco/hex/issues/68)
+reports Portuguese speech misrecognized as English. Source and pinned-model
+metadata inspection establish the prompting limitation, not the cause or repair
+of those transcripts. No v3 audio reproduction or transcription-quality fix has
+been demonstrated.
+
 Checks start in [onboarding.rs](../../src/onboarding.rs),
 [transcription.rs](../../src/transcription.rs), and
 [transcription_models.rs](../../src/transcription_models.rs). Setup/picker previews
