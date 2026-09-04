@@ -327,8 +327,10 @@ CoreAudio formats, AppleScript details, or event serialization.
   shortcut/double-tap settings stops and restores only a previously running
   listener; cancellation restores the old binding unless its save already
   committed. Settings must expose listener state, recovery, and errors. Without
-  a usable tray, closing Settings quits after draining workers, never detaches
-  an unmanageable microphone. HUD teardown only hides that listener's HUD.
+  a usable X11 tray, closing Settings quits after draining workers, never
+  detaches an unmanageable microphone. On Wayland, closing Settings keeps the
+  in-process listener; Quit HEX and SIGTERM remain the stop paths. HUD teardown
+  only hides that listener's HUD.
 - Linux paste keeps transcripts off helper argv, bounds helper I/O, and waits
   for physical modifiers without discarding accepted output. Shutdown cancels
   that wait. New installs use Ctrl-V; the terminal-paste preference selects
