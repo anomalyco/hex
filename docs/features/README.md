@@ -5,9 +5,8 @@ This maps existing behavior. [ROADMAP.md](../../ROADMAP.md) owns future work;
 [AGENTS.md](../../AGENTS.md) owns implementation invariants.
 
 Initial source baseline: September 1, 2026, `9e9da53aa9ed`. Public macOS release:
-[2.1.15](../releases/2.1.15.md), a maintenance cleanup following 2.1.14's
-Finder-extension mode matching, Parakeet language-selection clarification, and
-quiet menu-bar startup. The initial map was source-only. Listed checks are
+[2.1.16](../releases/2.1.16.md), with the long-form Cohere correction and menu-bar
+model switching. The initial map was source-only. Listed checks are
 locators unless an executed result is explicitly recorded, as in the
 [keyboard-layout verification](recovery.md#keyboard-layout-resolution).
 
@@ -128,7 +127,7 @@ and menu choice/tag projection. These do not establish a physical menu click or
 an installed-app switch. Remembering a language does not change the language
 conditioning limitations described above.
 
-**Observed September 4, 2026 (unreleased working branch):** all 455 Rust tests
+**Observed September 4, 2026 (2.1.16):** all 455 Rust tests
 passed in debug and release, with ten opt-in tests skipped per profile. All twelve
 keyboard-layout child scenarios passed per profile; formatting, strict
 all-target/all-feature Clippy in both profiles, and the release build passed.
@@ -385,6 +384,38 @@ the real installed app's Info.plist and executable hashes were unchanged.
 Screen Recording preflight reported unavailable, so no screenshot is claimed.
 The installed app was not replaced or launched, and no physical dictation,
 Sparkle installation, or Linux binary release was performed.
+
+**Published September 4, 2026:** [2.1.16](../releases/2.1.16.md), release commit
+`76dc552`, build `20116`. Both profiles passed 455 Rust tests and all twelve
+keyboard-layout scenarios, with ten opt-in tests skipped per profile. The real
+Cohere synthetic-audio regression passed separately. Both profiles passed strict
+Clippy; formatting, app-identity fixtures, 46 command-SDK tests, and 45 public-SDK
+tests passed, along with SDK typechecks and the public SDK build.
+
+The app and DMG were Developer ID signed, notarized, stapled, and accepted by
+Gatekeeper. The DMG and Sparkle ZIP matched across 208 no-follow payload entries.
+After artifact-first/feed-last publication, fresh public DMG, ZIP, and latest-DMG
+downloads matched the prepared artifacts byte-for-byte; the public feed led with
+`20116`, and its Ed25519 signature verified against the app's public key. The
+existing recursive-diff framework-loop warnings were independently covered by
+the no-follow comparison.
+
+[Homebrew cask PR #17](https://github.com/anomalyco/homebrew-tap/pull/17) updated
+the version/checksum and was merged after style, strict online audit, livecheck,
+checksum fetch, isolated installation/uninstallation, app identity/signature,
+stapled-ticket, and Gatekeeper checks. An existing-app fixture was refused without
+replacement. The test cask was removed; the real installed app's Info.plist and
+executable hashes were unchanged. Release replies were posted and
+[#73](https://github.com/anomalyco/hex/issues/73) and
+[#74](https://github.com/anomalyco/hex/issues/74) were closed after publication.
+
+Screen Recording preflight remains unavailable. This release has no physical
+menu-click, installed-app model switch, microphone/paste, or Sparkle installation
+proof. No Linux binary is published. The
+[Linux/Nix CI run](https://github.com/anomalyco/hex/actions/runs/33891943549)
+is tracked separately from native macOS and physical Linux verification.
+The [performance investigation](../research/performance-2026-09-04.md) changed
+no runtime defaults.
 
 [Recovery](recovery.md) separates supported recovery from known defects.
 [login_item.rs](../../src/login_item.rs), [status_item.rs](../../src/status_item.rs),

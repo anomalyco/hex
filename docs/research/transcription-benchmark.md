@@ -3,6 +3,10 @@
 **Status:** Historical benchmark method and provisional M2 Max results from
 2026-07-16. These measurements are not a current model-selection decision.
 
+The later [September 4 reconnaissance](performance-2026-09-04.md) measures
+current-model inference stages and an exploratory thread-count sweep. It did not
+change production performance defaults.
+
 The commands below run the current harness, not a pinned historical runtime.
 As of 2026-09-01, omitting `--model` selects the compiled default GGUF model,
 Parakeet Unified English, rather than the app's saved selection or the Parakeet
