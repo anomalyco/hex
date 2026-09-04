@@ -413,7 +413,11 @@ Screen Recording preflight remains unavailable. This release has no physical
 menu-click, installed-app model switch, microphone/paste, or Sparkle installation
 proof. No Linux binary is published. The
 [Linux/Nix CI run](https://github.com/anomalyco/hex/actions/runs/33891943549)
-is tracked separately from native macOS and physical Linux verification.
+passed for release commit `76dc552`: the Linux job completed in 3m50s and Nix in
+40m10s. This includes isolated X11 grabs, Wayland paste into GTK, virtual-microphone
+capture/inference/paste, signed-installer tamper rejection, and the installed Nix
+package checks. These CI checks remain separate from native macOS and physical
+Linux verification.
 The [performance investigation](../research/performance-2026-09-04.md) changed
 no runtime defaults.
 
