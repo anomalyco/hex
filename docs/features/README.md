@@ -5,11 +5,11 @@ This maps existing behavior. [ROADMAP.md](../../ROADMAP.md) owns future work;
 [AGENTS.md](../../AGENTS.md) owns implementation invariants.
 
 Initial source baseline: September 1, 2026, `9e9da53aa9ed`. Public macOS release:
-[2.1.14](../releases/2.1.14.md), including Finder-extension mode matching,
-Parakeet language-selection clarification, and quiet menu-bar startup. The initial
-map was source-only. Listed checks are locators unless an executed result is
-explicitly recorded, as in
-the [keyboard-layout verification](recovery.md#keyboard-layout-resolution).
+[2.1.15](../releases/2.1.15.md), a maintenance cleanup following 2.1.14's
+Finder-extension mode matching, Parakeet language-selection clarification, and
+quiet menu-bar startup. The initial map was source-only. Listed checks are
+locators unless an executed result is explicitly recorded, as in the
+[keyboard-layout verification](recovery.md#keyboard-layout-resolution).
 
 ## Product Map
 
@@ -30,6 +30,13 @@ HEX                                      // macOS release
 The other capabilities stay here until they need their own verification recipe.
 
 ## Get Ready
+
+Install the signed macOS app with `brew install --cask anomalyco/tap/hex` or the
+[manual DMG](../../README.md#install-hex). The cask uses a versioned, checksum-pinned
+DMG, requires Apple silicon/macOS 15+, and keeps Sparkle updates enabled. It does
+not require Bun or OpenCode, launch the app automatically, migrate the legacy
+Swift app, or forcibly replace an existing app destination. Homebrew uninstall
+leaves runtime settings, models, and retained data intact.
 
 ```ts
 Launch Hex                               // setup
@@ -308,6 +315,31 @@ The installed app and live settings were not modified. The live quiet-startup,
 Finder/Spotlight reopen, and physical dictation smoke test was explicitly waived
 for this release; those paths remain unverified on the installed candidate.
 No Sparkle installation or Linux binary release was performed.
+
+**Published September 3, 2026:** [2.1.15](../releases/2.1.15.md), release commit
+`9ec1b51`, build `20115`. The current-version checks passed 444 Rust tests in each
+of debug and release (nine opt-in tests ignored per profile), all twelve
+keyboard-layout scenarios in each profile, 46 command-SDK tests, strict Clippy in
+both profiles, formatting, and app identity guards.
+
+The app and DMG were Developer ID signed, notarized, and stapled; Gatekeeper
+accepted both. A no-follow manifest comparison matched all 208 entries including
+the app root, file bytes, modes, and symlink targets across DMG and ZIP. After
+artifact-first/feed-last publication, public DMG, ZIP, and latest-DMG downloads
+matched their prepared SHA-256 hashes. The public feed led with `20115`, and its
+ZIP signature verified against the app's public key. The existing recursive-diff
+warnings in the publication script remain; the separate no-follow check passed.
+
+[Homebrew cask PR #16](https://github.com/anomalyco/homebrew-tap/pull/16) passed
+style, strict online audit, Sparkle livecheck, and checksum-verified download.
+Installation and uninstall succeeded with an isolated temporary application
+directory. The installed candidate passed identity, signature, stapled-ticket,
+and Gatekeeper checks. An existing-app fixture was refused without replacement;
+the real installed app's Info.plist and executable hashes were unchanged.
+
+Screen Recording preflight reported unavailable, so no screenshot is claimed.
+The installed app was not replaced or launched, and no physical dictation,
+Sparkle installation, or Linux binary release was performed.
 
 [Recovery](recovery.md) separates supported recovery from known defects.
 [login_item.rs](../../src/login_item.rs), [status_item.rs](../../src/status_item.rs),

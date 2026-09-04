@@ -35,6 +35,20 @@ for what stays on your device and what optional features send to a provider.
 
 ## Install HEX
 
+With Homebrew:
+
+```sh
+brew install --cask anomalyco/tap/hex
+```
+
+Then launch Hex from Applications and complete setup.
+
+The cask installs the same signed app and keeps its built-in updater. Existing
+DMG installations can keep using **Check for Updates**; Homebrew does not migrate
+or forcibly replace another app already named `Hex.app`.
+
+Or install manually:
+
 1. [Download the latest signed DMG](https://pub-089d681d41754031a4aefa7017d8c2fb.r2.dev/releases/HEX-latest-arm64.dmg) and open it.
 2. Drag `Hex.app` into Applications, then launch it.
 3. Complete the permission and model steps in setup.
