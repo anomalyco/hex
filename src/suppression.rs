@@ -157,7 +157,6 @@ impl PendingInputEvents {
 pub struct InputMonitor {
     pub events: Receiver<ObservedInputEvent>,
     pub activity: InputActivity,
-    pub paste_key_code: u16,
     pending: PendingInputEvents,
     escape_cancels: Arc<AtomicBool>,
     run_loop: Arc<AtomicPtr<c_void>>,
@@ -220,7 +219,6 @@ impl InputMonitor {
             run_event_tap(
                 sender,
                 tap_activity,
-                paste_key_code,
                 tap_escape_cancels,
                 tap_pending,
                 tap_run_loop,
@@ -233,7 +231,6 @@ impl InputMonitor {
         Ok(Self {
             events,
             activity,
-            paste_key_code,
             pending,
             escape_cancels,
             run_loop,
@@ -284,7 +281,6 @@ struct EventTapContext {
 fn run_event_tap(
     sender: Sender<ObservedInputEvent>,
     activity: InputActivity,
-    _paste_key_code: u16,
     escape_cancels: Arc<AtomicBool>,
     pending: PendingInputEvents,
     run_loop: Arc<AtomicPtr<c_void>>,
@@ -677,33 +673,18 @@ pub struct DictationHotkey {
 }
 
 impl DictationHotkey {
-    pub fn new(
-        now: CaptureInstant,
-        double_tap_enabled: bool,
-        _paste_key_code: u16,
-        binding: RuntimeHotkey,
-    ) -> Self {
+    pub fn new(now: CaptureInstant, double_tap_enabled: bool, binding: RuntimeHotkey) -> Self {
         Self::with_binding(
-            trigger_is_physically_down(binding, true),
+            trigger_is_physically_down(binding),
             now,
-            _paste_key_code,
             double_tap_enabled,
             binding,
         )
     }
 
-    pub fn new_without_paste(
-        now: CaptureInstant,
-        _paste_key_code: u16,
-        binding: RuntimeHotkey,
-    ) -> Self {
-        let mut hotkey = Self::with_binding(
-            trigger_is_physically_down(binding, true),
-            now,
-            _paste_key_code,
-            false,
-            binding,
-        );
+    pub fn new_without_paste(now: CaptureInstant, binding: RuntimeHotkey) -> Self {
+        let mut hotkey =
+            Self::with_binding(trigger_is_physically_down(binding), now, false, binding);
         hotkey.paste_actions_enabled = false;
         hotkey
     }
@@ -711,7 +692,6 @@ impl DictationHotkey {
     fn with_binding(
         trigger_down: bool,
         now: CaptureInstant,
-        _paste_key_code: u16,
         double_tap_enabled: bool,
         binding: RuntimeHotkey,
     ) -> Self {
@@ -1134,17 +1114,13 @@ impl DictationHotkey {
     }
 }
 
-fn trigger_is_physically_down(binding: RuntimeHotkey, exact_modifiers: bool) -> bool {
+fn trigger_is_physically_down(binding: RuntimeHotkey) -> bool {
     // HID state reflects the physical keyboard. Combined-session state can
     // remain latched after synthetic events or application switching.
     // SAFETY: These are pure system queries with a documented state id.
     unsafe {
         !binding.is_empty()
-            && if exact_modifiers {
-                binding.exact_modifiers(CGEventSourceFlagsState(HID_SYSTEM_STATE))
-            } else {
-                binding.required_modifiers_down(CGEventSourceFlagsState(HID_SYSTEM_STATE))
-            }
+            && binding.exact_modifiers(CGEventSourceFlagsState(HID_SYSTEM_STATE))
             && binding
                 .key_code
                 .is_none_or(|code| CGEventSourceKeyState(HID_SYSTEM_STATE, code))
@@ -1382,8 +1358,7 @@ mod tests {
             (key_chord, command),
         ] {
             let start = 60_000_000_000;
-            let mut hotkey =
-                DictationHotkey::with_binding(false, capture_time(), 42, true, binding);
+            let mut hotkey = DictationHotkey::with_binding(false, capture_time(), true, binding);
             let press = binding
                 .key_code
                 .map_or(InputEvent::Flags(flags), |code| InputEvent::Key {
@@ -1558,7 +1533,7 @@ mod tests {
     #[test]
     fn standalone_function_modifier_starts_and_finishes_dictation() {
         let now = capture_time();
-        let mut hotkey = DictationHotkey::with_binding(false, now, 47, true, function_binding());
+        let mut hotkey = DictationHotkey::with_binding(false, now, true, function_binding());
 
         assert_eq!(
             hotkey.process(InputEvent::Flags(FUNCTION), now),
@@ -1584,16 +1559,7 @@ mod tests {
     }
 
     fn test_hotkey(trigger_down: bool, now: CaptureInstant) -> DictationHotkey {
-        DictationHotkey::with_binding(
-            trigger_down,
-            now,
-            HotkeyBinding::paste_last_default()
-                .key
-                .expect("default paste key")
-                .code,
-            true,
-            option_binding(),
-        )
+        DictationHotkey::with_binding(trigger_down, now, true, option_binding())
     }
 
     #[test]
@@ -1934,7 +1900,7 @@ mod tests {
             key_code: Some(49),
             ..function_binding()
         };
-        let mut hotkey = DictationHotkey::with_binding(false, now, 42, false, binding);
+        let mut hotkey = DictationHotkey::with_binding(false, now, false, binding);
         assert_eq!(hotkey.process(InputEvent::Flags(FUNCTION), now), None);
         assert_eq!(
             hotkey.process(
@@ -2087,7 +2053,7 @@ mod tests {
             },
         ] {
             let now = capture_time();
-            let mut hotkey = DictationHotkey::with_binding(false, now, 42, true, binding);
+            let mut hotkey = DictationHotkey::with_binding(false, now, true, binding);
             let key = |down| InputEvent::Key {
                 code: 97,
                 down,
@@ -2151,7 +2117,7 @@ mod tests {
             modifiers: Default::default(),
             key_code: Some(97),
         };
-        let mut hotkey = DictationHotkey::with_binding(false, now, 42, true, binding);
+        let mut hotkey = DictationHotkey::with_binding(false, now, true, binding);
         hotkey.set_double_tap_only(true);
         let key = |code, down| InputEvent::Key {
             code,
@@ -2287,7 +2253,7 @@ mod tests {
             modifiers: Default::default(),
             key_code: Some(96),
         };
-        let mut hotkey = DictationHotkey::with_binding(false, now, 42, true, binding);
+        let mut hotkey = DictationHotkey::with_binding(false, now, true, binding);
         hotkey.process(
             InputEvent::Key {
                 code: 0,
@@ -2361,7 +2327,7 @@ mod tests {
             modifiers: crate::app_settings::modifiers_from_flags(SHIFT_KEY_MASK),
             key_code: Some(49),
         };
-        let mut hotkey = DictationHotkey::with_binding(false, now, 42, true, binding);
+        let mut hotkey = DictationHotkey::with_binding(false, now, true, binding);
         let key_down = InputEvent::Key {
             code: 49,
             down: true,
@@ -2402,7 +2368,7 @@ mod tests {
             modifiers: crate::app_settings::modifiers_from_flags(SHIFT_KEY_MASK),
             key_code: Some(49),
         };
-        let mut hotkey = DictationHotkey::with_binding(false, now, 42, true, binding);
+        let mut hotkey = DictationHotkey::with_binding(false, now, true, binding);
         let event = |down| InputEvent::Key {
             code: 49,
             down,
@@ -2436,7 +2402,7 @@ mod tests {
             modifiers: crate::app_settings::modifiers_from_flags(SHIFT_KEY_MASK),
             key_code: Some(49),
         };
-        let mut hotkey = DictationHotkey::with_binding(false, now, 9, true, binding);
+        let mut hotkey = DictationHotkey::with_binding(false, now, true, binding);
         hotkey.set_double_tap_only(true);
         let event = |down| InputEvent::Key {
             code: 49,
@@ -2473,7 +2439,7 @@ mod tests {
             key_code: Some(49),
         };
         for delay in [DOUBLE_TAP_WINDOW, Duration::from_secs(1)] {
-            let mut hotkey = DictationHotkey::with_binding(false, now, 9, true, binding);
+            let mut hotkey = DictationHotkey::with_binding(false, now, true, binding);
             hotkey.set_double_tap_only(true);
             let event = |down| InputEvent::Key {
                 code: 49,
@@ -2511,7 +2477,7 @@ mod tests {
             modifiers: crate::app_settings::modifiers_from_flags(SHIFT_KEY_MASK),
             key_code: Some(49),
         };
-        let mut hotkey = DictationHotkey::with_binding(false, now, 9, true, binding);
+        let mut hotkey = DictationHotkey::with_binding(false, now, true, binding);
         hotkey.set_double_tap_only(true);
         let trigger = |down| InputEvent::Key {
             code: 49,
@@ -2542,7 +2508,7 @@ mod tests {
         );
         assert!(!hotkey.is_recording());
 
-        let mut hotkey = DictationHotkey::with_binding(false, now, 9, true, binding);
+        let mut hotkey = DictationHotkey::with_binding(false, now, true, binding);
         hotkey.set_double_tap_only(true);
         hotkey.process(trigger(true), now);
         hotkey.process(trigger(false), now + Duration::from_millis(50));
@@ -2561,7 +2527,7 @@ mod tests {
             modifiers: crate::app_settings::modifiers_from_flags(CONTROL_KEY_MASK | SHIFT_KEY_MASK),
             key_code: None,
         };
-        let mut hotkey = DictationHotkey::with_binding(false, now, 42, true, binding);
+        let mut hotkey = DictationHotkey::with_binding(false, now, true, binding);
 
         assert_eq!(
             hotkey.process(InputEvent::Flags(CONTROL_KEY_MASK), now),
@@ -2595,7 +2561,7 @@ mod tests {
             },
             key_code: None,
         };
-        let mut hotkey = DictationHotkey::with_binding(false, now, 9, false, binding);
+        let mut hotkey = DictationHotkey::with_binding(false, now, false, binding);
         // Remapped Caps Lock may carry the general Control flag without a side.
         assert_eq!(
             hotkey.process(InputEvent::Flags(CONTROL_KEY_MASK), now),
@@ -2621,7 +2587,6 @@ mod tests {
         let mut either = DictationHotkey::with_binding(
             false,
             now,
-            9,
             false,
             RuntimeHotkey {
                 modifiers: HotkeyModifiers {
@@ -2654,17 +2619,11 @@ mod tests {
         .unwrap();
         settings.voice_action.enabled = true;
         let now = capture_time();
-        let mut dictation = DictationHotkey::with_binding(
-            false,
-            now,
-            42,
-            false,
-            settings.dictation_hotkey.runtime(),
-        );
+        let mut dictation =
+            DictationHotkey::with_binding(false, now, false, settings.dictation_hotkey.runtime());
         let mut edit = DictationHotkey::with_binding(
             false,
             now,
-            42,
             false,
             settings.runtime_hotkeys().edit.unwrap(),
         );
@@ -2761,7 +2720,7 @@ mod tests {
             modifiers: Default::default(),
             key_code: Some(40),
         };
-        let mut hotkey = DictationHotkey::with_binding(false, now, 42, false, binding);
+        let mut hotkey = DictationHotkey::with_binding(false, now, false, binding);
         let event = |down| InputEvent::Key {
             code: 40,
             down,
@@ -2850,7 +2809,7 @@ mod tests {
             modifiers: crate::app_settings::modifiers_from_flags(OPTION_KEY_MASK | (1 << 20)),
             key_code: None,
         };
-        let mut edit = DictationHotkey::new_without_paste(now, 42, edit_binding);
+        let mut edit = DictationHotkey::new_without_paste(now, edit_binding);
 
         let option = InputEvent::Flags(OPTION_KEY_MASK);
         assert_eq!(dictation.process(option, now), Some(HotkeyAction::Start));
@@ -2916,7 +2875,7 @@ mod tests {
     #[test]
     fn disabling_double_tap_keeps_both_taps_as_press_and_hold() {
         let now = capture_time();
-        let mut hotkey = DictationHotkey::with_binding(false, now, 42, false, option_binding());
+        let mut hotkey = DictationHotkey::with_binding(false, now, false, option_binding());
 
         hotkey.process(InputEvent::Flags(OPTION_KEY_MASK), now);
         hotkey.process(InputEvent::Flags(NO_FLAGS), now + Duration::from_millis(80));
@@ -2944,7 +2903,7 @@ mod tests {
             key_code: Some(49),
         };
         for cancel in [false, true] {
-            let mut hotkey = DictationHotkey::with_binding(false, now, 42, true, binding);
+            let mut hotkey = DictationHotkey::with_binding(false, now, true, binding);
             let mut capture = DictationCapture::new(16_000);
             let key = |code, down| InputEvent::Key {
                 code,
@@ -3228,7 +3187,7 @@ mod tests {
     }
 
     #[test]
-    fn option_control_v_pastes_new_meeting_transcript() {
+    fn meeting_paste_is_only_active_in_developer_builds() {
         let now = capture_time();
         let mut hotkey = test_hotkey(true, now);
         let paste_key_code = HotkeyBinding::paste_last_default()
@@ -3244,7 +3203,12 @@ mod tests {
                 },
                 now + Duration::from_millis(50),
             ),
-            Some(HotkeyAction::PasteMeeting)
+            // Release treats this as an ordinary chord, not a reserved meeting action.
+            if crate::DEVELOPER_FEATURES_ENABLED {
+                Some(HotkeyAction::PasteMeeting)
+            } else {
+                Some(HotkeyAction::Discard)
+            }
         );
         assert!(!hotkey.is_recording());
         assert_eq!(

@@ -2045,6 +2045,7 @@ fn current_health() -> HealthResponse {
     }
 }
 
+#[cfg(debug_assertions)]
 pub fn call_developer(
     command: &crate::developer_control::DeveloperCommand,
 ) -> Result<crate::developer_control::DeveloperReply> {

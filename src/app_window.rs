@@ -916,7 +916,6 @@ pub struct AppWindow {
     selected_command: Option<String>,
     events: Vec<VoiceEvent>,
     current_context: (Option<String>, Option<String>),
-    events_error: Option<String>,
     selected_event: Option<usize>,
     history: Option<History>,
     history_search: ProcessingInput,
@@ -1393,7 +1392,6 @@ impl AppWindow {
             selected_command: None,
             events: Vec::new(),
             current_context: (None, None),
-            events_error: None,
             selected_event: None,
             history,
             history_search,
@@ -1992,19 +1990,15 @@ impl AppWindow {
         let selected = self
             .selected_event
             .and_then(|index| self.events.get(index))
-            .and_then(|event| serde_json::to_string(event).ok());
+            .cloned();
         self.activity.refresh(&mut self.event_reader);
-        self.events_error = self.activity.error.clone();
-        if self.events_error.is_some() {
+        if self.activity.error.is_some() {
             return;
         }
         self.events = self.event_reader.recent(ACTIVITY_LIMIT);
         self.current_context = activity_context(&self.event_reader);
-        self.selected_event = selected.and_then(|selected| {
-            self.events.iter().position(|event| {
-                serde_json::to_string(event).ok().as_deref() == Some(selected.as_str())
-            })
-        });
+        self.selected_event =
+            selected.and_then(|selected| self.events.iter().position(|event| event == &selected));
     }
 
     fn history_search_input(cx: &mut Context<Self>) -> ProcessingInput {
@@ -4138,24 +4132,13 @@ impl AppWindow {
         replacement: &TextReplacement,
         cx: &mut Context<Self>,
     ) -> ReplacementInputs {
-        let matched_phrase =
-            cx.new(|cx| TextInput::new(cx, "e.g. open code", &replacement.matched_phrase));
-        let output = cx.new(|cx| TextInput::new(cx, "e.g. OpenCode", &replacement.output));
-        let matched_subscription = cx.subscribe(&matched_phrase, |this, _, _: &TextChanged, cx| {
-            this.sync_processing_settings(cx)
-        });
-        let output_subscription = cx.subscribe(&output, |this, _, _: &TextChanged, cx| {
-            this.sync_processing_settings(cx)
-        });
         ReplacementInputs {
-            matched_phrase: ProcessingInput {
-                entity: matched_phrase,
-                _subscriptions: vec![matched_subscription],
-            },
-            output: ProcessingInput {
-                entity: output,
-                _subscriptions: vec![output_subscription],
-            },
+            matched_phrase: Self::processing_input(
+                "e.g. open code",
+                &replacement.matched_phrase,
+                cx,
+            ),
+            output: Self::processing_input("e.g. OpenCode", &replacement.output, cx),
         }
     }
 
@@ -6805,10 +6788,10 @@ impl AppWindow {
                                 .border_r_1()
                                 .border_color(rgb(LINE))
                                 .when(
-                                    self.events.is_empty() && self.events_error.is_none(),
+                                    self.events.is_empty() && self.activity.error.is_none(),
                                     |list| list.child(empty_message("No activity yet.")),
                                 )
-                                .when_some(self.events_error.clone(), |list, error| {
+                                .when_some(self.activity.error.clone(), |list, error| {
                                     list.child(error_message(
                                         "Activity could not be loaded.",
                                         error,

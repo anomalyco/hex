@@ -100,6 +100,12 @@ Checks there: `catalog_is_derived_from_resolvable_commands`,
 `contextual_command_requires_matching_foreground_browser`.
 They cover registry/text decisions, not live context capture or target-app effects.
 
+`erased_action_factories_are_lazy_and_preserve_alias_order` in
+[command_grammar.rs](../../src/command_grammar.rs) checks the shared pattern-to-action
+conversion through compiled, personal-handler, and literal command constructors.
+Construction and unmatched input do not invoke factories; matching aliases keep
+their catalog order. This builds actions without executing native effects.
+
 Native action sequences resolve against the initial context, not the app opened
 by an earlier action. `only_uses_commands_available_in_the_initial_context` and
 `interactive_commands_cannot_participate_in_sequences` cover this boundary.

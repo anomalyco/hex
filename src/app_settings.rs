@@ -278,19 +278,6 @@ impl HotkeyBinding {
     }
 
     #[cfg(test)]
-    pub fn conflicts_with_paste(&self, paste_key_code: u16) -> bool {
-        self.key
-            .as_ref()
-            .is_some_and(|key| key.code == paste_key_code)
-            && self.modifiers.command.is_none()
-            && self.modifiers.option.is_some()
-            && ((self.modifiers.shift.is_some() && self.modifiers.control.is_none())
-                || (crate::DEVELOPER_FEATURES_ENABLED
-                    && self.modifiers.control.is_some()
-                    && self.modifiers.shift.is_none()))
-    }
-
-    #[cfg(test)]
     pub fn is_modifier_prefix_of(&self, other: &Self) -> bool {
         self.key.is_none()
             && other.modifiers.contains(self.modifiers)
@@ -1497,30 +1484,22 @@ mod tests {
     }
 
     #[test]
-    fn meeting_and_last_transcript_paste_shortcuts_are_reserved() {
-        let paste_key = HotkeyKey {
-            code: 47,
-            label: "V".into(),
-        };
-        for modifiers in [
-            HotkeyModifiers {
-                option: Some(ModifierSide::Either),
-                shift: Some(ModifierSide::Either),
-                ..Default::default()
-            },
-            HotkeyModifiers {
-                option: Some(ModifierSide::Either),
-                control: Some(ModifierSide::Either),
-                ..Default::default()
-            },
+    fn default_paste_hotkeys_follow_build_capabilities() {
+        for hotkeys in [
+            RuntimeHotkeys::default(),
+            AppSettings::default().runtime_hotkeys(),
         ] {
-            assert!(
-                HotkeyBinding {
-                    modifiers,
-                    key: Some(paste_key.clone()),
-                }
-                .conflicts_with_paste(47)
+            assert_eq!(
+                hotkeys.paste_last,
+                Some(HotkeyBinding::paste_last_default().runtime())
             );
+            #[cfg(debug_assertions)]
+            assert_eq!(
+                hotkeys.paste_meeting,
+                Some(HotkeyBinding::paste_meeting_default().runtime())
+            );
+            #[cfg(not(debug_assertions))]
+            assert_eq!(hotkeys.paste_meeting, None);
         }
     }
 

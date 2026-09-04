@@ -12,7 +12,7 @@ use std::collections::VecDeque;
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum VoiceEvent {
     SessionStarted {
@@ -104,7 +104,7 @@ pub enum VoiceState {
     Stopping,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DictationPhase {
     Started,
@@ -121,7 +121,7 @@ pub enum DictationPhase {
     Failed(String),
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct DictationProcessing {
     pub profile: String,
     pub latency_ms: u64,
@@ -129,7 +129,7 @@ pub struct DictationProcessing {
     pub fallback: Option<String>,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CommandOutcome {
     Ignored,
@@ -453,6 +453,40 @@ pub fn now_ms() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn structural_event_equality_preserves_serialized_identity() {
+        let fixtures = serde_json::json!([
+            {"kind": "session_started", "timestamp_ms": 42},
+            {"kind": "state", "timestamp_ms": 42, "state": "listening", "device": "Test"},
+            {"kind": "transcript", "timestamp_ms": 42, "phase": "completed", "latency_ms": 73, "text": "olá"},
+            {"kind": "transcript", "timestamp_ms": 42, "phase": "completed", "latency_ms": 73, "text": "other"},
+            {"kind": "command", "timestamp_ms": 42, "heard": "alpha", "command": null, "outcome": "ignored"},
+            {"kind": "command", "timestamp_ms": 42, "heard": "alpha", "command": "example", "outcome": {"failed": "é"}, "context": "Test"},
+            {"kind": "dictation", "timestamp_ms": 42, "phase": "pasted", "text": "olá"},
+            {"kind": "dictation", "timestamp_ms": 42, "phase": "pasted", "text": "olá", "processing": {"profile": "example", "latency_ms": 321}},
+            {"kind": "dictation", "timestamp_ms": 42, "phase": "pasted", "text": "olá", "processing": {"profile": "example", "latency_ms": 321, "fallback": "timeout"}},
+            {"kind": "dictation", "timestamp_ms": 42, "phase": {"failed": "timeout"}},
+            {"kind": "context", "timestamp_ms": 42, "application": null, "browser_url": null},
+            {"kind": "context", "timestamp_ms": 42, "application": "Test", "browser_url": "https://example.com"},
+            {"kind": "api_server_started", "timestamp_ms": 42, "port": 12345},
+            {"kind": "api_server_stopped", "timestamp_ms": 42},
+            {"kind": "api_auth_failed", "timestamp_ms": 42, "method": "POST", "path": "/transcribe"}
+        ]);
+        let events: Vec<VoiceEvent> = serde_json::from_value(fixtures).unwrap();
+        for left in &events {
+            let serialized = serde_json::to_string(left).unwrap();
+            let decoded: VoiceEvent = serde_json::from_str(&serialized).unwrap();
+            assert_eq!(left, &decoded);
+            for right in &events {
+                assert_eq!(
+                    left == right,
+                    serialized == serde_json::to_string(right).unwrap(),
+                    "{left:?} vs {right:?}",
+                );
+            }
+        }
+    }
 
     #[test]
     fn events_round_trip_through_ndjson() {

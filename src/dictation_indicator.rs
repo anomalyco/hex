@@ -473,7 +473,6 @@ struct MetalRenderer {
     average: Spring,
     peak: Spring,
     width: Spring,
-    height: Spring,
     opacity: Spring,
     visual_scale: Spring,
     softness: Spring,
@@ -540,7 +539,6 @@ impl MetalRenderer {
             average: Spring::new(0.0),
             peak: Spring::new(0.0),
             width: Spring::new(CAPSULE_WIDTH),
-            height: Spring::new(CAPSULE_HEIGHT),
             opacity: Spring::new(0.0),
             visual_scale: Spring::new(HIDDEN_SCALE),
             softness: Spring::new(HIDDEN_SOFTNESS),
@@ -579,7 +577,6 @@ impl MetalRenderer {
                 self.average.reset(0.0);
                 self.peak.reset(0.0);
                 self.width.reset(CAPSULE_WIDTH);
-                self.height.reset(CAPSULE_HEIGHT);
                 self.opacity.reset(0.0);
                 self.visual_scale.reset(HIDDEN_SCALE);
                 self.softness.reset(HIDDEN_SOFTNESS);
@@ -698,7 +695,6 @@ impl MetalRenderer {
         self.average.velocity = 0.0;
         self.peak.velocity = 0.0;
         self.width.velocity = 0.0;
-        self.height.velocity = 0.0;
         self.processing.velocity = 0.0;
         self.post_processing.velocity = 0.0;
     }
@@ -721,7 +717,6 @@ impl MetalRenderer {
             && now.duration_since(self.phase_started) >= PROCESSING_MORPH_DURATION
         {
             self.width.reset(CAPSULE_HEIGHT);
-            self.height.reset(CAPSULE_HEIGHT);
             self.processing.reset(1.0);
             self.phase = Phase::Completed;
             self.phase_started = now;
@@ -751,7 +746,6 @@ impl MetalRenderer {
             Phase::Transcribing => CAPSULE_HEIGHT,
             Phase::Hidden | Phase::Completed | Phase::Cancelled | Phase::Failed => self.width.value,
         };
-        let target_height = CAPSULE_HEIGHT;
         let target_processing = match self.phase {
             Phase::Recording => 0.0,
             Phase::Transcribing => 1.0,
@@ -773,8 +767,6 @@ impl MetalRenderer {
         self.peak.step_critical(self.target_peak, dt, 26.0);
         self.width
             .step_critical(target_width, dt, GEOMETRY_ANGULAR_FREQUENCY);
-        self.height
-            .step_critical(target_height, dt, GEOMETRY_ANGULAR_FREQUENCY);
         self.processing
             .step_critical(target_processing, dt, GEOMETRY_ANGULAR_FREQUENCY);
         self.post_processing
@@ -815,7 +807,7 @@ impl MetalRenderer {
             resolution: [WINDOW_WIDTH * self.scale, WINDOW_HEIGHT * self.scale],
             time: now.duration_since(self.render_started).as_secs_f32(),
             width: self.width.value,
-            height: self.height.value,
+            height: CAPSULE_HEIGHT,
             opacity: self.opacity.value.clamp(0.0, 1.0),
             scale: self.visual_scale.value.max(0.01),
             softness: self.softness.value.clamp(0.0, HIDDEN_SOFTNESS),

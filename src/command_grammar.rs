@@ -788,20 +788,7 @@ impl<C: 'static> CommandBuilder<C> {
             context: self.context,
             protected: self.protected,
             group: None,
-            patterns: self
-                .patterns
-                .into_iter()
-                .map(|pattern| {
-                    let action = action.clone();
-                    ErasedPattern {
-                        display: pattern.display,
-                        signatures: pattern.signatures,
-                        resolve: Arc::new(move |words| {
-                            (pattern.parse)(words).map(|capture| (action)(capture))
-                        }),
-                    }
-                })
-                .collect(),
+            patterns: erase_patterns(self.patterns, action),
         }
     }
 }
@@ -818,6 +805,25 @@ struct ErasedPattern {
 }
 
 type ActionResolver = dyn Fn(&[&str]) -> Option<Action> + Send + Sync;
+
+fn erase_patterns<C: 'static>(
+    patterns: Vec<TypedPattern<C>>,
+    action: Arc<impl Fn(C) -> Action + Send + Sync + 'static>,
+) -> Vec<ErasedPattern> {
+    patterns
+        .into_iter()
+        .map(|pattern| {
+            let action = action.clone();
+            ErasedPattern {
+                display: pattern.display,
+                signatures: pattern.signatures,
+                resolve: Arc::new(move |words| {
+                    (pattern.parse)(words).map(|capture| (action)(capture))
+                }),
+            }
+        })
+        .collect()
+}
 
 #[derive(Clone)]
 pub struct ConfiguredCommand {
@@ -877,19 +883,7 @@ impl ConfiguredCommand {
             context,
             protected: false,
             group,
-            patterns: patterns
-                .into_iter()
-                .map(|pattern| {
-                    let action = action.clone();
-                    ErasedPattern {
-                        display: pattern.display,
-                        signatures: pattern.signatures,
-                        resolve: Arc::new(move |words| {
-                            (pattern.parse)(words).map(|capture| (action)(capture))
-                        }),
-                    }
-                })
-                .collect(),
+            patterns: erase_patterns(patterns, action),
         })
     }
 
@@ -939,19 +933,7 @@ impl ConfiguredCommand {
             context,
             protected: false,
             group,
-            patterns: patterns
-                .into_iter()
-                .map(|pattern| {
-                    let action = action.clone();
-                    ErasedPattern {
-                        display: pattern.display,
-                        signatures: pattern.signatures,
-                        resolve: Arc::new(move |words| {
-                            (pattern.parse)(words).map(|capture| (action)(capture))
-                        }),
-                    }
-                })
-                .collect(),
+            patterns: erase_patterns(patterns, action),
         })
     }
 
@@ -1079,5 +1061,63 @@ impl ContextSelector {
             Self::BrowserHost(host) => CommandScope::Browser(host.clone()),
             Self::Application(application) => CommandScope::Application(application.clone()),
         }
+    }
+}
+
+#[cfg(test)]
+mod action_tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[test]
+    fn erased_action_factories_are_lazy_and_preserve_alias_order() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let compiled_calls = calls.clone();
+        let compiled = Command::new("compiled", "Compiled command")
+            .phrases(["alpha", "bravo"])
+            .action(move |()| {
+                compiled_calls.fetch_add(1, Ordering::Relaxed);
+                Action::StartDictation
+            });
+        let personal_calls = calls.clone();
+        let personal = ConfiguredCommand::personal_command(
+            "personal",
+            "Personal command",
+            ["alpha", "bravo"],
+            ContextSelector::Always,
+            None,
+            move |_| {
+                personal_calls.fetch_add(1, Ordering::Relaxed);
+                Action::StartDictation
+            },
+            None,
+        )
+        .unwrap();
+        let literal = ConfiguredCommand::personal_literal(
+            "literal",
+            "Literal command",
+            ["alpha", "bravo"],
+            ContextSelector::Always,
+            Action::StartDictation,
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(calls.load(Ordering::Relaxed), 0);
+        let context = ContextSnapshot::default();
+        for command in [compiled, personal, literal] {
+            assert_eq!(command.catalog().phrase, "alpha");
+            assert_eq!(command.catalog().aliases, ["bravo"]);
+            let before = calls.load(Ordering::Relaxed);
+            assert!(command.match_words(&["unmatched"], &context).is_none());
+            assert_eq!(calls.load(Ordering::Relaxed), before);
+            for alias in ["alpha", "bravo"] {
+                assert!(matches!(
+                    command.clone().match_words(&[alias], &context),
+                    Some(Action::StartDictation)
+                ));
+            }
+        }
+        assert_eq!(calls.load(Ordering::Relaxed), 4);
     }
 }

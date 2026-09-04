@@ -477,12 +477,3 @@ public func hexAppleSpeechRelease(_ opaque: UnsafeMutableRawPointer?) {
 public func hexAppleSpeechFreeString(_ string: UnsafeMutablePointer<CChar>?) {
     free(string)
 }
-
-private extension Result {
-    func getOr(_ fallback: Success) -> Success {
-        switch self {
-        case .success(let value): value
-        case .failure: fallback
-        }
-    }
-}

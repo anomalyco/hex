@@ -212,17 +212,11 @@ pub fn listen(
     let mut hotkey = DictationHotkey::new(
         CaptureInstant::now(),
         crate::app_settings::double_tap_lock(),
-        input_monitor.paste_key_code,
         crate::app_settings::dictation_hotkey(),
     );
     hotkey.set_double_tap_only(crate::app_settings::double_tap_only());
-    let mut edit_hotkey = crate::app_settings::edit_hotkey().map(|binding| {
-        DictationHotkey::new_without_paste(
-            CaptureInstant::now(),
-            input_monitor.paste_key_code,
-            binding,
-        )
-    });
+    let mut edit_hotkey = crate::app_settings::edit_hotkey()
+        .map(|binding| DictationHotkey::new_without_paste(CaptureInstant::now(), binding));
     let mut edit_context = None;
     let mut edit_pending_since = None;
     let mut mode = Mode::Listening;
@@ -698,11 +692,8 @@ pub fn listen(
             Some(binding) => match &mut edit_hotkey {
                 Some(edit) => edit.set_binding(binding),
                 None => {
-                    let mut edit = DictationHotkey::new_without_paste(
-                        CaptureInstant::now(),
-                        input_monitor.paste_key_code,
-                        binding,
-                    );
+                    let mut edit =
+                        DictationHotkey::new_without_paste(CaptureInstant::now(), binding);
                     edit.wait_for_release();
                     edit_hotkey = Some(edit);
                 }
@@ -2373,7 +2364,6 @@ mod tests {
         let mut dictation = DictationHotkey::new(
             now,
             true,
-            42,
             RuntimeHotkey {
                 modifiers: crate::app_settings::modifiers_from_flags(OPTION),
                 key_code: None,
@@ -2381,7 +2371,6 @@ mod tests {
         );
         let mut edit = DictationHotkey::new_without_paste(
             now,
-            42,
             RuntimeHotkey {
                 modifiers: crate::app_settings::modifiers_from_flags(OPTION | COMMAND),
                 key_code: None,
@@ -2456,7 +2445,6 @@ mod tests {
         let mut hotkey = DictationHotkey::new(
             now,
             true,
-            42,
             RuntimeHotkey {
                 modifiers: crate::app_settings::modifiers_from_flags(OPTION),
                 key_code: None,
@@ -2464,7 +2452,6 @@ mod tests {
         );
         let mut edit_hotkey = DictationHotkey::new_without_paste(
             now,
-            42,
             RuntimeHotkey {
                 modifiers: crate::app_settings::modifiers_from_flags(OPTION | COMMAND),
                 key_code: None,

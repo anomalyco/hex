@@ -385,6 +385,26 @@ Sources: [meeting.rs](../../src/meeting.rs),
 iOS physical-device proof and temporary-WAV failure cleanup remain gaps;
 best-effort deletion is not guaranteed deletion.
 
+`default_paste_hotkeys_follow_build_capabilities` in
+[app_settings.rs](../../src/app_settings.rs) checks the production default runtime
+and settings projections: Paste Last remains available in both build profiles;
+meeting paste is present only in debug. `meeting_paste_is_only_active_in_developer_builds`
+in [suppression.rs](../../src/suppression.rs) checks the corresponding constructed
+hotkey event, including ordinary-chord discard in release. These replace an
+unconditional debug-only expectation and a test-only copy of the reservation rule;
+they do not establish native keyboard delivery or meeting insertion.
+
+`structural_event_equality_preserves_serialized_identity` in
+[events.rs](../../src/events.rs) covers Activity's full-event equality across
+event variants, equal timestamps, non-ASCII text, and optional/error payloads.
+It does not exercise native Activity selection or scrolling.
+
+**Executed September 3, 2026, source simplification pass:** 444 Rust tests passed
+in both debug and release (nine opt-in tests ignored in each), with all twelve
+keyboard-layout child scenarios passing in each profile. Formatting and strict
+Clippy passed in both profiles. These checks cover the working-tree cleanup, not
+a new published app; no installed-app, microphone, or native Linux test was run.
+
 ## Grow The Map
 
 ```ts

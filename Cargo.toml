@@ -21,21 +21,17 @@ inherits = "release"
 debug-assertions = true
 
 [dependencies]
-arboard = { version = "3.6.1", default-features = false }
 clap = { version = "4.6.1", features = ["derive"] }
 color-eyre = "0.6.5"
 cpal = "0.18.1"
 ctrlc = "3.5.2"
-crossterm = "0.29.0"
 dirs = "6.0.0"
 fs2 = "0.4.3"
 getrandom = "0.4.3"
 hound = "3.5.1"
 libc = "0.2.177"
 libloading = "0.9.0"
-ratatui = "0.30.2"
 regex = "1.12.3"
-rodio = { version = "0.22.2", default-features = false, features = ["playback", "mp3"] }
 rubato = "0.16.2"
 semver = "1.0.28"
 serde = { version = "1.0.228", features = ["derive"] }
@@ -49,9 +45,11 @@ unicode-segmentation = "1.13.3"
 url = "2.5.8"
 
 [target.'cfg(target_os = "macos")'.dependencies]
+arboard = { version = "3.6.1", default-features = false }
 block2 = "0.6.2"
 core-graphics-types = "0.1.3"
 core-video = "0.4.3"
+crossterm = "0.29.0"
 gpui = { version = "0.2.2", default-features = false, features = ["font-kit"] }
 gpui-symbols = { version = "0.6.1", default-features = false, features = ["component", "cache"] }
 metal = "0.29.0"
@@ -61,7 +59,9 @@ objc2-core-audio = "0.3.2"
 objc2-foundation = "0.3.2"
 objc2-quartz-core = { version = "0.3.2", features = ["CALayer"] }
 objc2-service-management = { version = "0.3.2", features = ["SMAppService"] }
+ratatui = "0.30.2"
 raw-window-handle = "0.6.2"
+rodio = { version = "0.22.2", default-features = false, features = ["playback", "mp3"] }
 screencapturekit = { version = "=8.0.1", features = ["macos_15_0"] }
 
 [target.'cfg(target_os = "macos")'.dev-dependencies]
