@@ -184,6 +184,10 @@ Record -> Release -> Transcribing/processing/paste -> Finished // dictate.feedba
   Feedback volume = 0 -> No tones
 ```
 
+Linux now uses the same recording sounds with its own persisted Sound volume
+control; see [Linux feedback](README.md#other-platforms-and-consumers) for its
+entry points, timing, defaults, and verification limits.
+
 Check: [capture-preview.sh](../../scripts/capture-preview.sh), `dictation-hud`
 preview. This renders a real window with deterministic state; it does not prove
 that actual capture caused that state.

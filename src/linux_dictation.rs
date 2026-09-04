@@ -11,6 +11,7 @@ use color_eyre::eyre::eyre;
 use crate::audio::{AudioInput, AudioInputEvent, CaptureInstant};
 use crate::dictation::{DictationCapture, Finish};
 use crate::events::{DictationPhase, EventLog, TranscriptPhase, VoiceEvent, VoiceState, now_ms};
+use crate::feedback::{self, Tone};
 use crate::linux_desktop::LinuxIndicator;
 use crate::linux_input::{HotkeyEvent, LinuxHotkeyMonitor};
 use crate::linux_paste::LinuxPaster;
@@ -60,6 +61,10 @@ fn run_with_settings(
     settings: crate::linux_settings::LinuxSettings,
     transcriber: LinuxTranscriber,
 ) -> Result<()> {
+    feedback::set_volume(settings.sound_effect_volume);
+    if let Err(error) = feedback::preload() {
+        tracing::warn!(%error, "recording sounds are unavailable; continuing without feedback");
+    }
     // Drop audio/hotkeys and close the job queue before joining slow output on
     // every exit, including failures during startup or recording.
     let mut output = OutputWorker {
@@ -131,7 +136,7 @@ fn run_with_settings(
         while let Ok(action) = hotkey.events.try_recv() {
             match action {
                 HotkeyEvent::Start if !recording => {
-                    capture.start(captured_through);
+                    start_capture(&mut capture, captured_through, feedback::play);
                     recording = true;
                     events.dictation(DictationPhase::Started, "")?;
                     emit_state(&mut events, VoiceState::Dictating, &input.device_name)?;
@@ -154,6 +159,7 @@ fn run_with_settings(
                 HotkeyEvent::Cancel if recording => {
                     capture.cancel();
                     recording = false;
+                    feedback::play(Tone::Cancel);
                     events.dictation(DictationPhase::Cancelled, "")?;
                     emit_state(
                         &mut events,
@@ -226,6 +232,15 @@ fn run_with_settings(
     Ok(())
 }
 
+fn start_capture(
+    capture: &mut DictationCapture,
+    started_at: CaptureInstant,
+    play: impl FnOnce(Tone),
+) {
+    capture.start(started_at);
+    play(Tone::DictationStart);
+}
+
 fn submit_capture(
     capture: &mut DictationCapture,
     ended_at: CaptureInstant,
@@ -236,6 +251,7 @@ fn submit_capture(
     match capture.finish(ended_at) {
         Finish::Discard => events.dictation(DictationPhase::Discarded, "")?,
         Finish::Transcribe(clip) => {
+            feedback::play(Tone::DictationStop);
             let audio_ms = clip.duration_ms();
             let job = Job {
                 samples: clip.into_parakeet_samples(),
@@ -279,6 +295,22 @@ fn emit_state(events: &mut EventLog, state: VoiceState, device: &str) -> Result<
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn start_sound_precedes_audio_and_does_not_change_short_tap_discard() {
+        let mut capture = DictationCapture::new(16_000);
+        let started_at = CaptureInstant::from_nanos(60_000_000_000);
+        let mut sounds = Vec::new();
+
+        start_capture(&mut capture, started_at, |tone| sounds.push(tone));
+
+        assert!(capture.is_recording());
+        assert_eq!(sounds, [Tone::DictationStart]);
+        assert!(matches!(
+            capture.finish(started_at + Duration::from_millis(100)),
+            Finish::Discard
+        ));
+    }
 
     #[test]
     fn cancelled_capture_keeps_pending_output_visible() {

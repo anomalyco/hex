@@ -1,4 +1,5 @@
 use std::io::Cursor;
+#[cfg(target_os = "macos")]
 use std::process::{Command, Stdio};
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
@@ -10,10 +11,13 @@ use color_eyre::eyre::{Result, WrapErr, eyre};
 use rodio::buffer::SamplesBuffer;
 use rodio::{Decoder, DeviceSinkBuilder, Source};
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Tone {
+    #[cfg(target_os = "macos")]
     Wake,
+    #[cfg(target_os = "macos")]
     Sleep,
+    #[cfg(target_os = "macos")]
     Error,
     DictationStart,
     DictationStop,
@@ -24,6 +28,7 @@ static DICTATION_PLAYER: OnceLock<SyncSender<Tone>> = OnceLock::new();
 static ENABLED: AtomicBool = AtomicBool::new(true);
 static VOLUME: AtomicU32 = AtomicU32::new(0.5_f32.to_bits());
 
+#[cfg(target_os = "macos")]
 pub fn set_enabled(enabled: bool) {
     ENABLED.store(enabled, Ordering::Relaxed);
 }
@@ -70,6 +75,7 @@ pub fn preload() -> Result<()> {
                 Tone::DictationStart => &start,
                 Tone::DictationStop => &stop,
                 Tone::Cancel => &cancel,
+                #[cfg(target_os = "macos")]
                 Tone::Wake | Tone::Sleep | Tone::Error => continue,
             };
             output.mixer().add(sound.clone().amplify(volume()));
@@ -83,19 +89,26 @@ pub fn preload() -> Result<()> {
 }
 
 pub fn play(tone: Tone) {
-    if !ENABLED.load(Ordering::Relaxed) {
+    if !ENABLED.load(Ordering::Relaxed) || volume() <= 0.0 {
         return;
     }
-    if matches!(
-        tone,
-        Tone::DictationStart | Tone::DictationStop | Tone::Cancel
-    ) {
-        if let Some(player) = DICTATION_PLAYER.get() {
-            let _ = player.try_send(tone);
+    match tone {
+        Tone::DictationStart | Tone::DictationStop | Tone::Cancel => {
+            enqueue(DICTATION_PLAYER.get(), tone);
         }
-        return;
+        #[cfg(target_os = "macos")]
+        Tone::Wake | Tone::Sleep | Tone::Error => play_system_sound(tone),
     }
+}
 
+fn enqueue(player: Option<&SyncSender<Tone>>, tone: Tone) {
+    if let Some(player) = player {
+        let _ = player.try_send(tone);
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn play_system_sound(tone: Tone) {
     let sound = match tone {
         Tone::Wake => "Pop",
         Tone::Sleep => "Tink",
@@ -129,4 +142,36 @@ fn decode(bytes: &'static [u8]) -> Result<SamplesBuffer> {
         sample_rate,
         decoder.collect::<Vec<_>>(),
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bundled_recording_sounds_decode_without_an_audio_device() {
+        for bytes in [
+            include_bytes!("../resources/audio/startRecording.mp3").as_slice(),
+            include_bytes!("../resources/audio/stopRecording.mp3").as_slice(),
+            include_bytes!("../resources/audio/cancel.mp3").as_slice(),
+        ] {
+            let mut sound = decode(bytes).unwrap();
+            assert!(sound.total_duration().unwrap() > Duration::ZERO);
+            assert!(sound.any(|sample| sample.abs() > 0.0));
+        }
+    }
+
+    #[test]
+    fn feedback_admission_never_waits_for_playback() {
+        let (sender, receiver) = mpsc::sync_channel(2);
+        enqueue(Some(&sender), Tone::DictationStart);
+        enqueue(Some(&sender), Tone::DictationStop);
+        enqueue(Some(&sender), Tone::Cancel);
+        assert_eq!(receiver.try_recv().unwrap(), Tone::DictationStart);
+        assert_eq!(receiver.try_recv().unwrap(), Tone::DictationStop);
+        assert!(receiver.try_recv().is_err());
+        drop(receiver);
+        enqueue(Some(&sender), Tone::Cancel);
+        enqueue(None, Tone::DictationStart);
+    }
 }

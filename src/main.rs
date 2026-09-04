@@ -46,7 +46,7 @@ mod dictation_indicator;
 pub mod dictation_processor;
 #[cfg_attr(target_os = "linux", allow(dead_code))]
 mod events;
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 mod feedback;
 #[cfg_attr(target_os = "linux", allow(dead_code))]
 mod history;

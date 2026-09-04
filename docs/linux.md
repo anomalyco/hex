@@ -81,6 +81,17 @@ stops listening and restores the previous running state after the edit.
 Cancelling shortcut capture preserves the old binding unless the new binding
 has already been saved; listening resumes only if it was previously running.
 
+Recording sounds are enabled at 50% volume by default, including when upgrading
+older settings. A start sound is queued immediately when the shortcut starts capture,
+a stop sound marks the end of a retained recording (not completed transcription
+or paste), and a cancel sound acknowledges cancellation of an active capture.
+Brief taps still play the start sound, but recordings shorter than 300 ms remain
+discarded and do not play the stop sound. **Sound volume** in Settings
+offers Off, 25%, 50%, 75%, and 100%; changes save immediately without restarting
+the listener and preview the start sound unless set to Off. `hex dictate` uses
+the same saved volume. Playback uses the default audio output through a bounded
+background worker; unavailable audio output does not prevent dictation.
+
 With a working X11 tray, closing Settings hides the window. Without a working
 tray, closing Settings quits after stopping its workers; it never leaves an
 unmanageable microphone running. `--hidden` is honored only with a usable tray.

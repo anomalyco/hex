@@ -434,6 +434,7 @@ update from an older supported build.
 ```ts
 Linux beta                               // not macOS feature parity
 ├── hex app / hex dictate -> Alt-Space capture -> Transcribe -> Paste
+├── Recording sounds -> Shortcut press / capture stop / active cancellation
 ├── X11 -> Tray when usable; no recording HUD
 ├── Wayland -> evdev + compositor protocols; keys observed, not suppressed
 ├── Escape -> Cancel active capture, not newest accepted job
@@ -454,6 +455,63 @@ The [direct installer/updater](../../src/linux_updater.rs) and
 [installer tests](../../scripts/test-install-linux-release.sh) do not establish
 a published, supported-host-validated signed release. [Nix](../nix.md) owns its
 package updates; HEX updates only managed direct installs.
+
+```ts
+Linux Settings > Sound volume             // dictate.feedback.linux; X11 + Wayland
+├── Default / older settings -> 50%
+├── Off -> No recording tones
+└── 25% / 50% / 75% / 100% -> Save and apply live; preview the start sound
+
+Capture                                  // hex app and hex dictate
+├── Shortcut starts capture -> Queue start sound immediately, before audio arrives
+├── Finish retained recording -> Stop sound, before transcription/paste
+├── Brief discarded tap -> Start sound, but no stop sound or transcription
+└── Cancel active capture -> Cancel sound; idle Escape stays silent
+```
+
+The shared [feedback player](../../src/feedback.rs) uses the bundled recording
+sounds on both platforms; only macOS wake/sleep/error tones use `afplay`.
+Decoding and output initialization happen before the Linux capture loop, and
+playback admission is bounded and nonblocking. Output preparation failures are
+logged without blocking dictation. Sound-volume saves in
+[linux_app.rs](../../src/linux_app.rs) preserve listener ownership; failed saves
+leave the previous selection active, and shortcut/model edits temporarily disable
+the control to prevent overlapping settings writes. The start sound does not wait
+for the 300 ms capture-retention threshold; input delivery and audio-device
+latency still apply.
+
+Checks: `bundled_recording_sounds_decode_without_an_audio_device` and
+`feedback_admission_never_waits_for_playback` in the player, plus
+`recording_volume_defaults_for_new_and_legacy_settings_and_round_trips` and
+`invalid_sound_volume_is_rejected_before_saving` in
+[linux_settings.rs](../../src/linux_settings.rs). The desktop host checks
+`invalid_volume_preserves_settings_and_does_not_stop_the_listener` and
+`volume_changes_cannot_overwrite_an_in_flight_settings_edit` cover invalid-volume
+and overlapping-edit guards, not real disk failures.
+`start_sound_precedes_audio_and_does_not_change_short_tap_discard` in
+[linux_dictation.rs](../../src/linux_dictation.rs) exercises the production start
+path with a sound spy: immediate feedback without any audio, while a 100 ms tap
+still discards. Existing timing checks in [dictation.rs](../../src/dictation.rs)
+cover the unchanged intentional-hold boundary. These are not proof of audible
+native playback or physical hotkey-to-sound timing.
+
+**Observed September 4, 2026, initial Linux sound build (before immediate-start
+feedback):** 134 Rust tests passed
+(seven native/opt-in tests skipped), along with formatting, strict Linux
+bin/tests Clippy, and the release build. The locally modified `4ff6c4c` build
+(executable SHA-256 `609f16cac11eb66cea7054092e7c4caee3f02c3bd1b8828f5232cf3b2b67df31`)
+was installed and launched with `hex app` on Arch/i3/X11. It reached Listening
+and opened a PipeWire ALSA playback stream; existing settings were unchanged.
+The installed Settings capture at `/tmp/opencode/hex-linux-sounds.png` showed
+the new volume control with 50% selected. Actual tone audibility, physical
+hotkey-to-sound timing, Wayland UI, and macOS regressions were not exercised.
+
+**Immediate-start refinement, same day:** 135 Rust tests passed (seven skipped),
+including the new start-before-audio regression. Formatting, strict Linux
+bin/tests Clippy, and the release build passed. The replacement executable
+(SHA-256 `470be7569cf9fa8be60e73554c8311df2b68487b221cefffc7cfd26cb7e11629`)
+was reinstalled and restarted on the same Arch/i3/X11 host and reached Listening.
+There is no measured native key-to-sound latency or additional macOS/Wayland proof.
 
 Both Linux CI triggers include `tests/**`, and the
 [Nix source fileset](../../nix/package.nix) includes those sources. The

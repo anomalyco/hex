@@ -28,7 +28,8 @@ use crate::desktop_transcription_picker::{
 use crate::desktop_ui::{
     LINE, MUTED, NavigationIcon, SIDEBAR_WIDTH, SURFACE, TEXT_SOFT, compact_button,
     disclosure_button, hotkey_keycaps, navigation_item, pane_body, pane_content, pane_header,
-    settings_panel, settings_row, settings_section_label, sidebar_frame, toggle, window_frame,
+    segmented_control, segmented_item, settings_panel, settings_row, settings_section_label,
+    sidebar_frame, toggle, window_frame,
 };
 use crate::events::EventReader;
 use crate::linux_desktop::TrayCommand;
@@ -144,6 +145,10 @@ pub fn open(event_path: PathBuf, start_hidden: bool, shutdown: &'static AtomicBo
             Some(format!("Could not load Linux settings: {error:#}")),
         ),
     };
+    crate::feedback::set_volume(settings.sound_effect_volume);
+    if let Err(error) = crate::feedback::preload() {
+        tracing::warn!(%error, "recording sounds are unavailable; continuing without feedback");
+    }
     let update = if crate::linux_updater::managed_install() {
         UpdateState::Checking(start_update_check())
     } else {
@@ -655,6 +660,25 @@ impl LinuxDesktopHost {
         });
     }
 
+    fn set_sound_effect_volume(&mut self, volume: f32) -> Result<()> {
+        if self.settings_edit.is_some() || self.transcription_preparation.is_some() {
+            return Err(color_eyre::eyre::eyre!(
+                "Wait for settings changes to finish before adjusting sound volume"
+            ));
+        }
+        let mut candidate = self.settings.clone();
+        candidate.sound_effect_volume = volume;
+        if let Err(error) = candidate.save() {
+            self.settings_error = Some(format!("Could not save sound volume: {error:#}"));
+            return Err(error);
+        }
+        self.settings = candidate;
+        self.settings_error = None;
+        crate::feedback::set_volume(volume);
+        crate::feedback::play(crate::feedback::Tone::DictationStart);
+        Ok(())
+    }
+
     fn cancel_settings_edit(&mut self) {
         if let Some(edit) = &self.settings_edit {
             edit.canceled.store(true, Ordering::Release);
@@ -1029,6 +1053,31 @@ impl LinuxApp {
             .is_some_and(|listener| listener.running);
         let editing = self.host.settings_edit.is_some();
         let paste_with_shift = self.host.settings.paste_with_shift;
+        let sound_volume_busy = editing || self.host.transcription_preparation.is_some();
+        let sound_volume = segmented_control().children(
+            [
+                ("Off", 0.0_f32),
+                ("25%", 0.25),
+                ("50%", 0.5),
+                ("75%", 0.75),
+                ("100%", 1.0),
+            ]
+            .into_iter()
+            .enumerate()
+            .map(|(index, (label, volume))| {
+                let selected = (self.host.settings.sound_effect_volume - volume).abs() < 0.01;
+                segmented_item(selected)
+                    .id(("linux-sound-volume", index))
+                    .child(label)
+                    .when(sound_volume_busy, |item| item.opacity(0.5))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        if !this.quitting && !sound_volume_busy {
+                            let _ = this.host.set_sound_effect_volume(volume);
+                            cx.notify();
+                        }
+                    }))
+            }),
+        );
         let shortcut = if self.host.capturing_hotkey() {
             div()
                 .w(px(180.0))
@@ -1202,7 +1251,6 @@ impl LinuxApp {
                                             "Use Ctrl-Shift-V instead of Ctrl-V",
                                             toggle(if paste_with_shift { 1.0 } else { 0.0 }),
                                         )
-                                        .border_b_0()
                                         .id("terminal-paste-setting")
                                         .when(editing, |row| row.opacity(0.5))
                                         .on_click(cx.listener(move |this, _, _, cx| {
@@ -1211,7 +1259,11 @@ impl LinuxApp {
                                                 cx.notify();
                                             }
                                         })),
-                                    ),
+                                    ).child(settings_row(
+                                        "Sound volume",
+                                        "Recording start, stop, and cancel sounds",
+                                        sound_volume,
+                                    ).border_b_0()),
                                 )
                                 .child(settings_section_label("APPLICATION"))
                                 .child(
@@ -1638,6 +1690,36 @@ mod tests {
         host.settings_error = Some("settings failed".into());
         host.dispatch(DesktopAction::ClearError).unwrap();
         assert!(host.snapshot().operation_error.is_none());
+    }
+
+    #[test]
+    fn invalid_volume_preserves_settings_and_does_not_stop_the_listener() {
+        let mut host = host_for_edit(true);
+        let original = host.settings.clone();
+        assert!(host.set_sound_effect_volume(f32::NAN).is_err());
+        assert_eq!(host.settings, original);
+        assert!(host.settings_error.is_some());
+        assert!(host.is_running());
+        assert!(host.listen_when_ready);
+        assert!(
+            !host
+                .listener_stop
+                .lock()
+                .unwrap()
+                .as_ref()
+                .unwrap()
+                .load(Ordering::Relaxed)
+        );
+    }
+
+    #[test]
+    fn volume_changes_cannot_overwrite_an_in_flight_settings_edit() {
+        let mut host = host_for_edit(false);
+        let original = host.settings.clone();
+        host.begin_settings_edit(SettingsChange::Capture);
+        assert!(host.set_sound_effect_volume(0.0).is_err());
+        assert_eq!(host.settings, original);
+        assert!(host.capturing_hotkey());
     }
 
     #[test]

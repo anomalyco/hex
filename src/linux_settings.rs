@@ -9,7 +9,7 @@ use x11rb::rust_connection::RustConnection;
 
 use crate::linux_input::{Keymap, XK_ALT_L, XK_ALT_R};
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(default)]
 pub struct LinuxSettings {
     pub schema_version: u32,
@@ -17,6 +17,7 @@ pub struct LinuxSettings {
     pub double_tap_lock: bool,
     #[serde(default = "legacy_paste_with_shift")]
     pub paste_with_shift: bool,
+    pub sound_effect_volume: f32,
     pub transcription: crate::transcription_models::TranscriptionSelection,
 }
 
@@ -37,6 +38,7 @@ impl Default for LinuxSettings {
             dictation_hotkey: LinuxHotkey::default(),
             double_tap_lock: true,
             paste_with_shift: false,
+            sound_effect_volume: 0.5,
             transcription: crate::transcription_models::TranscriptionSelection::default(),
         }
     }
@@ -67,14 +69,21 @@ impl LinuxSettings {
         }
         let settings: Self = serde_json::from_slice(&fs::read(&path)?)
             .wrap_err_with(|| format!("could not parse {}", path.display()))?;
-        settings.dictation_hotkey.validate()?;
-        crate::transcription_models::validate(&settings.transcription)?;
+        settings.validate()?;
         Ok(settings)
     }
 
-    pub fn save(&self) -> Result<()> {
+    fn validate(&self) -> Result<()> {
         self.dictation_hotkey.validate()?;
         crate::transcription_models::validate(&self.transcription)?;
+        if !(0.0..=1.0).contains(&self.sound_effect_volume) {
+            return Err(eyre!("Sound volume must be between zero and one"));
+        }
+        Ok(())
+    }
+
+    pub fn save(&self) -> Result<()> {
+        self.validate()?;
         let path = settings_path()?;
         let directory = path.parent().unwrap();
         fs::create_dir_all(directory)?;
@@ -230,5 +239,35 @@ mod tests {
         );
         let legacy: LinuxSettings = serde_json::from_str(r#"{"paste_with_shift":false}"#).unwrap();
         assert!(!legacy.paste_with_shift);
+    }
+
+    #[test]
+    fn recording_volume_defaults_for_new_and_legacy_settings_and_round_trips() {
+        assert_eq!(LinuxSettings::default().sound_effect_volume, 0.5);
+        let legacy: LinuxSettings = serde_json::from_str(r#"{"platform":"x11"}"#).unwrap();
+        assert_eq!(legacy.sound_effect_volume, 0.5);
+        for volume in [0.0, 0.25, 0.5, 0.75, 1.0] {
+            let settings = LinuxSettings {
+                sound_effect_volume: volume,
+                ..Default::default()
+            };
+            settings.validate().unwrap();
+            let saved = serde_json::to_vec(&settings).unwrap();
+            assert_eq!(
+                serde_json::from_slice::<LinuxSettings>(&saved).unwrap(),
+                settings
+            );
+        }
+    }
+
+    #[test]
+    fn invalid_sound_volume_is_rejected_before_saving() {
+        for volume in [-0.1, 1.1, f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+            let settings = LinuxSettings {
+                sound_effect_volume: volume,
+                ..Default::default()
+            };
+            assert!(settings.save().is_err());
+        }
     }
 }
