@@ -2,8 +2,6 @@ use std::cell::RefCell;
 use std::path::PathBuf;
 use std::process::Command as ProcessCommand;
 use std::rc::Rc;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, SyncSender, TrySendError, sync_channel};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -65,6 +63,7 @@ use crate::transcription_models::{
     ModelDefinition, ModelRuntime, TranscriptionModelId, TranscriptionSelection, definition,
     language_name, validate,
 };
+use crate::transcription_preparation::{PreparationStatus, TranscriptionPreparation};
 
 const WINDOW_WIDTH: f32 = 1040.0;
 const WINDOW_HEIGHT: f32 = 700.0;
@@ -195,6 +194,67 @@ pub fn open_or_focus(
         None,
         cx,
     )
+}
+
+/// Commit through the live editor when present, preserving its unsaved settings.
+/// Quiet startup does not require creating or focusing a Settings window.
+pub fn commit_transcription_selection(
+    app_window: &Rc<RefCell<Option<WindowHandle<AppWindow>>>>,
+    selection: TranscriptionSelection,
+    cx: &mut App,
+) -> Result<AppSettings, String> {
+    let handle = app_window.borrow().as_ref().copied();
+    if let Some(handle) = handle
+        && let Ok(result) = handle.update(cx, |this, _, cx| {
+            this.apply_transcription_selection(selection.clone(), cx)?;
+            cx.notify();
+            Ok(this.settings.clone())
+        })
+    {
+        return result;
+    }
+    let mut settings = AppSettings::load().map_err(|error| error.to_string())?;
+    settings
+        .save_transcription(selection)
+        .map_err(|error| error.to_string())?;
+    Ok(settings)
+}
+
+pub fn menu_transcription_selection(
+    app_window: &Rc<RefCell<Option<WindowHandle<AppWindow>>>>,
+    model: TranscriptionModelId,
+    fallback: &AppSettings,
+    cx: &mut App,
+) -> TranscriptionSelection {
+    let handle = app_window.borrow().as_ref().copied();
+    handle
+        .and_then(|handle| {
+            handle
+                .update(cx, |this, _, _| {
+                    this.settings.transcription_for_model(model)
+                })
+                .ok()
+        })
+        .unwrap_or_else(|| fallback.transcription_for_model(model))
+}
+
+pub fn refresh_transcription_menu(
+    app_window: &Rc<RefCell<Option<WindowHandle<AppWindow>>>>,
+    fallback: &AppSettings,
+    status: &PreparationStatus,
+    cx: &mut App,
+) {
+    let handle = app_window.borrow().as_ref().copied();
+    if handle.is_some_and(|handle| {
+        handle
+            .update(cx, |this, _, _| {
+                crate::status_item::update_transcription(&this.settings, status);
+            })
+            .is_ok()
+    }) {
+        return;
+    }
+    crate::status_item::update_transcription(fallback, status);
 }
 
 pub fn open_preview(
@@ -862,9 +922,7 @@ pub struct AppWindow {
     transcription_picker_language: Option<String>,
     transcription_picker_error: Option<String>,
     transcription_downloading: Option<TranscriptionModelId>,
-    transcription_download_receiver: Option<Receiver<Result<TranscriptionSelection, String>>>,
-    transcription_download_cancel: Option<Arc<AtomicBool>>,
-    transcription_download_progress: Option<Arc<AtomicU64>>,
+    transcription_preparation: TranscriptionPreparation,
     transcription_downloaded_bytes: u64,
     transcription_activation_started: Option<Instant>,
     transcription_preview_installed: Option<bool>,
@@ -1288,9 +1346,11 @@ impl AppWindow {
             )
             .then(|| "Preview download failed while verifying the model checksum.".into()),
             transcription_downloading: preview_downloading,
-            transcription_download_receiver: None,
-            transcription_download_cancel: None,
-            transcription_download_progress: None,
+            transcription_preparation: if preview.is_some() {
+                TranscriptionPreparation::default()
+            } else {
+                cx.default_global::<TranscriptionPreparation>().clone()
+            },
             transcription_downloaded_bytes: preview_downloading
                 .and_then(|model| definition(model).download_bytes())
                 .map_or(0, |bytes| bytes * 37 / 100),
@@ -1469,6 +1529,13 @@ impl AppWindow {
         self.select_pane(Pane::Settings, cx);
     }
 
+    pub(crate) fn show_transcription_models(&mut self, cx: &mut Context<Self>) {
+        self.show_settings(cx);
+        self.transcription_picker_language = Some(self.settings.transcription.language.clone());
+        self.poll_transcription_download();
+        cx.notify();
+    }
+
     pub(crate) fn developer_select_pane(
         &mut self,
         pane: crate::developer_control::DeveloperPane,
@@ -1596,31 +1663,18 @@ impl AppWindow {
     }
 
     fn poll_transcription_download(&mut self) -> bool {
-        let mut changed = false;
-        if let Some(progress) = &self.transcription_download_progress {
-            let downloaded_bytes = progress.load(Ordering::Relaxed);
-            if downloaded_bytes != self.transcription_downloaded_bytes {
-                self.transcription_downloaded_bytes = downloaded_bytes;
-                changed = true;
-            }
+        if self.preview {
+            return false;
         }
-        let Some(receiver) = &self.transcription_download_receiver else {
-            return changed;
-        };
-        let Ok(result) = receiver.try_recv() else {
-            return self.transcription_activation_started.is_some() || changed;
-        };
-        self.transcription_download_receiver = None;
-        self.transcription_download_cancel = None;
-        self.transcription_download_progress = None;
-        self.transcription_downloaded_bytes = 0;
-        self.transcription_downloading = None;
-        self.transcription_activation_started = None;
-        match result {
-            Ok(selection) => self.apply_transcription_selection(selection),
-            Err(error) => self.transcription_picker_error = Some(error),
-        }
-        true
+        let status = self.transcription_preparation.status();
+        let changed = self.transcription_downloading != status.model
+            || self.transcription_downloaded_bytes != status.downloaded_bytes
+            || self.transcription_picker_error != status.error;
+        self.transcription_downloading = status.model;
+        self.transcription_downloaded_bytes = status.downloaded_bytes;
+        self.transcription_activation_started = status.started;
+        self.transcription_picker_error = status.error;
+        changed || status.model.is_some()
     }
 
     fn poll_setup(&mut self, force: bool) -> bool {
@@ -1736,28 +1790,28 @@ impl AppWindow {
         self.personal_workspace_receiver = Some(receiver);
     }
 
-    fn apply_transcription_selection(&mut self, selection: TranscriptionSelection) {
+    fn apply_transcription_selection(
+        &mut self,
+        selection: TranscriptionSelection,
+        cx: &mut Context<Self>,
+    ) -> Result<(), String> {
         if self.preview {
-            self.settings.transcription = selection;
+            self.settings.remember_transcription(selection);
             self.transcription_preview_installed = Some(true);
             self.setup_status.transcription_model = true;
-            self.transcription_picker_language = None;
-            self.transcription_picker_error = None;
-            return;
+        } else {
+            self.settings
+                .save_transcription(selection)
+                .map_err(|error| error.to_string())?;
         }
-        let previous = std::mem::replace(&mut self.settings.transcription, selection);
-        match self.settings.save() {
-            Ok(()) => {
-                self.permission_refresh_at = Instant::now();
-                self.transcription_picker_language = None;
-                self.transcription_picker_error = None;
-                self.settings_load_error = None;
-            }
-            Err(error) => {
-                self.settings.transcription = previous;
-                self.transcription_picker_error = Some(error.to_string());
-            }
-        }
+        self.transcription_hints.entity.update(cx, |input, cx| {
+            input.set_text(&self.settings.transcription.recognition_hints, cx);
+        });
+        self.permission_refresh_at = Instant::now();
+        self.transcription_picker_language = None;
+        self.clear_transcription_error();
+        self.settings_load_error = None;
+        Ok(())
     }
 
     fn choose_transcription_model(
@@ -1776,9 +1830,10 @@ impl AppWindow {
                 String::new()
             },
         };
-        self.transcription_picker_error = None;
+        self.clear_transcription_error();
         if self.preview {
-            self.apply_transcription_selection(selection);
+            self.apply_transcription_selection(selection, cx)
+                .expect("preview selections do not write settings");
             return;
         }
         if transcription_selection_is_active(
@@ -1790,42 +1845,20 @@ impl AppWindow {
             self.transcription_picker_language = None;
             return;
         }
-        let (sender, receiver) = sync_channel(1);
-        let canceled = Arc::new(AtomicBool::new(false));
-        let progress = Arc::new(AtomicU64::new(0));
-        self.transcription_downloading = Some(model.id);
-        self.transcription_download_receiver = Some(receiver);
-        self.transcription_download_cancel = Some(canceled.clone());
-        self.transcription_download_progress = Some(progress.clone());
-        self.transcription_downloaded_bytes = 0;
-        self.transcription_activation_started = Some(Instant::now());
-        thread::spawn(move || {
-            let result = (|| {
-                if matches!(model.runtime, ModelRuntime::Gguf(_)) {
-                    crate::transcription_models::download_with_progress(
-                        model, &canceled, &progress,
-                    )?;
-                }
-                if canceled.load(Ordering::Relaxed) {
-                    return Err(color_eyre::eyre::eyre!("model activation canceled"));
-                }
-                crate::transcription::Transcriber::load_selection(&selection).map(drop)?;
-                Ok(selection)
-            })()
-            .map_err(|error| error.to_string());
-            let _ = sender.send(result);
-        });
+        self.transcription_preparation.start(selection, false);
+        self.poll_transcription_download();
     }
 
     fn cancel_transcription_download(&mut self) {
-        if let Some(canceled) = self.transcription_download_cancel.take() {
-            canceled.store(true, Ordering::Relaxed);
-        }
+        self.transcription_preparation.cancel();
         self.transcription_downloading = None;
-        self.transcription_download_receiver = None;
-        self.transcription_download_progress = None;
         self.transcription_downloaded_bytes = 0;
         self.transcription_activation_started = None;
+    }
+
+    fn clear_transcription_error(&mut self) {
+        self.transcription_preparation.set_error(None);
+        self.transcription_picker_error = None;
     }
 
     fn transcription_model_installed(&self, model: &ModelDefinition, language: &str) -> bool {
@@ -3082,7 +3115,7 @@ impl AppWindow {
 
     fn dismiss_transcription_picker(&mut self, cx: &mut Context<Self>) {
         self.transcription_picker_language = None;
-        self.transcription_picker_error = None;
+        self.clear_transcription_error();
         cx.notify();
     }
 
@@ -3311,7 +3344,7 @@ impl AppWindow {
             .on_click(cx.listener(|this, _, _, cx| {
                 this.transcription_picker_language =
                     Some(this.settings.transcription.language.clone());
-                this.transcription_picker_error = None;
+                this.clear_transcription_error();
                 cx.notify();
             }));
         let double_tap_position = self.double_tap_toggle.render_position(window);
@@ -3849,7 +3882,7 @@ impl AppWindow {
                 .on_click(cx.listener(|this, _, _, cx| {
                     this.transcription_picker_language =
                         Some(this.settings.transcription.language.clone());
-                    this.transcription_picker_error = None;
+                    this.clear_transcription_error();
                     cx.notify();
                 }))
                 .into_any_element()
@@ -7279,7 +7312,7 @@ impl TranscriptionPickerDelegate for AppWindow {
         if self.transcription_picker_language.as_deref() != Some(&language) {
             self.cancel_transcription_download();
             self.transcription_picker_language = Some(language);
-            self.transcription_picker_error = None;
+            self.clear_transcription_error();
             cx.notify();
         }
     }

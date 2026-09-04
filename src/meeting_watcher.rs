@@ -24,6 +24,7 @@ use crate::meeting_detection::{
     MeetingCandidate, MeetingDetector, MeetingSource, candidate_from_microphone,
 };
 use crate::microphone_activity::active_microphone_applications;
+use crate::transcription_preparation::TranscriptionPreparation;
 use crate::{config, recognition};
 
 const WINDOW_WIDTH: f32 = 344.0;
@@ -63,6 +64,8 @@ struct MeetingUi {
     history: Option<crate::history::History>,
     recognition_controls: SyncSender<crate::recognition::RecognitionControl>,
     status_actions: Option<Receiver<crate::status_item::StatusItemAction>>,
+    transcription_preparation: TranscriptionPreparation,
+    model_menu_settings: AppSettings,
 }
 
 struct RuntimeWorkers {
@@ -349,6 +352,7 @@ fn run_with_shell_preview(
     });
     let application_runtime_workers = runtime_workers.clone();
     application.run(move |cx| {
+        let transcription_preparation = cx.default_global::<TranscriptionPreparation>().clone();
         let close_app_window = app_window.clone();
         cx.bind_keys([
             KeyBinding::new("cmd-w", crate::app_window::CloseWindow, None),
@@ -425,6 +429,7 @@ fn run_with_shell_preview(
         } else {
             None
         };
+        crate::status_item::update_transcription(&settings, &transcription_preparation.status());
         crate::app_settings::set_dock_icon_visible(show_dock_icon || status_actions.is_none());
         let show_app_on_launch = should_open_app_on_launch(
             show_dock_icon,
@@ -461,7 +466,9 @@ fn run_with_shell_preview(
         }
         let quit_shutdown = shutdown;
         let quit_workers = application_runtime_workers.clone();
+        let quit_preparation = transcription_preparation.clone();
         cx.on_app_quit(move |_| {
+            quit_preparation.cancel();
             quit_shutdown.store(true, Ordering::Relaxed);
             if let Some(workers) = quit_workers.borrow_mut().take() {
                 workers.join_and_log();
@@ -486,6 +493,8 @@ fn run_with_shell_preview(
                     history: ui_history.clone(),
                     recognition_controls: recognition_control_sender.clone(),
                     status_actions,
+                    transcription_preparation,
+                    model_menu_settings: settings,
                 },
                 shutdown,
                 indicator_enabled,
@@ -506,16 +515,18 @@ async fn drive_ui(
     events: Receiver<ControllerEvent>,
     indicator_events: Receiver<crate::dictation_indicator::DictationIndicatorEvent>,
     developer_calls: Receiver<crate::developer_control::DeveloperCall>,
-    ui: MeetingUi,
+    mut ui: MeetingUi,
     shutdown: &AtomicBool,
     indicator_enabled: bool,
     cx: &mut gpui::AsyncApp,
 ) {
     let mut offer_window: Option<WindowHandle<MeetingOffer>> = None;
     let mut dictation_indicator = indicator_enabled.then(DictationIndicatorUi::new);
+    let mut model_menu_refresh_at = Instant::now();
 
     loop {
         if shutdown.load(Ordering::Relaxed) {
+            ui.transcription_preparation.cancel();
             let _ = cx.update(|cx| cx.quit());
             return;
         }
@@ -544,7 +555,8 @@ async fn drive_ui(
         if let Some(status_actions) = &ui.status_actions {
             while let Ok(action) = status_actions.try_recv() {
                 let result = cx.update(|cx| match action {
-                    crate::status_item::StatusItemAction::OpenSettings => {
+                    crate::status_item::StatusItemAction::OpenSettings
+                    | crate::status_item::StatusItemAction::OpenModels => {
                         match crate::app_window::open_or_focus(
                             &ui.app_window,
                             ui.event_path.clone(),
@@ -556,12 +568,34 @@ async fn drive_ui(
                             cx,
                         ) {
                             Ok(handle) => {
-                                let _ = handle.update(cx, |window, _, cx| window.show_settings(cx));
+                                let _ = handle.update(cx, |window, _, cx| {
+                                    if action == crate::status_item::StatusItemAction::OpenModels {
+                                        window.show_transcription_models(cx);
+                                    } else {
+                                        window.show_settings(cx);
+                                    }
+                                });
                             }
                             Err(error) => {
                                 tracing::error!(%error, "could not open HEX from status item");
                             }
                         }
+                    }
+                    crate::status_item::StatusItemAction::SelectModel(model) => {
+                        let (_, current) = crate::app_settings::transcription_selection();
+                        ui.model_menu_settings.transcription = current;
+                        let selection = crate::app_window::menu_transcription_selection(
+                            &ui.app_window,
+                            model,
+                            &ui.model_menu_settings,
+                            cx,
+                        );
+                        ui.transcription_preparation.start(selection, true);
+                        model_menu_refresh_at = Instant::now();
+                    }
+                    crate::status_item::StatusItemAction::CancelModelPreparation => {
+                        ui.transcription_preparation.cancel();
+                        model_menu_refresh_at = Instant::now();
                     }
                     crate::status_item::StatusItemAction::PasteLast => {
                         let _ = ui
@@ -571,13 +605,48 @@ async fn drive_ui(
                     crate::status_item::StatusItemAction::CheckForUpdates => {
                         crate::sparkle::check_for_updates();
                     }
-                    crate::status_item::StatusItemAction::Quit => cx.quit(),
+                    crate::status_item::StatusItemAction::Quit => {
+                        ui.transcription_preparation.cancel();
+                        cx.quit();
+                    }
                 });
                 if let Err(error) = result {
                     tracing::error!(%error, "could not handle HEX status item action");
                     return;
                 }
             }
+        }
+        // Delivered menu cancellations/new choices win over an uncommitted completion.
+        if let Some(result) = ui.transcription_preparation.poll() {
+            let result = result.and_then(|selection| {
+                cx.update(|cx| {
+                    crate::app_window::commit_transcription_selection(&ui.app_window, selection, cx)
+                })
+                .map_err(|error| error.to_string())?
+            });
+            match result {
+                Ok(settings) => {
+                    ui.model_menu_settings = settings;
+                    ui.transcription_preparation.set_error(None);
+                }
+                Err(error) => {
+                    tracing::warn!(%error, "could not select transcription model");
+                    ui.transcription_preparation.set_error(Some(error));
+                }
+            }
+            model_menu_refresh_at = Instant::now();
+        }
+        if ui.status_actions.is_some() && Instant::now() >= model_menu_refresh_at {
+            let status = ui.transcription_preparation.status();
+            let _ = cx.update(|cx| {
+                crate::app_window::refresh_transcription_menu(
+                    &ui.app_window,
+                    &ui.model_menu_settings,
+                    &status,
+                    cx,
+                );
+            });
+            model_menu_refresh_at = Instant::now() + Duration::from_secs(1);
         }
         while let Ok(event) = events.try_recv() {
             let result = cx.update(|cx| match event {

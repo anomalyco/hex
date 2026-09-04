@@ -8,7 +8,7 @@ use objc2::MainThreadMarker;
 use objc2_app_kit::{NSApplication, NSApplicationActivationPolicy};
 use serde::{Deserialize, Serialize};
 
-use crate::transcription_models::TranscriptionSelection;
+use crate::transcription_models::{TranscriptionModelId, TranscriptionSelection};
 
 static RECORDING_AUDIO_BEHAVIOR: AtomicU8 = AtomicU8::new(0);
 static DOUBLE_TAP_LOCK: AtomicBool = AtomicBool::new(true);
@@ -542,6 +542,7 @@ pub struct AppSettings {
     pub paste_last_hotkey: Option<HotkeyBinding>,
     pub show_dock_icon: bool,
     pub transcription: TranscriptionSelection,
+    pub transcription_recents: Vec<TranscriptionSelection>,
     pub dictation_processing: DictationProcessingSettings,
     pub voice_action: VoiceActionSettings,
     pub history_retention: crate::history::HistoryRetention,
@@ -573,6 +574,7 @@ impl Default for AppSettings {
             paste_last_hotkey: Some(HotkeyBinding::paste_last_default()),
             show_dock_icon: true,
             transcription: TranscriptionSelection::default(),
+            transcription_recents: Vec::new(),
             dictation_processing: DictationProcessingSettings::default(),
             voice_action: VoiceActionSettings::default(),
             history_retention: crate::history::HistoryRetention::default(),
@@ -582,6 +584,63 @@ impl Default for AppSettings {
 }
 
 impl AppSettings {
+    pub fn transcription_for_model(&self, id: TranscriptionModelId) -> TranscriptionSelection {
+        if self.transcription.model == id {
+            return self.transcription.clone();
+        }
+        if let Some(selection) = self.transcription_recents.iter().rev().find(|selection| {
+            selection.model == id && crate::transcription_models::validate(selection).is_ok()
+        }) {
+            return selection.clone();
+        }
+        let model = crate::transcription_models::definition(id);
+        let language = if model.supports_language(&self.transcription.language) {
+            self.transcription.language.clone()
+        } else if model.supports_language("en") {
+            "en".into()
+        } else {
+            model.languages[0].into()
+        };
+        TranscriptionSelection {
+            model: id,
+            language,
+            recognition_hints: String::new(),
+        }
+    }
+
+    pub fn remember_transcription(&mut self, selection: TranscriptionSelection) {
+        self.transcription_recents.push(self.transcription.clone());
+        self.transcription_recents.push(selection.clone());
+        self.normalize_transcription_recents();
+        self.transcription = selection;
+    }
+
+    fn normalize_transcription_recents(&mut self) {
+        let mut seen = std::collections::HashSet::new();
+        self.transcription_recents.reverse();
+        self.transcription_recents.retain(|selection| {
+            crate::transcription_models::validate(selection).is_ok() && seen.insert(selection.model)
+        });
+        self.transcription_recents.reverse();
+    }
+
+    pub fn save_transcription(&mut self, selection: TranscriptionSelection) -> Result<()> {
+        self.save_transcription_with(selection, Self::save)
+    }
+
+    fn save_transcription_with(
+        &mut self,
+        selection: TranscriptionSelection,
+        save: impl FnOnce(&Self) -> Result<()>,
+    ) -> Result<()> {
+        crate::transcription_models::validate(&selection)?;
+        let mut candidate = self.clone();
+        candidate.remember_transcription(selection);
+        save(&candidate)?;
+        *self = candidate;
+        Ok(())
+    }
+
     fn normalize_microphone_policy(&mut self) -> bool {
         if self.commands_enabled && self.release_microphone_while_idle {
             tracing::warn!("disabled voice commands because idle microphone release is enabled");
@@ -653,6 +712,7 @@ impl AppSettings {
                 settings.migrate_legacy_replacements();
                 let mode_applications_migrated = settings.normalize_mode_application_names();
                 let transcription_migrated = settings.migrate_disabled_transcription_model();
+                settings.normalize_transcription_recents();
                 crate::transcription_models::validate(&settings.transcription)?;
                 settings.repair_hotkey_conflict();
                 if (transcription_migrated
@@ -1206,6 +1266,111 @@ mod tests {
 
         assert_eq!(decoded.transcription, settings.transcription);
         assert!(crate::transcription_models::validate(&decoded.transcription).is_ok());
+    }
+
+    #[test]
+    fn model_switches_remember_language_and_hints_without_changing_other_settings() {
+        let french = TranscriptionSelection {
+            model: TranscriptionModelId::WhisperLargeV3Turbo,
+            language: "fr".into(),
+            recognition_hints: "Example project".into(),
+        };
+        let mut settings = AppSettings {
+            show_dock_icon: false,
+            microphone: Some("Test microphone".into()),
+            ..Default::default()
+        };
+        settings.remember_transcription(french.clone());
+        assert_eq!(
+            settings
+                .transcription_for_model(TranscriptionModelId::ParakeetV2)
+                .language,
+            "en"
+        );
+        assert_eq!(
+            settings
+                .transcription_for_model(TranscriptionModelId::CohereTranscribe)
+                .language,
+            "fr"
+        );
+        settings.remember_transcription(TranscriptionSelection::default());
+        let encoded = serde_json::to_vec(&settings).unwrap();
+        let mut decoded: AppSettings = serde_json::from_slice(&encoded).unwrap();
+        assert_eq!(
+            decoded.transcription_for_model(TranscriptionModelId::WhisperLargeV3Turbo),
+            french
+        );
+        for _ in 0..100 {
+            decoded.remember_transcription(french.clone());
+            decoded.remember_transcription(TranscriptionSelection::default());
+        }
+        assert_eq!(decoded.transcription_recents.len(), 2);
+        assert!(!decoded.show_dock_icon);
+        assert_eq!(decoded.microphone.as_deref(), Some("Test microphone"));
+        let old: AppSettings = serde_json::from_str("{}").unwrap();
+        assert!(old.transcription_recents.is_empty());
+    }
+
+    #[test]
+    fn failed_model_selection_save_preserves_selection_recents_and_unsaved_edits() {
+        let mut settings = AppSettings::default();
+        settings.dictation_processing.default_mode.name = "Unsaved mode".into();
+        let before = serde_json::to_value(&settings).unwrap();
+        let candidate = TranscriptionSelection {
+            model: TranscriptionModelId::WhisperLargeV3Turbo,
+            language: "fr".into(),
+            recognition_hints: String::new(),
+        };
+        let error = settings
+            .save_transcription_with(candidate.clone(), |next| {
+                assert_eq!(next.transcription, candidate);
+                assert_eq!(next.dictation_processing.default_mode.name, "Unsaved mode");
+                Err(eyre!("fixture save failed"))
+            })
+            .unwrap_err();
+        assert_eq!(error.to_string(), "fixture save failed");
+        assert_eq!(serde_json::to_value(&settings).unwrap(), before);
+        settings
+            .save_transcription_with(candidate.clone(), |_| Ok(()))
+            .unwrap();
+        assert_eq!(settings.transcription, candidate);
+        assert_eq!(
+            settings.dictation_processing.default_mode.name,
+            "Unsaved mode"
+        );
+    }
+
+    #[test]
+    fn invalid_remembered_languages_are_not_offered_by_model_switching() {
+        let mut settings = AppSettings {
+            transcription_recents: vec![
+                TranscriptionSelection {
+                    model: TranscriptionModelId::ParakeetV2,
+                    language: "fr".into(),
+                    recognition_hints: String::new(),
+                },
+                TranscriptionSelection {
+                    model: TranscriptionModelId::WhisperLargeV3Turbo,
+                    language: "not-a-language".into(),
+                    recognition_hints: String::new(),
+                },
+            ],
+            ..Default::default()
+        };
+        assert_eq!(
+            settings
+                .transcription_for_model(TranscriptionModelId::ParakeetV2)
+                .language,
+            "en"
+        );
+        assert_eq!(
+            settings
+                .transcription_for_model(TranscriptionModelId::WhisperLargeV3Turbo)
+                .language,
+            "en"
+        );
+        settings.normalize_transcription_recents();
+        assert!(settings.transcription_recents.is_empty());
     }
 
     #[test]

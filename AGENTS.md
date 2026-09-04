@@ -67,6 +67,9 @@ substitute for source inspection or a second roadmap.
 - `apple_speech`: the Swift `SpeechAnalyzer` bridge with per-locale support
   checks, asset reservation, and batch transcription.
 - `transcription`: runtime selection and transactional warm-model activation.
+- `transcription_preparation`: application-owned model preparation shared by
+  Settings and the menu bar, with one worker, latest-choice pending admission,
+  cancellation fences, and an installed-only path that never downloads a model.
 - `transcription_models`: the compiled model catalog, language recommendations,
   pinned artifact verification, and lazy installation.
 - `transcription_service`: bounded host-audio admission, hostile WAV validation,
@@ -232,6 +235,14 @@ CoreAudio formats, AppleScript details, or event serialization.
 - Model switches activate only after the pinned artifact is checksum-verified,
   loaded on strict Metal, and prewarmed. A failed switch preserves the active
   model and persisted selection.
+- The menu-bar model picker lists only downloaded, available models and remembers
+  each model's last selected language and recognition hints. It works without a
+  Settings window. Settings and the menu bar share one preparation owner; a newer
+  choice supersedes uncommitted work, and preparation/save failures leave the old
+  selection intact. Menu-bar selections never silently download or repair a model.
+- Cohere's advertised encoder input capacity is not its recommended inference
+  window. Both GGUF adapters cap Cohere chunks at the reference processor's
+  35 seconds (or a stricter advertised bound); capture duration remains unlimited.
 - A selected microphone switches live only while capture is idle. Opening the
   replacement must succeed before the old stream is dropped. If the persisted
   device is unavailable at startup, log the failure and fall back through the

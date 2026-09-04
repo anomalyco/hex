@@ -107,6 +107,39 @@ this page owns the resulting capture and output.
 ### Ongoing Jobs And Output
 
 ```ts
+Completed long recording                  // dictate.model-windows
+├── Cohere -> Runs of at most 35 seconds, including the final remainder
+└── Other GGUF models -> Existing backend-advertised input limit
+    -> Transcribe each chunk -> Join text in original order
+
+Chunking bounds inference, not capture duration. No silence is removed.
+```
+
+The shared `max_audio_chunk_samples` policy in
+[transcription_models.rs](../../src/transcription_models.rs) is used by
+[parakeet.rs](../../src/parakeet.rs) and
+[linux_transcriber.rs](../../src/linux_transcriber.rs). Cohere's pinned backend
+reports a 400-second encoder capacity, while its reference processor uses a
+35-second transcription window. Treating the encoder capacity as a useful
+inference window caused [#73](https://github.com/anomalyco/hex/issues/73)'s lost
+passages. A stricter backend bound still wins; other model policies are unchanged.
+
+`cohere_chunks_at_reference_window_not_encoder_capacity` checks the policy.
+The opt-in `cohere_long_form_keeps_all_sections_with_and_without_pauses` runs the
+real pinned model on synthetic speech. Reproduce it on macOS with
+[`scripts/test-cohere-long-form.sh`](../../scripts/test-cohere-long-form.sh) and an
+explicit model path. The script uses Samantha speech synthesis, never microphone
+capture, and retains fixtures on failure (`HEX_KEEP_COHERE_FIXTURES=1` keeps successes).
+
+**Observed September 4, 2026:** the same 57-second fixture went from 44 word errors
+to zero after chunking; the 73-second paused fixture went from 71 errors to one.
+Short references transcribed correctly before and after. The retained native
+regression also passed a roughly 235-second repeated fixture, retaining all three
+sections in each repetition. This is Metal inference evidence on an M2 Max, not
+physical capture/paste or Linux runtime proof. Chunk boundaries can still affect
+individual words; this is not a claim of perfect recognition or silence handling.
+
+```ts
 Finish
   ├── Capacity available -> Accepted job -> Local transcription -> Mode processing
   │    -> Paste successful nonempty output once, at current focus

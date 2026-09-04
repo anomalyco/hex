@@ -589,6 +589,20 @@ pub fn models_dir() -> Result<PathBuf> {
     Ok(crate::app_paths::support_dir()?.join("models"))
 }
 
+pub fn max_audio_chunk_samples(architecture: &str, max_audio_ms: i64) -> Option<usize> {
+    // Cohere's encoder capacity is not its recommended transcription window.
+    // The pinned model's reference processor chunks long audio at 35 seconds.
+    let maximum_ms = match (architecture, max_audio_ms) {
+        ("cohere_asr", limit) if limit > 0 => limit.min(35_000),
+        ("cohere_asr", _) => 35_000,
+        (_, limit) => limit,
+    };
+    usize::try_from(maximum_ms)
+        .ok()
+        .filter(|milliseconds| *milliseconds > 0)?
+        .checked_mul(16)
+}
+
 pub fn model_path(model: &ModelDefinition) -> Result<PathBuf> {
     let ModelRuntime::Gguf(artifact) = model.runtime else {
         bail!("{} is managed by macOS and has no model path", model.name);
@@ -615,6 +629,45 @@ pub fn is_verified(model: &ModelDefinition) -> bool {
         return false;
     };
     verification_receipt_matches(&path, model)
+}
+
+#[cfg(target_os = "macos")]
+pub fn verify_installed(model: &ModelDefinition, canceled: &AtomicBool) -> Result<PathBuf> {
+    check_canceled(canceled)?;
+    let path = model_path(model)?;
+    verify_installed_at(&path, model, canceled)?;
+    Ok(path)
+}
+
+#[cfg(target_os = "macos")]
+fn verify_installed_at(path: &Path, model: &ModelDefinition, canceled: &AtomicBool) -> Result<()> {
+    check_canceled(canceled)?;
+    if !path.is_file() {
+        bail!(
+            "{} is no longer installed. Open Settings to download it.",
+            model.name
+        );
+    }
+    let _lock = lock_downloads(path.parent().expect("model directory"), canceled)?;
+    if !verification_receipt_matches(path, model) {
+        verify_file_with_cancel(path, model, canceled)?;
+        write_verification_receipt(path, model)?;
+    }
+    Ok(())
+}
+
+fn lock_downloads(directory: &Path, canceled: &AtomicBool) -> Result<File> {
+    let lock = File::create(directory.join(".download.lock"))?;
+    loop {
+        check_canceled(canceled)?;
+        match lock.try_lock_exclusive() {
+            Ok(()) => return Ok(lock),
+            Err(error) if error.kind() == ErrorKind::WouldBlock => {
+                thread::sleep(Duration::from_millis(100));
+            }
+            Err(error) => return Err(error.into()),
+        }
+    }
 }
 
 fn verification_receipt_matches(path: &Path, model: &ModelDefinition) -> bool {
@@ -661,17 +714,7 @@ pub fn download_with_stage_progress(
     check_canceled(canceled)?;
     let directory = models_dir()?;
     fs::create_dir_all(&directory)?;
-    let lock = File::create(directory.join(".download.lock"))?;
-    loop {
-        match lock.try_lock_exclusive() {
-            Ok(()) => break,
-            Err(error) if error.kind() == ErrorKind::WouldBlock => {
-                check_canceled(canceled)?;
-                thread::sleep(Duration::from_millis(100));
-            }
-            Err(error) => return Err(error.into()),
-        }
-    }
+    let _lock = lock_downloads(&directory, canceled)?;
     check_canceled(canceled)?;
     let destination = directory.join(artifact.filename);
     if destination.exists() {
@@ -1123,5 +1166,59 @@ mod tests {
     fn canceled_downloads_stop_before_io() {
         let canceled = AtomicBool::new(true);
         assert!(check_canceled(&canceled).is_err());
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn installed_only_verification_never_downloads_or_replaces_an_invalid_model() {
+        const ARTIFACT: GgufArtifact = GgufArtifact {
+            filename: "fixture.gguf",
+            revision: "fixture",
+            repository: "fixture",
+            bytes: 5,
+            sha256: "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+            architecture: "fixture",
+            variant: "fixture",
+        };
+        let model = ModelDefinition {
+            runtime: ModelRuntime::Gguf(&ARTIFACT),
+            ..MODELS[0]
+        };
+        let directory = std::env::temp_dir().join(format!(
+            "hex-installed-model-{}-{}",
+            std::process::id(),
+            NEXT_TEMP_FILE.fetch_add(1, Ordering::Relaxed),
+        ));
+        fs::create_dir(&directory).unwrap();
+        let path = directory.join("fixture.gguf");
+        let canceled = AtomicBool::new(false);
+        assert!(verify_installed_at(&path, &model, &canceled).is_err());
+        assert!(!path.exists());
+        fs::write(&path, b"hello").unwrap();
+        verify_installed_at(&path, &model, &canceled).unwrap();
+        assert!(verification_receipt_matches(&path, &model));
+        thread::sleep(Duration::from_millis(2));
+        fs::write(&path, b"world").unwrap();
+        assert!(verify_installed_at(&path, &model, &canceled).is_err());
+        assert_eq!(fs::read(&path).unwrap(), b"world");
+        assert!(!path.with_extension("gguf.partial").exists());
+        canceled.store(true, Ordering::Relaxed);
+        assert!(verify_installed_at(&path, &model, &canceled).is_err());
+        fs::remove_file(verification_receipt_path(&path)).unwrap();
+        fs::remove_file(path).unwrap();
+        fs::remove_file(directory.join(".download.lock")).unwrap();
+        fs::remove_dir(directory).unwrap();
+    }
+
+    #[test]
+    fn cohere_chunks_at_reference_window_not_encoder_capacity() {
+        assert_eq!(
+            max_audio_chunk_samples("cohere_asr", 400_000),
+            Some(560_000)
+        );
+        assert_eq!(max_audio_chunk_samples("cohere_asr", 0), Some(560_000));
+        assert_eq!(max_audio_chunk_samples("cohere_asr", 10_000), Some(160_000));
+        assert_eq!(max_audio_chunk_samples("whisper", 0), None);
+        assert_eq!(max_audio_chunk_samples("parakeet", 60_000), Some(960_000));
     }
 }

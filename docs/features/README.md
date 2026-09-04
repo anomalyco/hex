@@ -91,6 +91,51 @@ Checks start in [onboarding.rs](../../src/onboarding.rs),
 [transcription_models.rs](../../src/transcription_models.rs). Setup/picker previews
 prove rendering, not clean-account permission grants or model preparation.
 
+```ts
+Menu bar > Transcription Model            // setup.quick-model-switch; macOS
+├── Downloaded models -> Last selected language shown beside each model
+├── Choose -> Verify installed artifact -> Prewarm -> Save selection
+│   ├── Success -> Checkmark moves; Settings reflects the saved selection
+│   └── Failure -> Previous selection remains; open Settings for the error
+├── Preparing -> Cancel Model Switch      // never cancels dictation/output jobs
+└── Manage Models… -> Settings picker      // downloads and language changes
+```
+
+The menu does not open Settings merely to switch models, download a missing model,
+or replace a corrupt artifact. Each model retains one last-used language/hints
+selection in `transcription_recents`; the current selection takes precedence.
+Older settings start with no remembered alternatives. Select an alternative's
+language in Settings once to establish it. No additional model is loaded at startup
+just to populate the menu, and the checkmark means selected, not live-worker readiness.
+
+[transcription_preparation.rs](../../src/transcription_preparation.rs) is shared
+by Settings and the menu bar: one worker plus one replaceable pending choice.
+Closing Settings does not abandon preparation. A superseded/cancelled completion
+cannot save, and delivered menu controls are drained before accepting completions.
+The desktop root commits through an existing editor to retain unrelated unsaved
+settings, or through persisted settings when no window exists.
+
+Sources: [status_item.rs](../../src/status_item.rs),
+[meeting_watcher.rs](../../src/meeting_watcher.rs), and
+[app_window.rs](../../src/app_window.rs). Key checks are
+`preparation_has_one_worker_and_only_keeps_the_latest_pending_choice`,
+`cancelling_a_completed_unpolled_preparation_never_commits_it`,
+`model_switches_remember_language_and_hints_without_changing_other_settings`, and
+`failed_model_selection_save_preserves_selection_recents_and_unsaved_edits` in
+the preparation owner and [app_settings.rs](../../src/app_settings.rs).
+Additional checks cover worker failure/retry, installed-only checksum verification,
+and menu choice/tag projection. These do not establish a physical menu click or
+an installed-app switch. Remembering a language does not change the language
+conditioning limitations described above.
+
+**Observed September 4, 2026 (unreleased working branch):** all 455 Rust tests
+passed in debug and release, with ten opt-in tests skipped per profile. All twelve
+keyboard-layout child scenarios passed per profile; formatting, strict
+all-target/all-feature Clippy in both profiles, and the release build passed.
+The Cohere fixture inference check was run separately; see
+[dictation model windows](dictation.md#ongoing-jobs-and-output). Native menu
+interaction, installed-app switching, and Linux runtime behavior were not exercised.
+
 **Known gap:** `is_installed` checks size, not checksum. Not every native-load
 path requires verification. Picker Active means selected/installed, not live
 worker readiness; a later worker-load failure does not roll back saved selection.

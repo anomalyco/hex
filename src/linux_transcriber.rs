@@ -159,8 +159,10 @@ impl LinuxTranscriber {
                 ..Default::default()
             },
             device_label,
-            max_audio_samples: (capabilities.max_audio_ms > 0)
-                .then_some(capabilities.max_audio_ms as usize * 16),
+            max_audio_samples: crate::transcription_models::max_audio_chunk_samples(
+                &architecture,
+                capabilities.max_audio_ms,
+            ),
         };
         let started = Instant::now();
         transcriber.transcribe(&vec![0.0; 24_000])?;

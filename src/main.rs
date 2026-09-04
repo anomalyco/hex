@@ -124,6 +124,8 @@ mod transcription_benchmark;
 #[cfg_attr(target_os = "linux", allow(dead_code))]
 mod transcription_models;
 #[cfg(target_os = "macos")]
+mod transcription_preparation;
+#[cfg(target_os = "macos")]
 mod transcription_service;
 
 #[cfg(target_os = "macos")]

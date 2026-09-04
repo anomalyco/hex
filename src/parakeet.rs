@@ -1000,10 +1000,10 @@ impl Parakeet {
             ));
         }
         let variant = model.variant();
+        let architecture = model.arch();
         let name = format!("transcribe-cpp-{}-{variant}", device.kind);
         let definition = selection.map(validate).transpose()?;
         if let Some(definition) = definition {
-            let architecture = model.arch();
             let crate::transcription_models::ModelRuntime::Gguf(artifact) = definition.runtime
             else {
                 return Err(eyre!(
@@ -1092,8 +1092,10 @@ impl Parakeet {
             },
             name,
             selection: selection.cloned(),
-            max_audio_samples: (capabilities.max_audio_ms > 0)
-                .then_some(capabilities.max_audio_ms as usize * 16),
+            max_audio_samples: crate::transcription_models::max_audio_chunk_samples(
+                &architecture,
+                capabilities.max_audio_ms,
+            ),
         })
     }
 
@@ -1181,6 +1183,54 @@ mod tests {
     use crate::app_settings::TextReplacement;
     use crate::dictation::resample_for_parakeet;
     use crate::meeting::MeetingSource;
+
+    #[test]
+    #[ignore = "requires HEX_COHERE_MODEL and HEX_COHERE_FIXTURES synthetic audio"]
+    fn cohere_long_form_keeps_all_sections_with_and_without_pauses() {
+        let model_path = PathBuf::from(std::env::var_os("HEX_COHERE_MODEL").expect("model path"));
+        let fixtures =
+            PathBuf::from(std::env::var_os("HEX_COHERE_FIXTURES").expect("fixture path"));
+        let selection = TranscriptionSelection {
+            model: TranscriptionModelId::CohereTranscribe,
+            language: "en".into(),
+            recognition_hints: String::new(),
+        };
+        let mut model = Parakeet::load_from(&model_path, false, Some(&selection)).unwrap();
+        eprintln!(
+            "Cohere maximum chunk: {:?} samples",
+            model.max_audio_samples
+        );
+        for (name, repeats) in [
+            ("long-continuous", 1),
+            ("long-pauses", 1),
+            ("long-repeated", 3),
+        ] {
+            let mut reader = WavReader::open(fixtures.join(format!("{name}.wav"))).unwrap();
+            assert_eq!(reader.spec().sample_rate, 16_000);
+            assert_eq!(reader.spec().channels, 1);
+            let samples = reader
+                .samples::<i16>()
+                .map(|sample| f32::from(sample.unwrap()) / 32768.0)
+                .collect::<Vec<_>>();
+            assert!(samples.len() > 35 * 16_000);
+            let text = model.transcribe(&samples).unwrap().to_lowercase();
+            for phrase in [
+                "small community garden",
+                "bright green door",
+                "purple submarine",
+            ] {
+                assert_eq!(
+                    text.matches(phrase).count(),
+                    repeats,
+                    "{name} lost {phrase:?}: {text}"
+                );
+            }
+            assert!(
+                text.split_whitespace().count() >= 160 * repeats,
+                "{name}: {text}"
+            );
+        }
+    }
 
     #[test]
     fn replacements_follow_control_stripping_and_stay_corrected_through_fallback() {
