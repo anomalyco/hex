@@ -17,6 +17,8 @@ static MICROPHONE_POLICY: AtomicU8 = AtomicU8::new(0);
 static CUSTOM_TRANSFORMATIONS_ENABLED: AtomicBool = AtomicBool::new(false);
 static HOTKEYS: OnceLock<RwLock<RuntimeHotkeys>> = OnceLock::new();
 static PASTE_KEY_CODE: OnceLock<u16> = OnceLock::new();
+static REWRITE_LAST_KEY_CODE: OnceLock<u16> = OnceLock::new();
+static REWRITE_SELECTION_KEY_CODE: OnceLock<u16> = OnceLock::new();
 static HOTKEY_CAPTURE_ACTIVE: AtomicBool = AtomicBool::new(false);
 static SETTINGS_TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 static TRANSCRIPTION_SELECTION: OnceLock<RwLock<RuntimeTranscriptionSelection>> = OnceLock::new();
@@ -251,10 +253,45 @@ impl HotkeyBinding {
             }),
         }
     }
+
+    pub fn rewrite_last_default() -> Self {
+        Self {
+            modifiers: HotkeyModifiers {
+                option: Some(ModifierSide::Either),
+                shift: Some(ModifierSide::Either),
+                ..Default::default()
+            },
+            key: Some(HotkeyKey {
+                code: rewrite_last_key_code(),
+                label: "O".into(),
+            }),
+        }
+    }
+
+    pub fn rewrite_selection_default() -> Self {
+        Self {
+            modifiers: HotkeyModifiers {
+                option: Some(ModifierSide::Either),
+                shift: Some(ModifierSide::Either),
+                ..Default::default()
+            },
+            key: Some(HotkeyKey {
+                code: rewrite_selection_key_code(),
+                label: "R".into(),
+            }),
+        }
+    }
 }
 
 fn paste_key_code() -> u16 {
     *PASTE_KEY_CODE.get_or_init(|| crate::keyboard::key_code_for('v').unwrap_or(9))
+}
+
+fn rewrite_last_key_code() -> u16 {
+    *REWRITE_LAST_KEY_CODE.get_or_init(|| crate::keyboard::key_code_for('o').unwrap_or(31))
+}
+fn rewrite_selection_key_code() -> u16 {
+    *REWRITE_SELECTION_KEY_CODE.get_or_init(|| crate::keyboard::key_code_for('r').unwrap_or(15))
 }
 
 impl HotkeyBinding {
@@ -391,6 +428,8 @@ pub struct RuntimeHotkeys {
     pub dictation: RuntimeHotkey,
     pub edit: Option<RuntimeHotkey>,
     pub paste_last: Option<RuntimeHotkey>,
+    pub rewrite_last: Option<RuntimeHotkey>,
+    pub rewrite_selection: Option<RuntimeHotkey>,
     pub paste_meeting: Option<RuntimeHotkey>,
 }
 
@@ -400,6 +439,8 @@ impl Default for RuntimeHotkeys {
             dictation: HotkeyBinding::default().runtime(),
             edit: None,
             paste_last: Some(HotkeyBinding::paste_last_default().runtime()),
+            rewrite_last: Some(HotkeyBinding::rewrite_last_default().runtime()),
+            rewrite_selection: Some(HotkeyBinding::rewrite_selection_default().runtime()),
             paste_meeting: crate::DEVELOPER_FEATURES_ENABLED
                 .then(|| HotkeyBinding::paste_meeting_default().runtime()),
         }
@@ -540,6 +581,10 @@ pub struct AppSettings {
     )]
     pub edit_hotkey: HotkeyBinding,
     pub paste_last_hotkey: Option<HotkeyBinding>,
+    #[serde(default = "default_rewrite_last_hotkey")]
+    pub rewrite_last_hotkey: Option<HotkeyBinding>,
+    #[serde(default = "default_rewrite_selection_hotkey")]
+    pub rewrite_selection_hotkey: Option<HotkeyBinding>,
     pub show_dock_icon: bool,
     pub transcription: TranscriptionSelection,
     pub transcription_recents: Vec<TranscriptionSelection>,
@@ -558,6 +603,13 @@ where
         .unwrap_or_else(HotkeyBinding::edit_default))
 }
 
+fn default_rewrite_last_hotkey() -> Option<HotkeyBinding> {
+    Some(HotkeyBinding::rewrite_last_default())
+}
+fn default_rewrite_selection_hotkey() -> Option<HotkeyBinding> {
+    Some(HotkeyBinding::rewrite_selection_default())
+}
+
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
@@ -572,6 +624,8 @@ impl Default for AppSettings {
             dictation_hotkey: HotkeyBinding::default(),
             edit_hotkey: HotkeyBinding::edit_default(),
             paste_last_hotkey: Some(HotkeyBinding::paste_last_default()),
+            rewrite_last_hotkey: default_rewrite_last_hotkey(),
+            rewrite_selection_hotkey: default_rewrite_selection_hotkey(),
             show_dock_icon: true,
             transcription: TranscriptionSelection::default(),
             transcription_recents: Vec::new(),
@@ -715,12 +769,14 @@ impl AppSettings {
                 settings.normalize_transcription_recents();
                 crate::transcription_models::validate(&settings.transcription)?;
                 settings.repair_hotkey_conflict();
+                let shortcut_conflicts_fixed = settings.normalize_shortcut_conflicts();
                 if (transcription_migrated
                     || microphone_policy_migrated
-                    || mode_applications_migrated)
+                    || mode_applications_migrated
+                    || shortcut_conflicts_fixed)
                     && let Err(error) = settings.write_to(path)
                 {
-                    tracing::warn!(%error, "could not persist the replacement transcription model");
+                    tracing::warn!(%error, "could not persist normalized settings");
                 }
                 Ok(settings)
             }
@@ -854,9 +910,74 @@ impl AppSettings {
                 .enabled
                 .then(|| self.edit_hotkey.runtime()),
             paste_last: self.paste_last_hotkey.as_ref().map(HotkeyBinding::runtime),
+            rewrite_last: self
+                .rewrite_last_hotkey
+                .as_ref()
+                .map(HotkeyBinding::runtime),
+            rewrite_selection: self
+                .rewrite_selection_hotkey
+                .as_ref()
+                .map(HotkeyBinding::runtime),
             paste_meeting: crate::DEVELOPER_FEATURES_ENABLED
                 .then(|| HotkeyBinding::paste_meeting_default().runtime()),
         }
+    }
+
+    /// A persisted rewrite shortcut must never shadow the shortcuts users already
+    /// rely on; disable it instead of silently changing their muscle memory.
+    fn normalize_shortcut_conflicts(&mut self) -> bool {
+        let mut changed = false;
+        let rewrite_last_conflicts =
+            self.rewrite_last_hotkey
+                .as_ref()
+                .is_some_and(|rewrite_last| {
+                    hotkeys_conflict(&self.dictation_hotkey, rewrite_last)
+                        || self
+                            .paste_last_hotkey
+                            .as_ref()
+                            .is_some_and(|x| hotkeys_conflict(x, rewrite_last))
+                        || (self.voice_action.enabled
+                            && hotkeys_conflict(&self.edit_hotkey, rewrite_last))
+                        || self
+                            .rewrite_selection_hotkey
+                            .as_ref()
+                            .is_some_and(|x| hotkeys_conflict(x, rewrite_last))
+                        || (crate::DEVELOPER_FEATURES_ENABLED
+                            && hotkeys_conflict(
+                                &HotkeyBinding::paste_meeting_default(),
+                                rewrite_last,
+                            ))
+                });
+        if rewrite_last_conflicts {
+            self.rewrite_last_hotkey = None;
+            changed = true;
+        }
+        let selection_conflicts = self
+            .rewrite_selection_hotkey
+            .as_ref()
+            .is_some_and(|selection| {
+                hotkeys_conflict(&self.dictation_hotkey, selection)
+                    || self
+                        .paste_last_hotkey
+                        .as_ref()
+                        .is_some_and(|x| hotkeys_conflict(x, selection))
+                    || self
+                        .rewrite_last_hotkey
+                        .as_ref()
+                        .is_some_and(|x| hotkeys_conflict(x, selection))
+                    || (self.voice_action.enabled && hotkeys_conflict(&self.edit_hotkey, selection))
+                    || (crate::DEVELOPER_FEATURES_ENABLED
+                        && hotkeys_conflict(&HotkeyBinding::paste_meeting_default(), selection))
+            });
+        if selection_conflicts {
+            self.rewrite_selection_hotkey = None;
+            changed = true;
+        }
+        changed
+    }
+    #[cfg(test)]
+    fn normalize_rewrite_last_conflict(&mut self) -> bool {
+        self.normalize_shortcut_conflicts()
     }
 
     fn repair_hotkey_conflict(&mut self) {
@@ -1066,6 +1187,10 @@ mod tests {
             settings.paste_last_hotkey,
             Some(HotkeyBinding::paste_last_default())
         );
+        assert_eq!(
+            settings.rewrite_last_hotkey,
+            Some(HotkeyBinding::rewrite_last_default())
+        );
         assert!(settings.show_dock_icon);
         assert_eq!(settings.transcription, TranscriptionSelection::default());
         assert!(
@@ -1079,6 +1204,51 @@ mod tests {
         assert!(settings.voice_action.variant.is_none());
         assert_eq!(settings.voice_action.deadline_seconds, 60);
         assert!(settings.text_replacements.is_empty());
+    }
+
+    #[test]
+    fn rewrite_last_shortcut_disables_itself_when_it_shadows_an_existing_shortcut() {
+        let rewrite = HotkeyBinding::rewrite_last_default();
+        let mut settings = AppSettings {
+            rewrite_last_hotkey: Some(rewrite.clone()),
+            ..AppSettings::default()
+        };
+        assert!(settings.runtime_hotkeys().rewrite_last.is_some());
+
+        settings.dictation_hotkey = rewrite.clone();
+        assert!(settings.normalize_rewrite_last_conflict());
+        assert_eq!(settings.rewrite_last_hotkey, None);
+        assert!(settings.runtime_hotkeys().rewrite_last.is_none());
+
+        let mut settings = AppSettings {
+            rewrite_last_hotkey: Some(rewrite.clone()),
+            paste_last_hotkey: Some(rewrite.clone()),
+            ..AppSettings::default()
+        };
+        assert!(settings.normalize_rewrite_last_conflict());
+        assert_eq!(settings.rewrite_last_hotkey, None);
+
+        let mut settings = AppSettings {
+            rewrite_last_hotkey: Some(rewrite.clone()),
+            voice_action: crate::app_settings::VoiceActionSettings {
+                enabled: true,
+                ..crate::app_settings::VoiceActionSettings::default()
+            },
+            edit_hotkey: rewrite.clone(),
+            ..AppSettings::default()
+        };
+        assert!(settings.normalize_rewrite_last_conflict());
+        assert_eq!(settings.rewrite_last_hotkey, None);
+
+        if crate::DEVELOPER_FEATURES_ENABLED {
+            let mut settings = AppSettings {
+                rewrite_last_hotkey: Some(rewrite),
+                ..AppSettings::default()
+            };
+            settings.rewrite_last_hotkey = Some(HotkeyBinding::paste_meeting_default());
+            assert!(settings.normalize_rewrite_last_conflict());
+            assert_eq!(settings.rewrite_last_hotkey, None);
+        }
     }
 
     #[test]

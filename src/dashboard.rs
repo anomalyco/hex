@@ -559,6 +559,7 @@ fn dictation_label(phase: &DictationPhase) -> &'static str {
         DictationPhase::VoiceAction => "voice action",
         DictationPhase::Logged => "logged",
         DictationPhase::Repasted => "repasted",
+        DictationPhase::Rewritten => "rewritten",
         DictationPhase::MeetingPasted => "meeting pasted",
         DictationPhase::Failed(_) => "failed",
     }
@@ -573,6 +574,7 @@ fn dictation_color(phase: &DictationPhase) -> Color {
         DictationPhase::VoiceAction => Color::Green,
         DictationPhase::Logged => Color::Green,
         DictationPhase::Repasted => Color::Green,
+        DictationPhase::Rewritten => Color::Green,
         DictationPhase::MeetingPasted => Color::Green,
         DictationPhase::Discarded => Color::DarkGray,
         DictationPhase::Cancelled => Color::Yellow,

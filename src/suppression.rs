@@ -523,6 +523,8 @@ impl ShortcutSuppression {
             Some(hotkeys.dictation),
             hotkeys.edit,
             hotkeys.paste_last,
+            hotkeys.rewrite_last,
+            hotkeys.rewrite_selection,
             hotkeys.paste_meeting,
         ];
         match input {
@@ -554,6 +556,8 @@ impl ShortcutSuppression {
     ) -> bool {
         let mut paste_last = HotkeyBinding::paste_last_default().runtime();
         paste_last.key_code = Some(paste_key_code);
+        let mut rewrite_last = HotkeyBinding::rewrite_last_default().runtime();
+        rewrite_last.key_code = Some(paste_key_code);
         let mut paste_meeting = HotkeyBinding::paste_meeting_default().runtime();
         paste_meeting.key_code = Some(paste_key_code);
         self.process_all(
@@ -562,6 +566,8 @@ impl ShortcutSuppression {
                 dictation: hotkey,
                 edit: None,
                 paste_last: Some(paste_last),
+                rewrite_last: Some(rewrite_last),
+                rewrite_selection: Some(HotkeyBinding::rewrite_selection_default().runtime()),
                 paste_meeting: Some(paste_meeting),
             },
             delivered,
@@ -603,6 +609,18 @@ fn paste_action(input: InputEvent, hotkeys: RuntimeHotkeys) -> Option<HotkeyActi
         .map(|_| HotkeyAction::PasteLast)
         .or_else(|| {
             hotkeys
+                .rewrite_last
+                .filter(|binding| binding.matches_key_press(code, flags))
+                .map(|_| HotkeyAction::RewriteLast)
+        })
+        .or_else(|| {
+            hotkeys
+                .rewrite_selection
+                .filter(|binding| binding.matches_key_press(code, flags))
+                .map(|_| HotkeyAction::RewriteSelection)
+        })
+        .or_else(|| {
+            hotkeys
                 .paste_meeting
                 .filter(|binding| binding.matches_key_press(code, flags))
                 .map(|_| HotkeyAction::PasteMeeting)
@@ -634,6 +652,8 @@ pub enum HotkeyAction {
     Discard,
     Cancel,
     PasteLast,
+    RewriteLast,
+    RewriteSelection,
     PasteMeeting,
 }
 
@@ -3139,6 +3159,43 @@ mod tests {
             },
             paste_key_code,
             option_binding(),
+            true,
+        ));
+    }
+
+    #[test]
+    fn option_shift_o_sends_the_last_transcript_through_opencode() {
+        let now = capture_time();
+        let mut hotkey = test_hotkey(true, now);
+        let rewrite_key_code = HotkeyBinding::rewrite_last_default()
+            .key
+            .expect("default rewrite key")
+            .code;
+        let key_down = InputEvent::Key {
+            code: rewrite_key_code,
+            down: true,
+            flags: OPTION_KEY_MASK | SHIFT_KEY_MASK,
+        };
+        assert_eq!(
+            hotkey.process(key_down, now + Duration::from_millis(50)),
+            Some(HotkeyAction::RewriteLast)
+        );
+        assert_eq!(
+            hotkey.process(key_down, now + Duration::from_millis(60)),
+            None
+        );
+        assert!(!hotkey.is_recording());
+        let mut suppression = ShortcutSuppression::default();
+        assert!(suppression.process_all(
+            key_down,
+            RuntimeHotkeys {
+                dictation: option_binding(),
+                edit: None,
+                paste_last: None,
+                rewrite_last: Some(HotkeyBinding::rewrite_last_default().runtime()),
+                rewrite_selection: None,
+                paste_meeting: None,
+            },
             true,
         ));
     }

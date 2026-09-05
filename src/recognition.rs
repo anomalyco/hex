@@ -827,7 +827,13 @@ pub fn listen(
                 );
             }
             if let Some(action) = hotkey.process(input_event, capture_at) {
-                if matches!(action, HotkeyAction::PasteLast | HotkeyAction::PasteMeeting) {
+                if matches!(
+                    action,
+                    HotkeyAction::PasteLast
+                        | HotkeyAction::RewriteLast
+                        | HotkeyAction::RewriteSelection
+                        | HotkeyAction::PasteMeeting
+                ) {
                     voice_protocol = None;
                     control_stability.reset();
                 }
@@ -1588,6 +1594,57 @@ fn handle_hotkey_action(
             }
             emit_engine_state(events, false, worker, mode, device)
         }
+        HotkeyAction::RewriteLast => {
+            dictation.cancel()?;
+            reset_command_recognizer(dictation, recognizer)?;
+            let submission = if !crate::dictation_processor::opencode_installed() {
+                Err("Rewrite requires OpenCode")
+            } else {
+                worker.rewrite_last(context.clone())
+            };
+            match submission {
+                Ok(job_id) => {
+                    if let Some(indicator) = indicator {
+                        indicator.send(DictationIndicatorEvent::Submitted {
+                            job_id: job_id.value(),
+                        });
+                    }
+                }
+                Err(error) => {
+                    feedback::play(Tone::Error);
+                    events.dictation(DictationPhase::Failed(error.into()), "")?;
+                }
+            }
+            emit_engine_state(events, false, worker, mode, device)
+        }
+        HotkeyAction::RewriteSelection => {
+            dictation.cancel()?;
+            reset_command_recognizer(dictation, recognizer)?;
+            let submission = if !crate::dictation_processor::opencode_installed() {
+                Err("Rewrite requires OpenCode".to_string())
+            } else if let Some(text) =
+                crate::accessibility::capture_optional().filter(|text| !text.trim().is_empty())
+            {
+                worker
+                    .rewrite_selection(text, context.clone())
+                    .map(|id| id.value())
+                    .map_err(str::to_string)
+            } else {
+                Err("No text is selected".to_string())
+            };
+            match submission {
+                Ok(job_id) => {
+                    if let Some(indicator) = indicator {
+                        indicator.send(DictationIndicatorEvent::Submitted { job_id });
+                    }
+                }
+                Err(error) => {
+                    feedback::play(Tone::Error);
+                    events.dictation(DictationPhase::Failed(error), "")?;
+                }
+            }
+            emit_engine_state(events, false, worker, mode, device)
+        }
     }?;
     Ok(true)
 }
@@ -1700,7 +1757,10 @@ fn handle_edit_hotkey_action(
             emit_state(events, false, mode, device)?;
             Ok(true)
         }
-        HotkeyAction::PasteLast | HotkeyAction::PasteMeeting => Ok(false),
+        HotkeyAction::PasteLast
+        | HotkeyAction::RewriteLast
+        | HotkeyAction::RewriteSelection
+        | HotkeyAction::PasteMeeting => Ok(false),
     }
 }
 
@@ -2095,7 +2155,13 @@ fn voice_action_owns_action(
     edit_action: Option<HotkeyAction>,
 ) -> bool {
     (edit_pending || edit_recording || edit_action.is_some())
-        && !matches!(action, HotkeyAction::PasteLast | HotkeyAction::PasteMeeting)
+        && !matches!(
+            action,
+            HotkeyAction::PasteLast
+                | HotkeyAction::RewriteLast
+                | HotkeyAction::RewriteSelection
+                | HotkeyAction::PasteMeeting
+        )
 }
 
 fn start_pending_voice_action(
@@ -2158,6 +2224,8 @@ fn handle_dictation_event(
             let phase = match target {
                 TranscriptionTarget::VoiceAction => DictationPhase::VoiceAction,
                 TranscriptionTarget::Paste | TranscriptionTarget::Send => DictationPhase::Pasted,
+                TranscriptionTarget::RewriteLast => DictationPhase::Rewritten,
+                TranscriptionTarget::RewriteSelection => DictationPhase::Rewritten,
                 TranscriptionTarget::Service => return Ok(()),
             };
             events.processed_dictation(
@@ -2526,6 +2594,12 @@ mod tests {
     fn explicit_paste_shortcuts_stay_available_during_a_voice_action_gesture() {
         assert!(!voice_action_owns_action(
             HotkeyAction::PasteLast,
+            true,
+            true,
+            None,
+        ));
+        assert!(!voice_action_owns_action(
+            HotkeyAction::RewriteLast,
             true,
             true,
             None,
