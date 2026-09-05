@@ -61,7 +61,6 @@ in
       (package: builtins.elem "${lib.getLib package}/lib" (lib.splitString ":" shell.LD_LIBRARY_PATH))
       [
         pkgs.vulkan-loader
-        pkgs.libayatana-appindicator
         pkgs.gtk-layer-shell
         pkgs.wayland
         pkgs.libxkbcommon
@@ -80,15 +79,16 @@ in
     assert builtins.elem hex system.environment.systemPackages;
     assert builtins.elem hex enabled.home.packages;
     assert !(builtins.elem hex disabled.home.packages);
-    assert !(manual.systemd.user.services ? hex);
+    assert manual.systemd.user.services.hex.Install.WantedBy == [ ];
     assert !(disabled.systemd.user.services ? hex);
-    assert enabled.systemd.user.services.hex.Service.ExecStart == [ "${lib.getExe hex} app --hidden" ];
+    assert enabled.systemd.user.services.hex.Service.ExecStart == [ "${lib.getExe hex} service" ];
     assert enabled.systemd.user.services.hex.Service.Restart == "on-failure";
+    assert builtins.elem "HEX_APPLICATION_SUPPORT_DIR=${enabled.xdg.dataHome}/voice-control"
+      enabled.systemd.user.services.hex.Service.Environment;
     assert
-      custom.systemd.user.services.hex.Service.ExecStart == [ "${lib.getExe pkgs.hello} app --hidden" ];
+      custom.systemd.user.services.hex.Service.ExecStart == [ "${lib.getExe pkgs.hello} service" ];
     assert lib.all (name: custom.systemd.user.services.hex.Unit.${name} == [ "sway-session.target" ]) [
       "After"
-      "Requisite"
       "PartOf"
     ];
     assert custom.systemd.user.services.hex.Install.WantedBy == [ "sway-session.target" ];

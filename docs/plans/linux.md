@@ -18,7 +18,7 @@ The Linux beta keeps its contracts explicit:
 | Inference | Vulkan with CPU fallback |
 | Shortcut | Configurable key-containing chord; default `Alt+Space` |
 | Insertion | Clipboard plus Ctrl-V, with a Ctrl-Shift-V terminal setting |
-| UI | Vulkan-backed GPUI shell; X11 tray where available; Wayland layer-shell HUD |
+| UI | On-demand GPUI service client; no tray; service-owned Wayland layer-shell HUD |
 
 The beta does not claim voice commands, application or browser context,
 meetings, or universal Wayland support. Wayland needs explicit read access to
@@ -34,11 +34,12 @@ There is no hidden XWayland or privileged injection fallback. See
 - Automatic clipboard insertion with bounded settling. The transcript remains
   on the clipboard; arbitrary previous formats are not restored.
 - CLI microphone override.
-- GPUI shell, tray integration, desktop launcher, and autostart entry.
+- Per-user systemd service, independent GPUI Settings client, CLI controls,
+  owner-only Unix IPC, desktop launcher, and service-only autostart entry.
 - Native Wayland evdev input with explicit key mapping, cancellation, and
   device rediscovery; persistent click-through recording/processing overlay.
-- Visible listener controls, transactional shortcut edits, and orderly tray-less
-  shutdown instead of a detached invisible microphone.
+- Visible listener controls, transactional shortcut edits, and explicit service
+  shutdown; closing Settings leaves the managed runtime running.
 - Nix package and matching development shell, NixOS installation, optional
   Home Manager user service, and evaluated session-readiness checks.
 - XDG paths, diagnostics, and exclusive listener ownership.
@@ -66,7 +67,7 @@ Arch/i3 host. Verify:
 - atomic activation and application restart;
 - retained-version rollback;
 - refusal to overwrite development, root, or package-manager installs;
-- startup with and without a tray host.
+- service/client restart and reconnect without requiring a tray host.
 
 This validation blocks calling the direct-install update channel proven.
 

@@ -11,7 +11,6 @@
   openblas,
   gtk3,
   gtk-layer-shell,
-  libayatana-appindicator,
   alsa-lib,
   alsa-plugins,
   pipewire,
@@ -45,7 +44,6 @@ let
   runtimeEnv = {
     LD_LIBRARY_PATH = lib.makeLibraryPath [
       vulkan-loader
-      libayatana-appindicator
       gtk-layer-shell
       openblas
       alsa-lib
@@ -108,7 +106,6 @@ rustPlatform.buildRustPackage (finalAttrs: {
     openblas
     gtk3
     gtk-layer-shell
-    libayatana-appindicator
     alsa-lib
     openssl
     libxkbcommon

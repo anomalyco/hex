@@ -19,12 +19,13 @@ audio=$3
 root=$(cd -- "$(dirname -- "$0")/.." && pwd)
 work=$(mktemp -d)
 listener=
+app=
 target=
 pulse=
 finish() {
   status=$?
   trap - EXIT INT TERM
-  for pid in "$listener" "$target" "$pulse"; do
+  for pid in "$app" "$listener" "$target" "$pulse"; do
     if [[ -n "$pid" ]]; then kill "$pid" 2>/dev/null || true; fi
   done
   for ((attempt = 0; attempt < 100; attempt++)); do
@@ -52,6 +53,7 @@ export GDK_BACKEND=x11 GGML_VK_VISIBLE_DEVICES=""
 unset WAYLAND_DISPLAY VK_ICD_FILENAMES
 mkdir -m 700 "$HOME" "$XDG_RUNTIME_DIR" "$HEX_APPLICATION_SUPPORT_DIR"
 mkdir "$HEX_APPLICATION_SUPPORT_DIR/models"
+printf '{"sound_effect_volume":0}\n' > "$HEX_APPLICATION_SUPPORT_DIR/linux-settings.json"
 ln -s "$model" "$HEX_APPLICATION_SUPPORT_DIR/models/$(basename "$model")"
 printf 'pcm.!default { type pulse server "%s" }\n' "$PULSE_SERVER" > "$HOME/.asoundrc"
 pulseaudio -n --daemonize=no --use-pid-file=no --exit-idle-time=-1 \
@@ -69,7 +71,7 @@ cc "$root/tests/fixtures/wayland-paste-target.c" $(pkg-config --cflags --libs gt
 target=$!
 window=$(xdotool search --sync --name '^Hex Wayland Test$' | head -n 1)
 xdotool windowfocus --sync "$window"
-"$binary" app --hidden >"$work/listener.log" 2>&1 &
+"$binary" service >"$work/listener.log" 2>&1 &
 listener=$!
 echo 'Waiting for the model and virtual microphone...'
 for ((attempt = 0; attempt < 1200; attempt++)); do
@@ -78,7 +80,14 @@ for ((attempt = 0; attempt < 1200; attempt++)); do
   sleep 0.05
 done
 grep -q 'HEX dictation is ready' "$work/listener.log"
-xdotool search --onlyvisible --name '^HEX$' >/dev/null
+# Settings is a client; the complete dictation below runs after that client exits.
+"$binary" app >"$work/app.log" 2>&1 &
+app=$!
+xdotool search --sync --onlyvisible --all --pid "$app" --name '^HEX$' >/dev/null
+kill -TERM "$app"
+wait "$app"
+app=
+kill -0 "$listener"
 xdotool windowfocus --sync "$window"
 echo 'Replaying speech through the held dictation shortcut...'
 xdotool keydown Alt_L keydown space
@@ -100,4 +109,4 @@ wait "$listener"
 listener=
 outputs=$(pactl list short source-outputs)
 test -z "$outputs"
-echo 'Linux virtual-microphone dictation and orderly shutdown passed.'
+echo 'Linux service dictation after Settings exits and orderly shutdown passed.'

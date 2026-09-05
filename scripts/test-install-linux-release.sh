@@ -18,6 +18,11 @@ if [ "$(id -u)" -eq 0 ]; then
 fi
 
 temporary=$(mktemp -d)
+# Never control the real user's systemd manager from installer fixtures.
+mkdir -p "$temporary/bin"
+printf '#!/bin/sh\nexit 0\n' > "$temporary/bin/systemctl"
+chmod 755 "$temporary/bin/systemctl"
+export PATH="$temporary/bin:$PATH"
 server_pid=
 cleanup() {
   if [ -n "$server_pid" ]; then
@@ -101,6 +106,10 @@ test -L "$install_dir/hex"
 test "$("$install_dir/hex" --version)" = "voice-control $version"
 grep -Fq 'X-HEX-Managed=true' "$home/.local/share/applications/hex.desktop"
 grep -Fq 'X-HEX-Managed=true' "$home/.config/autostart/HEX.desktop"
+grep -Fq '" start' "$home/.config/autostart/HEX.desktop"
+grep -Fq '# X-HEX-Managed=true' "$home/.config/systemd/user/hex.service"
+grep -Fq '" service' "$home/.config/systemd/user/hex.service"
+grep -Fxq "EnvironmentFile=-$support_dir/session.env" "$home/.config/systemd/user/hex.service"
 
 HOME="$home" \
   HEX_INSTALL_DIR="$install_dir" \
@@ -108,6 +117,7 @@ HOME="$home" \
   sh "$installer" uninstall
 test ! -e "$install_dir/hex"
 test ! -e "$support_dir/versions"
+test ! -e "$home/.config/systemd/user/hex.service"
 test -f "$support_dir/settings.json"
 
 cp "$server/linux-update.json" "$temporary/feed.valid.json"

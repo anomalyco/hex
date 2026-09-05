@@ -56,9 +56,10 @@ The outer application hosts remain separate:
 - The macOS host owns native menus, Dock policy, reopen behavior, TCC setup,
   `SMAppService`, Sparkle, meeting lifecycle, and the existing recognition
   coordinator.
-- The Linux host owns the GTK tray, X11 map and unmap behavior, close-to-tray,
-  X11 shortcut registration or Wayland evdev input, listener lifecycle, the
-  layer-shell HUD, and signed direct updates.
+- The Linux Settings host is a Unix-socket client of the per-user `hex.service`.
+  The service owns X11 shortcut registration or Wayland evdev input, listener
+  lifecycle, the layer-shell HUD, settings, and signed direct updates. Linux has
+  no tray and Settings can exit independently.
 
 At completion, both hosts open the shared `AppWindow` and the Linux host stops
 implementing its own `Render` tree. Today they still use separate roots.
@@ -155,7 +156,7 @@ for both roots. Transcript rows still read retained events directly; the unused
 transcript cache has been removed. Linux no longer interprets the event stream
 independently. The macOS Activity header renders the shared listener-status
 control. The Linux root shows only Settings, with listener controls there and in
-the X11 tray menu; the detailed Activity pane remains macOS developer-only until
+the CLI; the detailed Activity pane remains macOS developer-only until
 the shared root window lands.
 
 - Move the common `EventReader` projection into the shared window state.
@@ -192,9 +193,9 @@ transitional macOS host. macOS navigation derives from capabilities. Moving the
 remaining render state into one root entity is still outstanding.
 
 - Move `AppWindow` and its portable dependencies out of macOS-only module gates.
-- Have the macOS lifecycle coordinator and Linux tray host construct their
+- Have the macOS lifecycle coordinator and Linux service client construct their
   adapters and open the same GPUI entity.
-- Keep native menus, Dock and tray behavior outside the shared window.
+- Keep native macOS menus and Dock behavior outside the shared window.
 
 ### 5. Delete The Duplicate Linux Render Tree
 
@@ -205,8 +206,7 @@ superseded Linux dashboard implementation has been removed. The remaining
 Linux Settings composition disappears when the shared root extraction lands.
 
 - Remove `LinuxApp::render` and Linux-only visual constants and controls.
-- Retain the Linux lifecycle, tray, X11 window mapping, listener, updater, and
-  settings adapter.
+- Retain the Linux service/client lifecycle, listener, updater, and settings adapter.
 - Add later Linux capabilities to the shared panes rather than recreating them.
 
 ## Invariants
@@ -231,8 +231,8 @@ Linux Settings composition disappears when the shared root extraction lands.
   desktop window.
 - Settings and Activity use the same layout and controls on both platforms.
 - Platform-only panes and rows derive from semantic capabilities.
-- Linux retains working tray, close-to-tray, shortcut registration, listener,
-  automatic paste, updates, and XDG persistence.
+- Linux retains its independent per-user service, shortcut registration,
+  automatic paste, updates, and XDG persistence without depending on Settings.
 - macOS behavior and release validation remain unchanged.
 - Wide and minimum-size screenshots verify both supported desktop hosts.
 - `cargo fmt --check`, `cargo test`, Clippy, and `git diff --check` pass on the

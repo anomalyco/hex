@@ -5,12 +5,14 @@ if [[ "${1:-}" == --inside ]]; then
   target=
   keyboard=
   app=
+  service=
   finish() {
     status=$?
     trap - EXIT
     if [[ -n "$target" ]]; then kill "$target" 2>/dev/null || true; fi
     if [[ -n "$keyboard" ]]; then kill "$keyboard" 2>/dev/null || true; fi
     if [[ -n "$app" ]]; then kill "$app" 2>/dev/null || true; fi
+    if [[ -n "$service" ]]; then kill "$service" 2>/dev/null || true; wait "$service" 2>/dev/null || true; fi
     printf '%s\n' "$status" > "$HEX_WAYLAND_TEST_RESULT"
     swaymsg exit >/dev/null 2>&1 || true
     exit "$status"
@@ -46,7 +48,14 @@ if [[ "${1:-}" == --inside ]]; then
     if ! swaymsg -t get_inputs -r | grep wlr_virtual_keyboard >/dev/null; then break; fi
     sleep 0.05
   done
-  "$HEX_WAYLAND_APP_BINARY" app --hidden >"$HEX_WAYLAND_APP_LOG" 2>&1 &
+  "$HEX_WAYLAND_APP_BINARY" service >"$HEX_WAYLAND_APP_LOG.service" 2>&1 &
+  service=$!
+  for ((attempt = 0; attempt < 100; attempt++)); do
+    if "$HEX_WAYLAND_APP_BINARY" status >/dev/null 2>&1; then break; fi
+    sleep 0.05
+  done
+  "$HEX_WAYLAND_APP_BINARY" status >/dev/null
+  "$HEX_WAYLAND_APP_BINARY" app >"$HEX_WAYLAND_APP_LOG" 2>&1 &
   app=$!
   for ((attempt = 0; attempt < 200; attempt++)); do
     kill -0 "$app"
@@ -81,6 +90,8 @@ if [[ "${1:-}" == --inside ]]; then
   swaymsg '[app_id="hex"] kill' >/dev/null
   wait "$app"
   app=
+  kill -0 "$service"
+  "$HEX_WAYLAND_APP_BINARY" status >/dev/null
   exit 0
 fi
 
@@ -105,6 +116,9 @@ export HEX_WAYLAND_TEST_RESULT="$work/result"
 export HEX_WAYLAND_APP_LOG="$work/hex.log"
 export XDG_RUNTIME_DIR="$work/runtime"
 export XDG_DATA_HOME="$work/data"
+export HEX_APPLICATION_SUPPORT_DIR="$work/support"
+export ALSA_CONFIG_PATH="$work/alsa.conf"
+printf '# No physical audio devices in this fixture.\n' > "$ALSA_CONFIG_PATH"
 mkdir -m 700 "$XDG_RUNTIME_DIR"
 cc "$root/tests/fixtures/wayland-paste-target.c" $(pkg-config --cflags --libs gtk+-3.0) -o "$HEX_WAYLAND_TEST_TARGET"
 unset DISPLAY WAYLAND_DISPLAY SWAYSOCK
@@ -115,4 +129,4 @@ if ! timeout 25 dbus-run-session -- sway --config "$root/tests/fixtures/wayland-
   if [[ -f "$work/hex.log" ]]; then cat "$work/hex.log"; fi
   exit 1
 fi
-echo "Native Wayland clipboard insertion and tray-less app checks passed."
+echo "Native Wayland clipboard insertion and independent Settings/service checks passed."

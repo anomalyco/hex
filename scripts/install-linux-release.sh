@@ -8,6 +8,8 @@ config_home=${XDG_CONFIG_HOME:-$HOME/.config}
 support_dir=${HEX_APPLICATION_SUPPORT_DIR:-"$data_home/voice-control"}
 applications="$data_home/applications"
 autostart="$config_home/autostart"
+units="$config_home/systemd/user"
+unit="$units/hex.service"
 expected_public_key=bfad02e62208ff144b5c9d21c7e79c7c16c6904299a437d857303007cd4ff7d8
 public_key_prefix=302a300506032b6570032100
 
@@ -50,6 +52,18 @@ managed_directory() {
 }
 
 uninstall() {
+  if [ -f "$unit" ] && grep -Fxq '# X-HEX-Managed=true' "$unit"; then
+    if command -v systemctl >/dev/null 2>&1; then
+      active_unit=$(systemctl --user show hex.service --property=FragmentPath --value 2>/dev/null || true)
+      if [ "$active_unit" = "$unit" ]; then
+        systemctl --user disable --now hex.service || fail "Could not stop hex.service; refusing to uninstall a running service."
+      fi
+    fi
+    rm -f "$unit"
+    if command -v systemctl >/dev/null 2>&1; then
+      systemctl --user daemon-reload >/dev/null 2>&1 || true
+    fi
+  fi
   if [ -L "$support_dir" ]; then
     fail "Refusing managed symlink: $support_dir"
   fi
@@ -111,6 +125,7 @@ done
 temporary=$(mktemp -d)
 application_staged=
 autostart_staged=
+unit_staged=
 binary_staged=
 current_staged=
 version_staged=
@@ -119,6 +134,7 @@ cleanup() {
   for path in \
     "$application_staged" \
     "$autostart_staged" \
+    "$unit_staged" \
     "$binary_staged" \
     "$current_staged" \
     "$version_staged"
@@ -229,11 +245,18 @@ managed_directory "$version_dir"
 safe_user_directory "$install_dir"
 safe_user_directory "$applications"
 safe_user_directory "$autostart"
+safe_user_directory "$units"
 binary="$install_dir/hex"
 if printf '%s' "$binary" | LC_ALL=C grep -Eq '["\\[:cntrl:]]'; then
   fail "HEX install path contains unsupported characters."
 fi
 expected_binary="$support_dir/current/hex"
+if printf '%s' "$support_dir" | LC_ALL=C grep -Eq '["\\[:cntrl:]]'; then
+  fail "HEX service path contains unsupported characters."
+fi
+if [ -L "$unit" ] || { [ -e "$unit" ] && ! grep -Fxq '# X-HEX-Managed=true' "$unit"; }; then
+  fail "Refusing to replace an unmanaged systemd unit: $unit"
+fi
 if { [ -e "$binary" ] || [ -L "$binary" ]; } \
   && { [ ! -L "$binary" ] || [ "$(readlink "$binary")" != "$expected_binary" ]; }
 then
@@ -255,6 +278,7 @@ done
 
 application_staged=$(mktemp "$applications/.hex.desktop.XXXXXX")
 autostart_staged=$(mktemp "$autostart/.HEX.desktop.XXXXXX")
+unit_staged=$(mktemp "$units/.hex.service.XXXXXX")
 umask 077
 cat > "$application_staged" <<EOF
 [Desktop Entry]
@@ -273,13 +297,40 @@ cat > "$autostart_staged" <<EOF
 Type=Application
 Name=HEX
 Comment=Local voice dictation
-Exec="$binary" app --hidden
+Exec="$binary" start
 Icon=audio-input-microphone
 Terminal=false
 X-GNOME-Autostart-enabled=true
 X-HEX-Managed=true
 EOF
 chmod 644 "$application_staged" "$autostart_staged"
+
+# systemd expands percent specifiers, and ExecStart also expands dollar signs.
+unit_binary=$(printf '%s' "$binary" | sed -e 's/%/%%/g' -e 's/\$/$$/g')
+unit_support=$(printf '%s' "$support_dir" | sed 's/%/%%/g')
+cat > "$unit_staged" <<EOF
+# X-HEX-Managed=true
+[Unit]
+Description=HEX background dictation
+PartOf=graphical-session.target
+After=graphical-session.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+ExecStart="$unit_binary" service
+Environment="HEX_APPLICATION_SUPPORT_DIR=$unit_support"
+EnvironmentFile=-$unit_support/session.env
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=30
+UMask=0077
+
+[Install]
+WantedBy=graphical-session.target
+EOF
+chmod 644 "$unit_staged"
 
 version_staged="$version_dir/.hex.install.$$"
 current_staged="$support_dir/.current.next"
@@ -302,8 +353,14 @@ mv -Tf "$application_staged" "$application_entry"
 application_staged=
 mv -Tf "$autostart_staged" "$autostart_entry"
 autostart_staged=
+mv -Tf "$unit_staged" "$unit"
+unit_staged=
 sync -f "$applications"
 sync -f "$autostart"
+sync -f "$units"
+if command -v systemctl >/dev/null 2>&1; then
+  systemctl --user daemon-reload >/dev/null 2>&1 || true
+fi
 if command -v update-desktop-database >/dev/null 2>&1; then
   update-desktop-database "$applications" >/dev/null 2>&1 || true
 fi
@@ -311,4 +368,5 @@ fi
 printf 'Installed HEX %s to %s\n' "$version" "$binary"
 printf 'Install a model: %s model install\n' "$binary"
 printf 'Launch HEX: %s app\n' "$binary"
+printf 'Background service: %s start (stop with %s stop)\n' "$binary" "$binary"
 printf 'Uninstall: sh install-linux.sh uninstall\n'

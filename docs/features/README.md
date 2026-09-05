@@ -433,9 +433,10 @@ update from an older supported build.
 
 ```ts
 Linux beta                               // not macOS feature parity
-├── hex app / hex dictate -> Alt-Space capture -> Transcribe -> Paste
+├── hex start -> Per-user service -> Alt-Space capture -> Transcribe -> Paste
+├── hex app -> Settings client; closing it leaves the runtime running
 ├── Recording sounds -> Shortcut press / capture stop / active cancellation
-├── X11 -> Tray when usable; no recording HUD
+├── X11 -> No tray or recording HUD; service status and sounds remain available
 ├── Wayland -> evdev + compositor protocols; keys observed, not suppressed
 ├── Escape -> Cancel active capture, not newest accepted job
 ├── Microphone failure -> Listener exits, not macOS automatic recovery
@@ -444,9 +445,10 @@ Linux beta                               // not macOS feature parity
 
 No Linux Commands, Voice Action, Modes processing, retained History, or meetings.
 `hex listen` instead prints Moonshine transcripts. Wayland needs explicit broad
-input-device access; physical reconnect, click-through, and trayless shutdown
-still need native evidence. Its [smoke](../../scripts/test-wayland-paste.sh)
-inherits higher-priority `HEX_APPLICATION_SUPPORT_DIR`, weakening isolation.
+input-device access; physical reconnect and click-through still need native
+evidence. Its [smoke](../../scripts/test-wayland-paste.sh) explicitly isolates
+`HEX_APPLICATION_SUPPORT_DIR` and checks that Settings can exit without stopping
+the service.
 
 See the [Linux guide](../linux.md), [linux_app.rs](../../src/linux_app.rs),
 [linux_wayland_input.rs](../../src/linux_wayland_input.rs), and
@@ -455,6 +457,48 @@ The [direct installer/updater](../../src/linux_updater.rs) and
 [installer tests](../../scripts/test-install-linux-release.sh) do not establish
 a published, supported-host-validated signed release. [Nix](../nix.md) owns its
 package updates; HEX updates only managed direct installs.
+
+```ts
+Linux runtime                            // maintain.linux-service
+├── hex start / desktop autostart -> systemd --user hex.service; no Settings or tray
+├── Settings / CLI -> Same-user, owner-only Unix socket -> Typed commands and snapshots
+├── Close/crash Settings -> Keep microphone, accepted jobs, and model preparation
+│   └── Uncommitted shortcut capture -> Cancel and restore the prior listening state
+├── Service restart -> Client reconnects; uncertain commands are not replayed
+└── hex stop / systemctl --user stop hex -> Stop workers and release devices
+```
+
+Sources: the service owner and client in [linux_app.rs](../../src/linux_app.rs),
+[linux_service.rs](../../src/linux_service.rs), and the managed installer/Nix
+user units. `hex status` queries the running service; `--lines` explicitly reads
+historical observations. `hex app --hidden` is a compatibility alias for starting
+the service. GUI exit does not mean Stop Listening; the explicit listener and
+service controls retain separate meanings. No root daemon or new input grants.
+
+Checks: [test-linux-service.py](../../scripts/test-linux-service.py) exercises
+real IPC and process lifetime without a display, installed model, or audio device.
+`closing_a_client_does_not_stop_normal_dictation` and
+`client_disconnect_cancels_its_edit_and_restores_previous_listening` use controlled
+runtime workers. The virtual-microphone and Wayland scripts now run separate
+service/client processes. These checks do not establish a physical desktop logout,
+cross-version signed update, or microphone/target-app success on the user's devices.
+
+**Observed September 4, 2026, local service build:** 139 Rust tests passed (seven
+native/opt-in tests skipped), together with strict Linux bin/tests Clippy, the
+release build, the release-binary IPC/lifecycle script, and installer fixtures.
+The managed Arch/i3 installation passed `systemd-analyze --user verify` after
+correcting the unit's `EnvironmentFile` syntax. Its environment file cleared the
+user manager's stale Wayland values; the service reported X11 and Listening.
+The installed executable SHA-256 was
+`cbfa91894c5b592254da41a3d2791f9461e5995abdac3da90a2639aefe3e52f1`.
+
+The installed Settings client had no audio handles or runtime locks. Closing its
+window left the same systemd service PID running and Listening. The screenshot
+at `/tmp/opencode/hex-service-settings.png` also retained an empty-transcript
+failure; it was not dismissed to make the lifecycle check pass. This validates
+client-independent ownership, not transcription accuracy. The modified virtual
+microphone/Wayland smokes, Nix evaluation, physical logout, and signed
+cross-version service updates were not run on this host.
 
 ```ts
 Linux Settings > Sound volume             // dictate.feedback.linux; X11 + Wayland

@@ -150,21 +150,10 @@ fn validate_manifest(manifest: &Manifest) -> Result<Version> {
 }
 
 pub fn relaunch(update: &InstalledUpdate) -> Result<()> {
-    let pid = std::process::id().to_string();
-    Command::new("/bin/sh")
-        .args([
-            "-c",
-            "i=0; while kill -0 \"$1\" 2>/dev/null && [ \"$i\" -lt 300 ]; do sleep 0.1; i=$((i + 1)); done; exec \"$2\" app",
-            "hex-restart",
-            &pid,
-        ])
-        .arg(&update.0)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .wrap_err("could not schedule the updated HEX version")?;
-    Ok(())
+    if !update.0.is_file() {
+        bail!("the prepared HEX update is no longer installed");
+    }
+    crate::linux_service::schedule_restart()
 }
 
 fn verify_feed(bytes: &[u8], public_key: &[u8; 32]) -> Result<Manifest> {

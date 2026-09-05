@@ -55,7 +55,7 @@ impl DesktopCapabilities {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct DesktopSnapshot {
     pub(crate) activity: DesktopActivity,
     pub(crate) dictation_shortcut: Vec<String>,
@@ -67,7 +67,7 @@ pub(crate) struct DesktopSnapshot {
     pub(crate) update_status: DesktopUpdateStatus,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct DesktopTranscriptionSnapshot {
     pub(crate) downloaded_bytes: u64,
     pub(crate) error: Option<String>,
@@ -76,13 +76,13 @@ pub(crate) struct DesktopTranscriptionSnapshot {
     pub(crate) preparing: Option<TranscriptionModelId>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct DesktopListenerSnapshot {
     pub(crate) running: bool,
     pub(crate) status: String,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(target_os = "macos", allow(dead_code))]
 pub(crate) enum DesktopUpdateStatus {
     Unavailable,
@@ -94,7 +94,7 @@ pub(crate) enum DesktopUpdateStatus {
     ReadyToRestart,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct DesktopShortcut {
     pub(crate) alt: bool,
     pub(crate) control: bool,
@@ -104,7 +104,7 @@ pub(crate) struct DesktopShortcut {
     pub(crate) shift: bool,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(target_os = "macos", allow(dead_code))]
 pub(crate) enum DesktopAction {
     ClearError,

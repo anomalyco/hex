@@ -13,6 +13,7 @@ on:
       - "tests/**"
       - "scripts/test-wayland-paste.sh"
       - "scripts/test-linux-dictation.sh"
+      - "scripts/test-linux-service.py"
       - "scripts/*install-linux*.sh"
       - "flake.*"
       - "nix/**"
@@ -30,6 +31,7 @@ on:
       - "tests/**"
       - "scripts/test-wayland-paste.sh"
       - "scripts/test-linux-dictation.sh"
+      - "scripts/test-linux-service.py"
       - "scripts/*install-linux*.sh"
       - "flake.*"
       - "nix/**"
@@ -107,6 +109,8 @@ jobs:
             "$RUNNER_TEMP/jfk.wav"
       - name: Exercise signed installer and tamper rejection
         run: scripts/test-install-linux-release.sh
+      - name: Exercise service IPC and client-independent lifecycle
+        run: python3 scripts/test-linux-service.py target/debug/voice-control
       - run: cargo clippy --locked --bin voice-control --tests -- -D warnings
 
   nix:

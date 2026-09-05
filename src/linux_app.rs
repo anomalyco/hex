@@ -1,6 +1,4 @@
-use std::cell::Cell;
 use std::path::PathBuf;
-use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::sync::{Arc, Mutex};
@@ -12,8 +10,6 @@ use gpui::{
     AnyElement, App, Application, Bounds, Context, Keystroke, Timer, Window, WindowBounds,
     WindowKind, WindowOptions, div, prelude::*, px, rgb, size,
 };
-use x11rb::connection::Connection;
-use x11rb::protocol::xproto::ConnectionExt;
 
 use crate::desktop_activity::DesktopActivity;
 use crate::desktop_host::{
@@ -32,7 +28,9 @@ use crate::desktop_ui::{
     sidebar_frame, toggle, window_frame,
 };
 use crate::events::EventReader;
-use crate::linux_desktop::TrayCommand;
+use crate::linux_service::{
+    self, Client, Event as ServiceEvent, Request, Snapshot as ServiceSnapshot,
+};
 use crate::linux_session::LinuxSession;
 use crate::linux_updater::InstalledUpdate;
 
@@ -95,9 +93,8 @@ struct LinuxDesktopHost {
 }
 
 struct LinuxApp {
-    host: LinuxDesktopHost,
+    host: RemoteHost,
     quitting: bool,
-    restart_requested: bool,
     transcription_picker: TranscriptionPickerState,
 }
 
@@ -124,24 +121,169 @@ enum UpdateState {
     Ready(InstalledUpdate),
 }
 
-pub fn open(event_path: PathBuf, start_hidden: bool, shutdown: &'static AtomicBool) -> Result<()> {
-    let listener_stop = Arc::new(Mutex::new(None));
-    let quit_stop = listener_stop.clone();
-    let (tray_sender, tray_commands) = mpsc::channel();
-    let session = LinuxSession::detect();
-    // GPUI cannot hide/reopen a native Wayland toplevel. Keep it manageable without a tray.
-    let close_to_tray = !session.is_wayland()
-        && match crate::linux_desktop::start_tray(tray_sender) {
-            Ok(()) => true,
-            Err(error) => {
-                tracing::warn!(%error, "system tray is unavailable; closing HEX will quit");
-                false
+/// Settings is a disposable projection. It never opens audio, saves settings, or owns workers.
+struct RemoteHost {
+    client: Client,
+    settings: crate::linux_settings::LinuxSettings,
+    settings_edit: Option<()>,
+    transcription_preparation: Option<()>,
+    transcription_error: Option<String>,
+}
+
+impl RemoteHost {
+    fn new() -> Self {
+        Self {
+            client: Client::new(),
+            settings: Default::default(),
+            settings_edit: None,
+            transcription_preparation: None,
+            transcription_error: None,
+        }
+    }
+
+    fn refresh(&mut self) {
+        self.client.refresh();
+        if let Some(state) = &self.client.state {
+            self.settings = state.settings.clone();
+            self.settings_edit = state.editing.then_some(());
+            self.transcription_preparation = state.desktop.transcription.preparing.map(|_| ());
+            self.transcription_error = state.desktop.transcription.error.clone();
+        } else {
+            self.settings_edit = None;
+            self.transcription_preparation = None;
+        }
+    }
+
+    fn send(&mut self, request: Request) -> Result<()> {
+        if let Err(error) = self.client.send(request) {
+            self.client.error = Some(format!("{error:#}"));
+            return Err(error);
+        }
+        Ok(())
+    }
+
+    fn is_running(&self) -> bool {
+        self.client
+            .state
+            .as_ref()
+            .and_then(|s| s.desktop.listener.as_ref())
+            .is_some_and(|s| s.running)
+    }
+
+    fn capturing_hotkey(&self) -> bool {
+        self.client.state.as_ref().is_some_and(|s| s.capturing)
+    }
+
+    fn begin_settings_edit(&mut self, change: SettingsChange) {
+        let request = match change {
+            SettingsChange::Capture => Request::CaptureShortcut,
+            SettingsChange::DoubleTap(value) => {
+                Request::Desktop(DesktopAction::SetDoubleTapLock(value))
+            }
+            SettingsChange::PasteWithShift(value) => Request::SetTerminalPaste(value),
+            SettingsChange::Hotkey(binding) => {
+                Request::Desktop(DesktopAction::SetDictationShortcut(DesktopShortcut {
+                    alt: binding.alt,
+                    control: binding.control,
+                    shift: binding.shift,
+                    platform: binding.super_key,
+                    function: false,
+                    key: binding.key,
+                }))
             }
         };
-    let (settings, settings_error) = match crate::linux_settings::LinuxSettings::load() {
+        let _ = self.send(request);
+    }
+
+    fn cancel_settings_edit(&mut self) {
+        let _ = self.send(Request::CancelShortcut);
+    }
+    fn cancel_transcription_preparation(&mut self) {
+        let _ = self.send(Request::CancelModel);
+    }
+    fn set_sound_effect_volume(&mut self, volume: f32) -> Result<()> {
+        self.send(Request::SetVolume(volume))
+    }
+    fn choose_transcription(
+        &mut self,
+        model: crate::transcription_models::TranscriptionModelId,
+        language: String,
+    ) -> Result<()> {
+        self.send(Request::ChooseModel { model, language })
+    }
+}
+
+impl DesktopHost for RemoteHost {
+    fn capabilities(&self) -> DesktopCapabilities {
+        DesktopCapabilities::linux_x11()
+    }
+
+    fn snapshot(&self) -> DesktopSnapshot {
+        let mut snapshot = self
+            .client
+            .state
+            .as_ref()
+            .map(|s| s.desktop.clone())
+            .unwrap_or_else(|| DesktopSnapshot {
+                activity: DesktopActivity::default(),
+                dictation_shortcut: self.settings.dictation_hotkey.keycaps(),
+                double_tap_lock: self.settings.double_tap_lock,
+                double_tap_only: false,
+                listener: Some(DesktopListenerSnapshot {
+                    running: false,
+                    status: "Service disconnected".into(),
+                }),
+                operation_error: None,
+                transcription: DesktopTranscriptionSnapshot {
+                    downloaded_bytes: 0,
+                    error: None,
+                    preparation_stage: None,
+                    selection: self.settings.transcription.clone(),
+                    preparing: None,
+                },
+                update_status: DesktopUpdateStatus::Unavailable,
+            });
+        if let Some(error) = &self.client.error {
+            snapshot.operation_error = Some(error.clone());
+        }
+        snapshot
+    }
+
+    fn dispatch(&mut self, action: DesktopAction) -> Result<()> {
+        self.send(Request::Desktop(action))
+    }
+}
+
+fn service_snapshot(host: &LinuxDesktopHost, owns_editor: bool) -> ServiceSnapshot {
+    ServiceSnapshot {
+        desktop: host.snapshot(),
+        settings: host.settings.clone(),
+        editing: host.settings_edit.is_some(),
+        capturing: owns_editor && host.capturing_hotkey(),
+        hud_limitation: crate::linux_desktop::hud_limitation(),
+        pid: std::process::id(),
+        session: linux_service::Session::current(),
+    }
+}
+
+fn disconnect_editor(
+    host: &mut LinuxDesktopHost,
+    editor: &mut Option<(u64, Instant)>,
+    client: u64,
+) {
+    if editor.is_some_and(|(owner, _)| owner == client) {
+        host.cancel_settings_edit();
+        *editor = None;
+    }
+}
+
+/// The service owns this host independently of any GPUI application or Settings window.
+pub fn run_service(event_path: PathBuf, shutdown: &'static AtomicBool) -> Result<()> {
+    let mut server = linux_service::Server::bind()?;
+    let (settings, error) = match crate::linux_settings::LinuxSettings::load() {
         Ok(settings) => (settings, None),
         Err(error) => (
-            crate::linux_settings::LinuxSettings::default(),
+            Default::default(),
             Some(format!("Could not load Linux settings: {error:#}")),
         ),
     };
@@ -154,6 +296,102 @@ pub fn open(event_path: PathBuf, start_hidden: bool, shutdown: &'static AtomicBo
     } else {
         UpdateState::Unmanaged
     };
+    let mut host = LinuxDesktopHost::new(
+        event_path,
+        Arc::new(Mutex::new(None)),
+        settings,
+        error,
+        update,
+    );
+    host.start();
+    let mut editor: Option<(u64, Instant)> = None;
+    let mut stopping = false;
+    loop {
+        if shutdown.load(Ordering::Acquire) && !stopping {
+            stopping = true;
+            host.stop();
+            host.cancel_transcription_preparation();
+        }
+        host.refresh();
+        if stopping && !host.has_pending_work() {
+            break;
+        }
+        if !host.capturing_hotkey() {
+            editor = None;
+        }
+        if let Some((owner, deadline)) = editor
+            && Instant::now() >= deadline
+        {
+            disconnect_editor(&mut host, &mut editor, owner);
+        }
+        server.accept()?;
+        match server.events.recv_timeout(Duration::from_millis(20)) {
+            Ok(ServiceEvent::Disconnected(client)) => {
+                disconnect_editor(&mut host, &mut editor, client)
+            }
+            Ok(ServiceEvent::Request {
+                client,
+                request,
+                reply,
+            }) => {
+                let result = (|| -> Result<()> {
+                    if stopping {
+                        return Err(color_eyre::eyre::eyre!("HEX service is stopping"));
+                    }
+                    if let Some((owner, deadline)) = &mut editor {
+                        if *owner == client {
+                            *deadline = Instant::now() + Duration::from_secs(3);
+                        } else if matches!(
+                            request,
+                            Request::CaptureShortcut
+                                | Request::CancelShortcut
+                                | Request::Desktop(DesktopAction::SetDictationShortcut(_))
+                        ) {
+                            return Err(color_eyre::eyre::eyre!(
+                                "Another Settings client is capturing a shortcut"
+                            ));
+                        }
+                    }
+                    match request {
+                        Request::Snapshot => {}
+                        Request::Desktop(action) => host.dispatch(action)?,
+                        Request::CaptureShortcut => {
+                            host.begin_settings_edit(SettingsChange::Capture);
+                            if host.capturing_hotkey() {
+                                editor = Some((client, Instant::now() + Duration::from_secs(3)));
+                            }
+                        }
+                        Request::CancelShortcut => host.cancel_settings_edit(),
+                        Request::SetTerminalPaste(value) => {
+                            host.begin_settings_edit(SettingsChange::PasteWithShift(value))
+                        }
+                        Request::SetVolume(value) => host.set_sound_effect_volume(value)?,
+                        Request::ChooseModel { model, language } => {
+                            host.choose_transcription(model, language)?
+                        }
+                        Request::CancelModel => host.cancel_transcription_preparation(),
+                        Request::Shutdown => shutdown.store(true, Ordering::Release),
+                    }
+                    Ok(())
+                })();
+                let _ = reply.try_send((
+                    service_snapshot(&host, editor.is_some_and(|(owner, _)| owner == client)),
+                    result.err().map(|e| format!("{e:#}")),
+                ));
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+            Err(mpsc::RecvTimeoutError::Disconnected) => break,
+        }
+    }
+    crate::linux_desktop::shutdown();
+    Ok(())
+}
+
+pub fn open(event_path: PathBuf, start_hidden: bool, shutdown: &'static AtomicBool) -> Result<()> {
+    let _ = event_path;
+    if start_hidden {
+        return linux_service::start();
+    }
     Application::new().run(move |cx: &mut App| {
         let bounds = Bounds::centered(None, size(px(WINDOW_WIDTH), px(WINDOW_HEIGHT)), cx);
         let window = cx
@@ -167,27 +405,14 @@ pub fn open(event_path: PathBuf, start_hidden: bool, shutdown: &'static AtomicBo
                 },
                 |_, cx| {
                     cx.new(|_| LinuxApp {
-                        host: LinuxDesktopHost::new(
-                            event_path.clone(),
-                            listener_stop.clone(),
-                            settings.clone(),
-                            settings_error.clone(),
-                            update,
-                        ),
+                        host: RemoteHost::new(),
                         quitting: false,
-                        restart_requested: false,
                         transcription_picker: TranscriptionPickerState::Closed,
                     })
                 },
             )
             .expect("could not open the HEX window");
         let app = window.update(cx, |_, _, cx| cx.entity()).unwrap();
-        let quit_app = app.downgrade();
-        let x11_window = Rc::new(Cell::new(None));
-        app.update(cx, |app, cx| {
-            let _ = app.host.dispatch(DesktopAction::StartListening);
-            cx.notify();
-        });
         let hotkey_app = app.clone();
         cx.observe_keystrokes(move |event, _, cx| {
             hotkey_app.update(cx, |app, cx| {
@@ -197,64 +422,17 @@ pub fn open(event_path: PathBuf, start_hidden: bool, shutdown: &'static AtomicBo
             });
         })
         .detach();
-        let tray_window = window;
-        let tray_x11_window = x11_window.clone();
         cx.spawn(async move |cx| {
-            let mut had_tray = close_to_tray;
             loop {
                 Timer::after(Duration::from_millis(250)).await;
-                let has_tray = close_to_tray && crate::linux_desktop::tray_available();
-                if had_tray && !has_tray && !session.is_wayland() {
-                    let _ = set_x11_window_mapped(&tray_x11_window, true);
-                    let _ = tray_window.update(cx, |_, window, _| window.activate_window());
-                }
-                had_tray = has_tray;
-                while let Ok(command) = tray_commands.try_recv() {
-                    match command {
-                        TrayCommand::Show => {
-                            if !session.is_wayland() {
-                                let _ = set_x11_window_mapped(&tray_x11_window, true);
-                            }
-                            let _ = tray_window.update(cx, |_, window, _| {
-                                window.activate_window();
-                            });
-                        }
-                        TrayCommand::ToggleListening => {
-                            let _ = tray_window.update(cx, |app, _, cx| {
-                                if !app.quitting && app.host.is_running() {
-                                    let _ = app.host.dispatch(DesktopAction::StopListening);
-                                } else if !app.quitting {
-                                    let _ = app.host.dispatch(DesktopAction::StartListening);
-                                }
-                                cx.notify();
-                            });
-                        }
-                        TrayCommand::Quit => {
-                            let _ = tray_window.update(cx, |app, _, cx| {
-                                app.request_quit();
-                                cx.notify();
-                            });
-                        }
-                    }
-                }
                 if app
                     .update(cx, |this, cx| {
                         if shutdown.load(Ordering::Relaxed) {
                             this.request_quit();
                         }
                         this.host.refresh();
-                        if this.quitting && !this.host.has_pending_work() {
-                            if this.restart_requested
-                                && this
-                                    .host
-                                    .dispatch(DesktopAction::RestartIntoUpdate)
-                                    .is_err()
-                            {
-                                this.restart_requested = false;
-                                this.quitting = false;
-                            } else {
-                                cx.quit();
-                            }
+                        if this.quitting {
+                            cx.quit();
                         }
                         if matches!(
                             this.transcription_picker,
@@ -285,15 +463,7 @@ pub fn open(event_path: PathBuf, start_hidden: bool, shutdown: &'static AtomicBo
             .update(cx, |_, window, cx| {
                 window.set_window_title("HEX");
                 let close_app = cx.entity().downgrade();
-                let close_x11_window = x11_window.clone();
                 window.on_window_should_close(cx, move |_, cx| {
-                    if close_to_tray
-                        && crate::linux_desktop::tray_available()
-                        && set_x11_window_mapped(&close_x11_window, false)
-                    {
-                        return false;
-                    }
-                    // A missing X11 handle must not swallow close and strand a microphone.
                     if close_app
                         .update(cx, |app, cx| {
                             app.request_quit();
@@ -309,100 +479,8 @@ pub fn open(event_path: PathBuf, start_hidden: bool, shutdown: &'static AtomicBo
             })
             .ok();
         cx.activate(true);
-        if start_hidden && close_to_tray {
-            let _ = set_x11_window_mapped(&x11_window, false);
-        }
-        cx.on_app_quit(move |cx| {
-            let _ = quit_app.update(cx, |app, _| app.request_quit());
-            if let Some(stop) = quit_stop
-                .lock()
-                .unwrap_or_else(|error| error.into_inner())
-                .take()
-            {
-                stop.store(true, Ordering::Relaxed);
-            }
-            crate::linux_desktop::shutdown();
-            async {}
-        })
-        .detach();
     });
-    crate::linux_desktop::shutdown();
     Ok(())
-}
-
-fn find_hex_window() -> color_eyre::Result<u32> {
-    let (connection, screen) = x11rb::rust_connection::RustConnection::connect(None)?;
-    let root = connection.setup().roots[screen].root;
-    let client_list = connection
-        .intern_atom(false, b"_NET_CLIENT_LIST")?
-        .reply()?
-        .atom;
-    let clients = connection
-        .get_property(
-            false,
-            root,
-            client_list,
-            x11rb::protocol::xproto::AtomEnum::WINDOW,
-            0,
-            u32::MAX,
-        )?
-        .reply()?;
-    let windows = clients.value32().into_iter().flatten();
-    let pid_atom = connection.intern_atom(false, b"_NET_WM_PID")?.reply()?.atom;
-    let mut hex_window = None;
-    for window in windows {
-        let title = connection
-            .get_property(
-                false,
-                window,
-                x11rb::protocol::xproto::AtomEnum::WM_NAME,
-                x11rb::protocol::xproto::AtomEnum::STRING,
-                0,
-                64,
-            )?
-            .reply()?
-            .value;
-        let pid = connection
-            .get_property(
-                false,
-                window,
-                pid_atom,
-                x11rb::protocol::xproto::AtomEnum::CARDINAL,
-                0,
-                1,
-            )?
-            .reply()?;
-        if title == b"HEX"
-            && pid.value32().and_then(|mut values| values.next()) == Some(std::process::id())
-        {
-            hex_window = Some(window);
-            break;
-        }
-    }
-    hex_window.ok_or_else(|| color_eyre::eyre::eyre!("HEX window not found"))
-}
-
-fn set_x11_window_mapped(cache: &Cell<Option<u32>>, mapped: bool) -> bool {
-    // Keep a successful lookup so an unmapped window can be reopened, but never cache
-    // failure: the WM may not have published its client list during login yet.
-    let Some(window) = cache.get().or_else(|| find_hex_window().ok()) else {
-        return false;
-    };
-    let result = (|| -> color_eyre::Result<()> {
-        let (connection, _) = x11rb::rust_connection::RustConnection::connect(None)?;
-        if mapped {
-            connection.map_window(window)?.check()?;
-        } else {
-            connection.unmap_window(window)?.check()?;
-        }
-        connection.flush()?;
-        Ok(())
-    })();
-    if let Err(error) = &result {
-        tracing::warn!(%error, mapped, "could not change HEX window visibility");
-    }
-    cache.set(result.is_ok().then_some(window));
-    result.is_ok()
 }
 
 impl LinuxDesktopHost {
@@ -862,8 +940,6 @@ impl LinuxDesktopHost {
 impl LinuxApp {
     fn request_quit(&mut self) {
         self.quitting = true;
-        self.host.stop();
-        self.host.cancel_transcription_preparation();
     }
 
     fn capture_hotkey(&mut self, keystroke: &Keystroke) -> bool {
@@ -1164,7 +1240,7 @@ impl LinuxApp {
                                                     })))),
                                     )
                                 })
-                                .when_some(crate::linux_desktop::hud_limitation(), |content, limitation| {
+                                .when_some(self.host.client.state.as_ref().and_then(|s| s.hud_limitation.clone()), |content, limitation| {
                                     content.child(div().mt_3().text_size(px(12.0)).text_color(rgb(MUTED)).child(limitation))
                                 })
                                 .child(settings_section_label("DICTATION"))
@@ -1276,9 +1352,9 @@ impl LinuxApp {
                                             ),
                                         ))
                                         .child(settings_row(
-                                            "Quit HEX",
-                                            "Stop listening and close the application",
-                                            compact_button(if self.quitting { "Stopping..." } else { "Quit" })
+                                            "Close Settings",
+                                            "Dictation continues in the background service",
+                                            compact_button("Close")
                                                 .id("linux-quit")
                                                 .on_click(cx.listener(|this, _, _, cx| {
                                                     this.request_quit();
@@ -1294,8 +1370,7 @@ impl LinuxApp {
                                                     .border_1()
                                                     .border_color(rgb(LINE))
                                                     .on_click(cx.listener(|this, _, _, cx| {
-                                                        this.restart_requested = true;
-                                                        this.request_quit();
+                                                        let _ = this.host.dispatch(DesktopAction::RestartIntoUpdate);
                                                         cx.notify();
                                                     })),
                                             ))
@@ -1662,25 +1737,45 @@ mod tests {
     }
 
     #[test]
-    fn quit_during_edit_cancels_capture_and_suppresses_restart() {
-        let mut app = LinuxApp {
-            host: host_for_edit(true),
-            quitting: false,
-            restart_requested: false,
-            transcription_picker: TranscriptionPickerState::Closed,
-        };
-        app.host.begin_settings_edit(SettingsChange::Capture);
-        app.request_quit();
-        assert!(app.quitting);
-        assert!(app.host.has_pending_work());
-        let edit = app.host.settings_edit.as_ref().unwrap();
-        assert!(!edit.resume);
+    fn client_disconnect_cancels_its_edit_and_restores_previous_listening() {
+        let mut host = host_for_edit(true);
+        host.begin_settings_edit(SettingsChange::Capture);
+        let mut editor = Some((1, Instant::now()));
+        disconnect_editor(&mut host, &mut editor, 2);
+        assert!(
+            !host
+                .settings_edit
+                .as_ref()
+                .unwrap()
+                .canceled
+                .load(Ordering::Acquire)
+        );
+        disconnect_editor(&mut host, &mut editor, 1);
+        let edit = host.settings_edit.as_ref().unwrap();
+        assert!(edit.resume);
         assert!(edit.canceled.load(Ordering::Acquire));
-        app.host.listener_worker = None;
-        app.host.listener_stop.lock().unwrap().take();
-        app.host.refresh_settings_edit();
-        assert!(!app.host.listen_when_ready);
-        assert!(!app.host.has_pending_work());
+        host.listener_worker = None;
+        host.listener_stop.lock().unwrap().take();
+        host.refresh_settings_edit();
+        assert!(host.listen_when_ready);
+        assert!(editor.is_none());
+    }
+
+    #[test]
+    fn closing_a_client_does_not_stop_normal_dictation() {
+        let mut host = host_for_edit(true);
+        disconnect_editor(&mut host, &mut None, 1);
+        assert!(host.is_running());
+        assert!(host.listen_when_ready);
+        assert!(
+            !host
+                .listener_stop
+                .lock()
+                .unwrap()
+                .as_ref()
+                .unwrap()
+                .load(Ordering::Acquire)
+        );
     }
 
     #[test]

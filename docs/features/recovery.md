@@ -234,17 +234,21 @@ listener worker fails -> reap worker -> show failure
   ├── Retry -> new managed listener -> fresh capture -> expected output
   └── Dismiss -> clear error                            // not evidence of recovery
 
-close Settings
-  ├── X11 + usable tray -> hide window; listener stays managed
-  └── Wayland OR unusable tray -> stop listener -> drain workers -> quit
-                                                       // never strand a background mic
+close/crash Settings -> disconnect client -> service keeps running
+  └── that client's uncommitted shortcut capture -> cancel edit -> restore prior listening
+
+service exits -> systemd restart-on-failure OR explicit hex start
+  -> client reconnects -> live snapshot, not stale log state
+
+hex stop -> stop service -> release microphone and hotkeys
 ```
 Sources/checks: [linux_app.rs](../../src/linux_app.rs),
 [Linux CI](../../.github/workflows/check-linux.yml),
-[test-wayland-paste.sh](../../scripts/test-wayland-paste.sh).
+[test-wayland-paste.sh](../../scripts/test-wayland-paste.sh), and
+[test-linux-service.py](../../scripts/test-linux-service.py).
 Proof limit: source and available headless checks, not current supported-host
-behavior. Native compositor/device validation remains separate; the smoke's
-isolation gap is documented in the [index](README.md).
+behavior. Native compositor/device validation remains separate. The service
+socket is same-user only; bounded I/O and queues keep client stalls off the audio loop.
 
 ### Keyboard Layout Resolution
 

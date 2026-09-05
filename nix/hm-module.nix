@@ -44,21 +44,24 @@ in
       }
     ];
     home.packages = [ cfg.package ];
-    systemd.user.services.hex = lib.mkIf cfg.autostart {
+    systemd.user.services.hex = {
       Unit = {
         Description = "HEX local voice dictation";
         After = [ cfg.systemdTarget ];
-        Requisite = [ cfg.systemdTarget ];
         PartOf = [ cfg.systemdTarget ];
       };
       Service = {
         ExecStartPre = lib.getExe waitForSession;
-        ExecStart = "${lib.getExe cfg.package} app --hidden";
+        ExecStart = "${lib.getExe cfg.package} service";
+        Environment = [ "HEX_APPLICATION_SUPPORT_DIR=${config.xdg.dataHome}/voice-control" ];
+        EnvironmentFile = "-${config.xdg.dataHome}/voice-control/session.env";
         TimeoutStartSec = 35;
         Restart = "on-failure";
         RestartSec = 5;
+        TimeoutStopSec = 30;
+        UMask = "0077";
       };
-      Install.WantedBy = [ cfg.systemdTarget ];
+      Install.WantedBy = lib.optionals cfg.autostart [ cfg.systemdTarget ];
     };
   };
 }

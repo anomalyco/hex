@@ -60,13 +60,14 @@ Run a genuine signed update between two published versions on the target
 Arch/i3 machine. Verify exact artifact validation, atomic activation, restart,
 and retained-version rollback. Smoke-test installation, model download, the CLI
 microphone override, hotkey rebinding, locked capture, cancellation, automatic
-paste, tray behavior, autostart, and startup without a tray host.
+paste, service autostart, client reconnect, and Settings closing without stopping
+accepted work. Linux no longer uses a tray.
 
 Keep app-managed updates limited to the user-local direct-install layout. A
 future Arch package must leave updates to the package manager. Nix owns its
 packaged installation and optional Home Manager service. Validate the Wayland
 beta on a compatible compositor with physical keyboard reconnect, microphone,
-foreground paste, click-through HUD, and tray-less shutdown. See
+foreground paste, click-through HUD, and independent service/client shutdown. See
 [`docs/plans/linux.md`](docs/plans/linux.md). Add commands, context, meetings, or
 broader Wayland support only as explicit later capability slices.
 

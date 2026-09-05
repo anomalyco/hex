@@ -119,9 +119,11 @@ substitute for source inspection or a second roadmap.
   `WAYLAND_DISPLAY` rule, independent of persisted preferences.
 - `linux_wayland_input`: read-only evdev input, explicit physical key mappings,
   cancellable shortcut capture, exact chord state, and bounded device rediscovery.
-- `linux_desktop`: the single process-owned GTK thread for the X11 tray and
-  focus-free, click-through Wayland recording/processing HUD. A listener never
-  initializes or shuts down a separate GTK runtime.
+- `linux_service`: owner-only, same-user Unix IPC, bounded service/client transport,
+  and per-user systemd lifecycle. Settings and CLI are clients of one runtime.
+- `linux_desktop`: the service-owned GTK thread for the focus-free, click-through
+  Wayland recording/processing HUD. Settings never owns its lifecycle; Linux has
+  no tray icon.
 - `linux_updater`: signed direct-install updates, bounded downloads, atomic
   version activation, and restart handoff for user-local Linux installs.
 - `history`: the owner-only bounded retained-dictation store: retention
@@ -334,12 +336,18 @@ CoreAudio formats, AppleScript details, or event serialization.
   nodes. Do not silently fall back to XWayland or privileged input injection.
   Raw input observes, but does not suppress, physical US-labeled keys. Explain
   the broad keystroke access; never grant device permissions automatically.
+- Linux Settings owns no microphone, model workers, saved settings, or tray. The
+  per-user `hex.service` owns these independently of GUI lifetime. Closing or
+  crashing Settings must not stop capture or accepted work. Socket access is
+  owner-only and peer-UID checked; framing, queues, and I/O remain bounded.
+  Client disconnect cancels only its uncommitted shortcut capture, with a bounded
+  lease fallback. Never replay uncertain mutation requests after reconnecting.
 - X11 shortcut capture uses focused GPUI input, not evdev permissions. Editing
   shortcut/double-tap settings stops and restores only a previously running
   listener; cancellation restores the old binding unless its save already
-  committed. Settings must expose listener state, recovery, and errors. Without
-  a usable tray, closing Settings quits after draining workers, never detaches
-  an unmanageable microphone. HUD teardown only hides that listener's HUD.
+  committed. Settings and the CLI must expose service state, recovery, and errors.
+  Explicit service shutdown drains workers; closing Settings only disconnects its
+  client. HUD teardown only hides that listener's HUD.
 - Linux paste keeps transcripts off helper argv, bounds helper I/O, and waits
   for physical modifiers without discarding accepted output. Shutdown cancels
   that wait. New installs use Ctrl-V; the terminal-paste preference selects

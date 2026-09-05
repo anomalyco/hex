@@ -66,13 +66,13 @@ explicit `programs.hex.package` override. The flake also exports
 }
 ```
 
-Autostart defaults to `false`. When enabled, HEX is a systemd **user**
-service, wanted by `graphical-session.target` by default. It waits for a
-Wayland socket or an X11 window manager before launching with `app --hidden`.
-Settings stays visible on Wayland or without a usable X11 tray; closing it quits
-HEX in those cases.
+The module always installs the systemd **user** service. Autostart defaults to
+`false`; when enabled, the unit is wanted by `graphical-session.target` by default.
+It waits for a Wayland socket or an X11 window manager before launching `hex service`.
+Use `hex start` to start it manually and `hex app` to open the separate Settings
+client. Closing Settings never stops the service, and there is no Linux tray.
 The service stops with the configured target and retries failed starts
-without a tight restart loop. Quitting HEX normally leaves it stopped until
+without a tight restart loop. `hex stop` leaves it stopped until
 the next session or an explicit `systemctl --user start hex.service`.
 
 Your session manager must import its current `DISPLAY`, `XAUTHORITY`,
@@ -83,6 +83,11 @@ Sway integration, rather than starting the target from a shell login.
 The module does not create a graphical session or grant permission to use
 one. A bare `startx`/i3 session without systemd session integration will not
 start this service automatically.
+
+`hex start` records the current display/session environment in an owner-only
+file read by the unit; it clears stale variables when switching between X11 and
+Wayland. There is one active desktop service per user. Starting it from a
+different desktop explicitly restarts the service for that session.
 
 Home Manager's normal service-switch policy applies: newly enabled services
 can start during a switch if the session target is already active, and

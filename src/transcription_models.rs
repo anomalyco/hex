@@ -60,7 +60,7 @@ impl FromStr for TranscriptionModelId {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[repr(u8)]
 pub enum ModelPreparationStage {
     Downloading,

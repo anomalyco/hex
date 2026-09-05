@@ -75,7 +75,6 @@ evdev = "0.13.2"
 gpui = { version = "0.2.2", default-features = false, features = ["font-kit", "wayland", "x11"] }
 gtk = "0.18.2"
 gtk-layer-shell = { version = "0.8.2", features = ["v0_6"] }
-tray-icon = { version = "0.24.1", default-features = false, features = ["gtk"] }
 transcribe-cpp = { version = "=0.1.3", features = ["vulkan"] }
 x11-clipboard = "0.9.3"
 x11rb = { version = "0.13.2", features = ["xtest"] }

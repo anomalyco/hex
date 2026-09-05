@@ -66,6 +66,8 @@ mod linux_input;
 #[cfg(target_os = "linux")]
 mod linux_paste;
 #[cfg(target_os = "linux")]
+mod linux_service;
+#[cfg(target_os = "linux")]
 mod linux_session;
 #[cfg(target_os = "linux")]
 mod linux_settings;

@@ -22,12 +22,20 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Open the Linux transcription shell.
+    /// Open Settings and connect to the per-user dictation service.
     App {
-        /// Start hidden when a working system tray is available.
+        /// Start the service without opening Settings (legacy autostart compatibility).
         #[arg(long)]
         hidden: bool,
     },
+    /// Run the per-user runtime in the foreground (normally started by systemd).
+    Service,
+    /// Start the background service and enable listening.
+    Start,
+    /// Stop the background service.
+    Stop,
+    /// Restart the background service in this graphical session.
+    Restart,
     /// Listen to the microphone and print local transcripts until interrupted.
     Listen {
         /// Select an input device by a case-insensitive name fragment.
@@ -42,11 +50,11 @@ enum Command {
     },
     /// List microphone devices visible through ALSA.
     Devices,
-    /// Print recent recognition observations.
+    /// Query the live service, or print observations with --lines.
     Status {
         /// Maximum number of observations to print.
-        #[arg(long, default_value_t = 40)]
-        lines: usize,
+        #[arg(long)]
+        lines: Option<usize>,
     },
     /// Install, inspect, and validate the local dictation model.
     Model {
@@ -100,6 +108,10 @@ pub fn run(shutdown: &'static AtomicBool) -> Result<()> {
         .unwrap_or(Command::App { hidden: false })
     {
         Command::App { hidden } => crate::linux_app::open(event_path, hidden, shutdown),
+        Command::Service => crate::linux_app::run_service(event_path, shutdown),
+        Command::Start => crate::linux_service::start(),
+        Command::Stop => crate::linux_service::stop(),
+        Command::Restart => crate::linux_service::restart(),
         Command::Listen { device } => {
             let _instance = crate::instance::acquire("listener")?;
             listen(&root, &event_path, device.as_deref(), shutdown)
@@ -114,7 +126,12 @@ pub fn run(shutdown: &'static AtomicBool) -> Result<()> {
             }
             Ok(())
         }
-        Command::Status { lines } => print_status(&event_path, lines),
+        Command::Status { lines: Some(lines) } => print_status(&event_path, lines),
+        Command::Status { lines: None } => {
+            let state = crate::linux_service::request(crate::linux_service::Request::Snapshot)?;
+            println!("{}", serde_json::to_string_pretty(&state)?);
+            Ok(())
+        }
         Command::Model { command } => match command {
             ModelCommand::Status => {
                 let model = crate::linux_transcriber::default_model();

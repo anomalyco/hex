@@ -1,6 +1,6 @@
 use crate::events::{DictationPhase, EventReader, VoiceEvent, VoiceState};
 
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct DesktopActivity {
     pub(crate) session_started_at: Option<u64>,
     pub(crate) state: Option<VoiceState>,
