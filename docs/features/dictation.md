@@ -143,6 +143,8 @@ individual words; this is not a claim of perfect recognition or silence handling
 Finish
   ├── Capacity available -> Accepted job -> Local transcription -> Mode processing
   │    -> Paste successful nonempty output once, at current focus
+  │       // synthetic ⌘V resolves on any active layout: a non-Latin layout
+  │       // falls back to the ASCII-capable layout like AppKit itself
   └── Queue full -> Explicit rejection                // bounded admission
 
 A pending -> Start capture B                          // dictate.overlap
@@ -152,6 +154,8 @@ A pending -> Start capture B                          // dictate.overlap
 ```
 
 Source: `finish_dictation` in [recognition.rs](../../src/recognition.rs).
+Key resolution: [keyboard.rs](../../src/keyboard.rs); non-Latin layout
+fallback details live in [shortcut recovery](recovery.md#keyboard-layout-resolution).
 Checks in [parakeet.rs](../../src/parakeet.rs):
 `parallel_processing_results_are_released_in_submission_order`,
 `ordered_waiting_outputs_remain_bounded_after_channel_drain`.

@@ -134,7 +134,17 @@ pub fn key_code_for(character: char) -> Result<u16> {
     });
     // SAFETY: TIS copy functions return a retained source.
     unsafe { CFRelease(source) };
-    result.ok_or_else(|| eyre!("current keyboard layout has no key for {character:?}"))
+    if let Some(key_code) = result {
+        return Ok(key_code);
+    }
+    // Non-Latin layouts produce no ASCII letters with an empty modifier state;
+    // resolve those against the ASCII-capable layout like AppKit does.
+    if let Some(key_code) = ascii_capable_key_code(character) {
+        return Ok(key_code);
+    }
+    Err(eyre!(
+        "current keyboard layout has no key for {character:?}"
+    ))
 }
 
 /// GUI startup must build this snapshot on the main thread before starting workers.
@@ -163,8 +173,54 @@ pub fn initialize_layout() -> Result<()> {
         Some((character, key_code))
     }));
     unsafe { CFRelease(source) };
+    // Non-Latin layouts (Russian, Hebrew, …) produce no ASCII letters with an
+    // empty modifier state, so shortcuts like Cmd+V would miss. Appkit resolves
+    // those against the ASCII-capable layout; mirror that here by filling the
+    // missing letters from the ASCII-capable input source.
+    let mut codes = codes;
+    if !codes.contains_key(&'v')
+        && let Some((ascii_codes, source)) = ascii_capable_key_codes()
+    {
+        for (character, key_code) in ascii_codes {
+            codes.entry(character).or_insert(key_code);
+        }
+        unsafe { CFRelease(source) };
+    }
     let _ = KEY_CODES.set(codes);
     Ok(())
+}
+
+fn ascii_capable_key_codes() -> Option<(HashMap<char, u16>, InputSourceRef)> {
+    // SAFETY: TIS copy functions return a retained input source; the caller releases it.
+    let source = unsafe { TISCopyCurrentASCIICapableKeyboardLayoutInputSource() };
+    if source.is_null() {
+        return None;
+    }
+    let layout_data =
+        unsafe { TISGetInputSourceProperty(source, kTISPropertyUnicodeKeyLayoutData) };
+    if layout_data.is_null() {
+        unsafe { CFRelease(source) };
+        return None;
+    }
+    let layout = unsafe { CFDataGetBytePtr(layout_data) };
+    let codes = (0..128)
+        .filter_map(|key_code| {
+            let translated = translate(layout, key_code)?;
+            let character = translated.chars().next()?.to_ascii_lowercase();
+            Some((character, key_code))
+        })
+        .collect::<HashMap<_, _>>();
+    Some((codes, source))
+}
+
+/// Resolves a character against the ASCII-capable layout for non-Latin
+/// active layouts, mirroring how AppKit resolves shortcuts such as Cmd+V.
+fn ascii_capable_key_code(character: char) -> Option<u16> {
+    let (codes, source) = ascii_capable_key_codes()?;
+    let key_code = codes.get(&character.to_ascii_lowercase()).copied();
+    // SAFETY: TIS copy functions return a retained source.
+    unsafe { CFRelease(source) };
+    key_code
 }
 
 fn collect_key_codes(entries: impl IntoIterator<Item = (char, u16)>) -> HashMap<char, u16> {

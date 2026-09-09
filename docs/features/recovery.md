@@ -256,9 +256,11 @@ socket is same-user only; bounded I/O and queues keep client stalls off the audi
 GUI startup -> require OS main thread -> initialize_layout // recover.keyboard-layout
   -> publish complete snapshot BEFORE settings/workers/GPUI
      ├── cached character -> keycode
-     └── missing character -> error                    // no worker-side TIS/TSM query
+     └── missing ASCII character -> filled from ASCII-capable layout
+                                     // no worker-side TIS/TSM query
 
 Headless lookup without snapshot -> shared native lock -> current layout query
+  -> current layout misses ASCII character -> ASCII-capable fallback
 Concurrent snapshot construction -> same lock          // serialized, not a separate race
 ```
 Sources: [keyboard.rs](../../src/keyboard.rs),
@@ -267,6 +269,11 @@ The lock alone is not GUI thread safety: successful main-thread prewarming and
 pure cached misses prevent later GUI workers from querying native layout APIs.
 The GUI snapshot remains fixed until restart. CLI lookups without a snapshot
 still query the current layout; this fix does not remove their live resolution.
+Non-Latin active layouts (Russian, Hebrew, …) produce no ASCII letters with an
+empty modifier state, so a snapshot built from them alone would miss paste
+shortcuts like ⌘V. macOS resolves such shortcuts against the ASCII-capable
+layout; both the GUI snapshot and live lookups now fill missing ASCII letters
+from `TISCopyCurrentASCIICapableKeyboardLayoutInputSource` the same way.
 
 **Executed September 1, 2026:** [keyboard_layout.rs](../../tests/keyboard_layout.rs)
 includes the production module and runs four scenarios in fresh child processes,
@@ -291,6 +298,14 @@ macOS 26.5.1 (25F80), arm64, Rust 1.95.0,
 and the locally installed CMake executable via `CMAKE`. The harness has a
 20-second child deadline and confines a native abort to its child process.
 It posts no key events and does not launch the installed app or capture audio.
+
+**Executed September 9, 2026 (ASCII-capable fallback):** with the Russian
+layout active on macOS 26.6.2 (25G83), Apple M3, a locally built
+`/Applications/Hex.app` resolved `paste_key_code=9` at startup and held
+Option-dictations pasted into the focused app; the retained
+`keyboard_layout` regression still passed all twelve child runs. The
+fallback mirrors AppKit's own resolution of shortcuts such as ⌘V on
+non-Latin layouts, so a Latin-active snapshot is unchanged.
 
 **Local startup check, September 1, 2026:** Developer ID-signed version 2.1.11,
 local build `20111.1`, was installed and launched from `/Applications/Hex.app`.
