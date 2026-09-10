@@ -198,7 +198,11 @@ pub fn listen(
     ));
     let transformations = Arc::new(crate::personal_commands::TransformationClient::default());
     shutdown.store(false, Ordering::Relaxed);
-    feedback::preload()?;
+    // Feedback admission is advisory: a cold audio stack can exceed the
+    // preload timeout, and missing tones must not stop desktop recognition.
+    if let Err(error) = feedback::preload() {
+        tracing::warn!(%error, "recording sounds are unavailable; continuing without feedback");
+    }
     let mut microphone_policy = crate::app_settings::microphone_policy();
     let mut commands_enabled = microphone_policy.commands_enabled;
     let mut recognizer = None;

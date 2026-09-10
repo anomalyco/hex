@@ -182,7 +182,27 @@ Record -> Release -> Transcribing/processing/paste -> Finished // dictate.feedba
   HUD + tones distinguish capture from pending work          // never take focus
   Pending processing/paste -> Still unfinished, not recording
   Feedback volume = 0 -> No tones
+  Cold audio stack exceeds preload admission -> Warn once; recognition continues
+     -> Loader keeps running; later tones play once the output opens
 ```
+
+Feedback admission is advisory on every platform: a cold audio stack can exceed
+the two-second preload timeout, so the recognition worker logs a warning and
+continues rather than stopping. The loader thread keeps running and registers
+the player when the default output finally opens, restoring tones for the rest
+of the session. Linux already logged and continued; the macOS worker now
+matches that behavior instead of stopping desktop recognition.
+
+**Executed September 10, 2026:** a locally built `/Applications/Hex.app`
+(approximating 2.1.16 plus this change) was started right after a restart where
+the stock build had stopped its desktop recognition worker with
+`timed out preloading feedback audio`. The patched build started on the first
+attempt: the worker reached `dictation listener started` and
+`resolved paste key … paste_key_code=9`, and held-Option dictations pasted into
+the focused app. The late-registration path (loader still running when the
+admission wait times out) is implemented and covered by the admission unit
+test, but its end-to-end tone recovery has not yet been observed on hardware;
+it is expected behavior, not executed evidence.
 
 Linux now uses the same recording sounds with its own persisted Sound volume
 control; see [Linux feedback](README.md#other-platforms-and-consumers) for its
