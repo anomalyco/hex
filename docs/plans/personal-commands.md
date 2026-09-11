@@ -77,8 +77,9 @@ export default defineHexConfig({
 })
 ```
 
-Do not reuse the built-in transformation IDs `lowercase` or `spongebob-case`;
-those IDs execute Rust's built-ins rather than a registered TypeScript function.
+Do not reuse the built-in transformation IDs `lowercase`, `spongebob-case`, or
+`no-trailing-punctuation`; those IDs execute Rust's built-ins rather than a
+registered TypeScript function.
 
 Each dictation selects one complete mode. The required Global mode applies
 unless a more specific application or browser-host mode matches. A mode owns

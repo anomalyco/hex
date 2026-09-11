@@ -80,7 +80,8 @@ SDK upgrades, so consult the installed SDK's exports when they differ.
   run in order after a mode's corrections and optional OpenCode rewrite for Paste
   and Send, not Voice Action or meetings. Return only the final transformed
   string; failure discards the transformation stage's partial output and keeps
-  the text from before that stage. Avoid the built-in IDs `lowercase` and
-  `spongebob-case`, which execute native transformations instead of custom ones.
+  the text from before that stage. Avoid the built-in IDs `lowercase`,
+  `spongebob-case`, and `no-trailing-punctuation`, which execute native
+  transformations instead of custom ones.
 
 See `.agents/skills/personal-commands/SKILL.md` for examples.

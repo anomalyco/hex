@@ -57,6 +57,41 @@ const MAX_TRANSFORMATION_TEXT_BYTES: usize = 48 * 1024;
 const TRANSFORMATION_TIMEOUT: Duration = Duration::from_secs(10);
 const LOWERCASE_TRANSFORMATION_ID: &str = "lowercase";
 const SPONGEBOB_TRANSFORMATION_ID: &str = "spongebob-case";
+const NO_TRAILING_PUNCTUATION_TRANSFORMATION_ID: &str = "no-trailing-punctuation";
+
+struct BuiltinTransformation {
+    id: &'static str,
+    name: &'static str,
+    description: &'static str,
+    apply: fn(&str) -> String,
+}
+
+const BUILTIN_TRANSFORMATIONS: &[BuiltinTransformation] = &[
+    BuiltinTransformation {
+        id: LOWERCASE_TRANSFORMATION_ID,
+        name: "Lowercase",
+        description: "Convert the final text to lowercase",
+        apply: str::to_lowercase,
+    },
+    BuiltinTransformation {
+        id: SPONGEBOB_TRANSFORMATION_ID,
+        name: "SpongeBob case",
+        description: "Alternate lowercase and uppercase letters",
+        apply: spongebob_case,
+    },
+    BuiltinTransformation {
+        id: NO_TRAILING_PUNCTUATION_TRANSFORMATION_ID,
+        name: "No trailing punctuation",
+        description: "Remove punctuation at the end of the text",
+        apply: remove_trailing_punctuation,
+    },
+];
+
+fn builtin_transformation(id: &str) -> Option<&'static BuiltinTransformation> {
+    BUILTIN_TRANSFORMATIONS
+        .iter()
+        .find(|transformation| transformation.id == id)
+}
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -80,26 +115,18 @@ pub struct StatusTransformation {
 }
 
 pub fn include_builtin_transformations(status: &mut StatusSnapshot) {
-    status.transformations.retain(|transformation| {
-        !matches!(
-            transformation.id.as_str(),
-            LOWERCASE_TRANSFORMATION_ID | SPONGEBOB_TRANSFORMATION_ID
-        )
-    });
+    status
+        .transformations
+        .retain(|transformation| builtin_transformation(&transformation.id).is_none());
     status.transformations.splice(
         0..0,
-        [
-            StatusTransformation {
-                id: LOWERCASE_TRANSFORMATION_ID.into(),
-                name: "Lowercase".into(),
-                description: Some("Convert the final text to lowercase".into()),
-            },
-            StatusTransformation {
-                id: SPONGEBOB_TRANSFORMATION_ID.into(),
-                name: "SpongeBob case".into(),
-                description: Some("Alternate lowercase and uppercase letters".into()),
-            },
-        ],
+        BUILTIN_TRANSFORMATIONS
+            .iter()
+            .map(|transformation| StatusTransformation {
+                id: transformation.id.into(),
+                name: transformation.name.into(),
+                description: Some(transformation.description.into()),
+            }),
     );
 }
 
@@ -635,15 +662,12 @@ impl TransformationClient {
         let mut output = text.to_string();
         let mut custom = Vec::new();
         for id in ids {
-            if matches!(
-                id.as_str(),
-                LOWERCASE_TRANSFORMATION_ID | SPONGEBOB_TRANSFORMATION_ID
-            ) {
+            if let Some(builtin) = builtin_transformation(id) {
                 if !custom.is_empty() {
                     output = self.transform_custom(&custom, &output, context, cancelled)?;
                     custom.clear();
                 }
-                output = apply_builtin_transformation(id, &output).expect("built-in ID is known");
+                output = (builtin.apply)(&output);
             } else {
                 custom.push(id.clone());
             }
@@ -724,28 +748,37 @@ impl TransformationClient {
     }
 }
 
-fn apply_builtin_transformation(id: &str, text: &str) -> Option<String> {
-    match id {
-        LOWERCASE_TRANSFORMATION_ID => Some(text.to_lowercase()),
-        SPONGEBOB_TRANSFORMATION_ID => {
-            let mut uppercase = false;
-            let mut output = String::with_capacity(text.len());
-            for character in text.chars() {
-                if !character.is_alphabetic() {
-                    output.push(character);
-                    continue;
-                }
-                if uppercase {
-                    output.extend(character.to_uppercase());
-                } else {
-                    output.extend(character.to_lowercase());
-                }
-                uppercase = !uppercase;
-            }
-            Some(output)
+fn spongebob_case(text: &str) -> String {
+    let mut uppercase = false;
+    let mut output = String::with_capacity(text.len());
+    for character in text.chars() {
+        if !character.is_alphabetic() {
+            output.push(character);
+            continue;
         }
-        _ => None,
+        if uppercase {
+            output.extend(character.to_uppercase());
+        } else {
+            output.extend(character.to_lowercase());
+        }
+        uppercase = !uppercase;
     }
+    output
+}
+
+// Sentence marks only. Closing quotes and brackets stay so a dictated
+// quotation or parenthetical keeps its pairing intact.
+const TRAILING_PUNCTUATION: &[char] = &[
+    '.', ',', '!', '?', ';', ':', '\u{2026}', '\u{3002}', '\u{ff01}', '\u{ff1f}', '\u{3001}',
+    '\u{ff0c}', '\u{ff1b}', '\u{ff1a}',
+];
+
+fn remove_trailing_punctuation(text: &str) -> String {
+    let body = text.trim_end();
+    let trailing_whitespace = &text[body.len()..];
+    let mut output = body.trim_end_matches(TRAILING_PUNCTUATION).to_string();
+    output.push_str(trailing_whitespace);
+    output
 }
 
 struct Invocation {
@@ -3396,12 +3429,81 @@ mod tests {
     }
 
     #[test]
+    fn no_trailing_punctuation_strips_only_the_final_run() {
+        assert_eq!(
+            remove_trailing_punctuation("The quick, brown fox jumped over the lazy dog."),
+            "The quick, brown fox jumped over the lazy dog"
+        );
+        assert_eq!(remove_trailing_punctuation("Wait, what?!…"), "Wait, what");
+        assert_eq!(remove_trailing_punctuation("好的。"), "好的");
+        assert_eq!(remove_trailing_punctuation("你好："), "你好");
+        assert_eq!(remove_trailing_punctuation("你好；"), "你好");
+    }
+
+    #[test]
+    fn no_trailing_punctuation_keeps_quotes_brackets_and_symbols() {
+        for input in ["(see above)", "He said \"hi.\"", "up 5%"] {
+            assert_eq!(remove_trailing_punctuation(input), input);
+        }
+    }
+
+    #[test]
+    fn no_trailing_punctuation_preserves_trailing_whitespace_and_empty_input() {
+        assert_eq!(remove_trailing_punctuation("Good dog. "), "Good dog ");
+        assert_eq!(remove_trailing_punctuation("   "), "   ");
+        assert_eq!(remove_trailing_punctuation(""), "");
+        assert_eq!(remove_trailing_punctuation("..."), "");
+    }
+
+    #[test]
+    fn built_in_transformations_chain_in_selected_order() {
+        let client = TransformationClient::default();
+        let context = ContextSnapshot::default();
+        let cancelled = AtomicBool::new(false);
+        let chain = |ids: &[&str]| {
+            client
+                .transform(
+                    &ids.iter().map(|id| (*id).into()).collect::<Vec<_>>(),
+                    "abcd",
+                    &context,
+                    &cancelled,
+                )
+                .unwrap()
+        };
+
+        assert_eq!(
+            chain(&[LOWERCASE_TRANSFORMATION_ID, SPONGEBOB_TRANSFORMATION_ID]),
+            "aBcD"
+        );
+        assert_eq!(
+            chain(&[SPONGEBOB_TRANSFORMATION_ID, LOWERCASE_TRANSFORMATION_ID]),
+            "abcd"
+        );
+        assert_eq!(
+            client
+                .transform(
+                    &[NO_TRAILING_PUNCTUATION_TRANSFORMATION_ID.into()],
+                    "abcd.",
+                    &context,
+                    &cancelled,
+                )
+                .unwrap(),
+            "abcd"
+        );
+    }
+
+    #[test]
     fn built_in_transformations_replace_matching_personal_catalog_entries() {
         let mut status = StatusSnapshot {
             transformations: vec![
                 StatusTransformation {
                     id: LOWERCASE_TRANSFORMATION_ID.into(),
                     name: "Custom lowercase".into(),
+                    description: None,
+                },
+                StatusTransformation {
+                    id: NO_TRAILING_PUNCTUATION_TRANSFORMATION_ID.into(),
+                    name: "Custom trailing punctuation".into(),
                     description: None,
                 },
                 StatusTransformation {
@@ -3424,9 +3526,12 @@ mod tests {
             [
                 LOWERCASE_TRANSFORMATION_ID,
                 SPONGEBOB_TRANSFORMATION_ID,
+                NO_TRAILING_PUNCTUATION_TRANSFORMATION_ID,
                 "custom"
             ]
         );
+        assert_eq!(status.transformations[0].name, "Lowercase");
+        assert_eq!(status.transformations[2].name, "No trailing punctuation");
     }
 
     #[test]

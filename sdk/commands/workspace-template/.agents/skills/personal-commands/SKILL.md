@@ -63,8 +63,9 @@ Transformations may be async, receive the foreground context as their second
 argument, and must return a string. If the transformation stage fails, HEX keeps
 the text from before that stage, not partial transformation results.
 
-Do not reuse `lowercase` or `spongebob-case` as custom transformation IDs; these
-IDs execute native built-ins instead of a registered TypeScript function.
+Do not reuse `lowercase`, `spongebob-case`, or `no-trailing-punctuation` as
+custom transformation IDs; these IDs execute native built-ins instead of a
+registered TypeScript function.
 
 Use a handler with the provided `hex` capabilities for ordinary commands:
 
