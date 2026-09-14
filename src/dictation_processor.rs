@@ -546,18 +546,34 @@ fn discover_opencode_service(
 ) -> Result<(String, String)> {
     let started = Instant::now();
     let workspace = crate::app_paths::opencode_workspace()?;
-    fs::create_dir_all(&workspace)?;
-    let executable = opencode_executable();
-    let run = |args: &[&str]| -> Result<String> {
-        let mut command = Command::new(&executable);
-        command.current_dir(&workspace).args(args);
-        let output = run_command(
+    discover_opencode_service_with(
+        &opencode_executable(),
+        &workspace,
+        deadline.saturating_sub(started.elapsed()),
+        cancelled,
+    )
+}
+
+fn discover_opencode_service_with(
+    executable: &Path,
+    workspace: &Path,
+    deadline: Duration,
+    cancelled: &AtomicBool,
+) -> Result<(String, String)> {
+    let started = Instant::now();
+    fs::create_dir_all(workspace)?;
+    let run = |args: &[&str]| {
+        let mut command = Command::new(executable);
+        command.current_dir(workspace).args(args);
+        run_command(
             command,
             None,
             deadline.saturating_sub(started.elapsed()),
             "service discovery",
             cancelled,
-        )?;
+        )
+    };
+    let decode = |output: CommandOutput| -> Result<String> {
         if !output.status.success() {
             // Discovery can return credentials; never include its output in diagnostics.
             return Err(eyre!(
@@ -577,9 +593,16 @@ fn discover_opencode_service(
         pid: u32,
         version: String,
     }
-    let health: Health = serde_json::from_str(&run(&["api", "get", "/api/health"])?)
+    let mut output = run(&["api", "get", "/api/status"])?;
+    // Older OpenCode versions expose only /api/health. Other failures are not retries.
+    if !output.status.success()
+        && String::from_utf8_lossy(&output.stderr).trim() == "HTTP 404 Not Found"
+    {
+        output = run(&["api", "get", "/api/health"])?;
+    }
+    let health: Health = serde_json::from_str(&decode(output)?)
         .map_err(|_| eyre!("OpenCode returned an invalid service health response"))?;
-    let paths = run(&["debug", "paths"])?;
+    let paths = decode(run(&["debug", "paths"])?)?;
     let state = paths
         .lines()
         .find_map(|line| {
@@ -1519,6 +1542,141 @@ mod tests {
 
         assert!(error.to_string().contains("was cancelled"));
         assert!(started.elapsed() < Duration::from_secs(1));
+    }
+
+    #[test]
+    fn service_discovery_supports_current_and_legacy_endpoints() {
+        let root = std::env::temp_dir().join(format!(
+            "hex-service-endpoints-{}-{:?}",
+            std::process::id(),
+            thread::current().id()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let registration = root.join("service.json");
+        fs::write(
+            &registration,
+            br#"{"pid":42,"version":"fixture-version","url":"http://127.0.0.1:1234","password":"registered-password"}"#,
+        )
+        .unwrap();
+        fs::set_permissions(&registration, fs::Permissions::from_mode(0o600)).unwrap();
+        let executable = root.join("opencode2");
+        for (status, health, succeeds, expected_calls) in [
+            (
+                "printf '%s\\n' '{\"pid\":42,\"version\":\"fixture-version\"}'",
+                "echo 'HTTP 404 Not Found' >&2; exit 1",
+                true,
+                "api get /api/status\ndebug paths\n",
+            ),
+            (
+                "echo 'HTTP 404 Not Found' >&2; exit 1",
+                "printf '%s\\n' '{\"pid\":42,\"version\":\"fixture-version\"}'",
+                true,
+                "api get /api/status\napi get /api/health\ndebug paths\n",
+            ),
+            (
+                "echo 'HTTP 401 Unauthorized' >&2; exit 1",
+                "exit 0",
+                false,
+                "api get /api/status\n",
+            ),
+            (
+                "echo 'HTTP 500 Internal Server Error' >&2; exit 1",
+                "exit 0",
+                false,
+                "api get /api/status\n",
+            ),
+            (
+                "echo 'private diagnostic mentioning HTTP 404 Not Found' >&2; exit 1",
+                "exit 0",
+                false,
+                "api get /api/status\n",
+            ),
+            (
+                "echo 'private invalid response'",
+                "exit 0",
+                false,
+                "api get /api/status\n",
+            ),
+            (
+                "echo 'HTTP 404 Not Found' >&2; exit 1",
+                "echo 'private diagnostic' >&2; exit 1",
+                false,
+                "api get /api/status\napi get /api/health\n",
+            ),
+        ] {
+            fs::write(
+                &executable,
+                format!(
+                    "#!/bin/sh\nprintf '%s\\n' \"$*\" >> calls\ncase \"$*\" in\n'api get /api/status') {status} ;;\n'api get /api/health') {health} ;;\n'debug paths') printf 'state %s\\n' \"$PWD\" ;;\n*) exit 2 ;;\nesac\n"
+                ),
+            )
+            .unwrap();
+            fs::set_permissions(&executable, fs::Permissions::from_mode(0o755)).unwrap();
+            let result = discover_opencode_service_with(
+                &executable,
+                &root,
+                Duration::from_secs(2),
+                &AtomicBool::new(false),
+            );
+            assert_eq!(result.is_ok(), succeeds, "{result:?}");
+            assert_eq!(
+                fs::read_to_string(root.join("calls")).unwrap(),
+                expected_calls,
+                "status fixture: {status}"
+            );
+            if succeeds {
+                assert_eq!(
+                    result.unwrap(),
+                    ("http://127.0.0.1:1234".into(), "registered-password".into())
+                );
+            } else {
+                let error = format!("{:#}", result.unwrap_err());
+                assert!(!error.contains("private"), "{error}");
+                assert!(!error.contains("registered-password"), "{error}");
+            }
+            fs::remove_file(root.join("calls")).unwrap();
+        }
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn service_discovery_fallback_shares_deadline_and_observes_cancellation() {
+        let root = std::env::temp_dir().join(format!(
+            "hex-service-deadline-{}-{:?}",
+            std::process::id(),
+            thread::current().id()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let executable = root.join("opencode2");
+        fs::write(
+            &executable,
+            "#!/bin/sh\nprintf '%s\\n' \"$*\" >> calls\nsleep 2\ncase \"$*\" in\n'api get /api/status') echo 'HTTP 404 Not Found' >&2; exit 1 ;;\n'api get /api/health') echo '{\"pid\":42,\"version\":\"fixture-version\"}' ;;\n*) exit 2 ;;\nesac\n",
+        )
+        .unwrap();
+        fs::set_permissions(&executable, fs::Permissions::from_mode(0o755)).unwrap();
+        let error = discover_opencode_service_with(
+            &executable,
+            &root,
+            Duration::from_secs(3),
+            &AtomicBool::new(false),
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("exceeded"), "{error}");
+        assert_eq!(
+            fs::read_to_string(root.join("calls")).unwrap(),
+            "api get /api/status\napi get /api/health\n"
+        );
+        fs::remove_file(root.join("calls")).unwrap();
+        let error = discover_opencode_service_with(
+            &executable,
+            &root,
+            Duration::from_secs(2),
+            &AtomicBool::new(true),
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("was cancelled"), "{error}");
+        assert!(!root.join("calls").exists());
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
