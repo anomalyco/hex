@@ -233,6 +233,8 @@ logs are separate and currently unbounded on disk. See the
 ```ts
 Settings                                 // settings
 ├── Dictation shortcut -> Capture a replacement binding
+├── Whisper recognition hints -> Compact at rest; springs open while editing
+├── Microphone picker -> Closes after choosing a device or clicking outside
 ├── Microphone -> Automatic or saved device
 ├── Microphone mode
 │   ├── Keep ready (fast) -> Open while idle; pre-roll available

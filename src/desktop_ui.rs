@@ -1,4 +1,6 @@
-use gpui::{AnyElement, Div, FontWeight, IntoElement, Rgba, div, prelude::*, px, rgb};
+use std::time::{Duration, Instant};
+
+use gpui::{AnyElement, Div, FontWeight, IntoElement, Rgba, Window, div, prelude::*, px, rgb};
 
 #[cfg(target_os = "linux")]
 use gpui::{Image, ImageFormat, img};
@@ -143,6 +145,83 @@ pub(crate) const PANEL_RADIUS: f32 = 10.0;
 pub(crate) const COMPACT_PANEL_HEADER_HEIGHT: f32 = 38.0;
 #[cfg_attr(target_os = "linux", allow(dead_code))]
 pub(crate) const SECTION_GAP: f32 = 8.0;
+
+/// The critically damped motion used by Settings controls.
+pub(crate) struct ToggleSpring {
+    position: f32,
+    velocity: f32,
+    target: f32,
+    last_frame: Instant,
+}
+
+impl ToggleSpring {
+    pub(crate) fn new(enabled: bool) -> Self {
+        let position = if enabled { 1.0 } else { 0.0 };
+        Self::at(position)
+    }
+
+    pub(crate) fn at(position: f32) -> Self {
+        Self {
+            position,
+            velocity: 0.0,
+            target: position,
+            last_frame: Instant::now(),
+        }
+    }
+
+    pub(crate) fn set_enabled(&mut self, enabled: bool) {
+        self.set_target(if enabled { 1.0 } else { 0.0 });
+    }
+
+    pub(crate) fn set_target(&mut self, target: f32) {
+        if self.target == target {
+            return;
+        }
+        self.target = target;
+        self.last_frame = Instant::now();
+    }
+
+    pub(crate) fn advance(&mut self, elapsed: Duration) {
+        /// Critically damped spring stiffness in rad/s; higher settles faster.
+        const STIFFNESS: f32 = 40.0;
+        let mut remaining = elapsed.as_secs_f32().min(0.1);
+        while remaining > 0.0 {
+            let dt = remaining.min(1.0 / 240.0);
+            let acceleration = -STIFFNESS.powi(2) * (self.position - self.target)
+                - 2.0 * STIFFNESS * self.velocity;
+            self.velocity += acceleration * dt;
+            self.position += self.velocity * dt;
+            remaining -= dt;
+        }
+        if self.is_settled() {
+            self.position = self.target;
+            self.velocity = 0.0;
+        }
+    }
+
+    pub(crate) fn render_position(&mut self, window: &mut Window) -> f32 {
+        let now = Instant::now();
+        self.advance(now.duration_since(self.last_frame));
+        self.last_frame = now;
+        if !self.is_settled() {
+            window.request_animation_frame();
+        }
+        self.position
+    }
+
+    pub(crate) fn is_settled(&self) -> bool {
+        (self.position - self.target).abs() < 0.001 && self.velocity.abs() < 0.01
+    }
+
+    pub(crate) fn enabled(&self) -> bool {
+        self.target >= 0.5
+    }
+
+    #[cfg(test)]
+    pub(crate) fn position(&self) -> f32 {
+        self.position
+    }
+}
 
 pub(crate) fn window_frame() -> Div {
     div()

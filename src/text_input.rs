@@ -9,7 +9,9 @@ use gpui::{
 };
 use unicode_segmentation::UnicodeSegmentation;
 
-use crate::desktop_ui::{CANVAS, LINE, MULTILINE_INPUT_HEIGHT, MUTED, TEXT, TEXT_INPUT_HEIGHT};
+use crate::desktop_ui::{
+    CANVAS, LINE, MULTILINE_INPUT_HEIGHT, MUTED, TEXT, TEXT_INPUT_HEIGHT, ToggleSpring,
+};
 
 const FOCUS: u32 = 0x5a86c8;
 const SELECTION: u32 = 0x4776b866;
@@ -129,6 +131,8 @@ pub struct TextInput {
     preferred_x: Option<Pixels>,
     multiline: bool,
     height: Pixels,
+    focused_height: Pixels,
+    height_spring: ToggleSpring,
     picker: bool,
     history: EditHistory,
 }
@@ -267,14 +271,6 @@ impl TextInput {
         Self::with_mode(cx, placeholder, initial.as_ref(), false, true)
     }
 
-    pub fn multiline(
-        cx: &mut Context<Self>,
-        placeholder: impl Into<SharedString>,
-        initial: impl AsRef<str>,
-    ) -> Self {
-        Self::with_mode(cx, placeholder, initial.as_ref(), true, false)
-    }
-
     pub fn multiline_with_height(
         cx: &mut Context<Self>,
         placeholder: impl Into<SharedString>,
@@ -283,7 +279,15 @@ impl TextInput {
     ) -> Self {
         let mut input = Self::with_mode(cx, placeholder, initial.as_ref(), true, false);
         input.height = height;
+        input.focused_height = height;
+        input.height_spring = ToggleSpring::at(height / px(1.0));
         input
+    }
+
+    /// Expands this input while it owns keyboard focus.
+    pub fn with_focused_height(mut self, height: Pixels) -> Self {
+        self.focused_height = height.max(self.height);
+        self
     }
 
     fn with_mode(
@@ -295,6 +299,11 @@ impl TextInput {
     ) -> Self {
         let content: SharedString = normalize(initial, multiline).into();
         let cursor = content.len();
+        let height = px(if multiline {
+            MULTILINE_INPUT_HEIGHT
+        } else {
+            TEXT_INPUT_HEIGHT
+        });
         Self {
             focus_handle: cx.focus_handle(),
             content,
@@ -310,11 +319,9 @@ impl TextInput {
             mouse_selection: None,
             preferred_x: None,
             multiline,
-            height: px(if multiline {
-                MULTILINE_INPUT_HEIGHT
-            } else {
-                TEXT_INPUT_HEIGHT
-            }),
+            height,
+            focused_height: height,
+            height_spring: ToggleSpring::at(height / px(1.0)),
             picker,
             history: EditHistory::default(),
         }
@@ -1346,11 +1353,14 @@ fn multiline_selection_quads(
 
 impl Render for TextInput {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let border = if self.focus_handle.is_focused(window) {
-            FOCUS
+        let focused = self.focus_handle.is_focused(window);
+        let border = if focused { FOCUS } else { LINE };
+        self.height_spring.set_target(if focused {
+            self.focused_height / px(1.0)
         } else {
-            LINE
-        };
+            self.height / px(1.0)
+        });
+        let height = px(self.height_spring.render_position(window));
         div()
             .key_context("TextInput")
             .track_focus(&self.focus_handle(cx))
@@ -1396,7 +1406,7 @@ impl Render for TextInput {
             .on_mouse_up_out(MouseButton::Left, cx.listener(Self::on_mouse_up))
             .on_mouse_move(cx.listener(Self::on_mouse_move))
             .w_full()
-            .h(self.height)
+            .h(height)
             .px(px(10.))
             .py(px(7.))
             .overflow_hidden()

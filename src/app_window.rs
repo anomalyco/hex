@@ -32,15 +32,15 @@ use crate::desktop_transcription_picker::{
     transcription_selection_is_active,
 };
 use crate::desktop_ui::{
-    ACCENT, CANVAS, COMPACT_MULTILINE_INPUT_HEIGHT, CONTROL_HEIGHT, FAINT, LINE, MUTED, NEGATIVE,
-    NavigationIcon, PANE_CONTENT_WIDTH, PANE_LIST_WIDTH, SECTION_GAP, SIDEBAR_WIDTH, SURFACE,
-    SURFACE_HOVER, SURFACE_SELECTED, TEXT, TEXT_INPUT_HEIGHT, TEXT_SOFT, compact_button,
-    compact_header_plus_button, compact_panel, compact_panel_header, compact_plus_button,
-    compact_section_label, disclosure_button, empty_message, error_message, header_button,
-    hotkey_keycaps, listener_status, mix_color, navigation_item, pane_body, pane_content,
-    pane_header, pane_header_with_action, section_label, segmented_control, segmented_item,
-    settings_copy, settings_panel, settings_row, settings_section_label, sidebar_frame, toggle,
-    window_frame,
+    ACCENT, CANVAS, COMPACT_MULTILINE_INPUT_HEIGHT, CONTROL_HEIGHT, FAINT, LINE,
+    MULTILINE_INPUT_HEIGHT, MUTED, NEGATIVE, NavigationIcon, PANE_CONTENT_WIDTH, PANE_LIST_WIDTH,
+    SECTION_GAP, SIDEBAR_WIDTH, SURFACE, SURFACE_HOVER, SURFACE_SELECTED, TEXT, TEXT_INPUT_HEIGHT,
+    TEXT_SOFT, ToggleSpring, compact_button, compact_header_plus_button, compact_panel,
+    compact_panel_header, compact_plus_button, compact_section_label, disclosure_button,
+    empty_message, error_message, header_button, hotkey_keycaps, listener_status, mix_color,
+    navigation_item, pane_body, pane_content, pane_header, pane_header_with_action, section_label,
+    segmented_control, segmented_item, settings_copy, settings_panel, settings_row,
+    settings_section_label, sidebar_frame, toggle, window_frame,
 };
 use crate::dictation_indicator::{DictationIndicatorEvent, DictationIndicatorSender, HudTuning};
 use crate::dictation_processor::{ModelCatalog, ModelChoice};
@@ -567,13 +567,6 @@ enum MeetingTranscript {
     Unavailable(String),
 }
 
-struct ToggleSpring {
-    position: f32,
-    velocity: f32,
-    target: f32,
-    last_frame: Instant,
-}
-
 struct ProcessingInput {
     entity: Entity<TextInput>,
     _subscriptions: Vec<Subscription>,
@@ -813,70 +806,6 @@ enum HotkeyCaptureState {
 impl HotkeyCaptureState {
     fn is_listening(&self) -> bool {
         matches!(self, Self::Listening { .. })
-    }
-}
-
-impl ToggleSpring {
-    fn new(enabled: bool) -> Self {
-        let position = if enabled { 1.0 } else { 0.0 };
-        Self::at(position)
-    }
-
-    fn at(position: f32) -> Self {
-        Self {
-            position,
-            velocity: 0.0,
-            target: position,
-            last_frame: Instant::now(),
-        }
-    }
-
-    fn set_enabled(&mut self, enabled: bool) {
-        self.set_target(if enabled { 1.0 } else { 0.0 });
-    }
-
-    fn set_target(&mut self, target: f32) {
-        if self.target == target {
-            return;
-        }
-        self.target = target;
-        self.last_frame = Instant::now();
-    }
-
-    fn advance(&mut self, elapsed: Duration) {
-        /// Critically damped spring stiffness in rad/s; higher settles faster.
-        const STIFFNESS: f32 = 40.0;
-        let mut remaining = elapsed.as_secs_f32().min(0.1);
-        while remaining > 0.0 {
-            let dt = remaining.min(1.0 / 240.0);
-            let acceleration = -STIFFNESS.powi(2) * (self.position - self.target)
-                - 2.0 * STIFFNESS * self.velocity;
-            self.velocity += acceleration * dt;
-            self.position += self.velocity * dt;
-            remaining -= dt;
-        }
-        if self.is_settled() {
-            self.position = self.target;
-            self.velocity = 0.0;
-        }
-    }
-
-    fn render_position(&mut self, window: &mut Window) -> f32 {
-        let now = Instant::now();
-        self.advance(now.duration_since(self.last_frame));
-        self.last_frame = now;
-        if !self.is_settled() {
-            window.request_animation_frame();
-        }
-        self.position
-    }
-
-    fn is_settled(&self) -> bool {
-        (self.position - self.target).abs() < 0.001 && self.velocity.abs() < 0.01
-    }
-
-    fn enabled(&self) -> bool {
-        self.target >= 0.5
     }
 }
 
@@ -3126,8 +3055,8 @@ impl AppWindow {
         div()
             .id("microphone-picker")
             .absolute()
-            .top(px(170.0))
-            .right(px(16.0))
+            .top(px(36.0))
+            .right_0()
             .w(px(220.0))
             .max_h(px(240.0))
             .p_2()
@@ -3366,6 +3295,36 @@ impl AppWindow {
         let microphone_picker = self
             .microphone_picker_open
             .then(|| self.render_microphone_picker(cx));
+        let microphone_control = div()
+            .relative()
+            .child(
+                disclosure_button(microphone_label)
+                    .id("microphone-setting")
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.microphone_picker_open = !this.microphone_picker_open;
+                        if this.microphone_picker_open {
+                            match crate::audio::input_device_names() {
+                                Ok(devices) => {
+                                    this.microphone_devices = devices;
+                                    this.microphone_picker_error = None;
+                                }
+                                Err(error) => {
+                                    this.microphone_picker_error = Some(error.to_string());
+                                }
+                            }
+                        }
+                        cx.notify();
+                    })),
+            )
+            .when_some(microphone_picker, |control, picker| {
+                control.child(deferred(picker))
+            })
+            .when(self.microphone_picker_open, |control| {
+                control.on_mouse_down_out(cx.listener(|this, _, _, cx| {
+                    this.microphone_picker_open = false;
+                    cx.notify();
+                }))
+            });
         let sound_volume_position = self.sound_volume_spring.render_position(window);
         let sound_volume = segmented_control()
             .relative()
@@ -3583,25 +3542,7 @@ impl AppWindow {
                                     .child(settings_row(
                                         "Microphone",
                                         "Automatically chooses the preferred available input",
-                                        disclosure_button(microphone_label)
-                                            .id("microphone-setting")
-                                            .on_click(cx.listener(|this, _, _, cx| {
-                                                this.microphone_picker_open =
-                                                    !this.microphone_picker_open;
-                                                if this.microphone_picker_open {
-                                                    match crate::audio::input_device_names() {
-                                                        Ok(devices) => {
-                                                            this.microphone_devices = devices;
-                                                            this.microphone_picker_error = None;
-                                                        }
-                                                        Err(error) => {
-                                                            this.microphone_picker_error =
-                                                                Some(error.to_string());
-                                                        }
-                                                    }
-                                                }
-                                                cx.notify();
-                                            })),
+                                        microphone_control,
                                     ))
                                     .when(
                                         transcription_model.supports_recognition_hints,
@@ -3611,7 +3552,7 @@ impl AppWindow {
                                                 "Names and terms to softly prime the speech model",
                                                 div()
                                                     .w(px(320.0))
-                                                    .h(px(76.0))
+                                                    .flex_none()
                                                     .child(
                                                         self.transcription_hints.entity.clone(),
                                                     ),
@@ -3797,8 +3738,7 @@ impl AppWindow {
                                         .border_b_0()
                                         .id("sound-effects-setting"),
                                     ),
-                            )
-                             .children(microphone_picker),
+                            ),
         )
     }
 
@@ -4177,11 +4117,13 @@ impl AppWindow {
 
     fn transcription_hints_input(initial: &str, cx: &mut Context<Self>) -> ProcessingInput {
         let entity = cx.new(|cx| {
-            TextInput::multiline(
+            TextInput::multiline_with_height(
                 cx,
                 "Names and terms Whisper should expect, e.g. OpenCode, Effect...",
                 initial,
+                px(COMPACT_MULTILINE_INPUT_HEIGHT),
             )
+            .with_focused_height(px(MULTILINE_INPUT_HEIGHT))
         });
         let subscription = cx.subscribe(&entity, |this, _, _: &TextChanged, cx| {
             this.settings.transcription.recognition_hints =
@@ -8769,6 +8711,112 @@ mod tests {
         }
     }
 
+    #[gpui::test]
+    fn recognition_hints_expands_without_overlapping_the_shortcut_row(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        struct RecognitionHintsLayout {
+            input: Entity<TextInput>,
+            shortcut_focus: FocusHandle,
+        }
+
+        impl Render for RecognitionHintsLayout {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                settings_panel()
+                    .child(
+                        settings_row(
+                            "Recognition hints",
+                            "Names and terms to softly prime the speech model",
+                            div()
+                                .w(px(320.0))
+                                .flex_none()
+                                .debug_selector(|| "recognition-hints-control".into())
+                                .child(self.input.clone()),
+                        )
+                        .debug_selector(|| "recognition-hints-row".into()),
+                    )
+                    .child(
+                        settings_row(
+                            "Dictation shortcut",
+                            "Hold to dictate, release to transcribe",
+                            div()
+                                .track_focus(&self.shortcut_focus)
+                                .w(px(220.0))
+                                .h(px(CONTROL_HEIGHT))
+                                .flex_none(),
+                        )
+                        .debug_selector(|| "dictation-shortcut-row".into()),
+                    )
+            }
+        }
+
+        let (view, cx) = cx.add_window_view(|window, cx| {
+            window.activate_window();
+            RecognitionHintsLayout {
+                input: cx.new(|cx| {
+                    TextInput::multiline_with_height(
+                        cx,
+                        "Recognition hints",
+                        "Kolokium, BlockImpulse, ledger, chaincode",
+                        px(COMPACT_MULTILINE_INPUT_HEIGHT),
+                    )
+                    .with_focused_height(px(MULTILINE_INPUT_HEIGHT))
+                }),
+                shortcut_focus: cx.focus_handle(),
+            }
+        });
+        cx.simulate_resize(size(px(756.0), px(400.0)));
+        cx.run_until_parked();
+
+        let compact = cx.debug_bounds("recognition-hints-control").unwrap();
+        let compact_row = cx.debug_bounds("recognition-hints-row").unwrap();
+        let compact_shortcut = cx.debug_bounds("dictation-shortcut-row").unwrap();
+        assert_eq!(compact.size.height, px(COMPACT_MULTILINE_INPUT_HEIGHT));
+        assert!(compact.bottom() <= compact_row.bottom());
+        assert!(compact_row.bottom() <= compact_shortcut.top());
+
+        cx.simulate_click(compact.center(), GpuiModifiers::default());
+        cx.run_until_parked();
+
+        let opening = cx.debug_bounds("recognition-hints-control").unwrap();
+        assert!(opening.size.height >= px(COMPACT_MULTILINE_INPUT_HEIGHT));
+        assert!(opening.size.height < px(MULTILINE_INPUT_HEIGHT));
+
+        for _ in 0..4 {
+            std::thread::sleep(Duration::from_millis(100));
+            cx.update(|window, _| window.refresh());
+            cx.run_until_parked();
+        }
+
+        let expanded = cx.debug_bounds("recognition-hints-control").unwrap();
+        let expanded_row = cx.debug_bounds("recognition-hints-row").unwrap();
+        let expanded_shortcut = cx.debug_bounds("dictation-shortcut-row").unwrap();
+        assert_eq!(expanded.size.height, px(MULTILINE_INPUT_HEIGHT));
+        assert!(expanded.bottom() <= expanded_row.bottom());
+        assert!(expanded_row.bottom() <= expanded_shortcut.top());
+        assert_eq!(
+            expanded_shortcut.top() - compact_shortcut.top(),
+            px(MULTILINE_INPUT_HEIGHT - COMPACT_MULTILINE_INPUT_HEIGHT)
+        );
+
+        cx.update(|window, cx| {
+            let shortcut_focus = view.read(cx).shortcut_focus.clone();
+            shortcut_focus.focus(window);
+        });
+        cx.run_until_parked();
+
+        for _ in 0..4 {
+            std::thread::sleep(Duration::from_millis(100));
+            cx.update(|window, _| window.refresh());
+            cx.run_until_parked();
+        }
+
+        let collapsed = cx.debug_bounds("recognition-hints-control").unwrap();
+        let collapsed_shortcut = cx.debug_bounds("dictation-shortcut-row").unwrap();
+        assert_eq!(collapsed, compact);
+        assert_eq!(collapsed_shortcut, compact_shortcut);
+    }
+
     #[test]
     fn command_model_failure_has_recovery_without_blocking_dictation() {
         assert!(command_model_notice(&CommandModelStatus::Ready).is_none());
@@ -9105,8 +9153,8 @@ mod tests {
         let at_120_hz = simulate(120);
         assert!(at_60_hz.is_settled());
         assert!(at_120_hz.is_settled());
-        assert!((at_60_hz.position - at_120_hz.position).abs() < 0.001);
-        assert_eq!(at_60_hz.position, 1.0);
+        assert!((at_60_hz.position() - at_120_hz.position()).abs() < 0.001);
+        assert_eq!(at_60_hz.position(), 1.0);
     }
 
     #[test]
