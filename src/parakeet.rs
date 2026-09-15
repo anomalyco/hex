@@ -291,36 +291,11 @@ impl DictationWorker {
                     continue;
                 }
                 for job in ordered.push(job) {
-                    // Publish Paste/Send text before the paste runs so a rewrite
-                    // submitted while the paste is still in flight rewrites the
-                    // transcript the user just heard, not the previous one. The
-                    // snapshot is restored when that paste fails or is cancelled.
                     let mut last_transcript = output_state
                         .lock()
                         .unwrap_or_else(|error| error.into_inner())
                         .last_transcript
                         .clone();
-                    let published = match &job {
-                        OutputJob::Completed {
-                            target: TranscriptionTarget::Paste | TranscriptionTarget::Send,
-                            result,
-                            ..
-                        } => match result.as_ref() {
-                            Ok(completed) if !completed.text.trim().is_empty() => {
-                                let previous = last_transcript.replace(completed.text.clone());
-                                last_transcript = Some(completed.text.clone());
-                                Some(previous)
-                            }
-                            _ => None,
-                        },
-                        _ => None,
-                    };
-                    {
-                        let mut state = output_state
-                            .lock()
-                            .unwrap_or_else(|error| error.into_inner());
-                        state.last_transcript = last_transcript.clone();
-                    }
                     let event = finish_output(
                         job,
                         &mut |text, mode, commit| paster.paste(text, mode, commit),
@@ -328,17 +303,6 @@ impl DictationWorker {
                         &mut meeting_cursor,
                         history.as_ref(),
                     );
-                    // A published paste that failed or was cancelled must not
-                    // leave the newer text in the mirror.
-                    let failed = matches!(
-                        &event,
-                        WorkerEvent::Completed { result: Err(_), .. }
-                            | WorkerEvent::Cancelled { .. }
-                    );
-                    let last_transcript = match published {
-                        Some(previous) if failed => previous,
-                        _ => last_transcript,
-                    };
                     let mut state = output_state
                         .lock()
                         .unwrap_or_else(|error| error.into_inner());
@@ -1640,6 +1604,39 @@ mod tests {
         let cancelled = JobControl::default();
         assert!(cancelled.cancel());
         assert!(!cancelled.begin_output());
+    }
+
+    #[test]
+    fn failed_paste_does_not_publish_last_transcript() {
+        let mut last_transcript = Some("previous".to_string());
+        let event = finish_output(
+            OutputJob::Completed {
+                job_id: DictationJobId(0),
+                control: Arc::new(JobControl::default()),
+                target: TranscriptionTarget::Paste,
+                result: Box::new(Ok(CompletedTranscript {
+                    text: "new output".into(),
+                    raw: "new output".into(),
+                    application: None,
+                    total_started: Instant::now(),
+                    queue_ms: 0,
+                    audio_ms: 0,
+                    prepare_ms: 0,
+                    inference_ms: 0,
+                    processing: None,
+                })),
+            },
+            &mut |_text, _mode, _commit| Err(eyre!("paste failed")),
+            &mut last_transcript,
+            &mut MeetingPasteCursor::default(),
+            None,
+        );
+
+        assert!(matches!(
+            event,
+            WorkerEvent::Completed { result: Err(_), .. }
+        ));
+        assert_eq!(last_transcript.as_deref(), Some("previous"));
     }
 
     #[test]
