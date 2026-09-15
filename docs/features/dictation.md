@@ -185,7 +185,7 @@ no foreground application consumes the clipboard.
 No rewrite shortcut assigned by default                 // dictate.rewrite-opt-in
   -> Settings > Rewrite last dictation / Rewrite selected text
   -> Assign shortcut explicitly                         // active and reserved
-  -> Disable -> Saved binding remains available to reassign, but is unreserved
+  -> Disable -> Binding cleared (None), unreserved; reassign via capture
 
 Completed Paste or Send output
   -> Successful output commit -> Publish as last dictation
