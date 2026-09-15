@@ -3769,7 +3769,7 @@ impl AppWindow {
                                     .child(
                                         settings_row(
                                             "Rewrite last dictation",
-                                            "Sends the last ordinary dictation through OpenCode and pastes the cleaned-up result",
+                                             "Assign a shortcut to send the last ordinary dictation through OpenCode",
                                             div()
                                                 .flex()
                                                 .items_center()
@@ -3789,7 +3789,7 @@ impl AppWindow {
                                      )
                                     .child(settings_row(
                                         "Rewrite selected text",
-                                        "Replaces the selected text with the OpenCode cleaned-up version",
+                                         "Assign a shortcut to replace selected text with the OpenCode cleaned-up version",
                                         div().flex().items_center().gap_2().child(rewrite_selection_control).child(compact_button("Disable").id("disable-rewrite-selection-hotkey").on_click(cx.listener(|this, _, _, cx| { this.settings.rewrite_selection_hotkey = None; this.save_settings(cx); }))),
                                     ).border_b_0().id("rewrite-selection-hotkey-setting"))
                             )
