@@ -295,15 +295,18 @@ CoreAudio formats, AppleScript details, or event serialization.
   clipboard only if no newer paste or external clipboard change superseded it.
 - Option-Shift-V pastes the last completed dictation. Option-Control-V pastes
   completed meeting turns added since the previous successful invocation.
-- Option-Shift-O rewrites the last completed dictation on demand. It always
-  runs OpenCode generation with the matching mode's configured model, even
-  when automatic mode processing is off, and pastes the result at the cursor.
+- Option-Shift-O rewrites the last completed dictation on demand when the user
+  explicitly assigns the shortcut. It always runs OpenCode generation with the
+  matching mode's configured model, even when automatic mode processing is off,
+  and pastes the result at the cursor. The shared last transcript is published
+  only after the ordinary paste or Send output succeeds.
   The rewritten output never becomes the new last dictation, failures paste
   nothing, and the shortcut requires OpenCode. A second press while a rewrite
   is generating cancels it and starts a fresh rewrite.
 - Option-Shift-R rewrites the selected text through the same on-demand
-  OpenCode rewrite and pastes the result at the current focus, replacing the
-  selection where the target app supports it. It requires a non-empty
+  OpenCode rewrite when the user explicitly assigns the shortcut and pastes the
+  result at the current focus, replacing the selection where the target app
+  supports it. It requires a non-empty
   selection and OpenCode, never updates the last dictation, and failures
   paste nothing. A second press while a rewrite is generating cancels it and
   starts a fresh rewrite from the current selection.
