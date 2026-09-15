@@ -1112,6 +1112,14 @@ pub fn runtime_hotkeys() -> RuntimeHotkeys {
         .unwrap_or_else(|error| error.into_inner())
 }
 
+#[cfg(test)]
+pub fn set_runtime_hotkeys_for_test(hotkeys: RuntimeHotkeys) {
+    *HOTKEYS
+        .get_or_init(Default::default)
+        .write()
+        .unwrap_or_else(|error| error.into_inner()) = hotkeys;
+}
+
 pub fn dictation_hotkey() -> RuntimeHotkey {
     runtime_hotkeys().dictation
 }

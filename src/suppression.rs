@@ -3167,10 +3167,18 @@ mod tests {
     fn option_shift_o_sends_the_last_transcript_through_opencode() {
         let now = capture_time();
         let mut hotkey = test_hotkey(true, now);
-        let rewrite_key_code = HotkeyBinding::rewrite_last_default()
-            .key
-            .expect("default rewrite key")
-            .code;
+        let rewrite = HotkeyBinding::rewrite_last_default();
+        let rewrite_key_code = rewrite.key.as_ref().expect("default rewrite key").code;
+        let configured = RuntimeHotkeys {
+            dictation: option_binding(),
+            edit: None,
+            paste_last: None,
+            rewrite_last: Some(rewrite.runtime()),
+            rewrite_selection: None,
+            paste_meeting: None,
+        };
+        let previous = crate::app_settings::runtime_hotkeys();
+        crate::app_settings::set_runtime_hotkeys_for_test(configured);
         let key_down = InputEvent::Key {
             code: rewrite_key_code,
             down: true,
@@ -3186,18 +3194,30 @@ mod tests {
         );
         assert!(!hotkey.is_recording());
         let mut suppression = ShortcutSuppression::default();
-        assert!(suppression.process_all(
-            key_down,
-            RuntimeHotkeys {
-                dictation: option_binding(),
-                edit: None,
-                paste_last: None,
-                rewrite_last: Some(HotkeyBinding::rewrite_last_default().runtime()),
-                rewrite_selection: None,
-                paste_meeting: None,
-            },
-            true,
-        ));
+        assert!(suppression.process_all(key_down, configured, true));
+        crate::app_settings::set_runtime_hotkeys_for_test(previous);
+    }
+
+    #[test]
+    fn unconfigured_rewrite_shortcuts_are_neither_matched_nor_suppressed() {
+        let rewrite_key_code = HotkeyBinding::rewrite_last_default()
+            .key
+            .expect("default rewrite key")
+            .code;
+        let key_down = InputEvent::Key {
+            code: rewrite_key_code,
+            down: true,
+            flags: OPTION_KEY_MASK | SHIFT_KEY_MASK,
+        };
+        let disabled = RuntimeHotkeys {
+            paste_last: None,
+            rewrite_last: None,
+            rewrite_selection: None,
+            paste_meeting: None,
+            ..RuntimeHotkeys::default()
+        };
+        assert_eq!(paste_action(key_down, disabled), None);
+        assert!(!ShortcutSuppression::default().process_all(key_down, disabled, true));
     }
 
     #[test]

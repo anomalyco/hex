@@ -9092,12 +9092,14 @@ mod tests {
             HotkeyKind::RewriteLast,
             &rewrite
         ));
+        settings.rewrite_last_hotkey = Some(rewrite.clone());
         assert!(hotkey_binding_conflicts(
             &settings,
             HotkeyKind::PasteLast,
             &rewrite
         ));
         settings.paste_last_hotkey = None;
+        settings.rewrite_last_hotkey = None;
 
         settings.dictation_hotkey = rewrite.clone();
         assert!(hotkey_binding_conflicts(
