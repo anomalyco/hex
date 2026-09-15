@@ -228,9 +228,23 @@ impl Profiles {
         context: &ContextSnapshot,
         cancelled: &AtomicBool,
     ) -> Result<Processed, String> {
-        if cancelled.load(Ordering::Acquire) {
-            return Err("rewrite was cancelled".into());
-        }
+        self.rewrite_cancellable_with(
+            transcript,
+            context,
+            cancelled,
+            |prompt, model, deadline, cancelled| {
+                generate_cancellable(prompt, Some(model), deadline, cancelled)
+            },
+        )
+    }
+
+    fn rewrite_cancellable_with(
+        &self,
+        transcript: &str,
+        context: &ContextSnapshot,
+        cancelled: &AtomicBool,
+        generate: impl FnOnce(&str, &Model, Duration, &AtomicBool) -> Result<String>,
+    ) -> Result<Processed, String> {
         let profile = self.select(context);
         let Some(model) = profile.model.as_ref() else {
             return Err("no OpenCode model is configured for the current mode".into());
@@ -238,8 +252,11 @@ impl Profiles {
         let prompt = prompt(profile, transcript, context);
         let deadline = profile.deadline.unwrap_or(self.deadline);
         let started = Instant::now();
-        let text = generate_cancellable(&prompt, Some(model), deadline, cancelled)
-            .map_err(|error| error.to_string())?;
+        if cancelled.load(Ordering::Acquire) {
+            return Err("rewrite was cancelled".into());
+        }
+        let text =
+            generate(&prompt, model, deadline, cancelled).map_err(|error| error.to_string())?;
         if text.trim().is_empty() {
             return Err("OpenCode returned an empty rewrite".into());
         }
@@ -1516,18 +1533,20 @@ mod tests {
                 .model("test", "model"),
         );
 
-        // The model is configured, so the rewrite passes the gate and reaches
-        // generation (observed through the cancellation fast path) even though
-        // the automatic-processing toggle is off.
-        let error = profiles
-            .rewrite_cancellable(
-                "garbled transcript",
-                &context("Zed", None),
-                &AtomicBool::new(true),
-            )
-            .unwrap_err();
+        let generated = std::cell::Cell::new(false);
+        let result = profiles.rewrite_cancellable_with(
+            "garbled transcript",
+            &context("Zed", None),
+            &AtomicBool::new(false),
+            |_prompt, model, _deadline, _cancelled| {
+                generated.set(true);
+                assert_eq!(model.id, "model");
+                Ok("rewritten".into())
+            },
+        );
 
-        assert_eq!(error, "rewrite was cancelled");
+        assert_eq!(result.unwrap().text, "rewritten");
+        assert!(generated.get());
     }
 
     #[test]
