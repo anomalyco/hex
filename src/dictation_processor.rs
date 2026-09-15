@@ -217,6 +217,62 @@ impl Profiles {
         }
     }
 
+    /// Rewrite an existing transcript on demand. Unlike live mode processing,
+    /// this always runs generation with the mode's configured model even when
+    /// the automatic-processing toggle is off, applies no corrections or
+    /// transformations (the text was already finalized), and fails without a
+    /// fallback so callers never paste a stale transcript twice.
+    pub fn rewrite_cancellable(
+        &self,
+        transcript: &str,
+        context: &ContextSnapshot,
+        cancelled: &AtomicBool,
+    ) -> Result<Processed, String> {
+        self.rewrite_cancellable_with(
+            transcript,
+            context,
+            cancelled,
+            |prompt, model, deadline, cancelled| {
+                generate_cancellable(prompt, Some(model), deadline, cancelled)
+            },
+        )
+    }
+
+    fn rewrite_cancellable_with(
+        &self,
+        transcript: &str,
+        context: &ContextSnapshot,
+        cancelled: &AtomicBool,
+        generate: impl FnOnce(&str, &Model, Duration, &AtomicBool) -> Result<String>,
+    ) -> Result<Processed, String> {
+        let profile = self.select(context);
+        let Some(model) = profile.model.as_ref() else {
+            return Err("no OpenCode model is configured for the current mode".into());
+        };
+        let prompt = prompt(profile, transcript, context);
+        let deadline = profile.deadline.unwrap_or(self.deadline);
+        let started = Instant::now();
+        if cancelled.load(Ordering::Acquire) {
+            return Err("rewrite was cancelled".into());
+        }
+        let text =
+            generate(&prompt, model, deadline, cancelled).map_err(|error| error.to_string())?;
+        if text.trim().is_empty() {
+            return Err("OpenCode returned an empty rewrite".into());
+        }
+        let latency_ms = started.elapsed().as_millis() as u64;
+        tracing::info!(profile = profile.name, latency_ms, "rewrite completed");
+        Ok(Processed {
+            text: text.trim().into(),
+            observation: Some(ProcessingObservation {
+                profile: profile.name.clone(),
+                latency_ms,
+                fallback: None,
+            }),
+            transformations: Vec::new(),
+        })
+    }
+
     pub fn process_voice_action_cancellable(
         &self,
         instruction: &str,
@@ -420,6 +476,7 @@ fn opencode_api<T: for<'de> Deserialize<'de>>(
         .wrap_err_with(|| format!("OpenCode {path} returned an invalid response"))
 }
 
+#[derive(Debug)]
 pub struct Processed {
     pub text: String,
     pub observation: Option<ProcessingObservation>,
@@ -1451,6 +1508,45 @@ mod tests {
 
         assert!(!profiles.select(&context("Slack", None)).ai_enabled);
         assert_eq!(profiles.select(&context("Zed", None)).name, "default");
+    }
+
+    #[test]
+    fn rewrite_requires_a_configured_opencode_model() {
+        let profiles = Profiles::new(Profile::new("Global", "clean this up"));
+
+        let error = profiles
+            .rewrite_cancellable(
+                "garbled transcript",
+                &context("Zed", None),
+                &AtomicBool::new(false),
+            )
+            .unwrap_err();
+
+        assert!(error.contains("no OpenCode model is configured"));
+    }
+
+    #[test]
+    fn rewrite_generates_even_when_live_processing_is_disabled() {
+        let profiles = Profiles::new(
+            Profile::new("Global", "clean this up")
+                .ai_enabled(false)
+                .model("test", "model"),
+        );
+
+        let generated = std::cell::Cell::new(false);
+        let result = profiles.rewrite_cancellable_with(
+            "garbled transcript",
+            &context("Zed", None),
+            &AtomicBool::new(false),
+            |_prompt, model, _deadline, _cancelled| {
+                generated.set(true);
+                assert_eq!(model.id, "model");
+                Ok("rewritten".into())
+            },
+        );
+
+        assert_eq!(result.unwrap().text, "rewritten");
+        assert!(generated.get());
     }
 
     #[test]
