@@ -1640,6 +1640,172 @@ mod tests {
     }
 
     #[test]
+    fn rewrite_last_during_in_flight_paste_sees_only_previously_published_text() {
+        use std::time::Duration;
+
+        use crate::paste::commit_prepared_paste;
+
+        #[derive(Clone, Copy)]
+        enum Outcome {
+            Success,
+            Error,
+            CancelBeforeCommit,
+        }
+
+        let completed = |text: &str| CompletedTranscript {
+            text: text.into(),
+            raw: text.into(),
+            application: None,
+            total_started: Instant::now(),
+            queue_ms: 0,
+            audio_ms: 0,
+            prepare_ms: 0,
+            inference_ms: 0,
+            processing: None,
+        };
+
+        for (target, outcome) in [
+            (TranscriptionTarget::Paste, Outcome::Success),
+            (TranscriptionTarget::Paste, Outcome::Error),
+            (TranscriptionTarget::Paste, Outcome::CancelBeforeCommit),
+            (TranscriptionTarget::Send, Outcome::Success),
+            (TranscriptionTarget::Send, Outcome::Error),
+            (TranscriptionTarget::Send, Outcome::CancelBeforeCommit),
+        ] {
+            let (processor_sender, processor_receiver) = mpsc::sync_channel(4);
+            let (output_sender, _output_receiver) = mpsc::sync_channel(8);
+            let (_, events) = mpsc::channel();
+            let state = Arc::new(Mutex::new(WorkerState {
+                next_sequence: 0,
+                jobs: BTreeMap::new(),
+                pending_pastes: 0,
+                last_transcript: Some("previous".into()),
+                rewrite_job: None,
+                rewrite_selection_job: None,
+            }));
+            let worker = DictationWorker {
+                inference_jobs: None,
+                processor_jobs: Some(processor_sender),
+                output_jobs: Some(output_sender),
+                events,
+                state: state.clone(),
+                inference_worker: None,
+                processor_workers: Vec::new(),
+                output_worker: None,
+            };
+
+            let control = Arc::new(JobControl::default());
+            let (blocked, blocking) = mpsc::channel();
+            let (resume, resumed) = mpsc::channel();
+            let output_state = state.clone();
+            let paste_control = control.clone();
+            let paste_thread = thread::spawn(move || {
+                let mut last_transcript = output_state
+                    .lock()
+                    .unwrap_or_else(|error| error.into_inner())
+                    .last_transcript
+                    .clone();
+                let event = finish_output(
+                    OutputJob::Completed {
+                        job_id: DictationJobId(0),
+                        control: paste_control,
+                        target,
+                        result: Box::new(Ok(completed("new output"))),
+                    },
+                    &mut |_text, mode, commit| {
+                        assert!(matches!(
+                            (target, mode),
+                            (TranscriptionTarget::Paste, PasteMode::Continue)
+                                | (TranscriptionTarget::Send, PasteMode::Send)
+                        ));
+                        match outcome {
+                            Outcome::Success | Outcome::CancelBeforeCommit => {
+                                commit_prepared_paste(
+                                    || {
+                                        blocked.send(()).unwrap();
+                                        resumed.recv_timeout(Duration::from_secs(5)).unwrap();
+                                        Ok(())
+                                    },
+                                    commit,
+                                    |_| Ok(()),
+                                )
+                            }
+                            Outcome::Error => {
+                                blocked.send(()).unwrap();
+                                resumed.recv_timeout(Duration::from_secs(5)).unwrap();
+                                Err(eyre!("paste failed"))
+                            }
+                        }
+                    },
+                    &mut last_transcript,
+                    &mut MeetingPasteCursor::default(),
+                    None,
+                );
+                let mut state = output_state
+                    .lock()
+                    .unwrap_or_else(|error| error.into_inner());
+                state.last_transcript = last_transcript;
+                event
+            });
+
+            blocking.recv_timeout(Duration::from_secs(5)).unwrap();
+            if matches!(outcome, Outcome::CancelBeforeCommit) {
+                assert!(control.cancel());
+            }
+
+            let job_id = worker.rewrite_last(ContextSnapshot::default()).unwrap();
+            let job = processor_receiver.try_recv().unwrap();
+            assert_eq!(job.job_id, job_id);
+            assert_eq!(job.text, "previous");
+            assert!(matches!(job.target, TranscriptionTarget::RewriteLast));
+            assert_eq!(
+                state.lock().unwrap().last_transcript.as_deref(),
+                Some("previous")
+            );
+
+            resume.send(()).unwrap();
+            let event = paste_thread.join().unwrap();
+            match outcome {
+                Outcome::Success => {
+                    assert!(matches!(
+                        event,
+                        WorkerEvent::Completed {
+                            result: Ok(ref text),
+                            ..
+                        } if text == "new output"
+                    ));
+                    assert_eq!(
+                        state.lock().unwrap().last_transcript.as_deref(),
+                        Some("new output")
+                    );
+                }
+                Outcome::Error => {
+                    assert!(matches!(
+                        event,
+                        WorkerEvent::Completed { result: Err(_), .. }
+                    ));
+                    assert_eq!(
+                        state.lock().unwrap().last_transcript.as_deref(),
+                        Some("previous")
+                    );
+                }
+                Outcome::CancelBeforeCommit => {
+                    assert!(matches!(
+                        event,
+                        WorkerEvent::Cancelled {
+                            job_id: DictationJobId(0)
+                        }
+                    ));
+                    assert_eq!(
+                        state.lock().unwrap().last_transcript.as_deref(),
+                        Some("previous")
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
     fn output_stays_cancellable_through_preparation_but_not_after_mutation() {
         use std::cell::{Cell, RefCell};
         use std::time::{Duration, SystemTime, UNIX_EPOCH};
