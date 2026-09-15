@@ -4,8 +4,9 @@ use gpui::{
     App, Bounds, ClipboardItem, Context, CursorStyle, ElementId, ElementInputHandler, Entity,
     EntityInputHandler, EventEmitter, FocusHandle, Focusable, GlobalElementId, KeyBinding,
     LayoutId, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, PaintQuad, Pixels, Point,
-    ShapedLine, SharedString, Style, TextAlign, TextRun, UTF16Selection, UnderlineStyle, Window,
-    WrappedLine, actions, div, fill, point, prelude::*, px, relative, rgb, rgba, size,
+    ScrollWheelEvent, ShapedLine, SharedString, Style, TextAlign, TextRun, UTF16Selection,
+    UnderlineStyle, Window, WrappedLine, actions, div, fill, point, prelude::*, px, relative, rgb,
+    rgba, size,
 };
 use unicode_segmentation::UnicodeSegmentation;
 
@@ -25,6 +26,8 @@ actions!(
         Right,
         Up,
         Down,
+        PageUp,
+        PageDown,
         SelectLeft,
         SelectRight,
         SelectUp,
@@ -73,6 +76,8 @@ pub fn key_bindings() -> Vec<KeyBinding> {
         KeyBinding::new("right", Right, Some("TextInput")),
         KeyBinding::new("up", Up, Some("TextInput")),
         KeyBinding::new("down", Down, Some("TextInput")),
+        KeyBinding::new("pageup", PageUp, Some("TextInput")),
+        KeyBinding::new("pagedown", PageDown, Some("TextInput")),
         KeyBinding::new("shift-left", SelectLeft, Some("TextInput")),
         KeyBinding::new("shift-right", SelectRight, Some("TextInput")),
         KeyBinding::new("shift-up", SelectUp, Some("TextInput")),
@@ -127,6 +132,7 @@ pub struct TextInput {
     last_bounds: Option<Bounds<Pixels>>,
     scroll_x: Pixels,
     scroll_y: Pixels,
+    reveal_caret: bool,
     mouse_selection: Option<MouseSelection>,
     preferred_x: Option<Pixels>,
     multiline: bool,
@@ -316,6 +322,7 @@ impl TextInput {
             last_bounds: None,
             scroll_x: px(0.),
             scroll_y: px(0.),
+            reveal_caret: true,
             mouse_selection: None,
             preferred_x: None,
             multiline,
@@ -342,6 +349,7 @@ impl TextInput {
         self.selection_reversed = false;
         self.marked_range = None;
         self.preferred_x = None;
+        self.reveal_caret = true;
         self.history = EditHistory::default();
         cx.notify();
     }
@@ -384,6 +392,14 @@ impl TextInput {
         } else {
             self.move_to(self.content.len(), cx);
         }
+    }
+
+    fn page_up(&mut self, _: &PageUp, _: &mut Window, cx: &mut Context<Self>) {
+        self.move_by_page(-1.0, cx);
+    }
+
+    fn page_down(&mut self, _: &PageDown, _: &mut Window, cx: &mut Context<Self>) {
+        self.move_by_page(1.0, cx);
     }
 
     fn select_left(&mut self, _: &SelectLeft, _: &mut Window, cx: &mut Context<Self>) {
@@ -646,10 +662,35 @@ impl TextInput {
         }
     }
 
+    fn on_scroll_wheel(
+        &mut self,
+        event: &ScrollWheelEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.multiline && self.focus_handle.is_focused(window) {
+            cx.stop_propagation();
+        }
+        let (Some(layout), Some(bounds)) = (&self.last_multiline_layout, self.last_bounds) else {
+            return;
+        };
+        let max_scroll = (layout.size().height - bounds.size.height).max(px(0.0));
+        let delta = event.delta.pixel_delta(window.line_height()).y;
+        let scroll_y = (self.scroll_y - delta).max(px(0.0)).min(max_scroll);
+        if scroll_y == self.scroll_y {
+            return;
+        }
+        self.scroll_y = scroll_y;
+        self.reveal_caret = false;
+        cx.stop_propagation();
+        cx.notify();
+    }
+
     fn move_to(&mut self, offset: usize, cx: &mut Context<Self>) {
         self.selected_range = offset..offset;
         self.selection_reversed = false;
         self.preferred_x = None;
+        self.reveal_caret = true;
         cx.notify();
     }
 
@@ -664,6 +705,7 @@ impl TextInput {
             self.selected_range = self.selected_range.end..self.selected_range.start;
         }
         self.preferred_x = None;
+        self.reveal_caret = true;
         cx.notify();
     }
 
@@ -671,6 +713,7 @@ impl TextInput {
         self.selected_range = range;
         self.selection_reversed = reversed;
         self.preferred_x = None;
+        self.reveal_caret = true;
         cx.notify();
     }
 
@@ -696,6 +739,7 @@ impl TextInput {
         self.selection_reversed = state.selection_reversed;
         self.marked_range = None;
         self.preferred_x = None;
+        self.reveal_caret = true;
     }
 
     fn index_for_mouse_position(&self, position: Point<Pixels>) -> usize {
@@ -803,6 +847,26 @@ impl TextInput {
         self.preferred_x = Some(preferred_x);
     }
 
+    fn move_by_page(&mut self, direction: f32, cx: &mut Context<Self>) {
+        if !self.multiline {
+            self.move_to(
+                if direction < 0.0 {
+                    0
+                } else {
+                    self.content.len()
+                },
+                cx,
+            );
+            return;
+        }
+        let lines = self
+            .last_bounds
+            .zip(self.last_multiline_layout.as_ref())
+            .map(|(bounds, layout)| (bounds.size.height / layout.line_height).max(1.0))
+            .unwrap_or(1.0);
+        self.move_vertically(direction * lines, false, cx);
+    }
+
     fn visual_line_boundary(&self, end: bool) -> usize {
         if let Some(layout) = &self.last_multiline_layout
             && let Some(position) = layout.position_for_index(self.cursor_offset())
@@ -885,6 +949,7 @@ impl TextInput {
         }
         self.selection_reversed = false;
         self.preferred_x = None;
+        self.reveal_caret = true;
 
         if self.content.as_ref() != content {
             self.content = content.into();
@@ -1152,10 +1217,12 @@ impl Element for TextElement {
                 .unwrap_or_default();
             let margin = px(2.);
             let mut scroll_y = input.scroll_y;
-            if caret.y < scroll_y + margin {
-                scroll_y = (caret.y - margin).max(px(0.));
-            } else if caret.y + layout.line_height > scroll_y + bounds.size.height - margin {
-                scroll_y = caret.y + layout.line_height - bounds.size.height + margin;
+            if input.reveal_caret {
+                if caret.y < scroll_y + margin {
+                    scroll_y = (caret.y - margin).max(px(0.));
+                } else if caret.y + layout.line_height > scroll_y + bounds.size.height - margin {
+                    scroll_y = caret.y + layout.line_height - bounds.size.height + margin;
+                }
             }
             scroll_y = scroll_y.min((layout.size().height - bounds.size.height).max(px(0.)));
             let cursor = selected_range.is_empty().then(|| {
@@ -1276,6 +1343,7 @@ impl Element for TextElement {
                 input.last_bounds = Some(bounds);
                 input.scroll_x = px(0.);
                 input.scroll_y = prepaint.scroll_y;
+                input.reveal_caret = false;
             });
         } else {
             let line = prepaint.line.take().expect("text line was shaped");
@@ -1371,6 +1439,8 @@ impl Render for TextInput {
             .on_action(cx.listener(Self::right))
             .on_action(cx.listener(Self::up))
             .on_action(cx.listener(Self::down))
+            .on_action(cx.listener(Self::page_up))
+            .on_action(cx.listener(Self::page_down))
             .on_action(cx.listener(Self::select_left))
             .on_action(cx.listener(Self::select_right))
             .on_action(cx.listener(Self::select_up))
@@ -1405,6 +1475,7 @@ impl Render for TextInput {
             .on_mouse_up(MouseButton::Left, cx.listener(Self::on_mouse_up))
             .on_mouse_up_out(MouseButton::Left, cx.listener(Self::on_mouse_up))
             .on_mouse_move(cx.listener(Self::on_mouse_move))
+            .on_scroll_wheel(cx.listener(Self::on_scroll_wheel))
             .w_full()
             .h(height)
             .px(px(10.))
@@ -1473,7 +1544,11 @@ fn utf8_offset_for_utf16(text: &str, offset: usize) -> usize {
 
 #[cfg(test)]
 mod tests {
+    use std::cell::Cell;
+    use std::rc::Rc;
+
     use super::*;
+    use gpui::{Modifiers, ScrollDelta, ScrollWheelEvent};
 
     fn edit_state(content: &str) -> EditState {
         EditState {
@@ -1481,6 +1556,100 @@ mod tests {
             selected_range: content.len()..content.len(),
             selection_reversed: false,
         }
+    }
+
+    #[gpui::test]
+    fn multiline_input_scrolls_with_mouse_and_page_keys(cx: &mut gpui::TestAppContext) {
+        struct Editor {
+            input: Entity<TextInput>,
+            leaked_scroll_events: Rc<Cell<usize>>,
+        }
+
+        impl Render for Editor {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                let leaked_scroll_events = self.leaked_scroll_events.clone();
+                div()
+                    .size_full()
+                    .on_scroll_wheel(move |_, _, _| {
+                        leaked_scroll_events.set(leaked_scroll_events.get() + 1);
+                    })
+                    .child(self.input.clone())
+            }
+        }
+
+        cx.update(|cx| cx.bind_keys(key_bindings()));
+        let leaked_scroll_events = Rc::new(Cell::new(0));
+        let content = (1..=20)
+            .map(|line| format!("Recognition hint {line}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let (editor, cx) = cx.add_window_view(|window, cx| {
+            window.activate_window();
+            Editor {
+                input: cx.new(|cx| {
+                    TextInput::multiline_with_height(cx, "Recognition hints", content, px(80.0))
+                }),
+                leaked_scroll_events: leaked_scroll_events.clone(),
+            }
+        });
+        cx.simulate_resize(size(px(320.0), px(160.0)));
+        cx.update(|window, cx| {
+            let input = editor.read(cx).input.clone();
+            input.update(cx, |input, cx| input.move_to(0, cx));
+            input.read(cx).focus_handle.focus(window);
+            window.refresh();
+        });
+        cx.run_until_parked();
+
+        let before = editor.read_with(cx, |editor, cx| editor.input.read(cx).scroll_y);
+        cx.simulate_event(ScrollWheelEvent {
+            position: point(px(20.0), px(20.0)),
+            delta: ScrollDelta::Pixels(point(px(0.0), px(-60.0))),
+            modifiers: Modifiers::default(),
+            ..Default::default()
+        });
+        let after = editor.read_with(cx, |editor, cx| editor.input.read(cx).scroll_y);
+
+        assert!(after > before, "scrolling down should reveal later lines");
+
+        cx.update(|window, cx| {
+            let input = editor.read(cx).input.clone();
+            input.update(cx, |input, cx| input.move_to(0, cx));
+            window.refresh();
+        });
+        cx.run_until_parked();
+        cx.simulate_keystrokes("pagedown");
+        let (cursor, scroll_y) = editor.read_with(cx, |editor, cx| {
+            let input = editor.input.read(cx);
+            (input.cursor_offset(), input.scroll_y)
+        });
+
+        assert!(
+            cursor > 0,
+            "Page Down should move the caret by one viewport"
+        );
+        assert!(scroll_y > px(0.0), "Page Down should reveal the new caret");
+
+        cx.simulate_keystrokes("pageup");
+        let (cursor, scroll_y) = editor.read_with(cx, |editor, cx| {
+            let input = editor.input.read(cx);
+            (input.cursor_offset(), input.scroll_y)
+        });
+
+        assert_eq!(cursor, 0, "Page Up should move back by one viewport");
+        assert_eq!(scroll_y, px(0.0), "Page Up should reveal the new caret");
+
+        cx.simulate_event(ScrollWheelEvent {
+            position: point(px(20.0), px(20.0)),
+            delta: ScrollDelta::Pixels(point(px(0.0), px(60.0))),
+            modifiers: Modifiers::default(),
+            ..Default::default()
+        });
+        assert_eq!(
+            leaked_scroll_events.get(),
+            0,
+            "focused multiline input should contain scroll events at its boundary"
+        );
     }
 
     #[test]

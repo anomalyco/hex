@@ -234,6 +234,8 @@ logs are separate and currently unbounded on disk. See the
 Settings                                 // settings
 ├── Dictation shortcut -> Capture a replacement binding
 ├── Whisper recognition hints -> Compact at rest; springs open while editing
+│   └── Long text -> Scroll with trackpad, mouse wheel, Page Up, or Page Down
+│       └── While focused, wheel events stay inside the field at scroll limits
 ├── Microphone picker -> Closes after choosing a device or clicking outside
 ├── Microphone -> Automatic or saved device
 ├── Microphone mode
