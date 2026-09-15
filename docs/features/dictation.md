@@ -194,6 +194,10 @@ Completed Paste or Send output
 Rewrite last while another paste is in flight
   -> Use the previously successful published dictation
   -> Never use output whose paste has not committed
+
+Escape or cancel_latest cancels an in-flight rewrite
+  -> Job stays cancelled until OrderedOutputs drains
+  -> A second press starts a fresh rewrite             // never already-in-progress
 ```
 
 Sources: `AppSettings::runtime_hotkeys` in
@@ -204,10 +208,11 @@ in [`parakeet.rs`](../../src/parakeet.rs). Checks include
 `rewrite_last_shortcut_disables_itself_when_it_shadows_an_existing_shortcut`,
 `failed_paste_does_not_publish_last_transcript`,
 `rewrite_last_during_in_flight_paste_sees_only_previously_published_text`,
+`rewrite_last_restarts_after_escape_cancels_a_buffered_rewrite`,
 `output_stays_cancellable_through_preparation_but_not_after_mutation`, and
 `rewrite_generates_even_when_live_processing_is_disabled`.
 These prove persisted defaults, opt-in reservation, conflict handling,
-publish-after-success, in-flight rewrite acceptance, and the
+publish-after-success, in-flight rewrite acceptance, cancel-restart, and the
 cancellation/commit boundary; they do not prove a real target application paste.
 
 ### Feedback
