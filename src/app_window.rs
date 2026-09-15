@@ -48,7 +48,7 @@ use crate::events::{
     CommandOutcome, DictationPhase, EventReader, TranscriptPhase, VoiceEvent, VoiceState, now_ms,
 };
 use crate::history::{History, HistoryEntry, HistoryKind, HistoryRetention};
-use crate::login_item::LoginItemStatus;
+use crate::login_item::{LoginItemRequest, LoginItemStatus};
 use crate::meeting::{self, MeetingManifest, MeetingRequest, MeetingStatus};
 use crate::onboarding::{
     PermissionAction, PermissionKind, PermissionState, PermissionWarning, SetupStatus,
@@ -834,6 +834,8 @@ pub struct AppWindow {
     microphone_picker_error: Option<String>,
     launch_at_login_status: LoginItemStatus,
     launch_at_login_error: Option<String>,
+    login_item_receiver: Option<Receiver<crate::login_item::LoginItemResponse>>,
+    pending_login_item_request: Option<LoginItemRequest>,
     launch_at_login_toggle: ToggleSpring,
     update_status: crate::sparkle::UpdateStatus,
     update_status_changed_at: Instant,
@@ -1185,14 +1187,9 @@ impl AppWindow {
             tracing::warn!(%error, "could not list microphones for settings");
             Vec::new()
         });
-        let (launch_at_login_status, launch_at_login_error) = if preview_mode {
-            (LoginItemStatus::Disabled, None)
-        } else {
-            match crate::login_item::status() {
-                Ok(status) => (status, None),
-                Err(error) => (LoginItemStatus::Disabled, Some(error.to_string())),
-            }
-        };
+        let launch_at_login_status = LoginItemStatus::Disabled;
+        let login_item_receiver =
+            (!preview_mode).then(|| crate::login_item::request(LoginItemRequest::Status));
         let history = if preview_mode {
             preview
                 .as_ref()
@@ -1227,7 +1224,9 @@ impl AppWindow {
             microphone_picker_open: false,
             microphone_picker_error: None,
             launch_at_login_status,
-            launch_at_login_error,
+            launch_at_login_error: None,
+            login_item_receiver,
+            pending_login_item_request: None,
             launch_at_login_toggle: ToggleSpring::new(
                 launch_at_login_status == LoginItemStatus::Enabled,
             ),
@@ -1649,19 +1648,53 @@ impl AppWindow {
         if self.preview {
             return false;
         }
-        let Ok(status) = crate::login_item::status() else {
-            return false;
+        let pending_enabled = match self.pending_login_item_request {
+            Some(LoginItemRequest::SetEnabled(enabled)) => Some(enabled),
+            Some(LoginItemRequest::Status | LoginItemRequest::OpenSettings) | None => None,
         };
-        if status == self.launch_at_login_status {
-            return false;
+        let mut changed = false;
+        if let Some(receiver) = &self.login_item_receiver {
+            let response = match receiver.try_recv() {
+                Ok(response) => response,
+                Err(std::sync::mpsc::TryRecvError::Empty) => return false,
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    crate::login_item::LoginItemResponse {
+                        status: None,
+                        error: Some("Launch at Login worker stopped unexpectedly".into()),
+                        clear_error: false,
+                    }
+                }
+            };
+            self.login_item_receiver = None;
+            if let Some(status) = response.status {
+                changed = status != self.launch_at_login_status;
+                self.launch_at_login_status = status;
+                self.launch_at_login_toggle
+                    .set_enabled(pending_enabled.unwrap_or(status == LoginItemStatus::Enabled));
+            }
+            if response.error.is_some()
+                || response.clear_error
+                || changed && self.launch_at_login_status == LoginItemStatus::Enabled
+            {
+                changed |= self.launch_at_login_error != response.error;
+                self.launch_at_login_error = response.error;
+            }
         }
-        self.launch_at_login_status = status;
-        self.launch_at_login_toggle
-            .set_enabled(status == LoginItemStatus::Enabled);
-        if status == LoginItemStatus::Enabled {
-            self.launch_at_login_error = None;
+        let request = self
+            .pending_login_item_request
+            .take()
+            .unwrap_or(LoginItemRequest::Status);
+        self.login_item_receiver = Some(crate::login_item::request(request));
+        changed
+    }
+
+    fn request_login_item(&mut self, request: LoginItemRequest) {
+        if self.login_item_receiver.is_some() {
+            // Coalesce clicks while macOS is busy; user actions precede the next poll.
+            self.pending_login_item_request = Some(request);
+        } else {
+            self.login_item_receiver = Some(crate::login_item::request(request));
         }
-        true
     }
 
     fn poll_personal_commands(&mut self) -> bool {
@@ -3114,22 +3147,8 @@ impl AppWindow {
             cx.notify();
             return;
         }
-        match crate::login_item::set_enabled(enabled) {
-            Ok(status) => {
-                self.launch_at_login_status = status;
-                self.launch_at_login_error = None;
-                self.launch_at_login_toggle
-                    .set_enabled(status == LoginItemStatus::Enabled);
-            }
-            Err(error) => {
-                self.launch_at_login_error = Some(error.to_string());
-                if let Ok(status) = crate::login_item::status() {
-                    self.launch_at_login_status = status;
-                    self.launch_at_login_toggle
-                        .set_enabled(status == LoginItemStatus::Enabled);
-                }
-            }
-        }
+        self.launch_at_login_toggle.set_enabled(enabled);
+        self.request_login_item(LoginItemRequest::SetEnabled(enabled));
         cx.notify();
     }
 
@@ -3380,7 +3399,9 @@ impl AppWindow {
             if self.launch_at_login_status == LoginItemStatus::RequiresApproval {
                 compact_button("Open Settings")
                     .id("launch-at-login-approval")
-                    .on_click(|_, _, _| crate::login_item::open_settings())
+                    .on_click(cx.listener(|this, _, _, _| {
+                        this.request_login_item(LoginItemRequest::OpenSettings);
+                    }))
                     .into_any_element()
             } else {
                 toggle(launch_at_login_position)
@@ -3687,8 +3708,8 @@ impl AppWindow {
                                             |row| {
                                                 row.on_click(cx.listener(
                                                     |this, _, _, cx| {
-                                                        let enabled = this.launch_at_login_status
-                                                            != LoginItemStatus::Enabled;
+                                                        let enabled =
+                                                            !this.launch_at_login_toggle.enabled();
                                                         this.set_launch_at_login(enabled, cx);
                                                     },
                                                 ))

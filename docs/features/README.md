@@ -350,6 +350,45 @@ Launch Hex                               // maintain.startup
 Menu-bar installation fails -> Show Dock icon and open the window // recovery access
 ```
 
+```ts
+Settings > Launch at login               // maintain.login-item
+├── Initial lookup / periodic refresh -> One background ServiceManagement request
+│   └── Settings reads the latest completed status without waiting for macOS
+├── Toggle -> Background register/unregister -> Refresh actual macOS status
+│   └── While busy, retain only the latest pending action ahead of polling
+└── Requires approval -> Open Login Items settings on the same background path
+```
+
+macOS remains the source of truth; no login Boolean is persisted. Failed changes
+retain their error and refresh the actual status when possible. The native calls
+in [login_item.rs](../../src/login_item.rs) are private to the background adapter;
+[AppWindow](../../src/app_window.rs) consumes a bounded receiver with `try_recv`.
+
+Observed September 15, 2026, on ARM64 macOS 26.6.2 with
+`cargo run --release -- app`: five-second `sample` profiles at a requested 1 ms
+interval found `SMAppService.status()` in 530/4,133 main-thread samples before
+this fix (12.82%), and 0/3,991 afterward. The after profile still observes
+ServiceManagement XPC waits on background workers, with no ServiceManagement
+frames on the main thread. These profiles used an uncommitted working build
+before the final optimistic-toggle changes; they do not verify the final
+committed UI behavior. The local profile artifacts are
+`/tmp/hex-login-before.sample.txt` and `/tmp/hex-login-after.sample.txt`;
+no binary hash was recorded. These profiles measure sampled stacks, not
+input-to-frame latency.
+
+The final Rust sources from pre-amend commit `5ff43e7` passed `cargo test`
+(470 tests, ten opt-in tests ignored, and all twelve keyboard-layout child
+scenarios), `cargo fmt --check`, and
+`cargo clippy --all-targets --all-features -- -D warnings`. The documentation-only
+amendment also passed `git diff --check`. Test output is retained locally in
+`/tmp/hex-login-full-tests.log` and `/tmp/hex-login-final-clippy.log`.
+
+Manual verification confirmed by Náder on September 15, 2026: after testing
+Settings interactions, the reported lag had disappeared. This is user-observed
+verification; the exact tested binary was not recorded. The automation tool
+could not attach to the unbundled release executable. Signed-app login
+registration/approval transitions remain unverified.
+
 The existing **Show Dock icon** preference controls quiet startup; there is no
 additional launch-window setting. This applies to normal and login launches,
 does not change login registration, and does not hide an already open window
