@@ -718,9 +718,12 @@ impl DictationWorker {
             return Err("no previous transcript is available");
         };
         // A paste that already committed cannot be taken back; keep the error
-        // path for that narrow window instead of pasting twice.
+        // path for that narrow window instead of pasting twice. An Escape
+        // cancellation leaves the job cancelled until OrderedOutputs drains,
+        // and that must not block a fresh rewrite.
         if let Some(old_job) = state.rewrite_job
             && let Some(control) = state.jobs.get(&old_job)
+            && !control.is_cancelled()
             && !control.cancel()
         {
             return Err("a rewrite is already in progress");
@@ -759,6 +762,7 @@ impl DictationWorker {
         let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
         if let Some(old_job) = state.rewrite_selection_job
             && let Some(control) = state.jobs.get(&old_job)
+            && !control.is_cancelled()
             && !control.cancel()
         {
             return Err("a rewrite is already in progress");
@@ -2091,6 +2095,61 @@ mod tests {
                 .expect("old job stays tracked until its cancellation is delivered")
                 .is_cancelled()
         );
+    }
+
+    #[test]
+    fn rewrite_last_restarts_after_escape_cancels_a_buffered_rewrite() {
+        let (output_sender, output_receiver) = mpsc::sync_channel(8);
+        let (_, events) = mpsc::channel();
+        let (processor_sender, processor_receiver) = mpsc::sync_channel(4);
+        let worker = DictationWorker {
+            inference_jobs: None,
+            processor_jobs: Some(processor_sender),
+            output_jobs: Some(output_sender),
+            events,
+            state: Arc::new(Mutex::new(WorkerState {
+                next_sequence: 0,
+                jobs: BTreeMap::new(),
+                pending_pastes: 0,
+                last_transcript: Some("previous".into()),
+                rewrite_job: None,
+                rewrite_selection_job: None,
+            })),
+            inference_worker: None,
+            processor_workers: Vec::new(),
+            output_worker: None,
+        };
+
+        // Earlier paste occupies the next ordered slot so the rewrite's
+        // Cancelled event stays buffered until that paste commits.
+        worker.paste_last().unwrap();
+        assert!(matches!(
+            output_receiver.try_recv().unwrap(),
+            OutputJob::Paste { .. }
+        ));
+
+        let first = worker.rewrite_last(ContextSnapshot::default()).unwrap();
+        assert_eq!(processor_receiver.try_recv().unwrap().job_id, first);
+        assert_eq!(worker.cancel_latest(), Some(first));
+        assert!(matches!(
+            output_receiver.try_recv().unwrap(),
+            OutputJob::Cancelled { job_id } if job_id == first
+        ));
+        assert!(
+            worker
+                .state
+                .lock()
+                .unwrap()
+                .jobs
+                .get(&first)
+                .expect("cancelled rewrite stays tracked until OrderedOutputs drains")
+                .is_cancelled()
+        );
+
+        let second = worker.rewrite_last(ContextSnapshot::default()).unwrap();
+        assert_ne!(second, first);
+        assert_eq!(processor_receiver.try_recv().unwrap().job_id, second);
+        assert_eq!(worker.state.lock().unwrap().rewrite_job, Some(second));
     }
 
     #[test]
