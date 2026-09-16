@@ -106,6 +106,23 @@ fn sidebar_update_button(
     })
 }
 
+fn microphone_picker_control(
+    button: impl IntoElement,
+    picker: Option<AnyElement>,
+    dismiss: impl Fn(&gpui::MouseUpEvent, &mut Window, &mut App) + 'static,
+) -> Div {
+    div()
+        .relative()
+        .child(button)
+        .when_some(picker, |control, picker| {
+            // The absolute menu is outside the button's bounds. Wait for mouse-up so
+            // its option click runs in the same event, before a redraw can remove it.
+            control
+                .child(deferred(picker))
+                .on_mouse_up_out(MouseButton::Left, dismiss)
+        })
+}
+
 fn settings_pane(content: Div) -> AnyElement {
     div()
         .size_full()
@@ -3314,36 +3331,30 @@ impl AppWindow {
         let microphone_picker = self
             .microphone_picker_open
             .then(|| self.render_microphone_picker(cx));
-        let microphone_control = div()
-            .relative()
-            .child(
-                disclosure_button(microphone_label)
-                    .id("microphone-setting")
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.microphone_picker_open = !this.microphone_picker_open;
-                        if this.microphone_picker_open {
-                            match crate::audio::input_device_names() {
-                                Ok(devices) => {
-                                    this.microphone_devices = devices;
-                                    this.microphone_picker_error = None;
-                                }
-                                Err(error) => {
-                                    this.microphone_picker_error = Some(error.to_string());
-                                }
+        let microphone_control = microphone_picker_control(
+            disclosure_button(microphone_label)
+                .id("microphone-setting")
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.microphone_picker_open = !this.microphone_picker_open;
+                    if this.microphone_picker_open {
+                        match crate::audio::input_device_names() {
+                            Ok(devices) => {
+                                this.microphone_devices = devices;
+                                this.microphone_picker_error = None;
+                            }
+                            Err(error) => {
+                                this.microphone_picker_error = Some(error.to_string());
                             }
                         }
-                        cx.notify();
-                    })),
-            )
-            .when_some(microphone_picker, |control, picker| {
-                control.child(deferred(picker))
-            })
-            .when(self.microphone_picker_open, |control| {
-                control.on_mouse_down_out(cx.listener(|this, _, _, cx| {
-                    this.microphone_picker_open = false;
+                    }
                     cx.notify();
-                }))
-            });
+                })),
+            microphone_picker,
+            cx.listener(|this, _, _, cx| {
+                this.microphone_picker_open = false;
+                cx.notify();
+            }),
+        );
         let sound_volume_position = self.sound_volume_spring.render_position(window);
         let sound_volume = segmented_control()
             .relative()
@@ -8688,6 +8699,103 @@ mod tests {
 
     use super::*;
     use crate::personal_commands::StatusExecution;
+
+    #[gpui::test]
+    fn microphone_picker_allows_selection_and_dismissal(cx: &mut gpui::TestAppContext) {
+        struct Picker {
+            open: bool,
+            selected: bool,
+        }
+
+        impl Render for Picker {
+            fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+                let button = disclosure_button("Microphone")
+                    .id("test-microphone-button")
+                    .debug_selector(|| "microphone-button".into())
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.open = !this.open;
+                        cx.notify();
+                    }));
+                let picker = self.open.then(|| {
+                    div()
+                        .absolute()
+                        .top(px(36.0))
+                        .w(px(220.0))
+                        .h(px(50.0))
+                        .child(
+                            div()
+                                .id("test-microphone-choice")
+                                .size_full()
+                                .debug_selector(|| "microphone-choice".into())
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.selected = true;
+                                    this.open = false;
+                                    cx.notify();
+                                })),
+                        )
+                        .into_any_element()
+                });
+                div().size_full().child(microphone_picker_control(
+                    button,
+                    picker,
+                    cx.listener(|this, _, _, cx| {
+                        this.open = false;
+                        cx.notify();
+                    }),
+                ))
+            }
+        }
+
+        let (view, cx) = cx.add_window_view(|window, _| {
+            window.activate_window();
+            Picker {
+                open: false,
+                selected: false,
+            }
+        });
+        cx.simulate_resize(size(px(400.0), px(200.0)));
+        cx.run_until_parked();
+        let button = cx.debug_bounds("microphone-button").unwrap().center();
+        cx.simulate_click(button, GpuiModifiers::default());
+        cx.run_until_parked();
+        let choice = cx.debug_bounds("microphone-choice").unwrap().center();
+        cx.simulate_event(MouseDownEvent {
+            button: MouseButton::Left,
+            position: choice,
+            click_count: 1,
+            ..Default::default()
+        });
+        cx.run_until_parked();
+        assert!(
+            view.read_with(cx, |view, _| view.open),
+            "pressing an option must keep it alive until release"
+        );
+        cx.simulate_event(gpui::MouseUpEvent {
+            button: MouseButton::Left,
+            position: choice,
+            click_count: 1,
+            ..Default::default()
+        });
+        cx.run_until_parked();
+        assert!(view.read_with(cx, |view, _| view.selected));
+        assert!(!view.read_with(cx, |view, _| view.open));
+
+        cx.simulate_click(button, GpuiModifiers::default());
+        cx.run_until_parked();
+        assert!(view.read_with(cx, |view, _| view.open));
+        cx.simulate_click(button, GpuiModifiers::default());
+        cx.run_until_parked();
+        assert!(
+            !view.read_with(cx, |view, _| view.open),
+            "clicking the button again must not reopen the menu"
+        );
+
+        cx.simulate_click(button, GpuiModifiers::default());
+        cx.run_until_parked();
+        cx.simulate_click(gpui::point(px(350.0), px(150.0)), GpuiModifiers::default());
+        cx.run_until_parked();
+        assert!(!view.read_with(cx, |view, _| view.open));
+    }
 
     #[gpui::test]
     fn settings_content_stays_inside_the_pane_at_supported_widths(cx: &mut gpui::TestAppContext) {

@@ -247,6 +247,14 @@ Settings                                 // settings
 └── Sound volume -> Immediate feedback setting; zero suppresses tones
 ```
 
+The microphone menu dismisses on left-button release so pressing a device option
+cannot remove it before its click handler runs. The shared control's GPUI
+regression `microphone_picker_allows_selection_and_dismissal` in
+[app_window.rs](../../src/app_window.rs) checks selection across an intervening
+redraw, closing from the trigger button, and closing after an outside click.
+Observed September 16, 2026: the regression failed with mouse-down dismissal
+and passed with mouse-up dismissal. It does not exercise physical device switching.
+
 Successful settings saves persist and project changes at safe runtime boundaries.
 Persistence, conflict, and ownership checks live in
 [app_settings.rs](../../src/app_settings.rs),
