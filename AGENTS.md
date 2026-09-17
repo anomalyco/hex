@@ -53,7 +53,8 @@ substitute for source inspection or a second roadmap.
   lifecycle, recording owner, exact shortcut boundaries, recovery handoff, and
   disposable bounded command audio projection.
 - `recording_environment`: serialized RAII ownership of idle-sleep prevention,
-  output muting, and supported media-player pause/resume behavior.
+  output muting or volume reduction with optional fades, and supported
+  media-player pause/resume behavior.
 - `dictation_processor`: context-selected corrections and deadline-bounded
   OpenCode rewrite profiles with corrected-transcript fallback. The macOS app
   discovers the `opencode2` beta executable, links missing installs to
@@ -402,6 +403,7 @@ cargo run -- preview transcription-picker --language zh --model-state installed
 ./scripts/capture-preview.sh /tmp/hex-model-missing.png settings --model-missing
 ./scripts/capture-preview.sh /tmp/hex-command-model-missing.png settings --command-model-missing
 ./scripts/capture-preview.sh /tmp/hex-microphone-confirmation.png settings --confirm-release-microphone
+./scripts/capture-preview.sh /tmp/hex-reduce-volume.png settings --reduce-volume
 ./scripts/capture-preview.sh /tmp/hex-history-retention.png history --open-history-retention
 ./scripts/capture-preview.sh /tmp/hex-modes.png modes
 ./scripts/capture-preview.sh /tmp/hex-modes-collapsed.png modes --collapse-mode-processing

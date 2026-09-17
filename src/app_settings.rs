@@ -1,6 +1,6 @@
 use std::fs;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, AtomicU64, Ordering};
 use std::sync::{OnceLock, RwLock};
 
 use color_eyre::eyre::{Result, eyre};
@@ -11,6 +11,10 @@ use serde::{Deserialize, Serialize};
 use crate::transcription_models::{TranscriptionModelId, TranscriptionSelection};
 
 static RECORDING_AUDIO_BEHAVIOR: AtomicU8 = AtomicU8::new(0);
+static RECORDING_REDUCED_VOLUME: AtomicU32 =
+    AtomicU32::new(RecordingVolumeReduction::DEFAULT_VOLUME.to_bits());
+static RECORDING_VOLUME_FADE_OUT: AtomicU32 = AtomicU32::new(0);
+static RECORDING_VOLUME_FADE_IN: AtomicU32 = AtomicU32::new(0);
 static DOUBLE_TAP_LOCK: AtomicBool = AtomicBool::new(true);
 static DOUBLE_TAP_ONLY: AtomicBool = AtomicBool::new(false);
 static MICROPHONE_POLICY: AtomicU8 = AtomicU8::new(0);
@@ -410,9 +414,52 @@ impl Default for RuntimeHotkeys {
 #[serde(rename_all = "snake_case")]
 pub enum RecordingAudioBehavior {
     Mute,
+    ReduceVolume,
     PauseMedia,
     #[default]
     DoNothing,
+}
+
+/// Output-volume ducking applied while `RecordingAudioBehavior::ReduceVolume`
+/// is active. Volume is a 0..=1 fraction of the output device's virtual main
+/// volume; fades are seconds and are clamped to a bounded maximum so a
+/// misconfigured value can never hold the recording environment for long.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RecordingVolumeReduction {
+    pub volume: f32,
+    pub fade_out_seconds: f32,
+    pub fade_in_seconds: f32,
+}
+
+impl RecordingVolumeReduction {
+    pub const DEFAULT_VOLUME: f32 = 0.2;
+    pub const MAX_FADE_SECONDS: f32 = 2.0;
+
+    pub fn clamp_volume(volume: f32) -> f32 {
+        if volume.is_finite() {
+            volume.clamp(0.0, 1.0)
+        } else {
+            Self::DEFAULT_VOLUME
+        }
+    }
+
+    pub fn clamp_fade(seconds: f32) -> f32 {
+        if seconds.is_finite() {
+            seconds.clamp(0.0, Self::MAX_FADE_SECONDS)
+        } else {
+            0.0
+        }
+    }
+}
+
+impl Default for RecordingVolumeReduction {
+    fn default() -> Self {
+        Self {
+            volume: Self::DEFAULT_VOLUME,
+            fade_out_seconds: 0.0,
+            fade_in_seconds: 0.0,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -495,11 +542,18 @@ impl Default for DictationPostProcessing {
 }
 
 impl RecordingAudioBehavior {
-    pub const ALL: [Self; 3] = [Self::DoNothing, Self::Mute, Self::PauseMedia];
+    /// Every behavior, in the order Settings presents them.
+    pub const ALL: [Self; 4] = [
+        Self::Mute,
+        Self::ReduceVolume,
+        Self::PauseMedia,
+        Self::DoNothing,
+    ];
 
     pub const fn label(self) -> &'static str {
         match self {
             Self::Mute => "Mute",
+            Self::ReduceVolume => "Reduce volume",
             Self::PauseMedia => "Pause media",
             Self::DoNothing => "Do nothing",
         }
@@ -510,6 +564,7 @@ impl RecordingAudioBehavior {
             Self::Mute => 0,
             Self::PauseMedia => 1,
             Self::DoNothing => 2,
+            Self::ReduceVolume => 3,
         }
     }
 
@@ -517,6 +572,7 @@ impl RecordingAudioBehavior {
         match value {
             1 => Self::PauseMedia,
             2 => Self::DoNothing,
+            3 => Self::ReduceVolume,
             _ => Self::Mute,
         }
     }
@@ -531,6 +587,9 @@ pub struct AppSettings {
     pub sound_effect_volume: f32,
     pub microphone: Option<String>,
     pub recording_audio_behavior: RecordingAudioBehavior,
+    pub recording_reduced_volume: f32,
+    pub recording_volume_fade_out_seconds: f32,
+    pub recording_volume_fade_in_seconds: f32,
     pub double_tap_lock: bool,
     pub double_tap_only: bool,
     pub dictation_hotkey: HotkeyBinding,
@@ -567,6 +626,9 @@ impl Default for AppSettings {
             sound_effect_volume: 0.5,
             microphone: None,
             recording_audio_behavior: RecordingAudioBehavior::DoNothing,
+            recording_reduced_volume: RecordingVolumeReduction::DEFAULT_VOLUME,
+            recording_volume_fade_out_seconds: 0.0,
+            recording_volume_fade_in_seconds: 0.0,
             double_tap_lock: true,
             double_tap_only: false,
             dictation_hotkey: HotkeyBinding::default(),
@@ -696,6 +758,27 @@ impl AppSettings {
         }
     }
 
+    /// Hand-edited or partially written volume settings stay inside the
+    /// ranges the recording environment can honor.
+    fn normalize_recording_volume_settings(&mut self) {
+        let reduction = self.recording_volume_reduction();
+        self.recording_reduced_volume = reduction.volume;
+        self.recording_volume_fade_out_seconds = reduction.fade_out_seconds;
+        self.recording_volume_fade_in_seconds = reduction.fade_in_seconds;
+    }
+
+    pub fn recording_volume_reduction(&self) -> RecordingVolumeReduction {
+        RecordingVolumeReduction {
+            volume: RecordingVolumeReduction::clamp_volume(self.recording_reduced_volume),
+            fade_out_seconds: RecordingVolumeReduction::clamp_fade(
+                self.recording_volume_fade_out_seconds,
+            ),
+            fade_in_seconds: RecordingVolumeReduction::clamp_fade(
+                self.recording_volume_fade_in_seconds,
+            ),
+        }
+    }
+
     pub fn load() -> Result<Self> {
         let settings = Self::load_from(&path()?)?;
         settings.apply_runtime();
@@ -709,6 +792,7 @@ impl AppSettings {
                 let microphone_policy_migrated = settings.normalize_microphone_policy();
                 settings.dictation_processing.default_mode.name = "Global".into();
                 settings.normalize_double_tap_settings();
+                settings.normalize_recording_volume_settings();
                 settings.migrate_legacy_replacements();
                 let mode_applications_migrated = settings.normalize_mode_application_names();
                 let transcription_migrated = settings.migrate_disabled_transcription_model();
@@ -772,6 +856,10 @@ impl AppSettings {
         crate::feedback::set_enabled(self.sound_effects);
         crate::feedback::set_volume(self.sound_effect_volume.clamp(0.0, 1.0));
         RECORDING_AUDIO_BEHAVIOR.store(self.recording_audio_behavior.encoded(), Ordering::Relaxed);
+        let reduction = self.recording_volume_reduction();
+        RECORDING_REDUCED_VOLUME.store(reduction.volume.to_bits(), Ordering::Relaxed);
+        RECORDING_VOLUME_FADE_OUT.store(reduction.fade_out_seconds.to_bits(), Ordering::Relaxed);
+        RECORDING_VOLUME_FADE_IN.store(reduction.fade_in_seconds.to_bits(), Ordering::Relaxed);
         DOUBLE_TAP_LOCK.store(self.double_tap_lock, Ordering::Relaxed);
         DOUBLE_TAP_ONLY.store(
             self.double_tap_lock && self.double_tap_only && self.dictation_hotkey.key.is_some(),
@@ -953,6 +1041,20 @@ pub fn recording_audio_behavior() -> RecordingAudioBehavior {
     RecordingAudioBehavior::decode(RECORDING_AUDIO_BEHAVIOR.load(Ordering::Relaxed))
 }
 
+pub fn recording_volume_reduction() -> RecordingVolumeReduction {
+    RecordingVolumeReduction {
+        volume: RecordingVolumeReduction::clamp_volume(f32::from_bits(
+            RECORDING_REDUCED_VOLUME.load(Ordering::Relaxed),
+        )),
+        fade_out_seconds: RecordingVolumeReduction::clamp_fade(f32::from_bits(
+            RECORDING_VOLUME_FADE_OUT.load(Ordering::Relaxed),
+        )),
+        fade_in_seconds: RecordingVolumeReduction::clamp_fade(f32::from_bits(
+            RECORDING_VOLUME_FADE_IN.load(Ordering::Relaxed),
+        )),
+    }
+}
+
 pub fn commands_enabled() -> bool {
     microphone_policy().commands_enabled
 }
@@ -1058,6 +1160,10 @@ mod tests {
             settings.recording_audio_behavior,
             RecordingAudioBehavior::DoNothing
         );
+        assert_eq!(
+            settings.recording_volume_reduction(),
+            RecordingVolumeReduction::default()
+        );
         assert!(settings.double_tap_lock);
         assert!(!settings.double_tap_only);
         assert_eq!(settings.dictation_hotkey, HotkeyBinding::default());
@@ -1138,6 +1244,72 @@ mod tests {
         AppSettings::load_from(&path).unwrap();
         assert!(completion_recorded_at(&directory));
         fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn reduce_volume_settings_round_trip_through_json() {
+        let settings = AppSettings {
+            recording_audio_behavior: RecordingAudioBehavior::ReduceVolume,
+            recording_reduced_volume: 0.35,
+            recording_volume_fade_out_seconds: 0.5,
+            recording_volume_fade_in_seconds: 1.25,
+            ..AppSettings::default()
+        };
+        let json = serde_json::to_string(&settings).unwrap();
+        assert!(json.contains(r#""recording_audio_behavior":"reduce_volume""#));
+        let restored: AppSettings = serde_json::from_str(&json).unwrap();
+        assert_eq!(
+            restored.recording_audio_behavior,
+            RecordingAudioBehavior::ReduceVolume
+        );
+        assert_eq!(
+            restored.recording_volume_reduction(),
+            RecordingVolumeReduction {
+                volume: 0.35,
+                fade_out_seconds: 0.5,
+                fade_in_seconds: 1.25,
+            }
+        );
+    }
+
+    #[test]
+    fn loading_clamps_out_of_range_volume_reduction_values() {
+        let directory = std::env::temp_dir().join(format!(
+            "hex-volume-reduction-{}-{}",
+            std::process::id(),
+            SETTINGS_TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed),
+        ));
+        fs::create_dir(&directory).unwrap();
+        let path = directory.join("settings.json");
+        fs::write(
+            &path,
+            br#"{"recording_audio_behavior":"reduce_volume","recording_reduced_volume":1.7,"recording_volume_fade_out_seconds":-3,"recording_volume_fade_in_seconds":9}"#,
+        )
+        .unwrap();
+
+        let settings = AppSettings::load_from(&path).unwrap();
+        assert_eq!(settings.recording_reduced_volume, 1.0);
+        assert_eq!(settings.recording_volume_fade_out_seconds, 0.0);
+        assert_eq!(
+            settings.recording_volume_fade_in_seconds,
+            RecordingVolumeReduction::MAX_FADE_SECONDS
+        );
+        assert_eq!(
+            settings.recording_volume_reduction(),
+            RecordingVolumeReduction {
+                volume: 1.0,
+                fade_out_seconds: 0.0,
+                fade_in_seconds: RecordingVolumeReduction::MAX_FADE_SECONDS,
+            }
+        );
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn recording_audio_behavior_runtime_encoding_round_trips() {
+        for behavior in RecordingAudioBehavior::ALL {
+            assert_eq!(RecordingAudioBehavior::decode(behavior.encoded()), behavior);
+        }
     }
 
     #[test]
