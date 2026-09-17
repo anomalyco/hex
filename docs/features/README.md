@@ -291,6 +291,19 @@ Selection and stage checks start in
 [personal_commands.rs](../../src/personal_commands.rs). They do not prove live
 provider availability or real application/Brave context changes.
 
+```ts
+OpenCode discovery                         // modes.opencode-discovery; shared with Voice Action
+├── GET /api/info -> Match PID/version to private service registration
+├── Exact CLI 404 -> Try /api/status, then /api/health, within the same deadline
+└── Other failure / invalid response -> Show error; explicit Retry
+```
+
+HEX 2.1.18 uses the two older names, both of which return 404 on OpenCode
+`0.0.0-dev-19726`. The source fix adds `/api/info`.
+[OpenCode compatibility](../opencode-compatibility.md#september-17-2026-endpoint-change)
+records endpoint observations and fixture coverage. Endpoint availability alone
+does not establish provider-backed processing or installed-app recovery.
+
 Application activations compare the picker's bundle name with the foreground
 application's localized name. When Finder shows all filename extensions, the
 picker name arrives as `Ghostty.app`; [context.rs](../../src/context.rs) strips

@@ -28,8 +28,12 @@ HEX discovers a separately installed `opencode2`, optionally overridden by
 managed service, or restart or update it. `opencode2 api` discovers or starts
 the service through OpenCode's own lifecycle.
 
-Catalog loading and generation use `opencode2 api get /api/health` to identify
+Catalog loading and generation use `opencode2 api get /api/info` to identify
 the authenticated active server, starting it through the CLI when needed.
+For older servers, discovery tries `/api/status`, then `/api/health`, only when
+the preceding command fails with the exact `HTTP 404 Not Found` diagnostic.
+All attempts share the original deadline and cancellation signal. Other failures
+and invalid responses stop discovery without trying another endpoint.
 `opencode2 debug paths` locates its state directory. HEX reads endpoint and
 password together from the bounded, owner-only service registration matching
 that server's PID and version.
@@ -66,9 +70,26 @@ published to npm's `dev` tag; `next` was an older beta, not the newest V2 build.
 Resolve the published version rather than assuming a moving tag identifies the
 desired source commit.
 
-Check the connected server's `/api/health` version as well as the CLI version:
+Check the connected server's `/api/info` version as well as the CLI version:
 the CLI's `api` command permits a server version mismatch. Do not replace a
 user's running service to perform compatibility validation.
 
 Keep regression coverage for body/credential privacy, curl configuration escaping,
 large bodies, loopback-only admission, blocked input pipes, and cancellation.
+
+## September 17, 2026 endpoint change
+
+OpenCode CLI and server `0.0.0-dev-19726` returned HTTP 404 and exit code 1 for
+both `/api/status` and `/api/health`. `/api/info` succeeded, with PID and version
+matching the active service registration. Authenticated reads of `/api/model`
+and `/api/model/default` also returned HTTP 200. The
+[current troubleshooting guide](https://opencode.ai/v2/docs/troubleshooting)
+documents `/api/info`.
+
+HEX 2.1.18 supports the two older names and fails discovery on this version.
+The source fix prefers `/api/info` while retaining both older names.
+`service_discovery_supports_current_and_legacy_endpoints` covers each endpoint
+generation, fallback order, non-404 failures, invalid responses, and private
+diagnostics through a fixture CLI. The shared-deadline/cancellation fixture
+covers the three-endpoint path. These checks do not prove provider-backed
+generation or installed-app recovery.

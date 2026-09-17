@@ -593,12 +593,15 @@ fn discover_opencode_service_with(
         pid: u32,
         version: String,
     }
-    let mut output = run(&["api", "get", "/api/status"])?;
-    // Older OpenCode versions expose only /api/health. Other failures are not retries.
-    if !output.status.success()
-        && String::from_utf8_lossy(&output.stderr).trim() == "HTTP 404 Not Found"
-    {
-        output = run(&["api", "get", "/api/health"])?;
+    let mut output = run(&["api", "get", "/api/info"])?;
+    // Try older endpoint names only when the previous endpoint is missing.
+    for path in ["/api/status", "/api/health"] {
+        if output.status.success()
+            || String::from_utf8_lossy(&output.stderr).trim() != "HTTP 404 Not Found"
+        {
+            break;
+        }
+        output = run(&["api", "get", path])?;
     }
     let health: Health = serde_json::from_str(&decode(output)?)
         .map_err(|_| eyre!("OpenCode returned an invalid service health response"))?;
@@ -1560,54 +1563,84 @@ mod tests {
         .unwrap();
         fs::set_permissions(&registration, fs::Permissions::from_mode(0o600)).unwrap();
         let executable = root.join("opencode2");
-        for (status, health, succeeds, expected_calls) in [
+        let available = "printf '%s\\n' '{\"pid\":42,\"version\":\"fixture-version\"}'";
+        let missing = "echo 'HTTP 404 Not Found' >&2; exit 1";
+        for (info, status, health, succeeds, expected_calls) in [
             (
-                "printf '%s\\n' '{\"pid\":42,\"version\":\"fixture-version\"}'",
-                "echo 'HTTP 404 Not Found' >&2; exit 1",
+                available,
+                missing,
+                missing,
                 true,
-                "api get /api/status\ndebug paths\n",
+                "api get /api/info\ndebug paths\n",
             ),
             (
-                "echo 'HTTP 404 Not Found' >&2; exit 1",
-                "printf '%s\\n' '{\"pid\":42,\"version\":\"fixture-version\"}'",
+                missing,
+                available,
+                missing,
                 true,
-                "api get /api/status\napi get /api/health\ndebug paths\n",
+                "api get /api/info\napi get /api/status\ndebug paths\n",
+            ),
+            (
+                missing,
+                missing,
+                available,
+                true,
+                "api get /api/info\napi get /api/status\napi get /api/health\ndebug paths\n",
             ),
             (
                 "echo 'HTTP 401 Unauthorized' >&2; exit 1",
                 "exit 0",
+                "exit 0",
                 false,
-                "api get /api/status\n",
+                "api get /api/info\n",
             ),
             (
                 "echo 'HTTP 500 Internal Server Error' >&2; exit 1",
                 "exit 0",
+                "exit 0",
                 false,
-                "api get /api/status\n",
+                "api get /api/info\n",
             ),
             (
                 "echo 'private diagnostic mentioning HTTP 404 Not Found' >&2; exit 1",
                 "exit 0",
+                "exit 0",
                 false,
-                "api get /api/status\n",
+                "api get /api/info\n",
             ),
             (
                 "echo 'private invalid response'",
                 "exit 0",
+                "exit 0",
                 false,
-                "api get /api/status\n",
+                "api get /api/info\n",
             ),
             (
-                "echo 'HTTP 404 Not Found' >&2; exit 1",
+                missing,
+                "echo 'HTTP 401 Unauthorized' >&2; exit 1",
+                "exit 0",
+                false,
+                "api get /api/info\napi get /api/status\n",
+            ),
+            (
+                missing,
+                missing,
                 "echo 'private diagnostic' >&2; exit 1",
                 false,
-                "api get /api/status\napi get /api/health\n",
+                "api get /api/info\napi get /api/status\napi get /api/health\n",
+            ),
+            (
+                missing,
+                missing,
+                missing,
+                false,
+                "api get /api/info\napi get /api/status\napi get /api/health\n",
             ),
         ] {
             fs::write(
                 &executable,
                 format!(
-                    "#!/bin/sh\nprintf '%s\\n' \"$*\" >> calls\ncase \"$*\" in\n'api get /api/status') {status} ;;\n'api get /api/health') {health} ;;\n'debug paths') printf 'state %s\\n' \"$PWD\" ;;\n*) exit 2 ;;\nesac\n"
+                    "#!/bin/sh\nprintf '%s\\n' \"$*\" >> calls\ncase \"$*\" in\n'api get /api/info') {info} ;;\n'api get /api/status') {status} ;;\n'api get /api/health') {health} ;;\n'debug paths') printf 'state %s\\n' \"$PWD\" ;;\n*) exit 2 ;;\nesac\n"
                 ),
             )
             .unwrap();
@@ -1622,7 +1655,7 @@ mod tests {
             assert_eq!(
                 fs::read_to_string(root.join("calls")).unwrap(),
                 expected_calls,
-                "status fixture: {status}"
+                "info: {info}; status: {status}; health: {health}"
             );
             if succeeds {
                 assert_eq!(
@@ -1650,7 +1683,7 @@ mod tests {
         let executable = root.join("opencode2");
         fs::write(
             &executable,
-            "#!/bin/sh\nprintf '%s\\n' \"$*\" >> calls\nsleep 2\ncase \"$*\" in\n'api get /api/status') echo 'HTTP 404 Not Found' >&2; exit 1 ;;\n'api get /api/health') echo '{\"pid\":42,\"version\":\"fixture-version\"}' ;;\n*) exit 2 ;;\nesac\n",
+            "#!/bin/sh\nprintf '%s\\n' \"$*\" >> calls\ncase \"$*\" in\n'api get /api/info') echo 'HTTP 404 Not Found' >&2; exit 1 ;;\n'api get /api/status') sleep 2; echo 'HTTP 404 Not Found' >&2; exit 1 ;;\n'api get /api/health') sleep 2; echo '{\"pid\":42,\"version\":\"fixture-version\"}' ;;\n*) exit 2 ;;\nesac\n",
         )
         .unwrap();
         fs::set_permissions(&executable, fs::Permissions::from_mode(0o755)).unwrap();
@@ -1664,7 +1697,7 @@ mod tests {
         assert!(error.to_string().contains("exceeded"), "{error}");
         assert_eq!(
             fs::read_to_string(root.join("calls")).unwrap(),
-            "api get /api/status\napi get /api/health\n"
+            "api get /api/info\napi get /api/status\napi get /api/health\n"
         );
         fs::remove_file(root.join("calls")).unwrap();
         let error = discover_opencode_service_with(

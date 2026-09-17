@@ -26,6 +26,8 @@ reachable when OpenCode is unavailable; the pane offers setup/retry actions.
 HEX discovers `opencode2` and its managed service through
 [dictation_processor.rs](../../src/dictation_processor.rs), not a separate
 HEX-owned provider service.
+See [shared OpenCode discovery](README.md#process-text-with-modes) for current
+endpoint compatibility and verification limits.
 
 Discovery uses `opencode2 api get /api/status`; an exact CLI 404 falls back to
 `/api/health` for older V2 services. Both attempts share the original deadline
