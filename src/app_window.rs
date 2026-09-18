@@ -373,6 +373,7 @@ pub struct AppWindowPreview {
     pub command_model_missing: bool,
     pub open_history_retention: bool,
     pub confirm_release_microphone: bool,
+    pub reduce_volume: bool,
     pub update_available: bool,
 }
 
@@ -917,6 +918,10 @@ pub struct AppWindow {
     dock_icon_toggle: ToggleSpring,
     sound_volume_spring: ToggleSpring,
     recording_audio_spring: ToggleSpring,
+    reduce_volume_visibility: ToggleSpring,
+    reduced_volume_spring: ToggleSpring,
+    volume_fade_out_spring: ToggleSpring,
+    volume_fade_in_spring: ToggleSpring,
     variant_picker_open: Option<ModelPickerTarget>,
     transcription_hints: ProcessingInput,
     transcription_picker_language: Option<String>,
@@ -1072,6 +1077,11 @@ impl AppWindow {
             let mut settings = AppSettings {
                 commands_enabled: preview.command_model_missing
                     || preview.confirm_release_microphone,
+                recording_audio_behavior: if preview.reduce_volume {
+                    RecordingAudioBehavior::ReduceVolume
+                } else {
+                    RecordingAudioBehavior::DoNothing
+                },
                 ..AppSettings::default()
             };
             settings.voice_action.enabled = preview.voice_action_enabled;
@@ -1336,6 +1346,21 @@ impl AppWindow {
             sound_volume_spring: ToggleSpring::at(sound_volume_index(&settings) as f32),
             recording_audio_spring: ToggleSpring::at(recording_audio_index(
                 settings.recording_audio_behavior,
+            ) as f32),
+            reduce_volume_visibility: ToggleSpring::new(
+                settings.recording_audio_behavior == RecordingAudioBehavior::ReduceVolume,
+            ),
+            reduced_volume_spring: ToggleSpring::at(nearest_choice_index(
+                settings.recording_reduced_volume,
+                &REDUCED_VOLUME_CHOICES,
+            ) as f32),
+            volume_fade_out_spring: ToggleSpring::at(nearest_choice_index(
+                settings.recording_volume_fade_out_seconds,
+                &VOLUME_FADE_CHOICES,
+            ) as f32),
+            volume_fade_in_spring: ToggleSpring::at(nearest_choice_index(
+                settings.recording_volume_fade_in_seconds,
+                &VOLUME_FADE_CHOICES,
             ) as f32),
             variant_picker_open: None,
             transcription_hints,
@@ -2723,7 +2748,8 @@ impl AppWindow {
             &mut self.hotkey_side_selection_springs[hotkey_kind_index(kind)];
         side_selection_spring.set_target(hotkey_side_index(selected) as f32);
         let selection_position = side_selection_spring.render_position(window);
-        let (selection_left, selection_width) = segmented_geometry(selection_position, side_widths);
+        let (selection_left, selection_width) =
+            segmented_geometry(selection_position, &side_widths);
         let side_selector = div()
             .w(px(HOTKEY_SIDE_SELECTOR_WIDTH * side_position))
             .mr(px(8.0 * side_position))
@@ -3427,8 +3453,8 @@ impl AppWindow {
                 toggle(launch_at_login_position)
             };
         let recording_audio_position = self.recording_audio_spring.render_position(window);
-        let audio_widths = [50.0, 90.0, 80.0];
-        let (audio_left, audio_width) = segmented_geometry(recording_audio_position, audio_widths);
+        let audio_widths = [50.0, 96.0, 90.0, 80.0];
+        let (audio_left, audio_width) = segmented_geometry(recording_audio_position, &audio_widths);
         let audio_behavior = segmented_control()
             .relative()
             .child(
@@ -3441,15 +3467,8 @@ impl AppWindow {
                     .rounded(px(4.0))
                     .bg(rgb(SURFACE_SELECTED)),
             )
-            .children(
-                [
-                    RecordingAudioBehavior::ALL[1],
-                    RecordingAudioBehavior::ALL[2],
-                    RecordingAudioBehavior::ALL[0],
-                ]
-                .into_iter()
-                .enumerate()
-                .map(|(index, behavior)| {
+            .children(RecordingAudioBehavior::ALL.into_iter().enumerate().map(
+                |(index, behavior)| {
                     let selected = self.settings.recording_audio_behavior == behavior;
                     segmented_item(selected)
                         .id(("recording-audio-behavior", index))
@@ -3464,10 +3483,70 @@ impl AppWindow {
                             }
                             this.settings.recording_audio_behavior = behavior;
                             this.recording_audio_spring.set_target(index as f32);
+                            this.reduce_volume_visibility
+                                .set_enabled(behavior == RecordingAudioBehavior::ReduceVolume);
                             this.save_settings(cx);
                         }))
-                }),
-            );
+                },
+            ));
+        self.reduce_volume_visibility.set_enabled(
+            self.settings.recording_audio_behavior == RecordingAudioBehavior::ReduceVolume,
+        );
+        let reduce_volume_visibility = self
+            .reduce_volume_visibility
+            .render_position(window)
+            .clamp(0.0, 1.0);
+        let reduced_volume_position = self.reduced_volume_spring.render_position(window);
+        let reduced_volume = segmented_choice(
+            "reduced-volume",
+            reduced_volume_position,
+            REDUCED_VOLUME_CHOICE_WIDTH,
+            &REDUCED_VOLUME_CHOICES,
+            nearest_choice_index(
+                self.settings.recording_reduced_volume,
+                &REDUCED_VOLUME_CHOICES,
+            ),
+            cx,
+            |this, index, volume, cx| {
+                this.settings.recording_reduced_volume = volume;
+                this.reduced_volume_spring.set_target(index as f32);
+                this.save_settings(cx);
+            },
+        );
+        let volume_fade_out_position = self.volume_fade_out_spring.render_position(window);
+        let volume_fade_out = segmented_choice(
+            "volume-fade-out",
+            volume_fade_out_position,
+            VOLUME_FADE_CHOICE_WIDTH,
+            &VOLUME_FADE_CHOICES,
+            nearest_choice_index(
+                self.settings.recording_volume_fade_out_seconds,
+                &VOLUME_FADE_CHOICES,
+            ),
+            cx,
+            |this, index, seconds, cx| {
+                this.settings.recording_volume_fade_out_seconds = seconds;
+                this.volume_fade_out_spring.set_target(index as f32);
+                this.save_settings(cx);
+            },
+        );
+        let volume_fade_in_position = self.volume_fade_in_spring.render_position(window);
+        let volume_fade_in = segmented_choice(
+            "volume-fade-in",
+            volume_fade_in_position,
+            VOLUME_FADE_CHOICE_WIDTH,
+            &VOLUME_FADE_CHOICES,
+            nearest_choice_index(
+                self.settings.recording_volume_fade_in_seconds,
+                &VOLUME_FADE_CHOICES,
+            ),
+            cx,
+            |this, index, seconds, cx| {
+                this.settings.recording_volume_fade_in_seconds = seconds;
+                this.volume_fade_in_spring.set_target(index as f32);
+                this.save_settings(cx);
+            },
+        );
         let microphone_mode = segmented_control()
             .id("microphone-mode")
             .relative()
@@ -3638,6 +3717,42 @@ impl AppWindow {
                                             audio_behavior,
                                         )
                                         .id("recording-audio-setting"),
+                                    )
+                                    .child(
+                                        // Clip to an animated height only while the
+                                        // rows are appearing; once shown they take
+                                        // their natural height so wrapped copy at
+                                        // narrow widths is never cut off.
+                                        div()
+                                            .when(reduce_volume_visibility < 1.0, |rows| {
+                                                rows.h(px(72.0 * 3.0 * reduce_volume_visibility))
+                                                    .overflow_hidden()
+                                            })
+                                            .opacity(reduce_volume_visibility)
+                                            .child(
+                                                settings_row(
+                                                    "Reduced volume",
+                                                    "Playback level while dictating; your own volume changes are kept",
+                                                    reduced_volume,
+                                                )
+                                                .id("reduced-volume-setting"),
+                                            )
+                                            .child(
+                                                settings_row(
+                                                    "Fade out",
+                                                    "How long playback takes to reach the reduced level",
+                                                    volume_fade_out,
+                                                )
+                                                .id("volume-fade-out-setting"),
+                                            )
+                                            .child(
+                                                settings_row(
+                                                    "Fade in",
+                                                    "How long playback takes to return after dictation",
+                                                    volume_fade_in,
+                                                )
+                                                .id("volume-fade-in-setting"),
+                                            ),
                                     )
                                     .child(
                                         div()
@@ -7788,22 +7903,93 @@ fn hotkey_keycaps_width(keycap_count: usize) -> f32 {
     }
 }
 
+const REDUCED_VOLUME_CHOICES: [(&str, f32); 5] = [
+    ("10%", 0.1),
+    ("20%", 0.2),
+    ("30%", 0.3),
+    ("50%", 0.5),
+    ("75%", 0.75),
+];
+const REDUCED_VOLUME_CHOICE_WIDTH: f32 = 36.0;
+const VOLUME_FADE_CHOICES: [(&str, f32); 5] = [
+    ("Off", 0.0),
+    ("0.25s", 0.25),
+    ("0.5s", 0.5),
+    ("1s", 1.0),
+    ("2s", 2.0),
+];
+const VOLUME_FADE_CHOICE_WIDTH: f32 = 40.0;
+
+/// Position of a behavior in the "While dictating" control; the selection
+/// spring animates across these indices.
 fn recording_audio_index(behavior: RecordingAudioBehavior) -> usize {
-    match behavior {
-        RecordingAudioBehavior::Mute => 0,
-        RecordingAudioBehavior::PauseMedia => 1,
-        RecordingAudioBehavior::DoNothing => 2,
-    }
+    RecordingAudioBehavior::ALL
+        .iter()
+        .position(|segment| *segment == behavior)
+        .unwrap_or(0)
 }
 
-fn segmented_geometry(position: f32, widths: [f32; 3]) -> (f32, f32) {
-    let position = position.clamp(0.0, 2.0);
+/// Index of the choice closest to a persisted value, so hand-edited or
+/// future values still highlight a sensible segment.
+fn nearest_choice_index(value: f32, choices: &[(&str, f32)]) -> usize {
+    choices
+        .iter()
+        .enumerate()
+        .min_by(|(_, left), (_, right)| (value - left.1).abs().total_cmp(&(value - right.1).abs()))
+        .map_or(0, |(index, _)| index)
+}
+
+/// Equal-width segmented control whose selection indicator follows `position`.
+fn segmented_choice(
+    id: &'static str,
+    position: f32,
+    item_width: f32,
+    choices: &'static [(&'static str, f32)],
+    selected: usize,
+    cx: &mut Context<AppWindow>,
+    on_select: impl Fn(&mut AppWindow, usize, f32, &mut Context<AppWindow>) + Clone + 'static,
+) -> Div {
+    segmented_control()
+        .relative()
+        .child(
+            div()
+                .absolute()
+                .left(px(2.0 + position * item_width))
+                .top(px(2.0))
+                .w(px(item_width))
+                .h(px(26.0))
+                .rounded(px(4.0))
+                .bg(rgb(SURFACE_SELECTED)),
+        )
+        .children(choices.iter().enumerate().map(|(index, (label, value))| {
+            let value = *value;
+            let on_select = on_select.clone();
+            segmented_item(index == selected)
+                .id((id, index))
+                .w(px(item_width))
+                .px(px(0.0))
+                .justify_center()
+                .text_size(px(9.0))
+                .bg(rgba(0x00000000))
+                .child(*label)
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    if index == selected {
+                        return;
+                    }
+                    on_select(this, index, value, cx);
+                }))
+        }))
+}
+
+fn segmented_geometry(position: f32, widths: &[f32]) -> (f32, f32) {
+    let last = widths.len().saturating_sub(1);
+    let position = position.clamp(0.0, last as f32);
     let lower = position.floor() as usize;
-    let upper = (lower + 1).min(2);
+    let upper = (lower + 1).min(last);
     let progress = position - lower as f32;
-    let lefts = [2.0, 2.0 + widths[0], 2.0 + widths[0] + widths[1]];
+    let left = |index: usize| 2.0 + widths[..index].iter().sum::<f32>();
     (
-        lefts[lower] + (lefts[upper] - lefts[lower]) * progress,
+        left(lower) + (left(upper) - left(lower)) * progress,
         widths[lower] + (widths[upper] - widths[lower]) * progress,
     )
 }

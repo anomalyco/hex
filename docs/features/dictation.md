@@ -35,7 +35,7 @@ Ordinary hold                            // lock activation is mapped below
   ├── Release before 300 ms -> Discard            // dictate.short-tap
   └── Early unrelated shortcut/click -> Discard   // not intentional dictation
 
-Ordinary shortcut -> No recording mute/pause or idle-sleep prevention
+Ordinary shortcut -> No recording mute/reduce/pause or idle-sleep prevention
 Intentional recording -> No automatic duration limit
 ```
 

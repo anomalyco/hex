@@ -215,6 +215,9 @@ enum Command {
         /// Show the idle microphone release confirmation with Commands enabled.
         #[arg(long)]
         confirm_release_microphone: bool,
+        /// Select the Reduce volume behavior so its level and fade rows are visible.
+        #[arg(long)]
+        reduce_volume: bool,
         /// Show the sidebar update action without starting the updater.
         #[arg(long)]
         update_available: bool,
@@ -473,6 +476,7 @@ fn main() -> Result<()> {
             command_model_missing,
             open_history_retention,
             confirm_release_microphone,
+            reduce_volume,
             update_available,
         } => {
             if matches!(target, AppPreviewTarget::DictationHud) {
@@ -522,6 +526,7 @@ fn main() -> Result<()> {
                     command_model_missing,
                     open_history_retention,
                     confirm_release_microphone,
+                    reduce_volume,
                     update_available,
                 },
             )
@@ -784,6 +789,21 @@ mod tests {
             assert_eq!(confirm_release_microphone, expected);
         }
         assert!(Cli::try_parse_from(["hex", "app", "--confirm-release-microphone"]).is_err());
+    }
+
+    #[test]
+    fn reduce_volume_rows_require_an_explicit_preview_flag() {
+        for (args, expected) in [
+            (vec!["hex", "preview", "settings"], false),
+            (vec!["hex", "preview", "settings", "--reduce-volume"], true),
+        ] {
+            let cli = Cli::try_parse_from(args).unwrap();
+            let Some(Command::Preview { reduce_volume, .. }) = cli.command else {
+                panic!("expected preview command");
+            };
+            assert_eq!(reduce_volume, expected);
+        }
+        assert!(Cli::try_parse_from(["hex", "app", "--reduce-volume"]).is_err());
     }
 
     #[test]

@@ -238,8 +238,12 @@ Settings                                 // settings
 │   ├── Keep ready (fast) -> Open while idle; pre-roll available
 │   └── Release when idle -> Open on press; no pre-roll; startup delay
 │       └── Commands enabled? -> Confirm turning Commands off
-├── While dictating -> Mute / Pause media / Do nothing
-│   └── Intentional capture only, not ordinary shortcut chords
+├── While dictating -> Mute / Reduce volume / Pause media / Do nothing
+│   ├── Intentional capture only, not ordinary shortcut chords
+│   └── Reduce volume -> Reduced volume 10–75%, Fade out, Fade in (0–2 s)
+│       ├── Already at or below the level -> Left alone; nothing restored
+│       ├── Overlapping sessions -> One environment; original level restored
+│       └── Manual volume change while reduced or fading -> HEX stops; no restore
 └── Sound volume -> Immediate feedback setting; zero suppresses tones
 ```
 
@@ -249,6 +253,37 @@ Persistence, conflict, and ownership checks live in
 [recording_environment.rs](../../src/recording_environment.rs), and
 [audio.rs](../../src/audio.rs). Settings previews do not prove physical device
 switching or native mute support; muting is best-effort, not universal.
+
+Reduce volume lowers the default output device's virtual main volume to the
+saved level for the life of the recording environment and returns it to the
+level observed at start, fading in each direction when a fade is set. Before
+every write, during both fades and at restore, the current level is compared
+with the last level HEX applied, with a threshold that ignores Core Audio
+rounding but catches one volume-key step; after a manual change HEX stops
+writing and leaves the output where the user put it. The level read back after
+each write becomes the expected level, so coarse device volume steps are not
+mistaken for the user; a change landing between a write and its read-back is
+adopted as HEX's own, a short but unbounded interval accepted as a trade-off.
+A level that cannot be read stops HEX writing. Out-of-range persisted values
+are clamped on load. Checks in [app_settings.rs](../../src/app_settings.rs):
+`reduce_volume_settings_round_trip_through_json`,
+`loading_clamps_out_of_range_volume_reduction_values`,
+`recording_audio_behavior_runtime_encoding_round_trips`. Checks in
+[recording_environment.rs](../../src/recording_environment.rs) through a
+scripted output (`FakeOutput`), not Core Audio:
+`reduction_lowers_the_output_and_dropping_it_restores_exactly`,
+`output_already_at_or_below_the_level_is_left_untouched`,
+`a_manual_change_while_reduced_skips_the_restore`,
+`restore_fade_yields_to_a_manual_change_between_steps`,
+`dropping_during_a_fade_out_cancels_it_and_restores_from_the_current_level`,
+`a_change_between_a_write_and_its_read_back_is_adopted_not_released`,
+`a_failed_read_before_a_write_stops_the_ramp_instead_of_writing_blind`, the
+ramp-math and threshold checks, and the existing overlapping-session controller
+checks. Not covered: real device quantization, an output-device switch during
+dictation (restore targets the device observed at start, as Mute does), and
+the expanded rows at the minimum window width. The restore fade runs on the
+environment worker, so a fade-in of up to two seconds delays the next
+environment start, never the recording itself.
 
 **Easy to misread:** an open microphone is not an active recording. Sleeping
 Commands still needs open input; it is not Release when idle.
