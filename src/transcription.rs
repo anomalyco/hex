@@ -19,11 +19,6 @@ pub struct WarmTranscriber {
     active: Option<Transcriber>,
 }
 
-pub(crate) struct OfflineGgufSession {
-    model: transcribe_cpp::Model,
-    session: Option<transcribe_cpp::Session>,
-}
-
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TranscriptSegment {
@@ -124,43 +119,6 @@ impl WarmTranscriber {
             .active
             .as_mut()
             .expect("activated transcriber must be available"))
-    }
-}
-
-impl OfflineGgufSession {
-    pub(crate) fn new(model: transcribe_cpp::Model) -> transcribe_cpp::Result<Self> {
-        let session = model.session()?;
-        Ok(Self {
-            model,
-            session: Some(session),
-        })
-    }
-
-    pub(crate) fn run(
-        &mut self,
-        samples: &[f32],
-        options: &transcribe_cpp::RunOptions,
-    ) -> transcribe_cpp::Result<transcribe_cpp::Transcript> {
-        // transcribe-cpp 0.1.x retains input-sized scheduler buffers for the
-        // session lifetime. Drop each used session before creating its
-        // successor so a long inference cannot pin that high-water mark or
-        // overlap two sessions' persistent decoder state.
-        let mut session = match self.session.take() {
-            Some(session) => session,
-            None => self.model.session()?,
-        };
-        let result = session.run(samples, options);
-        drop(session);
-        match self.model.session() {
-            Ok(session) => {
-                self.session = Some(session);
-                result
-            }
-            Err(recovery_error) => match result {
-                Ok(_) => Err(recovery_error),
-                Err(run_error) => Err(run_error),
-            },
-        }
     }
 }
 

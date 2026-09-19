@@ -5,7 +5,7 @@ use std::time::Instant;
 use color_eyre::eyre::{Result, WrapErr, eyre};
 use transcribe_cpp::{Backend, Model, ModelOptions, RunOptions, TimestampKind};
 
-use crate::transcription::OfflineGgufSession;
+use crate::offline_gguf::OfflineGgufSession;
 use crate::transcription_models::{
     ModelDefinition, TranscriptionModelId, TranscriptionSelection, definition,
     download_with_progress, model_path, validate,

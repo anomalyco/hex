@@ -93,6 +93,8 @@ mod microphone_activity;
 mod moonshine;
 #[cfg(all(target_os = "macos", debug_assertions))]
 mod moonshine_lab;
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+mod offline_gguf;
 #[cfg(target_os = "macos")]
 mod onboarding;
 #[cfg(target_os = "macos")]
