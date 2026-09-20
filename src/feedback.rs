@@ -29,6 +29,11 @@ static LOADER_STARTED: AtomicBool = AtomicBool::new(false);
 static ENABLED: AtomicBool = AtomicBool::new(true);
 static VOLUME: AtomicU32 = AtomicU32::new(0.5_f32.to_bits());
 
+/// Extra time the device sink stays open after the queued audio's nominal
+/// duration, so short sounds and scheduling jitter never cut off playback.
+const PLAYBACK_MARGIN: Duration = Duration::from_millis(120);
+const DEFAULT_TONE_DURATION: Duration = Duration::from_millis(300);
+
 #[cfg(target_os = "macos")]
 pub fn set_enabled(enabled: bool) {
     ENABLED.store(enabled, Ordering::Relaxed);
@@ -51,6 +56,7 @@ fn sounds_enabled() -> bool {
 struct FeedbackOutput<S> {
     sink: Option<S>,
     retry_at: Instant,
+    busy_until: Option<Instant>,
 }
 
 impl<S> FeedbackOutput<S> {
@@ -58,17 +64,35 @@ impl<S> FeedbackOutput<S> {
         Self {
             sink: None,
             retry_at: Instant::now(),
+            busy_until: None,
+        }
+    }
+
+    /// Whether playback (or an imminent one) still needs the device.
+    fn busy(&self, now: Instant) -> bool {
+        self.busy_until.is_some_and(|until| now < until)
+    }
+
+    /// Drops the device sink once playback finished so the OS audio engine can
+    /// power down and the system can idle sleep again. Reopened on demand.
+    fn release_when_idle(&mut self, now: Instant) {
+        if self.sink.is_some() && !self.busy(now) {
+            self.sink = None;
+            self.busy_until = None;
+            // Allow an immediate reopen when the next tone arrives.
+            self.retry_at = now;
         }
     }
 
     fn update(
         &mut self,
-        enabled: bool,
+        requested: bool,
         now: Instant,
         open: impl FnOnce() -> Result<S>,
     ) -> Result<()> {
-        if !enabled {
+        if !requested {
             self.sink = None;
+            self.busy_until = None;
             self.retry_at = now;
         } else if self.sink.is_none() && now >= self.retry_at {
             self.retry_at = now + Duration::from_secs(2);
@@ -137,7 +161,10 @@ pub fn preload() -> Result<()> {
         let mut output = FeedbackOutput::new();
         let open =
             || DeviceSinkBuilder::open_default_sink().wrap_err("could not open the audio output");
-        let initial = output.update(sounds_enabled(), Instant::now(), open);
+        // Lazy: the device sink is only opened when a tone actually plays and
+        // is dropped again right after, so macOS keeps its no-idle-sleep
+        // audio assertion (coreaudiod) out of the picture while hex is idle.
+        let initial = output.update(false, Instant::now(), open);
         // Publish even after an admission timeout or output-open failure. The
         // same worker keeps observing preferences and retrying the device.
         publish_player(&DICTATION_PLAYER, sender, ready_sender, initial);
@@ -147,26 +174,31 @@ pub fn preload() -> Result<()> {
                 Err(mpsc::RecvTimeoutError::Timeout) => None,
                 Err(mpsc::RecvTimeoutError::Disconnected) => break,
             };
-            if let Err(error) = output.update(sounds_enabled(), Instant::now(), open) {
-                tracing::warn!(%error, "recording audio output unavailable; retrying");
+            if let Some(tone) = tone
+                && sounds_enabled()
+            {
+                if let Err(error) = output.update(true, Instant::now(), open) {
+                    tracing::warn!(%error, "recording audio output unavailable; retrying");
+                }
+                let now = Instant::now();
+                let sound = match tone {
+                    Tone::DictationStart => Some(&start),
+                    Tone::DictationStop => Some(&stop),
+                    Tone::Cancel => Some(&cancel),
+                    #[cfg(target_os = "macos")]
+                    Tone::Wake | Tone::Sleep | Tone::Error => None,
+                };
+                if let (Some(sound), Some(sink)) = (sound, output.sink.as_ref()) {
+                    let duration = sound.total_duration().unwrap_or(DEFAULT_TONE_DURATION);
+                    sink.mixer().add(sound.clone().amplify(volume()));
+                    output.busy_until = Some(now + duration + PLAYBACK_MARGIN);
+                }
             }
-            // Opening may have been slow; recheck the latest preference before
-            // retaining the output or playing any queued sound.
+            // Release the device as soon as playback queue drains.
+            output.release_when_idle(Instant::now());
             if !sounds_enabled() {
                 let _ = output.update(false, Instant::now(), open);
-                continue;
             }
-            let (Some(tone), Some(sink)) = (tone, output.sink.as_ref()) else {
-                continue;
-            };
-            let sound = match tone {
-                Tone::DictationStart => &start,
-                Tone::DictationStop => &stop,
-                Tone::Cancel => &cancel,
-                #[cfg(target_os = "macos")]
-                Tone::Wake | Tone::Sleep | Tone::Error => continue,
-            };
-            sink.mixer().add(sound.clone().amplify(volume()));
         }
     });
     let outcome = ready_receiver.recv_timeout(Duration::from_secs(2));
@@ -244,6 +276,42 @@ mod tests {
         publish_player(&player, sender, ready, Ok(()));
         enqueue(player.get(), Tone::DictationStart);
         assert_eq!(receiver.try_recv().unwrap(), Tone::DictationStart);
+    }
+
+    #[test]
+    fn sink_is_released_once_playback_finishes_and_reopens_on_demand() {
+        use std::cell::Cell;
+        struct Sink<'a>(&'a Cell<usize>);
+        impl Drop for Sink<'_> {
+            fn drop(&mut self) {
+                self.0.set(self.0.get() - 1);
+            }
+        }
+        let live = Cell::new(0);
+        let open = || {
+            live.set(live.get() + 1);
+            Ok(Sink(&live))
+        };
+        let mut output = FeedbackOutput::new();
+        let now = Instant::now();
+
+        // Requested open while a tone is "playing".
+        output.update(true, now, open).unwrap();
+        output.busy_until = Some(now + Duration::from_millis(500));
+        assert_eq!(live.get(), 1);
+
+        // Still busy: the sink is retained.
+        output.release_when_idle(now + Duration::from_millis(400));
+        assert_eq!(live.get(), 1);
+
+        // Playback drained: the device sink is dropped.
+        let later = now + Duration::from_millis(600);
+        output.release_when_idle(later);
+        assert_eq!(live.get(), 0);
+
+        // And it can be reopened afterwards without waiting for backoff.
+        output.update(true, later, open).unwrap();
+        assert_eq!(live.get(), 1);
     }
 
     #[test]
