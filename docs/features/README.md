@@ -300,6 +300,20 @@ Selection and stage checks start in
 [personal_commands.rs](../../src/personal_commands.rs). They do not prove live
 provider availability or real application/Brave context changes.
 
+```ts
+OpenCode generation                        // modes.opencode-generation; shared with Voice Action
+├── POST /api/experimental/generate -> Current OpenCode route
+└── Empty 404 body -> Try the legacy /api/generate name
+```
+
+OpenCode moved one-shot generation from `/api/generate` to
+`/api/experimental/generate`; HEX 2.1.20 called the old name and could not
+generate at all. The source fix tries the current name first and falls back to
+the legacy one, within the shared deadline.
+`generation_falls_back_to_the_legacy_endpoint` and
+`generation_reports_when_no_endpoint_answers` cover both routes through a
+loopback fixture server. They do not prove provider-backed generation.
+
 Application activations compare the picker's bundle name with the foreground
 application's localized name. When Finder shows all filename extensions, the
 picker name arrives as `Ghostty.app`; [context.rs](../../src/context.rs) strips

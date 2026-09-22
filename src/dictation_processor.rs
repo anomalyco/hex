@@ -19,6 +19,9 @@ use crate::text_replacements::ReplacementSet;
 const PROTOCOL_PROMPT: &str = "You transform dictated speech into replacement text. Return only the text that should be pasted. Do not add an explanation, label, alternative, or Markdown fence.";
 const VOICE_ACTION_PROTOCOL_PROMPT: &str = "You execute a one-off voice instruction. When selected text is provided, transform or use it as instructed. When no text is selected, generate the requested text. Return only the exact paste-ready result without an explanation, label, alternative, or Markdown fence.";
 const MAX_OPENCODE_OUTPUT_BYTES: u64 = 16 * 1024 * 1024;
+// Current OpenCode names one-shot generation `/api/experimental/generate`; older
+// V2 builds exposed `/api/generate`. The first route that answers wins.
+const GENERATE_ENDPOINTS: [&str; 2] = ["/api/experimental/generate", "/api/generate"];
 
 #[derive(Clone)]
 pub struct Profile {
@@ -506,26 +509,57 @@ fn generate_cancellable(
     let started = Instant::now();
     let (endpoint, password) =
         discover_opencode_service(deadline.saturating_sub(started.elapsed()), cancelled)?;
+    generate_via_endpoint(
+        &endpoint,
+        &password,
+        &data,
+        deadline.saturating_sub(started.elapsed()),
+        cancelled,
+    )
+}
+
+fn generate_via_endpoint(
+    endpoint: &str,
+    password: &str,
+    data: &str,
+    deadline: Duration,
+    cancelled: &AtomicBool,
+) -> Result<String> {
+    let started = Instant::now();
     for attempt in 0..2 {
         let remaining = deadline.saturating_sub(started.elapsed());
         if remaining.is_zero() {
             return Err(eyre!(
-                "opencode2 /api/generate exceeded {} seconds",
+                "opencode2 generation exceeded {} seconds",
                 deadline.as_secs()
             ));
         }
-        let (command, input) =
-            opencode_http_command(&endpoint, &password, "/api/generate", Some(&data), None)?;
-        let output = run_command(command, Some(input), remaining, "/api/generate", cancelled)?;
-        let status = output.status;
-        if !status.success() {
-            return Err(eyre!(
-                "opencode2 exited with {status}: {}",
-                String::from_utf8_lossy(&output.stderr).trim()
-            ));
+        // OpenCode renamed one-shot generation; a missing route answers with an
+        // empty body, so the first name that returns one is the route served.
+        let mut response = None;
+        for path in GENERATE_ENDPOINTS {
+            let (command, input) =
+                opencode_http_command(endpoint, password, path, Some(data), None)?;
+            let output = run_command(command, Some(input), remaining, path, cancelled)?;
+            if !output.status.success() {
+                return Err(eyre!(
+                    "opencode2 exited with {}: {}",
+                    output.status,
+                    String::from_utf8_lossy(&output.stderr).trim()
+                ));
+            }
+            if output.stdout.is_empty() {
+                continue;
+            }
+            response = Some(
+                serde_json::from_slice::<Response>(&output.stdout)
+                    .wrap_err("opencode2 returned an invalid generation response")?,
+            );
+            break;
         }
-        let response: Response = serde_json::from_slice(&output.stdout)
-            .wrap_err("opencode2 returned an invalid generation response")?;
+        let Some(response) = response else {
+            return Err(eyre!("OpenCode did not expose a generation endpoint"));
+        };
         match response {
             Response::Success { data } => return Ok(data.text),
             Response::Error { message } if attempt == 0 && retryable_generation_error(&message) => {
@@ -784,11 +818,11 @@ fn wait_for_generation_retry(
     let wait_started = Instant::now();
     while wait_started.elapsed() < Duration::from_millis(1_500) {
         if cancelled.load(Ordering::Acquire) {
-            return Err(eyre!("opencode2 /api/generate was cancelled"));
+            return Err(eyre!("opencode2 generation was cancelled"));
         }
         if started.elapsed() >= deadline {
             return Err(eyre!(
-                "opencode2 /api/generate exceeded {} seconds",
+                "opencode2 generation exceeded {} seconds",
                 deadline.as_secs()
             ));
         }
@@ -1728,7 +1762,7 @@ mod tests {
         fs::remove_dir_all(root).unwrap();
     }
 
-    fn receive_generation_request(stream: &mut std::net::TcpStream) -> Vec<u8> {
+    fn receive_generation_request(stream: &mut std::net::TcpStream, path: &str) -> Vec<u8> {
         use std::io::BufRead;
         stream
             .set_read_timeout(Some(Duration::from_secs(5)))
@@ -1743,7 +1777,7 @@ mod tests {
             }
             headers.push_str(&line);
         }
-        assert!(headers.starts_with("POST /api/generate HTTP/1.1\r\n"));
+        assert!(headers.starts_with(&format!("POST {path} HTTP/1.1\r\n")));
         assert!(headers.contains("Authorization: Basic b3BlbmNvZGU6Zml4dHVyZS1wYXNzd29yZA==\r\n"));
         let length: usize = headers
             .lines()
@@ -1767,13 +1801,38 @@ mod tests {
         body
     }
 
+    fn spawn_generation_server(
+        routes: Vec<(&'static str, u16, &'static str)>,
+    ) -> (String, thread::JoinHandle<()>) {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let endpoint = format!("http://{}", listener.local_addr().unwrap());
+        let server = thread::spawn(move || {
+            for (path, status, body) in routes {
+                let (mut stream, _) = listener.accept().unwrap();
+                receive_generation_request(&mut stream, path);
+                let reason = match status {
+                    200 => "OK",
+                    404 => "Not Found",
+                    _ => "Error",
+                };
+                write!(
+                    stream,
+                    "HTTP/1.1 {status} {reason}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                )
+                .unwrap();
+            }
+        });
+        (endpoint, server)
+    }
+
     #[test]
     fn generation_pipes_credentials_and_large_json_without_argv_exposure() {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let endpoint = format!("http://{}", listener.local_addr().unwrap());
         let server = thread::spawn(move || {
             let (mut stream, _) = listener.accept().unwrap();
-            let body = receive_generation_request(&mut stream);
+            let body = receive_generation_request(&mut stream, "/api/generate");
             let response = r#"{"data":{"text":"fixture result"}}"#;
             write!(
                 stream,
@@ -1872,7 +1931,7 @@ mod tests {
             let flag = cancelled.clone();
             let server = thread::spawn(move || {
                 let (mut stream, _) = listener.accept().unwrap();
-                receive_generation_request(&mut stream);
+                receive_generation_request(&mut stream, "/api/generate");
                 flag.store(cancel, Ordering::Release);
                 let mut byte = [0];
                 assert_eq!(stream.read(&mut byte).unwrap(), 0);
@@ -1903,6 +1962,47 @@ mod tests {
             server.join().unwrap();
             assert!(started.elapsed() < Duration::from_secs(2));
         }
+    }
+
+    #[test]
+    fn generation_falls_back_to_the_legacy_endpoint() {
+        let (endpoint, server) = spawn_generation_server(vec![
+            ("/api/experimental/generate", 404, ""),
+            (
+                "/api/generate",
+                200,
+                r#"{"data":{"text":"fixture result"}}"#,
+            ),
+        ]);
+        let text = generate_via_endpoint(
+            &endpoint,
+            "fixture-password",
+            "{}",
+            Duration::from_secs(5),
+            &AtomicBool::new(false),
+        )
+        .unwrap();
+        server.join().unwrap();
+        assert_eq!(text, "fixture result");
+    }
+
+    #[test]
+    fn generation_reports_when_no_endpoint_answers() {
+        let routes = GENERATE_ENDPOINTS
+            .into_iter()
+            .map(|path| (path, 404u16, ""))
+            .collect();
+        let (endpoint, server) = spawn_generation_server(routes);
+        let error = generate_via_endpoint(
+            &endpoint,
+            "fixture-password",
+            "{}",
+            Duration::from_secs(5),
+            &AtomicBool::new(false),
+        )
+        .unwrap_err();
+        server.join().unwrap();
+        assert!(error.to_string().contains("generation endpoint"), "{error}");
     }
 
     #[test]

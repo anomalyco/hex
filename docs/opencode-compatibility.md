@@ -51,11 +51,15 @@ of release status, including alpha and beta. Selecting a thinking variant for th
 floating default saves the resolved catalog model alongside it; existing explicit
 model selections are preserved.
 
-`/api/generate` accepts a prompt and optional model reference and returns
+One-shot generation accepts a prompt and optional model reference and returns
 `data.text`. It is stateless and uses the server's base configuration, not the
-catalog request's directory header. Existing saved selections whose catalog and
-upstream IDs match need no migration. Previously broken alias selections can be
-fixed by reselecting the model; HEX does not guess an ID migration.
+catalog request's directory header. Current OpenCode names the route
+`/api/experimental/generate`; older V2 builds exposed `/api/generate`. HEX tries
+the current name first and falls back to the legacy name when a server answers a
+missing route with an empty body, sharing the generation deadline. Existing saved
+selections whose catalog and upstream IDs match need no migration. Previously
+broken alias selections can be fixed by reselecting the model; HEX does not
+guess an ID migration.
 
 ## Updating The Baseline
 

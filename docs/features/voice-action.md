@@ -31,6 +31,9 @@ Discovery uses `opencode2 api get /api/status`; an exact CLI 404 falls back to
 `/api/health` for older V2 services. Both attempts share the original deadline
 and cancellation flag. Authentication, server, and malformed-response failures
 do not trigger that fallback, and discovery output is excluded from errors.
+One-shot generation prefers `/api/experimental/generate` and falls back to
+`/api/generate` when the current route answers a missing route with an empty
+body.
 `service_discovery_supports_current_and_legacy_endpoints` and
 `service_discovery_fallback_shares_deadline_and_observes_cancellation` cover
 these routes with executable fixtures. This shared discovery also serves Modes.
