@@ -413,15 +413,32 @@ latest-action coalescing, action priority, and closing during a blocked call.
 `login_item_response_reconciles_optimistic_toggle_and_unknown_state` in
 [app_window.rs](../../src/app_window.rs) checks initial status, error rollback
 including redraw, unchanged errors, error-only clearing, approval, and external
-enablement. These checks do not prove
-native responsiveness or signed-app registration/approval transitions. Those
-still require profiling and an installed-app smoke test; the earlier branch's
-profiling results do not verify this implementation.
+enablement. Native `RequiresApproval` and error transitions remain unverified;
+the simulated checks do not establish Developer ID signed distribution behavior.
 
-Observed September 23, 2026: all three targeted tests passed. The full debug
-suite passed 486 tests with twelve opt-in tests ignored, and all twelve keyboard
-layout child scenarios passed. Formatting, strict all-target/all-feature Clippy,
-and diff whitespace checks passed. No native login-item smoke test was run.
+Observed September 23, 2026, on `d1930b5` after the final simplifications: the
+full debug suite passed 486 tests and the release suite passed 485, each with
+twelve opt-in tests ignored and all twelve keyboard-layout child scenarios
+passing. Formatting, strict debug all-target/all-feature Clippy, and diff
+whitespace checks passed.
+
+Computer-use checks on an ad-hoc signed temporary bundle of the optimized build
+confirmed shortcut capture/cancellation, Settings/Modes navigation, registration
+and unregistration, the final state after three consecutive toggle clicks, and
+refresh after removing that bundle's login item in macOS Settings. The temporary
+item was left disabled/removed; no new microphone, input, or Accessibility grants
+were made. A five-second `sample` profile found `SMAppService` frames on the
+`login-item` worker and none on the main thread. This is sampled-stack evidence,
+not an input-to-frame latency measurement or a signed-release smoke test.
+
+Closing Settings left the app process alive with zero `login-item` threads;
+reopening produced one new worker. An earlier apparent surviving worker came
+from computer-use observation reopening the window. Cmd+Q and Quit HEX each
+terminated the process. Local profiles are `/tmp/hex-login-worker-current.sample.txt`
+and `/tmp/hex-login-cycle-{before,closed-no-observe,reobserved}.sample.txt`.
+The tested temporary executable's SHA-256 is
+`d1a3be1e219e7371726273937eeef6c7e16434637e4297ae183f9bdaf4d28b04`.
+No Developer ID signing identity was available for a new distribution build.
 
 The existing **Show Dock icon** preference controls quiet startup; there is no
 additional launch-window setting. This applies to normal and login launches,
