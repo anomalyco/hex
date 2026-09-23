@@ -392,6 +392,37 @@ Launch Hex                               // maintain.startup
 Menu-bar installation fails -> Show Dock icon and open the window // recovery access
 ```
 
+```ts
+Settings > Launch at login               // maintain.login-item
+├── Open -> Checking until macOS returns the initial state
+├── Refresh / toggle / Open Settings -> One persistent background worker
+│   └── One active request; latest pending user action precedes the next refresh
+├── Failed toggle -> Show error and reconcile with actual macOS state when available
+└── Close Settings -> Release channels without waiting for an active native call
+```
+
+[login_item.rs](../../src/login_item.rs) serializes ServiceManagement calls on one
+window-owned worker, with bounded request and response channels and an autorelease
+pool per operation. Settings reads responses without blocking every 500 ms;
+refreshes do not accumulate while macOS is busy. The toggle is unavailable until
+the first successful status lookup. macOS owns registration state; no login
+Boolean is persisted. Preview controls never start the worker or call macOS.
+
+The worker tests in `login_item.rs` exercise thread reuse, nonblocking polling,
+latest-action coalescing, action priority, and closing during a blocked call.
+`login_item_response_reconciles_optimistic_toggle_and_unknown_state` in
+[app_window.rs](../../src/app_window.rs) checks initial status, error rollback
+including redraw, unchanged errors, error-only clearing, approval, and external
+enablement. These checks do not prove
+native responsiveness or signed-app registration/approval transitions. Those
+still require profiling and an installed-app smoke test; the earlier branch's
+profiling results do not verify this implementation.
+
+Observed September 23, 2026: all three targeted tests passed. The full debug
+suite passed 486 tests with twelve opt-in tests ignored, and all twelve keyboard
+layout child scenarios passed. Formatting, strict all-target/all-feature Clippy,
+and diff whitespace checks passed. No native login-item smoke test was run.
+
 The existing **Show Dock icon** preference controls quiet startup; there is no
 additional launch-window setting. This applies to normal and login launches,
 does not change login registration, and does not hide an already open window
