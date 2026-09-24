@@ -1012,6 +1012,7 @@ fn find_opencode_executable(
     let home_candidates = home.into_iter().flat_map(|home| {
         [
             home.join(".opencode/bin/opencode2"),
+            home.join(".vite-plus/bin/opencode2"),
             home.join(".bun/bin/opencode2"),
             home.join("Library/pnpm/opencode2"),
             home.join("Library/pnpm/bin/opencode2"),
