@@ -27,15 +27,28 @@ HEX discovers `opencode2` and its managed service through
 [dictation_processor.rs](../../src/dictation_processor.rs), not a separate
 HEX-owned provider service.
 
-Discovery uses `opencode2 api get /api/status`; an exact CLI 404 falls back to
-`/api/health` for older V2 services. Both attempts share the original deadline
-and cancellation flag. Authentication, server, and malformed-response failures
-do not trigger that fallback, and discovery output is excluded from errors.
-`service_discovery_supports_current_and_legacy_endpoints` and
-`service_discovery_fallback_shares_deadline_and_observes_cancellation` cover
+Discovery uses `opencode2 api get /api/info`; an exact CLI 404 falls back to
+`/api/status`, then `/api/health`, for older V2 services. All attempts share the
+original deadline and cancellation flag. Authentication, server, and
+malformed-response failures do not trigger that fallback, and discovery output
+is excluded from errors. `service_discovery_supports_current_and_legacy_endpoints`
+and `service_discovery_fallback_shares_deadline_and_observes_cancellation` cover
 these routes with executable fixtures. This shared discovery also serves Modes.
-The local service on September 14 still exposes the legacy endpoint; current
-endpoint compatibility is fixture coverage, not an observed live-provider run.
+
+**Fixed in 2.1.21:** releases 2.1.18 through 2.1.20 only tried
+`/api/status` and `/api/health`, and posted generation to `/api/generate`.
+OpenCode `0.0.0-dev-19726` and later serve only `/api/info` and
+`/api/experimental/generate`, so those releases report `OpenCode service
+discovery failed (exit status: 1)`, and even with discovery repaired, generation
+received an empty 404 body and Modes fell back to the corrected transcript
+([#98](https://github.com/anomalyco/hex/issues/98)). Generation now posts to
+the new route and falls back to `/api/generate` only on HTTP 404;
+`generation_falls_back_to_the_legacy_route_only_when_the_new_one_is_missing`
+covers both routes and the served-error case through a loopback fixture. On
+September 22, 2026 the ignored `live_catalog` test discovered the running
+`0.0.0-dev-19937` service through `/api/info` and loaded its catalog, the legacy
+names returned exactly `HTTP 404 Not Found` from the CLI, and an explicit-model
+request to `/api/experimental/generate` returned paste-ready text.
 
 ## Sub-features
 
@@ -129,6 +142,11 @@ Voice Action uses its own model/variant and persisted deadline (60 seconds by
 default); no explicit model selection delegates to OpenCode's default.
 Audio transcription stays local, but the prompt text goes to the configured
 OpenCode provider.
+
+`voice_action_processing_never_loads_modes_and_announces_stage_before_generation`
+in [parakeet.rs](../../src/parakeet.rs) checks that this route never acquires
+ordinary Modes profiles and announces Processing before invoking Voice Action.
+It uses an injected processor, not a provider or native capture pipeline.
 
 `generation_http_wait_observes_cancellation_and_deadline` and
 `cancelled_generation_process_is_killed_promptly` in the processor cover local

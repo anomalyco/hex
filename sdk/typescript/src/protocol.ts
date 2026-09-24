@@ -43,6 +43,10 @@ export const decodeEndpoint = (line: string): EmbeddedEndpoint => {
   } catch (cause) {
     throw new HexError("invalid-handshake", "HEX returned malformed startup JSON", { cause })
   }
+  return decodeEndpointValue(value)
+}
+
+export const decodeEndpointValue = (value: unknown): EmbeddedEndpoint => {
   const input = record(value)
   const url = input && string(input.url)
   const token = input && string(input.token)

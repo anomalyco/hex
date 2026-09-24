@@ -122,11 +122,7 @@ pub fn candidate_from_microphone(
     application: &ActiveMicrophoneApplication,
     context: &ContextSnapshot,
 ) -> Option<MeetingCandidate> {
-    if !application.is_supported_meeting_app() {
-        return None;
-    }
     let canonical_bundle = application.canonical_bundle_id()?;
-    let bundle = canonical_bundle.to_ascii_lowercase();
     if application.is_browser() {
         if context
             .application
@@ -142,16 +138,12 @@ pub fn candidate_from_microphone(
             "Browser call",
         ));
     }
-    let (source, title) = if bundle.starts_with("us.zoom.xos") {
-        (MeetingSource::Zoom, "Zoom meeting")
-    } else if bundle.starts_with("com.microsoft.teams2") {
-        (MeetingSource::Teams, "Microsoft Teams meeting")
-    } else if bundle.starts_with("com.tinyspeck.slackmacgap") {
-        (MeetingSource::SlackHuddle, "Slack huddle")
-    } else if bundle.starts_with("com.apple.facetime") {
-        (MeetingSource::FaceTime, "FaceTime call")
-    } else {
-        return None;
+    let (source, title) = match canonical_bundle {
+        "us.zoom.xos" => (MeetingSource::Zoom, "Zoom meeting"),
+        "com.microsoft.teams2" => (MeetingSource::Teams, "Microsoft Teams meeting"),
+        "com.tinyspeck.slackmacgap" => (MeetingSource::SlackHuddle, "Slack huddle"),
+        "com.apple.FaceTime" => (MeetingSource::FaceTime, "FaceTime call"),
+        _ => return None,
     };
     Some(candidate(source, canonical_bundle, title))
 }

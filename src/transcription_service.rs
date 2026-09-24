@@ -334,9 +334,8 @@ fn transcribe(
     if canceled.load(Ordering::Acquire) {
         return Err(TranscriptionServiceError::Cancelled);
     }
-    let samples = model.prepare_samples(clip.samples);
     let transcript = model
-        .transcribe(&samples)
+        .transcribe(clip.samples)
         .map_err(|error| TranscriptionServiceError::Inference(error.to_string()))?;
     if canceled.load(Ordering::Acquire) {
         Err(TranscriptionServiceError::Cancelled)

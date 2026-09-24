@@ -228,6 +228,7 @@ impl ControlStability {
         accepted.then_some(control)
     }
 
+    #[cfg(test)]
     pub fn reset(&mut self) {
         self.pending = None;
     }

@@ -228,7 +228,7 @@ fn draw(
             Span::styled("command    ", Style::default().fg(Color::DarkGray)),
             Span::styled(command, Style::default().fg(command_color(outcome))),
             Span::styled(
-                format!("  {}", command_outcome(outcome)),
+                format!("  {}", outcome_display(outcome).1),
                 Style::default().fg(command_color(outcome)),
             ),
             Span::styled(format!("  {context}"), Style::default().fg(Color::DarkGray)),
@@ -514,17 +514,6 @@ fn phase_color(phase: TranscriptPhase) -> Color {
         TranscriptPhase::Started => Color::Cyan,
         TranscriptPhase::Updated => Color::Yellow,
         TranscriptPhase::Completed => Color::Green,
-    }
-}
-
-fn command_outcome(outcome: &CommandOutcome) -> &'static str {
-    match outcome {
-        CommandOutcome::Ignored => "ignored",
-        CommandOutcome::Woke => "woke",
-        CommandOutcome::Slept => "slept",
-        CommandOutcome::Submitted => "submitted",
-        CommandOutcome::Executed => "executed",
-        CommandOutcome::Failed(_) => "failed",
     }
 }
 

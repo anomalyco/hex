@@ -67,6 +67,9 @@ substitute for source inspection or a second roadmap.
 - `apple_speech`: the Swift `SpeechAnalyzer` bridge with per-locale support
   checks, asset reservation, and batch transcription.
 - `transcription`: runtime selection and transactional warm-model activation.
+- `gguf_session`: the `transcribe.cpp` session owner shared by `parakeet` and
+  `linux_transcriber`; it recreates the native session around each run so
+  inference scratch stays bounded.
 - `transcription_preparation`: application-owned model preparation shared by
   Settings and the menu bar, with one worker, latest-choice pending admission,
   cancellation fences, and an installed-only path that never downloads a model.
@@ -134,8 +137,9 @@ substitute for source inspection or a second roadmap.
   projections.
 - `desktop_activity`: the shared listener, device, session, and latest-failure
   projection over `EventReader`. Transcript rows read retained events directly.
-- `desktop_host`: semantic desktop capabilities, portable UI snapshots, and
-  typed actions implemented by the macOS root and contained Linux adapter.
+- `desktop_host`: the Linux Settings/service snapshot-and-action contract.
+  macOS chooses its navigation directly from the developer-feature flag and
+  uses the shared presentation primitives while committing its own settings.
 - `desktop_ui`: platform-neutral GPUI visual tokens and controls shared by both
   desktop roots, including the mandatory pane scaffold: `pane_header` /
   `pane_header_with_action`, `pane_body`, `pane_content`, the shared

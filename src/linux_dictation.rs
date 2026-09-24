@@ -38,33 +38,17 @@ impl Drop for OutputWorker {
     }
 }
 
-pub fn run(event_path: &Path, device: Option<&str>, shutdown: &AtomicBool) -> Result<()> {
-    let settings = crate::linux_settings::LinuxSettings::load()?;
-    let transcriber = LinuxTranscriber::load(&settings.transcription)?;
-    run_with_settings(event_path, device, shutdown, settings, transcriber)
-}
-
-pub fn run_with_transcriber(
-    event_path: &Path,
-    device: Option<&str>,
-    shutdown: &AtomicBool,
-    transcriber: LinuxTranscriber,
-) -> Result<()> {
-    let settings = crate::linux_settings::LinuxSettings::load()?;
-    run_with_settings(event_path, device, shutdown, settings, transcriber)
-}
-
-fn run_with_settings(
+/// Runs hotkey dictation until `shutdown`. A prepared transcriber skips the
+/// model load; otherwise the supplied transcription selection is loaded here.
+pub fn run(
     event_path: &Path,
     device: Option<&str>,
     shutdown: &AtomicBool,
     settings: crate::linux_settings::LinuxSettings,
-    transcriber: LinuxTranscriber,
+    transcriber: Option<LinuxTranscriber>,
 ) -> Result<()> {
-    feedback::set_volume(settings.sound_effect_volume);
-    if let Err(error) = feedback::preload() {
-        tracing::warn!(%error, "recording sounds are unavailable; continuing without feedback");
-    }
+    let transcriber =
+        transcriber.map_or_else(|| LinuxTranscriber::load(&settings.transcription), Ok)?;
     // Drop audio/hotkeys and close the job queue before joining slow output on
     // every exit, including failures during startup or recording.
     let mut output = OutputWorker {
@@ -235,6 +219,13 @@ fn run_with_settings(
     }
     println!("Stopped.");
     Ok(())
+}
+
+pub(crate) fn initialize_feedback(volume: f32) {
+    feedback::set_volume(volume);
+    if let Err(error) = feedback::preload() {
+        tracing::warn!(%error, "recording sounds are unavailable; continuing without feedback");
+    }
 }
 
 fn start_capture(

@@ -14,7 +14,6 @@ pub enum Key {
     Left,
     Right,
     Enter,
-    #[allow(dead_code)]
     Escape,
 }
 
@@ -118,22 +117,13 @@ pub fn key_code_for(character: char) -> Result<u16> {
     if let Some(result) = cached() {
         return result;
     }
-    let source = input_source()?;
-    // SAFETY: The retained TIS source remains alive until after all property reads.
-    let layout_data =
-        unsafe { TISGetInputSourceProperty(source, kTISPropertyUnicodeKeyLayoutData) };
-    if layout_data.is_null() {
-        unsafe { CFRelease(source) };
-        return Err(eyre!("active keyboard layout has no Unicode mapping"));
-    }
-    // SAFETY: The property is CFData containing a UCKeyboardLayout for this source.
-    let layout = unsafe { CFDataGetBytePtr(layout_data) };
+    let source = LayoutSource::current()?;
+    let layout = source.layout_bytes()?;
     let result = (0..128).find(|&key_code| {
         translate(layout, key_code)
             .is_some_and(|translated| translated.eq_ignore_ascii_case(&character.to_string()))
     });
-    // SAFETY: TIS copy functions return a retained source.
-    unsafe { CFRelease(source) };
+    drop(source);
     if let Some(key_code) = result {
         return Ok(key_code);
     }
@@ -159,20 +149,14 @@ pub fn initialize_layout() -> Result<()> {
     if KEY_CODES.get().is_some() {
         return Ok(());
     }
-    let source = input_source()?;
-    let layout_data =
-        unsafe { TISGetInputSourceProperty(source, kTISPropertyUnicodeKeyLayoutData) };
-    if layout_data.is_null() {
-        unsafe { CFRelease(source) };
-        return Err(eyre!("active keyboard layout has no Unicode mapping"));
-    }
-    let layout = unsafe { CFDataGetBytePtr(layout_data) };
+    let source = LayoutSource::current()?;
+    let layout = source.layout_bytes()?;
     let codes = collect_key_codes((0..128).filter_map(|key_code| {
         let translated = translate(layout, key_code)?;
         let character = translated.chars().next()?.to_ascii_lowercase();
         Some((character, key_code))
     }));
-    unsafe { CFRelease(source) };
+    drop(source);
     // Non-Latin layouts (Russian, Hebrew, …) produce no ASCII letters with an
     // empty modifier state, so shortcuts like Cmd+V would miss. Appkit resolves
     // those against the ASCII-capable layout; mirror that here by filling the
@@ -189,27 +173,15 @@ pub fn initialize_layout() -> Result<()> {
 
 fn ascii_capable_key_codes() -> Option<HashMap<char, u16>> {
     // Called only while LAYOUT_ACCESS is held, before the GUI snapshot is published.
-    // SAFETY: TIS copy functions return a retained input source, released below.
-    let source = unsafe { TISCopyCurrentASCIICapableKeyboardLayoutInputSource() };
-    if source.is_null() {
-        return None;
-    }
-    let layout_data =
-        unsafe { TISGetInputSourceProperty(source, kTISPropertyUnicodeKeyLayoutData) };
-    if layout_data.is_null() {
-        unsafe { CFRelease(source) };
-        return None;
-    }
-    let layout = unsafe { CFDataGetBytePtr(layout_data) };
-    let codes = collect_key_codes((0..128).filter_map(|key_code| {
+    let source = LayoutSource::ascii_capable()?;
+    let layout = source.layout_bytes().ok()?;
+    Some(collect_key_codes((0..128).filter_map(|key_code| {
         let translated = translate(layout, key_code)?;
         let character = translated.chars().next()?.to_ascii_lowercase();
         character
             .is_ascii_alphabetic()
             .then_some((character, key_code))
-    }));
-    unsafe { CFRelease(source) };
-    Some(codes)
+    })))
 }
 
 fn fill_missing_ascii_letters(codes: &mut HashMap<char, u16>, fallback: HashMap<char, u16>) {
@@ -357,18 +329,46 @@ impl Drop for KeyboardEvent {
     }
 }
 
-fn input_source() -> Result<InputSourceRef> {
-    #[cfg(test)]
-    INPUT_SOURCE_QUERIES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    // SAFETY: TIS copy functions return retained immutable input-source objects.
-    let source = unsafe { TISCopyCurrentKeyboardLayoutInputSource() };
-    if !source.is_null() {
-        return Ok(source);
+/// A retained TIS keyboard-layout input source, released on drop.
+struct LayoutSource(InputSourceRef);
+
+impl LayoutSource {
+    /// The active layout, falling back to the ASCII-capable layout.
+    fn current() -> Result<Self> {
+        #[cfg(test)]
+        INPUT_SOURCE_QUERIES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        // SAFETY: TIS copy functions return retained immutable input-source objects.
+        let source = unsafe { TISCopyCurrentKeyboardLayoutInputSource() };
+        if !source.is_null() {
+            return Ok(Self(source));
+        }
+        Self::ascii_capable().ok_or_else(|| eyre!("no keyboard layout input source is available"))
     }
-    let fallback = unsafe { TISCopyCurrentASCIICapableKeyboardLayoutInputSource() };
-    (!fallback.is_null())
-        .then_some(fallback)
-        .ok_or_else(|| eyre!("no keyboard layout input source is available"))
+
+    fn ascii_capable() -> Option<Self> {
+        // SAFETY: TIS copy functions return retained immutable input-source objects.
+        let source = unsafe { TISCopyCurrentASCIICapableKeyboardLayoutInputSource() };
+        (!source.is_null()).then_some(Self(source))
+    }
+
+    /// The UCKeyboardLayout bytes, valid while this source is alive.
+    fn layout_bytes(&self) -> Result<*const u8> {
+        // SAFETY: The retained source remains alive for every property read.
+        let layout_data =
+            unsafe { TISGetInputSourceProperty(self.0, kTISPropertyUnicodeKeyLayoutData) };
+        if layout_data.is_null() {
+            return Err(eyre!("active keyboard layout has no Unicode mapping"));
+        }
+        // SAFETY: The property is CFData containing a UCKeyboardLayout for this source.
+        Ok(unsafe { CFDataGetBytePtr(layout_data) })
+    }
+}
+
+impl Drop for LayoutSource {
+    fn drop(&mut self) {
+        // SAFETY: TIS copy functions return a retained source that we own.
+        unsafe { CFRelease(self.0) };
+    }
 }
 
 fn translate(layout: *const u8, key_code: u16) -> Option<String> {

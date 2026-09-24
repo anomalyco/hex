@@ -61,7 +61,7 @@ impl TranscriptReader {
         }
 
         self.read_live_tail(&directory.join("transcript.live.ndjson"))?;
-        Ok(project(self.live_events.values().cloned()))
+        Ok(project_latest(self.live_events.values()))
     }
 
     pub(super) fn read_live_tail(&mut self, path: &Path) -> Result<()> {
@@ -277,8 +277,12 @@ pub(super) fn project(events: impl IntoIterator<Item = Event>) -> Vec<Transcript
     for event in events {
         lines.insert((event.source, event.line_id), event);
     }
-    let mut transcript = lines
-        .into_values()
+    project_latest(lines.values())
+}
+
+fn project_latest<'a>(events: impl IntoIterator<Item = &'a Event>) -> Vec<TranscriptEntry> {
+    let mut transcript = events
+        .into_iter()
         .filter_map(|event| {
             let text = event.text.trim().to_string();
             (!text.is_empty()).then_some(TranscriptEntry {
@@ -354,5 +358,94 @@ fn source_index(source: MeetingSource) -> usize {
     match source {
         MeetingSource::System => 0,
         MeetingSource::Microphone => 1,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn incremental_projection_matches_snapshot_after_updates_and_partial_writes() {
+        let path = std::env::temp_dir().join(format!(
+            "voice-control-live-projection-{}-{}.ndjson",
+            std::process::id(),
+            crate::events::now_ms()
+        ));
+        let event = |source, line_id, phase, start_ms, text: &str| Event {
+            source,
+            line_id,
+            phase,
+            start_ms,
+            end_ms: start_ms + 500,
+            text: text.into(),
+        };
+        let events = [
+            event(
+                MeetingSource::Microphone,
+                1,
+                TranscriptPhase::Started,
+                1_000,
+                "draft",
+            ),
+            event(
+                MeetingSource::System,
+                1,
+                TranscriptPhase::Completed,
+                1_000,
+                " computer ",
+            ),
+            event(
+                MeetingSource::Microphone,
+                1,
+                TranscriptPhase::Updated,
+                1_000,
+                " updated ",
+            ),
+            event(
+                MeetingSource::Microphone,
+                2,
+                TranscriptPhase::Started,
+                2_000,
+                "discard me",
+            ),
+            event(
+                MeetingSource::Microphone,
+                2,
+                TranscriptPhase::Completed,
+                2_000,
+                "  ",
+            ),
+            event(
+                MeetingSource::Microphone,
+                1,
+                TranscriptPhase::Completed,
+                1_000,
+                " olá final ",
+            ),
+        ];
+        let mut file = File::create(&path).unwrap();
+        let mut reader = TranscriptReader::default();
+        for event in events {
+            let mut bytes = serde_json::to_vec(&event).unwrap();
+            bytes.push(b'\n');
+            let split = bytes.len() / 2;
+            for part in [&bytes[..split], &bytes[split..]] {
+                file.write_all(part).unwrap();
+                file.flush().unwrap();
+                reader.read_live_tail(&path).unwrap();
+                assert_eq!(
+                    project_latest(reader.live_events.values()),
+                    read_snapshot(&path).unwrap(),
+                );
+            }
+        }
+        let transcript = project_latest(reader.live_events.values());
+        assert_eq!(transcript.len(), 2);
+        assert_eq!(transcript[0].source, MeetingSource::System);
+        assert_eq!(transcript[0].text, "computer");
+        assert_eq!(transcript[1].source, MeetingSource::Microphone);
+        assert_eq!(transcript[1].text, "olá final");
+        fs::remove_file(path).unwrap();
     }
 }

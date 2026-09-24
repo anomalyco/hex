@@ -15,7 +15,6 @@ updates="$dist/updates"
 artifact="HEX-$version-arm64.dmg"
 update_artifact="HEX-$version-arm64.zip"
 latest_artifact="HEX-latest-arm64.dmg"
-identity=${VOICE_CONTROL_CODESIGN_IDENTITY:-}
 
 if [ "$mode" != "prepare" ] && [ "$mode" != "publish" ]; then
   echo "Usage: $0 [prepare|publish]" >&2
@@ -113,13 +112,8 @@ export HEX_VERSION="$version" HEX_BUILD_NUMBER="$build_number"
 bundle=$("$root/scripts/build-app.sh")
 bundle_name=$(basename "$bundle")
 "$root/scripts/validate-app.sh" "$bundle" Hex.app "$version" "$build_number" >/dev/null
-if [ -z "$identity" ]; then
-  identity=$(security find-identity -v -p codesigning | sed -n "s/.*\"\(Developer ID Application:.*($team_id)\)\"/\1/p" | head -1)
-fi
-if [ -z "$identity" ]; then
-  echo "No Developer ID signing identity found for team $team_id." >&2
-  exit 1
-fi
+. "$root/scripts/macos-signing.sh"
+identity=$(hex_codesign_identity "$team_id")
 rm -rf "$dist/staging" "$dist/update-staging" "$updates"
 rm -f "$dist/HEX-$version.zip" "$dist/$artifact" "$dist/$update_artifact"
 mkdir -p "$dist/staging" "$dist/update-staging" "$updates"

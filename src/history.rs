@@ -94,6 +94,17 @@ pub struct HistoryProcessing {
     pub fallback: Option<String>,
 }
 
+#[cfg(target_os = "macos")]
+impl From<crate::dictation_processor::ProcessingObservation> for HistoryProcessing {
+    fn from(observation: crate::dictation_processor::ProcessingObservation) -> Self {
+        Self {
+            profile: observation.profile,
+            latency_ms: observation.latency_ms,
+            fallback: observation.fallback,
+        }
+    }
+}
+
 /// One retained successful result.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct HistoryEntry {

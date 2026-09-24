@@ -3,15 +3,16 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Instant;
 
 use color_eyre::eyre::{Result, WrapErr, eyre};
-use transcribe_cpp::{Backend, Model, ModelOptions, RunOptions, Session, TimestampKind};
+use transcribe_cpp::{Backend, Model, ModelOptions, RunOptions, TimestampKind};
 
+use crate::gguf_session::OfflineGgufSession;
 use crate::transcription_models::{
     ModelDefinition, TranscriptionModelId, TranscriptionSelection, definition,
     download_with_progress, model_path, validate,
 };
 
 pub struct LinuxTranscriber {
-    session: Session,
+    session: OfflineGgufSession,
     options: RunOptions,
     device_label: String,
     max_audio_samples: Option<usize>,
@@ -146,7 +147,7 @@ impl LinuxTranscriber {
             variant,
             "loaded Linux transcription model"
         );
-        let session = model.session()?;
+        let session = OfflineGgufSession::new(model)?;
         let mut transcriber = Self {
             session,
             options: RunOptions {

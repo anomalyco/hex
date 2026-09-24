@@ -1,4 +1,7 @@
-use gpui::{AnyElement, Div, FontWeight, IntoElement, Rgba, div, prelude::*, px, rgb};
+use gpui::{
+    AnyElement, Div, ElementId, FontWeight, IntoElement, Rgba, Stateful, div, prelude::*, px, rgb,
+    rgba,
+};
 
 #[cfg(target_os = "linux")]
 use gpui::{Image, ImageFormat, img};
@@ -6,7 +9,6 @@ use gpui::{Image, ImageFormat, img};
 use std::sync::Arc;
 
 #[derive(Clone, Copy)]
-#[cfg_attr(target_os = "linux", allow(dead_code))]
 pub(crate) enum NavigationIcon {
     Activity,
     Commands,
@@ -114,7 +116,6 @@ fn navigation_icon(icon: NavigationIcon, selected: bool) -> AnyElement {
     img(Arc::new(image)).size(px(16.0)).into_any_element()
 }
 
-#[allow(dead_code)]
 pub(crate) const SIDEBAR_WIDTH: f32 = 220.0;
 
 pub(crate) const CANVAS: u32 = 0x111111;
@@ -132,16 +133,10 @@ pub(crate) const FAINT: u32 = 0x626262;
 pub(crate) const NEGATIVE: u32 = 0xc98f89;
 
 pub(crate) const CONTROL_HEIGHT: f32 = 32.0;
-#[cfg_attr(target_os = "linux", allow(dead_code))]
 pub(crate) const TEXT_INPUT_HEIGHT: f32 = 34.0;
-#[cfg_attr(target_os = "linux", allow(dead_code))]
-pub(crate) const MULTILINE_INPUT_HEIGHT: f32 = 132.0;
-#[cfg_attr(target_os = "linux", allow(dead_code))]
-pub(crate) const COMPACT_MULTILINE_INPUT_HEIGHT: f32 = 76.0;
+pub(crate) const MULTILINE_INPUT_HEIGHT: f32 = 76.0;
 pub(crate) const PANEL_RADIUS: f32 = 10.0;
-#[cfg_attr(target_os = "linux", allow(dead_code))]
 pub(crate) const COMPACT_PANEL_HEADER_HEIGHT: f32 = 38.0;
-#[cfg_attr(target_os = "linux", allow(dead_code))]
 pub(crate) const SECTION_GAP: f32 = 8.0;
 
 pub(crate) fn window_frame() -> Div {
@@ -163,7 +158,6 @@ pub(crate) fn sidebar_frame() -> Div {
         .border_color(rgb(LINE))
 }
 
-#[allow(dead_code)]
 pub(crate) fn navigation_item(icon: NavigationIcon, selected: bool) -> Div {
     div()
         .h(px(38.0))
@@ -196,8 +190,48 @@ pub(crate) fn navigation_item(icon: NavigationIcon, selected: bool) -> Div {
 pub(crate) const PANE_CONTENT_WIDTH: f32 = 940.0;
 
 /// The one fixed list-column width every list+detail pane uses.
-#[cfg_attr(target_os = "linux", allow(dead_code))]
 pub(crate) const PANE_LIST_WIDTH: f32 = 320.0;
+
+/// The one list column of a list+detail pane: fixed to [`PANE_LIST_WIDTH`],
+/// scrolling, with the pane's empty notice and load error ahead of its rows.
+/// Callers decide when `empty` applies and append their rows.
+pub(crate) fn pane_list(
+    id: impl Into<ElementId>,
+    empty: Option<&'static str>,
+    error_title: &'static str,
+    error: Option<String>,
+) -> Stateful<Div> {
+    div()
+        .id(id)
+        .w(px(PANE_LIST_WIDTH))
+        .h_full()
+        .flex_none()
+        .overflow_y_scroll()
+        .when_some(empty, |list, message| list.child(empty_message(message)))
+        .when_some(error, |list, error| {
+            list.child(error_message(error_title, error))
+        })
+}
+
+const LIST_ROW_SELECTED: u32 = 0x292929;
+const LIST_ROW_SELECTED_HOVER: u32 = 0x303030;
+
+/// A rounded, selectable row inside a list column.
+pub(crate) fn list_row(selected: bool) -> Div {
+    div()
+        .w_full()
+        .px_3()
+        .py_2()
+        .flex()
+        .flex_col()
+        .gap_1()
+        .rounded(px(6.0))
+        .when(selected, |row| {
+            row.bg(rgb(LIST_ROW_SELECTED))
+                .hover(|row| row.bg(rgb(LIST_ROW_SELECTED_HOVER)))
+        })
+        .when(!selected, |row| row.hover(|row| row.bg(rgb(SURFACE_HOVER))))
+}
 
 pub(crate) fn pane_header(title: &'static str) -> AnyElement {
     pane_header_with_action(title, None)
@@ -238,7 +272,6 @@ pub(crate) fn pane_header_with_action(
 
 /// The one pane body: fills the space under the header and centers its
 /// children. Put the pane's content column inside [`pane_content`].
-#[cfg_attr(target_os = "linux", allow(dead_code))]
 pub(crate) fn pane_body() -> Div {
     div()
         .flex_1()
@@ -250,7 +283,6 @@ pub(crate) fn pane_body() -> Div {
 
 /// The one pane-header action button: a bordered 30-point chip. Every
 /// clickable header action renders this.
-#[cfg_attr(target_os = "linux", allow(dead_code))]
 pub(crate) fn header_button(label: impl IntoElement) -> Div {
     div()
         .h(px(30.0))
@@ -268,7 +300,6 @@ pub(crate) fn header_button(label: impl IntoElement) -> Div {
 }
 
 /// The one pane content column, bounded to [`PANE_CONTENT_WIDTH`].
-#[cfg_attr(target_os = "linux", allow(dead_code))]
 pub(crate) fn pane_content() -> Div {
     div()
         .w_full()
@@ -278,7 +309,6 @@ pub(crate) fn pane_content() -> Div {
         .flex_col()
 }
 
-#[cfg_attr(target_os = "linux", allow(dead_code))]
 pub(crate) fn section_label(label: &'static str) -> AnyElement {
     div()
         .text_size(px(11.0))
@@ -288,7 +318,6 @@ pub(crate) fn section_label(label: &'static str) -> AnyElement {
         .into_any_element()
 }
 
-#[cfg_attr(target_os = "linux", allow(dead_code))]
 pub(crate) fn listener_status(
     status: impl IntoElement,
     device: impl IntoElement,
@@ -400,7 +429,6 @@ pub(crate) fn toggle(position: f32) -> AnyElement {
         .into_any_element()
 }
 
-#[allow(dead_code)]
 pub(crate) fn settings_section_label(label: &'static str) -> AnyElement {
     div()
         .pt_5()
@@ -413,7 +441,6 @@ pub(crate) fn settings_section_label(label: &'static str) -> AnyElement {
         .into_any_element()
 }
 
-#[allow(dead_code)]
 pub(crate) fn settings_copy(title: &'static str, description: &'static str) -> AnyElement {
     div()
         .debug_selector(|| "settings-copy".into())
@@ -469,7 +496,6 @@ pub(crate) fn compact_panel() -> Div {
         .overflow_hidden()
 }
 
-#[cfg_attr(target_os = "linux", allow(dead_code))]
 pub(crate) fn compact_panel_header(title: impl IntoElement, action: Option<AnyElement>) -> Div {
     div()
         .h(px(COMPACT_PANEL_HEADER_HEIGHT))
@@ -490,7 +516,6 @@ pub(crate) fn compact_panel_header(title: impl IntoElement, action: Option<AnyEl
         .when_some(action, |header, action| header.child(action))
 }
 
-#[cfg_attr(target_os = "linux", allow(dead_code))]
 pub(crate) fn compact_section_label(label: impl IntoElement) -> Div {
     div()
         .px_1()
@@ -500,7 +525,6 @@ pub(crate) fn compact_section_label(label: impl IntoElement) -> Div {
         .child(label)
 }
 
-#[cfg_attr(target_os = "linux", allow(dead_code))]
 pub(crate) fn disclosure_button(label: impl IntoElement) -> Div {
     div()
         .w(px(220.0))
@@ -529,7 +553,6 @@ pub(crate) fn disclosure_button(label: impl IntoElement) -> Div {
         )
 }
 
-#[allow(dead_code)]
 pub(crate) fn settings_row(
     title: &'static str,
     description: &'static str,
@@ -555,12 +578,10 @@ pub(crate) fn settings_row(
         .child(control)
 }
 
-#[cfg_attr(target_os = "linux", allow(dead_code))]
 pub(crate) fn settings_panel() -> Div {
     compact_panel().relative()
 }
 
-#[cfg_attr(target_os = "linux", allow(dead_code))]
 pub(crate) fn segmented_control() -> Div {
     div()
         .h(px(CONTROL_HEIGHT))
@@ -574,7 +595,6 @@ pub(crate) fn segmented_control() -> Div {
         .bg(rgb(CANVAS))
 }
 
-#[cfg_attr(target_os = "linux", allow(dead_code))]
 pub(crate) fn segmented_item(selected: bool) -> Div {
     div()
         .h(px(26.0))
@@ -593,6 +613,46 @@ pub(crate) fn segmented_item(selected: bool) -> Div {
         })
 }
 
+/// A [`segmented_control`] whose selection indicator slides between items.
+/// `position` is a fractional item index and `widths` lists every item's
+/// width in order; append the items with [`sliding_segmented_item`].
+pub(crate) fn sliding_segmented_control(position: f32, widths: &[f32]) -> Div {
+    let (left, width) = segmented_geometry(position, widths);
+    segmented_control().relative().child(
+        div()
+            .absolute()
+            .left(px(left))
+            .top(px(2.0))
+            .w(px(width))
+            .h(px(26.0))
+            .rounded(px(4.0))
+            .bg(rgb(SURFACE_SELECTED)),
+    )
+}
+
+/// A fixed-width, centered item that stays transparent so the sliding
+/// indicator beneath it shows through.
+pub(crate) fn sliding_segmented_item(width: f32, selected: bool) -> Div {
+    segmented_item(selected)
+        .w(px(width))
+        .px(px(0.0))
+        .justify_center()
+        .bg(rgba(0x00000000))
+}
+
+fn segmented_geometry(position: f32, widths: &[f32]) -> (f32, f32) {
+    let last = widths.len().saturating_sub(1);
+    let position = position.clamp(0.0, last as f32);
+    let lower = (position.floor() as usize).min(last);
+    let upper = (lower + 1).min(last);
+    let progress = position - lower as f32;
+    let left = |index: usize| 2.0 + widths[..index].iter().sum::<f32>();
+    (
+        left(lower) + (left(upper) - left(lower)) * progress,
+        widths[lower] + (widths[upper] - widths[lower]) * progress,
+    )
+}
+
 pub(crate) fn mix_color(from: Rgba, to: Rgba, position: f32) -> Rgba {
     let position = position.clamp(0.0, 1.0);
     Rgba {
@@ -603,7 +663,6 @@ pub(crate) fn mix_color(from: Rgba, to: Rgba, position: f32) -> Rgba {
     }
 }
 
-#[allow(dead_code)]
 pub(crate) fn empty_message(message: &'static str) -> AnyElement {
     div()
         .p_6()
@@ -613,7 +672,6 @@ pub(crate) fn empty_message(message: &'static str) -> AnyElement {
         .into_any_element()
 }
 
-#[allow(dead_code)]
 pub(crate) fn error_message(message: &'static str, error: String) -> AnyElement {
     div()
         .p_6()
@@ -635,13 +693,25 @@ pub(crate) fn error_message(message: &'static str, error: String) -> AnyElement 
 
 #[cfg(test)]
 mod tests {
-    use super::split_sided_keycap;
+    use super::{segmented_geometry, split_sided_keycap};
 
     #[test]
     fn side_badges_only_apply_to_sided_modifiers() {
         assert_eq!(split_sided_keycap("L⌥"), (Some("L"), "⌥".into()));
         assert_eq!(split_sided_keycap("R⌘"), (Some("R"), "⌘".into()));
         assert_eq!(split_sided_keycap("Return"), (None, "Return".into()));
+    }
+
+    #[test]
+    fn segmented_indicator_interpolates_between_uneven_items() {
+        let widths = [50.0, 90.0, 80.0];
+        assert_eq!(segmented_geometry(0.0, &widths), (2.0, 50.0));
+        assert_eq!(segmented_geometry(1.0, &widths), (52.0, 90.0));
+        assert_eq!(segmented_geometry(2.0, &widths), (142.0, 80.0));
+        assert_eq!(segmented_geometry(0.5, &widths), (27.0, 70.0));
+        assert_eq!(segmented_geometry(-1.0, &widths), (2.0, 50.0));
+        assert_eq!(segmented_geometry(5.0, &widths), (142.0, 80.0));
+        assert_eq!(segmented_geometry(2.5, &[34.0; 5]), (87.0, 34.0));
     }
 }
 

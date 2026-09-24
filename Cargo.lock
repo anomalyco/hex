@@ -8653,7 +8653,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "voice-control"
-version = "2.1.18"
+version = "2.1.22"
 dependencies = [
  "arboard",
  "base64",
@@ -8682,11 +8682,11 @@ dependencies = [
  "objc2",
  "objc2-app-kit",
  "objc2-core-audio",
+ "objc2-core-foundation",
  "objc2-foundation",
  "objc2-quartz-core",
  "objc2-service-management",
  "ratatui",
- "raw-window-handle",
  "regex",
  "rodio",
  "rubato",

@@ -1,3 +1,5 @@
+import { validateUnion } from "./captures.js"
+
 export const PROTOCOL_VERSION = 2 as const
 
 export type Modifier = "command" | "control" | "option" | "shift"
@@ -130,68 +132,13 @@ export function choice(
   return Object.freeze({ type: "choice", choices: Object.freeze(choices) })
 }
 
-const MAX_UNION_MEMBERS = 16
-const MAX_UNION_DEPTH = 4
-const MAX_UNION_SERIALIZED_BYTES = 16 * 1024
-const letterAliases = new Set([
-  "a", "ay", "alpha", "b", "bee", "bravo", "c", "see", "charlie", "d", "dee", "delta",
-  "e", "echo", "f", "ef", "foxtrot", "g", "gee", "golf", "h", "aitch", "hotel", "i", "eye",
-  "india", "j", "jay", "juliett", "k", "kay", "kilo", "l", "el", "lima", "m", "em", "mike",
-  "n", "en", "november", "o", "oh", "oscar", "p", "pee", "papa", "q", "cue", "quebec",
-  "r", "are", "romeo", "s", "ess", "sierra", "t", "tee", "tango", "u", "you", "uniform",
-  "v", "vee", "victor", "w", "whiskey", "x", "xray", "y", "why", "yankee", "z", "zee", "zed", "zulu",
-])
-
-const normalizeUnionWord = (value: string): string => {
-  const normalized = value.trim().replace(
-    /^[\x21-\x2f\x3a-\x40\x5b-\x60\x7b-\x7e]+|[\x21-\x2f\x3a-\x40\x5b-\x60\x7b-\x7e]+$/g,
-    "",
-  ).toLowerCase()
-  return ({ zero: "0", one: "1", two: "2", three: "3", four: "4", five: "5", six: "6", seven: "7", eight: "8", nine: "9" } as Readonly<Record<string, string>>)[normalized] ?? normalized
-}
-
-const unionWords = (member: AtomicCaptureDescriptor): ReadonlySet<string> => {
-  if (member.type === "digit") {
-    return new Set(Array.from({ length: member.max - member.min + 1 }, (_, index) => String(member.min + index)))
-  }
-  if (member.type === "letter") return letterAliases
-  return new Set(Object.values(member.choices).flatMap((aliases) => aliases.map(normalizeUnionWord)))
-}
-
 type FlattenedUnionMember<Member> = Member extends UnionCapture<infer Nested> ? Nested[number] : Member
 
 export function union<
   const Members extends readonly [BoundedCaptureDescriptor, BoundedCaptureDescriptor, ...BoundedCaptureDescriptor[]],
 >(...members: Members): UnionCapture<readonly Extract<FlattenedUnionMember<Members[number]>, AtomicCaptureDescriptor>[]>
 export function union(...members: readonly CaptureDescriptor[]): UnionCapture {
-  const flattened: AtomicCaptureDescriptor[] = []
-  const visit = (member: CaptureDescriptor, depth: number): void => {
-    if (depth > MAX_UNION_DEPTH) throw new Error(`union() nesting may not exceed ${MAX_UNION_DEPTH}`)
-    if (member.type === "text") throw new Error("union() does not accept text()")
-    if (member.type === "union") {
-      if (member.members.length < 2) throw new Error("union() requires at least two members")
-      for (const nested of member.members) visit(nested, depth + 1)
-      return
-    }
-    flattened.push(member)
-  }
-  if (members.length < 2) throw new Error("union() requires at least two members")
-  for (const member of members) visit(member, 1)
-  if (flattened.length > MAX_UNION_MEMBERS) {
-    throw new Error(`union() may contain at most ${MAX_UNION_MEMBERS} flattened members`)
-  }
-  const spoken = new Set<string>()
-  for (const member of flattened) {
-    for (const word of unionWords(member)) {
-      if (spoken.has(word)) throw new Error(`union() members overlap on spoken word ${word}`)
-      spoken.add(word)
-    }
-  }
-  const descriptor = { type: "union", members: Object.freeze(flattened) } as const
-  if (new TextEncoder().encode(JSON.stringify(descriptor)).byteLength > MAX_UNION_SERIALIZED_BYTES) {
-    throw new Error(`union() serialized descriptor exceeds ${MAX_UNION_SERIALIZED_BYTES} bytes`)
-  }
-  return Object.freeze(descriptor)
+  return validateUnion(members, "union()")
 }
 
 export interface HandlerArguments<Captures extends UntypedCaptures = Readonly<Record<string, string>>> {

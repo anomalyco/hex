@@ -5,12 +5,12 @@ use std::{error, fmt};
 
 use color_eyre::eyre::{Result, WrapErr, eyre};
 
+#[cfg(test)]
+pub use crate::command_grammar::CapturedCount;
 pub(crate) use crate::command_grammar::phrase_placeholder;
-#[allow(unused_imports)]
 pub use crate::command_grammar::{
-    CapturedCount, CapturedDigit, CapturedDirection, CapturedValue, CapturedValues, Command,
-    CommandBuilder, ConfiguredCommand, Count, Digit, Direction, OptionalCount, PatternSpec,
-    PersonalCapture, TypedPattern,
+    CapturedValue, CapturedValues, Command, ConfiguredCommand, Count, Digit, Direction,
+    PersonalCapture,
 };
 pub use crate::context::ContextSelector as ContextPredicate;
 use crate::context::ContextSnapshot;
@@ -34,9 +34,7 @@ pub enum Action {
     },
     OpenApplication(String),
     OpenUrl(String),
-    #[allow(dead_code)]
     OpenPath(String),
-    #[allow(dead_code)]
     TypeText(String),
     Keystroke {
         key: Key,
@@ -58,31 +56,13 @@ pub struct CommandConfig {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum CommandError {
-    DuplicateId {
-        id: String,
-    },
-    #[allow(dead_code)]
-    MissingPhrase {
-        id: String,
-    },
-    #[allow(dead_code)]
-    OverlappingAliases {
-        id: String,
-    },
-    InvalidCapture {
-        id: String,
-        message: String,
-    },
-    OverlappingPatterns {
-        first: String,
-        second: String,
-    },
-    ReservedId {
-        id: String,
-    },
-    ReservedPhrase {
-        phrase: String,
-    },
+    DuplicateId { id: String },
+    MissingPhrase { id: String },
+    OverlappingAliases { id: String },
+    InvalidCapture { id: String, message: String },
+    OverlappingPatterns { first: String, second: String },
+    ReservedId { id: String },
+    ReservedPhrase { phrase: String },
 }
 
 impl fmt::Display for CommandError {

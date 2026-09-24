@@ -10,7 +10,6 @@ use ed25519_dalek::{Signature, VerifyingKey};
 use fs2::FileExt;
 use semver::Version;
 use serde::Deserialize;
-use sha2::{Digest, Sha256};
 
 const UPDATE_URL: &str = "https://downloads.hex.kitlangton.dev/linux-update.json";
 const RELEASE_ORIGIN: &str = "https://downloads.hex.kitlangton.dev/releases/";
@@ -257,23 +256,7 @@ fn verify_artifact(path: &Path, manifest: &Manifest) -> Result<()> {
 }
 
 fn sha256(path: &Path) -> Result<String> {
-    let mut file = File::open(path)?;
-    let mut hasher = Sha256::new();
-    let mut buffer = [0_u8; 64 * 1024];
-    loop {
-        let read = file.read(&mut buffer)?;
-        if read == 0 {
-            break;
-        }
-        hasher.update(&buffer[..read]);
-    }
-    const HEX: &[u8; 16] = b"0123456789abcdef";
-    let mut result = String::with_capacity(64);
-    for &byte in hasher.finalize().iter() {
-        result.push(HEX[usize::from(byte >> 4)] as char);
-        result.push(HEX[usize::from(byte & 0x0f)] as char);
-    }
-    Ok(result)
+    crate::transcription_models::sha256_hex(path, None)
 }
 
 fn validate_executable(path: &Path, version: &str) -> Result<()> {

@@ -31,5 +31,8 @@ mod tests {
     #[test]
     fn normalizes_spoken_numbers_and_punctuation() {
         assert_eq!(normalize("Move LEFT, three!"), "move left 3");
+        // Match the command SDK constructor/host parity fixture: non-ASCII
+        // aliases remain distinct while ASCII case and spoken digits fold.
+        assert_eq!(normalize("Ä ä A a ONE one"), "Ä ä a a 1 1");
     }
 }

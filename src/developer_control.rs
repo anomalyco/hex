@@ -2,7 +2,7 @@ use std::sync::mpsc::SyncSender;
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, clap::ValueEnum)]
 #[serde(rename_all = "kebab-case")]
 pub enum DeveloperHudState {
     Reset,
@@ -11,7 +11,7 @@ pub enum DeveloperHudState {
     Processing,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, clap::ValueEnum)]
 #[serde(rename_all = "kebab-case")]
 pub enum DeveloperPane {
     Settings,

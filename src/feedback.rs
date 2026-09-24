@@ -46,11 +46,21 @@ fn sounds_enabled() -> bool {
     ENABLED.load(Ordering::Relaxed) && volume() > 0.0
 }
 
-// Only the playback worker owns a device. Turning sounds off drops it within
-// one observation interval, and opening/retrying never blocks capture or UI.
+/// How long the output device stays open after the last tone finishes. Holding
+/// the default output open keeps macOS from idle-sleeping, so an idle app must
+/// release it. A tone implies recent user activity, so a grace shorter than any
+/// idle-sleep timer costs nothing while sparing bursts of dictation the cold
+/// device reopen.
+const IDLE_RELEASE_GRACE: Duration = Duration::from_secs(5 * 60);
+const OPEN_RETRY_BACKOFF: Duration = Duration::from_secs(2);
+
+// Only the playback worker owns a device. It opens lazily for a tone, stays
+// open through the idle grace, and drops within one observation interval once
+// sounds turn off or the grace expires. Opening never blocks capture or UI.
 struct FeedbackOutput<S> {
     sink: Option<S>,
     retry_at: Instant,
+    playing_until: Option<Instant>,
 }
 
 impl<S> FeedbackOutput<S> {
@@ -58,23 +68,36 @@ impl<S> FeedbackOutput<S> {
         Self {
             sink: None,
             retry_at: Instant::now(),
+            playing_until: None,
         }
     }
 
-    fn update(
-        &mut self,
-        enabled: bool,
-        now: Instant,
-        open: impl FnOnce() -> Result<S>,
-    ) -> Result<()> {
-        if !enabled {
-            self.sink = None;
-            self.retry_at = now;
-        } else if self.sink.is_none() && now >= self.retry_at {
-            self.retry_at = now + Duration::from_secs(2);
+    /// Opens the device for a tone unless a recent failure is still backing off.
+    fn open_for_tone(&mut self, now: Instant, open: impl FnOnce() -> Result<S>) -> Result<()> {
+        if self.sink.is_none() && now >= self.retry_at {
+            self.retry_at = now + OPEN_RETRY_BACKOFF;
             self.sink = Some(open()?);
         }
         Ok(())
+    }
+
+    fn mark_playing(&mut self, now: Instant, duration: Duration) {
+        let until = now + duration;
+        self.playing_until = Some(self.playing_until.unwrap_or(until).max(until));
+    }
+
+    /// Releases the device when sounds are off or nothing has played within the
+    /// idle grace. A released device reopens immediately for the next tone.
+    fn release_when_idle(&mut self, enabled: bool, now: Instant) {
+        let idle = self
+            .playing_until
+            .is_none_or(|until| now >= until + IDLE_RELEASE_GRACE);
+        if !enabled || idle {
+            self.playing_until = None;
+            if self.sink.take().is_some() {
+                self.retry_at = now;
+            }
+        }
     }
 }
 
@@ -135,28 +158,24 @@ pub fn preload() -> Result<()> {
             return;
         };
         let mut output = FeedbackOutput::new();
-        let open =
-            || DeviceSinkBuilder::open_default_sink().wrap_err("could not open the audio output");
-        let initial = output.update(sounds_enabled(), Instant::now(), open);
-        // Publish even after an admission timeout or output-open failure. The
-        // same worker keeps observing preferences and retrying the device.
-        publish_player(&DICTATION_PLAYER, sender, ready_sender, initial);
+        let open = || {
+            let mut sink = DeviceSinkBuilder::open_default_sink()
+                .wrap_err("could not open the audio output")?;
+            sink.log_on_drop(false);
+            Ok(sink)
+        };
+        // The device opens for the first tone, not at startup, so an idle app
+        // holds no output stream. Publish before any tone arrives.
+        publish_player(&DICTATION_PLAYER, sender, ready_sender, Ok(()));
         loop {
             let tone = match receiver.recv_timeout(Duration::from_millis(250)) {
                 Ok(tone) => Some(tone),
                 Err(mpsc::RecvTimeoutError::Timeout) => None,
                 Err(mpsc::RecvTimeoutError::Disconnected) => break,
             };
-            if let Err(error) = output.update(sounds_enabled(), Instant::now(), open) {
-                tracing::warn!(%error, "recording audio output unavailable; retrying");
-            }
-            // Opening may have been slow; recheck the latest preference before
-            // retaining the output or playing any queued sound.
-            if !sounds_enabled() {
-                let _ = output.update(false, Instant::now(), open);
-                continue;
-            }
-            let (Some(tone), Some(sink)) = (tone, output.sink.as_ref()) else {
+            let enabled = sounds_enabled();
+            output.release_when_idle(enabled, Instant::now());
+            let Some(tone) = tone.filter(|_| enabled) else {
                 continue;
             };
             let sound = match tone {
@@ -166,7 +185,23 @@ pub fn preload() -> Result<()> {
                 #[cfg(target_os = "macos")]
                 Tone::Wake | Tone::Sleep | Tone::Error => continue,
             };
+            if let Err(error) = output.open_for_tone(Instant::now(), open) {
+                tracing::warn!(%error, "recording audio output unavailable; retrying");
+            }
+            // Opening may have been slow; recheck the latest preference before
+            // retaining the output or playing the queued sound.
+            if !sounds_enabled() {
+                output.release_when_idle(false, Instant::now());
+                continue;
+            }
+            let Some(sink) = output.sink.as_ref() else {
+                continue;
+            };
             sink.mixer().add(sound.clone().amplify(volume()));
+            output.mark_playing(
+                Instant::now(),
+                sound.total_duration().unwrap_or(Duration::ZERO),
+            );
         }
     });
     let outcome = ready_receiver.recv_timeout(Duration::from_secs(2));
@@ -234,6 +269,12 @@ fn decode(bytes: &'static [u8]) -> Result<SamplesBuffer> {
 mod tests {
     use super::*;
 
+    impl<S> FeedbackOutput<S> {
+        fn is_open(&self) -> bool {
+            self.sink.is_some()
+        }
+    }
+
     #[test]
     fn timed_out_admission_still_publishes_a_usable_player() {
         let player = OnceLock::new();
@@ -247,7 +288,7 @@ mod tests {
     }
 
     #[test]
-    fn sound_off_releases_output_and_reenable_reopens_it() {
+    fn output_opens_for_a_tone_and_releases_after_the_idle_grace() {
         use std::cell::Cell;
         struct Sink<'a>(&'a Cell<usize>);
         impl Drop for Sink<'_> {
@@ -264,18 +305,51 @@ mod tests {
         };
         let mut output = FeedbackOutput::new();
         let now = Instant::now();
-        output.update(false, now, open).unwrap();
+        let tone = Duration::from_secs(1);
+
+        // Idle observation without a tone never opens the device.
+        output.release_when_idle(true, now);
         assert_eq!(opens.get(), 0);
-        output.update(true, now, open).unwrap();
-        output.update(true, now, open).unwrap();
-        assert_eq!(opens.get(), 1);
-        assert_eq!(live.get(), 1);
-        output.update(false, now, open).unwrap();
+
+        output.open_for_tone(now, open).unwrap();
+        output.mark_playing(now, tone);
+        output.open_for_tone(now, open).unwrap();
+        assert_eq!((opens.get(), live.get()), (1, 1));
+
+        // Retained while playing and through the grace, released afterwards.
+        output.release_when_idle(true, now + tone);
+        output.release_when_idle(true, now + tone + IDLE_RELEASE_GRACE / 2);
+        assert!(output.is_open());
+        output.release_when_idle(true, now + tone + IDLE_RELEASE_GRACE);
+        assert!(!output.is_open());
         assert_eq!(live.get(), 0);
-        output.update(true, now, open).unwrap();
-        assert_eq!(opens.get(), 2);
+
+        // The next tone reopens immediately, without a failure backoff.
+        let later = now + tone + IDLE_RELEASE_GRACE;
+        output.open_for_tone(later, open).unwrap();
+        assert_eq!((opens.get(), live.get()), (2, 1));
+
+        // Turning sounds off releases even while a tone is nominally playing.
+        output.mark_playing(later, tone);
+        output.release_when_idle(false, later);
+        assert!(!output.is_open());
         drop(output);
         assert_eq!(live.get(), 0);
+    }
+
+    #[test]
+    fn overlapping_tones_extend_playback_instead_of_truncating_it() {
+        let mut output = FeedbackOutput::new();
+        let now = Instant::now();
+        output.open_for_tone(now, || Ok(())).unwrap();
+        output.mark_playing(now, Duration::from_secs(2));
+        output.mark_playing(now + Duration::from_millis(300), Duration::from_secs(1));
+        assert_eq!(output.playing_until, Some(now + Duration::from_secs(2)));
+
+        output.release_when_idle(true, now + Duration::from_secs(1) + IDLE_RELEASE_GRACE);
+        assert!(output.is_open());
+        output.release_when_idle(true, now + Duration::from_secs(2) + IDLE_RELEASE_GRACE);
+        assert!(!output.is_open());
     }
 
     #[test]
@@ -284,19 +358,51 @@ mod tests {
         let now = Instant::now();
         assert!(
             output
-                .update(true, now, || Err(eyre!("device unavailable")))
+                .open_for_tone(now, || Err(eyre!("device unavailable")))
                 .is_err()
         );
         output
-            .update(true, now + Duration::from_secs(1), || -> Result<()> {
+            .open_for_tone(now + Duration::from_secs(1), || -> Result<()> {
                 panic!("must not spin on device failure")
             })
             .unwrap();
-        assert!(output.sink.is_none());
+        assert!(!output.is_open());
         output
-            .update(true, now + Duration::from_secs(2), || Ok(()))
+            .open_for_tone(now + OPEN_RETRY_BACKOFF, || Ok(()))
             .unwrap();
-        assert!(output.sink.is_some());
+        assert!(output.is_open());
+    }
+
+    #[test]
+    #[ignore = "opens the native default output and inspects pmset assertions"]
+    #[cfg(target_os = "macos")]
+    fn native_output_release_clears_the_idle_sleep_assertion() {
+        fn assertion_for_this_process() -> bool {
+            let output = Command::new("/usr/bin/pmset")
+                .args(["-g", "assertions"])
+                .output()
+                .unwrap();
+            let report = String::from_utf8_lossy(&output.stdout);
+            let marker = format!("Created for PID: {}", std::process::id());
+            report
+                .split("PreventUserIdleSystemSleep")
+                .skip(1)
+                .any(|section| section.lines().take(3).any(|line| line.contains(&marker)))
+        }
+
+        let mut sink = DeviceSinkBuilder::open_default_sink().unwrap();
+        sink.log_on_drop(false);
+        thread::sleep(Duration::from_millis(500));
+        assert!(
+            assertion_for_this_process(),
+            "an open output should hold the coreaudiod sleep assertion"
+        );
+        drop(sink);
+        let released = (0..20).any(|_| {
+            thread::sleep(Duration::from_millis(250));
+            !assertion_for_this_process()
+        });
+        assert!(released, "releasing the output should clear the assertion");
     }
 
     #[test]

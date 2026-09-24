@@ -7,6 +7,37 @@ import { makeClient } from "../src/client.js"
 import { helper, options, processIsAlive } from "./support.js"
 
 describe("Promise client", () => {
+  it.each([
+    ["{", "startup-failed", "Could not read the running HEX endpoint"],
+    ["null", "invalid-handshake", "HEX discovery contained an invalid endpoint"],
+    ["{}", "invalid-handshake", "HEX returned an invalid startup handshake"],
+    [JSON.stringify({ port: "bad", token: "", apiVersion: "2", pid: 1 }), "invalid-handshake", "HEX returned an invalid service URL"],
+  ])("preserves discovery errors for %s without making a request", async (contents, code, message) => {
+    const directory = await mkdtemp(join(tmpdir(), "hex-discovery-"))
+    const discoveryPath = join(directory, "local-api.json")
+    const fetch = vi.fn<typeof globalThis.fetch>()
+    try {
+      await writeFile(discoveryPath, contents)
+      await expect(connect({ discoveryPath, fetch })).rejects.toMatchObject({ code, message })
+      expect(fetch).not.toHaveBeenCalled()
+    } finally {
+      await rm(directory, { recursive: true, force: true })
+    }
+  })
+
+  it("continues accepting a string discovery port and an empty token", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "hex-discovery-"))
+    const discoveryPath = join(directory, "local-api.json")
+    const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(Response.json({ version: "test", apiVersion: "2" }))
+    try {
+      await writeFile(discoveryPath, JSON.stringify({ port: "1234", token: "", apiVersion: "2", pid: 1 }))
+      await connect({ discoveryPath, fetch })
+      expect(fetch).toHaveBeenCalledWith("http://127.0.0.1:1234/health", expect.any(Object))
+    } finally {
+      await rm(directory, { recursive: true, force: true })
+    }
+  })
+
   it("owns the helper and exercises the complete protocol", async () => {
     const host = await create(options())
     const progress: Array<string> = []

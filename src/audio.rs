@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 
 use color_eyre::eyre::{Result, WrapErr, eyre};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use cpal::{Device, SampleFormat, Stream, StreamConfig};
+use cpal::{Device, SampleFormat, SizedSample, Stream, StreamConfig};
 
 #[cfg(target_os = "macos")]
 const AUTOMATIC_INPUT_DEVICE_PREFERENCES: &[&str] = crate::config::INPUT_DEVICES;
@@ -275,15 +275,30 @@ impl AudioInput {
         let (error_sender, stream_errors) = mpsc::sync_channel(1);
 
         let stream = match sample_format {
-            SampleFormat::F32 => {
-                build_f32_stream(&device, &config, channels, sender, error_sender)?
-            }
-            SampleFormat::I16 => {
-                build_i16_stream(&device, &config, channels, sender, error_sender)?
-            }
-            SampleFormat::U16 => {
-                build_u16_stream(&device, &config, channels, sender, error_sender)?
-            }
+            SampleFormat::F32 => build_stream(
+                &device,
+                &config,
+                channels,
+                sender,
+                error_sender,
+                |sample: f32| sample,
+            )?,
+            SampleFormat::I16 => build_stream(
+                &device,
+                &config,
+                channels,
+                sender,
+                error_sender,
+                |sample: i16| sample as f32 / i16::MAX as f32,
+            )?,
+            SampleFormat::U16 => build_stream(
+                &device,
+                &config,
+                channels,
+                sender,
+                error_sender,
+                |sample: u16| sample as f32 / 32768.0 - 1.0,
+            )?,
             format => return Err(eyre!("unsupported microphone sample format: {format:?}")),
         };
         stream
@@ -300,26 +315,24 @@ impl AudioInput {
     }
 
     pub fn recv_timeout(&self, timeout: Duration) -> AudioInputEvent {
+        // A stream failure reported before or during the wait outranks any
+        // chunk delivered alongside it.
         if let Ok(error) = self.stream_errors.try_recv() {
             return AudioInputEvent::StreamFailed(error);
         }
-        match self.chunks.recv_timeout(timeout) {
-            Ok((samples, captured_through)) => match self.stream_errors.try_recv() {
-                Ok(error) => AudioInputEvent::StreamFailed(error),
-                Err(_) => AudioInputEvent::Chunk {
-                    samples,
-                    captured_through,
-                },
+        let received = self.chunks.recv_timeout(timeout);
+        if let Ok(error) = self.stream_errors.try_recv() {
+            return AudioInputEvent::StreamFailed(error);
+        }
+        match received {
+            Ok((samples, captured_through)) => AudioInputEvent::Chunk {
+                samples,
+                captured_through,
             },
-            Err(RecvTimeoutError::Timeout) => match self.stream_errors.try_recv() {
-                Ok(error) => AudioInputEvent::StreamFailed(error),
-                Err(_) => AudioInputEvent::Timeout,
-            },
-            Err(RecvTimeoutError::Disconnected) => AudioInputEvent::StreamFailed(
-                self.stream_errors
-                    .try_recv()
-                    .unwrap_or_else(|_| "microphone audio channel disconnected".into()),
-            ),
+            Err(RecvTimeoutError::Timeout) => AudioInputEvent::Timeout,
+            Err(RecvTimeoutError::Disconnected) => {
+                AudioInputEvent::StreamFailed("microphone audio channel disconnected".into())
+            }
         }
     }
 }
@@ -630,79 +643,30 @@ fn report_stream_error(sender: &SyncSender<String>, error: String) {
     let _ = sender.try_send(error);
 }
 
-fn build_f32_stream(
+fn build_stream<T: SizedSample>(
     device: &Device,
     config: &StreamConfig,
     channels: usize,
     sender: Sender<(Vec<f32>, CaptureInstant)>,
     error_sender: SyncSender<String>,
+    convert: impl Fn(T) -> f32 + Send + 'static,
 ) -> Result<Stream> {
     let sample_rate = config.sample_rate;
     device
         .build_input_stream(
             *config,
-            move |data: &[f32], info| {
+            move |data: &[T], info| {
                 let captured_through = captured_through(info, data.len() / channels, sample_rate);
                 send(
                     &sender,
-                    mono(data, channels, |sample| *sample),
+                    mono(data, channels, |sample| convert(*sample)),
                     captured_through,
                 )
             },
             move |error| stream_error(&error_sender, error),
             None,
         )
-        .wrap_err("could not open f32 microphone stream")
-}
-
-fn build_i16_stream(
-    device: &Device,
-    config: &StreamConfig,
-    channels: usize,
-    sender: Sender<(Vec<f32>, CaptureInstant)>,
-    error_sender: SyncSender<String>,
-) -> Result<Stream> {
-    let sample_rate = config.sample_rate;
-    device
-        .build_input_stream(
-            *config,
-            move |data: &[i16], info| {
-                let captured_through = captured_through(info, data.len() / channels, sample_rate);
-                send(
-                    &sender,
-                    mono(data, channels, |sample| *sample as f32 / i16::MAX as f32),
-                    captured_through,
-                )
-            },
-            move |error| stream_error(&error_sender, error),
-            None,
-        )
-        .wrap_err("could not open i16 microphone stream")
-}
-
-fn build_u16_stream(
-    device: &Device,
-    config: &StreamConfig,
-    channels: usize,
-    sender: Sender<(Vec<f32>, CaptureInstant)>,
-    error_sender: SyncSender<String>,
-) -> Result<Stream> {
-    let sample_rate = config.sample_rate;
-    device
-        .build_input_stream(
-            *config,
-            move |data: &[u16], info| {
-                let captured_through = captured_through(info, data.len() / channels, sample_rate);
-                send(
-                    &sender,
-                    mono(data, channels, |sample| *sample as f32 / 32768.0 - 1.0),
-                    captured_through,
-                )
-            },
-            move |error| stream_error(&error_sender, error),
-            None,
-        )
-        .wrap_err("could not open u16 microphone stream")
+        .wrap_err_with(|| format!("could not open {} microphone stream", T::FORMAT))
 }
 
 fn captured_through(

@@ -2,7 +2,6 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::mpsc::{self, Receiver};
 use std::thread::{self, JoinHandle};
 use std::time::Instant;
 
@@ -37,8 +36,7 @@ struct Task {
     request: Request,
     canceled: Arc<AtomicBool>,
     progress: Arc<AtomicU64>,
-    result: Receiver<Result<(), String>>,
-    worker: JoinHandle<()>,
+    worker: JoinHandle<Result<(), String>>,
 }
 
 struct State {
@@ -92,10 +90,7 @@ impl TranscriptionPreparation {
         }
         let task = state.active.take().expect("finished preparation exists");
         let result = match task.worker.join() {
-            Ok(()) => task
-                .result
-                .try_recv()
-                .unwrap_or_else(|_| Err("Model preparation stopped unexpectedly.".into())),
+            Ok(result) => result,
             Err(_) => Err("Model preparation worker failed.".into()),
         };
         let accepted = !task.canceled.load(Ordering::Acquire);
@@ -142,7 +137,6 @@ impl State {
         };
         let canceled = Arc::new(AtomicBool::new(false));
         let progress = Arc::new(AtomicU64::new(0));
-        let (sender, result) = mpsc::sync_channel(1);
         let prepare = self.prepare.clone();
         let selection = request.selection.clone();
         let installed_only = request.installed_only;
@@ -151,20 +145,18 @@ impl State {
         match thread::Builder::new()
             .name("transcription-preparation".into())
             .spawn(move || {
-                let result = prepare(
+                prepare(
                     &selection,
                     installed_only,
                     &worker_canceled,
                     &worker_progress,
-                );
-                let _ = sender.send(result);
+                )
             }) {
             Ok(worker) => {
                 self.active = Some(Task {
                     request,
                     canceled,
                     progress,
-                    result,
                     worker,
                 });
             }
@@ -213,6 +205,7 @@ fn prepare_selection(
 mod tests {
     use super::*;
     use std::sync::Mutex;
+    use std::sync::mpsc;
     use std::time::Duration;
 
     fn selection(model: TranscriptionModelId) -> TranscriptionSelection {

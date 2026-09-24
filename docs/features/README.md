@@ -5,7 +5,7 @@ This maps existing behavior. [ROADMAP.md](../../ROADMAP.md) owns future work;
 [AGENTS.md](../../AGENTS.md) owns implementation invariants.
 
 Initial source baseline: September 1, 2026, `9e9da53aa9ed`. Public macOS release:
-[2.1.18](../releases/2.1.18.md), with custom-domain downloads, a GitHub DMG mirror,
+[2.1.22](../releases/2.1.22.md), with custom-domain downloads, a GitHub DMG mirror,
 and model-download recovery guidance. The initial map was source-only. Listed checks are
 locators unless an executed result is explicitly recorded, as in the
 [keyboard-layout verification](recovery.md#keyboard-layout-resolution).
@@ -234,21 +234,57 @@ logs are separate and currently unbounded on disk. See the
 Settings                                 // settings
 ├── Dictation shortcut -> Capture a replacement binding
 ├── Microphone -> Automatic or saved device
+│   └── Open menu covers the controls beneath it; click elsewhere dismisses
 ├── Microphone mode
 │   ├── Keep ready (fast) -> Open while idle; pre-roll available
 │   └── Release when idle -> Open on press; no pre-roll; startup delay
 │       └── Commands enabled? -> Confirm turning Commands off
 ├── While dictating -> Mute / Pause media / Do nothing
-│   └── Intentional capture only, not ordinary shortcut chords
+│   ├── Intentional capture only, not ordinary shortcut chords
+│   └── Pause/resume only players already reported running by macOS
 └── Sound volume -> Immediate feedback setting; zero suppresses tones
+
+Intentional recording                    // recording.environment
+├── Acquire native macOS no-idle-sleep assertion
+│   └── Failure -> Warn and continue recording
+└── Finish/cancel -> Release the assertion
+    // no caffeinate child process or executable-policy dialog
 ```
 
 Successful settings saves persist and project changes at safe runtime boundaries.
+Immediate settings controls commit a candidate before changing the saved UI
+choice or applying dependent native/history effects. A failed shortcut save
+stays in capture instead of showing Saved; failed retention saves keep the old
+choice and surface the error. Failed debounced text saves retain their drafts
+for a subsequent edit or close-time flush. The regressions
+`failed_shortcut_save_stays_in_capture_and_preserves_pending_edits` and
+`failed_retention_save_keeps_previous_choice_and_reports_the_error` in
+[app_window.rs](../../src/app_window.rs) inject persistence failure in an
+in-memory GPUI window; they do not simulate disk failure in an installed app.
 Persistence, conflict, and ownership checks live in
 [app_settings.rs](../../src/app_settings.rs),
 [recording_environment.rs](../../src/recording_environment.rs), and
 [audio.rs](../../src/audio.rs). Settings previews do not prove physical device
-switching or native mute support; muting is best-effort, not universal.
+switching or native mute support; muting is best-effort, not universal. The
+recording-environment ownership checks cover overlapping acquisition and release,
+not a managed-device policy or native power assertion. The pause-script regression
+checks that inactive players are absent before AppleScript application resolution;
+when no supported player is running, acquisition skips AppleScript entirely.
+The script check does not prove subprocess avoidance or exercise Music, Spotify,
+or VLC through Automation. An opt-in native
+assertion smoke exercises IOKit without starting microphone capture.
+
+**Fixed after 2.1.20:** through 2.1.20 the microphone menu was painted without
+occluding the panel, so hovering or clicking a device also reached the setting
+under the pointer ([#94](https://github.com/anomalyco/hex/issues/94)), and it
+only closed by choosing or reopening. The menu is now anchored to its button,
+occludes the controls beneath it, and closes on any outside mouse-down.
+`microphone_picker_occludes_the_controls_beneath_it` in
+[app_window.rs](../../src/app_window.rs) renders the production menu over a
+hoverable, clickable control and fails without the occlusion; it does not prove
+a native pointer session. The recognition-hints editor also now uses the compact
+multiline height, so it no longer overlaps the shortcut row for Whisper models.
+Screen Recording was unavailable, so that layout is unverified visually.
 
 **Easy to misread:** an open microphone is not an active recording. Sleeping
 Commands still needs open input; it is not Release when idle.
@@ -290,6 +326,16 @@ Selection and stage checks start in
 [text_replacements.rs](../../src/text_replacements.rs), and
 [personal_commands.rs](../../src/personal_commands.rs). They do not prove live
 provider availability or real application/Brave context changes.
+
+`ordinary_processing_snapshots_modes_before_stage_and_keeps_transformations` in
+[parakeet.rs](../../src/parakeet.rs) checks processing-time profile acquisition,
+conditional Processing-stage emission, and retained transformation selection.
+It uses controlled profiles, not a live provider or custom transformation host.
+
+`mode_rows_preserve_edits_across_add_delete_and_supersede_old_debounces` in
+[app_window.rs](../../src/app_window.rs) covers mode-editor changes and stale
+debounced saves with one row owning its draft and inputs. It does not exercise
+native typing or foreground mode activation.
 
 Application activations compare the picker's bundle name with the foreground
 application's localized name. When Finder shows all filename extensions, the
@@ -387,126 +433,11 @@ Software Update window; no installation was performed. That path remains the
 workaround for older versions, including after Remind Me Later. A repaired
 installed-sidebar click remains unverified.
 
-Release `3675206`, build `20113`, was signed, notarized, stapled, and accepted by
-Gatekeeper. DMG and ZIP payloads matched across 207 entries. Public DMG, ZIP, and
-latest-DMG downloads matched their prepared SHA-256 checksums; the public feed
-led with `20113`, and its ZIP signature verified against the app's public key.
-
-**Published September 3, 2026:** [2.1.14](../releases/2.1.14.md), release commit
-`cc7f843`, build `20114`. The combined release passed 442 Rust tests (nine opt-in
-tests ignored), all twelve keyboard-layout scenarios in debug and release,
-46 command-SDK tests, Clippy, formatting, and app identity guards. The first
-optimized harness attempt exceeded the command timeout during compilation;
-the rerun completed and all twelve scenarios passed.
-
-The app and DMG were Developer ID signed, notarized, and stapled; Gatekeeper
-accepted both. DMG and ZIP app payloads matched across 207 entries, including
-file bytes, permissions, and symlink targets. After artifact-first/feed-last
-publication, public DMG, ZIP, and latest-DMG downloads matched the prepared
-SHA-256 hashes. The public feed led with `20114`, and its ZIP signature verified
-against the app's public key. The publication script's recursive diff emitted
-framework directory-loop warnings; the separate no-follow manifest comparison
-verified the complete payloads without traversing symlinks.
-
-The installed app and live settings were not modified. The live quiet-startup,
-Finder/Spotlight reopen, and physical dictation smoke test was explicitly waived
-for this release; those paths remain unverified on the installed candidate.
-No Sparkle installation or Linux binary release was performed.
-
-**Published September 3, 2026:** [2.1.15](../releases/2.1.15.md), release commit
-`9ec1b51`, build `20115`. The current-version checks passed 444 Rust tests in each
-of debug and release (nine opt-in tests ignored per profile), all twelve
-keyboard-layout scenarios in each profile, 46 command-SDK tests, strict Clippy in
-both profiles, formatting, and app identity guards.
-
-The app and DMG were Developer ID signed, notarized, and stapled; Gatekeeper
-accepted both. A no-follow manifest comparison matched all 208 entries including
-the app root, file bytes, modes, and symlink targets across DMG and ZIP. After
-artifact-first/feed-last publication, public DMG, ZIP, and latest-DMG downloads
-matched their prepared SHA-256 hashes. The public feed led with `20115`, and its
-ZIP signature verified against the app's public key. The existing recursive-diff
-warnings in the publication script remain; the separate no-follow check passed.
-
-[Homebrew cask PR #16](https://github.com/anomalyco/homebrew-tap/pull/16) passed
-style, strict online audit, Sparkle livecheck, and checksum-verified download.
-Installation and uninstall succeeded with an isolated temporary application
-directory. The installed candidate passed identity, signature, stapled-ticket,
-and Gatekeeper checks. An existing-app fixture was refused without replacement;
-the real installed app's Info.plist and executable hashes were unchanged.
-
-Screen Recording preflight reported unavailable, so no screenshot is claimed.
-The installed app was not replaced or launched, and no physical dictation,
-Sparkle installation, or Linux binary release was performed.
-
-**Published September 4, 2026:** [2.1.16](../releases/2.1.16.md), release commit
-`76dc552`, build `20116`. Both profiles passed 455 Rust tests and all twelve
-keyboard-layout scenarios, with ten opt-in tests skipped per profile. The real
-Cohere synthetic-audio regression passed separately. Both profiles passed strict
-Clippy; formatting, app-identity fixtures, 46 command-SDK tests, and 45 public-SDK
-tests passed, along with SDK typechecks and the public SDK build.
-
-The app and DMG were Developer ID signed, notarized, stapled, and accepted by
-Gatekeeper. The DMG and Sparkle ZIP matched across 208 no-follow payload entries.
-After artifact-first/feed-last publication, fresh public DMG, ZIP, and latest-DMG
-downloads matched the prepared artifacts byte-for-byte; the public feed led with
-`20116`, and its Ed25519 signature verified against the app's public key. The
-existing recursive-diff framework-loop warnings were independently covered by
-the no-follow comparison.
-
-[Homebrew cask PR #17](https://github.com/anomalyco/homebrew-tap/pull/17) updated
-the version/checksum and was merged after style, strict online audit, livecheck,
-checksum fetch, isolated installation/uninstallation, app identity/signature,
-stapled-ticket, and Gatekeeper checks. An existing-app fixture was refused without
-replacement. The test cask was removed; the real installed app's Info.plist and
-executable hashes were unchanged. Release replies were posted and
-[#73](https://github.com/anomalyco/hex/issues/73) and
-[#74](https://github.com/anomalyco/hex/issues/74) were closed after publication.
-
-Screen Recording preflight remains unavailable. This release has no physical
-menu-click, installed-app model switch, microphone/paste, or Sparkle installation
-proof. No Linux binary is published. The
-[Linux/Nix CI run](https://github.com/anomalyco/hex/actions/runs/33891943549)
-passed for release commit `76dc552`: the Linux job completed in 3m50s and Nix in
-40m10s. This includes isolated X11 grabs, Wayland paste into GTK, virtual-microphone
-capture/inference/paste, signed-installer tamper rejection, and the installed Nix
-package checks. These CI checks remain separate from native macOS and physical
-Linux verification.
-The [performance investigation](../research/performance-2026-09-04.md) changed
-no runtime defaults.
-
-**Published September 14, 2026:** [2.1.18](../releases/2.1.18.md), release commit
-`62b055e`, build `20118`. The optimized suite passed 468 Rust tests and all twelve
-keyboard-layout child scenarios, with ten opt-in tests skipped. Strict release
-Clippy and app-identity fixtures passed. The signed bundle's isolated HUD preview
-was visible over native fullscreen TextEdit; no microphone capture or installed
-app replacement was performed.
-
-Apple accepted the app and DMG for notarization; both were stapled. Gatekeeper
-accepted the candidate. DMG, Sparkle ZIP, and tested bundle matched across 208
-no-follow entries (bytes, modes, and symlink targets). Public DMG, ZIP, latest-DMG,
-and GitHub mirror bytes matched the prepared artifacts. The public feed matches
-the prepared feed and leads with `20118`; its ZIP signature verified against the
-bundled public key. Publication resumed at the feed upload after a server restart,
-following fresh verification of all uploaded artifacts.
-
-Both production marketing sites show the versioned 2.1.18 links. Their GitHub
-download buttons completed downloads in headless Chromium with the primary host
-blocked. The Homebrew cask passed style, strict online audit, and checksum fetch.
-The separate `.com` site's lint, typecheck, and build passed; its dependency audit
-reported four existing development-tool advisories, tracked separately.
-
-The Ubuntu CI run passed Rust tests, isolated X11 grabs, and native Wayland paste,
-then exposed a virtual-microphone fixture mismatch: its partial saved settings
-selected legacy Ctrl-Shift-V while the GTK target expects Ctrl-V. The fixture now
-sets `paste_with_shift:false` explicitly. The failed target check remains a failed
-run, not native paste proof; see the subsequent CI result for verification.
-
-**Subsequent CI passed:** [run 34927405408](https://github.com/anomalyco/hex/actions/runs/34927405408)
-on `cd3a8d9` passed both Ubuntu (4m15s) and Nix (39m58s). This includes the
-corrected virtual-microphone capture/inference/paste fixture, X11 grabs, Wayland
-paste into GTK, signed-installer tamper rejection, service IPC/lifecycle, strict
-Linux Clippy, and the installed Nix package build and tests. These isolated checks
-do not establish physical Linux device or compositor compatibility.
+The [historical release verification](release-verification.md) records publication
+evidence through 2.1.20, including signing, artifact checks, CI results, and skipped
+native checks. Those release-specific results do not verify the current working
+tree, installed-app behavior, or physical Linux compatibility; retain each entry's
+stated limits when using it as evidence.
 
 [Recovery](recovery.md) separates supported recovery from known defects.
 [login_item.rs](../../src/login_item.rs), [status_item.rs](../../src/status_item.rs),
@@ -572,6 +503,13 @@ historical observations. `hex app --hidden` is a compatibility alias for startin
 the service. GUI exit does not mean Stop Listening; the explicit listener and
 service controls retain separate meanings. No root daemon or new input grants.
 
+Listener starts consume the service-owned settings snapshot; the foreground
+`hex dictate` command loads its own snapshot once. Invalid startup settings leave
+defaults available only for editing and block capture until a successful settings
+commit or a service restart with valid settings. Dismissing the load error does
+not authorize recording with defaults. Feedback is initialized at these entry
+points, so a delayed listener start cannot reset a newer live volume selection.
+
 Checks: [test-linux-service.py](../../scripts/test-linux-service.py) exercises
 real IPC and process lifetime without a display, installed model, or audio device.
 `closing_a_client_does_not_stop_normal_dictation` and
@@ -580,22 +518,19 @@ runtime workers. The virtual-microphone and Wayland scripts now run separate
 service/client processes. These checks do not establish a physical desktop logout,
 cross-version signed update, or microphone/target-app success on the user's devices.
 
-**Observed September 4, 2026, local service build:** 139 Rust tests passed (seven
-native/opt-in tests skipped), together with strict Linux bin/tests Clippy, the
-release build, the release-binary IPC/lifecycle script, and installer fixtures.
-The managed Arch/i3 installation passed `systemd-analyze --user verify` after
-correcting the unit's `EnvironmentFile` syntax. Its environment file cleared the
-user manager's stale Wayland values; the service reported X11 and Listening.
-The installed executable SHA-256 was
-`cbfa91894c5b592254da41a3d2791f9461e5995abdac3da90a2639aefe3e52f1`.
+`malformed_settings_cannot_start_even_after_dismissing_the_error` in
+[linux_app.rs](../../src/linux_app.rs) checks the failure gate and recovery after a
+simulated successful settings commit. It has **not been executed on Linux**.
+`listener_startup_ignores_the_previous_session_until_a_new_one_arrives` checks the
+listener owner's startup observation and stop signal; the exact production owner
+and test passed in an isolated standard-library-only Rust harness on macOS. That
+harness does not compile the Linux application or prove its runtime integration;
+the test has **not been executed on Linux**. These checks do not exercise physical
+devices or persistence failure on disk.
 
-The installed Settings client had no audio handles or runtime locks. Closing its
-window left the same systemd service PID running and Listening. The screenshot
-at `/tmp/opencode/hex-service-settings.png` also retained an empty-transcript
-failure; it was not dismissed to make the lifecycle check pass. This validates
-client-independent ownership, not transcription accuracy. The modified virtual
-microphone/Wayland smokes, Nix evaluation, physical logout, and signed
-cross-version service updates were not run on this host.
+The [September 4 service-build evidence](release-verification.md#linux-service-build)
+records an Arch/i3 client-independent ownership check, not transcription accuracy
+or physical logout, Wayland, or signed cross-version update proof.
 
 ```ts
 Linux Settings > Sound volume             // dictate.feedback.linux; X11 + Wayland
@@ -612,8 +547,10 @@ Capture                                  // hex app and hex dictate
 
 The shared [feedback player](../../src/feedback.rs) uses the bundled recording
 sounds on both platforms; only macOS wake/sleep/error tones use `afplay`.
-Decoding and output initialization happen before the Linux capture loop, and
-playback admission is bounded and nonblocking. Output preparation failures are
+Decoding happens before the Linux capture loop; the output device opens for
+the first tone and is released five minutes after the last one, as described
+in [macOS feedback](dictation.md#feedback). Playback admission is bounded and
+nonblocking. Output preparation failures are
 logged without blocking dictation. Sound-volume saves in
 [linux_app.rs](../../src/linux_app.rs) preserve listener ownership; failed saves
 leave the previous selection active, and shortcut/model edits temporarily disable
@@ -636,23 +573,9 @@ still discards. Existing timing checks in [dictation.rs](../../src/dictation.rs)
 cover the unchanged intentional-hold boundary. These are not proof of audible
 native playback or physical hotkey-to-sound timing.
 
-**Observed September 4, 2026, initial Linux sound build (before immediate-start
-feedback):** 134 Rust tests passed
-(seven native/opt-in tests skipped), along with formatting, strict Linux
-bin/tests Clippy, and the release build. The locally modified `4ff6c4c` build
-(executable SHA-256 `609f16cac11eb66cea7054092e7c4caee3f02c3bd1b8828f5232cf3b2b67df31`)
-was installed and launched with `hex app` on Arch/i3/X11. It reached Listening
-and opened a PipeWire ALSA playback stream; existing settings were unchanged.
-The installed Settings capture at `/tmp/opencode/hex-linux-sounds.png` showed
-the new volume control with 50% selected. Actual tone audibility, physical
-hotkey-to-sound timing, Wayland UI, and macOS regressions were not exercised.
-
-**Immediate-start refinement, same day:** 135 Rust tests passed (seven skipped),
-including the new start-before-audio regression. Formatting, strict Linux
-bin/tests Clippy, and the release build passed. The replacement executable
-(SHA-256 `470be7569cf9fa8be60e73554c8311df2b68487b221cefffc7cfd26cb7e11629`)
-was reinstalled and restarted on the same Arch/i3/X11 host and reached Listening.
-There is no measured native key-to-sound latency or additional macOS/Wayland proof.
+The [September 4 sound-build evidence](release-verification.md#linux-recording-sounds-builds)
+records the initial and immediate-start builds. It does not establish audible
+native playback, measured physical key-to-sound latency, or Wayland UI behavior.
 
 Both Linux CI triggers include `tests/**`, and the
 [Nix source fileset](../../nix/package.nix) includes those sources. The
@@ -672,9 +595,21 @@ The [SDK guide](../../sdk/typescript/README.md),
 [service contract](../specs/local-transcription-service.md), and
 [SDK tests](../../sdk/typescript/test) distinguish those paths. Helper-only service
 mode is not a physical hotkey/microphone test. Embedded/packaged service smokes
-still expect API 1 while service/SDK require API 2. Low-level blocking-peek and
+now expect API 2, matching service/SDK compatibility checks. Helper packaging
+requires an explicit signing team and notarization profile, with the same
+Developer ID identity validation as the app; identity fixtures do not establish
+a signed helper distribution. Low-level blocking-peek and
 FIN/half-close limitations in [local_api.rs](../../src/local_api.rs) must not be
 generalized to every SDK cancellation path.
+
+Model progress and dictation levels share bounded SSE framing in
+[sse.ts](../../sdk/typescript/src/sse.ts). In-memory
+[SDK regressions](../../sdk/typescript/test/sse.test.ts) cover transport-chunk
+independence, line/event limits, callback cancellation, reader cleanup, and
+bounded level observations. A CR-delimited terminal event is also checked with
+an open response body, so completion does not depend on EOF or subsequent data.
+These checks do not establish live service or
+microphone behavior.
 
 ## Developer And Prototype Surfaces
 
@@ -696,6 +631,22 @@ Sources: [meeting.rs](../../src/meeting.rs),
 iOS physical-device proof and temporary-WAV failure cleanup remain gaps;
 best-effort deletion is not guaranteed deletion.
 
+`incremental_projection_matches_snapshot_after_updates_and_partial_writes` in
+[meeting_live.rs](../../src/meeting_live.rs) compares the incremental transcript
+reader with snapshot projection across updates, partial writes, and source
+ordering. This checks filesystem/projection behavior, not native meeting capture.
+
+`production_navigation_keeps_commands_available_as_an_opt_in` and
+`developer_navigation_appends_developer_panes_in_order` in
+[app_window.rs](../../src/app_window.rs) check exact pane availability and order
+from the developer-feature flag; they do not exercise native navigation clicks.
+
+Desktop previews use a deterministic microphone list. Their settings controls do
+not change global shortcut-capture suspension or Dock policy, or play preview
+sounds. The
+in-memory editor regressions use these fixtures; they do not establish native
+device discovery or installed-app behavior.
+
 `default_paste_hotkeys_follow_build_capabilities` in
 [app_settings.rs](../../src/app_settings.rs) checks the production default runtime
 and settings projections: Paste Last remains available in both build profiles;
@@ -715,6 +666,24 @@ in both debug and release (nine opt-in tests ignored in each), with all twelve
 keyboard-layout child scenarios passing in each profile. Formatting and strict
 Clippy passed in both profiles. These checks cover the working-tree cleanup, not
 a new published app; no installed-app, microphone, or native Linux test was run.
+
+## September 22, 2026 Cleanup Verification
+
+The working-tree cleanup passed 481 Rust tests in debug and 480 in release, with
+twelve opt-in tests ignored in each profile and all twelve keyboard-layout child
+scenarios passing per profile. Strict all-target/all-feature Clippy, formatting,
+app/helper signing-input guards, and changed shell-script syntax checks passed.
+The command SDK passed 52 tests; the public SDK passed 56; both typechecks and
+builds passed. A packed public SDK imported both Promise and Effect entry points
+from an isolated consumer.
+
+The isolated embedded-service smoke passed API 2 handoff, health/models routes,
+absence of discovery-file publication, and shutdown on host-lease closure. It did
+not open a microphone or run inference. No signed helper artifact, installed-app
+settings flow, provider, physical capture/paste, or Linux integration was tested.
+The Linux listener-owner harness and source review do not replace Linux CI.
+The optimized Modes preview built and launched, but screenshot capture failed
+with `could not create image from window`; native visual layout is unverified.
 
 ## Grow The Map
 

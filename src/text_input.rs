@@ -275,17 +275,6 @@ impl TextInput {
         Self::with_mode(cx, placeholder, initial.as_ref(), true, false)
     }
 
-    pub fn multiline_with_height(
-        cx: &mut Context<Self>,
-        placeholder: impl Into<SharedString>,
-        initial: impl AsRef<str>,
-        height: Pixels,
-    ) -> Self {
-        let mut input = Self::with_mode(cx, placeholder, initial.as_ref(), true, false);
-        input.height = height;
-        input
-    }
-
     fn with_mode(
         cx: &mut Context<Self>,
         placeholder: impl Into<SharedString>,

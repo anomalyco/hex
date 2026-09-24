@@ -1,7 +1,7 @@
 import * as m from "motion/react-m"
 import ChatteringTeeth from "./ChatteringTeeth"
 
-const MAC_VERSION = "2.1.18"
+const MAC_VERSION = "2.1.22"
 const DOWNLOAD_URL =
   `https://downloads.hex.kitlangton.dev/releases/HEX-${MAC_VERSION}-arm64.dmg`
 const GITHUB_DOWNLOAD_URL =

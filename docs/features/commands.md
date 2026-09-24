@@ -51,6 +51,11 @@ Sources: `load_command_recognizer` and live policy handling in
 These cover a controlled loader, notice copy, and settings transitions, not
 download-to-speech recognition or physical microphone readiness.
 
+`cleanup_frees_inactive_streams_without_stopping_them` in
+[moonshine.rs](../../src/moonshine.rs) checks active/inactive stream cleanup and
+continued freeing after a failed stop. It runs fixture callbacks, not the native
+Moonshine library.
+
 Transfer failures identify `download.moonshine.ai`, suggest restoring connectivity
 or asking IT to allow that host, and direct the user to Retry. The error also
 explains that hotkey dictation does not need the Commands model. Existing partial
@@ -148,6 +153,14 @@ wire protocol with supplied messages. The
 [workspace smoke](../../scripts/smoke-commands-workspace.sh) exercises temporary
 Bun installs, type checking, and host registration, not speech-to-native-action
 success. See [Modes](README.md#process-text-with-modes) for transformation output.
+
+Capture constructors and host registration share normalization and union
+validation in [captures.ts](../../sdk/commands/src/captures.ts), retaining ASCII
+case semantics. [Parity regressions](../../sdk/commands/test/captures.test.ts)
+cover distinct non-ASCII case, normalized overlaps, nesting/member limits, and
+invalid descriptors. Rust independently validates registration;
+`normalizes_spoken_numbers_and_punctuation` in
+[spoken_text.rs](../../src/spoken_text.rs) also preserves distinct `Ä`/`ä` aliases.
 
 ### Spoken Dictation Controls
 

@@ -696,18 +696,26 @@ impl AppSettings {
         crate::transcription_models::validate(&selection)?;
         let mut candidate = self.clone();
         candidate.remember_transcription(selection);
+        self.commit_with(candidate, save)
+    }
+
+    /// Persist the entire candidate before replacing the current editor value.
+    /// The candidate may include unrelated debounced edits, which must survive
+    /// both failed immediate changes and successful commits.
+    pub(crate) fn commit_with(
+        &mut self,
+        candidate: Self,
+        save: impl FnOnce(&Self) -> Result<()>,
+    ) -> Result<()> {
         save(&candidate)?;
         *self = candidate;
         Ok(())
     }
 
-    fn normalize_microphone_policy(&mut self) -> bool {
+    fn normalize_microphone_policy(&mut self) {
         if self.commands_enabled && self.release_microphone_while_idle {
             tracing::warn!("disabled voice commands because idle microphone release is enabled");
             self.commands_enabled = false;
-            true
-        } else {
-            false
         }
     }
 
@@ -766,20 +774,17 @@ impl AppSettings {
         match fs::read(path) {
             Ok(data) => {
                 let mut settings: Self = serde_json::from_slice(&data)?;
-                let microphone_policy_migrated = settings.normalize_microphone_policy();
+                let loaded = serde_json::to_value(&settings)?;
+                settings.normalize_microphone_policy();
                 settings.dictation_processing.default_mode.name = "Global".into();
                 settings.normalize_double_tap_settings();
                 settings.migrate_legacy_replacements();
-                let mode_applications_migrated = settings.normalize_mode_application_names();
-                let transcription_migrated = settings.migrate_disabled_transcription_model();
+                settings.normalize_mode_application_names();
+                settings.migrate_disabled_transcription_model();
                 settings.normalize_transcription_recents();
                 crate::transcription_models::validate(&settings.transcription)?;
                 settings.repair_hotkey_conflict();
-                let shortcut_conflicts_fixed = settings.normalize_shortcut_conflicts();
-                if (transcription_migrated
-                    || microphone_policy_migrated
-                    || mode_applications_migrated
-                    || shortcut_conflicts_fixed)
+                if serde_json::to_value(&settings)? != loaded
                     && let Err(error) = settings.write_to(path)
                 {
                     tracing::warn!(%error, "could not persist normalized settings");
@@ -854,8 +859,7 @@ impl AppSettings {
 
     /// Mode activations saved while Finder showed filename extensions carry a
     /// `.app` suffix that never matched the foreground application name.
-    fn normalize_mode_application_names(&mut self) -> bool {
-        let mut migrated = false;
+    fn normalize_mode_application_names(&mut self) {
         let modes = std::iter::once(&mut self.dictation_processing.default_mode)
             .chain(self.dictation_processing.modes.iter_mut());
         for mode in modes {
@@ -870,10 +874,8 @@ impl AppSettings {
             if mode_migrated {
                 mode.applications.sort_by_key(|name| name.to_lowercase());
                 mode.applications.dedup();
-                migrated = true;
             }
         }
-        migrated
     }
 
     fn migrate_legacy_replacements(&mut self) {
@@ -896,16 +898,15 @@ impl AppSettings {
         self.text_replacements.clear();
     }
 
-    fn migrate_disabled_transcription_model(&mut self) -> bool {
+    fn migrate_disabled_transcription_model(&mut self) {
         if crate::transcription_models::definition(self.transcription.model).available() {
-            return false;
+            return;
         }
         tracing::warn!(
             model = self.transcription.model.as_str(),
             "replaced a disabled transcription model"
         );
         self.transcription = TranscriptionSelection::default();
-        true
     }
 
     pub fn runtime_hotkeys(&self) -> RuntimeHotkeys {
@@ -1368,6 +1369,38 @@ mod tests {
     }
 
     #[test]
+    fn loading_persists_normalizations_only_when_they_change_settings() {
+        let directory = std::env::temp_dir().join(format!(
+            "hex-normalized-settings-{}-{}",
+            std::process::id(),
+            SETTINGS_TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed),
+        ));
+        fs::create_dir(&directory).unwrap();
+        let path = directory.join("settings.json");
+        fs::write(
+            &path,
+            br#"{"text_replacements":[{"matched_phrase":"open code","output":"OpenCode"}]}"#,
+        )
+        .unwrap();
+
+        let settings = AppSettings::load_from(&path).unwrap();
+        assert!(settings.text_replacements.is_empty());
+        let persisted = fs::read_to_string(&path).unwrap();
+        assert!(!persisted.contains("text_replacements"));
+        assert!(persisted.contains("OpenCode"));
+
+        let written = fs::metadata(&path).unwrap().modified().unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        let reloaded = AppSettings::load_from(&path).unwrap();
+        assert_eq!(
+            reloaded.dictation_processing.default_mode.replacements,
+            settings.dictation_processing.default_mode.replacements
+        );
+        assert_eq!(fs::metadata(&path).unwrap().modified().unwrap(), written);
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
     fn rewriting_legacy_rust_settings_preserves_onboarding_migration() {
         let directory = std::env::temp_dir().join(format!(
             "hex-legacy-onboarding-{}-{}",
@@ -1436,7 +1469,7 @@ mod tests {
         )
         .unwrap();
 
-        assert!(settings.normalize_microphone_policy());
+        settings.normalize_microphone_policy();
         assert!(!settings.commands_enabled);
         assert!(settings.release_microphone_while_idle);
         assert!(settings.validate_microphone_policy().is_ok());
@@ -1598,9 +1631,8 @@ mod tests {
         )
         .unwrap();
 
-        assert!(settings.migrate_disabled_transcription_model());
+        settings.migrate_disabled_transcription_model();
         assert_eq!(settings.transcription, TranscriptionSelection::default());
-        assert!(!settings.migrate_disabled_transcription_model());
     }
 
     #[test]

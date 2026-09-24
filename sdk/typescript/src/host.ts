@@ -5,7 +5,7 @@ import { join } from "node:path"
 import { HexError } from "./errors.js"
 import { makeClient } from "./client.js"
 import { resolveCommand } from "./helper.js"
-import { decodeEndpoint } from "./protocol.js"
+import { decodeEndpoint, decodeEndpointValue } from "./protocol.js"
 import type { ConnectOptions, CreateOptions, HexClient, HexHost, Transcriber, TranscriberOptions } from "./types.js"
 
 const DEFAULT_STARTUP_TIMEOUT_MS = 10_000
@@ -216,13 +216,13 @@ export const connect = async (options: ConnectOptions = {}): Promise<HexClient> 
     throw new HexError("invalid-handshake", "HEX discovery contained an invalid endpoint")
   }
   const input = value as Record<string, unknown>
-  const endpoint = decodeEndpoint(JSON.stringify({
+  const endpoint = decodeEndpointValue({
     type: "ready",
     url: `http://127.0.0.1:${String(input.port)}`,
     token: input.token,
     apiVersion: input.apiVersion,
     pid: input.pid,
-  }))
+  })
   const lifetime = options.signal ?? new AbortController().signal
   const client = makeClient(endpoint, options.fetch ?? globalThis.fetch, lifetime)
   await client.health(options.signal === undefined ? undefined : { signal: options.signal })

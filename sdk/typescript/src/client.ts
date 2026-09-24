@@ -1,4 +1,5 @@
 import { HexError } from "./errors.js"
+import { consumeSse } from "./sse.js"
 import {
   decodeCapabilities,
   decodeDictationLevel,
@@ -19,8 +20,6 @@ import type {
   TranscriptionRequest,
   TranscriptionResult,
 } from "./types.js"
-
-const MAX_SSE_EVENT_CHARS = 64 * 1024
 
 interface ResponseContext {
   readonly response: Response
@@ -128,36 +127,18 @@ export const makeClient = (
     const suffix = query.size === 0 ? "" : `?${query}`
     const context = await request(`/models/${id}/prepare${suffix}`, { method: "POST" }, options?.signal)
     const { response, signal } = context
-    if (!response.headers.get("content-type")?.toLowerCase().startsWith("text/event-stream")) {
-      throw new HexError("invalid-response", "HEX returned an invalid model progress content type")
-    }
-    if (response.body === null) throw new HexError("invalid-response", "HEX returned no model progress stream")
-
-    const reader = response.body.pipeThrough(new TextDecoderStream()).getReader()
-    let line = ""
-    let pendingCarriageReturn = false
-    let data: Array<string> = []
-    let eventChars = 0
     let completed = false
-
-    const dispatch = () => {
-      if (data.length === 0 || completed) {
-        data = []
-        eventChars = 0
-        return
-      }
+    const dispatch = (data: string) => {
       let value: unknown
       try {
-        value = JSON.parse(data.join("\n"))
+        value = JSON.parse(data)
       } catch (cause) {
         throw new HexError("invalid-response", "HEX returned malformed model progress", { cause })
       }
-      data = []
-      eventChars = 0
       const progress = decodeProgress(value)
       if (progress === "ok") {
         completed = true
-        return
+        return true
       }
       try {
         options?.onProgress?.(progress)
@@ -167,74 +148,10 @@ export const makeClient = (
       if (signal.aborted) throw abortError(signal)
     }
 
-    const acceptLine = () => {
-      if (line === "") {
-        dispatch()
-      } else if (!line.startsWith(":")) {
-        const separator = line.indexOf(":")
-        const field = separator < 0 ? line : line.slice(0, separator)
-        let value = separator < 0 ? "" : line.slice(separator + 1)
-        if (value.startsWith(" ")) value = value.slice(1)
-        if (field === "data") {
-          eventChars += value.length + 1
-          if (eventChars > MAX_SSE_EVENT_CHARS) {
-            throw new HexError("invalid-response", "HEX model progress event exceeded its byte limit")
-          }
-          data.push(value)
-        }
-      }
-      line = ""
-    }
-
-    const accept = (chunk: string, end: boolean) => {
-      for (const character of chunk) {
-        if (signal.aborted) throw abortError(signal)
-        if (completed) return
-        if (pendingCarriageReturn) {
-          pendingCarriageReturn = false
-          acceptLine()
-          if (character === "\n") continue
-        }
-        if (character === "\r") {
-          pendingCarriageReturn = true
-        } else if (character === "\n") {
-          acceptLine()
-        } else {
-          line += character
-          if (line.length > MAX_SSE_EVENT_CHARS) {
-            throw new HexError("invalid-response", "HEX model progress line exceeded its byte limit")
-          }
-        }
-      }
-      if (end) {
-        if (pendingCarriageReturn) {
-          pendingCarriageReturn = false
-          acceptLine()
-        } else if (line !== "") {
-          acceptLine()
-        }
-        dispatch()
-      }
-    }
-
     try {
-      while (!completed) {
-        const result = await reader.read()
-        if (result.done) {
-          accept("", true)
-          break
-        }
-        accept(result.value, false)
-      }
+      await consumeSse(response, signal, "model progress", dispatch)
     } catch (cause) {
       throw boundaryError(cause, signal, "invalid-response", "HEX model progress stream failed")
-    } finally {
-      try {
-        await reader.cancel()
-      } catch {
-        // The underlying stream may already be closed or aborted.
-      }
-      reader.releaseLock()
     }
     if (!completed) throw new HexError("model-prepare-failed", "HEX model preparation ended without a result")
   }
@@ -353,37 +270,9 @@ export const makeClient = (
         { headers: dictationHeaders(ownerToken) },
         streamSignal,
       )
-      if (!response.headers.get("content-type")?.toLowerCase().startsWith("text/event-stream")) {
-        throw new HexError("invalid-response", "HEX returned an invalid dictation level content type")
-      }
-      if (response.body === null) throw new HexError("invalid-response", "HEX returned no dictation level stream")
-      const reader = response.body.pipeThrough(new TextDecoderStream()).getReader()
-      let buffer = ""
-      try {
-        while (true) {
-          const chunk = await reader.read()
-          if (chunk.done) break
-          if (signal.aborted) throw abortError(signal)
-          buffer += chunk.value
-          if (buffer.length > MAX_SSE_EVENT_CHARS) {
-            throw new HexError("invalid-response", "HEX dictation level stream exceeded its byte limit")
-          }
-          let match = /\r?\n\r?\n/.exec(buffer)
-          while (match !== null) {
-            const event = buffer.slice(0, match.index)
-            buffer = buffer.slice(match.index + match[0].length)
-            const data = event.split(/\r?\n/)
-              .filter((line) => line.startsWith("data:"))
-              .map((line) => line.slice(5).trimStart())
-              .join("\n")
-            if (data !== "") push(decodeDictationLevel(JSON.parse(data)))
-            match = /\r?\n\r?\n/.exec(buffer)
-          }
-        }
-      } finally {
-        if (signal.aborted) await reader.cancel(signal.reason).catch(() => {})
-        reader.releaseLock()
-      }
+      await consumeSse(response, signal, "dictation level", (data) => {
+        if (data !== "") push(decodeDictationLevel(JSON.parse(data)))
+      })
     })
 
   const audioStream = (id: number, ownerToken: string): AsyncIterable<Float32Array> =>

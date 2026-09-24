@@ -5,56 +5,6 @@ use crate::transcription_models::{
     ModelPreparationStage, TranscriptionModelId, TranscriptionSelection,
 };
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-#[cfg_attr(target_os = "linux", allow(dead_code))]
-pub(crate) struct DesktopCapabilities {
-    pub(crate) activity: bool,
-    pub(crate) commands: bool,
-    pub(crate) history: bool,
-    pub(crate) hud_lab: bool,
-    pub(crate) meetings: bool,
-    pub(crate) modes: bool,
-    pub(crate) replacements: bool,
-    pub(crate) listener_control: bool,
-    pub(crate) update_restart: bool,
-    pub(crate) voice_action: bool,
-}
-
-impl DesktopCapabilities {
-    #[cfg(target_os = "macos")]
-    pub(crate) const fn macos(developer_features: bool) -> Self {
-        Self {
-            activity: developer_features,
-            commands: true,
-            history: true,
-            hud_lab: developer_features,
-            meetings: developer_features,
-            modes: true,
-            replacements: true,
-            listener_control: false,
-            update_restart: false,
-            voice_action: true,
-        }
-    }
-
-    #[cfg(any(target_os = "linux", test))]
-    #[cfg_attr(target_os = "linux", allow(dead_code))]
-    pub(crate) const fn linux_x11() -> Self {
-        Self {
-            activity: false,
-            commands: false,
-            history: false,
-            hud_lab: false,
-            meetings: false,
-            modes: false,
-            replacements: false,
-            listener_control: true,
-            update_restart: true,
-            voice_action: false,
-        }
-    }
-}
-
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct DesktopSnapshot {
     pub(crate) activity: DesktopActivity,
@@ -83,14 +33,11 @@ pub(crate) struct DesktopListenerSnapshot {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
-#[cfg_attr(target_os = "macos", allow(dead_code))]
 pub(crate) enum DesktopUpdateStatus {
     Unavailable,
     Checking,
     Current,
     Failed,
-    #[cfg(target_os = "macos")]
-    Available,
     ReadyToRestart,
 }
 
@@ -105,7 +52,6 @@ pub(crate) struct DesktopShortcut {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
-#[cfg_attr(target_os = "macos", allow(dead_code))]
 pub(crate) enum DesktopAction {
     ClearError,
     RestartIntoUpdate,
@@ -116,9 +62,8 @@ pub(crate) enum DesktopAction {
     StopListening,
 }
 
+/// Contract between the Linux Settings client and its service-owned runtime.
 pub(crate) trait DesktopHost {
-    #[cfg_attr(target_os = "linux", allow(dead_code))]
-    fn capabilities(&self) -> DesktopCapabilities;
     fn snapshot(&self) -> DesktopSnapshot;
     fn dispatch(&mut self, action: DesktopAction) -> Result<()>;
 }
@@ -132,10 +77,6 @@ mod tests {
     struct TestHost;
 
     impl DesktopHost for TestHost {
-        fn capabilities(&self) -> DesktopCapabilities {
-            DesktopCapabilities::linux_x11()
-        }
-
         fn snapshot(&self) -> DesktopSnapshot {
             DesktopSnapshot {
                 activity: DesktopActivity::default(),
@@ -163,24 +104,5 @@ mod tests {
     #[test]
     fn host_can_be_contained_by_the_shared_window() {
         owns_host_object(Box::new(TestHost));
-    }
-
-    #[test]
-    fn linux_exposes_only_implemented_product_capabilities() {
-        assert_eq!(
-            DesktopCapabilities::linux_x11(),
-            DesktopCapabilities {
-                activity: false,
-                commands: false,
-                history: false,
-                hud_lab: false,
-                meetings: false,
-                modes: false,
-                replacements: false,
-                listener_control: true,
-                update_restart: true,
-                voice_action: false,
-            }
-        );
     }
 }

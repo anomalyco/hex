@@ -11,7 +11,7 @@ version_dir="$install_root/versions/$version"
 installed="$version_dir/HEX Service.app"
 runtime="$install_root/runtime"
 staging="$install_root/.staging-$version-$$"
-expected_team=${VOICE_CONTROL_TEAM_ID:-QC99C9JE59}
+expected_team=${VOICE_CONTROL_TEAM_ID:?Set VOICE_CONTROL_TEAM_ID to the Apple Developer signing team}
 expected_identifier=com.kitlangton.hex.service
 pid=
 
@@ -90,7 +90,7 @@ health=$(curl --fail --silent --show-error \
 models=$(curl --fail --silent --show-error \
   -H "Authorization: Bearer $token" \
   "http://127.0.0.1:$port/models")
-jq -e '.apiVersion == "1" and .version != null' >/dev/null <<EOF
+jq -e '.apiVersion == "2" and .version != null' >/dev/null <<EOF
 $health
 EOF
 jq -e 'length > 0 and .[0].id == "parakeet_unified_en"' >/dev/null <<EOF

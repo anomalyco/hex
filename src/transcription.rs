@@ -2,6 +2,7 @@ use color_eyre::eyre::Result;
 use serde::Deserialize;
 
 use crate::apple_speech::AppleSpeech;
+use crate::dictation::DictationProtocol;
 use crate::parakeet::Parakeet;
 use crate::transcription_models::{
     ModelRuntime, TranscriptionModelId, TranscriptionSelection, validate,
@@ -56,35 +57,59 @@ impl Transcriber {
         }
     }
 
-    pub fn prepare_samples(&self, mut samples: Vec<f32>) -> Vec<f32> {
-        if let Self::Gguf(model) = self {
-            prepare_gguf_samples(&mut samples, model.model_id());
-        }
-        samples
+    /// Transcribe normalized 16 kHz audio. Backend padding is applied once here,
+    /// before GGUF chunking or any voice-control retranscription.
+    pub fn transcribe(&mut self, samples: Vec<f32>) -> Result<String> {
+        self.transcribe_with_protocol(samples, None)
     }
 
-    pub fn transcribe(&mut self, samples: &[f32]) -> Result<String> {
+    pub fn transcribe_voice(
+        &mut self,
+        samples: Vec<f32>,
+        protocol: &DictationProtocol,
+    ) -> Result<String> {
+        self.transcribe_with_protocol(samples, Some(protocol))
+    }
+
+    fn transcribe_with_protocol(
+        &mut self,
+        mut samples: Vec<f32>,
+        protocol: Option<&DictationProtocol>,
+    ) -> Result<String> {
         match self {
-            Self::Gguf(model) => model.transcribe(samples),
-            Self::AppleSpeech(model) => model.transcribe(samples).map(|result| result.text),
+            Self::Gguf(model) => {
+                prepare_gguf_samples(&mut samples, model.model_id());
+                match protocol {
+                    Some(protocol) => model.transcribe_voice(&samples, protocol),
+                    None => model.transcribe(&samples),
+                }
+            }
+            Self::AppleSpeech(model) => model.transcribe(&samples).map(|result| result.text),
         }
     }
 
-    pub fn transcribe_segments(&mut self, samples: &[f32]) -> Result<Transcript> {
+    /// Transcribe one normalized segment with the same input preparation as
+    /// plain dictation. The caller retains ownership of segment offsets.
+    pub fn transcribe_segments(&mut self, mut samples: Vec<f32>) -> Result<Transcript> {
         match self {
-            Self::Gguf(model) => model.transcribe_segments(samples).map(|result| Transcript {
-                text: result.text,
-                segments: result
-                    .segments
-                    .into_iter()
-                    .map(|segment| TranscriptSegment {
-                        start_ms: segment.t0_ms,
-                        end_ms: segment.t1_ms,
-                        text: segment.text,
+            Self::Gguf(model) => {
+                prepare_gguf_samples(&mut samples, model.model_id());
+                model
+                    .transcribe_segments(&samples)
+                    .map(|result| Transcript {
+                        text: result.text,
+                        segments: result
+                            .segments
+                            .into_iter()
+                            .map(|segment| TranscriptSegment {
+                                start_ms: segment.t0_ms,
+                                end_ms: segment.t1_ms,
+                                text: segment.text,
+                            })
+                            .collect(),
                     })
-                    .collect(),
-            }),
-            Self::AppleSpeech(model) => model.transcribe(samples),
+            }
+            Self::AppleSpeech(model) => model.transcribe(&samples),
         }
     }
 }
@@ -164,5 +189,22 @@ mod tests {
         prepare_gguf_samples(&mut samples, Some(TranscriptionModelId::ParakeetV2));
 
         assert_eq!(samples.len(), 32_000);
+    }
+
+    #[test]
+    fn short_unified_input_is_minimum_padded_before_trailing_context() {
+        let mut samples = vec![0.5; 1_600];
+        prepare_gguf_samples(
+            &mut samples,
+            Some(TranscriptionModelId::ParakeetUnifiedEnglish),
+        );
+
+        // The 200 ms context is additional to the 1.5 s minimum, not part of it.
+        assert_eq!(
+            samples.len(),
+            24_000 + UNIFIED_ENGLISH_TRAILING_SILENCE_SAMPLES
+        );
+        assert!(samples[..1_600].iter().all(|sample| *sample == 0.5));
+        assert!(samples[1_600..].iter().all(|sample| *sample == 0.0));
     }
 }

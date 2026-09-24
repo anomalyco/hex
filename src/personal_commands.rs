@@ -823,19 +823,58 @@ struct PendingInvocation {
     started: Instant,
 }
 
+impl PendingInvocation {
+    fn into_outcome(self, result: std::result::Result<(), String>) -> ActionOutcome {
+        ActionOutcome {
+            id: self.command_id,
+            heard: self.heard,
+            context: self.context,
+            result,
+        }
+    }
+}
+
 struct PendingTransformation {
     generation: u64,
     response: SyncSender<std::result::Result<String, String>>,
     started: Instant,
 }
 
-type CandidateRegistration = (
-    HostProcess,
-    RuntimeSnapshot,
-    Vec<StatusCommand>,
-    Option<StatusDictationProtocol>,
-    Vec<StatusTransformation>,
-);
+/// Live host processes and the work still awaiting each generation's reply.
+#[derive(Default)]
+struct Generations {
+    hosts: HashMap<u64, HostProcess>,
+    pending: HashMap<String, PendingInvocation>,
+    pending_transformations: HashMap<String, PendingTransformation>,
+    pending_tools: HashSet<(u64, String, String)>,
+}
+
+/// Everything a host launch needs that stays fixed for the worker's lifetime.
+struct HostLaunch<'a> {
+    base: &'a CommandConfig,
+    workspace: &'a Path,
+    config: &'a Path,
+    bun: &'a Path,
+    host_entrypoint: &'a Path,
+    event_sender: &'a SyncSender<HostEvent>,
+}
+
+/// A host that registered successfully, before it replaces the active registry.
+struct Candidate {
+    host: HostProcess,
+    runtime: RuntimeSnapshot,
+    catalog: Vec<StatusCommand>,
+    dictation: Option<StatusDictationProtocol>,
+    transformations: Vec<StatusTransformation>,
+}
+
+/// Resolved tooling for the configured personal command workspace.
+struct HostPaths {
+    workspace: PathBuf,
+    config: PathBuf,
+    bun: PathBuf,
+    host_entrypoint: PathBuf,
+}
 
 #[derive(Default)]
 struct RestartBackoff {
@@ -1212,76 +1251,24 @@ fn run_worker(
         ..StatusSnapshot::default()
     };
     persist_status(&status);
-    let workspace = match crate::app_paths::personal_commands_workspace() {
-        Ok(workspace) => workspace,
-        Err(error) => {
-            status.host_state = HostState::Unavailable;
-            status.last_reload_error = Some(bounded_status_error(&error.to_string()));
+    let HostPaths {
+        workspace,
+        config,
+        bun,
+        host_entrypoint,
+    } = match prepare_host() {
+        Ok(Some(paths)) => paths,
+        Ok(None) => {
+            status.host_state = HostState::NotConfigured;
             persist_status(&status);
-            tracing::warn!(%error, "personal commands are unavailable");
             return;
         }
-    };
-    let config = workspace.join("hex.config.ts");
-    if !config.is_file() {
-        status.host_state = HostState::NotConfigured;
-        persist_status(&status);
-        return;
-    }
-    let Some(bun) = find_bun() else {
-        status.host_state = HostState::Unavailable;
-        status.last_reload_error = Some("Bun was not found".into());
-        persist_status(&status);
-        tracing::warn!("Bun was not found; personal commands are unavailable");
-        return;
-    };
-    let sdk = match crate::app_paths::personal_commands_sdk() {
-        Ok(sdk) => sdk,
         Err(error) => {
+            let error = format!("{error:#}");
             status.host_state = HostState::Unavailable;
-            status.last_reload_error = Some(bounded_status_error(&error.to_string()));
+            status.last_reload_error = Some(bounded_status_error(&error));
             persist_status(&status);
-            tracing::warn!(%error, "personal command SDK is unavailable");
-            return;
-        }
-    };
-    let workspace_changed = match refresh_managed_sdk_at(&workspace, &sdk) {
-        Ok(changed) => changed,
-        Err(error) => {
-            status.host_state = HostState::Unavailable;
-            status.last_reload_error = Some(bounded_status_error(&error.to_string()));
-            persist_status(&status);
-            tracing::warn!(%error, "could not refresh the managed personal command SDK");
-            return;
-        }
-    };
-    let managed_host = workspace.join("node_modules/@hex/commands/dist/bin.js");
-    if workspace_changed || !managed_host.is_file() {
-        let refreshed = (|| {
-            if workspace_changed {
-                remove_installed_managed_sdk(&workspace)?;
-            }
-            install_workspace_dependencies(&workspace, &bun)
-        })();
-        if let Err(error) = refreshed {
-            status.host_state = HostState::Unavailable;
-            status.last_reload_error = Some(bounded_status_error(&error.to_string()));
-            persist_status(&status);
-            tracing::warn!(%error, "could not activate the current personal command SDK");
-            return;
-        }
-        tracing::info!(
-            workspace_changed,
-            "refreshed the managed personal command SDK"
-        );
-    }
-    let host_entrypoint = match crate::app_paths::personal_commands_host() {
-        Ok(path) => path,
-        Err(error) => {
-            status.host_state = HostState::Unavailable;
-            status.last_reload_error = Some(bounded_status_error(&error.to_string()));
-            persist_status(&status);
-            tracing::warn!(%error, "personal commands are unavailable");
+            tracing::warn!(error, "personal commands are unavailable");
             return;
         }
     };
@@ -1294,43 +1281,36 @@ fn run_worker(
     let _ = thread::Builder::new()
         .name("personal-command-watch".into())
         .spawn(move || watch_workspace(watcher_workspace, reload_sender, watcher_stop));
+    let launch = HostLaunch {
+        base: &base,
+        workspace: &workspace,
+        config: &config,
+        bun: &bun,
+        host_entrypoint: &host_entrypoint,
+        event_sender: &event_sender,
+    };
     let mut generation = 0;
-    let mut hosts = HashMap::new();
+    let mut generations = Generations::default();
     let mut restart_backoff = RestartBackoff::default();
     if let Some(host) = reload(
-        &base,
+        &launch,
         &active,
-        &event_sender,
-        &workspace,
-        &config,
-        &bun,
-        &host_entrypoint,
         &mut generation,
         &mut status,
         &request_sender,
         &transformations,
     ) {
         restart_backoff.host_started(Instant::now());
-        hosts.insert(host.generation, host);
+        generations.hosts.insert(host.generation, host);
     }
     let mut next_invocation = 0_u64;
-    let mut pending = HashMap::<String, PendingInvocation>::new();
-    let mut pending_transformations = HashMap::<String, PendingTransformation>::new();
-    let mut pending_tools = HashSet::<(u64, String, String)>::new();
 
     while !stop.load(Ordering::Acquire) {
         restart_backoff.reset_if_healthy(Instant::now());
         let mut active_host_failed = false;
         while let Ok(event) = events.try_recv() {
-            active_host_failed |= handle_host_event(
-                event,
-                &mut hosts,
-                &mut pending,
-                &mut pending_transformations,
-                &mut pending_tools,
-                &outcomes,
-                &tool_sender,
-            );
+            active_host_failed |=
+                handle_host_event(event, &mut generations, &outcomes, &tool_sender);
         }
         if active_host_failed {
             restart_backoff.host_failed(Instant::now());
@@ -1344,26 +1324,21 @@ fn run_worker(
         let automatic_restart = !config_reload && restart_backoff.ready(Instant::now());
         if config_reload || automatic_restart {
             if let Some(candidate) = reload(
-                &base,
+                &launch,
                 &active,
-                &event_sender,
-                &workspace,
-                &config,
-                &bun,
-                &host_entrypoint,
                 &mut generation,
                 &mut status,
                 &request_sender,
                 &transformations,
             ) {
                 let now = Instant::now();
-                for host in hosts.values_mut() {
+                for host in generations.hosts.values_mut() {
                     if host.retire_at.is_none() {
                         host.retire_at = Some(now + RETIRE_TIMEOUT);
                     }
                 }
                 restart_backoff.host_started(now);
-                hosts.insert(candidate.generation, candidate);
+                generations.hosts.insert(candidate.generation, candidate);
             } else if automatic_restart {
                 restart_backoff.host_failed(Instant::now());
             }
@@ -1371,7 +1346,7 @@ fn run_worker(
         match request {
             Ok(Request::Invoke(invocation)) => {
                 let invocation = *invocation;
-                if pending.len() >= MAX_PENDING_INVOCATIONS {
+                if generations.pending.len() >= MAX_PENDING_INVOCATIONS {
                     emit_failure(
                         invocation,
                         &outcomes,
@@ -1379,7 +1354,7 @@ fn run_worker(
                     );
                     continue;
                 }
-                let Some(host) = hosts.get(&invocation.generation) else {
+                let Some(host) = generations.hosts.get(&invocation.generation) else {
                     emit_failure(
                         invocation,
                         &outcomes,
@@ -1415,17 +1390,7 @@ fn run_worker(
                 if let Err(error) = host.input.try_send(input) {
                     let reason = writer_queue_error(error);
                     emit_failure(invocation, &outcomes, reason);
-                    let restart = generation_is_active(&hosts, host_generation);
-                    fail_generation(
-                        host_generation,
-                        &mut hosts,
-                        &mut pending,
-                        &mut pending_transformations,
-                        &mut pending_tools,
-                        &outcomes,
-                        reason,
-                    );
-                    if restart {
+                    if generations.fail(host_generation, &outcomes, reason) {
                         restart_backoff.host_failed(Instant::now());
                     }
                 } else {
@@ -1437,7 +1402,7 @@ fn run_worker(
                         status = "dispatched",
                         "personal command invocation"
                     );
-                    pending.insert(
+                    generations.pending.insert(
                         invocation_id,
                         PendingInvocation {
                             generation: invocation.generation,
@@ -1452,13 +1417,13 @@ fn run_worker(
             }
             Ok(Request::Transform(request)) => {
                 let request = *request;
-                if pending_transformations.len() >= MAX_PENDING_INVOCATIONS {
+                if generations.pending_transformations.len() >= MAX_PENDING_INVOCATIONS {
                     let _ = request.response.send(Err(
                         "too many custom transformations are still running".into(),
                     ));
                     continue;
                 }
-                let Some(host) = hosts.get(&request.generation) else {
+                let Some(host) = generations.hosts.get(&request.generation) else {
                     let _ = request
                         .response
                         .send(Err("custom transformation generation is unavailable".into()));
@@ -1481,7 +1446,7 @@ fn run_worker(
                         .response
                         .send(Err("custom transformation host is unavailable".into()));
                 } else {
-                    pending_transformations.insert(
+                    generations.pending_transformations.insert(
                         invocation_id,
                         PendingTransformation {
                             generation: request.generation,
@@ -1497,7 +1462,8 @@ fn run_worker(
         }
 
         let now = Instant::now();
-        let timed_out_generations = pending_transformations
+        let timed_out_generations = generations
+            .pending_transformations
             .values()
             .filter_map(|invocation| {
                 (invocation.started.elapsed() >= TRANSFORMATION_TIMEOUT)
@@ -1505,45 +1471,30 @@ fn run_worker(
             })
             .collect::<HashSet<_>>();
         for generation in timed_out_generations {
-            let restart = generation_is_active(&hosts, generation);
-            fail_generation(
-                generation,
-                &mut hosts,
-                &mut pending,
-                &mut pending_transformations,
-                &mut pending_tools,
-                &outcomes,
-                "custom transformations timed out",
-            );
-            if restart {
+            if generations.fail(generation, &outcomes, "custom transformations timed out") {
                 restart_backoff.host_failed(now);
             }
         }
-        let retired = hosts
+        let retired = generations
+            .hosts
             .iter()
             .filter_map(|(generation, host)| {
-                let has_pending = pending
+                let has_pending = generations
+                    .pending
                     .values()
                     .any(|invocation| invocation.generation == *generation)
-                    || pending_transformations
+                    || generations
+                        .pending_transformations
                         .values()
                         .any(|invocation| invocation.generation == *generation);
                 should_retire(host.retire_at, has_pending, now).then_some(*generation)
             })
             .collect::<Vec<_>>();
         for generation in retired {
-            fail_generation(
-                generation,
-                &mut hosts,
-                &mut pending,
-                &mut pending_transformations,
-                &mut pending_tools,
-                &outcomes,
-                "personal command generation retired",
-            );
+            generations.fail(generation, &outcomes, "personal command generation retired");
         }
     }
-    for host in hosts.values() {
+    for host in generations.hosts.values() {
         let _ = host.input.try_send(HostInput::Shutdown);
     }
     status.host_state = HostState::Stopped;
@@ -1551,42 +1502,63 @@ fn run_worker(
     persist_status(&status);
 }
 
-#[allow(clippy::too_many_arguments)]
+/// Resolves the workspace, Bun, and managed SDK a host launch needs. `Ok(None)`
+/// means no `hex.config.ts` exists, so personal commands are not configured.
+fn prepare_host() -> Result<Option<HostPaths>> {
+    let workspace = crate::app_paths::personal_commands_workspace()?;
+    let config = workspace.join("hex.config.ts");
+    if !config.is_file() {
+        return Ok(None);
+    }
+    let bun = find_bun().ok_or_else(|| eyre!("Bun was not found"))?;
+    let sdk = crate::app_paths::personal_commands_sdk()
+        .wrap_err("personal command SDK is unavailable")?;
+    let workspace_changed = refresh_managed_sdk_at(&workspace, &sdk)
+        .wrap_err("could not refresh the managed personal command SDK")?;
+    let managed_host = workspace.join("node_modules/@hex/commands/dist/bin.js");
+    if workspace_changed || !managed_host.is_file() {
+        if workspace_changed {
+            remove_installed_managed_sdk(&workspace)
+                .wrap_err("could not activate the current personal command SDK")?;
+        }
+        install_workspace_dependencies(&workspace, &bun)
+            .wrap_err("could not activate the current personal command SDK")?;
+        tracing::info!(
+            workspace_changed,
+            "refreshed the managed personal command SDK"
+        );
+    }
+    let host_entrypoint = crate::app_paths::personal_commands_host()?;
+    Ok(Some(HostPaths {
+        workspace,
+        config,
+        bun,
+        host_entrypoint,
+    }))
+}
+
 fn reload(
-    base: &CommandConfig,
+    launch: &HostLaunch<'_>,
     active: &RwLock<Arc<RuntimeSnapshot>>,
-    event_sender: &SyncSender<HostEvent>,
-    workspace: &Path,
-    config: &Path,
-    bun: &Path,
-    host_entrypoint: &Path,
     generation: &mut u64,
     status: &mut StatusSnapshot,
     requests: &SyncSender<Request>,
     transformations: &TransformationClient,
 ) -> Option<HostProcess> {
     *generation += 1;
-    match start_candidate(
-        *generation,
-        base,
-        event_sender,
-        workspace,
-        config,
-        bun,
-        host_entrypoint,
-    ) {
-        Ok((host, runtime, catalog, dictation, transformation_catalog)) => {
-            transformations.activate(&runtime, requests.clone());
-            *active.write().expect("command registry poisoned") = Arc::new(runtime);
+    match start_candidate(*generation, launch) {
+        Ok(candidate) => {
+            transformations.activate(&candidate.runtime, requests.clone());
+            *active.write().expect("command registry poisoned") = Arc::new(candidate.runtime);
             status.active_generation = Some(*generation);
-            status.catalog = catalog;
-            status.dictation = dictation;
-            status.transformations = transformation_catalog;
+            status.catalog = candidate.catalog;
+            status.dictation = candidate.dictation;
+            status.transformations = candidate.transformations;
             status.host_state = HostState::Active;
             status.last_reload_error = None;
             persist_status(status);
             tracing::info!(generation, "personal commands activated");
-            Some(host)
+            Some(candidate.host)
         }
         Err(error) => {
             status.host_state = if status.active_generation.is_some() {
@@ -1602,20 +1574,11 @@ fn reload(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-fn start_candidate(
-    generation: u64,
-    base: &CommandConfig,
-    event_sender: &SyncSender<HostEvent>,
-    workspace: &Path,
-    config: &Path,
-    bun: &Path,
-    host_entrypoint: &Path,
-) -> Result<CandidateRegistration> {
-    let mut child = Command::new(bun)
-        .arg(host_entrypoint)
-        .arg(config)
-        .current_dir(workspace)
+fn start_candidate(generation: u64, launch: &HostLaunch<'_>) -> Result<Candidate> {
+    let mut child = Command::new(launch.bun)
+        .arg(launch.host_entrypoint)
+        .arg(launch.config)
+        .current_dir(launch.workspace)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit())
@@ -1658,21 +1621,21 @@ fn start_candidate(
                         description: transformation.description.clone(),
                     })
                     .collect();
-                let compiled = match compile_registration(
-                    base,
+                let runtime = match compile_registration(
+                    launch.base,
                     generation,
                     protocol_version,
                     dictation,
                     transformations,
                     commands,
                 ) {
-                    Ok(compiled) => compiled,
+                    Ok(runtime) => runtime,
                     Err(error) => {
                         kill_and_wait(&mut child);
                         return Err(error);
                     }
                 };
-                let active_sender = event_sender.clone();
+                let active_sender = launch.event_sender.clone();
                 thread::spawn(move || {
                     while let Ok(event) = candidate_events.recv() {
                         if active_sender.send(event).is_err() {
@@ -1680,19 +1643,19 @@ fn start_candidate(
                         }
                     }
                 });
-                let input = spawn_writer(generation, input, event_sender.clone());
-                return Ok((
-                    HostProcess {
+                let input = spawn_writer(generation, input, launch.event_sender.clone());
+                return Ok(Candidate {
+                    host: HostProcess {
                         generation,
                         child,
                         input,
                         retire_at: None,
                     },
-                    compiled,
+                    runtime,
                     catalog,
-                    status_dictation,
-                    status_transformations,
-                ));
+                    dictation: status_dictation,
+                    transformations: status_transformations,
+                });
             }
             Ok(HostEvent::Closed(event_generation, error)) if event_generation == generation => {
                 kill_and_wait(&mut child);
@@ -1739,10 +1702,7 @@ fn status_catalog(commands: &[RegistrationCommand]) -> Vec<StatusCommand> {
 
 fn handle_host_event(
     event: HostEvent,
-    hosts: &mut HashMap<u64, HostProcess>,
-    pending: &mut HashMap<String, PendingInvocation>,
-    pending_transformations: &mut HashMap<String, PendingTransformation>,
-    pending_tools: &mut HashSet<(u64, String, String)>,
+    generations: &mut Generations,
     outcomes: &SyncSender<ActionOutcome>,
     tool_sender: &SyncSender<ToolJob>,
 ) -> bool {
@@ -1755,26 +1715,20 @@ fn handle_host_event(
                 action,
             },
         ) => {
-            let valid = hosts.contains_key(&generation)
+            let valid = generations.hosts.contains_key(&generation)
                 && accept_tool_call(
-                    pending,
-                    pending_tools,
+                    &mut generations.pending,
+                    &mut generations.pending_tools,
                     generation,
                     &invocation_id,
                     &tool_call_id,
                 );
             if !valid {
-                let restart = generation_is_active(hosts, generation);
-                fail_generation(
+                return generations.fail(
                     generation,
-                    hosts,
-                    pending,
-                    pending_transformations,
-                    pending_tools,
                     outcomes,
                     "personal command host sent an invalid or excessive tool call",
                 );
-                return restart;
             }
             let correlation = (generation, invocation_id.clone(), tool_call_id.clone());
             if tool_sender
@@ -1786,18 +1740,12 @@ fn handle_host_event(
                 })
                 .is_err()
             {
-                pending_tools.remove(&correlation);
-                let restart = generation_is_active(hosts, generation);
-                fail_generation(
+                generations.pending_tools.remove(&correlation);
+                return generations.fail(
                     generation,
-                    hosts,
-                    pending,
-                    pending_transformations,
-                    pending_tools,
                     outcomes,
                     "personal command native tool queue is unavailable",
                 );
-                return restart;
             }
             false
         }
@@ -1808,52 +1756,44 @@ fn handle_host_event(
                 result,
             },
         ) => {
-            let valid = pending
+            let valid = generations
+                .pending
                 .get(&invocation_id)
                 .is_some_and(|invocation| invocation.generation == generation)
-                && !pending_tools
-                    .iter()
-                    .any(|(tool_generation, tool_invocation, _)| {
+                && !generations.pending_tools.iter().any(
+                    |(tool_generation, tool_invocation, _)| {
                         *tool_generation == generation && tool_invocation == &invocation_id
-                    });
-            if valid {
-                let invocation = pending.remove(&invocation_id).expect("invocation checked");
-                let result = match result {
-                    WireResult::Success => Ok(()),
-                    WireResult::Failure { message } => Err(bounded_error(&message)),
-                };
-                tracing::info!(
-                    generation,
-                    invocation_id,
-                    command_id = invocation.command_id,
-                    execution_kind = "handler",
-                    status = if result.is_ok() {
-                        "completed"
-                    } else {
-                        "failed"
                     },
-                    duration_ms = invocation.started.elapsed().as_millis(),
-                    "personal command invocation"
                 );
-                let _ = outcomes.send(ActionOutcome {
-                    id: invocation.command_id,
-                    heard: invocation.heard,
-                    context: invocation.context,
-                    result,
-                });
-            } else {
-                let restart = generation_is_active(hosts, generation);
-                fail_generation(
+            if !valid {
+                return generations.fail(
                     generation,
-                    hosts,
-                    pending,
-                    pending_transformations,
-                    pending_tools,
                     outcomes,
                     "personal command host sent an invalid invocation result",
                 );
-                return restart;
             }
+            let invocation = generations
+                .pending
+                .remove(&invocation_id)
+                .expect("invocation checked");
+            let result = match result {
+                WireResult::Success => Ok(()),
+                WireResult::Failure { message } => Err(bounded_error(&message)),
+            };
+            tracing::info!(
+                generation,
+                invocation_id,
+                command_id = invocation.command_id,
+                execution_kind = "handler",
+                status = if result.is_ok() {
+                    "completed"
+                } else {
+                    "failed"
+                },
+                duration_ms = invocation.started.elapsed().as_millis(),
+                "personal command invocation"
+            );
+            let _ = outcomes.send(invocation.into_outcome(result));
             false
         }
         HostEvent::Frame(
@@ -1863,49 +1803,44 @@ fn handle_host_event(
                 result,
             },
         ) => {
-            let valid = pending_transformations
+            let valid = generations
+                .pending_transformations
                 .get(&invocation_id)
                 .is_some_and(|invocation| invocation.generation == generation);
-            if valid {
-                let invocation = pending_transformations
-                    .remove(&invocation_id)
-                    .expect("transformation invocation checked");
-                let result = match result {
-                    TransformationWireResult::Success { text }
-                        if text.len() <= MAX_TRANSFORMATION_TEXT_BYTES =>
-                    {
-                        Ok(text)
-                    }
-                    TransformationWireResult::Success { .. } => {
-                        Err("custom transformation output is too large".into())
-                    }
-                    TransformationWireResult::Failure { message } => Err(bounded_error(&message)),
-                };
-                tracing::info!(
+            if !valid {
+                return generations.fail(
                     generation,
-                    invocation_id,
-                    status = if result.is_ok() {
-                        "completed"
-                    } else {
-                        "failed"
-                    },
-                    duration_ms = invocation.started.elapsed().as_millis(),
-                    "custom transformation invocation"
-                );
-                let _ = invocation.response.send(result);
-            } else {
-                let restart = generation_is_active(hosts, generation);
-                fail_generation(
-                    generation,
-                    hosts,
-                    pending,
-                    pending_transformations,
-                    pending_tools,
                     outcomes,
                     "personal command host sent an invalid transformation result",
                 );
-                return restart;
             }
+            let invocation = generations
+                .pending_transformations
+                .remove(&invocation_id)
+                .expect("transformation invocation checked");
+            let result = match result {
+                TransformationWireResult::Success { text }
+                    if text.len() <= MAX_TRANSFORMATION_TEXT_BYTES =>
+                {
+                    Ok(text)
+                }
+                TransformationWireResult::Success { .. } => {
+                    Err("custom transformation output is too large".into())
+                }
+                TransformationWireResult::Failure { message } => Err(bounded_error(&message)),
+            };
+            tracing::info!(
+                generation,
+                invocation_id,
+                status = if result.is_ok() {
+                    "completed"
+                } else {
+                    "failed"
+                },
+                duration_ms = invocation.started.elapsed().as_millis(),
+                "custom transformation invocation"
+            );
+            let _ = invocation.response.send(result);
             false
         }
         HostEvent::ToolResult(generation, result) => {
@@ -1914,8 +1849,8 @@ fn handle_host_event(
                 result.invocation_id.clone(),
                 result.tool_call_id.clone(),
             );
-            if pending_tools.remove(&correlation)
-                && let Some(host) = hosts.get(&generation)
+            if generations.pending_tools.remove(&correlation)
+                && let Some(host) = generations.hosts.get(&generation)
             {
                 let frame = HostInput::ToolResult {
                     invocation_id: result.invocation_id,
@@ -1923,56 +1858,79 @@ fn handle_host_event(
                     result: result.result,
                 };
                 if host.input.try_send(frame).is_err() {
-                    let restart = generation_is_active(hosts, generation);
-                    fail_generation(
+                    return generations.fail(
                         generation,
-                        hosts,
-                        pending,
-                        pending_transformations,
-                        pending_tools,
                         outcomes,
                         "personal command host writer is unavailable",
                     );
-                    return restart;
                 }
             }
             false
         }
-        HostEvent::Closed(generation, error) if hosts.contains_key(&generation) => {
+        HostEvent::Closed(generation, error) if generations.hosts.contains_key(&generation) => {
             tracing::error!(generation, %error, "personal command host stopped");
-            let restart = generation_is_active(hosts, generation);
-            fail_generation(
-                generation,
-                hosts,
-                pending,
-                pending_transformations,
-                pending_tools,
-                outcomes,
-                "personal command host stopped",
-            );
-            restart
+            generations.fail(generation, outcomes, "personal command host stopped")
         }
-        HostEvent::Frame(generation, HostOutput::Registration { .. }) => {
-            let restart = generation_is_active(hosts, generation);
-            fail_generation(
-                generation,
-                hosts,
-                pending,
-                pending_transformations,
-                pending_tools,
-                outcomes,
-                "personal command host sent an unexpected registration",
-            );
-            restart
-        }
+        HostEvent::Frame(generation, HostOutput::Registration { .. }) => generations.fail(
+            generation,
+            outcomes,
+            "personal command host sent an unexpected registration",
+        ),
         _ => false,
     }
 }
 
-fn generation_is_active(hosts: &HashMap<u64, HostProcess>, generation: u64) -> bool {
-    hosts
-        .get(&generation)
-        .is_some_and(|host| host.retire_at.is_none())
+impl Generations {
+    fn is_active(&self, generation: u64) -> bool {
+        self.hosts
+            .get(&generation)
+            .is_some_and(|host| host.retire_at.is_none())
+    }
+
+    /// Drops one generation's host and fails every invocation still waiting on
+    /// it. Returns whether that generation was the active (unretired) host, so
+    /// the caller can count the failure toward restart backoff.
+    fn fail(&mut self, generation: u64, outcomes: &SyncSender<ActionOutcome>, error: &str) -> bool {
+        let was_active = self.is_active(generation);
+        self.hosts.remove(&generation);
+        self.pending_tools
+            .retain(|(tool_generation, _, _)| *tool_generation != generation);
+        let invocation_ids = self
+            .pending
+            .iter()
+            .filter_map(|(id, invocation)| {
+                (invocation.generation == generation).then_some(id.clone())
+            })
+            .collect::<Vec<_>>();
+        for id in invocation_ids {
+            if let Some(invocation) = self.pending.remove(&id) {
+                tracing::warn!(
+                    generation,
+                    invocation_id = id,
+                    command_id = invocation.command_id,
+                    execution_kind = "handler",
+                    status = "failed",
+                    duration_ms = invocation.started.elapsed().as_millis(),
+                    error,
+                    "personal command invocation"
+                );
+                let _ = outcomes.send(invocation.into_outcome(Err(error.into())));
+            }
+        }
+        let transformation_ids = self
+            .pending_transformations
+            .iter()
+            .filter_map(|(id, invocation)| {
+                (invocation.generation == generation).then_some(id.clone())
+            })
+            .collect::<Vec<_>>();
+        for id in transformation_ids {
+            if let Some(invocation) = self.pending_transformations.remove(&id) {
+                let _ = invocation.response.send(Err(error.into()));
+            }
+        }
+        was_active
+    }
 }
 
 fn should_retire(retire_at: Option<Instant>, has_pending: bool, now: Instant) -> bool {
@@ -2399,52 +2357,6 @@ fn spawn_tool_workers(jobs: Receiver<ToolJob>, events: SyncSender<HostEvent>) {
     }
 }
 
-fn fail_generation(
-    generation: u64,
-    hosts: &mut HashMap<u64, HostProcess>,
-    pending: &mut HashMap<String, PendingInvocation>,
-    pending_transformations: &mut HashMap<String, PendingTransformation>,
-    pending_tools: &mut HashSet<(u64, String, String)>,
-    outcomes: &SyncSender<ActionOutcome>,
-    error: &str,
-) {
-    hosts.remove(&generation);
-    pending_tools.retain(|(tool_generation, _, _)| *tool_generation != generation);
-    let invocation_ids = pending
-        .iter()
-        .filter_map(|(id, invocation)| (invocation.generation == generation).then_some(id.clone()))
-        .collect::<Vec<_>>();
-    for id in invocation_ids {
-        if let Some(invocation) = pending.remove(&id) {
-            tracing::warn!(
-                generation,
-                invocation_id = id,
-                command_id = invocation.command_id,
-                execution_kind = "handler",
-                status = "failed",
-                duration_ms = invocation.started.elapsed().as_millis(),
-                error,
-                "personal command invocation"
-            );
-            let _ = outcomes.send(ActionOutcome {
-                id: invocation.command_id,
-                heard: invocation.heard,
-                context: invocation.context,
-                result: Err(error.into()),
-            });
-        }
-    }
-    let transformation_ids = pending_transformations
-        .iter()
-        .filter_map(|(id, invocation)| (invocation.generation == generation).then_some(id.clone()))
-        .collect::<Vec<_>>();
-    for id in transformation_ids {
-        if let Some(invocation) = pending_transformations.remove(&id) {
-            let _ = invocation.response.send(Err(error.into()));
-        }
-    }
-}
-
 fn writer_queue_error(error: TrySendError<HostInput>) -> &'static str {
     match error {
         TrySendError::Full(_) => "personal command host writer queue is full",
@@ -2693,6 +2605,32 @@ mod tests {
     use crate::commands::{Decision, Mode};
     use std::time::UNIX_EPOCH;
 
+    fn compile_commands(commands: Vec<RegistrationCommand>) -> Result<RuntimeSnapshot> {
+        compile_registration(&CommandConfig::new(), 1, 2, None, vec![], commands)
+    }
+
+    fn compile_one(command: RegistrationCommand) -> Result<RuntimeSnapshot> {
+        compile_commands(vec![command])
+    }
+
+    fn handler_command(
+        phrase: &str,
+        captures: impl IntoIterator<Item = (&'static str, CaptureDescriptor)>,
+    ) -> RegistrationCommand {
+        RegistrationCommand {
+            id: "bad".into(),
+            phrases: vec![phrase.into()],
+            group: None,
+            description: None,
+            when: None,
+            captures: captures
+                .into_iter()
+                .map(|(name, descriptor)| (name.into(), descriptor))
+                .collect(),
+            execution: Execution::Handler,
+        }
+    }
+
     #[test]
     fn native_url_actions_preserve_deep_links() {
         for url in [
@@ -2856,8 +2794,7 @@ mod tests {
             r#"{"id":"move","phrases":["move {from} to {to} named {label}"],"captures":{"from":{"type":"digit","min":1,"max":3},"to":{"type":"digit","min":4,"max":6},"label":{"type":"text"}},"execution":{"type":"handler"}}"#,
         )
         .unwrap();
-        let compiled =
-            compile_registration(&CommandConfig::new(), 9, 2, None, vec![], vec![command]).unwrap();
+        let compiled = compile_one(command).unwrap();
 
         match compiled.commands.resolve(
             Mode::Listening,
@@ -2893,8 +2830,7 @@ mod tests {
             r#"{"id":"move","phrases":["move {direction} to {edge}"],"captures":{"direction":{"type":"choice","choices":{"left":["left","back"],"right":["right","forward"]}},"edge":{"type":"choice","choices":{"top":["top"],"bottom":["bottom"]}}},"execution":{"type":"handler"}}"#,
         )
         .unwrap();
-        let compiled =
-            compile_registration(&CommandConfig::new(), 9, 2, None, vec![], vec![command]).unwrap();
+        let compiled = compile_one(command).unwrap();
 
         match compiled.commands.resolve(
             Mode::Listening,
@@ -2924,8 +2860,7 @@ mod tests {
             r#"{"id":"control","phrases":["control {key}"],"captures":{"key":{"type":"letter"}},"execution":{"type":"handler"}}"#,
         )
         .unwrap();
-        let compiled =
-            compile_registration(&CommandConfig::new(), 9, 2, None, vec![], vec![command]).unwrap();
+        let compiled = compile_one(command).unwrap();
 
         for (heard, expected) in [
             ("control A", 'a'),
@@ -2961,8 +2896,7 @@ mod tests {
             r#"{"id":"keys","phrases":["key {first} then {second}"],"captures":{"first":{"type":"union","members":[{"type":"letter"},{"type":"digit","min":0,"max":9},{"type":"choice","choices":{"home":["home"],"escape":["escape","cancel"]}}]},"second":{"type":"union","members":[{"type":"digit","min":0,"max":9},{"type":"choice","choices":{"enter":["enter"]}}]}},"execution":{"type":"handler"}}"#,
         )
         .unwrap();
-        let compiled =
-            compile_registration(&CommandConfig::new(), 9, 2, None, vec![], vec![command]).unwrap();
+        let compiled = compile_one(command).unwrap();
 
         for (heard, first, second) in [
             (
@@ -3003,9 +2937,7 @@ mod tests {
             r#"{"id":"key","phrases":["key {key}"],"captures":{"key":{"type":"union","members":[{"type":"letter"},{"type":"union","members":[{"type":"digit","min":0,"max":9},{"type":"choice","choices":{"home":["home"]}}]}]}},"execution":{"type":"handler"}}"#,
         )
         .unwrap();
-        assert!(
-            compile_registration(&CommandConfig::new(), 1, 2, None, vec![], vec![valid]).is_ok()
-        );
+        assert!(compile_one(valid).is_ok());
 
         for input in [
             r#"{"id":"bad","phrases":["key {key}"],"captures":{"key":{"type":"union","members":[{"type":"letter"}]}},"execution":{"type":"handler"}}"#,
@@ -3016,8 +2948,7 @@ mod tests {
         ] {
             let command = serde_json::from_str(input).unwrap();
             assert!(
-                compile_registration(&CommandConfig::new(), 1, 2, None, vec![], vec![command])
-                    .is_err(),
+                compile_one(command).is_err(),
                 "union should be rejected: {input}"
             );
         }
@@ -3027,18 +2958,8 @@ mod tests {
                 choices: BTreeMap::from([(format!("key{index}"), vec![format!("key{index}")])]),
             })
             .collect();
-        let command = RegistrationCommand {
-            id: "bad".into(),
-            phrases: vec!["key {key}".into()],
-            group: None,
-            description: None,
-            when: None,
-            captures: BTreeMap::from([("key".into(), CaptureDescriptor::Union { members })]),
-            execution: Execution::Handler,
-        };
-        assert!(
-            compile_registration(&CommandConfig::new(), 1, 2, None, vec![], vec![command]).is_err()
-        );
+        let command = handler_command("key {key}", [("key", CaptureDescriptor::Union { members })]);
+        assert!(compile_one(command).is_err());
 
         let large_choice = |prefix: &str| CaptureDescriptor::Choice {
             choices: (0..16)
@@ -3052,23 +2973,16 @@ mod tests {
                 })
                 .collect(),
         };
-        let command = RegistrationCommand {
-            id: "bad".into(),
-            phrases: vec!["key {key}".into()],
-            group: None,
-            description: None,
-            when: None,
-            captures: BTreeMap::from([(
-                "key".into(),
+        let command = handler_command(
+            "key {key}",
+            [(
+                "key",
                 CaptureDescriptor::Union {
                     members: vec![large_choice("left"), large_choice("right")],
                 },
-            )]),
-            execution: Execution::Handler,
-        };
-        assert!(
-            compile_registration(&CommandConfig::new(), 1, 2, None, vec![], vec![command]).is_err()
+            )],
         );
+        assert!(compile_one(command).is_err());
     }
 
     #[test]
@@ -3078,14 +2992,7 @@ mod tests {
                 r#"{"id":"union","phrases":["press {key}"],"captures":{"key":{"type":"union","members":[{"type":"digit","min":0,"max":2},{"type":"choice","choices":{"home":["home"]}}]}},"execution":{"type":"handler"}}"#,
             )
             .unwrap();
-            compile_registration(
-                &CommandConfig::new(),
-                1,
-                2,
-                None,
-                vec![],
-                vec![union, serde_json::from_str(right).unwrap()],
-            )
+            compile_commands(vec![union, serde_json::from_str(right).unwrap()])
         };
 
         for right in [
@@ -3111,14 +3018,7 @@ mod tests {
             )
             .unwrap();
             let right = serde_json::from_str(right).unwrap();
-            compile_registration(
-                &CommandConfig::new(),
-                1,
-                2,
-                None,
-                vec![],
-                vec![letter, right],
-            )
+            compile_commands(vec![letter, right])
         };
 
         assert!(
@@ -3145,21 +3045,17 @@ mod tests {
             let command = serde_json::from_str(input);
             if let Ok(command) = command {
                 assert!(
-                    compile_registration(&CommandConfig::new(), 1, 2, None, vec![], vec![command])
-                        .is_err(),
+                    compile_one(command).is_err(),
                     "descriptor should be rejected: {input}"
                 );
             }
         }
 
-        let command = |choices| RegistrationCommand {
-            id: "bad".into(),
-            phrases: vec!["move {direction}".into()],
-            group: None,
-            description: None,
-            when: None,
-            captures: BTreeMap::from([("direction".into(), CaptureDescriptor::Choice { choices })]),
-            execution: Execution::Handler,
+        let command = |choices| {
+            handler_command(
+                "move {direction}",
+                [("direction", CaptureDescriptor::Choice { choices })],
+            )
         };
         let oversized_values = (0..=MAX_CHOICE_VALUES)
             .map(|index| (format!("value{index}"), vec![format!("word{index}")]))
@@ -3175,17 +3071,7 @@ mod tests {
             )]),
             oversized_values,
         ] {
-            assert!(
-                compile_registration(
-                    &CommandConfig::new(),
-                    1,
-                    2,
-                    None,
-                    vec![],
-                    vec![command(choices)]
-                )
-                .is_err()
-            );
+            assert!(compile_one(command(choices)).is_err());
         }
     }
 
@@ -3194,7 +3080,7 @@ mod tests {
         let compile_pair = |left: &str, right: &str| {
             let left = serde_json::from_str(left).unwrap();
             let right = serde_json::from_str(right).unwrap();
-            compile_registration(&CommandConfig::new(), 1, 2, None, vec![], vec![left, right])
+            compile_commands(vec![left, right])
         };
         let choice = r#"{"id":"choice","phrases":["press {value}"],"captures":{"value":{"type":"choice","choices":{"left":["left"],"second":["two"]}}},"execution":{"type":"handler"}}"#;
 
@@ -3240,10 +3126,7 @@ mod tests {
             r#"{"id":"bad","phrases":["press {number}"],"captures":{"number":{"type":"digit","min":3,"max":10}},"execution":{"type":"handler"}}"#,
         ] {
             let command = serde_json::from_str(input).unwrap();
-            assert!(
-                compile_registration(&CommandConfig::new(), 1, 2, None, vec![], vec![command])
-                    .is_err()
-            );
+            assert!(compile_one(command).is_err());
         }
 
         let first = serde_json::from_str(
@@ -3254,17 +3137,7 @@ mod tests {
             r#"{"id":"disjoint","phrases":["press {number}"],"captures":{"number":{"type":"digit","min":4,"max":6}},"execution":{"type":"handler"}}"#,
         )
         .unwrap();
-        assert!(
-            compile_registration(
-                &CommandConfig::new(),
-                1,
-                2,
-                None,
-                vec![],
-                vec![first, disjoint]
-            )
-            .is_ok()
-        );
+        assert!(compile_commands(vec![first, disjoint]).is_ok());
 
         let first = serde_json::from_str(
             r#"{"id":"first","phrases":["press {number}"],"captures":{"number":{"type":"digit","min":1,"max":3}},"execution":{"type":"handler"}}"#,
@@ -3274,17 +3147,7 @@ mod tests {
             r#"{"id":"overlapping","phrases":["press {number}"],"captures":{"number":{"type":"digit","min":3,"max":5}},"execution":{"type":"handler"}}"#,
         )
         .unwrap();
-        assert!(
-            compile_registration(
-                &CommandConfig::new(),
-                1,
-                2,
-                None,
-                vec![],
-                vec![first, overlapping]
-            )
-            .is_err()
-        );
+        assert!(compile_commands(vec![first, overlapping]).is_err());
     }
 
     #[test]
@@ -3591,8 +3454,7 @@ mod tests {
                 .is_none()
         );
 
-        let fallback =
-            compile_registration(&CommandConfig::new(), 1, 2, None, vec![], vec![]).unwrap();
+        let fallback = compile_commands(vec![]).unwrap();
         assert!(
             fallback
                 .dictation
@@ -3648,9 +3510,7 @@ mod tests {
             r#"{"id":"bad","phrases":["bad"],"when":{"browserHost":"https://x.com/path"},"execution":{"type":"handler"}}"#,
         )
         .unwrap();
-        assert!(
-            compile_registration(&CommandConfig::new(), 1, 2, None, vec![], vec![command]).is_err()
-        );
+        assert!(compile_one(command).is_err());
 
         let context = ContextSnapshot {
             application: Some("Brave Browser".into()),

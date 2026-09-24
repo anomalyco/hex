@@ -835,7 +835,7 @@ fn verification_receipt_path(model_path: &Path) -> PathBuf {
     model_path.with_extension("gguf.verified.json")
 }
 
-fn modified_ns(metadata: &fs::Metadata) -> Option<u64> {
+pub(crate) fn modified_ns(metadata: &fs::Metadata) -> Option<u64> {
     metadata
         .modified()
         .ok()?
@@ -844,6 +844,43 @@ fn modified_ns(metadata: &fs::Metadata) -> Option<u64> {
         .as_nanos()
         .try_into()
         .ok()
+}
+
+/// Publish `value` as JSON at `path` so a crash leaves either the previous
+/// file or the complete new one, never a partial write.
+pub(crate) fn write_json_atomically(path: &Path, value: &impl Serialize) -> Result<()> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| color_eyre::eyre::eyre!("{} has no parent", path.display()))?;
+    let temporary = path.with_extension("json.tmp");
+    fs::write(&temporary, serde_json::to_vec(value)?)?;
+    File::open(&temporary)?.sync_all()?;
+    fs::rename(temporary, path)?;
+    File::open(parent)?.sync_all()?;
+    Ok(())
+}
+
+/// Stream `path` through SHA-256 and return the lowercase hex digest,
+/// honoring `canceled` between chunks.
+pub(crate) fn sha256_hex(path: &Path, canceled: Option<&AtomicBool>) -> Result<String> {
+    let mut file = File::open(path)?;
+    let mut digest = Sha256::new();
+    let mut buffer = [0_u8; 1024 * 1024];
+    loop {
+        if let Some(canceled) = canceled {
+            check_canceled(canceled)?;
+        }
+        let read = file.read(&mut buffer)?;
+        if read == 0 {
+            break;
+        }
+        digest.update(&buffer[..read]);
+    }
+    Ok(digest
+        .finalize()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect())
 }
 
 fn write_verification_receipt(path: &Path, model: &ModelDefinition) -> Result<()> {
@@ -857,17 +894,7 @@ fn write_verification_receipt(path: &Path, model: &ModelDefinition) -> Result<()
         modified_ns: modified_ns(&metadata)
             .ok_or_else(|| color_eyre::eyre::eyre!("model modification time is unavailable"))?,
     };
-    let destination = verification_receipt_path(path);
-    let temporary = destination.with_extension("json.tmp");
-    fs::write(&temporary, serde_json::to_vec(&receipt)?)?;
-    File::open(&temporary)?.sync_all()?;
-    fs::rename(temporary, destination)?;
-    File::open(
-        path.parent()
-            .ok_or_else(|| color_eyre::eyre::eyre!("model path has no parent"))?,
-    )?
-    .sync_all()?;
-    Ok(())
+    write_json_atomically(&verification_receipt_path(path), &receipt)
 }
 
 fn check_canceled(canceled: &AtomicBool) -> Result<()> {
@@ -899,23 +926,7 @@ fn verify_file_with_cancel(
             artifact.bytes
         );
     }
-    let mut file = File::open(path)?;
-    let mut digest = Sha256::new();
-    let mut buffer = [0_u8; 1024 * 1024];
-    loop {
-        check_canceled(canceled)?;
-        let read = file.read(&mut buffer)?;
-        if read == 0 {
-            break;
-        }
-        digest.update(&buffer[..read]);
-    }
-    let actual = digest
-        .finalize()
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect::<String>();
-    if actual != artifact.sha256 {
+    if sha256_hex(path, Some(canceled))? != artifact.sha256 {
         bail!("checksum mismatch for {}", model.name);
     }
     Ok(())
@@ -928,6 +939,23 @@ mod tests {
     use super::*;
 
     static NEXT_TEMP_FILE: AtomicU64 = AtomicU64::new(0);
+
+    /// A five-byte artifact whose checksum is `sha256("hello")`.
+    fn fixture_model() -> ModelDefinition {
+        const FIXTURE_ARTIFACT: GgufArtifact = GgufArtifact {
+            filename: "fixture.gguf",
+            revision: "fixture",
+            repository: "fixture",
+            bytes: 5,
+            sha256: "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+            architecture: "fixture",
+            variant: "fixture",
+        };
+        ModelDefinition {
+            runtime: ModelRuntime::Gguf(&FIXTURE_ARTIFACT),
+            ..*definition(TranscriptionModelId::ParakeetV2)
+        }
+    }
 
     #[test]
     fn recommendations_are_language_specific() {
@@ -1092,30 +1120,7 @@ mod tests {
 
     #[test]
     fn artifact_verification_checks_size_and_checksum() {
-        const FIXTURE_ARTIFACT: GgufArtifact = GgufArtifact {
-            filename: "fixture.gguf",
-            revision: "fixture",
-            repository: "fixture",
-            bytes: 5,
-            sha256: "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
-            architecture: "fixture",
-            variant: "fixture",
-        };
-        let model = ModelDefinition {
-            id: TranscriptionModelId::ParakeetV2,
-            name: "fixture",
-            realtime: "fixture",
-            realtime_context: "fixture",
-            quality: "fixture",
-            quality_context: "fixture",
-            coverage: "fixture",
-            timestamps: "fixture",
-            runtime: ModelRuntime::Gguf(&FIXTURE_ARTIFACT),
-            languages: &["en"],
-            accepts_language_hint: false,
-            supports_language_detection: false,
-            supports_recognition_hints: false,
-        };
+        let model = fixture_model();
         let path = std::env::temp_dir().join(format!(
             "hex-model-verification-{}-{}",
             std::process::id(),
@@ -1130,30 +1135,7 @@ mod tests {
 
     #[test]
     fn verification_receipt_is_invalidated_when_the_artifact_changes() {
-        const FIXTURE_ARTIFACT: GgufArtifact = GgufArtifact {
-            filename: "fixture.gguf",
-            revision: "fixture",
-            repository: "fixture",
-            bytes: 5,
-            sha256: "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
-            architecture: "fixture",
-            variant: "fixture",
-        };
-        let model = ModelDefinition {
-            id: TranscriptionModelId::ParakeetV2,
-            name: "fixture",
-            realtime: "fixture",
-            realtime_context: "fixture",
-            quality: "fixture",
-            quality_context: "fixture",
-            coverage: "fixture",
-            timestamps: "fixture",
-            runtime: ModelRuntime::Gguf(&FIXTURE_ARTIFACT),
-            languages: &["en"],
-            accepts_language_hint: false,
-            supports_language_detection: false,
-            supports_recognition_hints: false,
-        };
+        let model = fixture_model();
         let path = std::env::temp_dir().join(format!(
             "hex-model-receipt-{}-{}",
             std::process::id(),
@@ -1178,19 +1160,7 @@ mod tests {
     #[cfg(target_os = "macos")]
     #[test]
     fn installed_only_verification_never_downloads_or_replaces_an_invalid_model() {
-        const ARTIFACT: GgufArtifact = GgufArtifact {
-            filename: "fixture.gguf",
-            revision: "fixture",
-            repository: "fixture",
-            bytes: 5,
-            sha256: "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
-            architecture: "fixture",
-            variant: "fixture",
-        };
-        let model = ModelDefinition {
-            runtime: ModelRuntime::Gguf(&ARTIFACT),
-            ..MODELS[0]
-        };
+        let model = fixture_model();
         let directory = std::env::temp_dir().join(format!(
             "hex-installed-model-{}-{}",
             std::process::id(),

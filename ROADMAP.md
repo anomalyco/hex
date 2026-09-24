@@ -63,6 +63,12 @@ microphone override, hotkey rebinding, locked capture, cancellation, automatic
 paste, service autostart, client reconnect, and Settings closing without stopping
 accepted work. Linux no longer uses a tray.
 
+Before consolidating X11 gesture flags into a state enum, capture deterministic
+traces for Escape during held/locked capture, trigger-before-Escape release,
+autorepeat inside the 50 ms release grace, and second-tap boundaries. Preserve
+Escape ungrabbing and dirty-release suppression, then run the isolated Xvfb
+grab tests on Linux.
+
 Keep app-managed updates limited to the user-local direct-install layout. A
 future Arch package must leave updates to the package manager. Nix owns its
 packaged installation and optional Home Manager service. Validate the Wayland
@@ -149,6 +155,11 @@ user setting.
 Add end-of-speech detection only if it preserves explicit Send, Cancel, and
 locked-capture controls.
 
+Before consolidating Voice Action's pending timestamp and active context into
+one lifecycle owner, cover pending/promotion/disable/microphone-interruption
+sequences together, including both cold-microphone modifier orders. Existing
+gesture-decision tests do not establish those integrated transitions.
+
 ## Make Diagnostics Incremental
 
 Ratatui and GPUI now share a bounded incremental event reader with session and
@@ -216,6 +227,13 @@ synchronized playback, echo annotation, summarization, and person-level
 diarization only against real meeting recordings.
 
 ## Deliberate Deferrals
+
+The iOS prototype needs explicit accepted-job behavior when its keyboard session
+expires. `DictationController` can clear active-job state while an unretained
+transcription task still owns completion and temporary-file cleanup. Define the
+expiry/restart contract, then give the job its task and generation-scoped
+completion; verify that a stale job cannot reset a newer capture or delete its
+file. This is a source-identified risk, not a reproduced device failure.
 
 Keep protected lifecycle commands and typed captures in compiled Rust. Ordinary
 literal commands and dictation control phrases already use the explicit

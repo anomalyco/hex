@@ -1,6 +1,6 @@
 [package]
 name = "voice-control"
-version = "2.1.18"
+version = "2.1.22"
 edition = "2024"
 default-run = "voice-control"
 license = "MIT"
@@ -57,11 +57,11 @@ metal = "0.29.0"
 objc2 = "0.6.4"
 objc2-app-kit = "0.3.2"
 objc2-core-audio = "0.3.2"
+objc2-core-foundation = "0.3.2"
 objc2-foundation = "0.3.2"
 objc2-quartz-core = { version = "0.3.2", features = ["CALayer"] }
 objc2-service-management = { version = "0.3.2", features = ["SMAppService"] }
 ratatui = "0.30.2"
-raw-window-handle = "0.6.2"
 screencapturekit = { version = "=8.0.1", features = ["macos_15_0"] }
 
 [target.'cfg(target_os = "macos")'.dev-dependencies]

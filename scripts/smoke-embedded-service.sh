@@ -42,7 +42,7 @@ url=$(jq -r .url "$endpoint")
 token=$(jq -r .token "$endpoint")
 api_version=$(jq -r .apiVersion "$endpoint")
 reported_pid=$(jq -r .pid "$endpoint")
-if [ "$type" != "ready" ] || [ "$api_version" != "1" ] || [ "$reported_pid" != "$pid" ]; then
+if [ "$type" != "ready" ] || [ "$api_version" != "2" ] || [ "$reported_pid" != "$pid" ]; then
   echo "Invalid embedded service handshake:" >&2
   cat "$endpoint" >&2
   exit 1
@@ -58,7 +58,7 @@ health=$(curl --fail --silent --show-error \
 models=$(curl --fail --silent --show-error \
   -H "Authorization: Bearer $token" \
   "$url/models")
-jq -e '.apiVersion == "1" and .version != null' >/dev/null <<EOF
+jq -e '.apiVersion == "2" and .version != null' >/dev/null <<EOF
 $health
 EOF
 jq -e 'length > 0 and .[0].id == "parakeet_unified_en"' >/dev/null <<EOF

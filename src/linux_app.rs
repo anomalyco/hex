@@ -1,7 +1,7 @@
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, TryRecvError};
-use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
@@ -13,8 +13,8 @@ use gpui::{
 
 use crate::desktop_activity::DesktopActivity;
 use crate::desktop_host::{
-    DesktopAction, DesktopCapabilities, DesktopHost, DesktopListenerSnapshot, DesktopShortcut,
-    DesktopSnapshot, DesktopTranscriptionSnapshot, DesktopUpdateStatus,
+    DesktopAction, DesktopHost, DesktopListenerSnapshot, DesktopShortcut, DesktopSnapshot,
+    DesktopTranscriptionSnapshot, DesktopUpdateStatus,
 };
 use crate::desktop_transcription_picker::{
     TranscriptionPickerDelegate, TranscriptionPickerModel, TranscriptionPickerProgress,
@@ -71,20 +71,50 @@ struct SettingsEdit {
     worker: Option<JoinHandle<Result<crate::linux_settings::LinuxSettings>>>,
 }
 
+struct Listener {
+    stop: Arc<AtomicBool>,
+    worker: JoinHandle<ListenerResult>,
+    startup: ListenerStartup,
+}
+
+enum ListenerStartup {
+    Awaiting { previous_session: Option<u64> },
+    Observed,
+}
+
+impl Listener {
+    fn stop(&self) {
+        self.stop.store(true, Ordering::Relaxed);
+    }
+
+    fn finish(self) -> ListenerResult {
+        self.worker
+            .join()
+            .unwrap_or_else(|_| Err("listener worker stopped unexpectedly".into()))
+    }
+
+    fn observe_session(&mut self, session: Option<u64>) {
+        if let ListenerStartup::Awaiting { previous_session } = self.startup
+            && session != previous_session
+        {
+            self.startup = ListenerStartup::Observed;
+        }
+    }
+}
+
 struct LinuxDesktopHost {
     event_path: PathBuf,
     event_reader: EventReader,
     activity: DesktopActivity,
-    listener_stop: Arc<Mutex<Option<Arc<AtomicBool>>>>,
-    listener_worker: Option<JoinHandle<ListenerResult>>,
-    session_before_start: Option<u64>,
-    awaiting_session_start: bool,
+    listener: Option<Listener>,
     listen_when_ready: bool,
     status: String,
     error: Option<String>,
     dismissed_failure_at: Option<u64>,
     settings_error: Option<String>,
     settings: crate::linux_settings::LinuxSettings,
+    // Dismissing a load error must not authorize recording with fallback defaults.
+    settings_valid: bool,
     settings_edit: Option<SettingsEdit>,
     prepared_transcriber: Option<crate::linux_transcriber::LinuxTranscriber>,
     transcription_preparation: Option<TranscriptionPreparation>,
@@ -125,9 +155,6 @@ enum UpdateState {
 struct RemoteHost {
     client: Client,
     settings: crate::linux_settings::LinuxSettings,
-    settings_edit: Option<()>,
-    transcription_preparation: Option<()>,
-    transcription_error: Option<String>,
 }
 
 impl RemoteHost {
@@ -135,9 +162,6 @@ impl RemoteHost {
         Self {
             client: Client::new(),
             settings: Default::default(),
-            settings_edit: None,
-            transcription_preparation: None,
-            transcription_error: None,
         }
     }
 
@@ -145,13 +169,11 @@ impl RemoteHost {
         self.client.refresh();
         if let Some(state) = &self.client.state {
             self.settings = state.settings.clone();
-            self.settings_edit = state.editing.then_some(());
-            self.transcription_preparation = state.desktop.transcription.preparing.map(|_| ());
-            self.transcription_error = state.desktop.transcription.error.clone();
-        } else {
-            self.settings_edit = None;
-            self.transcription_preparation = None;
         }
+    }
+
+    fn editing_settings(&self) -> bool {
+        self.client.state.as_ref().is_some_and(|s| s.editing)
     }
 
     fn send(&mut self, request: Request) -> Result<()> {
@@ -214,10 +236,6 @@ impl RemoteHost {
 }
 
 impl DesktopHost for RemoteHost {
-    fn capabilities(&self) -> DesktopCapabilities {
-        DesktopCapabilities::linux_x11()
-    }
-
     fn snapshot(&self) -> DesktopSnapshot {
         let mut snapshot = self
             .client
@@ -287,22 +305,13 @@ pub fn run_service(event_path: PathBuf, shutdown: &'static AtomicBool) -> Result
             Some(format!("Could not load Linux settings: {error:#}")),
         ),
     };
-    crate::feedback::set_volume(settings.sound_effect_volume);
-    if let Err(error) = crate::feedback::preload() {
-        tracing::warn!(%error, "recording sounds are unavailable; continuing without feedback");
-    }
+    crate::linux_dictation::initialize_feedback(settings.sound_effect_volume);
     let update = if crate::linux_updater::managed_install() {
         UpdateState::Checking(start_update_check())
     } else {
         UpdateState::Unmanaged
     };
-    let mut host = LinuxDesktopHost::new(
-        event_path,
-        Arc::new(Mutex::new(None)),
-        settings,
-        error,
-        update,
-    );
+    let mut host = LinuxDesktopHost::new(event_path, settings, error, update);
     host.start();
     let mut editor: Option<(u64, Instant)> = None;
     let mut stopping = false;
@@ -387,8 +396,7 @@ pub fn run_service(event_path: PathBuf, shutdown: &'static AtomicBool) -> Result
     Ok(())
 }
 
-pub fn open(event_path: PathBuf, start_hidden: bool, shutdown: &'static AtomicBool) -> Result<()> {
-    let _ = event_path;
+pub fn open(start_hidden: bool, shutdown: &'static AtomicBool) -> Result<()> {
     if start_hidden {
         return linux_service::start();
     }
@@ -434,16 +442,17 @@ pub fn open(event_path: PathBuf, start_hidden: bool, shutdown: &'static AtomicBo
                         if this.quitting {
                             cx.quit();
                         }
+                        let transcription = this.host.snapshot().transcription;
                         if matches!(
                             this.transcription_picker,
                             TranscriptionPickerState::Preparing(_)
-                        ) && this.host.transcription_preparation.is_none()
+                        ) && transcription.preparing.is_none()
                         {
                             let picker = std::mem::replace(
                                 &mut this.transcription_picker,
                                 TranscriptionPickerState::Closed,
                             );
-                            if this.host.transcription_error.is_some()
+                            if transcription.error.is_some()
                                 && let TranscriptionPickerState::Preparing(language) = picker
                             {
                                 this.transcription_picker =
@@ -486,7 +495,6 @@ pub fn open(event_path: PathBuf, start_hidden: bool, shutdown: &'static AtomicBo
 impl LinuxDesktopHost {
     fn new(
         event_path: PathBuf,
-        listener_stop: Arc<Mutex<Option<Arc<AtomicBool>>>>,
         settings: crate::linux_settings::LinuxSettings,
         error: Option<String>,
         update: UpdateState,
@@ -498,14 +506,12 @@ impl LinuxDesktopHost {
             event_reader,
             event_path,
             activity,
-            listener_stop,
-            listener_worker: None,
-            session_before_start: None,
-            awaiting_session_start: false,
+            listener: None,
             listen_when_ready: false,
             status: "Ready".into(),
             error: None,
             dismissed_failure_at: None,
+            settings_valid: error.is_none(),
             settings_error: error,
             settings,
             settings_edit: None,
@@ -524,6 +530,12 @@ impl LinuxDesktopHost {
         if self.is_running() || self.transcription_preparation.is_some() {
             return;
         }
+        // Defaults are only an editable recovery projection after a failed load.
+        // They must never become a recording configuration until saved successfully.
+        if !self.settings_valid {
+            self.status = "Unavailable".into();
+            return;
+        }
         let model = crate::transcription_models::definition(self.settings.transcription.model);
         if !crate::transcription_models::is_installed(model, &self.settings.transcription.language)
         {
@@ -531,30 +543,29 @@ impl LinuxDesktopHost {
             return;
         }
         let stop = Arc::new(AtomicBool::new(false));
-        *self
-            .listener_stop
-            .lock()
-            .unwrap_or_else(|error| error.into_inner()) = Some(stop.clone());
+        let worker_stop = stop.clone();
+        let settings = self.settings.clone();
         let event_path = self.event_path.clone();
         let prepared_transcriber = self.prepared_transcriber.take();
         let worker = std::thread::spawn(move || {
             let result = crate::instance::acquire("listener").and_then(|_instance| {
-                if let Some(transcriber) = prepared_transcriber {
-                    crate::linux_dictation::run_with_transcriber(
-                        &event_path,
-                        None,
-                        &stop,
-                        transcriber,
-                    )
-                } else {
-                    crate::linux_dictation::run(&event_path, None, &stop)
-                }
+                crate::linux_dictation::run(
+                    &event_path,
+                    None,
+                    &worker_stop,
+                    settings,
+                    prepared_transcriber,
+                )
             });
             result.map_err(|error| format!("{error:#}"))
         });
-        self.listener_worker = Some(worker);
-        self.session_before_start = self.activity.session_started_at;
-        self.awaiting_session_start = true;
+        self.listener = Some(Listener {
+            stop,
+            worker,
+            startup: ListenerStartup::Awaiting {
+                previous_session: self.activity.session_started_at,
+            },
+        });
         self.status = "Starting".into();
     }
 
@@ -564,13 +575,8 @@ impl LinuxDesktopHost {
             edit.resume = false;
             edit.canceled.store(true, Ordering::Release);
         }
-        if let Some(stop) = self
-            .listener_stop
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
-            .as_ref()
-        {
-            stop.store(true, Ordering::Relaxed);
+        if let Some(listener) = &self.listener {
+            listener.stop();
             self.status = "Stopping".into();
         }
     }
@@ -623,6 +629,7 @@ impl LinuxDesktopHost {
                         match candidate.save() {
                             Ok(()) => {
                                 self.settings = candidate;
+                                self.settings_valid = true;
                                 self.prepared_transcriber = Some(prepared.transcriber);
                                 self.transcription_error = None;
                                 self.settings_error = None;
@@ -647,19 +654,12 @@ impl LinuxDesktopHost {
         }
 
         if self
-            .listener_worker
+            .listener
             .as_ref()
-            .is_some_and(JoinHandle::is_finished)
-            && let Some(worker) = self.listener_worker.take()
+            .is_some_and(|listener| listener.worker.is_finished())
+            && let Some(listener) = self.listener.take()
         {
-            let result = worker
-                .join()
-                .unwrap_or_else(|_| Err("listener worker stopped unexpectedly".into()));
-            self.awaiting_session_start = false;
-            self.listener_stop
-                .lock()
-                .unwrap_or_else(|error| error.into_inner())
-                .take();
+            let result = listener.finish();
             match result {
                 Ok(()) => self.status = "Ready".into(),
                 Err(error) => {
@@ -672,14 +672,14 @@ impl LinuxDesktopHost {
         self.refresh_settings_edit();
 
         self.activity.refresh(&mut self.event_reader);
-        if self.awaiting_session_start
-            && self.activity.session_started_at != self.session_before_start
-        {
-            self.awaiting_session_start = false;
+        if let Some(listener) = &mut self.listener {
+            listener.observe_session(self.activity.session_started_at);
         }
-        if self.is_running()
+        if self
+            .listener
+            .as_ref()
+            .is_some_and(|listener| matches!(listener.startup, ListenerStartup::Observed))
             && self.listen_when_ready
-            && !self.awaiting_session_start
             && let Some(status) = self.activity.state_label()
         {
             self.status = status.into();
@@ -687,7 +687,7 @@ impl LinuxDesktopHost {
     }
 
     fn is_running(&self) -> bool {
-        self.listener_worker.is_some()
+        self.listener.is_some()
     }
 
     fn set_dictation_hotkey(&mut self, shortcut: DesktopShortcut) -> Result<()> {
@@ -751,6 +751,7 @@ impl LinuxDesktopHost {
             return Err(error);
         }
         self.settings = candidate;
+        self.settings_valid = true;
         self.settings_error = None;
         crate::feedback::set_volume(volume);
         crate::feedback::play(crate::feedback::Tone::DictationStart);
@@ -796,6 +797,7 @@ impl LinuxDesktopHost {
                 // if Cancel raced with the final atomic save.
                 Ok(Ok(settings)) => {
                     self.settings = settings;
+                    self.settings_valid = true;
                     self.settings_error = None;
                 }
                 Ok(Err(error)) if !canceled => {
@@ -981,17 +983,13 @@ impl Drop for LinuxDesktopHost {
     fn drop(&mut self) {
         self.stop();
         self.cancel_transcription_preparation();
-        self.listener_stop
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
-            .take();
         if self
-            .listener_worker
+            .listener
             .as_ref()
-            .is_some_and(JoinHandle::is_finished)
-            && let Some(worker) = self.listener_worker.take()
+            .is_some_and(|listener| listener.worker.is_finished())
+            && let Some(listener) = self.listener.take()
         {
-            let _ = worker.join();
+            let _ = listener.finish();
         }
         if self
             .transcription_preparation
@@ -1011,10 +1009,6 @@ impl Drop for LinuxDesktopHost {
 }
 
 impl DesktopHost for LinuxDesktopHost {
-    fn capabilities(&self) -> DesktopCapabilities {
-        DesktopCapabilities::linux_x11()
-    }
-
     fn snapshot(&self) -> DesktopSnapshot {
         let update_status = match &self.update {
             UpdateState::Unmanaged => DesktopUpdateStatus::Unavailable,
@@ -1101,7 +1095,6 @@ impl DesktopHost for LinuxDesktopHost {
 
 impl LinuxApp {
     fn render_shared_navigation(&self) -> AnyElement {
-        debug_assert!(self.host.capabilities().listener_control);
         sidebar_frame()
             .w(px(SIDEBAR_WIDTH))
             .px(px(14.0))
@@ -1127,9 +1120,9 @@ impl LinuxApp {
             .listener
             .as_ref()
             .is_some_and(|listener| listener.running);
-        let editing = self.host.settings_edit.is_some();
+        let editing = self.host.editing_settings();
         let paste_with_shift = self.host.settings.paste_with_shift;
-        let sound_volume_busy = editing || self.host.transcription_preparation.is_some();
+        let sound_volume_busy = editing || snapshot.transcription.preparing.is_some();
         let sound_volume = segmented_control().children(
             [
                 ("Off", 0.0_f32),
@@ -1527,16 +1520,14 @@ mod tests {
             },
             ..Default::default()
         };
-        let mut host = LinuxDesktopHost::new(
-            PathBuf::new(),
-            Arc::new(Mutex::new(None)),
-            settings,
-            None,
-            UpdateState::Unmanaged,
-        );
+        let mut host =
+            LinuxDesktopHost::new(PathBuf::new(), settings, None, UpdateState::Unmanaged);
         if running {
-            host.listener_worker = Some(std::thread::spawn(|| Ok(())));
-            *host.listener_stop.lock().unwrap() = Some(Arc::new(AtomicBool::new(false)));
+            host.listener = Some(Listener {
+                worker: std::thread::spawn(|| Ok(())),
+                stop: Arc::new(AtomicBool::new(false)),
+                startup: ListenerStartup::Observed,
+            });
             host.listen_when_ready = true;
         }
         host
@@ -1554,6 +1545,53 @@ mod tests {
     }
 
     #[test]
+    fn malformed_settings_cannot_start_even_after_dismissing_the_error() {
+        let mut host = LinuxDesktopHost::new(
+            PathBuf::new(),
+            Default::default(),
+            Some("Could not load Linux settings: invalid JSON".into()),
+            UpdateState::Unmanaged,
+        );
+        host.start();
+        assert!(!host.is_running());
+        assert_eq!(host.status, "Unavailable");
+        host.dispatch(DesktopAction::ClearError).unwrap();
+        host.start();
+        assert!(!host.is_running());
+        assert_eq!(host.status, "Unavailable");
+        assert!(!host.settings_valid);
+
+        host.begin_settings_edit(SettingsChange::DoubleTap(false));
+        let mut recovered = host.settings.clone();
+        recovered.double_tap_lock = false;
+        set_finished_edit(&mut host, Ok(recovered.clone()));
+        host.refresh_settings_edit();
+        assert!(host.settings_valid);
+        assert_eq!(host.settings, recovered);
+        assert!(!host.is_running());
+    }
+
+    #[test]
+    fn listener_startup_ignores_the_previous_session_until_a_new_one_arrives() {
+        for previous_session in [None, Some(10)] {
+            let mut listener = Listener {
+                stop: Arc::new(AtomicBool::new(false)),
+                worker: std::thread::spawn(|| Ok(())),
+                startup: ListenerStartup::Awaiting { previous_session },
+            };
+            listener.observe_session(previous_session);
+            assert!(matches!(listener.startup, ListenerStartup::Awaiting { .. }));
+            listener.observe_session(Some(20));
+            assert!(matches!(listener.startup, ListenerStartup::Observed));
+            listener.observe_session(previous_session);
+            assert!(matches!(listener.startup, ListenerStartup::Observed));
+            listener.stop();
+            assert!(listener.stop.load(Ordering::Relaxed));
+            listener.finish().unwrap();
+        }
+    }
+
+    #[test]
     fn listener_completion_waits_for_the_worker_and_preserves_errors() {
         for outcome in [Some(Ok(())), Some(Err("listener failed".into())), None] {
             let expected = outcome
@@ -1562,20 +1600,20 @@ mod tests {
                 .err();
             let mut host = host_for_edit(true);
             let (release, held) = mpsc::channel();
-            host.listener_worker = Some(std::thread::spawn(move || {
+            host.listener.as_mut().unwrap().worker = std::thread::spawn(move || {
                 held.recv_timeout(Duration::from_secs(5)).unwrap();
                 outcome.expect("fixture listener panic")
-            }));
+            });
             host.refresh();
             assert!(host.is_running());
-            assert!(host.listener_stop.lock().unwrap().is_some());
+            assert!(!host.listener.as_ref().unwrap().stop.load(Ordering::Relaxed));
             release.send(()).unwrap();
-            while !host.listener_worker.as_ref().unwrap().is_finished() {
+            while !host.listener.as_ref().unwrap().worker.is_finished() {
                 std::thread::yield_now();
             }
             host.refresh();
             assert!(!host.is_running());
-            assert!(host.listener_stop.lock().unwrap().is_none());
+            assert!(host.listener.is_none());
             assert_eq!(host.error, expected);
             assert_eq!(
                 host.status,
@@ -1654,19 +1692,11 @@ mod tests {
             assert_eq!(host.settings_edit.as_ref().unwrap().resume, running);
             if running {
                 host.refresh_settings_edit();
-                assert!(
-                    host.listener_stop
-                        .lock()
-                        .unwrap()
-                        .as_ref()
-                        .unwrap()
-                        .load(Ordering::Relaxed)
-                );
+                assert!(host.listener.as_ref().unwrap().stop.load(Ordering::Relaxed));
                 assert!(host.settings_edit.as_ref().unwrap().worker.is_none());
                 assert_ne!(host.settings, candidate);
             }
-            host.listener_worker = None;
-            host.listener_stop.lock().unwrap().take();
+            host.listener = None;
             set_finished_edit(&mut host, Ok(candidate.clone()));
             host.refresh_settings_edit();
             assert_eq!(host.settings, candidate);
@@ -1683,8 +1713,7 @@ mod tests {
                 let original = host.settings.clone();
                 host.begin_settings_edit(SettingsChange::Capture);
                 assert!(host.capturing_hotkey());
-                host.listener_worker = None;
-                host.listener_stop.lock().unwrap().take();
+                host.listener = None;
                 if cancel {
                     host.cancel_settings_edit();
                 } else {
@@ -1707,8 +1736,7 @@ mod tests {
     fn cancel_signals_worker_and_does_not_wait_or_restart_until_it_finishes() {
         let mut host = host_for_edit(true);
         host.begin_settings_edit(SettingsChange::Capture);
-        host.listener_worker = None;
-        host.listener_stop.lock().unwrap().take();
+        host.listener = None;
         let (release, held) = mpsc::channel();
         host.settings_edit.as_mut().unwrap().worker = Some(std::thread::spawn(move || {
             let _ = held.recv();
@@ -1754,8 +1782,7 @@ mod tests {
         let edit = host.settings_edit.as_ref().unwrap();
         assert!(edit.resume);
         assert!(edit.canceled.load(Ordering::Acquire));
-        host.listener_worker = None;
-        host.listener_stop.lock().unwrap().take();
+        host.listener = None;
         host.refresh_settings_edit();
         assert!(host.listen_when_ready);
         assert!(editor.is_none());
@@ -1767,15 +1794,7 @@ mod tests {
         disconnect_editor(&mut host, &mut None, 1);
         assert!(host.is_running());
         assert!(host.listen_when_ready);
-        assert!(
-            !host
-                .listener_stop
-                .lock()
-                .unwrap()
-                .as_ref()
-                .unwrap()
-                .load(Ordering::Acquire)
-        );
+        assert!(!host.listener.as_ref().unwrap().stop.load(Ordering::Acquire));
     }
 
     #[test]
@@ -1796,15 +1815,7 @@ mod tests {
         assert!(host.settings_error.is_some());
         assert!(host.is_running());
         assert!(host.listen_when_ready);
-        assert!(
-            !host
-                .listener_stop
-                .lock()
-                .unwrap()
-                .as_ref()
-                .unwrap()
-                .load(Ordering::Relaxed)
-        );
+        assert!(!host.listener.as_ref().unwrap().stop.load(Ordering::Relaxed));
     }
 
     #[test]
@@ -1846,13 +1857,8 @@ mod tests {
             },
             ..Default::default()
         };
-        let mut host = LinuxDesktopHost::new(
-            PathBuf::new(),
-            Arc::new(Mutex::new(None)),
-            settings,
-            None,
-            UpdateState::Unmanaged,
-        );
+        let mut host =
+            LinuxDesktopHost::new(PathBuf::new(), settings, None, UpdateState::Unmanaged);
         host.transcription_preparation = Some(TranscriptionPreparation {
             canceled: Arc::new(AtomicBool::new(false)),
             model: TranscriptionModelId::default(),
@@ -1866,8 +1872,7 @@ mod tests {
         assert!(host.listen_when_ready);
         assert_eq!(host.status, "Ready");
         assert!(!host.is_running());
-        assert!(host.listener_worker.is_none());
-        assert!(host.listener_stop.lock().unwrap().is_none());
+        assert!(host.listener.is_none());
         assert!(host.transcription_preparation.is_some());
 
         host.dispatch(DesktopAction::StopListening).unwrap();

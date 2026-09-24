@@ -179,7 +179,6 @@ pub fn run_batch(project_root: &Path, directory: &Path) -> Result<()> {
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
 fn run_loop(
     terminal: &mut ratatui::DefaultTerminal,
     project_root: &Path,

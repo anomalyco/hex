@@ -30,12 +30,11 @@ pub struct LinuxPaster {
     backend: Backend,
     stop: Arc<AtomicBool>,
     paste_with_shift: bool,
-    wayland_modifiers: Option<WaylandModifierState>,
 }
 
 enum Backend {
     X11(Box<X11Paster>),
-    Wayland,
+    Wayland(WaylandModifierState),
 }
 
 impl LinuxPaster {
@@ -46,13 +45,17 @@ impl LinuxPaster {
     ) -> Result<Self> {
         let backend = match LinuxSession::detect() {
             LinuxSession::X11 => Backend::X11(Box::new(X11Paster::new()?)),
-            LinuxSession::Wayland => Backend::Wayland,
+            LinuxSession::Wayland => {
+                let modifiers = wayland_modifiers.ok_or_else(|| {
+                    eyre!("Wayland paste requires the active hotkey modifier state")
+                })?;
+                Backend::Wayland(modifiers)
+            }
         };
         Ok(Self {
             backend,
             stop,
             paste_with_shift,
-            wayland_modifiers,
         })
     }
 
@@ -62,10 +65,7 @@ impl LinuxPaster {
         }
         match &mut self.backend {
             Backend::X11(paster) => paster.paste(text, &self.stop, self.paste_with_shift)?,
-            Backend::Wayland => {
-                let modifiers = self.wayland_modifiers.as_ref().ok_or_else(|| {
-                    eyre!("Wayland paste requires the active hotkey modifier state")
-                })?;
+            Backend::Wayland(modifiers) => {
                 wait_for_modifiers(&self.stop, || Ok(modifiers.held()))?;
                 let mut copy = Command::new("wl-copy");
                 copy.args(["--type", "text/plain;charset=utf-8"]);

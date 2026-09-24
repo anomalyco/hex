@@ -1,13 +1,10 @@
-use std::fs::{self, OpenOptions};
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use clap::{Parser, Subcommand};
 use color_eyre::Result;
-use tracing_subscriber::fmt::writer::MakeWriterExt;
 
 use crate::audio::{AudioInput, AudioInputEvent};
 use crate::events::{EventLog, TranscriptPhase, VoiceEvent, VoiceState, now_ms};
@@ -87,19 +84,7 @@ pub fn run(shutdown: &'static AtomicBool) -> Result<()> {
         );
     }
     color_eyre::install()?;
-    let log_dir = crate::app_paths::logs_dir()?;
-    fs::create_dir_all(&log_dir)?;
-    let process_log = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(log_dir.join("process.log"))?;
-    let filter = tracing_subscriber::EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("voice_control=info"));
-    tracing_subscriber::fmt()
-        .with_env_filter(filter)
-        .with_writer(std::io::stderr.and(Mutex::new(process_log)))
-        .init();
-    ctrlc::set_handler(|| shutdown.store(true, Ordering::Relaxed))?;
+    let log_dir = crate::app_paths::init_process_logging(shutdown)?;
 
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let event_path = log_dir.join("live.ndjson");
@@ -107,7 +92,7 @@ pub fn run(shutdown: &'static AtomicBool) -> Result<()> {
         .command
         .unwrap_or(Command::App { hidden: false })
     {
-        Command::App { hidden } => crate::linux_app::open(event_path, hidden, shutdown),
+        Command::App { hidden } => crate::linux_app::open(hidden, shutdown),
         Command::Service => crate::linux_app::run_service(event_path, shutdown),
         Command::Start => crate::linux_service::start(),
         Command::Stop => crate::linux_service::stop(),
@@ -118,7 +103,9 @@ pub fn run(shutdown: &'static AtomicBool) -> Result<()> {
         }
         Command::Dictate { device } => {
             let _instance = crate::instance::acquire("listener")?;
-            crate::linux_dictation::run(&event_path, device.as_deref(), shutdown)
+            let settings = crate::linux_settings::LinuxSettings::load()?;
+            crate::linux_dictation::initialize_feedback(settings.sound_effect_volume);
+            crate::linux_dictation::run(&event_path, device.as_deref(), shutdown, settings, None)
         }
         Command::Devices => {
             for device in crate::audio::input_device_names()? {

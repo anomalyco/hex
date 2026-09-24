@@ -3,21 +3,8 @@ set -eu
 
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 team_id=${VOICE_CONTROL_TEAM_ID:?Set VOICE_CONTROL_TEAM_ID to the Apple Developer signing team}
-identity=${VOICE_CONTROL_CODESIGN_IDENTITY:-}
-if [ -z "$identity" ]; then
-  identity=$(security find-identity -v -p codesigning | sed -n "s/.*\"\(Developer ID Application:.*($team_id)\)\"/\1/p" | head -1)
-fi
-if [ -z "$identity" ]; then
-  echo "No Developer ID signing identity found for team $team_id. Set VOICE_CONTROL_CODESIGN_IDENTITY." >&2
-  exit 1
-fi
-case "$identity" in
-  "Developer ID Application:"*"($team_id)") ;;
-  *)
-    echo "Signing identity is not a Developer ID Application identity for team $team_id." >&2
-    exit 1
-    ;;
-esac
+. "$root/scripts/macos-signing.sh"
+identity=$(hex_codesign_identity "$team_id")
 icon_output="$root/target/AppIcon.assets"
 icon_info="$root/target/AppIcon-info.plist"
 sparkle_dir=$("$root/scripts/setup-sparkle.sh")

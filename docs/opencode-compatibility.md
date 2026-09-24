@@ -28,8 +28,10 @@ HEX discovers a separately installed `opencode2`, optionally overridden by
 managed service, or restart or update it. `opencode2 api` discovers or starts
 the service through OpenCode's own lifecycle.
 
-Catalog loading and generation use `opencode2 api get /api/health` to identify
-the authenticated active server, starting it through the CLI when needed.
+Catalog loading and generation use `opencode2 api get /api/info` to identify
+the authenticated active server, starting it through the CLI when needed. An
+exact CLI `HTTP 404 Not Found` falls back to the older `/api/status`, then
+`/api/health`, names within the same deadline; any other failure is final.
 `opencode2 debug paths` locates its state directory. HEX reads endpoint and
 password together from the bounded, owner-only service registration matching
 that server's PID and version.
@@ -51,8 +53,12 @@ of release status, including alpha and beta. Selecting a thinking variant for th
 floating default saves the resolved catalog model alongside it; existing explicit
 model selections are preserved.
 
-`/api/generate` accepts a prompt and optional model reference and returns
-`data.text`. It is stateless and uses the server's base configuration, not the
+One-shot generation accepts a prompt and optional model reference and returns
+`data.text`. Current OpenCode serves it at `/api/experimental/generate`; HEX
+falls back to the older `/api/generate` only when the server answers the new
+route with HTTP 404, within the same generation deadline. curl reports the
+status on a trailing line so a missing route is distinguished from a served
+error body. It is stateless and uses the server's base configuration, not the
 catalog request's directory header. Existing saved selections whose catalog and
 upstream IDs match need no migration. Previously broken alias selections can be
 fixed by reselecting the model; HEX does not guess an ID migration.
@@ -66,7 +72,7 @@ published to npm's `dev` tag; `next` was an older beta, not the newest V2 build.
 Resolve the published version rather than assuming a moving tag identifies the
 desired source commit.
 
-Check the connected server's `/api/health` version as well as the CLI version:
+Check the connected server's `/api/info` version as well as the CLI version:
 the CLI's `api` command permits a server version mismatch. Do not replace a
 user's running service to perform compatibility validation.
 
