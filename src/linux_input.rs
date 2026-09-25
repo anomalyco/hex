@@ -6,6 +6,8 @@ use std::time::{Duration, Instant};
 
 use color_eyre::eyre::{Result, WrapErr, eyre};
 use x11rb::connection::Connection;
+use x11rb::errors::ReplyError;
+use x11rb::protocol::ErrorKind;
 use x11rb::protocol::Event;
 use x11rb::protocol::xproto::{ConnectionExt, GrabMode, ModMask, Window};
 use x11rb::rust_connection::RustConnection;
@@ -189,7 +191,10 @@ fn run(
                     second_tap = last_release
                         .take()
                         .is_some_and(|released: Instant| released.elapsed() < DOUBLE_TAP_WINDOW);
-                    connection
+                    // Escape-cancel is best-effort: another X11 client (e.g. the window
+                    // manager) may already hold it. A conflict must degrade to
+                    // hold-to-dictate without Escape-cancel, never kill the listener.
+                    match connection
                         .grab_key(
                             false,
                             root,
@@ -199,9 +204,20 @@ fn run(
                             GrabMode::ASYNC,
                         )?
                         .check()
-                        .wrap_err("Escape is already in use by another X11 client")?;
-                    connection.flush()?;
-                    escape_grabbed = true;
+                    {
+                        Ok(()) => {
+                            connection.flush()?;
+                            escape_grabbed = true;
+                        }
+                        Err(error) if is_grab_conflict(&error) => {
+                            tracing::warn!(
+                                "Escape is already in use by another X11 client; continuing without Escape-cancel"
+                            );
+                        }
+                        Err(error) => {
+                            return Err(error).wrap_err("could not grab the Escape key for cancel");
+                        }
+                    }
                     if !send_event(&sender, HotkeyEvent::Start)? {
                         break;
                     }
@@ -247,6 +263,16 @@ pub(crate) fn send_event(sender: &SyncSender<HotkeyEvent>, event: HotkeyEvent) -
         Err(TrySendError::Full(_)) => Err(eyre!("Linux hotkey event queue overflow")),
         Err(TrySendError::Disconnected(_)) => Ok(false),
     }
+}
+
+/// True when the server refused a passive grab because another client holds it.
+/// `GrabKey` with a conflicting grab fails with `BadAccess` (`Access`); any
+/// other error (connection loss, bad value) must stay fatal.
+fn is_grab_conflict(error: &ReplyError) -> bool {
+    matches!(
+        error,
+        ReplyError::X11Error(error) if error.error_kind == ErrorKind::Access
+    )
 }
 
 fn release_escape(
@@ -415,6 +441,34 @@ mod tests {
         assert!(!send_event(&sender, HotkeyEvent::Cancel).unwrap());
     }
 
+    fn grab_error(kind: ErrorKind) -> ReplyError {
+        ReplyError::X11Error(x11rb::x11_utils::X11Error {
+            error_kind: kind,
+            error_code: 10,
+            sequence: 12,
+            bad_value: 1722,
+            minor_opcode: 0,
+            major_opcode: 33,
+            extension_name: None,
+            request_name: Some("GrabKey"),
+        })
+    }
+
+    #[test]
+    fn escape_grab_conflict_is_not_fatal() {
+        assert!(is_grab_conflict(&grab_error(ErrorKind::Access)));
+    }
+
+    #[test]
+    fn non_conflict_grab_errors_stay_fatal() {
+        for kind in [ErrorKind::Value, ErrorKind::Window, ErrorKind::Match] {
+            assert!(
+                !is_grab_conflict(&grab_error(kind)),
+                "{kind:?} must stay fatal"
+            );
+        }
+    }
+
     #[test]
     fn dropping_a_monitor_stops_and_joins_its_worker() {
         let (_, events) = mpsc::sync_channel(1);
@@ -546,5 +600,60 @@ mod tests {
             monitor.events.recv_timeout(Duration::from_secs(1)).unwrap(),
             HotkeyEvent::Finish
         );
+    }
+
+    #[test]
+    #[ignore = "requires the active X11 desktop"]
+    fn conflicted_escape_still_dictates_without_cancel() {
+        let _guard = X11_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let (holder, holder_screen) = RustConnection::connect(None).unwrap();
+        let holder_root = holder.setup().roots[holder_screen].root;
+        let escape = Keymap::read(&holder).unwrap().keycode(XK_ESCAPE).unwrap();
+        holder
+            .grab_key(
+                false,
+                holder_root,
+                ModMask::ANY,
+                escape,
+                GrabMode::ASYNC,
+                GrabMode::ASYNC,
+            )
+            .unwrap()
+            .check()
+            .unwrap();
+        holder.flush().unwrap();
+        let monitor =
+            LinuxHotkeyMonitor::start_for(LinuxHotkey::default(), false, LinuxSession::X11)
+                .unwrap();
+        let (connection, screen) = RustConnection::connect(None).unwrap();
+        let root = connection.setup().roots[screen].root;
+        let keymap = Keymap::read(&connection).unwrap();
+        let alt = keymap.keycode(XK_ALT_L).unwrap();
+        let space = keymap.keycode(XK_SPACE).unwrap();
+        send_key(&connection, root, KEY_PRESS, alt);
+        send_key(&connection, root, KEY_PRESS, space);
+        send_key(&connection, root, KEY_RELEASE, space);
+        send_key(&connection, root, KEY_RELEASE, alt);
+        assert_eq!(
+            monitor.events.recv_timeout(Duration::from_secs(1)).unwrap(),
+            HotkeyEvent::Start
+        );
+        assert_eq!(
+            monitor.events.recv_timeout(Duration::from_secs(1)).unwrap(),
+            HotkeyEvent::Finish
+        );
+        assert!(
+            monitor
+                .events
+                .recv_timeout(Duration::from_millis(100))
+                .is_err()
+        );
+        assert!(monitor.errors.try_recv().is_err());
+        holder
+            .ungrab_key(escape, holder_root, ModMask::ANY)
+            .unwrap();
+        holder.flush().unwrap();
     }
 }

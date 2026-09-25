@@ -243,12 +243,25 @@ service exits -> systemd restart-on-failure OR explicit hex start
 hex stop -> stop service -> release microphone and hotkeys
 ```
 Sources/checks: [linux_app.rs](../../src/linux_app.rs),
-[Linux CI](../../.github/workflows/check-linux.yml),
-[test-wayland-paste.sh](../../scripts/test-wayland-paste.sh), and
-[test-linux-service.py](../../scripts/test-linux-service.py).
+  [linux_input.rs](../../src/linux_input.rs),
+  [Linux CI](../../.github/workflows/check-linux.yml),
+  [test-wayland-paste.sh](../../scripts/test-wayland-paste.sh), and
+  [test-linux-service.py](../../scripts/test-linux-service.py).
 Proof limit: source and available headless checks, not current supported-host
 behavior. Native compositor/device validation remains separate. The service
 socket is same-user only; bounded I/O and queues keep client stalls off the audio loop.
+
+**Fixed in 2.1.22 (unreleased):** on X11 the Escape-cancel grab is best-effort.
+When another client (e.g. i3) already holds Escape, the listener logs a
+warning and keeps dictating without Escape-cancel instead of stopping with
+`Escape is already in use by another X11 client`. Checks
+`escape_grab_conflict_is_not_fatal` and `non_conflict_grab_errors_stay_fatal`
+in [linux_input.rs](../../src/linux_input.rs) pin the classifier; the full
+binary suite (151 passed) and `test-linux-service.py` passed on the i3 host.
+Live probe note: holding Escape/ANY from a second client reproduced the
+server-side BadAccess (error 10, GrabKey opcode 33); re-running `hex status`
+during and after the hold showed the listener still `Listening` with no
+`operation_error`. Escape-cancel-while-conflicted is covered by the ignored `conflicted_escape_still_dictates_without_cancel` survival test, which needs the active X11 desktop.
 
 ### Keyboard Layout Resolution
 
