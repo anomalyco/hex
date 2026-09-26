@@ -397,6 +397,54 @@ Launch Hex                               // maintain.startup
 Menu-bar installation fails -> Show Dock icon and open the window // recovery access
 ```
 
+```ts
+Settings > Launch at login               // maintain.login-item
+├── Open -> Checking until macOS returns the initial state
+├── Refresh / toggle / Open Settings -> One persistent background worker
+│   └── One active request; latest pending user action precedes the next refresh
+├── Failed toggle -> Show error and reconcile with actual macOS state when available
+└── Close Settings -> Release channels without waiting for an active native call
+```
+
+[login_item.rs](../../src/login_item.rs) serializes ServiceManagement calls on one
+window-owned worker, with bounded request and response channels and an autorelease
+pool per operation. Settings reads responses without blocking every 500 ms;
+refreshes do not accumulate while macOS is busy. The toggle is unavailable until
+the first successful status lookup. macOS owns registration state; no login
+Boolean is persisted. Preview controls never start the worker or call macOS.
+
+The worker tests in `login_item.rs` exercise thread reuse, nonblocking polling,
+latest-action coalescing, action priority, and closing during a blocked call.
+`login_item_response_reconciles_optimistic_toggle_and_unknown_state` in
+[app_window.rs](../../src/app_window.rs) checks initial status, error rollback
+including redraw, unchanged errors, error-only clearing, approval, and external
+enablement. Native `RequiresApproval` and error transitions remain unverified;
+the simulated checks do not establish Developer ID signed distribution behavior.
+
+Observed September 23, 2026, on `d1930b5` after the final simplifications: the
+full debug suite passed 486 tests and the release suite passed 485, each with
+twelve opt-in tests ignored and all twelve keyboard-layout child scenarios
+passing. Formatting, strict debug all-target/all-feature Clippy, and diff
+whitespace checks passed.
+
+Computer-use checks on an ad-hoc signed temporary bundle of the optimized build
+confirmed shortcut capture/cancellation, Settings/Modes navigation, registration
+and unregistration, the final state after three consecutive toggle clicks, and
+refresh after removing that bundle's login item in macOS Settings. The temporary
+item was left disabled/removed; no new microphone, input, or Accessibility grants
+were made. A five-second `sample` profile found `SMAppService` frames on the
+`login-item` worker and none on the main thread. This is sampled-stack evidence,
+not an input-to-frame latency measurement or a signed-release smoke test.
+
+Closing Settings left the app process alive with zero `login-item` threads;
+reopening produced one new worker. An earlier apparent surviving worker came
+from computer-use observation reopening the window. Cmd+Q and Quit HEX each
+terminated the process. Local profiles are `/tmp/hex-login-worker-current.sample.txt`
+and `/tmp/hex-login-cycle-{before,closed-no-observe,reobserved}.sample.txt`.
+The tested temporary executable's SHA-256 is
+`d1a3be1e219e7371726273937eeef6c7e16434637e4297ae183f9bdaf4d28b04`.
+No Developer ID signing identity was available for a new distribution build.
+
 The existing **Show Dock icon** preference controls quiet startup; there is no
 additional launch-window setting. This applies to normal and login launches,
 does not change login registration, and does not hide an already open window

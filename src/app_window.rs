@@ -45,7 +45,7 @@ use crate::events::{
     CommandOutcome, DictationPhase, EventReader, TranscriptPhase, VoiceEvent, VoiceState, now_ms,
 };
 use crate::history::{History, HistoryEntry, HistoryKind, HistoryRetention};
-use crate::login_item::LoginItemStatus;
+use crate::login_item::{LoginItemRequest, LoginItemResponse, LoginItemStatus, LoginItemWorker};
 use crate::meeting::{self, MeetingManifest, MeetingRequest, MeetingStatus};
 use crate::onboarding::{
     PermissionAction, PermissionKind, PermissionState, PermissionWarning, SetupStatus,
@@ -966,7 +966,8 @@ pub struct AppWindow {
     microphone_devices: Vec<String>,
     microphone_picker_open: bool,
     microphone_picker_error: Option<String>,
-    launch_at_login_status: LoginItemStatus,
+    launch_at_login_status: Option<LoginItemStatus>,
+    login_item_worker: Option<LoginItemWorker>,
     launch_at_login_error: Option<String>,
     launch_at_login_toggle: ToggleSpring,
     update_status: crate::sparkle::UpdateStatus,
@@ -1323,12 +1324,13 @@ impl AppWindow {
                 Vec::new()
             })
         };
-        let (launch_at_login_status, launch_at_login_error) = if preview_mode {
-            (LoginItemStatus::Disabled, None)
+        let launch_at_login_status = preview_mode.then_some(LoginItemStatus::Disabled);
+        let (login_item_worker, launch_at_login_error) = if preview_mode {
+            (None, None)
         } else {
-            match crate::login_item::status() {
-                Ok(status) => (status, None),
-                Err(error) => (LoginItemStatus::Disabled, Some(error.to_string())),
+            match LoginItemWorker::new() {
+                Ok(worker) => (Some(worker), None),
+                Err(error) => (None, Some(error)),
             }
         };
         let history = if preview_mode {
@@ -1365,9 +1367,10 @@ impl AppWindow {
             microphone_picker_open: false,
             microphone_picker_error: None,
             launch_at_login_status,
+            login_item_worker,
             launch_at_login_error,
             launch_at_login_toggle: ToggleSpring::new(
-                launch_at_login_status == LoginItemStatus::Enabled,
+                launch_at_login_status == Some(LoginItemStatus::Enabled),
             ),
             update_status: if let Some(preview) = &preview {
                 if preview.update_available {
@@ -1775,22 +1778,75 @@ impl AppWindow {
     }
 
     fn poll_login_item(&mut self) -> bool {
-        if self.preview {
-            return false;
-        }
-        let Ok(status) = crate::login_item::status() else {
+        let Some(worker) = &mut self.login_item_worker else {
             return false;
         };
-        if status == self.launch_at_login_status {
+        let response = worker.poll();
+        let changed = match response {
+            Ok(Some(response)) => self.apply_login_item_response(response),
+            Ok(None) => false,
+            Err(error) => {
+                self.login_item_worker_failed(error);
+                return true;
+            }
+        };
+        let request_changed = self.request_login_item(LoginItemRequest::Status);
+        changed || request_changed
+    }
+
+    fn apply_login_item_response(&mut self, response: LoginItemResponse) -> bool {
+        let before = (
+            self.launch_at_login_status,
+            self.launch_at_login_toggle.enabled(),
+        );
+        let error_changed = match response.result {
+            Ok(status) => {
+                let clear_error = self.launch_at_login_status.is_none()
+                    || matches!(response.request, LoginItemRequest::SetEnabled(_))
+                    || self.launch_at_login_status != Some(status)
+                        && status == LoginItemStatus::Enabled;
+                self.launch_at_login_status = Some(status);
+                clear_error && self.launch_at_login_error.take().is_some()
+            }
+            Err(error) => {
+                if let Some(status) = error.status {
+                    self.launch_at_login_status = Some(status);
+                }
+                let changed = self.launch_at_login_error.as_deref() != Some(error.message.as_str());
+                self.launch_at_login_error = Some(error.message);
+                changed
+            }
+        };
+        let enabled = self
+            .login_item_worker
+            .as_ref()
+            .and_then(LoginItemWorker::desired_enabled)
+            .unwrap_or(self.launch_at_login_status == Some(LoginItemStatus::Enabled));
+        self.launch_at_login_toggle.set_enabled(enabled);
+        error_changed
+            || before
+                != (
+                    self.launch_at_login_status,
+                    self.launch_at_login_toggle.enabled(),
+                )
+    }
+
+    fn request_login_item(&mut self, request: LoginItemRequest) -> bool {
+        let Some(worker) = &mut self.login_item_worker else {
             return false;
+        };
+        if let Err(error) = worker.request(request) {
+            self.login_item_worker_failed(error);
+            return true;
         }
-        self.launch_at_login_status = status;
+        false
+    }
+
+    fn login_item_worker_failed(&mut self, error: String) {
+        self.login_item_worker = None;
+        self.launch_at_login_error = Some(error);
         self.launch_at_login_toggle
-            .set_enabled(status == LoginItemStatus::Enabled);
-        if status == LoginItemStatus::Enabled {
-            self.launch_at_login_error = None;
-        }
-        true
+            .set_enabled(self.launch_at_login_status == Some(LoginItemStatus::Enabled));
     }
 
     fn poll_personal_commands(&mut self) -> bool {
@@ -3157,31 +3213,16 @@ impl AppWindow {
 
     fn set_launch_at_login(&mut self, enabled: bool, cx: &mut Context<Self>) {
         if self.preview {
-            self.launch_at_login_status = if enabled {
+            self.launch_at_login_status = Some(if enabled {
                 LoginItemStatus::Enabled
             } else {
                 LoginItemStatus::Disabled
-            };
-            self.launch_at_login_toggle.set_enabled(enabled);
-            cx.notify();
+            });
+        } else if self.launch_at_login_status.is_none() || self.login_item_worker.is_none() {
             return;
         }
-        match crate::login_item::set_enabled(enabled) {
-            Ok(status) => {
-                self.launch_at_login_status = status;
-                self.launch_at_login_error = None;
-                self.launch_at_login_toggle
-                    .set_enabled(status == LoginItemStatus::Enabled);
-            }
-            Err(error) => {
-                self.launch_at_login_error = Some(error.to_string());
-                if let Ok(status) = crate::login_item::status() {
-                    self.launch_at_login_status = status;
-                    self.launch_at_login_toggle
-                        .set_enabled(status == LoginItemStatus::Enabled);
-                }
-            }
-        }
+        self.launch_at_login_toggle.set_enabled(enabled);
+        self.request_login_item(LoginItemRequest::SetEnabled(enabled));
         cx.notify();
     }
 
@@ -3385,15 +3426,26 @@ impl AppWindow {
                     }))
             }),
         );
-        let launch_at_login_control =
-            if self.launch_at_login_status == LoginItemStatus::RequiresApproval {
-                compact_button("Open Settings")
-                    .id("launch-at-login-approval")
-                    .on_click(|_, _, _| crate::login_item::open_settings())
-                    .into_any_element()
-            } else {
-                toggle(launch_at_login_position)
-            };
+        let launch_at_login_control = if self.launch_at_login_status.is_none() {
+            div()
+                .text_color(rgb(MUTED))
+                .child(if self.login_item_worker.is_some() {
+                    "Checking…"
+                } else {
+                    "Unavailable"
+                })
+                .into_any_element()
+        } else if self.launch_at_login_status == Some(LoginItemStatus::RequiresApproval) {
+            compact_button("Open Settings")
+                .id("launch-at-login-approval")
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.request_login_item(LoginItemRequest::OpenSettings);
+                    cx.notify();
+                }))
+                .into_any_element()
+        } else {
+            toggle(launch_at_login_position)
+        };
         let recording_audio_position = self.recording_audio_spring.render_position(window);
         let audio_widths = [50.0, 90.0, 80.0];
         let audio_behavior = sliding_segmented_control(recording_audio_position, &audio_widths)
@@ -3646,13 +3698,12 @@ impl AppWindow {
                                         )
                                         .id("launch-at-login-setting")
                                         .when(
-                                            self.launch_at_login_status
-                                                != LoginItemStatus::RequiresApproval,
+                                            matches!(self.launch_at_login_status, Some(LoginItemStatus::Enabled | LoginItemStatus::Disabled))
+                                                && (self.preview || self.login_item_worker.is_some()),
                                             |row| {
                                                 row.on_click(cx.listener(
                                                     |this, _, _, cx| {
-                                                        let enabled = this.launch_at_login_status
-                                                            != LoginItemStatus::Enabled;
+                                                        let enabled = !this.launch_at_login_toggle.enabled();
                                                         this.set_launch_at_login(enabled, cx);
                                                     },
                                                 ))
@@ -8577,6 +8628,65 @@ mod tests {
             window,
             cx,
         )
+    }
+
+    #[gpui::test]
+    fn login_item_response_reconciles_optimistic_toggle_and_unknown_state(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        let (view, cx) = cx.add_window_view(editor_fixture);
+        cx.update(|_, cx| {
+            view.update(cx, |view, _| {
+                view.launch_at_login_status = None;
+                assert!(view.apply_login_item_response(LoginItemResponse {
+                    request: LoginItemRequest::Status,
+                    result: Ok(LoginItemStatus::Disabled),
+                }));
+                assert_eq!(view.launch_at_login_status, Some(LoginItemStatus::Disabled));
+                view.launch_at_login_toggle.set_enabled(true);
+                view.launch_at_login_error = Some("Registration failed".into());
+                // Even with unchanged confirmed status and error, rollback needs a redraw.
+                assert!(view.apply_login_item_response(LoginItemResponse {
+                    request: LoginItemRequest::SetEnabled(true),
+                    result: Err(crate::login_item::LoginItemFailure {
+                        status: Some(LoginItemStatus::Disabled),
+                        message: "Registration failed".into(),
+                    }),
+                }));
+                assert!(!view.launch_at_login_toggle.enabled());
+                assert!(!view.apply_login_item_response(LoginItemResponse {
+                    request: LoginItemRequest::SetEnabled(true),
+                    result: Err(crate::login_item::LoginItemFailure {
+                        status: Some(LoginItemStatus::Disabled),
+                        message: "Registration failed".into(),
+                    }),
+                }));
+                // Clearing only the error still needs a redraw.
+                assert!(view.apply_login_item_response(LoginItemResponse {
+                    request: LoginItemRequest::SetEnabled(false),
+                    result: Ok(LoginItemStatus::Disabled),
+                }));
+                assert!(view.launch_at_login_error.is_none());
+                assert!(view.apply_login_item_response(LoginItemResponse {
+                    request: LoginItemRequest::SetEnabled(true),
+                    result: Ok(LoginItemStatus::RequiresApproval),
+                }));
+                assert_eq!(
+                    view.launch_at_login_status,
+                    Some(LoginItemStatus::RequiresApproval)
+                );
+                assert!(view.launch_at_login_error.is_none());
+                assert!(view.apply_login_item_response(LoginItemResponse {
+                    request: LoginItemRequest::Status,
+                    result: Ok(LoginItemStatus::Enabled),
+                }));
+                assert!(view.launch_at_login_toggle.enabled());
+                assert!(!view.apply_login_item_response(LoginItemResponse {
+                    request: LoginItemRequest::Status,
+                    result: Ok(LoginItemStatus::Enabled),
+                }));
+            });
+        });
     }
 
     fn reject_settings_save(_: &AppSettings) -> color_eyre::Result<()> {
