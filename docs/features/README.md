@@ -327,6 +327,11 @@ Selection and stage checks start in
 [personal_commands.rs](../../src/personal_commands.rs). They do not prove live
 provider availability or real application/Brave context changes.
 
+GUI executable discovery also checks `~/.vite-plus/bin/opencode2` when it is
+absent from the inherited PATH. `standard_install_location_finds_opencode_outside_the_gui_path`
+in [dictation_processor.rs](../../src/dictation_processor.rs) covers this with
+a temporary executable; it does not run an installed Vite Plus shim or provider.
+
 `ordinary_processing_snapshots_modes_before_stage_and_keeps_transformations` in
 [parakeet.rs](../../src/parakeet.rs) checks processing-time profile acquisition,
 conditional Processing-stage emission, and retained transformation selection.

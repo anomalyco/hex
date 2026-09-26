@@ -1170,7 +1170,11 @@ mod tests {
             std::process::id(),
             thread::current().id()
         ));
-        for location in [".opencode/bin/opencode2", "Library/pnpm/bin/opencode2"] {
+        for location in [
+            ".opencode/bin/opencode2",
+            ".vite-plus/bin/opencode2",
+            "Library/pnpm/bin/opencode2",
+        ] {
             let executable = root.join(location);
             fake_executable(&executable);
 
