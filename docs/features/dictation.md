@@ -7,8 +7,8 @@ work; cancellation prevents insertion only before output commits.
 This map covers the macOS release path. Linux shares the basic journey, not
 every timing, input, or recovery guarantee; see the
 [platform map](README.md#other-platforms-and-consumers). This is a map, not a
-verified end-to-end driver. Linked checks are locators; no tests or previews
-were run for this rewrite.
+verified end-to-end driver. Linked checks are locators; native paste remains
+outside this map's proof boundary.
 
 ## How To Get To It
 
@@ -221,6 +221,42 @@ Checks in [parakeet.rs](../../src/parakeet.rs):
 `repeated_cancellation_walks_back_through_pending_jobs`.
 These use a controlled paste boundary and temporary history store;
 no foreground application consumes the clipboard.
+
+### On-Demand Rewrites
+
+```ts
+No rewrite shortcut assigned by default                 // dictate.rewrite-opt-in
+  -> Settings > Rewrite last dictation / Rewrite selected text
+  -> Assign shortcut explicitly                         // active and reserved
+  -> Disable -> Binding cleared (None), unreserved; reassign via capture
+
+Completed Paste or Send output
+  -> Successful output commit -> Publish as last dictation
+  -> Preparation, paste failure, cancellation, or empty output -> Do not publish
+
+Rewrite last while another paste is in flight
+  -> Use the previously successful published dictation
+  -> Never use output whose paste has not committed
+
+Escape or cancel_latest cancels an in-flight rewrite
+  -> Job stays cancelled until OrderedOutputs drains
+  -> A second press starts a fresh rewrite             // never already-in-progress
+```
+
+Sources: `AppSettings::runtime_hotkeys` in
+[`app_settings.rs`](../../src/app_settings.rs), and ordered output publication
+in [`parakeet.rs`](../../src/parakeet.rs). Checks include
+`missing_fields_receive_defaults`,
+`rewrite_shortcuts_only_enter_runtime_when_explicitly_saved`,
+`rewrite_last_shortcut_disables_itself_when_it_shadows_an_existing_shortcut`,
+`failed_paste_does_not_publish_last_transcript`,
+`rewrite_last_during_in_flight_paste_sees_only_previously_published_text`,
+`rewrite_last_restarts_after_escape_cancels_a_buffered_rewrite`,
+`output_stays_cancellable_through_preparation_but_not_after_mutation`, and
+`rewrite_generates_even_when_live_processing_is_disabled`.
+These prove persisted defaults, opt-in reservation, conflict handling,
+publish-after-success, in-flight rewrite acceptance, cancel-restart, and the
+cancellation/commit boundary; they do not prove a real target application paste.
 
 ### Feedback
 

@@ -15,7 +15,13 @@ fn main() {
     use std::process::{Command, Stdio};
     use std::time::{Duration, Instant};
 
-    const CASES: [&str; 4] = ["cold-lookups", "cold-mixed", "warm-hits", "warm-misses"];
+    const CASES: [&str; 5] = [
+        "cold-lookups",
+        "cold-mixed",
+        "warm-hits",
+        "warm-misses",
+        "serialized-queries",
+    ];
     let args = std::env::args().skip(1).collect::<Vec<_>>();
     if args.first().is_some_and(|arg| arg == "--case") {
         // Native aborts should fail the child without creating crash reports or
@@ -118,6 +124,26 @@ fn run_case(case: &str) {
 
     const WORKERS: usize = 8;
     const ITERATIONS: usize = 1_000;
+    if case == "serialized-queries" {
+        keyboard::initialize_layout().unwrap();
+        let barrier = Arc::new(Barrier::new(WORKERS));
+        let workers = (0..WORKERS)
+            .map(|_| {
+                let barrier = barrier.clone();
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    for character in ['o', 'v', 'a'] {
+                        keyboard::key_code_for(character).unwrap();
+                    }
+                })
+            })
+            .collect::<Vec<_>>();
+        for worker in workers {
+            worker.join().unwrap();
+        }
+        assert!(keyboard::key_code_for('o').is_ok());
+        return;
+    }
     let warm = case.starts_with("warm-");
     if warm {
         keyboard::initialize_layout().unwrap();
