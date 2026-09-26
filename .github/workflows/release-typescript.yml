@@ -3,6 +3,15 @@ name: Release TypeScript SDK
 on:
   push:
     branches: [main]
+    paths:
+      - "sdk/**"
+      - ".github/workflows/release-typescript.yml"
+  workflow_dispatch:
+
+# Finish an in-flight publish before another run checks registry availability.
+concurrency:
+  group: release-typescript
+  cancel-in-progress: false
 
 permissions:
   contents: write
@@ -11,6 +20,7 @@ permissions:
 
 jobs:
   release:
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     defaults:
       run:
