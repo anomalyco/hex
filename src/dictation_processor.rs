@@ -1012,6 +1012,7 @@ fn find_opencode_executable(
     let home_candidates = home.into_iter().flat_map(|home| {
         [
             home.join(".opencode/bin/opencode2"),
+            home.join(".vite-plus/bin/opencode2"),
             home.join(".bun/bin/opencode2"),
             home.join("Library/pnpm/opencode2"),
             home.join("Library/pnpm/bin/opencode2"),
@@ -1169,7 +1170,11 @@ mod tests {
             std::process::id(),
             thread::current().id()
         ));
-        for location in [".opencode/bin/opencode2", "Library/pnpm/bin/opencode2"] {
+        for location in [
+            ".opencode/bin/opencode2",
+            ".vite-plus/bin/opencode2",
+            "Library/pnpm/bin/opencode2",
+        ] {
             let executable = root.join(location);
             fake_executable(&executable);
 
