@@ -228,6 +228,27 @@ Send is not an atomic target-app transaction.
 logs are separate and currently unbounded on disk. See the
 [privacy guide](../../README.md#privacy-and-local-data).
 
+Opening or reopening Settings does not read the diagnostic event log. Commands
+and developer Activity load it on demand through `AppWindow::reload_events`.
+The shared `EventReader` streams a file-length snapshot in 16 KiB chunks rather
+than copying the entire log into memory. It retains up to 1,024 event rows and
+the latest context, even when that context predates the retained rows.
+Diagnostic records over 1 MiB are skipped through their terminating newline;
+the original log and dictation output remain intact. Partial UTF-8 records carry
+over to the next refresh, and truncation or file replacement resets the reader.
+
+Checks: `activity_log_is_only_read_when_an_observing_pane_needs_it` in
+[app_window.rs](../../src/app_window.rs) and the `reader_*` regressions in
+[events.rs](../../src/events.rs). These exercise synthetic files, not an
+installed Settings session. A first Commands/Activity refresh still scans the
+full log snapshot; disk rotation and background parsing remain separate work.
+
+Observed September 26, 2026: the reader and pane-loading regressions passed.
+An optimized isolated harness using the production reader and a synthetic
+64 MiB log reduced peak process RSS from about 204 MB to 2.4 MB; refresh took
+254 ms before and 222 ms after. This is reader evidence, not a native Settings
+latency measurement.
+
 ## Adjust Behavior
 
 ```ts

@@ -179,6 +179,7 @@ pub struct EventReader {
     path: PathBuf,
     offset: u64,
     pending: Vec<u8>,
+    discarding_record: bool,
     events: VecDeque<VoiceEvent>,
     current_context: Option<(Option<String>, Option<String>)>,
     #[cfg(unix)]
@@ -187,6 +188,9 @@ pub struct EventReader {
 
 const EVENT_RETENTION: usize = 1_024;
 const EVENT_WRITER_CAPACITY: usize = 1_024;
+const EVENT_READ_BUFFER_BYTES: usize = 16 * 1024;
+// This is an observation-reader limit, not a limit on capture or persisted output.
+const MAX_EVENT_RECORD_BYTES: usize = 1024 * 1024;
 
 impl EventLog {
     pub fn create(path: &Path) -> io::Result<Self> {
@@ -351,6 +355,7 @@ impl EventReader {
             path: path.into(),
             offset: 0,
             pending: Vec::new(),
+            discarding_record: false,
             events: VecDeque::new(),
             current_context: None,
             #[cfg(unix)]
@@ -359,14 +364,18 @@ impl EventReader {
     }
 
     pub fn refresh(&mut self) -> io::Result<()> {
-        let metadata = match fs::metadata(&self.path) {
-            Ok(metadata) => metadata,
+        let mut file = match File::open(&self.path) {
+            Ok(file) => file,
             Err(error) if error.kind() == io::ErrorKind::NotFound => {
                 self.reset();
                 return Ok(());
             }
             Err(error) => return Err(error),
         };
+        let metadata = file.metadata()?;
+        if metadata.len() < self.offset {
+            self.reset();
+        }
         #[cfg(unix)]
         {
             let file_id = (metadata.dev(), metadata.ino());
@@ -375,36 +384,50 @@ impl EventReader {
             }
             self.file_id = Some(file_id);
         }
-        if metadata.len() < self.offset {
-            self.reset();
-        }
-        let mut file = File::open(&self.path)?;
         file.seek(SeekFrom::Start(self.offset))?;
-        let mut appended = Vec::new();
-        file.read_to_end(&mut appended)?;
-        self.offset += appended.len() as u64;
-        self.pending.extend_from_slice(&appended);
-
-        let Some(complete) = self
-            .pending
-            .iter()
-            .rposition(|byte| *byte == b'\n')
-            .map(|position| position + 1)
-        else {
-            return Ok(());
-        };
-        let records: Vec<_> = self.pending.drain(..complete).collect();
-        for line in records.split(|byte| *byte == b'\n') {
-            let line = line.strip_suffix(b"\r").unwrap_or(line);
-            if line.is_empty() {
-                continue;
-            }
-            let Ok(event) = serde_json::from_slice(line) else {
-                continue;
+        // Read this snapshot only: a busy writer must not keep refresh chasing EOF.
+        let mut appended = file.take(metadata.len() - self.offset);
+        let mut buffer = [0; EVENT_READ_BUFFER_BYTES];
+        loop {
+            let count = match appended.read(&mut buffer) {
+                Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+                result => result?,
             };
-            self.push(event);
+            if count == 0 {
+                break;
+            }
+            self.offset += count as u64;
+            self.read_records(&buffer[..count]);
         }
         Ok(())
+    }
+
+    fn read_records(&mut self, bytes: &[u8]) {
+        for part in bytes.split_inclusive(|byte| *byte == b'\n') {
+            let complete = part.last() == Some(&b'\n');
+            let text = if complete {
+                &part[..part.len() - 1]
+            } else {
+                part
+            };
+            if !self.discarding_record {
+                if self.pending.len() + text.len() > MAX_EVENT_RECORD_BYTES {
+                    self.pending.clear();
+                    self.discarding_record = true;
+                } else {
+                    self.pending.extend_from_slice(text);
+                }
+            }
+            if complete {
+                if !self.discarding_record
+                    && let Ok(event) = serde_json::from_slice(&self.pending)
+                {
+                    self.push(event);
+                }
+                self.pending.clear();
+                self.discarding_record = false;
+            }
+        }
     }
 
     pub fn events(&self) -> &VecDeque<VoiceEvent> {
@@ -445,6 +468,7 @@ impl EventReader {
     fn reset(&mut self) {
         self.offset = 0;
         self.pending.clear();
+        self.discarding_record = false;
         self.events.clear();
         self.current_context = None;
         #[cfg(unix)]
@@ -610,6 +634,114 @@ mod tests {
             Some(VoiceEvent::SessionStarted { timestamp_ms: 3 })
         ));
         assert_eq!(reader.current_context(), None);
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn reader_streams_large_logs_and_keeps_context_outside_the_retained_rows() {
+        let path = std::env::temp_dir().join(format!(
+            "hex-large-event-reader-{}-{}.ndjson",
+            std::process::id(),
+            now_ms()
+        ));
+        let log = EventLog::create(&path).unwrap();
+        log.emit(&VoiceEvent::Context {
+            timestamp_ms: 0,
+            application: Some("Fixture".into()),
+            browser_url: None,
+        })
+        .unwrap();
+        for timestamp_ms in 1..=2048 {
+            log.dictation(
+                DictationPhase::Pasted,
+                format!("{timestamp_ms}: {}", "é".repeat(100)),
+            )
+            .unwrap();
+        }
+        log.flush().unwrap();
+        let mut reader = EventReader::open(&path);
+        reader.refresh().unwrap();
+        assert_eq!(reader.offset, fs::metadata(&path).unwrap().len());
+        assert_eq!(reader.events().len(), EVENT_RETENTION);
+        assert_eq!(
+            reader.current_context(),
+            Some(&(Some("Fixture".into()), None))
+        );
+        assert!(
+            matches!(reader.events().back(), Some(VoiceEvent::Dictation { text, .. }) if text.starts_with("2048:"))
+        );
+        // Scratch space follows one record, never the size of the file.
+        assert!(reader.pending.capacity() <= EVENT_READ_BUFFER_BYTES);
+        drop(log);
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn reader_skips_oversized_records_through_their_newline_and_recovers() {
+        let path = std::env::temp_dir().join(format!(
+            "hex-oversized-event-reader-{}-{}.ndjson",
+            std::process::id(),
+            now_ms()
+        ));
+        fs::write(&path, vec![b'x'; MAX_EVENT_RECORD_BYTES + 1]).unwrap();
+        let mut reader = EventReader::open(&path);
+        reader.refresh().unwrap();
+        assert!(reader.discarding_record);
+        assert!(reader.pending.is_empty());
+        assert!(reader.pending.capacity() <= MAX_EVENT_RECORD_BYTES);
+
+        let mut file = OpenOptions::new().append(true).open(&path).unwrap();
+        // A valid-looking suffix of the oversized line must not become an event.
+        writeln!(file, "{{\"kind\":\"session_started\",\"timestamp_ms\":1}}").unwrap();
+        write!(
+            file,
+            "{{\"kind\":\"context\",\"timestamp_ms\":2,\"application\":\"caf"
+        )
+        .unwrap();
+        file.write_all(&[0xc3]).unwrap();
+        reader.refresh().unwrap();
+        assert!(reader.events().is_empty());
+        assert!(!reader.discarding_record);
+        file.write_all(b"\xa9\",\"browser_url\":null}\r\n").unwrap();
+        reader.refresh().unwrap();
+        assert_eq!(reader.current_context(), Some(&(Some("café".into()), None)));
+        assert_eq!(reader.events().len(), 1);
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn reader_resets_partial_record_state_on_truncation_and_replacement() {
+        let path = std::env::temp_dir().join(format!(
+            "hex-replaced-event-reader-{}-{}.ndjson",
+            std::process::id(),
+            now_ms()
+        ));
+        let mut reader = EventReader::open(&path);
+        fs::write(&path, vec![b'x'; MAX_EVENT_RECORD_BYTES + 1]).unwrap();
+        reader.refresh().unwrap();
+        fs::write(
+            &path,
+            b"{\"kind\":\"session_started\",\"timestamp_ms\":3}\n",
+        )
+        .unwrap();
+        reader.refresh().unwrap();
+        assert!(matches!(
+            reader.events().front(),
+            Some(VoiceEvent::SessionStarted { timestamp_ms: 3 })
+        ));
+
+        let replacement = path.with_extension("replacement");
+        fs::write(
+            &replacement,
+            b"{\"kind\":\"session_started\",\"timestamp_ms\":4}\n",
+        )
+        .unwrap();
+        fs::rename(replacement, &path).unwrap();
+        reader.refresh().unwrap();
+        assert!(matches!(
+            reader.events().front(),
+            Some(VoiceEvent::SessionStarted { timestamp_ms: 4 })
+        ));
         fs::remove_file(path).unwrap();
     }
 }

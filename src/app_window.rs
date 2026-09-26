@@ -2132,6 +2132,9 @@ impl AppWindow {
     }
 
     fn reload_events(&mut self) {
+        if !matches!(self.pane, Pane::Commands | Pane::Activity) {
+            return;
+        }
         let selected = self
             .selected_event
             .and_then(|index| self.events.get(index))
@@ -8691,6 +8694,40 @@ mod tests {
 
     fn reject_settings_save(_: &AppSettings) -> color_eyre::Result<()> {
         Err(color_eyre::eyre::eyre!("fixture persistence failure"))
+    }
+
+    #[gpui::test]
+    fn activity_log_is_only_read_when_an_observing_pane_needs_it(cx: &mut gpui::TestAppContext) {
+        let path = std::env::temp_dir().join(format!(
+            "hex-lazy-activity-{}-{}.ndjson",
+            std::process::id(),
+            now_ms()
+        ));
+        std::fs::write(&path, b"{\"kind\":\"context\",\"timestamp_ms\":1,\"application\":\"Fixture\",\"browser_url\":null}\n").unwrap();
+        let (view, cx) = cx.add_window_view(editor_fixture);
+        cx.update(|_, cx| {
+            view.update(cx, |view, cx| {
+                view.event_reader = EventReader::open(&path);
+                view.pane = Pane::Settings;
+                view.reload_events();
+                assert!(view.event_reader.events().is_empty());
+                view.select_pane(Pane::Commands, cx);
+                assert_eq!(view.current_context.0.as_deref(), Some("Fixture"));
+
+                std::fs::write(
+                    &path,
+                    b"{\"kind\":\"session_started\",\"timestamp_ms\":2}\n",
+                )
+                .unwrap();
+                view.select_pane(Pane::Settings, cx);
+                view.reload_events();
+                assert_eq!(view.current_context.0.as_deref(), Some("Fixture"));
+                view.select_pane(Pane::Activity, cx);
+                assert_eq!(view.current_context, (None, None));
+                assert_eq!(view.activity.session_started_at, Some(2));
+            });
+        });
+        std::fs::remove_file(path).unwrap();
     }
 
     #[gpui::test]
