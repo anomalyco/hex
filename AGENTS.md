@@ -195,7 +195,9 @@ CoreAudio formats, AppleScript details, or event serialization.
   Uncached headless lookups retain live-layout resolution, with all native
   lookup and snapshot construction serialized by the same lock.
 - Stale shortcut recovery requires at least 100 ms of sampled keyboard neutrality,
-  no pending input, and no active or pending gesture. It emits no capture actions.
+  no pending input, and no hold or pending gesture. A lock is repaired only when
+  it tracks a held key, and it stays locked so a fresh press can still finish it.
+  It emits no capture actions.
   Native `SecondaryFn` navigation metadata may be ignored only with timestamped
   modifier-change evidence that Fn is up; the full key scan and delayed-event
   fences remain required. Never strip Fn globally from shortcut matching.

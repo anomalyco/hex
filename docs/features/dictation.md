@@ -70,12 +70,14 @@ Settings > Double-tap only                            // dictate.double-tap-only
 
 LOCKED -> Speak hands-free -> Fresh shortcut press -> Finish
        -> Escape -> Cancel
+       -> Missed key release -> Neutral keyboard repairs tracking -> Still LOCKED
 ```
 
 Checks in [suppression.rs](../../src/suppression.rs):
 `callback_double_tap_locks_for_modifier_and_key_bindings`,
 `a_slow_second_release_does_not_lock`,
-`double_tap_only_waits_for_two_complete_key_chord_taps`.
+`double_tap_only_waits_for_two_complete_key_chord_taps`,
+`locked_dictation_finishes_after_a_missing_key_release`.
 These cover gesture decisions, not hardware keyboard-layout or remapping equivalence.
 
 ### Warm And Cold Capture

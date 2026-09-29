@@ -67,10 +67,15 @@ bookkeeping. Repairing that bookkeeping must not manufacture a recording.
 
 ```ts
 stale shortcut state
-  -> no active/pending gesture + no pending input     // required gates
+  -> no hold/pending gesture + no pending input       // required gates
   -> full key scan + >= 100 ms sampled neutrality
   -> rearm bookkeeping only                          // emits NO capture actions
   -> fresh hold -> release -> expected output
+
+LOCKED + key release missed while hands-free          // would block the finish press
+  -> same gates, scan, and neutrality
+  -> clear key tracking, stay LOCKED                  // emits NO capture actions
+  -> fresh shortcut press -> Finish
 
 delayed pre-recovery input -> fenced                  // cannot corrupt the fresh hold
 ```
@@ -78,7 +83,8 @@ Checks in [suppression.rs](../../src/suppression.rs):
 `neutral_keyboard_rearms_after_a_missing_modifier_release`,
 `delayed_neutral_callback_after_recovery_preserves_the_next_hold`,
 `stale_key_recovery_requires_complete_neutrality_and_no_intervening_input`,
-`stale_key_recovery_never_polls_active_or_pending_gestures`.
+`stale_key_recovery_never_polls_holds_or_pending_gestures`,
+`locked_dictation_finishes_after_a_missing_key_release`.
 Proof limit: synthetic events and sampled-state fixtures, not every physical
 keyboard or remapping.
 

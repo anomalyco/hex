@@ -805,9 +805,14 @@ impl DictationHotkey {
         mut flags: impl FnMut() -> u64,
         mut key_down: impl FnMut(u16) -> bool,
     ) {
-        if !matches!(self.state, State::Idle { .. } | State::Dirty)
-            || (matches!(self.state, State::Idle { .. }) && self.pressed_keys.is_empty())
-        {
+        let recoverable = match self.state {
+            State::Dirty => true,
+            // A lock captures while the keyboard sits idle. A missed key-up would
+            // otherwise block the fresh shortcut press that finishes it.
+            State::Idle { .. } | State::Locked => !self.pressed_keys.is_empty(),
+            _ => false,
+        };
+        if !recoverable {
             self.stale_keys_neutral_since = None;
             return;
         }
@@ -837,12 +842,17 @@ impl DictationHotkey {
         if sampled_through.duration_since(neutral_since) < STALE_KEY_NEUTRAL_DURATION {
             return;
         }
+        let locked = matches!(self.state, State::Locked);
         tracing::warn!(
             key_count = self.pressed_keys.len(),
+            locked,
             "resynchronized stale input tracking after neutral keyboard"
         );
         self.pressed_keys.clear();
-        self.state = State::IDLE;
+        // Repair bookkeeping only: a lock keeps capturing until a fresh press or Escape.
+        if !locked {
+            self.state = State::IDLE;
+        }
         self.stale_keys_neutral_since = None;
         self.recovery_ignore_through = Some(sampled_through);
         self.recovery_updated_keys.clear();
@@ -2189,14 +2199,13 @@ mod tests {
     }
 
     #[test]
-    fn stale_key_recovery_never_polls_active_or_pending_gestures() {
+    fn stale_key_recovery_never_polls_holds_or_pending_gestures() {
         let now = capture_time();
         for state in [
             State::Recording {
                 started_at: now,
                 previous_release: None,
             },
-            State::Locked,
             State::FirstTapPressed,
             State::AwaitingSecondTap { released_at: now },
             State::SecondTapPressed {
@@ -2215,6 +2224,65 @@ mod tests {
             assert_eq!(hotkey.is_recording(), was_recording);
             assert!(hotkey.pressed_keys.contains(&0));
         }
+        // A lock with accurate tracking has nothing to repair.
+        let mut hotkey = test_hotkey(false, now);
+        hotkey.state = State::Locked;
+        hotkey.recover_stale_keys_with(
+            || panic!("clock must not be polled"),
+            || panic!("flags must not be polled"),
+            |_| panic!("keys must not be polled"),
+        );
+        assert!(hotkey.is_recording());
+    }
+
+    #[test]
+    fn locked_dictation_finishes_after_a_missing_key_release() {
+        let now = capture_time();
+        let mut hotkey = test_hotkey(false, now);
+        let option = InputEvent::Flags(OPTION_KEY_MASK);
+        let neutral = InputEvent::Flags(NO_FLAGS);
+        assert_eq!(hotkey.process(option, now), Some(HotkeyAction::Start));
+        let released = now + Duration::from_millis(80);
+        assert_eq!(
+            hotkey.process(neutral, released),
+            Some(HotkeyAction::Finish)
+        );
+        let second = now + Duration::from_millis(180);
+        assert_eq!(hotkey.process(option, second), Some(HotkeyAction::Start));
+        let locked = now + Duration::from_millis(260);
+        assert_eq!(hotkey.process(neutral, locked), None);
+        assert!(hotkey.is_recording());
+
+        // A key pressed while locked whose release never reaches the reducer.
+        let down = InputEvent::Key {
+            code: 0,
+            down: true,
+            flags: 0,
+        };
+        assert_eq!(hotkey.process(down, now + Duration::from_secs(1)), None);
+        let blocked = now + Duration::from_secs(2);
+        assert_eq!(hotkey.process(option, blocked), None);
+        assert_eq!(
+            hotkey.process(neutral, blocked + Duration::from_millis(80)),
+            None
+        );
+        assert!(hotkey.is_recording());
+
+        // Repair leaves the capture locked and emits no action of its own.
+        let first_sample = now + Duration::from_secs(3);
+        hotkey.recover_stale_keys_with(|| first_sample, || 0, |_| false);
+        let held = first_sample + Duration::from_millis(50);
+        hotkey.recover_stale_keys_with(|| held, || 0, |code| code == 0);
+        assert!(hotkey.pressed_keys.contains(&0));
+        hotkey.recover_stale_keys_with(|| held, || 0, |_| false);
+        let repaired = held + STALE_KEY_NEUTRAL_DURATION;
+        hotkey.recover_stale_keys_with(|| repaired, || 0, |_| false);
+        assert!(hotkey.pressed_keys.is_empty());
+        assert!(hotkey.is_recording());
+
+        let finish = repaired + Duration::from_millis(1);
+        assert_eq!(hotkey.process(option, finish), Some(HotkeyAction::Finish));
+        assert!(!hotkey.is_recording());
     }
 
     #[test]
