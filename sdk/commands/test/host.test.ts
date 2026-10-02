@@ -781,7 +781,11 @@ describe("command host", () => {
     })
 
     expect(output.filter((frame) => frame.type === "invocationResult")).toEqual([
-      { type: "invocationResult", invocationId: "timeout", result: { type: "failure", message: "TimeoutError" } },
+      {
+        type: "invocationResult",
+        invocationId: "timeout",
+        result: { type: "failure", message: expect.stringContaining("timed out") },
+      },
       { type: "invocationResult", invocationId: "next", result: { type: "success" } },
     ])
   })

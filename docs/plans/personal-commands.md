@@ -153,7 +153,7 @@ refresh.
 There is one narrow metadata exception: on init and host startup, HEX adds a
 missing Effect dependency or upgrades the exact legacy pins `4.0.0-beta.97` and
 `4.0.0-beta.107` to the bundled SDK's exact
-`peerDependencies.effect` version (currently `4.0.0-rc.112`). Effect is required
+`peerDependencies.effect` version (currently `4.0.0`). Effect is required
 by the host even for Promise-only configs. The current exact pin is left
 untouched. Effect entries in dependency, dev/optional/peer dependency, override, and
 resolution maps are checked together so duplicate pins cannot conflict.

@@ -314,7 +314,7 @@ export const prepareConfig = (value: unknown): PreparedConfig => {
     if (isFunction(candidate)) {
       handlers.set(id, candidate)
     } else if (Effect.isEffect(candidate)) {
-      handlers.set(id, candidate)
+      handlers.set(id, candidate as Effect.Effect<void, unknown, Hex>)
     }
     return {
       id,
