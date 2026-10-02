@@ -236,12 +236,14 @@ pub fn record(
         let filter = SCContentFilter::create()
             .with_display(&display)
             .with_excluding_windows(&[])
-            .build();
+            .build()
+            .wrap_err("could not build meeting capture filter")?;
         let config = SCStreamConfiguration::new()
             .with_width(2)
             .with_height(2)
             .with_captures_audio(true)
             .with_captures_microphone(true)
+            .wrap_err("could not enable meeting microphone capture")?
             .with_excludes_current_process_audio(true)
             .with_sample_rate(SAMPLE_RATE as i32)
             .with_channel_count(1);
@@ -272,7 +274,7 @@ pub fn record(
         });
         let stream_error = Arc::new(Mutex::new(None::<String>));
         let delegate_error = stream_error.clone();
-        let mut stream = SCStream::new_with_delegate(
+        let mut stream = match SCStream::new_with_delegate(
             &filter,
             &config,
             ErrorHandler::new(move |error| {
@@ -280,7 +282,16 @@ pub fn record(
                     .lock()
                     .unwrap_or_else(|error| error.into_inner()) = Some(error.to_string());
             }),
-        );
+        ) {
+            Ok(stream) => stream,
+            Err(error) => {
+                drop(sender);
+                if let Err(cleanup_error) = join_capture_workers(writer, live_worker) {
+                    tracing::error!(%cleanup_error, "could not finalize failed meeting setup");
+                }
+                return Err(eyre!(error).wrap_err("could not create meeting capture stream"));
+            }
+        };
         let capture_clock = Instant::now();
         let sleep_prevention = crate::recording_environment::prevent_sleep();
         let start_result = (|| -> Result<()> {
@@ -485,9 +496,9 @@ fn add_audio_handler(
                         bytes_per_frame = ?format.audio_bytes_per_frame(),
                         flags = ?format.audio_format_flags(),
                         sample_count = sample.num_samples(),
-                        buffers = buffers.as_ref().map(|buffers| buffers.num_buffers()),
-                        buffer_bytes = ?buffers.as_ref().map(|buffers| buffers.iter().map(|buffer| buffer.data_byte_size()).collect::<Vec<_>>()),
-                        buffer_channels = ?buffers.as_ref().map(|buffers| buffers.iter().map(|buffer| buffer.number_channels).collect::<Vec<_>>()),
+                        buffers = buffers.as_ref().ok().map(|buffers| buffers.num_buffers()),
+                        buffer_bytes = ?buffers.as_ref().ok().map(|buffers| buffers.iter().map(|buffer| buffer.data_byte_size()).collect::<Vec<_>>()),
+                        buffer_channels = ?buffers.as_ref().ok().map(|buffers| buffers.iter().map(|buffer| buffer.number_channels).collect::<Vec<_>>()),
                         "unsupported meeting audio format"
                     );
                 }
@@ -507,11 +518,9 @@ fn add_audio_handler(
         },
         output_type,
     );
-    if registered.is_some() {
-        Ok(())
-    } else {
-        Err(eyre!("ScreenCaptureKit rejected {output_type} output"))
-    }
+    registered
+        .map(|_| ())
+        .map_err(|error| eyre!("ScreenCaptureKit rejected {output_type} output: {error}"))
 }
 
 fn media_time_us(time: CMTime) -> Option<i64> {
@@ -539,7 +548,7 @@ fn decode_audio(sample: &CMSampleBuffer) -> Option<Vec<f32>> {
     let bits_per_channel = format.audio_bits_per_channel()?;
     let flags = format.audio_format_flags()?;
     let frames = usize::try_from(sample.num_samples()).ok()?;
-    let buffers = sample.audio_buffer_list()?;
+    let buffers = sample.audio_buffer_list().ok()?;
     if buffers.num_buffers() == channels && channels > 1 {
         let channel_samples: Vec<Vec<f32>> = buffers
             .iter()
