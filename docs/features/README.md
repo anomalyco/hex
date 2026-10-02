@@ -255,6 +255,8 @@ latency measurement.
 Settings                                 // settings
 ├── Dictation shortcut -> Capture a replacement binding
 ├── Microphone -> Automatic or saved device
+│   ├── Automatic -> Compiled preferences, then the macOS default
+│   │   └── Default is a Bluetooth headset -> Built-in mic when present // avoids the call profile
 │   └── Open menu covers the controls beneath it; click elsewhere dismisses
 ├── Microphone mode
 │   ├── Keep ready (fast) -> Open while idle; pre-roll available
@@ -294,6 +296,16 @@ when no supported player is running, acquisition skips AppleScript entirely.
 The script check does not prove subprocess avoidance or exercise Music, Spotify,
 or VLC through Automation. An opt-in native
 assertion smoke exercises IOKit without starting microphone capture.
+
+**Fixed after 2.1.22:** Automatic selection opened a Bluetooth headset when it was
+the macOS default input, which switches AirPods and similar headsets into a
+low-quality call profile for all audio, including music
+([#106](https://github.com/anomalyco/hex/issues/106),
+[#88](https://github.com/anomalyco/hex/issues/88)). It now prefers a built-in
+microphone and keeps the headset only when none exists; an explicitly saved
+headset is still opened. `automatic_input_prefers_built_in_over_a_bluetooth_default`
+in [audio.rs](../../src/audio.rs) covers the choice, not CoreAudio's transport
+report or a connected headset.
 
 **Fixed after 2.1.20:** through 2.1.20 the microphone menu was painted without
 occluding the panel, so hovering or clicking a device also reached the setting

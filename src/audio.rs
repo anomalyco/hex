@@ -611,12 +611,126 @@ fn find_device(host: &cpal::Host, queries: &[&str]) -> Result<Device> {
             return Ok(device.clone());
         }
     }
-    host.default_input_device().ok_or_else(|| {
+    let default = host.default_input_device().ok_or_else(|| {
         eyre!(
             "no preferred or default input device is available (preferred: {})",
             queries.join(", ")
         )
-    })
+    })?;
+    Ok(avoid_bluetooth_input(default, &devices))
+}
+
+#[cfg(target_os = "macos")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum InputTransport {
+    BuiltIn,
+    Bluetooth,
+    Other,
+}
+
+/// Opening a Bluetooth headset's microphone switches it into a low-quality
+/// call profile for all audio, so automatic selection prefers a built-in mic.
+#[cfg(target_os = "macos")]
+fn automatic_input_index(default: usize, transports: &[InputTransport]) -> usize {
+    if transports.get(default) != Some(&InputTransport::Bluetooth) {
+        return default;
+    }
+    transports
+        .iter()
+        .position(|transport| *transport == InputTransport::BuiltIn)
+        .unwrap_or(default)
+}
+
+#[cfg(target_os = "macos")]
+fn avoid_bluetooth_input(default: Device, devices: &[Device]) -> Device {
+    let default_id = default.id().ok();
+    let Some(default_index) = devices
+        .iter()
+        .position(|device| device.id().ok() == default_id)
+    else {
+        return default;
+    };
+    let transports = devices.iter().map(input_transport).collect::<Vec<_>>();
+    let index = automatic_input_index(default_index, &transports);
+    if index != default_index {
+        tracing::info!(
+            bluetooth = %devices[default_index],
+            selected = %devices[index],
+            "automatic microphone selection skipped a Bluetooth headset"
+        );
+    }
+    devices[index].clone()
+}
+
+#[cfg(target_os = "linux")]
+fn avoid_bluetooth_input(default: Device, _devices: &[Device]) -> Device {
+    default
+}
+
+#[cfg(target_os = "macos")]
+fn input_transport(device: &Device) -> InputTransport {
+    use std::ffi::c_void;
+    use std::ptr::NonNull;
+
+    use objc2_core_audio::{
+        AudioObjectGetPropertyData, AudioObjectID, AudioObjectPropertyAddress,
+        AudioObjectPropertySelector, kAudioDevicePropertyTransportType,
+        kAudioDeviceTransportTypeBluetooth, kAudioDeviceTransportTypeBluetoothLE,
+        kAudioDeviceTransportTypeBuiltIn, kAudioHardwarePropertyTranslateUIDToDevice,
+        kAudioObjectPropertyElementMain, kAudioObjectPropertyScopeGlobal, kAudioObjectSystemObject,
+    };
+    use objc2_core_foundation::CFString;
+
+    fn read_u32(
+        object: AudioObjectID,
+        selector: AudioObjectPropertySelector,
+        qualifier: Option<NonNull<c_void>>,
+        qualifier_size: u32,
+    ) -> Option<u32> {
+        let mut address = AudioObjectPropertyAddress {
+            mSelector: selector,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain,
+        };
+        let mut value = 0_u32;
+        let mut size = std::mem::size_of::<u32>() as u32;
+        let status = unsafe {
+            AudioObjectGetPropertyData(
+                object,
+                NonNull::from(&mut address),
+                qualifier_size,
+                qualifier.map_or(std::ptr::null(), |qualifier| qualifier.as_ptr()),
+                NonNull::from(&mut size),
+                NonNull::from(&mut value).cast(),
+            )
+        };
+        (status == 0 && size as usize == std::mem::size_of::<u32>()).then_some(value)
+    }
+
+    let Ok(id) = device.id() else {
+        return InputTransport::Other;
+    };
+    let uid = CFString::from_str(id.id());
+    let uid_ref: *const CFString = &*uid;
+    let Some(device_id) = read_u32(
+        kAudioObjectSystemObject as AudioObjectID,
+        kAudioHardwarePropertyTranslateUIDToDevice,
+        Some(NonNull::from(&uid_ref).cast()),
+        std::mem::size_of::<*const CFString>() as u32,
+    )
+    .filter(|device_id| *device_id != 0) else {
+        return InputTransport::Other;
+    };
+    match read_u32(device_id, kAudioDevicePropertyTransportType, None, 0) {
+        Some(transport) if transport == kAudioDeviceTransportTypeBuiltIn => InputTransport::BuiltIn,
+        Some(transport)
+            if transport == kAudioDeviceTransportTypeBluetooth
+                || transport == kAudioDeviceTransportTypeBluetoothLE =>
+        {
+            InputTransport::Bluetooth
+        }
+        _ => InputTransport::Other,
+    }
 }
 
 fn mono<T>(samples: &[T], channels: usize, convert: impl Fn(&T) -> f32) -> Vec<f32> {
@@ -683,6 +797,19 @@ fn captured_through(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn automatic_input_prefers_built_in_over_a_bluetooth_default() {
+        use InputTransport::{Bluetooth, BuiltIn, Other};
+
+        assert_eq!(automatic_input_index(1, &[BuiltIn, Bluetooth]), 0);
+        assert_eq!(automatic_input_index(0, &[Bluetooth, Other, BuiltIn]), 2);
+        // Non-Bluetooth defaults, such as USB microphones, are kept.
+        assert_eq!(automatic_input_index(1, &[BuiltIn, Other]), 1);
+        // Without a built-in microphone the Bluetooth default is still used.
+        assert_eq!(automatic_input_index(0, &[Bluetooth, Other]), 0);
+    }
 
     #[cfg(target_os = "macos")]
     #[test]
