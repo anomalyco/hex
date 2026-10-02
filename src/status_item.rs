@@ -265,6 +265,10 @@ fn model_menu_entries(
         .collect()
 }
 
+pub fn installed() -> bool {
+    STATUS_ITEM.with(|controller| controller.borrow().is_some())
+}
+
 pub fn update_transcription(settings: &AppSettings, status: &PreparationStatus) {
     STATUS_ITEM.with(|controller| {
         let controller = controller.borrow();

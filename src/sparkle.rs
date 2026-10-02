@@ -197,10 +197,18 @@ fn begin_check(status: &AtomicU8, can_check: bool, session_in_progress: bool) {
     // An existing session may only be focused, and resuming a deferred install
     // need not emit didFindValidUpdate again. Neither should erase its result.
     if can_check && !session_in_progress {
-        let _ = status.fetch_update(Ordering::AcqRel, Ordering::Acquire, |value| {
-            (value == UpdateStatus::Idle as u8 || value == UpdateStatus::UpToDate as u8)
-                .then_some(UpdateStatus::Checking as u8)
-        });
+        let mut value = status.load(Ordering::Acquire);
+        while value == UpdateStatus::Idle as u8 || value == UpdateStatus::UpToDate as u8 {
+            match status.compare_exchange_weak(
+                value,
+                UpdateStatus::Checking as u8,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ) {
+                Ok(_) => break,
+                Err(current) => value = current,
+            }
+        }
     }
 }
 

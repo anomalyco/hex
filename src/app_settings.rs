@@ -1017,6 +1017,13 @@ pub fn set_hotkey_capture_active(active: bool) {
     HOTKEY_CAPTURE_ACTIVE.store(active, Ordering::Release);
 }
 
+/// The Dock policy while no Settings window is open. An open window always
+/// shows the icon: hiding it deactivates HEX asynchronously, which would drop
+/// that window behind other applications.
+pub fn dock_icon_visible(show_dock_icon: bool, status_item_available: bool) -> bool {
+    show_dock_icon || !status_item_available
+}
+
 pub fn set_dock_icon_visible(visible: bool) {
     let Some(mtm) = MainThreadMarker::new() else {
         tracing::warn!("Dock icon visibility must be changed on the main thread");

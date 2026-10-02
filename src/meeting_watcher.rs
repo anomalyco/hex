@@ -462,7 +462,10 @@ pub fn run(shutdown: &'static AtomicBool, launch: Launch) -> Result<()> {
             None
         };
         crate::status_item::update_transcription(&settings, &transcription_preparation.status());
-        crate::app_settings::set_dock_icon_visible(show_dock_icon || status_actions.is_none());
+        crate::app_settings::set_dock_icon_visible(crate::app_settings::dock_icon_visible(
+            show_dock_icon,
+            status_actions.is_some(),
+        ));
         let show_app_on_launch = should_open_app_on_launch(
             show_dock_icon,
             setup_ready,
