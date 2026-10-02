@@ -61,6 +61,13 @@ Or install manually:
 HEX checks for signed updates automatically. Use **HEX > Check for Updates...**
 to check immediately.
 
+Organizations that manage app versions themselves can turn off in-app updates,
+including manual checks, with the `DisableUpdates` Boolean in the
+`com.kitlangton.hex2` preference domain. Deploy it in a configuration profile
+(payload type `com.kitlangton.hex2`, key `DisableUpdates`, value `true`), or for a
+single Mac run `defaults write com.kitlangton.hex2 DisableUpdates -bool true`.
+Relaunch HEX to apply it. Model downloads still work.
+
 **Download blocked?** [Alternative download: GitHub — Hex 2.1.22](https://github.com/anomalyco/hex/releases/download/app-v2.1.22/HEX-2.1.22-arm64.dmg)
 contains the identical signed DMG for Apple silicon and macOS 15+. App releases
 use `app-v…` tags; the repository also publishes separate TypeScript SDK releases.

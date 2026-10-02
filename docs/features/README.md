@@ -498,7 +498,20 @@ Update available                         // maintain.updates
 └── Menu bar > Check for Updates -> Same dialog
 
 Remind Me Later -> Dismiss this offer -> Manual update -> Reopen the offer
+
+DisableUpdates = true at launch          // maintain.managed-updates
+├── Sparkle never loads -> No background or manual checks, downloads, or installs
+├── App menu -> Check for Updates omitted
+└── Menu bar -> Disabled "Updates Managed by Your Organization"
 ```
+
+Administrators set the `DisableUpdates` Boolean in the `com.kitlangton.hex2`
+domain, normally through a configuration profile
+([#100](https://github.com/anomalyco/hex/issues/100)). HEX reads the effective
+`NSUserDefaults` value once at launch, so a forced profile value wins over a local
+one and a change applies after relaunch. Speech-model downloads are unaffected.
+No automated check covers it; the read is a single preference lookup in
+[sparkle.rs](../../src/sparkle.rs).
 
 The sidebar uses window-local deferred action dispatch in
 [app_window.rs](../../src/app_window.rs). The executed

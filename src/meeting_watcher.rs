@@ -418,19 +418,25 @@ pub fn run(shutdown: &'static AtomicBool, launch: Launch) -> Result<()> {
         cx.on_action(|_: &crate::app_window::HideApplication, _| {
             crate::app_settings::hide_application()
         });
+        let mut application_items = Vec::new();
+        if !crate::sparkle::updates_managed() {
+            application_items.extend([
+                MenuItem::action("Check for Updates…", crate::app_window::CheckForUpdates),
+                MenuItem::separator(),
+            ]);
+        }
+        application_items.extend([
+            MenuItem::action("Settings…", crate::app_window::ShowSettings),
+            MenuItem::os_submenu("Services", SystemMenuType::Services),
+            MenuItem::separator(),
+            MenuItem::action("Hide HEX", crate::app_window::HideApplication),
+            MenuItem::separator(),
+            MenuItem::action("Quit HEX", crate::app_window::QuitApplication),
+        ]);
         cx.set_menus(vec![
             Menu {
                 name: "HEX".into(),
-                items: vec![
-                    MenuItem::action("Check for Updates…", crate::app_window::CheckForUpdates),
-                    MenuItem::separator(),
-                    MenuItem::action("Settings…", crate::app_window::ShowSettings),
-                    MenuItem::os_submenu("Services", SystemMenuType::Services),
-                    MenuItem::separator(),
-                    MenuItem::action("Hide HEX", crate::app_window::HideApplication),
-                    MenuItem::separator(),
-                    MenuItem::action("Quit HEX", crate::app_window::QuitApplication),
-                ],
+                items: application_items,
             },
             Menu {
                 name: "File".into(),

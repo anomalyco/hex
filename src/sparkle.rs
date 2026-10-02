@@ -1,5 +1,6 @@
 use std::cell::RefCell;
 use std::path::PathBuf;
+use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU8, Ordering};
 
 use color_eyre::eyre::{Result, WrapErr, eyre};
@@ -8,7 +9,10 @@ use objc2::rc::Retained;
 use objc2::runtime::{AnyClass, AnyObject, AnyProtocol, Bool, NSObjectProtocol, ProtocolObject};
 use objc2::{AnyThread, DefinedClass, MainThreadMarker, msg_send};
 use objc2_app_kit::NSApplication;
-use objc2_foundation::{NSError, NSInteger, NSObject};
+use objc2_foundation::{NSError, NSInteger, NSObject, NSString, NSUserDefaults};
+
+/// Shown in place of update actions when an administrator sets `DisableUpdates`.
+pub const MANAGED_UPDATES_LABEL: &str = "Updates Managed by Your Organization";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[repr(u8)]
@@ -85,7 +89,20 @@ struct SparkleUpdater {
     _framework: Library,
 }
 
+/// Reads the effective `DisableUpdates` preference once, so a value forced by a
+/// configuration profile takes precedence and changes apply at the next launch.
+pub fn updates_managed() -> bool {
+    static MANAGED: OnceLock<bool> = OnceLock::new();
+    *MANAGED.get_or_init(|| {
+        NSUserDefaults::standardUserDefaults().boolForKey(&NSString::from_str("DisableUpdates"))
+    })
+}
+
 pub fn start() {
+    if updates_managed() {
+        tracing::info!("DisableUpdates is set; Sparkle update checks are disabled");
+        return;
+    }
     if let Err(error) = start_inner() {
         tracing::error!(%error, "could not start Sparkle updater");
     }
@@ -149,6 +166,9 @@ fn start_inner() -> Result<()> {
 }
 
 pub fn check_for_updates() {
+    if updates_managed() {
+        return;
+    }
     let Some(mtm) = MainThreadMarker::new() else {
         tracing::warn!("Sparkle update checks must run on the main thread");
         return;

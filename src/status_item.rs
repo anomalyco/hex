@@ -172,13 +172,26 @@ pub fn install() -> Result<Receiver<StatusItemAction>> {
     model_error.setHidden(true);
     add_item(&models, &target, "Manage Models…", sel!(openModels:), mtm);
     menu.addItem(&NSMenuItem::separatorItem(mtm));
-    add_item(
-        &menu,
-        &target,
-        "Check for Updates…",
-        sel!(checkForUpdates:),
-        mtm,
-    );
+    if crate::sparkle::updates_managed() {
+        // An item without an action is shown disabled.
+        let managed = unsafe {
+            NSMenuItem::initWithTitle_action_keyEquivalent(
+                NSMenuItem::alloc(mtm),
+                &NSString::from_str(crate::sparkle::MANAGED_UPDATES_LABEL),
+                None,
+                &NSString::new(),
+            )
+        };
+        menu.addItem(&managed);
+    } else {
+        add_item(
+            &menu,
+            &target,
+            "Check for Updates…",
+            sel!(checkForUpdates:),
+            mtm,
+        );
+    }
     menu.addItem(&NSMenuItem::separatorItem(mtm));
     add_item(&menu, &target, "Quit HEX", sel!(quit:), mtm);
 
