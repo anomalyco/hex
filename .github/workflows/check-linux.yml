@@ -57,7 +57,7 @@ jobs:
       CC: clang
       CXX: clang++
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
@@ -89,7 +89,7 @@ jobs:
           app=$(cargo build --locked --bin voice-control --message-format=json |
             jq -r 'select(.reason == "compiler-artifact" and .target.name == "voice-control") | .executable // empty')
           scripts/test-wayland-paste.sh "$binary" "$app"
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: ${{ runner.temp }}/hex-model-test/models
           key: linux-dictation-model-${{ hashFiles('src/transcription_models.rs') }}
@@ -117,9 +117,9 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: cachix/install-nix-action@v31
-      - uses: DeterminateSystems/magic-nix-cache-action@v13
+      - uses: DeterminateSystems/magic-nix-cache-action@v15
         with:
           use-gha-cache: enabled
           use-flakehub: disabled

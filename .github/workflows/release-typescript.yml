@@ -26,18 +26,16 @@ jobs:
       run:
         working-directory: sdk
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: oven-sh/setup-bun@v2
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           registry-url: https://registry.npmjs.org
       - run: npm install --global npm@latest
       - run: bun install --frozen-lockfile
-      - uses: changesets/action@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - uses: changesets/action@v2
         with:
           cwd: sdk
-          publish: bun run release
-          title: "chore: release TypeScript SDK"
+          publish-script: bun run release
+          pr-title: "chore: release TypeScript SDK"
