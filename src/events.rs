@@ -117,6 +117,7 @@ pub enum DictationPhase {
     // Retained so activity readers can decode records written by older releases.
     Logged,
     Repasted,
+    Rewritten,
     MeetingPasted,
     Failed(String),
 }
