@@ -1,7 +1,8 @@
 use std::collections::{HashMap, VecDeque};
 use std::time::Duration;
 
-use rubato::{FftFixedIn, Resampler};
+use rubato::audioadapter_buffers::direct::InterleavedSlice;
+use rubato::{Fft, FixedSync, Indexing, Resampler, WindowFunction};
 
 use crate::audio::CaptureInstant;
 
@@ -380,7 +381,7 @@ struct Recording {
     source_rate: u32,
     recorded_through: Option<CaptureInstant>,
     input_buffer: Vec<f32>,
-    resampler: Option<FftFixedIn<f32>>,
+    resampler: Option<Fft<f32>>,
     #[cfg(target_os = "macos")]
     environment: RecordingEnvironmentState,
 }
@@ -415,12 +416,14 @@ impl Recording {
     fn try_new(started_at: CaptureInstant, source_rate: u32) -> Result<Self, String> {
         let resampler = (source_rate != PARAKEET_SAMPLE_RATE)
             .then(|| {
-                FftFixedIn::new(
+                Fft::new_custom(
                     source_rate as usize,
                     PARAKEET_SAMPLE_RATE as usize,
                     Self::CHUNK_SIZE,
                     1,
                     1,
+                    WindowFunction::BlackmanHarris2,
+                    FixedSync::Input,
                 )
                 .map_err(|error| error.to_string())
             })
@@ -462,12 +465,8 @@ impl Recording {
             self.input_buffer.extend_from_slice(&samples[..take]);
             samples = &samples[take..];
             if self.input_buffer.len() == Self::CHUNK_SIZE {
-                self.samples.extend(
-                    resampler
-                        .process(&[&self.input_buffer], None)
-                        .expect("fixed-rate resampling must succeed")
-                        .remove(0),
-                );
+                self.samples
+                    .extend(resample_chunk(resampler, &self.input_buffer, false));
                 self.input_buffer.clear();
             }
         }
@@ -490,23 +489,15 @@ impl Recording {
             let expected_samples =
                 self.source_samples * PARAKEET_SAMPLE_RATE as usize / self.source_rate as usize;
             if !self.input_buffer.is_empty() {
-                self.samples.extend(
-                    resampler
-                        .process_partial(Some(&[&self.input_buffer]), None)
-                        .expect("fixed-rate resampling must succeed")
-                        .remove(0),
-                );
+                self.samples
+                    .extend(resample_chunk(resampler, &self.input_buffer, true));
             }
             let output_delay = resampler.output_delay();
             for _ in 0..8 {
                 if self.samples.len() >= expected_samples + output_delay {
                     break;
                 }
-                let flushed = resampler
-                    .process_partial::<&[f32]>(None, None)
-                    .expect("fixed-rate resampler flush must succeed")
-                    .remove(0);
-                self.samples.extend(flushed);
+                self.samples.extend(resample_chunk(resampler, &[], true));
             }
             self.samples.drain(..output_delay.min(self.samples.len()));
             self.samples.truncate(expected_samples);
@@ -515,6 +506,21 @@ impl Recording {
         }
         self.samples
     }
+}
+
+/// Resamples one mono chunk. A partial chunk is padded with silence, so an
+/// empty partial chunk flushes the resampler's delay.
+fn resample_chunk(resampler: &mut Fft<f32>, samples: &[f32], partial: bool) -> Vec<f32> {
+    let input =
+        InterleavedSlice::new(samples, 1, samples.len()).expect("mono chunk fits its slice");
+    let indexing = partial.then(|| Indexing {
+        partial_len: Some(samples.len()),
+        ..Indexing::default()
+    });
+    resampler
+        .process(&input, indexing.as_ref())
+        .expect("fixed-rate resampling must succeed")
+        .take_data()
 }
 
 impl DictationCapture {
