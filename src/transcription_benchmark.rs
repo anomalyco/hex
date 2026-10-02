@@ -4,7 +4,7 @@ use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-use color_eyre::eyre::{Result, WrapErr, bail};
+use color_eyre::eyre::{Result, WrapErr, bail, eyre};
 use hound::{SampleFormat, WavReader};
 use serde::Deserialize;
 use serde_json::json;
@@ -83,7 +83,7 @@ fn load_onnx() -> Result<LoadedBackend> {
 
 #[cfg(not(feature = "onnx-benchmark"))]
 fn load_onnx() -> Result<LoadedBackend> {
-    bail!("the ONNX backend requires --features onnx-benchmark")
+    Err(eyre!("the ONNX backend requires --features onnx-benchmark"))
 }
 
 #[derive(Deserialize)]
@@ -306,12 +306,14 @@ fn load_clip(root: &Path, definition: ClipDefinition) -> Result<Clip> {
                 sample.map(|sample| sample as f32 / 2_f32.powi(spec.bits_per_sample as i32 - 1))
             })
             .collect::<Result<Vec<_>, _>>()?,
-        _ => bail!(
-            "unsupported WAV format in {}: {:?}, {} bits",
-            path.display(),
-            spec.sample_format,
-            spec.bits_per_sample
-        ),
+        _ => {
+            return Err(eyre!(
+                "unsupported WAV format in {}: {:?}, {} bits",
+                path.display(),
+                spec.sample_format,
+                spec.bits_per_sample
+            ));
+        }
     };
     let channels = usize::from(spec.channels);
     if channels == 0 || samples.is_empty() || !samples.len().is_multiple_of(channels) {

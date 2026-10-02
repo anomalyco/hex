@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
 use std::thread;
 use std::time::{Duration, UNIX_EPOCH};
 
-use color_eyre::eyre::{Result, WrapErr, bail};
+use color_eyre::eyre::{Result, WrapErr, bail, eyre};
 use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -55,7 +55,7 @@ impl FromStr for TranscriptionModelId {
             "sense_voice_small" => Ok(Self::SenseVoiceSmall),
             "cohere_transcribe" => Ok(Self::CohereTranscribe),
             "apple_speech" => Ok(Self::AppleSpeech),
-            _ => bail!("unknown transcription model: {value}"),
+            _ => Err(eyre!("unknown transcription model: {value}")),
         }
     }
 }
