@@ -981,7 +981,7 @@ impl Parakeet {
             model_path,
             &ModelOptions {
                 backend: Backend::Metal,
-                gpu_device: 0,
+                device: None,
             },
         )
         .wrap_err_with(|| {

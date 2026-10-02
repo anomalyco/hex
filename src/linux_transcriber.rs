@@ -107,7 +107,7 @@ impl LinuxTranscriber {
             &path,
             &ModelOptions {
                 backend: Backend::Auto,
-                gpu_device: 0,
+                device: None,
             },
         )
         .wrap_err_with(|| format!("could not load transcription model from {}", path.display()))?;
