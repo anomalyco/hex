@@ -416,6 +416,10 @@ Launch Hex                               // maintain.startup
     └── Menu-bar Settings / Finder or Spotlight reopen -> Open or focus the window
 
 Menu-bar installation fails -> Show Dock icon and open the window // recovery access
+
+Show Dock icon off                       // maintain.dock-policy
+├── Settings window open -> Dock icon stays // hiding it would deactivate HEX
+└── Settings window closes -> Menu-bar only
 ```
 
 ```ts
@@ -469,7 +473,10 @@ No Developer ID signing identity was available for a new distribution build.
 The existing **Show Dock icon** preference controls quiet startup; there is no
 additional launch-window setting. This applies to normal and login launches,
 does not change login registration, and does not hide an already open window
-when the preference changes. Explicit previews always open their requested pane.
+when the preference changes. Any open Settings window keeps the Dock icon: macOS
+deactivates an app asynchronously when it becomes menu-bar only, which dropped
+the window behind other applications ([#103](https://github.com/anomalyco/hex/issues/103)).
+Turning the preference off therefore takes effect when Settings closes. Explicit previews always open their requested pane.
 
 Checks in [meeting_watcher.rs](../../src/meeting_watcher.rs):
 `dockless_startup_stays_quiet_only_when_setup_and_menu_bar_are_ready` and

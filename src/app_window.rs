@@ -1209,6 +1209,9 @@ impl AppWindow {
             ApplicationCatalogState::Loading
         };
         let application_search = Self::application_search_input(cx);
+        if !preview_mode {
+            crate::app_settings::set_dock_icon_visible(true);
+        }
         let window_focus = cx.focus_handle();
         window_focus.focus(native_window);
         let hotkey_focus = cx.focus_handle();
@@ -3729,7 +3732,7 @@ impl AppWindow {
                                     .child(
                                         settings_row(
                                             "Show Dock icon",
-                                            "When off, HEX starts quietly in the menu bar after setup",
+                                            "When off, HEX stays in the menu bar while Settings is closed",
                                             toggle(dock_icon_position),
                                         )
                                         .id("dock-icon-setting")
@@ -3739,14 +3742,6 @@ impl AppWindow {
                                             }
                                             this.dock_icon_toggle
                                                 .set_enabled(this.settings.show_dock_icon);
-                                            if !this.preview {
-                                                crate::app_settings::set_dock_icon_visible(
-                                                    this.settings.show_dock_icon,
-                                                );
-                                            }
-                                            if this.settings.show_dock_icon {
-                                                cx.activate(true);
-                                            }
                                         })),
                                     )
                                     .child(
@@ -7296,6 +7291,10 @@ impl Drop for AppWindow {
         }
         if !self.preview {
             crate::app_settings::set_hotkey_capture_active(false);
+            crate::app_settings::set_dock_icon_visible(crate::app_settings::dock_icon_visible(
+                self.settings.show_dock_icon,
+                crate::status_item::installed(),
+            ));
         }
     }
 }
