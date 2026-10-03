@@ -564,6 +564,7 @@ Linux beta                               // not macOS feature parity
 ├── Wayland -> evdev + compositor protocols; keys observed, not suppressed
 │   └── Mouse-classified nodes excluded; live modifiers reused for paste
 ├── Escape -> Cancel active capture, not newest accepted job
+│   └── X11 grab conflict -> Try plain Escape; otherwise warn without stopping dictation
 ├── Microphone failure -> Listener exits, not macOS automatic recovery
 └── Paste -> Retain transcript clipboard, not restore previous contents
 ```

@@ -73,6 +73,7 @@ with tempfile.TemporaryDirectory(prefix="hex-service-", dir=os.environ.get("TMPD
         state = wait_for(snapshot)
         assert state["pid"] == service.pid
         assert state["desktop"]["listener"]["status"] == "Model required"
+        assert state["desktop"]["listener"]["warning"] is None
         assert stat.S_IMODE(path.stat().st_mode) == 0o600
         assert stat.S_IMODE(support.stat().st_mode) == 0o700
 
@@ -107,7 +108,9 @@ with tempfile.TemporaryDirectory(prefix="hex-service-", dir=os.environ.get("TMPD
             assert stalled.recv(1) == b""
 
         status = subprocess.run([binary, "status"], env=env, check=True, capture_output=True, text=True)
-        assert json.loads(status.stdout)["pid"] == service.pid
+        status_state = json.loads(status.stdout)
+        assert status_state["pid"] == service.pid
+        assert status_state["desktop"]["listener"]["warning"] is None
 
         # Crash leaves a socket, not a permanent instance lock. No stale state is reported.
         service.kill()

@@ -30,6 +30,8 @@ pub(crate) struct DesktopTranscriptionSnapshot {
 pub(crate) struct DesktopListenerSnapshot {
     pub(crate) running: bool,
     pub(crate) status: String,
+    #[serde(default)]
+    pub(crate) warning: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -104,5 +106,14 @@ mod tests {
     #[test]
     fn host_can_be_contained_by_the_shared_window() {
         owns_host_object(Box::new(TestHost));
+    }
+
+    #[test]
+    fn older_listener_snapshots_have_no_warning() {
+        let snapshot: DesktopListenerSnapshot =
+            serde_json::from_str(r#"{"running":true,"status":"Listening"}"#).unwrap();
+        assert!(snapshot.running);
+        assert_eq!(snapshot.status, "Listening");
+        assert!(snapshot.warning.is_none());
     }
 }

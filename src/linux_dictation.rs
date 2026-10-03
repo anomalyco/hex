@@ -13,7 +13,7 @@ use crate::dictation::{DictationCapture, Finish};
 use crate::events::{DictationPhase, EventLog, TranscriptPhase, VoiceEvent, VoiceState, now_ms};
 use crate::feedback::{self, Tone};
 use crate::linux_desktop::LinuxIndicator;
-use crate::linux_input::{HotkeyEvent, LinuxHotkeyMonitor};
+use crate::linux_input::{HotkeyEvent, HotkeyStatus, LinuxHotkeyMonitor};
 use crate::linux_paste::LinuxPaster;
 use crate::linux_transcriber::LinuxTranscriber;
 
@@ -46,6 +46,7 @@ pub fn run(
     shutdown: &AtomicBool,
     settings: crate::linux_settings::LinuxSettings,
     transcriber: Option<LinuxTranscriber>,
+    hotkey_status: HotkeyStatus,
 ) -> Result<()> {
     let transcriber =
         transcriber.map_or_else(|| LinuxTranscriber::load(&settings.transcription), Ok)?;
@@ -60,7 +61,11 @@ pub fn run(
         None => AudioInput::open(&[])?,
     };
     let hotkey_label = settings.dictation_hotkey.label();
-    let hotkey = LinuxHotkeyMonitor::start(settings.dictation_hotkey, settings.double_tap_lock)?;
+    let hotkey = LinuxHotkeyMonitor::start(
+        settings.dictation_hotkey,
+        settings.double_tap_lock,
+        hotkey_status,
+    )?;
     let wayland_modifiers = hotkey.wayland_modifiers();
     let indicator = LinuxIndicator::new();
     let (jobs, job_receiver) = mpsc::sync_channel::<Job>(2);
