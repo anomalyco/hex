@@ -127,6 +127,14 @@ stops listening and restores the previous running state after the edit.
 Cancelling shortcut capture preserves the old binding unless the new binding
 has already been saved; listening resumes only if it was previously running.
 
+On X11, HEX first grabs Escape with any modifiers. If another application owns
+a modified Escape shortcut, HEX falls back to plain Escape with Caps/Num Lock
+variants; release other modifiers before cancelling. If plain Escape also
+conflicts, dictation continues and Settings and `hex status` show
+`Escape cancel unavailable: another application holds Escape`. Finish with the
+dictation shortcut instead. HEX logs once per conflict episode and retries on
+the next capture; a successful grab clears the warning.
+
 Recording sounds are enabled at 50% volume by default, including when upgrading
 older settings. A start sound is queued immediately when the shortcut starts capture,
 a stop sound marks the end of a retained recording (not completed transcription

@@ -256,6 +256,58 @@ Proof limit: source and available headless checks, not current supported-host
 behavior. Native compositor/device validation remains separate. The service
 socket is same-user only; bounded I/O and queues keep client stalls off the audio loop.
 
+**Fixed after 2.1.22:** on X11 the Escape-cancel grab is best-effort.
+
+```ts
+capture starts -> grab Escape with AnyModifier        // recover.linux-escape
+  ├── success -> Escape cancels
+  └── BadAccess -> try bare Escape + Caps/Num Lock variants
+        ├── success -> plain Escape cancels; modified shortcuts stay with their owner
+        └── BadAccess -> keep dictating without Escape-cancel
+              -> Settings + hex status show a non-fatal listener warning
+              -> log once per conflict episode
+
+next capture -> retry grab
+  └── success -> clear warning and rearm episode logging
+other grab error -> stop listener and report failure
+```
+
+The warning persists while idle until a later successful grab, or until that
+listener stops. It does not become an `operation_error` or hide other failures.
+Release the hold shortcut, or press the locked shortcut, to finish when Escape
+is unavailable. With the bare-Escape fallback, release other modifiers before
+pressing Escape. A failed fallback releases any partial grabs.
+
+Checks in [linux_input.rs](../../src/linux_input.rs):
+`escape_grab_conflict_is_not_fatal`, `non_conflict_grab_errors_stay_fatal`,
+and `escape_warning_is_logged_once_per_episode_and_clears_on_recovery`.
+`listener_warning_is_nonfatal_and_round_trips_in_service_snapshots` in
+[linux_app.rs](../../src/linux_app.rs) checks snapshot serialization, warning
+recovery, and listener shutdown. The ignored X11 checks
+`conflicted_escape_still_dictates_without_cancel`,
+`modified_escape_conflict_keeps_plain_escape_cancel`, and
+`conflicted_escape_fallback_releases_partial_grabs` cover real server conflicts,
+fresh-capture recovery, fallback cancellation, and partial-grab cleanup on an
+isolated display. These checks do not prove microphone-to-target output or
+native Settings rendering.
+
+**Executed October 3, 2026:** on x86_64 Arch Linux with Rust 1.97.0, rebased onto
+`faa2192`, the working tree passed 157 Rust tests (ten opt-in tests ignored),
+formatting, strict all-target/all-feature Clippy, and whitespace checks. The
+macOS-only keyboard-layout harness skipped. All six ignored X11 input tests
+passed separately on Xvfb. The service IPC/lifecycle smoke passed. An ad hoc
+Escape-conflict-to-dictation probe also passed using a separate D-Bus session,
+virtual microphone, CPU Parakeet inference, software Vulkan for Settings, and
+an isolated GTK paste target. That probe is not retained as a repository test.
+No physical microphone, user's clipboard, installed-service restart, or visual
+warning check was exercised.
+
+Historical contributor probe before these additions: holding Escape/ANY from
+a second client on i3 reproduced server-side BadAccess (error 10, GrabKey opcode
+33); `hex status` still showed `Listening` without an `operation_error`. The
+151-test binary suite and `test-linux-service.py` passed on that host. That probe
+did not verify the new visible warning or bare-Escape fallback.
+
 ### Keyboard Layout Resolution
 
 ```ts

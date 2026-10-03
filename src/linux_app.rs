@@ -75,6 +75,7 @@ struct Listener {
     stop: Arc<AtomicBool>,
     worker: JoinHandle<ListenerResult>,
     startup: ListenerStartup,
+    hotkey_status: crate::linux_input::HotkeyStatus,
 }
 
 enum ListenerStartup {
@@ -250,6 +251,7 @@ impl DesktopHost for RemoteHost {
                 listener: Some(DesktopListenerSnapshot {
                     running: false,
                     status: "Service disconnected".into(),
+                    warning: None,
                 }),
                 operation_error: None,
                 transcription: DesktopTranscriptionSnapshot {
@@ -547,6 +549,8 @@ impl LinuxDesktopHost {
         let settings = self.settings.clone();
         let event_path = self.event_path.clone();
         let prepared_transcriber = self.prepared_transcriber.take();
+        let hotkey_status = crate::linux_input::HotkeyStatus::default();
+        let worker_hotkey_status = hotkey_status.clone();
         let worker = std::thread::spawn(move || {
             let result = crate::instance::acquire("listener").and_then(|_instance| {
                 crate::linux_dictation::run(
@@ -555,6 +559,7 @@ impl LinuxDesktopHost {
                     &worker_stop,
                     settings,
                     prepared_transcriber,
+                    worker_hotkey_status,
                 )
             });
             result.map_err(|error| format!("{error:#}"))
@@ -565,6 +570,7 @@ impl LinuxDesktopHost {
             startup: ListenerStartup::Awaiting {
                 previous_session: self.activity.session_started_at,
             },
+            hotkey_status,
         });
         self.status = "Starting".into();
     }
@@ -835,7 +841,11 @@ impl LinuxDesktopHost {
                 };
                 if let Some(binding) = binding {
                     binding.validate()?;
-                    crate::linux_input::LinuxHotkeyMonitor::start(binding.clone(), false)?;
+                    crate::linux_input::LinuxHotkeyMonitor::start(
+                        binding.clone(),
+                        false,
+                        Default::default(),
+                    )?;
                     candidate.dictation_hotkey = binding;
                 }
                 if canceled.load(Ordering::Acquire) {
@@ -1025,6 +1035,10 @@ impl DesktopHost for LinuxDesktopHost {
             listener: Some(DesktopListenerSnapshot {
                 running: self.is_running(),
                 status: self.status.clone(),
+                warning: self
+                    .listener
+                    .as_ref()
+                    .and_then(|listener| listener.hotkey_status.warning()),
             }),
             operation_error: self
                 .error
@@ -1214,6 +1228,14 @@ impl LinuxApp {
                                             }
                                         }))),
                                 )))
+                                .when_some(snapshot.listener.as_ref().and_then(|listener| listener.warning.clone()), |content, warning| {
+                                    content.child(
+                                        div().id("linux-listener-warning").mt_3().p_3().rounded(px(6.0)).border_1().border_color(rgb(LINE))
+                                            .child(div().text_size(px(12.0)).child(warning))
+                                            .child(div().mt_2().text_size(px(12.0)).text_color(rgb(MUTED))
+                                                .child("Dictation still works. Release the hold shortcut or press the locked shortcut to finish. Free Escape in the other application; HEX retries on the next capture.")),
+                                    )
+                                })
                                 .when_some(snapshot.operation_error.clone(), |content, error| {
                                     content.child(
                                         div().mt_3().p_3().rounded(px(6.0)).border_1().border_color(rgb(LINE))
@@ -1527,6 +1549,7 @@ mod tests {
                 worker: std::thread::spawn(|| Ok(())),
                 stop: Arc::new(AtomicBool::new(false)),
                 startup: ListenerStartup::Observed,
+                hotkey_status: Default::default(),
             });
             host.listen_when_ready = true;
         }
@@ -1578,6 +1601,7 @@ mod tests {
                 stop: Arc::new(AtomicBool::new(false)),
                 worker: std::thread::spawn(|| Ok(())),
                 startup: ListenerStartup::Awaiting { previous_session },
+                hotkey_status: Default::default(),
             };
             listener.observe_session(previous_session);
             assert!(matches!(listener.startup, ListenerStartup::Awaiting { .. }));
@@ -1589,6 +1613,46 @@ mod tests {
             assert!(listener.stop.load(Ordering::Relaxed));
             listener.finish().unwrap();
         }
+    }
+
+    #[test]
+    fn listener_warning_is_nonfatal_and_round_trips_in_service_snapshots() {
+        let mut host = host_for_edit(true);
+        host.status = "Listening".into();
+        let status = host.listener.as_ref().unwrap().hotkey_status.clone();
+        status.update_escape_availability(false);
+        let snapshot = service_snapshot(&host, false);
+        let serialized = serde_json::to_vec(&snapshot).unwrap();
+        let received: ServiceSnapshot = serde_json::from_slice(&serialized).unwrap();
+        let listener = received.desktop.listener.unwrap();
+        assert!(listener.running);
+        assert_eq!(listener.status, "Listening");
+        assert_eq!(
+            listener.warning.as_deref(),
+            Some(crate::linux_input::ESCAPE_CANCEL_WARNING),
+        );
+        assert!(received.desktop.operation_error.is_none());
+
+        // Dismissing an unrelated failure must not hide an unresolved limitation.
+        host.error = Some("previous transcription failed".into());
+        assert_eq!(
+            host.snapshot().operation_error.as_deref(),
+            Some("previous transcription failed"),
+        );
+        host.dispatch(DesktopAction::ClearError).unwrap();
+        assert!(host.snapshot().listener.unwrap().warning.is_some());
+        assert!(host.snapshot().operation_error.is_none());
+        status.update_escape_availability(true);
+        assert!(host.snapshot().listener.unwrap().warning.is_none());
+        status.update_escape_availability(false);
+        host.stop();
+        while !host.listener.as_ref().unwrap().worker.is_finished() {
+            std::thread::yield_now();
+        }
+        host.refresh();
+        let listener = host.snapshot().listener.unwrap();
+        assert!(!listener.running);
+        assert!(listener.warning.is_none());
     }
 
     #[test]
