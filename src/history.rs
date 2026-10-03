@@ -71,6 +71,7 @@ pub enum HistoryKind {
     Dictation,
     Send,
     VoiceAction,
+    Rewrite,
 }
 
 impl HistoryKind {
@@ -79,6 +80,7 @@ impl HistoryKind {
             Self::Dictation => "Dictation",
             Self::Send => "Send",
             Self::VoiceAction => "Voice Action",
+            Self::Rewrite => "Rewrite",
         }
     }
 }
