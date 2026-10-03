@@ -7,7 +7,7 @@ trap 'rm -rf "$temporary"' EXIT
 
 (cd "$root/sdk/commands" && bun run build)
 
-for fixture in fresh 4.0.0-beta.97 4.0.0-beta.107; do
+for fixture in fresh 4.0.0-beta.97 4.0.0-beta.107 4.0.0-rc.112; do
   workspace="$temporary/$fixture"
   mkdir "$workspace"
   cp -R "$root/sdk/commands/workspace-template/." "$workspace/"

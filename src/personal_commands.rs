@@ -414,7 +414,7 @@ fn workspace_effect_update(workspace: &Path, sdk: &Path) -> Result<Option<Vec<u8
         );
         match effect.as_str() {
             Some(version) if version == required => {}
-            Some("4.0.0-beta.97" | "4.0.0-beta.107") => {
+            Some("4.0.0-beta.97" | "4.0.0-beta.107" | "4.0.0-rc.112") => {
                 *effect = required.into();
                 changed = true;
             }
@@ -3687,7 +3687,12 @@ mod tests {
     fn workspace_effect_migration_preserves_user_fields_and_is_idempotent() {
         let (workspace, sdk) = workspace_upgrade_fixture();
         let required = "4.0.0-rc.999";
-        for old in [None, Some("4.0.0-beta.97"), Some("4.0.0-beta.107")] {
+        for old in [
+            None,
+            Some("4.0.0-beta.97"),
+            Some("4.0.0-beta.107"),
+            Some("4.0.0-rc.112"),
+        ] {
             let mut manifest = serde_json::json!({
                 "name": "my-commands", "private": true, "custom": { "keep": [1, 2] },
                 "scripts": { "check": "custom-check", "start": "custom-start" },
