@@ -183,6 +183,9 @@ enum Command {
         /// Deterministic model installation state shown by the picker.
         #[arg(long, value_enum, default_value = "actual")]
         model_state: AppPreviewModelState,
+        /// Ask to delete the first deletable model in the transcription picker.
+        #[arg(long)]
+        confirm_model_deletion: bool,
         /// Collapse OpenCode settings in the representative Modes preview.
         #[arg(long)]
         collapse_mode_processing: bool,
@@ -425,6 +428,7 @@ fn main() -> Result<()> {
             target,
             language,
             model_state,
+            confirm_model_deletion,
             collapse_mode_processing,
             open_transformation_picker,
             select_global_mode,
@@ -479,6 +483,7 @@ fn main() -> Result<()> {
                     transcription_picker: matches!(target, AppPreviewTarget::TranscriptionPicker)
                         .then_some((language, model_state)),
                     onboarding: matches!(target, AppPreviewTarget::Onboarding),
+                    confirm_model_deletion,
                     collapse_mode_processing,
                     open_transformation_picker,
                     select_global_mode,

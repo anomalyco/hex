@@ -3,7 +3,7 @@ use gpui::{
 };
 
 use crate::desktop_ui::{
-    ACCENT, CANVAS, FAINT, LINE, MUTED, PANEL_RADIUS, SIDEBAR, SURFACE, SURFACE_HOVER,
+    ACCENT, CANVAS, FAINT, LINE, MUTED, NEGATIVE, PANEL_RADIUS, SIDEBAR, SURFACE, SURFACE_HOVER,
     SURFACE_SELECTED, TEXT, TEXT_SOFT, error_message,
 };
 use crate::transcription_models::{
@@ -30,11 +30,20 @@ pub(crate) enum TranscriptionPickerStatus {
     Active,
     Available {
         installed: bool,
+        deletion: ModelDeletion,
     },
     Preparing {
         label: String,
         progress: Option<TranscriptionPickerProgress>,
     },
+}
+
+/// Whether a downloaded model card offers deleting its files.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum ModelDeletion {
+    Unavailable,
+    Offered,
+    Confirming,
 }
 
 #[derive(Clone, Copy)]
@@ -46,6 +55,7 @@ pub(crate) enum TranscriptionPickerProgress {
 #[derive(Clone)]
 pub(crate) struct TranscriptionPickerView {
     pub(crate) error: Option<String>,
+    pub(crate) deletion_error: Option<String>,
     pub(crate) language: String,
     pub(crate) models: Vec<TranscriptionPickerModel>,
 }
@@ -58,6 +68,14 @@ pub(crate) trait TranscriptionPickerDelegate: Sized + 'static {
         language: String,
         cx: &mut Context<Self>,
     );
+    /// The first call asks for confirmation; a repeated call deletes the model.
+    /// Roots that never offer deletion keep this default.
+    fn delete_transcription_model(
+        &mut self,
+        _model: TranscriptionModelId,
+        _cx: &mut Context<Self>,
+    ) {
+    }
     fn dismiss_transcription_picker(&mut self, cx: &mut Context<Self>);
     fn select_transcription_language(&mut self, language: String, cx: &mut Context<Self>);
 }
@@ -95,16 +113,23 @@ pub(crate) fn render_transcription_picker<T: TranscriptionPickerDelegate>(
     let model_cards = view.models.into_iter().enumerate().map(|(index, model)| {
         let language = view.language.clone();
         let definition = model.choice.model;
+        let mut deletion = ModelDeletion::Unavailable;
         let (state_label, action, active, preparing, progress, installed) = match model.status {
             TranscriptionPickerStatus::Active => ("Active".into(), None, true, false, None, true),
-            TranscriptionPickerStatus::Available { installed } => (
-                model.choice.recommendation.label().into(),
-                Some(if installed { "Use" } else { "Download" }),
-                false,
-                false,
-                None,
+            TranscriptionPickerStatus::Available {
                 installed,
-            ),
+                deletion: offered,
+            } => {
+                deletion = offered;
+                (
+                    model.choice.recommendation.label().into(),
+                    Some(if installed { "Use" } else { "Download" }),
+                    false,
+                    false,
+                    None,
+                    installed,
+                )
+            }
             TranscriptionPickerStatus::Preparing { label, progress } => {
                 (label, Some("Cancel"), false, true, progress, false)
             }
@@ -234,23 +259,35 @@ pub(crate) fn render_transcription_picker<T: TranscriptionPickerDelegate>(
                             .text_color(rgb(FAINT))
                             .child(metadata),
                     )
-                    .when_some(action, |footer, action| {
-                        footer.child(
-                            div()
-                                .h(px(26.0))
-                                .px(px(10.0))
-                                .flex()
-                                .items_center()
-                                .rounded(px(6.0))
-                                .border_1()
-                                .border_color(rgb(LINE))
-                                .bg(rgb(CANVAS))
-                                .text_size(px(11.0))
-                                .text_color(rgb(TEXT_SOFT))
-                                .hover(|button| button.bg(rgb(SURFACE_HOVER)).text_color(rgb(TEXT)))
-                                .child(action),
-                        )
-                    }),
+                    .child(
+                        div()
+                            .flex()
+                            .gap_2()
+                            .when(deletion != ModelDeletion::Unavailable, |actions| {
+                                let confirming = deletion == ModelDeletion::Confirming;
+                                actions.child(
+                                    card_button(if confirming {
+                                        format!("Delete {}?", definition.size_label())
+                                    } else {
+                                        "Delete".into()
+                                    })
+                                    .id(("transcription-model-delete", index))
+                                    .when(confirming, |button| {
+                                        button.border_color(rgb(NEGATIVE)).text_color(rgb(NEGATIVE))
+                                    })
+                                    .on_click(cx.listener(
+                                        move |this, _, _, cx| {
+                                            cx.stop_propagation();
+                                            this.delete_transcription_model(definition.id, cx);
+                                            cx.notify();
+                                        },
+                                    )),
+                                )
+                            })
+                            .when_some(action, |actions, action| {
+                                actions.child(card_button(action))
+                            }),
+                    ),
             )
             .on_click(cx.listener(move |this, _, _, cx| {
                 cx.stop_propagation();
@@ -343,11 +380,30 @@ pub(crate) fn render_transcription_picker<T: TranscriptionPickerDelegate>(
                                         "Model could not be installed.",
                                         error,
                                     ))
+                                })
+                                .when_some(view.deletion_error, |list, error| {
+                                    list.child(error_message("Model could not be deleted.", error))
                                 }),
                         ),
                 ),
         )
         .into_any_element()
+}
+
+fn card_button(label: impl Into<gpui::SharedString>) -> gpui::Div {
+    div()
+        .h(px(26.0))
+        .px(px(10.0))
+        .flex()
+        .items_center()
+        .rounded(px(6.0))
+        .border_1()
+        .border_color(rgb(LINE))
+        .bg(rgb(CANVAS))
+        .text_size(px(11.0))
+        .text_color(rgb(TEXT_SOFT))
+        .hover(|button| button.bg(rgb(SURFACE_HOVER)).text_color(rgb(TEXT)))
+        .child(label.into())
 }
 
 fn model_metric(label: impl IntoElement, value: impl IntoElement) -> gpui::Div {

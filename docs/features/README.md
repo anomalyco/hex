@@ -179,6 +179,30 @@ The Cohere fixture inference check was run separately; see
 [dictation model windows](dictation.md#ongoing-jobs-and-output). Native menu
 interaction, installed-app switching, and Linux runtime behavior were not exercised.
 
+```ts
+Settings picker > Downloaded model card   // setup.delete-model; macOS
+├── Delete -> "Delete <size>?" -> Delete again
+│   ├── Success -> Model file, receipt, and partial download removed; card offers Download
+│   └── Download in progress -> Nothing removed; "Model could not be deleted." with reason
+├── Selected dictation model (any language) -> No Delete
+├── Preparing or Apple Speech model -> No Delete
+└── Language change, model choice, or closing the picker -> Confirmation cleared
+```
+
+Deletion takes the shared model-directory download lock without waiting, so it
+cannot race a Settings, menu-bar, or local API download. The menu bar drops a
+deleted model because it reads installation state when it builds the menu. Linux
+Settings does not offer deletion: the service owns model files and has no delete
+request yet.
+
+Sources: [shared picker](../../src/desktop_transcription_picker.rs),
+`remove_installed` in [transcription_models.rs](../../src/transcription_models.rs),
+and [app_window.rs](../../src/app_window.rs). Checks are
+`removing_a_model_deletes_its_artifacts_unless_a_download_is_active` (real files
+and lock) and `model_deletion_confirms_first_and_spares_the_dictation_model`
+(preview state, no disk access). Preview: `voice-control preview
+transcription-picker --model-state installed --confirm-model-deletion`.
+
 **Known gap:** `is_installed` checks size, not checksum. Not every native-load
 path requires verification. Picker Active means selected/installed, not live
 worker readiness; a later worker-load failure does not roll back saved selection.

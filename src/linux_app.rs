@@ -17,9 +17,9 @@ use crate::desktop_host::{
     DesktopTranscriptionSnapshot, DesktopUpdateStatus,
 };
 use crate::desktop_transcription_picker::{
-    TranscriptionPickerDelegate, TranscriptionPickerModel, TranscriptionPickerProgress,
-    TranscriptionPickerStatus, TranscriptionPickerView, render_transcription_picker,
-    transcription_selection_is_active,
+    ModelDeletion, TranscriptionPickerDelegate, TranscriptionPickerModel,
+    TranscriptionPickerProgress, TranscriptionPickerStatus, TranscriptionPickerView,
+    render_transcription_picker, transcription_selection_is_active,
 };
 use crate::desktop_ui::{
     LINE, MUTED, NavigationIcon, SIDEBAR_WIDTH, SURFACE, TEXT_SOFT, compact_button,
@@ -1442,13 +1442,18 @@ impl LinuxApp {
                 } else if active {
                     TranscriptionPickerStatus::Active
                 } else {
-                    TranscriptionPickerStatus::Available { installed }
+                    // The service owns model files; Settings cannot delete them yet.
+                    TranscriptionPickerStatus::Available {
+                        installed,
+                        deletion: ModelDeletion::Unavailable,
+                    }
                 };
                 TranscriptionPickerModel { choice, status }
             })
             .collect();
         TranscriptionPickerView {
             error: transcription.error.clone(),
+            deletion_error: None,
             language,
             models,
         }

@@ -22,8 +22,8 @@ use crate::application_catalog::InstalledApplication;
 use crate::commands::{CommandConfig, CommandInfo, CommandScope};
 use crate::desktop_activity::DesktopActivity;
 use crate::desktop_transcription_picker::{
-    TranscriptionPickerDelegate, TranscriptionPickerModel, TranscriptionPickerProgress,
-    TranscriptionPickerStatus, TranscriptionPickerView,
+    ModelDeletion, TranscriptionPickerDelegate, TranscriptionPickerModel,
+    TranscriptionPickerProgress, TranscriptionPickerStatus, TranscriptionPickerView,
     render_transcription_picker as render_shared_transcription_picker,
     transcription_selection_is_active,
 };
@@ -415,6 +415,7 @@ pub struct AppWindowPreview {
     pub pane: DeveloperPane,
     pub transcription_picker: Option<(String, PreviewModelState)>,
     pub onboarding: bool,
+    pub confirm_model_deletion: bool,
     pub collapse_mode_processing: bool,
     pub open_transformation_picker: bool,
     pub select_global_mode: bool,
@@ -987,6 +988,8 @@ pub struct AppWindow {
     transcription_status: PreparationStatus,
     transcription_preparation: TranscriptionPreparation,
     transcription_preview_installed: Option<bool>,
+    transcription_deletion: Option<TranscriptionModelId>,
+    transcription_deletion_error: Option<String>,
     mode_editors: ModeEditors,
     voice_action_inputs: VoiceActionInputs,
     selected_mode: ModeSelection,
@@ -1436,6 +1439,23 @@ impl AppWindow {
                 ) => Some(false),
                 Some(PreviewModelState::Actual) | None => preview_model_missing.then_some(false),
             },
+            transcription_deletion: preview_picker
+                .filter(|_| {
+                    preview
+                        .as_ref()
+                        .is_some_and(|preview| preview.confirm_model_deletion)
+                })
+                .and_then(|(language, _)| {
+                    crate::transcription_models::choices_for_runtime(language)
+                        .into_iter()
+                        .map(|choice| choice.model)
+                        .find(|model| {
+                            matches!(model.runtime, ModelRuntime::Gguf(_))
+                                && model.id != settings.transcription.model
+                        })
+                        .map(|model| model.id)
+                }),
+            transcription_deletion_error: None,
             mode_editors,
             voice_action_inputs,
             selected_mode: if preview
@@ -1974,6 +1994,54 @@ impl AppWindow {
     fn clear_transcription_error(&mut self) {
         self.transcription_preparation.set_error(None);
         self.transcription_status = self.transcription_preparation.status();
+        self.transcription_deletion = None;
+        self.transcription_deletion_error = None;
+    }
+
+    /// Downloaded local models other than the dictation model can be deleted,
+    /// whatever language the picker shows, unless they are being prepared.
+    fn transcription_model_deletion(
+        &self,
+        model: &ModelDefinition,
+        installed: bool,
+    ) -> ModelDeletion {
+        if !installed
+            || !matches!(model.runtime, ModelRuntime::Gguf(_))
+            || self.settings.transcription.model == model.id
+            || self.transcription_status.model == Some(model.id)
+        {
+            ModelDeletion::Unavailable
+        } else if self.transcription_deletion == Some(model.id) {
+            ModelDeletion::Confirming
+        } else {
+            ModelDeletion::Offered
+        }
+    }
+
+    fn delete_transcription_model(&mut self, model: &'static ModelDefinition) {
+        self.transcription_deletion_error = None;
+        let language = self
+            .transcription_picker_language
+            .clone()
+            .unwrap_or_default();
+        let installed = self.transcription_model_installed(model, &language);
+        match self.transcription_model_deletion(model, installed) {
+            ModelDeletion::Unavailable => self.transcription_deletion = None,
+            ModelDeletion::Offered => self.transcription_deletion = Some(model.id),
+            ModelDeletion::Confirming => {
+                self.transcription_deletion = None;
+                if self.preview {
+                    return;
+                }
+                match crate::transcription_models::remove_installed(model) {
+                    Ok(()) => tracing::info!(model = ?model.id, "deleted transcription model"),
+                    Err(error) => {
+                        tracing::warn!(model = ?model.id, %error, "could not delete transcription model");
+                        self.transcription_deletion_error = Some(error.to_string());
+                    }
+                }
+            }
+        }
     }
 
     fn transcription_model_installed(&self, model: &ModelDefinition, language: &str) -> bool {
@@ -3168,13 +3236,17 @@ impl AppWindow {
                 } else if active {
                     TranscriptionPickerStatus::Active
                 } else {
-                    TranscriptionPickerStatus::Available { installed }
+                    TranscriptionPickerStatus::Available {
+                        installed,
+                        deletion: self.transcription_model_deletion(model, installed),
+                    }
                 };
                 TranscriptionPickerModel { choice, status }
             })
             .collect();
         TranscriptionPickerView {
             error: self.transcription_status.error.clone(),
+            deletion_error: self.transcription_deletion_error.clone(),
             language: selected_language.to_string(),
             models,
         }
@@ -7313,6 +7385,10 @@ impl TranscriptionPickerDelegate for AppWindow {
         AppWindow::choose_transcription_model(self, definition(model), language, cx);
     }
 
+    fn delete_transcription_model(&mut self, model: TranscriptionModelId, _cx: &mut Context<Self>) {
+        AppWindow::delete_transcription_model(self, definition(model));
+    }
+
     fn dismiss_transcription_picker(&mut self, cx: &mut Context<Self>) {
         AppWindow::dismiss_transcription_picker(self, cx);
     }
@@ -8615,6 +8691,7 @@ mod tests {
                 pane: DeveloperPane::Modes,
                 transcription_picker: None,
                 onboarding: false,
+                confirm_model_deletion: false,
                 collapse_mode_processing: true,
                 open_transformation_picker: false,
                 select_global_mode: true,
@@ -8693,6 +8770,60 @@ mod tests {
 
     fn reject_settings_save(_: &AppSettings) -> color_eyre::Result<()> {
         Err(color_eyre::eyre::eyre!("fixture persistence failure"))
+    }
+
+    #[gpui::test]
+    fn model_deletion_confirms_first_and_spares_the_dictation_model(cx: &mut gpui::TestAppContext) {
+        let (view, cx) = cx.add_window_view(editor_fixture);
+        cx.update(|_, cx| {
+            view.update(cx, |view, _| {
+                view.transcription_preview_installed = Some(true);
+                view.transcription_picker_language = Some("en".into());
+                let current = definition(view.settings.transcription.model);
+                let other = crate::transcription_models::choices_for_runtime("en")
+                    .into_iter()
+                    .map(|choice| choice.model)
+                    .find(|model| {
+                        matches!(model.runtime, ModelRuntime::Gguf(_)) && model.id != current.id
+                    })
+                    .unwrap();
+
+                assert_eq!(
+                    view.transcription_model_deletion(current, true),
+                    ModelDeletion::Unavailable
+                );
+                assert_eq!(
+                    view.transcription_model_deletion(other, false),
+                    ModelDeletion::Unavailable
+                );
+                assert_eq!(
+                    view.transcription_model_deletion(other, true),
+                    ModelDeletion::Offered
+                );
+
+                view.delete_transcription_model(other);
+                assert_eq!(
+                    view.transcription_model_deletion(other, true),
+                    ModelDeletion::Confirming
+                );
+                view.clear_transcription_error();
+                assert_eq!(
+                    view.transcription_model_deletion(other, true),
+                    ModelDeletion::Offered
+                );
+
+                view.delete_transcription_model(other);
+                view.delete_transcription_model(other);
+                assert_eq!(view.transcription_deletion, None);
+                assert_eq!(view.transcription_deletion_error, None);
+
+                view.transcription_status.model = Some(other.id);
+                assert_eq!(
+                    view.transcription_model_deletion(other, true),
+                    ModelDeletion::Unavailable
+                );
+            });
+        });
     }
 
     #[gpui::test]

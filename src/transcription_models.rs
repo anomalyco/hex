@@ -656,6 +656,45 @@ fn verify_installed_at(path: &Path, model: &ModelDefinition, canceled: &AtomicBo
     Ok(())
 }
 
+/// Deletes a downloaded model with its verification receipt and any partial
+/// download. Refuses instead of waiting while a download owns the directory.
+pub fn remove_installed(model: &ModelDefinition) -> Result<()> {
+    if !matches!(model.runtime, ModelRuntime::Gguf(_)) {
+        bail!("{} is managed by macOS and cannot be deleted", model.name);
+    }
+    remove_installed_at(&model_path(model)?)
+}
+
+fn remove_installed_at(path: &Path) -> Result<()> {
+    let directory = path.parent().expect("model directory");
+    if !directory.is_dir() {
+        return Ok(());
+    }
+    let lock = File::create(directory.join(".download.lock"))?;
+    match lock.try_lock_exclusive() {
+        Ok(()) => {}
+        Err(error) if error.kind() == ErrorKind::WouldBlock => {
+            bail!("A model download is in progress. Try again when it finishes.")
+        }
+        Err(error) => return Err(error.into()),
+    }
+    for file in [
+        path.to_path_buf(),
+        verification_receipt_path(path),
+        path.with_extension("gguf.partial"),
+    ] {
+        match fs::remove_file(&file) {
+            Ok(()) => {}
+            Err(error) if error.kind() == ErrorKind::NotFound => {}
+            Err(error) => {
+                return Err(error).wrap_err_with(|| format!("could not delete {}", file.display()));
+            }
+        }
+    }
+    File::open(directory)?.sync_all()?;
+    Ok(())
+}
+
 fn lock_downloads(directory: &Path, canceled: &AtomicBool) -> Result<File> {
     let lock = File::create(directory.join(".download.lock"))?;
     loop {
@@ -1185,6 +1224,36 @@ mod tests {
         fs::remove_file(path).unwrap();
         fs::remove_file(directory.join(".download.lock")).unwrap();
         fs::remove_dir(directory).unwrap();
+    }
+
+    #[test]
+    fn removing_a_model_deletes_its_artifacts_unless_a_download_is_active() {
+        let directory = std::env::temp_dir().join(format!(
+            "hex-remove-model-{}-{}",
+            std::process::id(),
+            NEXT_TEMP_FILE.fetch_add(1, Ordering::Relaxed),
+        ));
+        fs::create_dir(&directory).unwrap();
+        let path = directory.join("fixture.gguf");
+        let artifacts = [
+            path.clone(),
+            verification_receipt_path(&path),
+            path.with_extension("gguf.partial"),
+        ];
+        for artifact in &artifacts {
+            fs::write(artifact, b"model").unwrap();
+        }
+        let download = lock_downloads(&directory, &AtomicBool::new(false)).unwrap();
+        let error = remove_installed_at(&path).unwrap_err().to_string();
+        assert!(error.contains("download is in progress"), "{error}");
+        assert!(artifacts.iter().all(|artifact| artifact.exists()));
+        drop(download);
+
+        remove_installed_at(&path).unwrap();
+        assert!(artifacts.iter().all(|artifact| !artifact.exists()));
+        remove_installed_at(&path).unwrap();
+        remove_installed_at(&directory.join("missing").join("fixture.gguf")).unwrap();
+        fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
