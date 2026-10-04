@@ -42,6 +42,8 @@ pub(crate) enum TranscriptionPickerStatus {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum ModelDeletion {
     Unavailable,
+    // Linux Settings cannot delete service-owned models yet.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     Offered,
     Confirming,
 }
