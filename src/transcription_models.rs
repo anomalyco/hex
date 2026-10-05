@@ -313,11 +313,11 @@ const ARK_LANGUAGES: &[&str] = &[
     "sl", "et", "lt",
 ];
 const ARK_ARTIFACT: GgufArtifact = GgufArtifact {
-    filename: "ark-asr-0.6b-Q8_0.gguf",
-    revision: "aa2af66f16bb8f04c2da550ce07880e0c3a7e7d4",
+    filename: "ark-asr-0.6b-Q8_0-v2.gguf",
+    revision: "2a0c341bb42231f6ea4584454cefe441ca887154",
     repository: "maxffarrell/ARK-ASR-0.6B-GGUF",
-    bytes: 1_372_881_664,
-    sha256: "ceca6bacd9cab3b52892de6703562aeeb62dc8a4b14aab0b020706637dd127dc",
+    bytes: 1_372_882_944,
+    sha256: "20a9954ce65e0e724a836194a12ad10879ca746c133dcea54e0d15f2132a94bd",
     architecture: "arkasr",
     variant: "ark-asr-0.6b",
 };
