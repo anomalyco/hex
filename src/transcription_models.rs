@@ -22,6 +22,7 @@ pub enum TranscriptionModelId {
     ParakeetV3,
     WhisperLargeV3Turbo,
     Qwen3Asr06B,
+    ArkAsr06B,
     SenseVoiceSmall,
     CohereTranscribe,
     AppleSpeech,
@@ -35,6 +36,7 @@ impl TranscriptionModelId {
             Self::ParakeetV3 => "parakeet_v3",
             Self::WhisperLargeV3Turbo => "whisper_large_v3_turbo",
             Self::Qwen3Asr06B => "qwen3_asr06_b",
+            Self::ArkAsr06B => "ark_asr06_b",
             Self::SenseVoiceSmall => "sense_voice_small",
             Self::CohereTranscribe => "cohere_transcribe",
             Self::AppleSpeech => "apple_speech",
@@ -52,6 +54,7 @@ impl FromStr for TranscriptionModelId {
             "parakeet_v3" => Ok(Self::ParakeetV3),
             "whisper_large_v3_turbo" => Ok(Self::WhisperLargeV3Turbo),
             "qwen3_asr06_b" => Ok(Self::Qwen3Asr06B),
+            "ark_asr06_b" => Ok(Self::ArkAsr06B),
             "sense_voice_small" => Ok(Self::SenseVoiceSmall),
             "cohere_transcribe" => Ok(Self::CohereTranscribe),
             "apple_speech" => Ok(Self::AppleSpeech),
@@ -110,6 +113,7 @@ impl Default for TranscriptionSelection {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Recommendation {
+    Alternative,
     Recommended,
     Fastest,
     MostAccurate,
@@ -119,6 +123,7 @@ pub enum Recommendation {
 impl Recommendation {
     pub const fn label(self) -> &'static str {
         match self {
+            Self::Alternative => "Alternative",
             Self::Recommended => "Recommended",
             Self::Fastest => "Fastest",
             Self::MostAccurate => "Most accurate",
@@ -303,6 +308,20 @@ const COHERE_ARTIFACT: GgufArtifact = GgufArtifact {
     variant: "cohere-transcribe-03-2026",
 };
 
+const ARK_LANGUAGES: &[&str] = &[
+    "zh", "en", "de", "ja", "fr", "ko", "es", "pl", "it", "ro", "hu", "cs", "nl", "fi", "hr", "sk",
+    "sl", "et", "lt",
+];
+const ARK_ARTIFACT: GgufArtifact = GgufArtifact {
+    filename: "ark-asr-0.6b-Q8_0.gguf",
+    revision: "aa2af66f16bb8f04c2da550ce07880e0c3a7e7d4",
+    repository: "maxffarrell/ARK-ASR-0.6B-GGUF",
+    bytes: 1_372_881_664,
+    sha256: "ceca6bacd9cab3b52892de6703562aeeb62dc8a4b14aab0b020706637dd127dc",
+    architecture: "arkasr",
+    variant: "ark-asr-0.6b",
+};
+
 pub const MODELS: &[ModelDefinition] = &[
     ModelDefinition {
         id: TranscriptionModelId::ParakeetUnifiedEnglish,
@@ -377,6 +396,21 @@ pub const MODELS: &[ModelDefinition] = &[
         runtime: ModelRuntime::Gguf(&QWEN_ARTIFACT),
         languages: QWEN_LANGUAGES,
         accepts_language_hint: true,
+        supports_language_detection: true,
+        supports_recognition_hints: false,
+    },
+    ModelDefinition {
+        id: TranscriptionModelId::ArkAsr06B,
+        name: "ARK-ASR 0.6B",
+        realtime: "Unmeasured",
+        realtime_context: "no dictation benchmark",
+        quality: "1.87%",
+        quality_context: "upstream LibriSpeech clean WER",
+        coverage: "19 languages · automatic detection",
+        timestamps: "No timestamps",
+        runtime: ModelRuntime::Gguf(&ARK_ARTIFACT),
+        languages: ARK_LANGUAGES,
+        accepts_language_hint: false,
         supports_language_detection: true,
         supports_recognition_hints: false,
     },
@@ -491,7 +525,7 @@ pub(crate) fn choices_for_runtime(language: &str) -> Vec<ModelChoice> {
         model: definition(id),
         recommendation,
     };
-    match language {
+    let mut choices = match language {
         AUTO_LANGUAGE => vec![
             choice(
                 TranscriptionModelId::WhisperLargeV3Turbo,
@@ -558,7 +592,14 @@ pub(crate) fn choices_for_runtime(language: &str) -> Vec<ModelChoice> {
             TranscriptionModelId::WhisperLargeV3Turbo,
             Recommendation::Recommended,
         )],
+    };
+    if definition(TranscriptionModelId::ArkAsr06B).supports_language(language) {
+        choices.push(choice(
+            TranscriptionModelId::ArkAsr06B,
+            Recommendation::Alternative,
+        ));
     }
+    choices
 }
 
 pub fn validate(selection: &TranscriptionSelection) -> Result<&'static ModelDefinition> {
@@ -1025,6 +1066,7 @@ mod tests {
                 "whisper_large_v3_turbo",
             ),
             (TranscriptionModelId::Qwen3Asr06B, "qwen3_asr06_b"),
+            (TranscriptionModelId::ArkAsr06B, "ark_asr06_b"),
             (TranscriptionModelId::SenseVoiceSmall, "sense_voice_small"),
             (TranscriptionModelId::CohereTranscribe, "cohere_transcribe"),
             (TranscriptionModelId::AppleSpeech, "apple_speech"),
@@ -1034,6 +1076,49 @@ mod tests {
             assert_eq!(serde_json::to_value(id).unwrap(), name);
         }
         assert!("unknown".parse::<TranscriptionModelId>().is_err());
+    }
+
+    #[test]
+    fn ark_choices_use_detection_without_claiming_language_steering() {
+        let ark = definition(TranscriptionModelId::ArkAsr06B);
+        for language in ARK_LANGUAGES.iter().copied().chain([AUTO_LANGUAGE]) {
+            assert!(
+                validate(&TranscriptionSelection {
+                    model: ark.id,
+                    language: language.into(),
+                    recognition_hints: String::new(),
+                })
+                .is_ok()
+            );
+            assert_eq!(ark.runtime_language_hint(language), None);
+            assert_eq!(
+                choices_for_runtime(language).last().unwrap().model.id,
+                ark.id
+            );
+        }
+        for language in ["yue", "pt", "ru", "ar"] {
+            assert!(
+                validate(&TranscriptionSelection {
+                    model: ark.id,
+                    language: language.into(),
+                    recognition_hints: String::new(),
+                })
+                .is_err()
+            );
+            assert!(
+                choices_for_runtime(language)
+                    .iter()
+                    .all(|choice| choice.model.id != ark.id)
+            );
+        }
+        assert!(
+            validate(&TranscriptionSelection {
+                model: ark.id,
+                language: AUTO_LANGUAGE.into(),
+                recognition_hints: "preferred spelling".into(),
+            })
+            .is_err()
+        );
     }
 
     #[test]

@@ -99,6 +99,39 @@ Permissions revoked later
 Apple silicon, macOS 15+. Choices come from the compiled model/language catalog;
 Apple Speech is currently excluded from the desktop picker.
 
+ARK-ASR 0.6B is an experimental alternative in Auto and its 19 published
+language groups, with the stable CLI/service/SDK ID `ark_asr06_b`. Selection
+uses automatic language detection; choosing a language filters availability
+but does not force ARK's output language. Recognition hints and timestamps are
+unavailable. Existing defaults and ranked recommendations are preserved.
+The candidate requires the pinned ARK-enabled transcribe.cpp fork in
+`Cargo.toml`; upstream acceptance is tracked in
+[transcribe.cpp #190](https://github.com/handy-computer/transcribe.cpp/issues/190)
+and [draft #191](https://github.com/handy-computer/transcribe.cpp/pull/191).
+The converted artifact is pinned by revision, exact size, SHA-256 and
+`arkasr/ark-asr-0.6b` identity in the catalog, so ordinary preparation,
+cancellation and transactional warm activation apply.
+
+The candidate's six public short samples match the original model across
+F16 and Q8, but include original-model failures: a Korean sample produces
+Japanese and nonspeech produces text. The upstream LibriSpeech number shown
+in the picker is publisher-reported, not a local GGUF WER result. The
+`ark_choices_use_detection_without_claiming_language_steering` regression
+covers availability, unsupported languages and hints. Native download,
+installed-app UI, physical microphone/paste and Linux inference require
+separate evidence; reference comparisons do not establish those flows.
+
+Executed October 4 candidate verification: 495 Rust tests passed (12 opt-in
+tests ignored), all twelve keyboard-layout child scenarios passed, strict
+all-target/all-feature Clippy and formatting passed, and the public SDK passed
+70 tests, typecheck and build. In an isolated Application Support directory,
+the headless Hex service downloaded and verified the pinned ARK artifact,
+completed warm activation, returned the reference JFK text for both Auto and
+English selections, rejected Russian preparation with HTTP 400, and removed
+its discovery file on clean shutdown. This verifies model preparation and
+service transcription; installed-app UI, physical microphone/paste and Linux
+inference remain unverified.
+
 ```ts
 Choose a supported language              // setup.language-conditioning; macOS + Linux picker
 ├── Parakeet v3 -> Detect language from audio; selected language does not constrain output
