@@ -12,6 +12,7 @@ import {
   text,
   union,
 } from "../src/index.js"
+import type { Letter } from "../src/index.js"
 
 describe("command model", () => {
   it("builds every native descriptor", () => {
@@ -158,9 +159,7 @@ describe("command model", () => {
           captures: { key },
           run: ({ captures }) => {
             expectTypeOf(captures.key).toEqualTypeOf<
-              | "a" | "b" | "c" | "d" | "e" | "f" | "g" | "h" | "i" | "j" | "k" | "l" | "m"
-              | "n" | "o" | "p" | "q" | "r" | "s" | "t" | "u" | "v" | "w" | "x" | "y" | "z"
-              | number | "home" | "end" | "enter" | "escape"
+              Letter | number | "home" | "end" | "enter" | "escape"
             >()
           },
         },

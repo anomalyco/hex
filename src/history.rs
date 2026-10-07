@@ -11,7 +11,7 @@ use std::io::{self, Write};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, TryLockError, mpsc};
 use std::thread;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
@@ -84,24 +84,7 @@ impl HistoryKind {
 }
 
 /// Bounded record of the post-processing that shaped the final text.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub struct HistoryProcessing {
-    pub profile: String,
-    pub latency_ms: u64,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub fallback: Option<String>,
-}
-
-#[cfg(target_os = "macos")]
-impl From<crate::dictation_processor::ProcessingObservation> for HistoryProcessing {
-    fn from(observation: crate::dictation_processor::ProcessingObservation) -> Self {
-        Self {
-            profile: observation.profile,
-            latency_ms: observation.latency_ms,
-            fallback: observation.fallback,
-        }
-    }
-}
+pub type HistoryProcessing = crate::events::DictationProcessing;
 
 /// One retained successful result.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -337,8 +320,8 @@ impl HistoryStore {
             self.entries.retain(|entry| entry.timestamp_ms >= cutoff);
             changed |= self.entries.len() != before;
         }
-        while self.entries.len() > MAX_ENTRIES {
-            self.entries.remove(0);
+        if self.entries.len() > MAX_ENTRIES {
+            self.entries.drain(..self.entries.len() - MAX_ENTRIES);
             changed = true;
         }
         let mut total: usize = self.entries.iter().map(HistoryEntry::text_bytes).sum();
@@ -459,22 +442,10 @@ impl History {
     }
 }
 
-pub fn now_ms() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_millis() as u64)
-        .unwrap_or_default()
-}
+pub use crate::events::now_ms;
 
 fn truncated(text: &str, max_bytes: usize) -> String {
-    if text.len() <= max_bytes {
-        return text.to_string();
-    }
-    let mut end = max_bytes;
-    while !text.is_char_boundary(end) {
-        end -= 1;
-    }
-    text[..end].to_string()
+    text[..text.floor_char_boundary(max_bytes)].to_string()
 }
 
 #[cfg(unix)]
@@ -492,6 +463,7 @@ fn restrict_to_owner(_file: &fs::File) -> io::Result<()> {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
+    use std::time::UNIX_EPOCH;
 
     fn temp_path(name: &str) -> PathBuf {
         let directory =

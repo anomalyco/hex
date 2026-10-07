@@ -1,11 +1,10 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises"
-import { tmpdir } from "node:os"
+import { readFile } from "node:fs/promises"
 import { join } from "node:path"
 import { ChildProcess } from "node:child_process"
 import { once } from "node:events"
 import { describe, expect, it, vi } from "vitest"
 import { create, type ModelProgress } from "../src/index.js"
-import { options, processIsAlive } from "./support.js"
+import { options, processIsAlive, withTempDir } from "./support.js"
 
 describe("ready transcriber", () => {
   it("prepares once and binds the model and language across recordings", async () => {
@@ -41,10 +40,9 @@ describe("ready transcriber", () => {
   })
 
   it.each(["error", "cancel", "callback"])("closes the helper before failed creation settles: %s", async (mode) => {
-    const directory = await mkdtemp(join(tmpdir(), "hex-ready-"))
-    const pidPath = join(directory, "pid")
-    const controller = new AbortController()
-    try {
+    await withTempDir("hex-ready-", async (directory) => {
+      const pidPath = join(directory, "pid")
+      const controller = new AbortController()
       await expect(create({
         ...options(), model: "parakeet_v2",
         env: { HEX_FAKE_PID_PATH: pidPath, HEX_FAKE_PREPARE_ERROR: "1" },
@@ -57,9 +55,7 @@ describe("ready transcriber", () => {
         code: mode === "error" ? "model-prepare-failed" : mode === "cancel" ? "cancelled" : "request-failed",
       })
       expect(processIsAlive(Number(await readFile(pidPath, "utf8")))).toBe(false)
-    } finally {
-      await rm(directory, { recursive: true, force: true })
-    }
+    })
   })
 
   it("does not close a ready transcriber for an already-aborted request", async () => {

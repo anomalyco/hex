@@ -1,5 +1,5 @@
 import { pathToFileURL } from "node:url"
-import { normalizeSpokenWord, validateCaptureDescriptor } from "./captures.js"
+import { boundedString, record, utf8Length, validateCaptureDescriptor } from "./captures.js"
 import { Cause, Deferred, Effect, Exit, Fiber } from "effect"
 import { Hex, ToolCallError } from "./effect.js"
 import type { HexService } from "./effect.js"
@@ -13,6 +13,7 @@ import {
 } from "./model.js"
 import type {
   HandlerArguments,
+  HandlerContext,
   CaptureDescriptor,
   CaptureSchema,
   HexCapabilities,
@@ -53,20 +54,6 @@ const SHUTDOWN_TIMEOUT_MS = 2_000
 type HostHandlerFunction = (arguments_: HandlerArguments<UntypedCaptures>) =>
   void | Promise<void> | Effect.Effect<void, unknown, Hex>
 type HostHandler = HostHandlerFunction | Effect.Effect<void, unknown, Hex>
-
-const utf8Length = (value: string): number => Buffer.byteLength(value, "utf8")
-
-const boundedString = (value: unknown, label: string, maxBytes: number): string => {
-  if (typeof value !== "string" || value.length === 0 || utf8Length(value) > maxBytes) {
-    throw new Error(`${label} must be a non-empty string no longer than ${maxBytes} UTF-8 bytes`)
-  }
-  return value
-}
-
-const record = (value: unknown): Record<string, unknown> | undefined =>
-  typeof value === "object" && value !== null && !Array.isArray(value)
-    ? Object.fromEntries(Object.entries(value))
-    : undefined
 
 const isFunction = (value: unknown): value is HostHandlerFunction =>
   typeof value === "function"
@@ -356,6 +343,33 @@ const errorMessage = (error: unknown): string => {
     : Buffer.from(message).subarray(0, MAX_ERROR_BYTES).toString("utf8")
 }
 
+const decodeContext = (
+  value: unknown,
+  label: "invoke.context" | "transform.context",
+  deriveBrowserHost: boolean,
+): HandlerContext => {
+  const context = record(value)
+  if (context === undefined) throw new Error(`${label} must be an object`)
+  const application = context.application === undefined
+    ? undefined
+    : boundedString(context.application, `${label}.application`, MAX_VALUE_BYTES)
+  const browserUrl = context.browserUrl === undefined
+    ? undefined
+    : boundedString(context.browserUrl, `${label}.browserUrl`, MAX_VALUE_BYTES)
+  const windowTitle = context.windowTitle === undefined
+    ? undefined
+    : boundedString(context.windowTitle, `${label}.windowTitle`, MAX_VALUE_BYTES)
+  const browserHost = context.browserHost === undefined
+    ? deriveBrowserHost && browserUrl !== undefined ? new URL(browserUrl).hostname : undefined
+    : boundedString(context.browserHost, `${label}.browserHost`, 253)
+  return {
+    ...(application === undefined ? {} : { application }),
+    ...(browserHost === undefined ? {} : { browserHost }),
+    ...(browserUrl === undefined ? {} : { browserUrl }),
+    ...(windowTitle === undefined ? {} : { windowTitle }),
+  }
+}
+
 const decodeInput = (line: string): HostInput => {
   let value: unknown
   try {
@@ -365,21 +379,8 @@ const decodeInput = (line: string): HostInput => {
   }
   const input = record(value)
   switch (input?.type) {
-    case "invoke":
-      const context = record(input.context)
-      if (context === undefined) throw new Error("invoke.context must be an object")
-      const application = context.application === undefined
-        ? undefined
-        : boundedString(context.application, "invoke.context.application", MAX_VALUE_BYTES)
-      const browserUrl = context.browserUrl === undefined
-        ? undefined
-        : boundedString(context.browserUrl, "invoke.context.browserUrl", MAX_VALUE_BYTES)
-      const windowTitle = context.windowTitle === undefined
-        ? undefined
-        : boundedString(context.windowTitle, "invoke.context.windowTitle", MAX_VALUE_BYTES)
-      const browserHost = context.browserHost === undefined
-        ? browserUrl === undefined ? undefined : new URL(browserUrl).hostname
-        : boundedString(context.browserHost, "invoke.context.browserHost", 253)
+    case "invoke": {
+      const context = decodeContext(input.context, "invoke.context", true)
       const rawCaptures = input.captures === undefined ? {} : record(input.captures)
       if (rawCaptures === undefined) throw new Error("invoke.captures must be an object")
       const captureEntries = Object.entries(rawCaptures)
@@ -397,17 +398,12 @@ const decodeInput = (line: string): HostInput => {
         type: "invoke",
         invocationId: boundedString(input.invocationId, "invoke.invocationId", MAX_ID_BYTES),
         commandId: boundedString(input.commandId, "invoke.commandId", MAX_ID_BYTES),
-        context: {
-          ...(application === undefined ? {} : { application }),
-          ...(browserHost === undefined ? {} : { browserHost }),
-          ...(browserUrl === undefined ? {} : { browserUrl }),
-          ...(windowTitle === undefined ? {} : { windowTitle }),
-        },
+        context,
         captures,
       }
+    }
     case "transform": {
-      const context = record(input.context)
-      if (context === undefined) throw new Error("transform.context must be an object")
+      const context = decodeContext(input.context, "transform.context", false)
       if (!Array.isArray(input.transformationIds)
         || input.transformationIds.length === 0
         || input.transformationIds.length > MAX_TRANSFORMATIONS_PER_INVOCATION) {
@@ -424,20 +420,7 @@ const decodeInput = (line: string): HostInput => {
         transformationIds: input.transformationIds.map((id, index) =>
           boundedString(id, `transform.transformationIds[${index}]`, MAX_ID_BYTES)),
         text,
-        context: {
-          ...(context.application === undefined ? {} : {
-            application: boundedString(context.application, "transform.context.application", MAX_VALUE_BYTES),
-          }),
-          ...(context.browserHost === undefined ? {} : {
-            browserHost: boundedString(context.browserHost, "transform.context.browserHost", 253),
-          }),
-          ...(context.browserUrl === undefined ? {} : {
-            browserUrl: boundedString(context.browserUrl, "transform.context.browserUrl", MAX_VALUE_BYTES),
-          }),
-          ...(context.windowTitle === undefined ? {} : {
-            windowTitle: boundedString(context.windowTitle, "transform.context.windowTitle", MAX_VALUE_BYTES),
-          }),
-        },
+        context,
       }
     }
     case "toolResult": {

@@ -30,10 +30,8 @@ impl RecognitionAudio {
     }
 
     pub fn captured_from(&self) -> CaptureInstant {
-        let nanos = self.samples.len() as u128 * 1_000_000_000 / u128::from(self.sample_rate);
         self.captured_through
-            .checked_sub(Duration::from_nanos(nanos as u64))
-            .unwrap_or(self.captured_through)
+            .sub_frames(self.samples.len(), self.sample_rate)
     }
 }
 
@@ -198,59 +196,19 @@ impl DictationAudio {
         pending_input: PendingInputEvents,
         release_while_idle: bool,
     ) -> Result<Self> {
-        let state = Arc::new(State {
-            sample_rate: AtomicU64::new(if input.is_open() {
-                u64::from(input.sample_rate())
-            } else {
-                0
-            }),
-            captured_through: AtomicU64::new(0),
-            device_name: Mutex::new(device_name),
-            recording: AtomicBool::new(false),
-            recovering: AtomicBool::new(input.is_recovering()),
-            recognition_generation: AtomicU64::new(0),
-            outstanding_recognition_frames: Arc::new(AtomicU64::new(0)),
-            capture_generation: AtomicU64::new(0),
-        });
-        let capture = new_capture(
-            if input.is_open() {
-                input.sample_rate()
-            } else {
-                16_000
-            },
-            &recording_environment,
+        let (owner, mut audio) = Owner::new(
+            input,
+            device_name,
+            recording_environment,
+            pending_input,
+            release_while_idle,
         );
-        let (command_sender, commands) = mpsc::channel();
-        let (recognition_sender, recognition) = mpsc::sync_channel(RECOGNITION_QUEUE_CAPACITY);
-        let (event_sender, events) = mpsc::channel();
-        let owner_state = state.clone();
-        let worker = thread::Builder::new()
-            .name("dictation-audio".into())
-            .spawn(move || {
-                Owner {
-                    input,
-                    release_while_idle,
-                    pending_capture: None,
-                    capture,
-                    recording_environment,
-                    commands,
-                    recognition: recognition_sender,
-                    events: event_sender,
-                    state: owner_state,
-                    dropped_recognition_frames: 0,
-                    recognition_overflowed: false,
-                    pending_input,
-                    last_captured_through: None,
-                }
-                .run();
-            })?;
-        Ok(Self {
-            commands: command_sender,
-            recognition,
-            events,
-            state,
-            worker: Some(worker),
-        })
+        audio.worker = Some(
+            thread::Builder::new()
+                .name("dictation-audio".into())
+                .spawn(move || owner.run())?,
+        );
+        Ok(audio)
     }
 
     pub fn sample_rate(&self) -> u32 {
@@ -415,30 +373,82 @@ impl Drop for DictationAudio {
 }
 
 impl Owner {
+    fn new(
+        input: RecoveringAudioInput,
+        device_name: String,
+        recording_environment: RecordingEnvironmentController,
+        pending_input: PendingInputEvents,
+        release_while_idle: bool,
+    ) -> (Self, DictationAudio) {
+        let state = Arc::new(State {
+            sample_rate: AtomicU64::new(if input.is_open() {
+                u64::from(input.sample_rate())
+            } else {
+                0
+            }),
+            captured_through: AtomicU64::new(0),
+            device_name: Mutex::new(device_name),
+            recording: AtomicBool::new(false),
+            recovering: AtomicBool::new(input.is_recovering()),
+            recognition_generation: AtomicU64::new(0),
+            outstanding_recognition_frames: Arc::new(AtomicU64::new(0)),
+            capture_generation: AtomicU64::new(0),
+        });
+        let capture = new_capture(
+            if input.is_open() {
+                input.sample_rate()
+            } else {
+                16_000
+            },
+            &recording_environment,
+        );
+        let (command_sender, commands) = mpsc::channel();
+        let (recognition_sender, recognition) = mpsc::sync_channel(RECOGNITION_QUEUE_CAPACITY);
+        let (event_sender, events) = mpsc::channel();
+        let owner = Self {
+            input,
+            release_while_idle,
+            pending_capture: None,
+            capture,
+            recording_environment,
+            commands,
+            recognition: recognition_sender,
+            events: event_sender,
+            state: state.clone(),
+            dropped_recognition_frames: 0,
+            recognition_overflowed: false,
+            pending_input,
+            last_captured_through: None,
+        };
+        let audio = DictationAudio {
+            commands: command_sender,
+            recognition,
+            events,
+            state,
+            worker: None,
+        };
+        (owner, audio)
+    }
+
     fn run(mut self) {
         loop {
-            match self.commands.try_recv() {
-                Ok(command) => {
-                    if !self.handle(command) {
-                        break;
-                    }
-                    self.reconcile_input();
-                    continue;
-                }
+            let next_command = match self.commands.try_recv() {
+                Ok(command) => Some(command),
                 Err(TryRecvError::Disconnected) => break,
-                Err(TryRecvError::Empty) => {}
-            }
-            if !self.input.is_open() && !self.input.is_opening() && !self.input.is_recovering() {
-                match self.commands.recv() {
-                    Ok(command) => {
-                        if !self.handle(command) {
-                            break;
-                        }
-                        self.reconcile_input();
-                        continue;
-                    }
-                    Err(_) => break,
+                Err(TryRecvError::Empty) if !self.input.is_active() => {
+                    let Ok(command) = self.commands.recv() else {
+                        break;
+                    };
+                    Some(command)
                 }
+                Err(TryRecvError::Empty) => None,
+            };
+            if let Some(command) = next_command {
+                if !self.handle(command) {
+                    break;
+                }
+                self.reconcile_input();
+                continue;
             }
             let capture_idle = self.capture_idle();
             let event = self
@@ -572,11 +582,7 @@ impl Owner {
                 samples,
                 captured_through,
             } => {
-                let chunk_nanos =
-                    samples.len() as u128 * 1_000_000_000 / u128::from(self.sample_rate());
-                let captured_from = captured_through
-                    .checked_sub(Duration::from_nanos(chunk_nanos as u64))
-                    .unwrap_or(captured_through);
+                let captured_from = captured_through.sub_frames(samples.len(), self.sample_rate());
                 if let Some(previous) = self.last_captured_through
                     && captured_from.duration_since(previous) > Duration::from_millis(50)
                 {
@@ -740,12 +746,10 @@ impl Owner {
 
     fn reconcile_input(&mut self) {
         if self.release_while_idle {
-            if self.capture_idle()
-                && (self.input.is_open() || self.input.is_opening() || self.input.is_recovering())
-            {
+            if self.capture_idle() && self.input.is_active() {
                 self.close_input();
             }
-        } else if !self.input.is_open() && !self.input.is_opening() && !self.input.is_recovering() {
+        } else if !self.input.is_active() {
             // A key release is acknowledged after its synchronous controls return;
             // waiting for that acknowledgment here can leave the owner asleep.
             self.input.request_recovery();
@@ -798,42 +802,14 @@ mod tests {
                 RecoveringAudioInputEvent::Reopened
             ));
         }
-        let state = Arc::new(State {
-            sample_rate: AtomicU64::new(if open { 48_000 } else { 0 }),
-            captured_through: AtomicU64::new(0),
-            device_name: Mutex::new("Test microphone".into()),
-            recording: AtomicBool::new(false),
-            recovering: AtomicBool::new(false),
-            recognition_generation: AtomicU64::new(0),
-            outstanding_recognition_frames: Arc::new(AtomicU64::new(0)),
-            capture_generation: AtomicU64::new(0),
-        });
-        let (commands, command_receiver) = mpsc::channel();
-        let (recognition_sender, recognition) = mpsc::sync_channel(RECOGNITION_QUEUE_CAPACITY);
-        let (events_sender, events) = mpsc::channel();
-        let recording_environment = RecordingEnvironmentController::for_test();
-        let owner = Owner {
+        let (owner, input) = Owner::new(
             input,
-            release_while_idle: false,
-            pending_capture: None,
-            capture: new_capture(if open { 48_000 } else { 16_000 }, &recording_environment),
-            recording_environment,
-            commands: command_receiver,
-            recognition: recognition_sender,
-            events: events_sender,
-            state: state.clone(),
-            dropped_recognition_frames: 0,
-            recognition_overflowed: false,
-            pending_input: PendingInputEvents::default(),
-            last_captured_through: None,
-        };
-        let input = DictationAudio {
-            commands,
-            recognition,
-            events,
-            state,
-            worker: None,
-        };
+            "Test microphone".into(),
+            RecordingEnvironmentController::for_test(),
+            PendingInputEvents::default(),
+            false,
+        );
+        input.state.recovering.store(false, Ordering::Release);
         (owner, input, samples)
     }
 

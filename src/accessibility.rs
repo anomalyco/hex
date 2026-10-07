@@ -54,103 +54,96 @@ pub fn focused_window_title(pid: i32) -> Option<String> {
         .filter(|title| !title.is_empty())
 }
 
+struct CfObject(CfTypeRef);
+
+impl Drop for CfObject {
+    fn drop(&mut self) {
+        unsafe { CFRelease(self.0) };
+    }
+}
+
+fn bounded_element(
+    element: AxUiElementRef,
+    null_error: &'static str,
+    timeout_error: &'static str,
+) -> Result<CfObject> {
+    if element.is_null() {
+        return Err(eyre!(null_error));
+    }
+    let element = CfObject(element);
+    if unsafe { AXUIElementSetMessagingTimeout(element.0, 0.25) } != 0 {
+        return Err(eyre!(timeout_error));
+    }
+    Ok(element)
+}
+
+fn copy_attribute(
+    element: &CfObject,
+    name: &std::ffi::CStr,
+    missing_error: &'static str,
+) -> Result<CfObject> {
+    let attribute = CfObject(cf_string_literal(name)?);
+    let mut value = ptr::null();
+    let status = unsafe { AXUIElementCopyAttributeValue(element.0, attribute.0, &mut value) };
+    if status != 0 || value.is_null() {
+        return Err(eyre!(missing_error));
+    }
+    Ok(CfObject(value))
+}
+
 fn capture_focused_window_title(pid: i32) -> Result<String> {
     // SAFETY: The create/copy APIs return retained Core Foundation objects.
-    let application = unsafe { AXUIElementCreateApplication(pid) };
-    if application.is_null() {
-        return Err(eyre!("could not inspect the foreground application"));
-    }
-    if unsafe { AXUIElementSetMessagingTimeout(application, 0.25) } != 0 {
-        unsafe { CFRelease(application) };
-        return Err(eyre!(
-            "could not bound communication with the foreground application"
-        ));
-    }
-
-    let focused_window_attribute = cf_string_literal(c"AXFocusedWindow")?;
-    let mut window = ptr::null();
-    let window_status = unsafe {
-        AXUIElementCopyAttributeValue(application, focused_window_attribute, &mut window)
-    };
-    unsafe { CFRelease(focused_window_attribute) };
-    unsafe { CFRelease(application) };
-    if window_status != 0 || window.is_null() {
-        return Err(eyre!("the foreground application has no focused window"));
-    }
-    if unsafe { AXUIElementSetMessagingTimeout(window.cast(), 0.25) } != 0 {
-        unsafe { CFRelease(window) };
+    let application = bounded_element(
+        unsafe { AXUIElementCreateApplication(pid) },
+        "could not inspect the foreground application",
+        "could not bound communication with the foreground application",
+    )?;
+    let window = copy_attribute(
+        &application,
+        c"AXFocusedWindow",
+        "the foreground application has no focused window",
+    )?;
+    if unsafe { AXUIElementSetMessagingTimeout(window.0, 0.25) } != 0 {
         return Err(eyre!(
             "could not bound communication with the foreground window"
         ));
     }
-
-    let title_attribute = cf_string_literal(c"AXTitle")?;
-    let mut title = ptr::null();
-    let title_status =
-        unsafe { AXUIElementCopyAttributeValue(window.cast(), title_attribute, &mut title) };
-    unsafe { CFRelease(title_attribute) };
-    unsafe { CFRelease(window) };
-    if title_status != 0 || title.is_null() {
-        return Err(eyre!("the foreground window does not expose a title"));
-    }
-    let result = cf_string(title);
-    unsafe { CFRelease(title) };
-    result
+    let title = copy_attribute(
+        &window,
+        c"AXTitle",
+        "the foreground window does not expose a title",
+    )?;
+    cf_string(title.0)
 }
 
 fn capture_accessibility() -> Result<String> {
     let focused = focused_element()?;
-    let result = selected_text(focused);
-    unsafe { CFRelease(focused) };
-    result
+    let selected = copy_attribute(
+        &focused,
+        c"AXSelectedText",
+        "the focused control does not expose selected text",
+    )?;
+    cf_string(selected.0)
 }
 
-fn focused_element() -> Result<AxUiElementRef> {
+fn focused_element() -> Result<CfObject> {
     // SAFETY: The create/copy APIs return retained Core Foundation objects.
-    let system = unsafe { AXUIElementCreateSystemWide() };
-    if system.is_null() {
-        return Err(eyre!("could not inspect the focused control"));
-    }
-    if unsafe { AXUIElementSetMessagingTimeout(system, 0.25) } != 0 {
-        unsafe { CFRelease(system) };
-        return Err(eyre!(
-            "could not bound communication with the Accessibility server"
-        ));
-    }
-    let focused_attribute = cf_string_literal(c"AXFocusedUIElement")?;
-    let mut focused = ptr::null();
-    let focused_status =
-        unsafe { AXUIElementCopyAttributeValue(system, focused_attribute, &mut focused) };
-    unsafe { CFRelease(focused_attribute) };
-    unsafe { CFRelease(system) };
-    if focused_status != 0 || focused.is_null() {
-        return Err(eyre!(
-            "the foreground application has no focused text control"
-        ));
-    }
-    let timeout_status = unsafe { AXUIElementSetMessagingTimeout(focused.cast(), 0.25) };
-    if timeout_status != 0 {
-        unsafe { CFRelease(focused) };
+    let system = bounded_element(
+        unsafe { AXUIElementCreateSystemWide() },
+        "could not inspect the focused control",
+        "could not bound communication with the Accessibility server",
+    )?;
+    let focused = copy_attribute(
+        &system,
+        c"AXFocusedUIElement",
+        "the foreground application has no focused text control",
+    )?;
+    if unsafe { AXUIElementSetMessagingTimeout(focused.0, 0.25) } != 0 {
         return Err(eyre!(
             "could not bound communication with the focused text control"
         ));
     }
-
-    Ok(focused.cast())
-}
-
-fn selected_text(focused: AxUiElementRef) -> Result<String> {
-    let selected_attribute = cf_string_literal(c"AXSelectedText")?;
-    let mut selected = ptr::null();
-    let selected_status =
-        unsafe { AXUIElementCopyAttributeValue(focused, selected_attribute, &mut selected) };
-    unsafe { CFRelease(selected_attribute) };
-    if selected_status != 0 || selected.is_null() {
-        return Err(eyre!("the focused control does not expose selected text"));
-    }
-    let result = cf_string(selected);
-    unsafe { CFRelease(selected) };
-    result
+    Ok(focused)
 }
 
 fn cf_string_literal(value: &std::ffi::CStr) -> Result<CfStringRef> {
@@ -184,7 +177,8 @@ fn cf_string(value: CfTypeRef) -> Result<String> {
         .iter()
         .position(|byte| *byte == 0)
         .unwrap_or(bytes.len());
-    String::from_utf8(bytes[..length].to_vec()).map_err(Into::into)
+    bytes.truncate(length);
+    String::from_utf8(bytes).map_err(Into::into)
 }
 
 #[cfg(test)]

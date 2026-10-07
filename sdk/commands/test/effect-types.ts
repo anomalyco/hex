@@ -1,5 +1,6 @@
 import { Effect } from "effect"
 import { choice, defineHexConfig, digit, Hex, letter, press, text, union } from "../src/effect.js"
+import type { Letter } from "../src/effect.js"
 
 defineHexConfig({
   commands: {
@@ -43,8 +44,7 @@ defineHexConfig({
       phrases: ["control {key}"],
       captures: { key: letter() },
       run: ({ captures }) => Effect.gen(function* () {
-        const key: "a" | "b" | "c" | "d" | "e" | "f" | "g" | "h" | "i" | "j" | "k" | "l" | "m"
-          | "n" | "o" | "p" | "q" | "r" | "s" | "t" | "u" | "v" | "w" | "x" | "y" | "z" = captures.key
+        const key: Letter = captures.key
         const hex = yield* Hex
         yield* hex.press({ key, modifiers: ["control"] })
       }),

@@ -56,7 +56,10 @@ impl ActiveMicrophoneApplication {
         ]
         .iter()
         .find_map(|(prefix, canonical)| {
-            (bundle == *prefix || bundle.starts_with(&format!("{prefix}."))).then_some(*canonical)
+            bundle
+                .strip_prefix(prefix)
+                .is_some_and(|rest| rest.is_empty() || rest.starts_with('.'))
+                .then_some(*canonical)
         })
     }
 }

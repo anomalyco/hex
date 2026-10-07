@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest"
 import { makeClient } from "../src/client.js"
 import { consumeSse } from "../src/sse.js"
+import { fixtureEndpoint } from "./support.js"
 
 const response = (chunks: readonly Uint8Array[], cancel = () => {}, close = true) =>
   new Response(new ReadableStream<Uint8Array>({
@@ -60,14 +61,12 @@ describe("shared SSE framing", () => {
 })
 
 describe("SDK SSE consumers", () => {
-  const endpoint = { type: "ready", url: "http://127.0.0.1:1", token: "fixture", apiVersion: "2", pid: 1 } as const
-
   it("dispatches CR-only events and completes preparation without another byte or EOF", async () => {
     const cancel = vi.fn()
     const transport: typeof fetch = async () => response([
       encoded('data: {"type":"verifying"}\r\rdata: {"type":"ok"}\r\r'),
     ], cancel, false)
-    const client = makeClient(endpoint, transport, new AbortController().signal)
+    const client = makeClient(fixtureEndpoint, transport, new AbortController().signal)
     const onProgress = vi.fn()
     await client.models.prepare("parakeet_v2", { onProgress })
     expect(onProgress).toHaveBeenCalledExactlyOnceWith({ type: "verifying" })
@@ -87,7 +86,7 @@ describe("SDK SSE consumers", () => {
       }
       return new Response(null, { status: 204 })
     }
-    const client = makeClient(endpoint, transport, new AbortController().signal)
+    const client = makeClient(fixtureEndpoint, transport, new AbortController().signal)
     const onProgress = vi.fn()
     await client.models.prepare("parakeet_v2", { onProgress })
     expect(onProgress).toHaveBeenCalledTimes(count)
@@ -108,7 +107,7 @@ describe("SDK SSE consumers", () => {
     const transport: typeof fetch = async () => response([
       encoded('data: {"type":"verifying"}\n\ndata: {"type":"ok"}\n\n'),
     ], cancel, false)
-    const client = makeClient(endpoint, transport, controller.signal)
+    const client = makeClient(fixtureEndpoint, transport, controller.signal)
     await expect(client.models.prepare("parakeet_v2", {
       onProgress: () => {
         if (operation === "abort") controller.abort("fixture cancellation")

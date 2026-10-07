@@ -10,6 +10,16 @@ async function* messages(lines: readonly unknown[]): AsyncGenerator<string> {
   for (const line of lines) yield `${JSON.stringify(line)}\n`
 }
 
+const collectHost = async (config: unknown, lines: readonly unknown[]): Promise<HostOutput[]> => {
+  const output: HostOutput[] = []
+  await runHost({
+    config,
+    input: messages(lines),
+    write: (frame) => { output.push(frame) },
+  })
+  return output
+}
+
 describe("command host", () => {
   it("emits a bounded serializable registration without handlers", () => {
     const prepared = prepareConfig({
@@ -52,9 +62,8 @@ describe("command host", () => {
   })
 
   it("registers and applies ordered transformations", async () => {
-    const output: HostOutput[] = []
-    await runHost({
-      config: {
+    const output = await collectHost(
+      {
         transformations: {
           trim: { name: "Trim", transform: (text: string) => text.trim() },
           lowercase: {
@@ -65,7 +74,7 @@ describe("command host", () => {
         },
         commands: {},
       },
-      input: messages([
+      [
         {
           type: "transform",
           invocationId: "transform-1",
@@ -74,9 +83,8 @@ describe("command host", () => {
           context: { application: "Messages" },
         },
         { type: "shutdown" },
-      ]),
-      write: (frame) => { output.push(frame) },
-    })
+      ],
+    )
 
     expect(output[0]).toMatchObject({
       type: "registration",
@@ -96,10 +104,9 @@ describe("command host", () => {
     "https://example.com",
     "slack://channel?team=T_EXAMPLE&id=C_EXAMPLE",
   ])("adapts vanilla handlers and round-trips %s", async (url) => {
-    const output: HostOutput[] = []
     let observedApplication: string | undefined
-    await runHost({
-      config: {
+    const output = await collectHost(
+      {
         commands: {
           example: {
             phrases: ["open example"],
@@ -110,7 +117,7 @@ describe("command host", () => {
           },
         },
       },
-      input: messages([
+      [
         {
           type: "invoke",
           invocationId: "inv-1",
@@ -124,9 +131,8 @@ describe("command host", () => {
           result: { type: "success" },
         },
         { type: "shutdown" },
-      ]),
-      write: (frame) => { output.push(frame) },
-    })
+      ],
+    )
     expect(output.map((frame) => frame.type)).toEqual([
       "registration",
       "toolCall",
@@ -142,11 +148,10 @@ describe("command host", () => {
   })
 
   it("passes bounded captures to vanilla and Effect handlers", async () => {
-    const output: HostOutput[] = []
     const observedCaptures: Readonly<Record<string, string>>[] = []
     let observedEffectCaptures: Readonly<Record<string, string | number>> | undefined
-    await runHost({
-      config: {
+    const output = await collectHost(
+      {
         commands: {
           search: {
             phrases: ["search amazon for {query}"],
@@ -163,7 +168,7 @@ describe("command host", () => {
           },
         },
       },
-      input: messages([
+      [
         {
           type: "invoke",
           invocationId: "inv-1",
@@ -174,19 +179,17 @@ describe("command host", () => {
         { type: "invoke", invocationId: "inv-2", commandId: "note", context: {}, captures: { text: "buy socks" } },
         { type: "invoke", invocationId: "inv-3", commandId: "search", context: {} },
         { type: "shutdown" },
-      ]),
-      write: (frame) => { output.push(frame) },
-    })
+      ],
+    )
     expect(output.filter((frame) => frame.type === "invocationResult")).toHaveLength(3)
     expect(observedCaptures).toEqual([{ query: "wool socks" }, {}])
     expect(observedEffectCaptures).toEqual({ text: "buy socks" })
   })
 
   it("registers typed capture schemas and passes numeric values", async () => {
-    const output: HostOutput[] = []
     let observed: number | undefined
-    await runHost({
-      config: {
+    const output = await collectHost(
+      {
         commands: {
           control: {
             phrases: ["control {number}"],
@@ -197,12 +200,11 @@ describe("command host", () => {
           },
         },
       },
-      input: messages([
+      [
         { type: "invoke", invocationId: "inv-1", commandId: "control", context: {}, captures: { number: 2 } },
         { type: "shutdown" },
-      ]),
-      write: (frame) => { output.push(frame) },
-    })
+      ],
+    )
 
     expect(output[0]).toMatchObject({
       protocolVersion: 2,
@@ -212,9 +214,8 @@ describe("command host", () => {
   })
 
   it("rejects invocation values that do not match the registered schema", async () => {
-    const output: HostOutput[] = []
-    await runHost({
-      config: {
+    const output = await collectHost(
+      {
         commands: {
           control: {
             phrases: ["control {number}"],
@@ -223,12 +224,11 @@ describe("command host", () => {
           },
         },
       },
-      input: messages([
+      [
         { type: "invoke", invocationId: "bad", commandId: "control", context: {}, captures: { number: 7 } },
         { type: "shutdown" },
-      ]),
-      write: (frame) => { output.push(frame) },
-    })
+      ],
+    )
 
     expect(output.at(-1)).toEqual({
       type: "invocationResult",
@@ -238,10 +238,9 @@ describe("command host", () => {
   })
 
   it("normalizes choice aliases and passes only canonical values", async () => {
-    const output: HostOutput[] = []
     let observed: { direction: "left" | "right"; edge: "top" | "bottom" } | undefined
-    await runHost({
-      config: {
+    const output = await collectHost(
+      {
         commands: {
           move: {
             phrases: ["move {direction} {edge}"],
@@ -256,7 +255,7 @@ describe("command host", () => {
           },
         },
       },
-      input: messages([
+      [
         {
           type: "invoke",
           invocationId: "choice-1",
@@ -265,9 +264,8 @@ describe("command host", () => {
           captures: { direction: "left", edge: "bottom" },
         },
         { type: "shutdown" },
-      ]),
-      write: (frame) => { output.push(frame) },
-    })
+      ],
+    )
 
     expect(output[0]).toMatchObject({
       protocolVersion: 2,
@@ -285,9 +283,8 @@ describe("command host", () => {
   })
 
   it("rejects noncanonical choice invocation values", async () => {
-    const output: HostOutput[] = []
-    await runHost({
-      config: {
+    const output = await collectHost(
+      {
         commands: {
           move: {
             phrases: ["move {direction}"],
@@ -296,12 +293,11 @@ describe("command host", () => {
           },
         },
       },
-      input: messages([
+      [
         { type: "invoke", invocationId: "bad-choice", commandId: "move", context: {}, captures: { direction: "back" } },
         { type: "shutdown" },
-      ]),
-      write: (frame) => { output.push(frame) },
-    })
+      ],
+    )
 
     expect(output.at(-1)).toMatchObject({
       invocationId: "bad-choice",
@@ -310,10 +306,9 @@ describe("command host", () => {
   })
 
   it("registers letters and accepts only canonical lowercase invocation values", async () => {
-    const output: HostOutput[] = []
     let observed: string | undefined
-    await runHost({
-      config: {
+    const output = await collectHost(
+      {
         commands: {
           control: {
             phrases: ["control {key}"],
@@ -322,13 +317,12 @@ describe("command host", () => {
           },
         },
       },
-      input: messages([
+      [
         { type: "invoke", invocationId: "letter", commandId: "control", context: {}, captures: { key: "q" } },
         { type: "invoke", invocationId: "uppercase", commandId: "control", context: {}, captures: { key: "Q" } },
         { type: "shutdown" },
-      ]),
-      write: (frame) => { output.push(frame) },
-    })
+      ],
+    )
 
     expect(output[0]).toMatchObject({ commands: [{ captures: { key: { type: "letter" } } }] })
     expect(observed).toBe("q")
@@ -339,15 +333,14 @@ describe("command host", () => {
   })
 
   it("registers flattened unions and validates each canonical runtime value", async () => {
-    const output: HostOutput[] = []
     const observed: Array<string | number> = []
     const key = union(
       letter(),
       digit(),
       choice({ home: ["home"], escape: ["escape", "cancel"] } as const),
     )
-    await runHost({
-      config: {
+    const output = await collectHost(
+      {
         commands: {
           key: {
             phrases: ["key {key}"],
@@ -358,15 +351,14 @@ describe("command host", () => {
           },
         },
       },
-      input: messages([
+      [
         { type: "invoke", invocationId: "letter", commandId: "key", context: {}, captures: { key: "q" } },
         { type: "invoke", invocationId: "digit", commandId: "key", context: {}, captures: { key: 2 } },
         { type: "invoke", invocationId: "choice", commandId: "key", context: {}, captures: { key: "escape" } },
         { type: "invoke", invocationId: "alias", commandId: "key", context: {}, captures: { key: "cancel" } },
         { type: "shutdown" },
-      ]),
-      write: (frame) => { output.push(frame) },
-    })
+      ],
+    )
 
     expect(output[0]).toMatchObject({
       commands: [{ captures: { key: { type: "union", members: [
@@ -640,9 +632,8 @@ describe("command host", () => {
   })
 
   it("waits for vanilla tool calls even when the handler forgets await", async () => {
-    const output: HostOutput[] = []
-    await runHost({
-      config: {
+    const output = await collectHost(
+      {
         commands: {
           example: {
             phrases: ["open example"],
@@ -652,13 +643,12 @@ describe("command host", () => {
           },
         },
       },
-      input: messages([
+      [
         { type: "invoke", invocationId: "inv-1", commandId: "example", context: {} },
         { type: "toolResult", invocationId: "inv-1", toolCallId: "1", result: { type: "success" } },
         { type: "shutdown" },
-      ]),
-      write: (frame) => { output.push(frame) },
-    })
+      ],
+    )
 
     expect(output.map((frame) => frame.type)).toEqual([
       "registration",
@@ -668,9 +658,8 @@ describe("command host", () => {
   })
 
   it("runs Effect-producing handlers and exposes browserHost", async () => {
-    const output: HostOutput[] = []
-    await runHost({
-      config: {
+    const output = await collectHost(
+      {
         commands: {
           example: {
             phrases: ["show host"],
@@ -681,7 +670,7 @@ describe("command host", () => {
           },
         },
       },
-      input: messages([
+      [
         {
           type: "invoke",
           invocationId: "inv-1",
@@ -690,9 +679,8 @@ describe("command host", () => {
         },
         { type: "toolResult", invocationId: "inv-1", toolCallId: "1", result: { type: "success" } },
         { type: "shutdown" },
-      ]),
-      write: (frame) => { output.push(frame) },
-    })
+      ],
+    )
 
     expect(output[1]).toMatchObject({
       type: "toolCall",
@@ -720,9 +708,8 @@ describe("command host", () => {
   })
 
   it("turns an unawaited tool failure into an invocation failure", async () => {
-    const output: HostOutput[] = []
-    await runHost({
-      config: {
+    const output = await collectHost(
+      {
         commands: {
           example: {
             phrases: ["open example"],
@@ -732,7 +719,7 @@ describe("command host", () => {
           },
         },
       },
-      input: messages([
+      [
         { type: "invoke", invocationId: "inv-1", commandId: "example", context: {} },
         {
           type: "toolResult",
@@ -741,9 +728,8 @@ describe("command host", () => {
           result: { type: "failure", message: "native action failed" },
         },
         { type: "shutdown" },
-      ]),
-      write: (frame) => { output.push(frame) },
-    })
+      ],
+    )
 
     expect(output.at(-1)).toEqual({
       type: "invocationResult",

@@ -3,8 +3,9 @@ use gpui::{
 };
 
 use crate::desktop_ui::{
-    ACCENT, CANVAS, FAINT, LINE, MUTED, NEGATIVE, PANEL_RADIUS, SIDEBAR, SURFACE, SURFACE_HOVER,
-    SURFACE_SELECTED, TEXT, TEXT_SOFT, error_message,
+    ACCENT, CANVAS, DANGER_BORDER, DANGER_SURFACE, FAINT, LINE, MUTED, NEGATIVE, PANEL_RADIUS,
+    SIDEBAR, SURFACE, SURFACE_HOVER, SURFACE_SELECTED, TEXT, TEXT_SOFT, compact_button,
+    error_message,
 };
 use crate::transcription_models::{
     ModelChoice, ModelDefinition, TranscriptionModelId, TranscriptionSelection, language_name,
@@ -42,8 +43,6 @@ pub(crate) enum TranscriptionPickerStatus {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum ModelDeletion {
     Unavailable,
-    // Linux Settings cannot delete service-owned models yet.
-    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     Offered,
     Confirming,
 }
@@ -104,7 +103,7 @@ pub(crate) fn render_transcription_picker<T: TranscriptionPickerDelegate>(
                 .text_color(if selected { rgb(TEXT) } else { rgb(MUTED) })
                 .when(selected, |row| row.bg(rgb(SURFACE_SELECTED)))
                 .when(!selected, |row| {
-                    row.hover(|row| row.bg(rgb(0x2a2a2a)).text_color(rgb(TEXT_SOFT)))
+                    row.hover(|row| row.bg(rgb(0x1b1b1b)).text_color(rgb(TEXT_SOFT)))
                 })
                 .child(*name)
                 .on_click(cx.listener(move |this, _, _, cx| {
@@ -173,11 +172,12 @@ pub(crate) fn render_transcription_picker<T: TranscriptionPickerDelegate>(
         div()
             .id(("transcription-model", index))
             .w_full()
-            .p_4()
-            .mb_3()
+            .px_4()
+            .py_3()
+            .mb_2p5()
             .rounded(px(PANEL_RADIUS))
             .border_1()
-            .border_color(if active { rgb(TEXT_SOFT) } else { rgb(LINE) })
+            .border_color(if active { rgb(ACCENT) } else { rgb(LINE) })
             .bg(rgb(SURFACE))
             .when(!active, |card| {
                 card.cursor_pointer()
@@ -190,7 +190,7 @@ pub(crate) fn render_transcription_picker<T: TranscriptionPickerDelegate>(
                     .justify_between()
                     .child(
                         div()
-                            .text_size(px(14.0))
+                            .text_size(px(13.0))
                             .font_weight(FontWeight::SEMIBOLD)
                             .child(definition.name),
                     )
@@ -198,24 +198,18 @@ pub(crate) fn render_transcription_picker<T: TranscriptionPickerDelegate>(
             )
             .child(
                 div()
-                    .pt_3()
+                    .pt_2p5()
                     .flex()
                     .gap_2()
-                    .child(model_metric(
-                        definition.realtime_context.to_uppercase(),
-                        definition.realtime,
-                    ))
-                    .child(model_metric("SIZE", definition.size_label()))
-                    .child(model_metric(
-                        "ERROR RATE · LOWER IS BETTER",
-                        definition.quality,
-                    )),
+                    .child(model_metric("Speed", definition.realtime))
+                    .child(model_metric("Size", definition.size_label()))
+                    .child(model_metric("WER", definition.quality)),
             )
             .when(definition.id == TranscriptionModelId::ParakeetV3, |card| {
                 card.child(
                     div()
-                        .pt_3()
-                        .text_size(px(12.0))
+                        .pt_2()
+                        .text_size(px(11.0))
                         .text_color(rgb(MUTED))
                         .child(
                             "Detects language from audio, not the selected language. \
@@ -229,16 +223,16 @@ pub(crate) fn render_transcription_picker<T: TranscriptionPickerDelegate>(
                         .h_full()
                         .w(relative(progress))
                         .rounded_sm()
-                        .bg(rgb(TEXT_SOFT)),
+                        .bg(rgb(ACCENT)),
                     TranscriptionPickerProgress::Loading(progress) => div()
                         .ml(relative(progress * 0.75))
                         .h_full()
                         .w(relative(0.25))
                         .rounded_sm()
-                        .bg(rgb(TEXT_SOFT)),
+                        .bg(rgb(ACCENT)),
                 };
                 card.child(
-                    div().pt_3().child(
+                    div().pt_2p5().child(
                         div()
                             .h(px(3.0))
                             .w_full()
@@ -250,14 +244,14 @@ pub(crate) fn render_transcription_picker<T: TranscriptionPickerDelegate>(
             })
             .child(
                 div()
-                    .pt_3()
-                    .min_h(px(26.0))
+                    .pt_2p5()
+                    .min_h(px(24.0))
                     .flex()
                     .items_center()
                     .justify_between()
                     .child(
                         div()
-                            .text_size(px(10.0))
+                            .text_size(px(11.0))
                             .text_color(rgb(FAINT))
                             .child(metadata),
                     )
@@ -265,27 +259,36 @@ pub(crate) fn render_transcription_picker<T: TranscriptionPickerDelegate>(
                         div()
                             .flex()
                             .gap_2()
-                            .when(deletion != ModelDeletion::Unavailable, |actions| {
-                                let confirming = deletion == ModelDeletion::Confirming;
-                                actions.child(
-                                    card_button(if confirming {
-                                        format!("Delete {}?", definition.size_label())
-                                    } else {
-                                        "Delete".into()
-                                    })
-                                    .id(("transcription-model-delete", index))
-                                    .when(confirming, |button| {
-                                        button.border_color(rgb(NEGATIVE)).text_color(rgb(NEGATIVE))
-                                    })
-                                    .on_click(cx.listener(
-                                        move |this, _, _, cx| {
-                                            cx.stop_propagation();
-                                            this.delete_transcription_model(definition.id, cx);
-                                            cx.notify();
-                                        },
-                                    )),
-                                )
-                            })
+                            .when_some(
+                                match deletion {
+                                    ModelDeletion::Unavailable => None,
+                                    ModelDeletion::Offered => Some(false),
+                                    ModelDeletion::Confirming => Some(true),
+                                },
+                                |actions, confirming| {
+                                    actions.child(
+                                        card_button(if confirming {
+                                            format!("Delete {}?", definition.size_label())
+                                        } else {
+                                            "Delete".into()
+                                        })
+                                        .id(("transcription-model-delete", index))
+                                        .when(confirming, |button| {
+                                            button
+                                                .border_color(rgb(DANGER_BORDER))
+                                                .bg(rgb(DANGER_SURFACE))
+                                                .text_color(rgb(NEGATIVE))
+                                        })
+                                        .on_click(
+                                            cx.listener(move |this, _, _, cx| {
+                                                cx.stop_propagation();
+                                                this.delete_transcription_model(definition.id, cx);
+                                                cx.notify();
+                                            }),
+                                        ),
+                                    )
+                                },
+                            )
                             .when_some(action, |actions, action| {
                                 actions.child(card_button(action))
                             }),
@@ -331,24 +334,30 @@ pub(crate) fn render_transcription_picker<T: TranscriptionPickerDelegate>(
                 .on_click(|_, _, cx| cx.stop_propagation())
                 .child(
                     div()
-                        .px_6()
-                        .py_5()
+                        .px_5()
+                        .py_3p5()
+                        .flex()
+                        .items_center()
+                        .justify_between()
                         .border_b_1()
                         .border_color(rgb(LINE))
                         .child(
                             div()
-                                .text_size(px(18.0))
+                                .text_size(px(15.0))
                                 .font_weight(FontWeight::SEMIBOLD)
-                                .child("Choose local transcription"),
+                                .child("Local transcription"),
                         )
                         .child(
-                            div()
-                                .pt_1()
-                                .text_size(px(12.0))
+                            compact_button("×")
+                                .id("close-transcription-picker")
+                                .size(px(28.0))
+                                .px_0()
+                                .justify_center()
+                                .text_size(px(15.0))
                                 .text_color(rgb(MUTED))
-                                .child(
-                                    "Select what you speak; HEX recommends the best supported models.",
-                                ),
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.dismiss_transcription_picker(cx);
+                                })),
                         ),
                 )
                 .child(
@@ -393,34 +402,33 @@ pub(crate) fn render_transcription_picker<T: TranscriptionPickerDelegate>(
 }
 
 fn card_button(label: impl Into<gpui::SharedString>) -> gpui::Div {
-    div()
+    crate::desktop_ui::canvas_button()
         .h(px(26.0))
         .px(px(10.0))
-        .flex()
-        .items_center()
-        .rounded(px(6.0))
-        .border_1()
-        .border_color(rgb(LINE))
-        .bg(rgb(CANVAS))
-        .text_size(px(11.0))
-        .text_color(rgb(TEXT_SOFT))
-        .hover(|button| button.bg(rgb(SURFACE_HOVER)).text_color(rgb(TEXT)))
         .child(label.into())
 }
 
 fn model_metric(label: impl IntoElement, value: impl IntoElement) -> gpui::Div {
     div()
         .flex_1()
-        .h(px(54.0))
+        .h(px(32.0))
         .px_3()
-        .py_2()
+        .flex()
+        .items_center()
+        .justify_between()
         .rounded_sm()
+        .border_1()
+        .border_color(rgb(LINE))
         .bg(rgb(CANVAS))
-        .child(div().text_size(px(9.0)).text_color(rgb(FAINT)).child(label))
         .child(
             div()
-                .pt_1()
-                .text_size(px(14.0))
+                .text_size(px(10.0))
+                .text_color(rgb(FAINT))
+                .child(label),
+        )
+        .child(
+            div()
+                .text_size(px(12.0))
                 .font_weight(FontWeight::SEMIBOLD)
                 .text_color(rgb(TEXT))
                 .child(value),

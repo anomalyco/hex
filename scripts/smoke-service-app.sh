@@ -2,7 +2,8 @@
 set -eu
 
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-version=${HEX_VERSION:-$(cargo metadata --no-deps --format-version 1 --manifest-path "$root/Cargo.toml" | jq -r '.packages[0].version')}
+. "$root/scripts/macos-signing.sh"
+version=$(hex_version "$root")
 arch=$(uname -m)
 artifact=${HEX_SERVICE_ARTIFACT:-$root/dist/service/HEX-Service-$version-$arch.zip}
 digest="$artifact.sha256"

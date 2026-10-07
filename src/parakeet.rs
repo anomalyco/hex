@@ -861,7 +861,7 @@ fn record_history(history: &History, target: TranscriptionTarget, completed: &Co
         raw_text: completed.raw.clone(),
         final_text: completed.text.clone(),
         application: completed.application.clone(),
-        processing: completed.processing.clone().map(Into::into),
+        processing: completed.processing.clone(),
         audio_ms: completed.timings.audio_ms,
         inference_ms: completed.timings.inference_ms as u64,
         total_ms: completed.timings.total_started.elapsed().as_millis() as u64,
@@ -1002,23 +1002,6 @@ impl Parakeet {
         let architecture = model.arch();
         let name = format!("transcribe-cpp-{}-{variant}", device.kind);
         let definition = selection.map(validate).transpose()?;
-        if let Some(definition) = definition {
-            let crate::transcription_models::ModelRuntime::Gguf(artifact) = definition.runtime
-            else {
-                return Err(eyre!(
-                    "{} is not a GGUF transcription model",
-                    definition.name
-                ));
-            };
-            if architecture != artifact.architecture || variant != artifact.variant {
-                return Err(eyre!(
-                    "{} contains {architecture}/{variant}, expected {}/{}",
-                    model_path.display(),
-                    artifact.architecture,
-                    artifact.variant
-                ));
-            }
-        }
         tracing::info!(
             backend = device.kind,
             device = device.description,
@@ -1026,17 +1009,18 @@ impl Parakeet {
             "loaded transcription model"
         );
         let capabilities = model.capabilities();
+        let mut language = None;
+        let mut family = None;
         if let (Some(selection), Some(definition)) = (selection, definition) {
-            let runtime_language = definition.runtime_language_hint(&selection.language);
-            if selection.language == crate::transcription_models::AUTO_LANGUAGE
-                && !capabilities.supports_language_detect
-            {
-                return Err(eyre!(
-                    "{} does not advertise automatic language detection",
-                    definition.name
-                ));
-            }
-            if let Some(runtime_language) = runtime_language
+            let runtime_language = crate::gguf_session::validate_gguf_artifact(
+                model_path,
+                definition,
+                &architecture,
+                &variant,
+                selection,
+                capabilities.supports_language_detect,
+            )?;
+            if let Some(runtime_language) = &runtime_language
                 && !capabilities.languages.is_empty()
                 && !capabilities
                     .languages
@@ -1049,34 +1033,22 @@ impl Parakeet {
                     crate::transcription_models::language_name(&selection.language)
                 ));
             }
-            if definition.supports_recognition_hints
-                && !model.accepts_ext(ExtSlot::Run, TRANSCRIBE_EXT_KIND_WHISPER_RUN)
-            {
-                return Err(eyre!(
-                    "{} does not accept Whisper recognition hints",
-                    definition.name
-                ));
+            if definition.supports_recognition_hints {
+                if !model.accepts_ext(ExtSlot::Run, TRANSCRIBE_EXT_KIND_WHISPER_RUN) {
+                    return Err(eyre!(
+                        "{} does not accept Whisper recognition hints",
+                        definition.name
+                    ));
+                }
+                family = Some(RunExtension::Whisper(WhisperRunOptions {
+                    initial_prompt: (!selection.recognition_hints.trim().is_empty())
+                        .then(|| selection.recognition_hints.trim().to_string()),
+                    ..Default::default()
+                }));
             }
+            language = runtime_language;
         }
         let session = OfflineGgufSession::new(model)?;
-        let language = selection
-            .zip(definition)
-            .and_then(|(selection, definition)| {
-                definition
-                    .runtime_language_hint(&selection.language)
-                    .map(str::to_string)
-            });
-        let family = selection
-            .zip(definition)
-            .and_then(|(selection, definition)| {
-                definition.supports_recognition_hints.then(|| {
-                    RunExtension::Whisper(WhisperRunOptions {
-                        initial_prompt: (!selection.recognition_hints.trim().is_empty())
-                            .then(|| selection.recognition_hints.trim().to_string()),
-                        ..Default::default()
-                    })
-                })
-            });
         Ok(Self {
             session,
             options: RunOptions {
@@ -1114,12 +1086,12 @@ impl Parakeet {
     /// whole-clip padding; chunks and control-trimmed reruns below only apply
     /// the minimum duration, never another model-specific trailing context.
     pub fn transcribe(&mut self, samples: &[f32]) -> Result<String> {
-        let Some(max_audio_samples) = self.max_audio_samples else {
+        let Some(max_audio_samples) = self
+            .max_audio_samples
+            .filter(|&max_samples| samples.len() > max_samples)
+        else {
             return self.transcribe_segments(samples).map(|result| result.text);
         };
-        if samples.len() <= max_audio_samples {
-            return self.transcribe_segments(samples).map(|result| result.text);
-        }
         let mut text = Vec::new();
         for chunk in samples.chunks(max_audio_samples) {
             let mut chunk = chunk.to_vec();
@@ -1677,7 +1649,6 @@ mod tests {
         )
         .unwrap();
         let mut model = Parakeet::load().unwrap();
-        model.options.timestamps = TimestampKind::Word;
 
         for (name, expected) in [
             ("period-stop", "I don't understand this."),

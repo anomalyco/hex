@@ -1,11 +1,10 @@
 import { Deferred, Effect, Fiber, Stream } from "effect"
 import { watch } from "node:fs"
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
-import { tmpdir } from "node:os"
+import { readFile, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { describe, expect, it } from "vitest"
 import * as Hex from "../src/effect.js"
-import { options, processIsAlive } from "./support.js"
+import { options, processIsAlive, withTempDir } from "./support.js"
 
 describe("Effect client", () => {
   it("creates a ready transcriber with scope-owned cleanup", async () => {
@@ -26,11 +25,10 @@ describe("Effect client", () => {
   })
 
   it("interrupts model preparation and waits for helper cleanup", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "hex-effect-ready-"))
-    const pidPath = join(directory, "pid")
-    let markStarted = () => {}
-    const started = new Promise<void>((resolve) => { markStarted = resolve })
-    try {
+    await withTempDir("hex-effect-ready-", async (directory) => {
+      const pidPath = join(directory, "pid")
+      let markStarted = () => {}
+      const started = new Promise<void>((resolve) => { markStarted = resolve })
       await Effect.runPromise(Effect.scoped(Effect.gen(function* () {
         const fiber = yield* Hex.create({
           ...options(), model: "parakeet_v2",
@@ -43,9 +41,7 @@ describe("Effect client", () => {
         const pid = yield* Effect.promise(() => readFile(pidPath, "utf8"))
         expect(processIsAlive(Number(pid))).toBe(false)
       })))
-    } finally {
-      await rm(directory, { recursive: true, force: true })
-    }
+    })
   })
 
   it("waits for interrupted inference to stop even while the owning scope stays open", async () => {
@@ -69,32 +65,32 @@ describe("Effect client", () => {
   })
 
   it("cleans up pending startup interruption before returning to an open parent scope", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "hex-effect-start-"))
-    const pidPath = join(directory, "pid")
-    const gate = join(directory, "handshake")
-    const watcher = watch(directory)
-    const started = new Promise<void>((resolve) => {
-      watcher.on("change", (_event, file) => {
-        if (file === "pid") resolve()
+    await withTempDir("hex-effect-start-", async (directory) => {
+      const pidPath = join(directory, "pid")
+      const gate = join(directory, "handshake")
+      const watcher = watch(directory)
+      const started = new Promise<void>((resolve) => {
+        watcher.on("change", (_event, file) => {
+          if (file === "pid") resolve()
+        })
       })
+      try {
+        await Effect.runPromise(Effect.scoped(Effect.gen(function* () {
+          const fiber = yield* Hex.create({
+            ...options(), model: "parakeet_v2",
+            env: { HEX_FAKE_PID_PATH: pidPath, HEX_FAKE_HANDSHAKE_GATE: gate },
+          }).pipe(Effect.forkScoped)
+          yield* Effect.promise(() => started)
+          fiber.interruptUnsafe()
+          yield* Effect.promise(() => writeFile(gate, "ready"))
+          yield* Fiber.interrupt(fiber)
+          const pid = yield* Effect.promise(() => readFile(pidPath, "utf8"))
+          expect(processIsAlive(Number(pid))).toBe(false)
+        })))
+      } finally {
+        watcher.close()
+      }
     })
-    try {
-      await Effect.runPromise(Effect.scoped(Effect.gen(function* () {
-        const fiber = yield* Hex.create({
-          ...options(), model: "parakeet_v2",
-          env: { HEX_FAKE_PID_PATH: pidPath, HEX_FAKE_HANDSHAKE_GATE: gate },
-        }).pipe(Effect.forkScoped)
-        yield* Effect.promise(() => started)
-        fiber.interruptUnsafe()
-        yield* Effect.promise(() => writeFile(gate, "ready"))
-        yield* Fiber.interrupt(fiber)
-        const pid = yield* Effect.promise(() => readFile(pidPath, "utf8"))
-        expect(processIsAlive(Number(pid))).toBe(false)
-      })))
-    } finally {
-      watcher.close()
-      await rm(directory, { recursive: true, force: true })
-    }
   })
 
   it.each([

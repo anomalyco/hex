@@ -192,7 +192,7 @@ export type CommandDefinitionFor<Run> = CommandMetadata & (
   | { readonly captures?: never; readonly action?: never; readonly run: NativeAction | Run }
 )
 
-type CapturesFor<Schema> = [Schema] extends [never]
+export type CapturesFor<Schema> = [Schema] extends [never]
   ? Readonly<Record<string, string>>
   : [Schema] extends [CaptureSchema]
   ? CaptureValues<Extract<NoInfer<Schema>, CaptureSchema>>

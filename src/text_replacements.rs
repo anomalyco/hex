@@ -77,6 +77,9 @@ impl ReplacementSet {
             }
             selected.push(candidate);
         }
+        if selected.is_empty() {
+            return text.into();
+        }
         selected.sort_by_key(|candidate| candidate.start);
 
         let mut output = String::with_capacity(text.len());
@@ -85,9 +88,6 @@ impl ReplacementSet {
             output.push_str(&text[cursor..candidate.start]);
             output.push_str(&self.rules[candidate.rule].output);
             cursor = candidate.end;
-        }
-        if cursor == 0 {
-            return text.into();
         }
         output.push_str(&text[cursor..]);
         output

@@ -202,13 +202,8 @@ impl InputMonitor {
         let tap_run_loop = run_loop.clone();
         let escape_cancels = Arc::new(AtomicBool::new(false));
         let tap_escape_cancels = escape_cancels.clone();
-        let paste_key_code = crate::keyboard::key_code_for('v').unwrap_or(9);
         let pending = PendingInputEvents::default();
         let tap_pending = pending.clone();
-        tracing::info!(
-            paste_key_code,
-            "resolved paste key for active keyboard layout"
-        );
         let worker = thread::spawn(move || {
             run_event_tap(
                 sender,
@@ -746,11 +741,9 @@ impl DictationHotkey {
     }
 
     pub fn set_binding(&mut self, binding: RuntimeHotkey) {
-        if let State::Idle { last_release_at } = &mut self.state
-            && self.binding != binding
-        {
+        if matches!(self.state, State::Idle { .. }) && self.binding != binding {
             self.binding = binding;
-            *last_release_at = None;
+            self.state = State::IDLE;
         }
     }
 
@@ -948,15 +941,7 @@ impl DictationHotkey {
             self.state = State::Dirty;
             return Some(action);
         }
-        if matches!(
-            event,
-            InputEvent::Key {
-                code: ESCAPE_KEY_CODE,
-                down: true,
-                ..
-            }
-        ) && self.is_recording()
-        {
+        if event.is_escape_down() && self.is_recording() {
             self.state = State::Dirty;
             return Some(HotkeyAction::Cancel);
         }
@@ -1543,6 +1528,39 @@ mod tests {
         DictationHotkey::with_binding(trigger_down, now, true, option_binding())
     }
 
+    fn key_binding(code: u16) -> RuntimeHotkey {
+        RuntimeHotkey {
+            modifiers: Default::default(),
+            key_code: Some(code),
+        }
+    }
+
+    fn shift_space_binding() -> RuntimeHotkey {
+        RuntimeHotkey {
+            modifiers: crate::app_settings::modifiers_from_flags(SHIFT_KEY_MASK),
+            key_code: Some(49),
+        }
+    }
+
+    fn shift_space_event(down: bool) -> InputEvent {
+        InputEvent::Key {
+            code: 49,
+            down,
+            flags: SHIFT_KEY_MASK,
+        }
+    }
+
+    fn recover_after_neutral_window(
+        hotkey: &mut DictationHotkey,
+        start: CaptureInstant,
+        flags: u64,
+    ) -> CaptureInstant {
+        let repaired = start + STALE_KEY_NEUTRAL_DURATION;
+        hotkey.recover_stale_keys_with(|| start, || flags, |_| false);
+        hotkey.recover_stale_keys_with(|| repaired, || flags, |_| false);
+        repaired
+    }
+
     #[test]
     fn stale_key_recovery_restores_a_fresh_hold_without_changing_its_boundaries() {
         let now = capture_time();
@@ -1623,9 +1641,7 @@ mod tests {
                 // Two native neutral samples repair the missing key-up, but an old
                 // neutral release has not reached its tap callback yet.
                 let first_sample = now + Duration::from_secs(1);
-                let repaired = first_sample + STALE_KEY_NEUTRAL_DURATION;
-                hotkey.recover_stale_keys_with(|| first_sample, || 0, |_| false);
-                hotkey.recover_stale_keys_with(|| repaired, || 0, |_| false);
+                let repaired = recover_after_neutral_window(&mut hotkey, first_sample, 0);
                 let neutral_at = first_sample + Duration::from_millis(offset_ms);
                 let neutral = callback_input(&[(neutral_at.as_nanos(), neutral_event)])[0];
                 assert_eq!(hotkey.process(neutral.event, neutral.capture_at), None);
@@ -1711,12 +1727,7 @@ mod tests {
                 // The final modifier release never reached either callback. Native
                 // neutrality must repair suppression without synthesizing a capture.
                 let first = now + Duration::from_secs(2);
-                hotkey.recover_stale_keys_with(|| first, || 0, |_| false);
-                hotkey.recover_stale_keys_with(
-                    || first + STALE_KEY_NEUTRAL_DURATION,
-                    || 0,
-                    |_| false,
-                );
+                recover_after_neutral_window(&mut hotkey, first, 0);
                 assert!(!hotkey.is_recording());
                 let press = now + Duration::from_secs(5);
                 assert_eq!(
@@ -1776,12 +1787,7 @@ mod tests {
             assert!(hotkey.pressed_keys.is_empty());
 
             let first = now + Duration::from_secs(1);
-            hotkey.recover_stale_keys_with(|| first, || arrow_flags, |_| false);
-            hotkey.recover_stale_keys_with(
-                || first + STALE_KEY_NEUTRAL_DURATION,
-                || arrow_flags,
-                |_| false,
-            );
+            recover_after_neutral_window(&mut hotkey, first, arrow_flags);
             assert!(!hotkey.is_recording());
             let press = now + Duration::from_secs(5);
             assert_eq!(
@@ -1817,24 +1823,14 @@ mod tests {
             }
             // A missed Fn release must not turn the observation itself into a latch.
             let neutral = now + Duration::from_secs(2);
-            hotkey.recover_stale_keys_with(|| neutral, || 0, |_| false);
-            hotkey.recover_stale_keys_with(
-                || neutral + STALE_KEY_NEUTRAL_DURATION,
-                || 0,
-                |_| false,
-            );
+            recover_after_neutral_window(&mut hotkey, neutral, 0);
             assert!(matches!(hotkey.state, State::Idle { .. }));
             hotkey.suppress_until_release();
             // A later explicit modifier release allows the navigation metadata
             // to be ignored without changing ordinary key-event Fn matching.
             let released = now + Duration::from_secs(3);
             hotkey.track_key_state(InputEvent::Flags(0), released);
-            hotkey.recover_stale_keys_with(|| released, || FUNCTION_KEY_MASK, |_| false);
-            hotkey.recover_stale_keys_with(
-                || released + STALE_KEY_NEUTRAL_DURATION,
-                || FUNCTION_KEY_MASK,
-                |_| false,
-            );
+            recover_after_neutral_window(&mut hotkey, released, FUNCTION_KEY_MASK);
             assert!(matches!(hotkey.state, State::Idle { .. }));
         }
     }
@@ -1861,12 +1857,7 @@ mod tests {
                 invalidated.checked_sub(Duration::from_nanos(1)).unwrap(),
             );
             hotkey.suppress_until_release();
-            hotkey.recover_stale_keys_with(|| invalidated, || FUNCTION_KEY_MASK, |_| false);
-            hotkey.recover_stale_keys_with(
-                || invalidated + STALE_KEY_NEUTRAL_DURATION,
-                || FUNCTION_KEY_MASK,
-                |_| false,
-            );
+            recover_after_neutral_window(&mut hotkey, invalidated, FUNCTION_KEY_MASK);
             assert!(matches!(hotkey.state, State::Dirty));
         }
     }
@@ -1951,9 +1942,7 @@ mod tests {
         };
         hotkey.process(key(true), now);
         let first = now + Duration::from_secs(1);
-        let repaired = first + STALE_KEY_NEUTRAL_DURATION;
-        hotkey.recover_stale_keys_with(|| first, || 0, |_| false);
-        hotkey.recover_stale_keys_with(|| repaired, || 0, |_| false);
+        let repaired = recover_after_neutral_window(&mut hotkey, first, 0);
         for (offset, event) in [
             (10, key(true)),
             (20, InputEvent::Flags(OPTION_KEY_MASK)),
@@ -1999,9 +1988,7 @@ mod tests {
             },
             now,
         );
-        let repaired = now + STALE_KEY_NEUTRAL_DURATION;
-        hotkey.recover_stale_keys_with(|| now, || 0, |_| false);
-        hotkey.recover_stale_keys_with(|| repaired, || 0, |_| false);
+        let repaired = recover_after_neutral_window(&mut hotkey, now, 0);
         // This new key went down after its native query but before sampling ended.
         let key = |down| InputEvent::Key {
             code: 1,
@@ -2026,13 +2013,7 @@ mod tests {
 
     #[test]
     fn stale_key_recovery_old_release_cannot_erase_a_fresh_press() {
-        for binding in [
-            option_binding(),
-            RuntimeHotkey {
-                modifiers: Default::default(),
-                key_code: Some(97),
-            },
-        ] {
+        for binding in [option_binding(), key_binding(97)] {
             let now = capture_time();
             let mut hotkey = DictationHotkey::with_binding(false, now, true, binding);
             let key = |down| InputEvent::Key {
@@ -2048,9 +2029,7 @@ mod tests {
                 },
                 now,
             );
-            let fence = now + STALE_KEY_NEUTRAL_DURATION;
-            hotkey.recover_stale_keys_with(|| now, || 0, |_| false);
-            hotkey.recover_stale_keys_with(|| fence, || 0, |_| false);
+            let fence = recover_after_neutral_window(&mut hotkey, now, 0);
             let fresh = fence + Duration::from_millis(1);
             hotkey.process(key(true), fresh);
             assert_eq!(hotkey.process(key(false), now), None);
@@ -2082,9 +2061,7 @@ mod tests {
             };
             let mut hotkey = test_hotkey(false, now);
             hotkey.process(key(true), now);
-            let fence = now + STALE_KEY_NEUTRAL_DURATION;
-            hotkey.recover_stale_keys_with(|| now, || 0, |_| false);
-            hotkey.recover_stale_keys_with(|| fence, || 0, |_| false);
+            let fence = recover_after_neutral_window(&mut hotkey, now, 0);
             hotkey.track_key_state(key(down), fence + Duration::from_millis(1));
             assert_eq!(hotkey.track_key_state(key(!down), now), None);
             assert_eq!(hotkey.pressed_keys.contains(&0), down);
@@ -2094,10 +2071,7 @@ mod tests {
     #[test]
     fn programmatic_ownership_disarms_pending_double_taps_without_losing_held_keys() {
         let now = capture_time();
-        let binding = RuntimeHotkey {
-            modifiers: Default::default(),
-            key_code: Some(97),
-        };
+        let binding = key_binding(97);
         let mut hotkey = DictationHotkey::with_binding(false, now, true, binding);
         hotkey.set_double_tap_only(true);
         let key = |code, down| InputEvent::Key {
@@ -2274,9 +2248,7 @@ mod tests {
         let held = first_sample + Duration::from_millis(50);
         hotkey.recover_stale_keys_with(|| held, || 0, |code| code == 0);
         assert!(hotkey.pressed_keys.contains(&0));
-        hotkey.recover_stale_keys_with(|| held, || 0, |_| false);
-        let repaired = held + STALE_KEY_NEUTRAL_DURATION;
-        hotkey.recover_stale_keys_with(|| repaired, || 0, |_| false);
+        let repaired = recover_after_neutral_window(&mut hotkey, held, 0);
         assert!(hotkey.pressed_keys.is_empty());
         assert!(hotkey.is_recording());
 
@@ -2288,10 +2260,7 @@ mod tests {
     #[test]
     fn stale_key_recovery_does_not_scan_a_held_key_or_disturb_a_normal_double_tap() {
         let now = capture_time();
-        let binding = RuntimeHotkey {
-            modifiers: Default::default(),
-            key_code: Some(96),
-        };
+        let binding = key_binding(96);
         let mut hotkey = DictationHotkey::with_binding(false, now, true, binding);
         hotkey.process(
             InputEvent::Key {
@@ -2362,57 +2331,27 @@ mod tests {
     #[test]
     fn key_chord_starts_on_key_down_and_finishes_on_key_up() {
         let now = capture_time();
-        let binding = RuntimeHotkey {
-            modifiers: crate::app_settings::modifiers_from_flags(SHIFT_KEY_MASK),
-            key_code: Some(49),
-        };
+        let binding = shift_space_binding();
         let mut hotkey = DictationHotkey::with_binding(false, now, true, binding);
-        let key_down = InputEvent::Key {
-            code: 49,
-            down: true,
-            flags: SHIFT_KEY_MASK,
-        };
+        let key_down = shift_space_event(true);
 
         assert_eq!(hotkey.process(key_down, now), Some(HotkeyAction::Start));
         assert_eq!(
-            hotkey.process(
-                InputEvent::Key {
-                    code: 49,
-                    down: false,
-                    flags: SHIFT_KEY_MASK,
-                },
-                now + Duration::from_secs(1),
-            ),
+            hotkey.process(shift_space_event(false), now + Duration::from_secs(1)),
             Some(HotkeyAction::Finish)
         );
 
         let mut suppression = ShortcutSuppression::default();
         assert!(suppression.process(key_down, 42, binding, true));
-        assert!(suppression.process(
-            InputEvent::Key {
-                code: 49,
-                down: false,
-                flags: SHIFT_KEY_MASK,
-            },
-            42,
-            binding,
-            true,
-        ));
+        assert!(suppression.process(shift_space_event(false), 42, binding, true));
     }
 
     #[test]
     fn key_chord_double_tap_locks_until_the_chord_is_pressed_again() {
         let now = capture_time();
-        let binding = RuntimeHotkey {
-            modifiers: crate::app_settings::modifiers_from_flags(SHIFT_KEY_MASK),
-            key_code: Some(49),
-        };
+        let binding = shift_space_binding();
         let mut hotkey = DictationHotkey::with_binding(false, now, true, binding);
-        let event = |down| InputEvent::Key {
-            code: 49,
-            down,
-            flags: SHIFT_KEY_MASK,
-        };
+        let event = shift_space_event;
 
         assert_eq!(hotkey.process(event(true), now), Some(HotkeyAction::Start));
         assert_eq!(
@@ -2437,17 +2376,10 @@ mod tests {
     #[test]
     fn double_tap_only_waits_for_two_complete_key_chord_taps() {
         let now = capture_time();
-        let binding = RuntimeHotkey {
-            modifiers: crate::app_settings::modifiers_from_flags(SHIFT_KEY_MASK),
-            key_code: Some(49),
-        };
+        let binding = shift_space_binding();
         let mut hotkey = DictationHotkey::with_binding(false, now, true, binding);
         hotkey.set_double_tap_only(true);
-        let event = |down| InputEvent::Key {
-            code: 49,
-            down,
-            flags: SHIFT_KEY_MASK,
-        };
+        let event = shift_space_event;
 
         assert_eq!(hotkey.process(event(true), now), None);
         assert!(!hotkey.is_recording());
@@ -2473,18 +2405,11 @@ mod tests {
     #[test]
     fn double_tap_only_restarts_with_the_first_press_after_timeout() {
         let now = capture_time();
-        let binding = RuntimeHotkey {
-            modifiers: crate::app_settings::modifiers_from_flags(SHIFT_KEY_MASK),
-            key_code: Some(49),
-        };
+        let binding = shift_space_binding();
         for delay in [DOUBLE_TAP_WINDOW, Duration::from_secs(1)] {
             let mut hotkey = DictationHotkey::with_binding(false, now, true, binding);
             hotkey.set_double_tap_only(true);
-            let event = |down| InputEvent::Key {
-                code: 49,
-                down,
-                flags: SHIFT_KEY_MASK,
-            };
+            let event = shift_space_event;
 
             assert_eq!(hotkey.process(event(true), now), None);
             let released_at = now + Duration::from_millis(50);
@@ -2512,17 +2437,10 @@ mod tests {
     #[test]
     fn double_tap_only_timeout_and_unrelated_chord_never_start_capture() {
         let now = capture_time();
-        let binding = RuntimeHotkey {
-            modifiers: crate::app_settings::modifiers_from_flags(SHIFT_KEY_MASK),
-            key_code: Some(49),
-        };
+        let binding = shift_space_binding();
         let mut hotkey = DictationHotkey::with_binding(false, now, true, binding);
         hotkey.set_double_tap_only(true);
-        let trigger = |down| InputEvent::Key {
-            code: 49,
-            down,
-            flags: SHIFT_KEY_MASK,
-        };
+        let trigger = shift_space_event;
 
         hotkey.process(trigger(true), now);
         hotkey.process(trigger(false), now + Duration::from_millis(50));
@@ -2850,7 +2768,9 @@ mod tests {
         let now = capture_time();
         let mut dictation = test_hotkey(false, now);
         let edit_binding = RuntimeHotkey {
-            modifiers: crate::app_settings::modifiers_from_flags(OPTION_KEY_MASK | (1 << 20)),
+            modifiers: crate::app_settings::modifiers_from_flags(
+                OPTION_KEY_MASK | COMMAND_KEY_MASK,
+            ),
             key_code: None,
         };
         let mut edit = DictationHotkey::new_without_paste(now, edit_binding);
@@ -2859,7 +2779,7 @@ mod tests {
         assert_eq!(dictation.process(option, now), Some(HotkeyAction::Start));
         assert_eq!(edit.process(option, now), None);
 
-        let chord = InputEvent::Flags(OPTION_KEY_MASK | (1 << 20));
+        let chord = InputEvent::Flags(OPTION_KEY_MASK | COMMAND_KEY_MASK);
         assert_eq!(
             dictation.process(chord, now + Duration::from_millis(40)),
             Some(HotkeyAction::Discard)
@@ -2947,10 +2867,7 @@ mod tests {
         use crate::dictation::{DictationCapture, Finish};
 
         let now = capture_time();
-        let binding = RuntimeHotkey {
-            modifiers: crate::app_settings::modifiers_from_flags(SHIFT_KEY_MASK),
-            key_code: Some(49),
-        };
+        let binding = shift_space_binding();
         for cancel in [false, true] {
             let mut hotkey = DictationHotkey::with_binding(false, now, true, binding);
             let mut capture = DictationCapture::new(16_000);

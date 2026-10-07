@@ -265,7 +265,7 @@ pub fn strip_bundle_extension(name: &str) -> &str {
     }
 }
 
-fn browser_hosts_equal(left: &str, right: &str) -> bool {
+pub(crate) fn browser_hosts_equal(left: &str, right: &str) -> bool {
     left.trim_end_matches('.')
         .eq_ignore_ascii_case(right.trim_end_matches('.'))
 }

@@ -15,9 +15,10 @@ pub enum DeveloperHudState {
 #[serde(rename_all = "kebab-case")]
 pub enum DeveloperPane {
     Settings,
+    #[serde(alias = "replacements")]
+    #[value(alias = "replacements")]
     Modes,
     VoiceAction,
-    Replacements,
     History,
     HudLab,
     Commands,

@@ -107,7 +107,7 @@ pub struct StatusSnapshot {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct StatusTransformation {
     pub id: String,
     pub name: String,
@@ -131,7 +131,7 @@ pub fn include_builtin_transformations(status: &mut StatusSnapshot) {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct StatusDictationProtocol {
     pub start: Vec<String>,
     pub stop: Vec<String>,
@@ -286,18 +286,38 @@ fn validate_status(status: &StatusSnapshot) -> Result<()> {
     if status.transformations.len() > MAX_TRANSFORMATIONS {
         return Err(eyre!("personal transformation catalog is too large"));
     }
-    let mut transformation_ids = HashSet::new();
-    for transformation in &status.transformations {
-        validate_text(&transformation.id, "status transformation id", 128)?;
-        validate_text(&transformation.name, "status transformation name", 1024)?;
+    validate_transformations(&status.transformations, "status ")?;
+    Ok(())
+}
+
+fn validate_transformations(
+    transformations: &[StatusTransformation],
+    label_prefix: &str,
+) -> Result<HashSet<String>> {
+    let mut ids = HashSet::new();
+    for transformation in transformations {
+        validate_text(
+            &transformation.id,
+            &format!("{label_prefix}transformation id"),
+            128,
+        )?;
+        validate_text(
+            &transformation.name,
+            &format!("{label_prefix}transformation name"),
+            1024,
+        )?;
         if let Some(description) = &transformation.description {
-            validate_text(description, "status transformation description", 1024)?;
+            validate_text(
+                description,
+                &format!("{label_prefix}transformation description"),
+                1024,
+            )?;
         }
-        if !transformation_ids.insert(&transformation.id) {
-            return Err(eyre!("status transformation IDs must be unique"));
+        if !ids.insert(transformation.id.clone()) {
+            return Err(eyre!("{label_prefix}transformation IDs must be unique"));
         }
     }
-    Ok(())
+    Ok(ids)
 }
 
 pub fn initialize_workspace() -> Result<PathBuf> {
@@ -314,10 +334,7 @@ pub fn initialize_workspace() -> Result<PathBuf> {
 
 pub fn initialize_workspace_at(workspace: &Path, sdk: &Path) -> Result<bool> {
     let template = sdk.join("workspace-template");
-    if !sdk.join("package.json").is_file()
-        || !sdk.join("dist/bin.js").is_file()
-        || !template.is_dir()
-    {
+    if !template.is_dir() {
         return Err(eyre!("personal command SDK resources are incomplete"));
     }
     let workspace_changed = refresh_managed_sdk_at(workspace, sdk)?;
@@ -899,9 +916,9 @@ struct ToolJob {
 enum HostOutput {
     Registration {
         protocol_version: u8,
-        dictation: Option<RegistrationDictationProtocol>,
+        dictation: Option<StatusDictationProtocol>,
         #[serde(default)]
-        transformations: Vec<RegistrationTransformation>,
+        transformations: Vec<StatusTransformation>,
         commands: Vec<RegistrationCommand>,
     },
     ToolCall {
@@ -917,34 +934,6 @@ enum HostOutput {
         invocation_id: String,
         result: TransformationWireResult,
     },
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct RegistrationTransformation {
-    id: String,
-    name: String,
-    description: Option<String>,
-}
-
-#[derive(Clone, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct RegistrationDictationProtocol {
-    start: Vec<String>,
-    stop: Vec<String>,
-    send: Vec<String>,
-    cancel: Vec<String>,
-}
-
-impl From<&RegistrationDictationProtocol> for StatusDictationProtocol {
-    fn from(protocol: &RegistrationDictationProtocol) -> Self {
-        Self {
-            start: protocol.start.clone(),
-            stop: protocol.stop.clone(),
-            send: protocol.send.clone(),
-            cancel: protocol.cancel.clone(),
-        }
-    }
 }
 
 #[derive(Deserialize)]
@@ -1528,12 +1517,16 @@ fn prepare_host() -> Result<Option<HostPaths>> {
             "refreshed the managed personal command SDK"
         );
     }
-    let host_entrypoint = crate::app_paths::personal_commands_host()?;
+    if !managed_host.is_file() {
+        return Err(eyre!(
+            "personal command SDK is not installed; run `hex commands init`"
+        ));
+    }
     Ok(Some(HostPaths {
         workspace,
         config,
         bun,
-        host_entrypoint,
+        host_entrypoint: managed_host,
     }))
 }
 
@@ -1612,15 +1605,8 @@ fn start_candidate(generation: u64, launch: &HostLaunch<'_>) -> Result<Candidate
                 },
             )) if event_generation == generation => {
                 let catalog = status_catalog(&commands);
-                let status_dictation = dictation.as_ref().map(StatusDictationProtocol::from);
-                let status_transformations = transformations
-                    .iter()
-                    .map(|transformation| StatusTransformation {
-                        id: transformation.id.clone(),
-                        name: transformation.name.clone(),
-                        description: transformation.description.clone(),
-                    })
-                    .collect();
+                let status_dictation = dictation.clone();
+                let status_transformations = transformations.clone();
                 let runtime = match compile_registration(
                     launch.base,
                     generation,
@@ -1895,39 +1881,27 @@ impl Generations {
         self.hosts.remove(&generation);
         self.pending_tools
             .retain(|(tool_generation, _, _)| *tool_generation != generation);
-        let invocation_ids = self
+        for (id, invocation) in self
             .pending
-            .iter()
-            .filter_map(|(id, invocation)| {
-                (invocation.generation == generation).then_some(id.clone())
-            })
-            .collect::<Vec<_>>();
-        for id in invocation_ids {
-            if let Some(invocation) = self.pending.remove(&id) {
-                tracing::warn!(
-                    generation,
-                    invocation_id = id,
-                    command_id = invocation.command_id,
-                    execution_kind = "handler",
-                    status = "failed",
-                    duration_ms = invocation.started.elapsed().as_millis(),
-                    error,
-                    "personal command invocation"
-                );
-                let _ = outcomes.send(invocation.into_outcome(Err(error.into())));
-            }
+            .extract_if(|_, invocation| invocation.generation == generation)
+        {
+            tracing::warn!(
+                generation,
+                invocation_id = id,
+                command_id = invocation.command_id,
+                execution_kind = "handler",
+                status = "failed",
+                duration_ms = invocation.started.elapsed().as_millis(),
+                error,
+                "personal command invocation"
+            );
+            let _ = outcomes.send(invocation.into_outcome(Err(error.into())));
         }
-        let transformation_ids = self
+        for (_, invocation) in self
             .pending_transformations
-            .iter()
-            .filter_map(|(id, invocation)| {
-                (invocation.generation == generation).then_some(id.clone())
-            })
-            .collect::<Vec<_>>();
-        for id in transformation_ids {
-            if let Some(invocation) = self.pending_transformations.remove(&id) {
-                let _ = invocation.response.send(Err(error.into()));
-            }
+            .extract_if(|_, invocation| invocation.generation == generation)
+        {
+            let _ = invocation.response.send(Err(error.into()));
         }
         was_active
     }
@@ -2062,8 +2036,8 @@ fn compile_registration(
     base: &CommandConfig,
     generation: u64,
     protocol_version: u8,
-    dictation: Option<RegistrationDictationProtocol>,
-    transformations: Vec<RegistrationTransformation>,
+    dictation: Option<StatusDictationProtocol>,
+    transformations: Vec<StatusTransformation>,
     commands: Vec<RegistrationCommand>,
 ) -> Result<RuntimeSnapshot> {
     if protocol_version != 2 {
@@ -2079,17 +2053,7 @@ fn compile_registration(
             "personal registry exceeds {MAX_TRANSFORMATIONS} transformations"
         ));
     }
-    let mut transformation_ids = HashSet::new();
-    for transformation in transformations {
-        validate_text(&transformation.id, "transformation id", 128)?;
-        validate_text(&transformation.name, "transformation name", 1024)?;
-        if let Some(description) = &transformation.description {
-            validate_text(description, "transformation description", 1024)?;
-        }
-        if !transformation_ids.insert(transformation.id) {
-            return Err(eyre!("duplicate transformation id"));
-        }
-    }
+    let transformation_ids = validate_transformations(&transformations, "")?;
     let mut compiled = base.clone();
     for command in commands {
         validate_text(&command.id, "command id", 128)?;
@@ -2556,11 +2520,7 @@ fn validate_text(value: &str, label: &str, max_bytes: usize) -> Result<()> {
 
 fn validate_browser_host(host: &str) -> Result<()> {
     let parsed = url::Host::parse(host).wrap_err("browser host context must be an exact host")?;
-    if parsed
-        .to_string()
-        .trim_end_matches('.')
-        .eq_ignore_ascii_case(host.trim_end_matches('.'))
-    {
+    if crate::context::browser_hosts_equal(&parsed.to_string(), host) {
         Ok(())
     } else {
         Err(eyre!("browser host context must be an exact host"))
@@ -2572,15 +2532,7 @@ fn bounded_error(message: &str) -> String {
 }
 
 fn bounded_status_error(message: &str) -> String {
-    let mut end = 0;
-    for (index, character) in message.char_indices() {
-        let next = index + character.len_utf8();
-        if next > MAX_STATUS_ERROR_BYTES {
-            break;
-        }
-        end = next;
-    }
-    message[..end].to_owned()
+    message[..message.floor_char_boundary(MAX_STATUS_ERROR_BYTES)].to_owned()
 }
 
 fn emit_failure(invocation: Invocation, outcomes: &SyncSender<ActionOutcome>, error: &str) {
@@ -2594,8 +2546,7 @@ fn emit_failure(invocation: Invocation, outcomes: &SyncSender<ActionOutcome>, er
 
 impl Drop for HostProcess {
     fn drop(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
+        kill_and_wait(&mut self.child);
     }
 }
 
@@ -2611,6 +2562,26 @@ mod tests {
 
     fn compile_one(command: RegistrationCommand) -> Result<RuntimeSnapshot> {
         compile_commands(vec![command])
+    }
+
+    fn compile_registration_json(json: &str) -> Result<RuntimeSnapshot> {
+        let registration: HostOutput = serde_json::from_str(json).unwrap();
+        let HostOutput::Registration {
+            protocol_version,
+            commands,
+            ..
+        } = registration
+        else {
+            panic!("expected registration")
+        };
+        compile_registration(
+            &CommandConfig::new(),
+            7,
+            protocol_version,
+            None,
+            vec![],
+            commands,
+        )
     }
 
     fn handler_command(
@@ -2672,25 +2643,8 @@ mod tests {
 
     #[test]
     fn registration_compiles_native_and_handler_commands() {
-        let registration: HostOutput = serde_json::from_str(
+        let compiled = compile_registration_json(
             r#"{"type":"registration","protocolVersion":2,"commands":[{"id":"native","phrases":["open example"],"execution":{"type":"native","action":{"type":"openUrl","url":"slack://channel?team=T_EXAMPLE&id=C_EXAMPLE"}}},{"id":"handled","phrases":["do work"],"group":"Work","when":{"application":"Slack"},"execution":{"type":"handler"}}]}"#,
-        )
-        .unwrap();
-        let HostOutput::Registration {
-            protocol_version,
-            commands,
-            ..
-        } = registration
-        else {
-            panic!("expected registration")
-        };
-        let compiled = compile_registration(
-            &CommandConfig::new(),
-            7,
-            protocol_version,
-            None,
-            vec![],
-            commands,
         )
         .unwrap();
 
@@ -2736,25 +2690,8 @@ mod tests {
 
     #[test]
     fn capture_phrases_compile_for_handlers_and_carry_the_spoken_remainder() {
-        let registration: HostOutput = serde_json::from_str(
+        let compiled = compile_registration_json(
             r#"{"type":"registration","protocolVersion":2,"commands":[{"id":"search","phrases":["search amazon for {query}"],"execution":{"type":"handler"}}]}"#,
-        )
-        .unwrap();
-        let HostOutput::Registration {
-            protocol_version,
-            commands,
-            ..
-        } = registration
-        else {
-            panic!("expected registration")
-        };
-        let compiled = compile_registration(
-            &CommandConfig::new(),
-            7,
-            protocol_version,
-            None,
-            vec![],
-            commands,
         )
         .unwrap();
 
@@ -3152,25 +3089,8 @@ mod tests {
 
     #[test]
     fn capture_phrases_are_rejected_for_native_commands() {
-        let registration: HostOutput = serde_json::from_str(
+        let result = compile_registration_json(
             r#"{"type":"registration","protocolVersion":2,"commands":[{"id":"search","phrases":["search amazon for {query}"],"execution":{"type":"native","action":{"type":"openUrl","url":"https://example.com"}}}]}"#,
-        )
-        .unwrap();
-        let HostOutput::Registration {
-            protocol_version,
-            commands,
-            ..
-        } = registration
-        else {
-            panic!("expected registration")
-        };
-        let result = compile_registration(
-            &CommandConfig::new(),
-            7,
-            protocol_version,
-            None,
-            vec![],
-            commands,
         );
 
         match result {
@@ -3431,7 +3351,7 @@ mod tests {
             &CommandConfig::new(),
             1,
             2,
-            Some(RegistrationDictationProtocol {
+            Some(StatusDictationProtocol {
                 start: vec!["begin note".into()],
                 stop: vec!["finish note".into()],
                 send: vec!["send note".into()],
@@ -3469,7 +3389,7 @@ mod tests {
             r#"{"id":"personal","phrases":["begin note now"],"execution":{"type":"handler"}}"#,
         )
         .unwrap();
-        let protocol = RegistrationDictationProtocol {
+        let protocol = StatusDictationProtocol {
             start: vec!["begin note".into()],
             stop: vec!["finish note".into()],
             send: vec!["send note".into()],

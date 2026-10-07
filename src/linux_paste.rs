@@ -14,15 +14,12 @@ use x11rb::protocol::xproto::{ConnectionExt, KeyButMask};
 use x11rb::protocol::xtest;
 use x11rb::rust_connection::RustConnection;
 
-use crate::linux_input::Keymap;
-use crate::linux_input::WaylandModifierState;
+use crate::linux_input::{
+    KEY_PRESS, KEY_RELEASE, WaylandModifierState, XK_CONTROL_L, XK_SHIFT_L, connect_x11,
+};
 use crate::linux_session::LinuxSession;
 
-const XK_CONTROL_L: u32 = 0xffe3;
-const XK_SHIFT_L: u32 = 0xffe1;
 const XK_V: u32 = 0x76;
-const KEY_PRESS: u8 = 2;
-const KEY_RELEASE: u8 = 3;
 const HELPER_TIMEOUT: Duration = Duration::from_secs(3);
 const PASTE_SETTLE: Duration = Duration::from_millis(100);
 
@@ -99,10 +96,7 @@ struct X11Paster {
 impl X11Paster {
     pub fn new() -> Result<Self> {
         let clipboard = Clipboard::new().wrap_err("could not open the X11 clipboard")?;
-        let (connection, screen) =
-            RustConnection::connect(None).wrap_err("could not connect to X11")?;
-        let root = connection.setup().roots[screen].root;
-        let keymap = Keymap::read(&connection)?;
+        let (connection, root, keymap) = connect_x11()?;
         Ok(Self {
             clipboard,
             connection,
@@ -388,13 +382,14 @@ mod tests {
         let path = std::env::var_os("HEX_WAYLAND_PASTE_OUTPUT")
             .expect("the isolated Wayland test runner must supply its output file");
         let expected = "Example dictation: --flags, punctuation, \u{6f22}\u{5b57}.\nSecond line.";
-        let stop = AtomicBool::new(false);
-        let mut copy = Command::new("wl-copy");
-        copy.args(["--type", "text/plain;charset=utf-8"]);
-        run_helper(copy, expected.as_bytes(), &stop, HELPER_TIMEOUT).unwrap();
-        let mut keys = Command::new("wtype");
-        keys.args(paste_keys(false));
-        run_helper(keys, &[], &stop, HELPER_TIMEOUT).unwrap();
+        LinuxPaster::new(
+            Arc::new(AtomicBool::new(false)),
+            false,
+            Some(WaylandModifierState::default()),
+        )
+        .unwrap()
+        .paste(expected)
+        .unwrap();
         let deadline = Instant::now() + Duration::from_secs(3);
         loop {
             let actual = std::fs::read_to_string(&path).unwrap_or_default();

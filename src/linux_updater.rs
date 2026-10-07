@@ -30,6 +30,7 @@ struct SignedFeed {
 }
 
 #[derive(Debug, Deserialize)]
+#[cfg_attr(test, derive(Clone))]
 struct Manifest {
     schema_version: u32,
     channel: String,
@@ -248,15 +249,11 @@ fn verify_artifact(path: &Path, manifest: &Manifest) -> Result<()> {
             manifest.bytes
         );
     }
-    let actual = sha256(path)?;
+    let actual = crate::transcription_models::sha256_hex(path, None)?;
     if actual != manifest.sha256 {
         bail!("Linux update checksum verification failed");
     }
     Ok(())
-}
-
-fn sha256(path: &Path) -> Result<String> {
-    crate::transcription_models::sha256_hex(path, None)
 }
 
 fn validate_executable(path: &Path, version: &str) -> Result<()> {
@@ -367,31 +364,22 @@ mod tests {
         assert!(
             validate_manifest(&Manifest {
                 channel: "nightly".into(),
-                ..valid
+                ..valid.clone()
             })
             .is_err()
         );
         assert!(
             validate_manifest(&Manifest {
-                schema_version: 1,
-                channel: "stable".into(),
-                target: "x86_64-unknown-linux-gnu".into(),
-                version: "2.1.0".into(),
                 artifact: "../hex".into(),
-                bytes: 3,
-                sha256: "a".repeat(64),
+                ..valid.clone()
             })
             .is_err()
         );
         assert!(
             validate_manifest(&Manifest {
-                schema_version: 1,
-                channel: "stable".into(),
-                target: "x86_64-unknown-linux-gnu".into(),
                 version: "2.1.0-beta.1".into(),
                 artifact: format!("HEX-2.1.0-beta.1-{}-x86_64-linux", "a".repeat(64)),
-                bytes: 3,
-                sha256: "a".repeat(64),
+                ..valid
             })
             .is_err()
         );
@@ -432,7 +420,7 @@ mod tests {
             version: "2.1.0".into(),
             artifact: format!("HEX-2.1.0-{}-x86_64-linux", "a".repeat(64)),
             bytes: 3,
-            sha256: sha256(&path).unwrap(),
+            sha256: crate::transcription_models::sha256_hex(&path, None).unwrap(),
         };
         assert!(verify_artifact(&path, &manifest).is_ok());
         manifest.sha256 = "a".repeat(64);

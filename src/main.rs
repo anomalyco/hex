@@ -1,6 +1,5 @@
 #[cfg(target_os = "macos")]
 mod accessibility;
-#[cfg_attr(target_os = "linux", allow(dead_code))]
 mod app_paths;
 #[cfg(target_os = "macos")]
 mod app_settings;
@@ -25,7 +24,6 @@ mod dashboard;
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 mod desktop_activity;
 #[cfg(target_os = "linux")]
-#[allow(dead_code)]
 mod desktop_host;
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 mod desktop_transcription_picker;
@@ -50,7 +48,7 @@ mod events;
 mod feedback;
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 mod gguf_session;
-#[cfg_attr(target_os = "linux", allow(dead_code))]
+#[cfg(any(target_os = "macos", test))]
 mod history;
 mod instance;
 #[cfg(target_os = "macos")]
@@ -338,9 +336,9 @@ enum AppPreviewTarget {
     HudLab,
     Onboarding,
     Settings,
+    #[value(alias = "replacements")]
     Modes,
     VoiceAction,
-    Replacements,
     Commands,
     Meetings,
     Activity,
@@ -462,7 +460,6 @@ fn main() -> Result<()> {
                 }
                 AppPreviewTarget::Modes => developer_control::DeveloperPane::Modes,
                 AppPreviewTarget::VoiceAction => developer_control::DeveloperPane::VoiceAction,
-                AppPreviewTarget::Replacements => developer_control::DeveloperPane::Replacements,
                 AppPreviewTarget::Commands => developer_control::DeveloperPane::Commands,
                 AppPreviewTarget::Meetings => developer_control::DeveloperPane::Meetings,
                 AppPreviewTarget::Activity => developer_control::DeveloperPane::Activity,

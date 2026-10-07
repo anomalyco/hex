@@ -175,9 +175,7 @@ impl ActiveMeeting {
 }
 
 pub fn root() -> Result<PathBuf> {
-    Ok(dirs::data_dir()
-        .ok_or_else(|| eyre!("macOS application support directory is unavailable"))?
-        .join("voice-control/meetings"))
+    Ok(crate::app_paths::support_dir()?.join("meetings"))
 }
 
 pub fn record(
@@ -274,6 +272,17 @@ pub fn record(
         });
         let stream_error = Arc::new(Mutex::new(None::<String>));
         let delegate_error = stream_error.clone();
+        let cleanup_failed_setup =
+            |stream: Option<SCStream>,
+             sender: SyncSender<AudioPacket>,
+             writer: thread::JoinHandle<Result<CaptureStats>>,
+             live_worker: thread::JoinHandle<Result<()>>| {
+                drop(stream);
+                drop(sender);
+                if let Err(cleanup_error) = join_capture_workers(writer, live_worker) {
+                    tracing::error!(%cleanup_error, "could not finalize failed meeting setup");
+                }
+            };
         let mut stream = match SCStream::new_with_delegate(
             &filter,
             &config,
@@ -285,10 +294,7 @@ pub fn record(
         ) {
             Ok(stream) => stream,
             Err(error) => {
-                drop(sender);
-                if let Err(cleanup_error) = join_capture_workers(writer, live_worker) {
-                    tracing::error!(%cleanup_error, "could not finalize failed meeting setup");
-                }
+                cleanup_failed_setup(None, sender, writer, live_worker);
                 return Err(eyre!(error).wrap_err("could not create meeting capture stream"));
             }
         };
@@ -319,11 +325,7 @@ pub fn record(
                 .wrap_err("could not start meeting capture")
         })();
         if let Err(error) = start_result {
-            drop(stream);
-            drop(sender);
-            if let Err(cleanup_error) = join_capture_workers(writer, live_worker) {
-                tracing::error!(%cleanup_error, "could not finalize failed meeting setup");
-            }
+            cleanup_failed_setup(Some(stream), sender, writer, live_worker);
             return Err(error);
         }
         manifest.status = MeetingStatus::Recording;
@@ -331,11 +333,7 @@ pub fn record(
             if let Err(stop_error) = stream.stop_capture() {
                 tracing::error!(%stop_error, "could not stop meeting capture after manifest failure");
             }
-            drop(stream);
-            drop(sender);
-            if let Err(cleanup_error) = join_capture_workers(writer, live_worker) {
-                tracing::error!(%cleanup_error, "could not finalize failed meeting setup");
-            }
+            cleanup_failed_setup(Some(stream), sender, writer, live_worker);
             return Err(error);
         }
         if let Some(started_sender) = started_sender {
@@ -443,16 +441,19 @@ fn finish_live_worker(live_worker: thread::JoinHandle<Result<()>>) -> Option<Str
     }
 }
 
+fn stamp_ended(manifest: &mut MeetingManifest, ended_at_ms: u64) {
+    manifest.ended_at_ms.get_or_insert(ended_at_ms);
+    manifest
+        .duration_ms
+        .get_or_insert(ended_at_ms.saturating_sub(manifest.created_at_ms));
+}
+
 fn persist_meeting_failure(directory: &Path, error: &color_eyre::Report) {
     let result = (|| -> Result<()> {
         let mut manifest = read_manifest(directory)?;
         if manifest.status != MeetingStatus::Complete {
-            let ended_at_ms = now_ms();
             manifest.status = MeetingStatus::Failed;
-            manifest.ended_at_ms.get_or_insert(ended_at_ms);
-            manifest
-                .duration_ms
-                .get_or_insert(ended_at_ms.saturating_sub(manifest.created_at_ms));
+            stamp_ended(&mut manifest, now_ms());
             manifest.error = Some(error.to_string());
             write_manifest(directory, &manifest)?;
         }
@@ -691,21 +692,19 @@ fn write_tracks(
             }
         }
     }
-    if let Some(writer) = system {
-        writer.finalize()?;
-        File::open(directory.join("system.wav"))?.sync_all()?;
-    } else {
-        create_empty_track(directory.join("system.wav"))?;
-    }
-    if let Some(writer) = microphone {
-        writer.finalize()?;
-        File::open(directory.join("microphone.wav"))?.sync_all()?;
-    } else {
-        create_empty_track(directory.join("microphone.wav"))?;
-    }
-    set_owner_only(&directory.join("system.wav"), false)?;
-    set_owner_only(&directory.join("microphone.wav"), false)?;
+    finalize_track(directory.join("system.wav"), system)?;
+    finalize_track(directory.join("microphone.wav"), microphone)?;
     Ok(stats)
+}
+
+fn finalize_track(path: PathBuf, writer: Option<WavWriter<BufWriter<File>>>) -> Result<()> {
+    if let Some(writer) = writer {
+        writer.finalize()?;
+        File::open(path)?.sync_all()?;
+        Ok(())
+    } else {
+        create_empty_track(path)
+    }
 }
 
 fn create_empty_track(path: PathBuf) -> Result<()> {
@@ -835,13 +834,10 @@ pub fn list() -> Result<Vec<MeetingManifest>> {
         if let Ok(data) = fs::read(&path)
             && let Ok(mut manifest) = serde_json::from_slice::<MeetingManifest>(&data)
         {
-            manifest.live_transcription_error = fs::read_to_string(
-                path.parent()
-                    .unwrap_or_else(|| Path::new("."))
-                    .join("transcript.live.error.txt"),
-            )
-            .ok()
-            .map(|error| error.trim().to_string());
+            manifest.live_transcription_error =
+                fs::read_to_string(directory.join("transcript.live.error.txt"))
+                    .ok()
+                    .map(|error| error.trim().to_string());
             let process_is_active = meeting_is_active(&directory);
             if process_is_active == Some(false) {
                 if let Err(error) = recover_final_publication(&directory) {
@@ -853,13 +849,7 @@ pub fn list() -> Result<Vec<MeetingManifest>> {
                     manifest.status = recovered;
                     match recovered {
                         MeetingStatus::Complete => manifest.error = None,
-                        MeetingStatus::Interrupted => {
-                            let ended_at_ms = now_ms();
-                            manifest.ended_at_ms.get_or_insert(ended_at_ms);
-                            manifest
-                                .duration_ms
-                                .get_or_insert(ended_at_ms.saturating_sub(manifest.created_at_ms));
-                        }
+                        MeetingStatus::Interrupted => stamp_ended(&mut manifest, now_ms()),
                         MeetingStatus::Starting
                         | MeetingStatus::Recording
                         | MeetingStatus::Transcribing
@@ -924,7 +914,7 @@ fn recovered_status(
     }
 }
 
-#[cfg_attr(not(debug_assertions), allow(dead_code))]
+#[cfg(debug_assertions)]
 pub fn show(id: &str) -> Result<String> {
     let directory = root()?.join(id);
     let path = directory.join("transcript.md");
@@ -953,7 +943,7 @@ fn markdown_line(entry: &TranscriptEntry) -> String {
 
 /// Callers recover the final publication first; `show` does so before its
 /// `final_transcript_exists` check.
-#[cfg_attr(not(debug_assertions), allow(dead_code))]
+#[cfg(any(debug_assertions, test))]
 fn transcript_entries_in(directory: &Path) -> Result<Vec<TranscriptEntry>> {
     let final_path = directory.join("transcript.ndjson");
     if final_transcript_exists(directory) {

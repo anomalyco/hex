@@ -137,12 +137,13 @@ impl DictationProtocol {
     }
 
     pub fn control_suffix(&self, text: &str) -> Option<(DictationControl, usize)> {
+        let words = spoken_words(text);
         for (phrases, control) in [
             (&self.cancel, DictationControl::Cancel),
             (&self.stop, DictationControl::Stop),
             (&self.send, DictationControl::Send),
         ] {
-            if let Some(prefix_end) = control_suffix(text, phrases) {
+            if let Some(prefix_end) = control_suffix(&words, phrases) {
                 return Some((control, prefix_end));
             }
         }
@@ -235,15 +236,18 @@ impl ControlStability {
     }
 }
 
-fn control_suffix(text: &str, suffixes: &[String]) -> Option<usize> {
-    let words = spoken_words(text);
+fn words_match(words: &[SpokenWord], pattern: &[SpokenWord]) -> bool {
+    words.len() == pattern.len()
+        && words
+            .iter()
+            .map(|word| &word.normalized)
+            .eq(pattern.iter().map(|word| &word.normalized))
+}
+
+fn control_suffix(words: &[SpokenWord], suffixes: &[String]) -> Option<usize> {
     for suffix in suffixes {
         let suffix = spoken_words(suffix);
-        if words.len() >= suffix.len()
-            && words[words.len() - suffix.len()..]
-                .iter()
-                .map(|word| &word.normalized)
-                .eq(suffix.iter().map(|word| &word.normalized))
+        if words.len() >= suffix.len() && words_match(&words[words.len() - suffix.len()..], &suffix)
         {
             return Some(words[words.len() - suffix.len()].start);
         }
@@ -255,12 +259,8 @@ fn control_prefix(text: &str, prefixes: &[String]) -> Option<usize> {
     let words = spoken_words(text);
     prefixes.iter().find_map(|prefix| {
         let prefix = spoken_words(prefix);
-        (words.len() >= prefix.len()
-            && words[..prefix.len()]
-                .iter()
-                .map(|word| &word.normalized)
-                .eq(prefix.iter().map(|word| &word.normalized)))
-        .then(|| words[prefix.len() - 1].end)
+        (words.len() >= prefix.len() && words_match(&words[..prefix.len()], &prefix))
+            .then(|| words[prefix.len() - 1].end)
     })
 }
 
@@ -445,12 +445,6 @@ impl Recording {
         })
     }
 
-    #[cfg(target_os = "macos")]
-    fn with_environment(mut self, environment: RecordingEnvironmentState) -> Self {
-        self.environment = environment;
-        self
-    }
-
     fn push(&mut self, mut samples: &[f32]) {
         self.source_samples += samples.len();
         let Some(resampler) = &mut self.resampler else {
@@ -540,7 +534,7 @@ impl DictationCapture {
         self.recording_environment = Some(controller);
     }
 
-    #[cfg(any(test, target_os = "linux"))]
+    #[cfg(test)]
     pub fn keep_warm(&mut self, samples: &[f32]) {
         self.keep_warm_for(samples, TIMELINE_BUFFER_DURATION);
     }
@@ -610,23 +604,19 @@ impl DictationCapture {
     }
 
     fn start_with_pre_roll(&mut self, now: CaptureInstant, duration: Duration, intentional: bool) {
-        #[cfg(target_os = "macos")]
-        let environment = match &self.recording_environment {
-            Some(controller) if intentional => RecordingEnvironmentState::Active {
-                _session: controller.begin(),
-            },
-            Some(controller) => RecordingEnvironmentState::Pending(controller.clone()),
-            None => RecordingEnvironmentState::Disabled,
-        };
-        #[cfg(not(target_os = "macos"))]
-        let _ = intentional;
         let pre_roll = samples_for(duration, self.sample_rate).min(self.ring.len());
-        let recording = Recording::new(now, self.sample_rate);
-        #[cfg(target_os = "macos")]
-        let mut recording = recording.with_environment(environment);
-        #[cfg(not(target_os = "macos"))]
-        let mut recording = recording;
+        let mut recording = Recording::new(now, self.sample_rate);
         recording.intentional = intentional;
+        #[cfg(target_os = "macos")]
+        {
+            recording.environment = match &self.recording_environment {
+                Some(controller) if intentional => RecordingEnvironmentState::Active {
+                    _session: controller.begin(),
+                },
+                Some(controller) => RecordingEnvironmentState::Pending(controller.clone()),
+                None => RecordingEnvironmentState::Disabled,
+            };
+        }
         let skip = self.ring.len() - pre_roll;
         let (front, back) = self.ring.as_slices();
         if skip < front.len() {
@@ -664,7 +654,7 @@ impl DictationCapture {
         let retention = oldest_pending
             .map(|pending| {
                 captured_through
-                    .saturating_duration_since(pending)
+                    .duration_since(pending)
                     .saturating_add(VOICE_PRE_ROLL_DURATION)
                     .max(TIMELINE_BUFFER_DURATION)
             })

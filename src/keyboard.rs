@@ -119,9 +119,11 @@ pub fn key_code_for(character: char) -> Result<u16> {
     }
     let source = LayoutSource::current()?;
     let layout = source.layout_bytes()?;
+    let mut target = [0; 4];
+    let target = character.encode_utf8(&mut target);
     let result = (0..128).find(|&key_code| {
         translate(layout, key_code)
-            .is_some_and(|translated| translated.eq_ignore_ascii_case(&character.to_string()))
+            .is_some_and(|translated| translated.eq_ignore_ascii_case(target))
     });
     drop(source);
     if let Some(key_code) = result {
@@ -149,19 +151,11 @@ pub fn initialize_layout() -> Result<()> {
     if KEY_CODES.get().is_some() {
         return Ok(());
     }
-    let source = LayoutSource::current()?;
-    let layout = source.layout_bytes()?;
-    let codes = collect_key_codes((0..128).filter_map(|key_code| {
-        let translated = translate(layout, key_code)?;
-        let character = translated.chars().next()?.to_ascii_lowercase();
-        Some((character, key_code))
-    }));
-    drop(source);
+    let mut codes = collect_layout_codes(LayoutSource::current()?)?;
     // Non-Latin layouts (Russian, Hebrew, …) produce no ASCII letters with an
     // empty modifier state, so shortcuts like Cmd+V would miss. Appkit resolves
     // those against the ASCII-capable layout; mirror that here by filling the
     // missing letters from the ASCII-capable input source.
-    let mut codes = codes;
     if ('a'..='z').any(|character| !codes.contains_key(&character))
         && let Some(ascii_codes) = ascii_capable_key_codes()
     {
@@ -173,15 +167,7 @@ pub fn initialize_layout() -> Result<()> {
 
 fn ascii_capable_key_codes() -> Option<HashMap<char, u16>> {
     // Called only while LAYOUT_ACCESS is held, before the GUI snapshot is published.
-    let source = LayoutSource::ascii_capable()?;
-    let layout = source.layout_bytes().ok()?;
-    Some(collect_key_codes((0..128).filter_map(|key_code| {
-        let translated = translate(layout, key_code)?;
-        let character = translated.chars().next()?.to_ascii_lowercase();
-        character
-            .is_ascii_alphabetic()
-            .then_some((character, key_code))
-    })))
+    collect_layout_codes(LayoutSource::ascii_capable()?).ok()
 }
 
 fn fill_missing_ascii_letters(codes: &mut HashMap<char, u16>, fallback: HashMap<char, u16>) {
@@ -201,6 +187,15 @@ fn ascii_capable_key_code(character: char) -> Option<u16> {
     ascii_capable_key_codes()?
         .get(&character.to_ascii_lowercase())
         .copied()
+}
+
+fn collect_layout_codes(source: LayoutSource) -> Result<HashMap<char, u16>> {
+    let layout = source.layout_bytes()?;
+    Ok(collect_key_codes((0..128).filter_map(|key_code| {
+        let translated = translate(layout, key_code)?;
+        let character = translated.chars().next()?.to_ascii_lowercase();
+        Some((character, key_code))
+    })))
 }
 
 fn collect_key_codes(entries: impl IntoIterator<Item = (char, u16)>) -> HashMap<char, u16> {

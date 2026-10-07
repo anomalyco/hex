@@ -120,9 +120,7 @@ pub(crate) fn shutdown() {
             .worker
             .lock()
             .unwrap_or_else(|error| error.into_inner());
-        if worker.as_ref().is_some_and(JoinHandle::is_finished)
-            && let Some(worker) = worker.take()
-        {
+        if let Some(worker) = worker.take_if(|worker| worker.is_finished()) {
             let _ = worker.join();
         }
     }
@@ -236,7 +234,7 @@ fn create_indicator() -> Result<(gtk::Window, gtk::Label)> {
     window.set_layer_shell_margin(Edge::Top, 16);
     window.style_context().add_class("hex-hud");
     let css = gtk::CssProvider::new();
-    css.load_from_data(b"window.hex-hud { background: transparent; } .hex-hud label { background: #20221f; color: #d9ff68; border: 1px solid #44483b; border-radius: 18px; padding: 9px 18px; font: 13px sans-serif; }")?;
+    css.load_from_data(b"window.hex-hud { background: transparent; } .hex-hud label { background: #171717; color: #eeeeee; border: 1px solid #292929; border-radius: 18px; padding: 9px 18px; font: 600 13px sans-serif; }")?;
     if let Some(screen) = GtkWindowExt::screen(&window) {
         gtk::StyleContext::add_provider_for_screen(
             &screen,

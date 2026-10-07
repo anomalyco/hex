@@ -34,6 +34,7 @@ const GEOMETRY_ANGULAR_FREQUENCY: f32 = 24.0;
 const HIDDEN_SCALE: f32 = 0.82;
 const HIDDEN_SOFTNESS: f32 = 4.0;
 const PROCESSING_MORPH_DURATION: Duration = Duration::from_millis(250);
+const COMPLETED_VISIBLE_DURATION: Duration = Duration::from_millis(240);
 const RECORDING_FLASH_HALF_LIFE: Duration = Duration::from_millis(280);
 
 #[derive(Clone, Copy, Debug)]
@@ -400,7 +401,7 @@ enum JobPhase {
 impl Phase {
     fn visible_duration(self) -> Option<Duration> {
         match self {
-            Self::Completed => Some(Duration::from_millis(240)),
+            Self::Completed => Some(COMPLETED_VISIBLE_DURATION),
             Self::Cancelled => Some(Duration::ZERO),
             Self::Failed => Some(Duration::from_millis(600)),
             _ => None,
@@ -608,27 +609,10 @@ impl MetalRenderer {
                 }
             }
             DictationIndicatorEvent::Discarded => {
-                self.capturing = false;
-                self.editing = false;
-                self.completion_pending = false;
-                self.freeze_visual_state();
-                if self.jobs.is_empty() {
-                    self.phase = Phase::Hidden;
-                } else {
-                    self.show_pipeline(now);
-                }
+                self.finish_capture(now, Phase::Hidden);
             }
             DictationIndicatorEvent::Cancelled => {
-                self.capturing = false;
-                self.editing = false;
-                self.phase_started = now;
-                self.completion_pending = false;
-                self.freeze_visual_state();
-                if self.jobs.is_empty() {
-                    self.phase = Phase::Cancelled;
-                } else {
-                    self.show_pipeline(now);
-                }
+                self.finish_capture(now, Phase::Cancelled);
             }
             DictationIndicatorEvent::JobCompleted { job_id } => {
                 self.finish_job(job_id, now, Phase::Completed);
@@ -640,17 +624,23 @@ impl MetalRenderer {
                 self.finish_job(job_id, now, Phase::Failed);
             }
             DictationIndicatorEvent::Failed => {
-                self.capturing = false;
-                self.editing = false;
-                self.phase_started = now;
-                self.completion_pending = false;
-                self.freeze_visual_state();
-                if self.jobs.is_empty() {
-                    self.phase = Phase::Failed;
-                } else {
-                    self.show_pipeline(now);
-                }
+                self.finish_capture(now, Phase::Failed);
             }
+        }
+    }
+
+    fn finish_capture(&mut self, now: Instant, empty_phase: Phase) {
+        self.capturing = false;
+        self.editing = false;
+        if !matches!(empty_phase, Phase::Hidden) {
+            self.phase_started = now;
+        }
+        self.completion_pending = false;
+        self.freeze_visual_state();
+        if self.jobs.is_empty() {
+            self.phase = empty_phase;
+        } else {
+            self.show_pipeline(now);
         }
     }
 
@@ -831,7 +821,7 @@ impl MetalRenderer {
             light_angle: self.tuning.light_angle,
             sphere_outline: self.tuning.outline,
             completion: if matches!(self.phase, Phase::Completed) {
-                (elapsed.as_secs_f32() / 0.24).clamp(0.0, 1.0)
+                (elapsed.as_secs_f32() / COMPLETED_VISIBLE_DURATION.as_secs_f32()).clamp(0.0, 1.0)
             } else {
                 0.0
             },

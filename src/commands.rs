@@ -421,19 +421,16 @@ impl CommandConfig {
         commands
     }
 
-    #[cfg_attr(not(debug_assertions), allow(dead_code))]
+    #[cfg(any(debug_assertions, test))]
     pub fn available_catalog(&self, mode: Mode, context: &ContextSnapshot) -> Vec<CommandInfo> {
         self.catalog()
             .into_iter()
             .filter(|command| match mode {
                 Mode::Sleeping => command.scope == CommandScope::Sleeping,
-                Mode::Listening => match command.scope {
+                Mode::Listening => match &command.scope {
                     CommandScope::Global => true,
-                    CommandScope::Application(_) | CommandScope::Browser(_) => {
-                        self.commands.iter().any(|configured| {
-                            configured.id() == command.id && configured.matches_context(context)
-                        })
-                    }
+                    CommandScope::Application(app) => context.application_is(app),
+                    CommandScope::Browser(host) => context.browser_host_is(host),
                     CommandScope::Sleeping => false,
                 },
             })
@@ -789,7 +786,7 @@ mod tests {
             )
             .command(
                 Command::new("literal", "Literal")
-                    .spoken(("choose", "1"))
+                    .phrases(["choose 1"])
                     .action(|()| Action::StopMeeting),
             );
     }

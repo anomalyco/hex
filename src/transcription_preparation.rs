@@ -179,7 +179,13 @@ fn prepare_selection(
     canceled: &AtomicBool,
     progress: &AtomicU64,
 ) -> Result<(), String> {
-    let prepare = || -> color_eyre::Result<()> {
+    let check_canceled = || {
+        if canceled.load(Ordering::Acquire) {
+            color_eyre::eyre::bail!("Model preparation canceled.");
+        }
+        Ok(())
+    };
+    (|| -> color_eyre::Result<()> {
         let model = crate::transcription_models::validate(selection)?;
         if matches!(model.runtime, ModelRuntime::Gguf(_)) {
             if installed_only {
@@ -189,16 +195,11 @@ fn prepare_selection(
                 crate::transcription_models::download_with_progress(model, canceled, progress)?;
             }
         }
-        if canceled.load(Ordering::Acquire) {
-            color_eyre::eyre::bail!("Model preparation canceled.");
-        }
+        check_canceled()?;
         crate::transcription::Transcriber::load_selection(selection).map(drop)?;
-        if canceled.load(Ordering::Acquire) {
-            color_eyre::eyre::bail!("Model preparation canceled.");
-        }
-        Ok(())
-    };
-    prepare().map_err(|error| error.to_string())
+        check_canceled()
+    })()
+    .map_err(|error| error.to_string())
 }
 
 #[cfg(test)]

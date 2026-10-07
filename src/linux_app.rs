@@ -189,33 +189,19 @@ impl RemoteHost {
         self.client
             .state
             .as_ref()
-            .and_then(|s| s.desktop.listener.as_ref())
-            .is_some_and(|s| s.running)
+            .is_some_and(|s| s.desktop.listener.running)
     }
 
     fn capturing_hotkey(&self) -> bool {
         self.client.state.as_ref().is_some_and(|s| s.capturing)
     }
 
-    fn begin_settings_edit(&mut self, change: SettingsChange) {
-        let request = match change {
-            SettingsChange::Capture => Request::CaptureShortcut,
-            SettingsChange::DoubleTap(value) => {
-                Request::Desktop(DesktopAction::SetDoubleTapLock(value))
-            }
-            SettingsChange::PasteWithShift(value) => Request::SetTerminalPaste(value),
-            SettingsChange::Hotkey(binding) => {
-                Request::Desktop(DesktopAction::SetDictationShortcut(DesktopShortcut {
-                    alt: binding.alt,
-                    control: binding.control,
-                    shift: binding.shift,
-                    platform: binding.super_key,
-                    function: false,
-                    key: binding.key,
-                }))
-            }
-        };
-        let _ = self.send(request);
+    fn capture_shortcut(&mut self) {
+        let _ = self.send(Request::CaptureShortcut);
+    }
+
+    fn set_terminal_paste(&mut self, value: bool) {
+        let _ = self.send(Request::SetTerminalPaste(value));
     }
 
     fn cancel_settings_edit(&mut self) {
@@ -247,12 +233,11 @@ impl DesktopHost for RemoteHost {
                 activity: DesktopActivity::default(),
                 dictation_shortcut: self.settings.dictation_hotkey.keycaps(),
                 double_tap_lock: self.settings.double_tap_lock,
-                double_tap_only: false,
-                listener: Some(DesktopListenerSnapshot {
+                listener: DesktopListenerSnapshot {
                     running: false,
                     status: "Service disconnected".into(),
                     warning: None,
-                }),
+                },
                 operation_error: None,
                 transcription: DesktopTranscriptionSnapshot {
                     downloaded_bytes: 0,
@@ -394,7 +379,6 @@ pub fn run_service(event_path: PathBuf, shutdown: &'static AtomicBool) -> Result
             Err(mpsc::RecvTimeoutError::Disconnected) => break,
         }
     }
-    crate::linux_desktop::shutdown();
     Ok(())
 }
 
@@ -444,21 +428,22 @@ pub fn open(start_hidden: bool, shutdown: &'static AtomicBool) -> Result<()> {
                         if this.quitting {
                             cx.quit();
                         }
-                        let transcription = this.host.snapshot().transcription;
-                        if matches!(
-                            this.transcription_picker,
-                            TranscriptionPickerState::Preparing(_)
-                        ) && transcription.preparing.is_none()
+                        if let TranscriptionPickerState::Preparing(language) =
+                            &this.transcription_picker
                         {
-                            let picker = std::mem::replace(
-                                &mut this.transcription_picker,
-                                TranscriptionPickerState::Closed,
-                            );
-                            if transcription.error.is_some()
-                                && let TranscriptionPickerState::Preparing(language) = picker
-                            {
-                                this.transcription_picker =
-                                    TranscriptionPickerState::Choosing(language);
+                            let (preparing_done, has_error) =
+                                this.host.client.state.as_ref().map_or((true, false), |s| {
+                                    (
+                                        s.desktop.transcription.preparing.is_none(),
+                                        s.desktop.transcription.error.is_some(),
+                                    )
+                                });
+                            if preparing_done {
+                                this.transcription_picker = if has_error {
+                                    TranscriptionPickerState::Choosing(language.clone())
+                                } else {
+                                    TranscriptionPickerState::Closed
+                                };
                             }
                         }
                         cx.notify();
@@ -614,11 +599,9 @@ impl LinuxDesktopHost {
         }
 
         let mut start_listener = false;
-        if self
+        if let Some(preparation) = self
             .transcription_preparation
-            .as_ref()
-            .is_some_and(|preparation| preparation.worker.is_finished())
-            && let Some(preparation) = self.transcription_preparation.take()
+            .take_if(|preparation| preparation.worker.is_finished())
         {
             let was_canceled = preparation.canceled.load(Ordering::Relaxed);
             let result = preparation
@@ -659,11 +642,9 @@ impl LinuxDesktopHost {
             self.start();
         }
 
-        if self
+        if let Some(listener) = self
             .listener
-            .as_ref()
-            .is_some_and(|listener| listener.worker.is_finished())
-            && let Some(listener) = self.listener.take()
+            .take_if(|listener| listener.worker.is_finished())
         {
             let result = listener.finish();
             match result {
@@ -993,25 +974,20 @@ impl Drop for LinuxDesktopHost {
     fn drop(&mut self) {
         self.stop();
         self.cancel_transcription_preparation();
-        if self
+        if let Some(listener) = self
             .listener
-            .as_ref()
-            .is_some_and(|listener| listener.worker.is_finished())
-            && let Some(listener) = self.listener.take()
+            .take_if(|listener| listener.worker.is_finished())
         {
             let _ = listener.finish();
         }
-        if self
+        if let Some(preparation) = self
             .transcription_preparation
-            .as_ref()
-            .is_some_and(|preparation| preparation.worker.is_finished())
-            && let Some(preparation) = self.transcription_preparation.take()
+            .take_if(|preparation| preparation.worker.is_finished())
         {
             let _ = preparation.worker.join();
         }
         if let Some(edit) = &mut self.settings_edit
-            && edit.worker.as_ref().is_some_and(JoinHandle::is_finished)
-            && let Some(worker) = edit.worker.take()
+            && let Some(worker) = edit.worker.take_if(|worker| worker.is_finished())
         {
             let _ = worker.join();
         }
@@ -1031,15 +1007,14 @@ impl DesktopHost for LinuxDesktopHost {
             activity: self.activity.clone(),
             dictation_shortcut: self.settings.dictation_hotkey.keycaps(),
             double_tap_lock: self.settings.double_tap_lock,
-            double_tap_only: false,
-            listener: Some(DesktopListenerSnapshot {
+            listener: DesktopListenerSnapshot {
                 running: self.is_running(),
                 status: self.status.clone(),
                 warning: self
                     .listener
                     .as_ref()
                     .and_then(|listener| listener.hotkey_status.warning()),
-            }),
+            },
             operation_error: self
                 .error
                 .clone()
@@ -1091,11 +1066,6 @@ impl DesktopHost for LinuxDesktopHost {
             DesktopAction::SetDoubleTapLock(enabled) => {
                 self.begin_settings_edit(SettingsChange::DoubleTap(enabled));
             }
-            DesktopAction::SetDoubleTapOnly(_) => {
-                return Err(color_eyre::eyre::eyre!(
-                    "double-tap-only is unavailable on X11"
-                ));
-            }
             DesktopAction::StartListening => {
                 self.error = None;
                 self.dismissed_failure_at = self.activity.last_failure.as_ref().map(|(at, _)| *at);
@@ -1130,36 +1100,28 @@ impl LinuxApp {
         snapshot: &DesktopSnapshot,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let running = snapshot
-            .listener
-            .as_ref()
-            .is_some_and(|listener| listener.running);
+        let running = snapshot.listener.running;
+        let double_tap_lock = snapshot.double_tap_lock;
         let editing = self.host.editing_settings();
         let paste_with_shift = self.host.settings.paste_with_shift;
         let sound_volume_busy = editing || snapshot.transcription.preparing.is_some();
         let sound_volume = segmented_control().children(
-            [
-                ("Off", 0.0_f32),
-                ("25%", 0.25),
-                ("50%", 0.5),
-                ("75%", 0.75),
-                ("100%", 1.0),
-            ]
-            .into_iter()
-            .enumerate()
-            .map(|(index, (label, volume))| {
-                let selected = (self.host.settings.sound_effect_volume - volume).abs() < 0.01;
-                segmented_item(selected)
-                    .id(("linux-sound-volume", index))
-                    .child(label)
-                    .when(sound_volume_busy, |item| item.opacity(0.5))
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        if !this.quitting && !sound_volume_busy {
-                            let _ = this.host.set_sound_effect_volume(volume);
-                            cx.notify();
-                        }
-                    }))
-            }),
+            crate::desktop_ui::SOUND_VOLUME_STEPS
+                .into_iter()
+                .enumerate()
+                .map(|(index, (label, volume))| {
+                    let selected = (self.host.settings.sound_effect_volume - volume).abs() < 0.01;
+                    segmented_item(selected)
+                        .id(("linux-sound-volume", index))
+                        .child(label)
+                        .when(sound_volume_busy, |item| item.opacity(0.5))
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            if !this.quitting && !sound_volume_busy {
+                                let _ = this.host.set_sound_effect_volume(volume);
+                                cx.notify();
+                            }
+                        }))
+                }),
         );
         let shortcut = if self.host.capturing_hotkey() {
             div()
@@ -1214,7 +1176,7 @@ impl LinuxApp {
                                     "Global hotkey dictation",
                                     div().flex().items_center().gap_3()
                                         .child(div().text_size(px(12.0)).text_color(rgb(MUTED))
-                                            .child(snapshot.listener.as_ref().map_or_else(|| "Ready".to_string(), |listener| listener.status.clone())))
+                                            .child(snapshot.listener.status.clone()))
                                         .child(compact_button(if running { "Stop" } else { "Start" })
                                         .id("linux-listener-toggle")
                                         .on_click(cx.listener(move |this, _, _, cx| {
@@ -1228,7 +1190,7 @@ impl LinuxApp {
                                             }
                                         }))),
                                 )))
-                                .when_some(snapshot.listener.as_ref().and_then(|listener| listener.warning.clone()), |content, warning| {
+                                .when_some(snapshot.listener.warning.clone(), |content, warning| {
                                     content.child(
                                         div().id("linux-listener-warning").mt_3().p_3().rounded(px(6.0)).border_1().border_color(rgb(LINE))
                                             .child(div().text_size(px(12.0)).child(warning))
@@ -1293,7 +1255,7 @@ impl LinuxApp {
                                                         if this.host.capturing_hotkey() {
                                                             this.host.cancel_settings_edit();
                                                         } else {
-                                                            this.host.begin_settings_edit(SettingsChange::Capture);
+                                                            this.host.capture_shortcut();
                                                         }
                                                         cx.notify();
                                                     }
@@ -1316,21 +1278,17 @@ impl LinuxApp {
                                         settings_row(
                                             "Double-tap to lock",
                                             "Double-tap the shortcut for hands-free dictation",
-                                            toggle(if snapshot.double_tap_lock {
-                                                1.0
-                                            } else {
-                                                0.0
-                                            }),
+                                            toggle(if double_tap_lock { 1.0 } else { 0.0 }),
                                         )
                                         .id("double-tap-setting")
                                         .when(editing, |row| row.opacity(0.5))
                                         .on_click(
                                             cx.listener(move |this, _, _, cx| {
                                                 if !this.quitting && !editing {
-                                                    let enabled =
-                                                        !this.host.snapshot().double_tap_lock;
                                                     let _ = this.host.dispatch(
-                                                        DesktopAction::SetDoubleTapLock(enabled),
+                                                        DesktopAction::SetDoubleTapLock(
+                                                            !double_tap_lock,
+                                                        ),
                                                     );
                                                     cx.notify();
                                                 }
@@ -1346,7 +1304,7 @@ impl LinuxApp {
                                         .when(editing, |row| row.opacity(0.5))
                                         .on_click(cx.listener(move |this, _, _, cx| {
                                             if !this.quitting && !editing {
-                                                this.host.begin_settings_edit(SettingsChange::PasteWithShift(!paste_with_shift));
+                                                this.host.set_terminal_paste(!paste_with_shift);
                                                 cx.notify();
                                             }
                                         })),
@@ -1463,11 +1421,8 @@ impl LinuxApp {
 impl TranscriptionPickerDelegate for LinuxApp {
     fn cancel_transcription_preparation(&mut self) {
         self.host.cancel_transcription_preparation();
-        if let TranscriptionPickerState::Preparing(language) = std::mem::replace(
-            &mut self.transcription_picker,
-            TranscriptionPickerState::Closed,
-        ) {
-            self.transcription_picker = TranscriptionPickerState::Choosing(language);
+        if let TranscriptionPickerState::Preparing(language) = &self.transcription_picker {
+            self.transcription_picker = TranscriptionPickerState::Choosing(language.clone());
         }
     }
 
@@ -1629,7 +1584,7 @@ mod tests {
         let snapshot = service_snapshot(&host, false);
         let serialized = serde_json::to_vec(&snapshot).unwrap();
         let received: ServiceSnapshot = serde_json::from_slice(&serialized).unwrap();
-        let listener = received.desktop.listener.unwrap();
+        let listener = received.desktop.listener;
         assert!(listener.running);
         assert_eq!(listener.status, "Listening");
         assert_eq!(
@@ -1645,17 +1600,17 @@ mod tests {
             Some("previous transcription failed"),
         );
         host.dispatch(DesktopAction::ClearError).unwrap();
-        assert!(host.snapshot().listener.unwrap().warning.is_some());
+        assert!(host.snapshot().listener.warning.is_some());
         assert!(host.snapshot().operation_error.is_none());
         status.update_escape_availability(true);
-        assert!(host.snapshot().listener.unwrap().warning.is_none());
+        assert!(host.snapshot().listener.warning.is_none());
         status.update_escape_availability(false);
         host.stop();
         while !host.listener.as_ref().unwrap().worker.is_finished() {
             std::thread::yield_now();
         }
         host.refresh();
-        let listener = host.snapshot().listener.unwrap();
+        let listener = host.snapshot().listener;
         assert!(!listener.running);
         assert!(listener.warning.is_none());
     }

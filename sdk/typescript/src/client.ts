@@ -73,6 +73,9 @@ const combineSignals = (first: AbortSignal, second?: AbortSignal): AbortSignal =
   return AbortSignal.any([first, second])
 }
 
+const languageSuffix = (language?: string): string =>
+  language === undefined ? "" : `?${new URLSearchParams({ language })}`
+
 export const makeClient = (
   endpoint: EmbeddedEndpoint,
   transport: typeof globalThis.fetch,
@@ -84,15 +87,13 @@ export const makeClient = (
     callerSignal?: AbortSignal,
   ): Promise<ResponseContext> => {
     const signal = combineSignals(lifetime, callerSignal)
+    const headers = new Headers(init.headers)
+    headers.set("authorization", `Bearer ${endpoint.token}`)
     let response: Response
     try {
       response = await transport(`${endpoint.url}${path}`, {
         ...init,
-        headers: (() => {
-          const headers = new Headers(init.headers)
-          headers.set("authorization", `Bearer ${endpoint.token}`)
-          return headers
-        })(),
+        headers,
         signal,
       })
     } catch (cause) {
@@ -114,18 +115,15 @@ export const makeClient = (
   const capabilities = async (options?: RequestOptions) =>
     decodeCapabilities(await json(await request("/capabilities", {}, options?.signal)))
 
-  const list = async (options?: ListModelsOptions) => {
-    const query = new URLSearchParams()
-    if (options?.language !== undefined) query.set("language", options.language)
-    const suffix = query.size === 0 ? "" : `?${query}`
-    return decodeModels(await json(await request(`/models${suffix}`, {}, options?.signal)))
-  }
+  const list = async (options?: ListModelsOptions) =>
+    decodeModels(await json(await request(`/models${languageSuffix(options?.language)}`, {}, options?.signal)))
 
   const prepare = async (id: ModelId, options?: PrepareModelOptions): Promise<void> => {
-    const query = new URLSearchParams()
-    if (options?.language !== undefined) query.set("language", options.language)
-    const suffix = query.size === 0 ? "" : `?${query}`
-    const context = await request(`/models/${id}/prepare${suffix}`, { method: "POST" }, options?.signal)
+    const context = await request(
+      `/models/${id}/prepare${languageSuffix(options?.language)}`,
+      { method: "POST" },
+      options?.signal,
+    )
     const { response, signal } = context
     let completed = false
     const dispatch = (data: string) => {

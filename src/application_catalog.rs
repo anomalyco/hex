@@ -44,12 +44,6 @@ fn discover_uncached() -> Vec<InstalledApplication> {
 }
 
 pub fn insert(applications: &mut Vec<InstalledApplication>, application: InstalledApplication) {
-    if applications
-        .iter()
-        .any(|existing| same_application(existing, &application))
-    {
-        return;
-    }
     applications.push(application);
     normalize(applications);
 }
@@ -70,13 +64,6 @@ fn normalize(applications: &mut Vec<InstalledApplication>) {
             .cmp(&right.name.to_lowercase())
             .then_with(|| left.path.cmp(&right.path))
     });
-}
-
-fn same_application(left: &InstalledApplication, right: &InstalledApplication) -> bool {
-    match (&left.bundle_id, &right.bundle_id) {
-        (Some(left), Some(right)) => left == right,
-        _ => left.path == right.path,
-    }
 }
 
 pub fn metadata(path: &Path) -> Result<InstalledApplication> {

@@ -368,18 +368,9 @@ fn word_errors(expected: &str, actual: &str) -> (usize, usize) {
 }
 
 fn normalized_words(text: &str) -> Vec<String> {
-    text.to_lowercase()
-        .chars()
-        .map(|character| {
-            if character.is_alphanumeric() {
-                character
-            } else {
-                ' '
-            }
-        })
-        .collect::<String>()
-        .split_whitespace()
-        .map(str::to_string)
+    text.split(|character: char| !character.is_alphanumeric())
+        .filter(|word| !word.is_empty())
+        .map(str::to_lowercase)
         .collect()
 }
 

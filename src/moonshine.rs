@@ -335,12 +335,12 @@ pub struct RecognitionUpdate {
     pub start_ms: u64,
     pub end_ms: u64,
     pub text: String,
-    #[cfg_attr(not(debug_assertions), allow(dead_code))]
+    #[cfg(debug_assertions)]
     pub words: Vec<RecognitionWord>,
 }
 
+#[cfg(debug_assertions)]
 #[derive(Clone, Debug)]
-#[cfg_attr(not(debug_assertions), allow(dead_code))]
 pub struct RecognitionWord {
     pub text: String,
     pub start_ms: u64,
@@ -579,30 +579,19 @@ impl Moonshine {
                 },
                 latency_ms: line.last_transcription_latency_ms,
                 line_id: line.id,
-                start_ms: (line.start_time.max(0.0) * 1_000.0) as u64,
-                end_ms: ((line.start_time + line.duration).max(0.0) * 1_000.0) as u64,
-                text: if line.text.is_null() {
-                    String::new()
-                } else {
-                    unsafe { CStr::from_ptr(line.text) }
-                        .to_string_lossy()
-                        .into_owned()
-                },
+                start_ms: secs_to_ms(line.start_time),
+                end_ms: secs_to_ms(line.start_time + line.duration),
+                text: unsafe { cstr_or_empty(line.text) },
+                #[cfg(debug_assertions)]
                 words: if line.words.is_null() || line.word_count == 0 {
                     Vec::new()
                 } else {
                     unsafe { std::slice::from_raw_parts(line.words, line.word_count as usize) }
                         .iter()
                         .map(|word| RecognitionWord {
-                            text: if word.text.is_null() {
-                                String::new()
-                            } else {
-                                unsafe { CStr::from_ptr(word.text) }
-                                    .to_string_lossy()
-                                    .into_owned()
-                            },
-                            start_ms: (word.start.max(0.0) * 1_000.0) as u64,
-                            end_ms: (word.end.max(0.0) * 1_000.0) as u64,
+                            text: unsafe { cstr_or_empty(word.text) },
+                            start_ms: secs_to_ms(word.start),
+                            end_ms: secs_to_ms(word.end),
                             confidence: word.confidence,
                         })
                         .collect()
@@ -744,15 +733,27 @@ fn check_handle(functions: &Functions, handle: c_int, operation: &str) -> Result
     }
 }
 
+fn secs_to_ms(secs: c_float) -> u64 {
+    (secs.max(0.0) * 1_000.0) as u64
+}
+
+unsafe fn cstr_or_empty(ptr: *const c_char) -> String {
+    if ptr.is_null() {
+        String::new()
+    } else {
+        unsafe { CStr::from_ptr(ptr) }
+            .to_string_lossy()
+            .into_owned()
+    }
+}
+
 fn error_message(functions: &Functions, code: c_int) -> String {
     // SAFETY: Moonshine returns a static NUL-terminated error string.
     let message = unsafe { (functions.error_to_string)(code) };
     if message.is_null() {
         format!("unknown error {code}")
     } else {
-        unsafe { CStr::from_ptr(message) }
-            .to_string_lossy()
-            .into_owned()
+        unsafe { cstr_or_empty(message) }
     }
 }
 

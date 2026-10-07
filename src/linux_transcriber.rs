@@ -114,32 +114,15 @@ impl LinuxTranscriber {
         let device = model.device()?;
         let variant = model.variant();
         let architecture = model.arch();
-        let crate::transcription_models::ModelRuntime::Gguf(artifact) = definition.runtime else {
-            return Err(eyre!(
-                "{} is not a GGUF transcription model",
-                definition.name
-            ));
-        };
-        if architecture != artifact.architecture || variant != artifact.variant {
-            return Err(eyre!(
-                "{} contains {architecture}/{variant}, expected {}/{}",
-                path.display(),
-                artifact.architecture,
-                artifact.variant
-            ));
-        }
         let capabilities = model.capabilities();
-        if selection.language == crate::transcription_models::AUTO_LANGUAGE
-            && !capabilities.supports_language_detect
-        {
-            return Err(eyre!(
-                "{} does not advertise automatic language detection",
-                definition.name
-            ));
-        }
-        let language = definition
-            .runtime_language_hint(&selection.language)
-            .map(str::to_string);
+        let language = crate::gguf_session::validate_gguf_artifact(
+            path,
+            definition,
+            &architecture,
+            &variant,
+            selection,
+            capabilities.supports_language_detect,
+        )?;
         let device_label = format!("{} ({})", device.description, device.kind);
         tracing::info!(
             backend = device.kind,
@@ -179,14 +162,20 @@ impl LinuxTranscriber {
     }
 
     pub fn transcribe(&mut self, samples: &[f32]) -> Result<String> {
-        let Some(max_samples) = self.max_audio_samples else {
+        let Some(max_samples) = self
+            .max_audio_samples
+            .filter(|&max_samples| samples.len() > max_samples)
+        else {
             return self.run(samples);
         };
         let mut output = Vec::new();
         for samples in samples.chunks(max_samples) {
-            let text = self.run(samples)?;
-            if !text.trim().is_empty() {
-                output.push(text);
+            let mut chunk = samples.to_vec();
+            crate::dictation::pad_for_parakeet(&mut chunk);
+            let text = self.run(&chunk)?;
+            let text = text.trim();
+            if !text.is_empty() {
+                output.push(text.to_string());
             }
         }
         Ok(output.join(" "))

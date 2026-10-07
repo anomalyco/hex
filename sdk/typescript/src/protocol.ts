@@ -36,6 +36,13 @@ const invalid = (description: string): never => {
   throw new HexError("invalid-response", `HEX returned an invalid ${description}`)
 }
 
+const incompatibleApi = (apiVersion: unknown): never => {
+  throw new HexError(
+    "incompatible-api",
+    `HEX local API ${String(apiVersion ?? "unknown")} is incompatible with client API 2; install a matching HEX app`,
+  )
+}
+
 export const decodeEndpoint = (line: string): EmbeddedEndpoint => {
   let value: unknown
   try {
@@ -52,10 +59,7 @@ export const decodeEndpointValue = (value: unknown): EmbeddedEndpoint => {
   const token = input && string(input.token)
   const pid = input && number(input.pid)
   if (input?.apiVersion !== undefined && input.apiVersion !== "2") {
-    throw new HexError(
-      "incompatible-api",
-      `HEX local API ${String(input?.apiVersion ?? "unknown")} is incompatible with client API 2; install a matching HEX app`,
-    )
+    incompatibleApi(input.apiVersion)
   }
   if (
     input?.type !== "ready"
@@ -84,10 +88,7 @@ export const decodeHealth = (value: unknown): Health => {
   const input = record(value)
   const version = input && string(input.version)
   if (input?.apiVersion !== "2") {
-    throw new HexError(
-      "incompatible-api",
-      `HEX local API ${String(input?.apiVersion ?? "unknown")} is incompatible with client API 2; install a matching HEX app`,
-    )
+    incompatibleApi(input?.apiVersion)
   }
   if (version === undefined) return invalid("health response")
   return { version, apiVersion: "2" }

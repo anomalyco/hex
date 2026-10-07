@@ -284,22 +284,6 @@ impl PatternSpec for (&'static str, &'static str, Digit) {
     }
 }
 
-impl PatternSpec for (&'static str, &'static str) {
-    type Capture = ();
-
-    fn compile(self) -> TypedPattern<Self::Capture> {
-        literal_pattern(&[self.0, self.1])
-    }
-}
-
-impl PatternSpec for (&'static str, &'static str, &'static str) {
-    type Capture = ();
-
-    fn compile(self) -> TypedPattern<Self::Capture> {
-        literal_pattern(&[self.0, self.1, self.2])
-    }
-}
-
 impl PatternSpec for (&'static str, Count) {
     type Capture = CapturedCount;
 
@@ -371,24 +355,6 @@ fn digit_pattern(literals: &[&'static str]) -> TypedPattern<CapturedDigit> {
                 .flatten()
                 .map(CapturedDigit)
         }),
-    }
-}
-
-fn literal_pattern(literals: &[&'static str]) -> TypedPattern<()> {
-    let display = literals.join(" ");
-    let literals = literals
-        .iter()
-        .map(|literal| normalize(literal))
-        .collect::<Vec<_>>();
-    let signature = literals
-        .iter()
-        .cloned()
-        .map(PatternToken::Literal)
-        .collect();
-    TypedPattern {
-        display,
-        signatures: vec![signature],
-        parse: Box::new(move |words| (words == literals).then_some(())),
     }
 }
 
@@ -775,10 +741,6 @@ impl<C: 'static> CommandBuilder<C> {
     }
 }
 
-fn typed_patterns_overlap<C>(left: &TypedPattern<C>, right: &TypedPattern<C>) -> bool {
-    signatures_overlap(&left.signatures, &right.signatures)
-}
-
 #[derive(Clone)]
 struct ErasedPattern {
     display: String,
@@ -927,7 +889,7 @@ impl ConfiguredCommand {
         }
         for (index, left) in patterns.iter().enumerate() {
             for right in &patterns[index + 1..] {
-                if typed_patterns_overlap(left, right) {
+                if signatures_overlap(&left.signatures, &right.signatures) {
                     return Err(CommandError::OverlappingAliases { id });
                 }
             }
@@ -955,7 +917,7 @@ impl ConfiguredCommand {
                 other
                     .patterns
                     .iter()
-                    .any(|right| patterns_overlap(left, right))
+                    .any(|right| signatures_overlap(&left.signatures, &right.signatures))
             })
     }
 
@@ -981,11 +943,6 @@ impl ConfiguredCommand {
             .find_map(|pattern| (pattern.resolve)(words))
     }
 
-    #[cfg_attr(not(debug_assertions), allow(dead_code))]
-    pub(crate) fn matches_context(&self, context: &ContextSnapshot) -> bool {
-        self.context.matches(context)
-    }
-
     pub(crate) fn catalog(&self) -> CommandInfo {
         let mut phrases = self.patterns.iter().map(|pattern| pattern.display.clone());
         CommandInfo {
@@ -997,10 +954,6 @@ impl ConfiguredCommand {
             group: self.group.clone(),
         }
     }
-}
-
-fn patterns_overlap(left: &ErasedPattern, right: &ErasedPattern) -> bool {
-    signatures_overlap(&left.signatures, &right.signatures)
 }
 
 fn signatures_overlap(left: &[Vec<PatternToken>], right: &[Vec<PatternToken>]) -> bool {

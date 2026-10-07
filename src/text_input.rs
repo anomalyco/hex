@@ -9,10 +9,12 @@ use gpui::{
 };
 use unicode_segmentation::UnicodeSegmentation;
 
-use crate::desktop_ui::{CANVAS, LINE, MULTILINE_INPUT_HEIGHT, MUTED, TEXT, TEXT_INPUT_HEIGHT};
+use crate::desktop_ui::{
+    ACCENT, CANVAS, LINE, MULTILINE_INPUT_HEIGHT, MUTED, TEXT, TEXT_INPUT_HEIGHT,
+};
 
-const FOCUS: u32 = 0x5a86c8;
-const SELECTION: u32 = 0x4776b866;
+const FOCUS: u32 = ACCENT;
+const SELECTION: u32 = 0x3b5cf655;
 
 actions!(
     text_input,
@@ -128,7 +130,6 @@ pub struct TextInput {
     mouse_selection: Option<MouseSelection>,
     preferred_x: Option<Pixels>,
     multiline: bool,
-    height: Pixels,
     picker: bool,
     history: EditHistory,
 }
@@ -299,11 +300,6 @@ impl TextInput {
             mouse_selection: None,
             preferred_x: None,
             multiline,
-            height: px(if multiline {
-                MULTILINE_INPUT_HEIGHT
-            } else {
-                TEXT_INPUT_HEIGHT
-            }),
             picker,
             history: EditHistory::default(),
         }
@@ -480,16 +476,15 @@ impl TextInput {
 
     fn undo(&mut self, _: &Undo, _: &mut Window, cx: &mut Context<Self>) {
         let state = self.history.undo(self.edit_state());
-        self.marked_range = None;
-        if let Some(state) = state {
-            self.restore_edit_state(state);
-            cx.emit(Changed);
-        }
-        cx.notify();
+        self.apply_history_step(state, cx);
     }
 
     fn redo(&mut self, _: &Redo, _: &mut Window, cx: &mut Context<Self>) {
         let state = self.history.redo(self.edit_state());
+        self.apply_history_step(state, cx);
+    }
+
+    fn apply_history_step(&mut self, state: Option<EditState>, cx: &mut Context<Self>) {
         self.marked_range = None;
         if let Some(state) = state {
             self.restore_edit_state(state);
@@ -498,18 +493,19 @@ impl TextInput {
         cx.notify();
     }
 
-    fn backspace(&mut self, _: &Backspace, window: &mut Window, cx: &mut Context<Self>) {
+    fn delete_to(&mut self, offset: usize, window: &mut Window, cx: &mut Context<Self>) {
         if self.selected_range.is_empty() {
-            self.select_to(self.previous_boundary(self.cursor_offset()), cx);
+            self.select_to(offset, cx);
         }
         self.replace_text_in_range(None, "", window, cx);
     }
 
+    fn backspace(&mut self, _: &Backspace, window: &mut Window, cx: &mut Context<Self>) {
+        self.delete_to(self.previous_boundary(self.cursor_offset()), window, cx);
+    }
+
     fn delete(&mut self, _: &Delete, window: &mut Window, cx: &mut Context<Self>) {
-        if self.selected_range.is_empty() {
-            self.select_to(self.next_boundary(self.cursor_offset()), cx);
-        }
-        self.replace_text_in_range(None, "", window, cx);
+        self.delete_to(self.next_boundary(self.cursor_offset()), window, cx);
     }
 
     fn delete_word_backward(
@@ -518,10 +514,11 @@ impl TextInput {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.selected_range.is_empty() {
-            self.select_to(self.previous_word_boundary(self.cursor_offset()), cx);
-        }
-        self.replace_text_in_range(None, "", window, cx);
+        self.delete_to(
+            self.previous_word_boundary(self.cursor_offset()),
+            window,
+            cx,
+        );
     }
 
     fn delete_word_forward(
@@ -530,10 +527,7 @@ impl TextInput {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.selected_range.is_empty() {
-            self.select_to(self.next_word_boundary(self.cursor_offset()), cx);
-        }
-        self.replace_text_in_range(None, "", window, cx);
+        self.delete_to(self.next_word_boundary(self.cursor_offset()), window, cx);
     }
 
     fn delete_to_line_start(
@@ -542,10 +536,7 @@ impl TextInput {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.selected_range.is_empty() {
-            self.select_to(self.visual_line_boundary(false), cx);
-        }
-        self.replace_text_in_range(None, "", window, cx);
+        self.delete_to(self.visual_line_boundary(false), window, cx);
     }
 
     fn paste(&mut self, _: &Paste, window: &mut Window, cx: &mut Context<Self>) {
@@ -605,18 +596,12 @@ impl TextInput {
         let offset = self.index_for_mouse_position(event.position);
         match selection {
             MouseSelection::Character => self.select_to(offset, cx),
-            MouseSelection::Word(anchor) => {
-                let target = word_range_at(&self.content, offset);
-                if target.end <= anchor.start {
-                    self.set_selection(target.start..anchor.end, true, cx);
-                } else if target.start >= anchor.end {
-                    self.set_selection(anchor.start..target.end, false, cx);
+            MouseSelection::Word(anchor) | MouseSelection::Line(anchor) => {
+                let target = if matches!(self.mouse_selection, Some(MouseSelection::Word(_))) {
+                    word_range_at(&self.content, offset)
                 } else {
-                    self.set_selection(anchor, false, cx);
-                }
-            }
-            MouseSelection::Line(anchor) => {
-                let target = line_range_at(&self.content, offset);
+                    line_range_at(&self.content, offset)
+                };
                 if target.end <= anchor.start {
                     self.set_selection(target.start..anchor.end, true, cx);
                 } else if target.start >= anchor.end {
@@ -1385,7 +1370,11 @@ impl Render for TextInput {
             .on_mouse_up_out(MouseButton::Left, cx.listener(Self::on_mouse_up))
             .on_mouse_move(cx.listener(Self::on_mouse_move))
             .w_full()
-            .h(self.height)
+            .h(px(if self.multiline {
+                MULTILINE_INPUT_HEIGHT
+            } else {
+                TEXT_INPUT_HEIGHT
+            }))
             .px(px(10.))
             .py(px(7.))
             .overflow_hidden()

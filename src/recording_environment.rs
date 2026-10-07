@@ -274,44 +274,37 @@ fn mute_output() -> Option<(u32, f32)> {
     set_output_volume(device, 0.0).then_some((device, previous))
 }
 
+fn read_property<T: Copy + Default>(
+    object: u32,
+    mut address: AudioObjectPropertyAddress,
+) -> Option<T> {
+    let mut size = size_of::<T>() as u32;
+    let mut value = T::default();
+    // SAFETY: All pointers reference initialized, correctly sized stack values.
+    let status = unsafe {
+        AudioObjectGetPropertyData(
+            object,
+            NonNull::from(&mut address),
+            0,
+            std::ptr::null(),
+            NonNull::from(&mut size),
+            NonNull::from(&mut value).cast::<c_void>(),
+        )
+    };
+    (status == 0 && size as usize == size_of::<T>()).then_some(value)
+}
+
 fn default_output_device() -> Option<u32> {
-    let mut address = AudioObjectPropertyAddress {
+    let address = AudioObjectPropertyAddress {
         mSelector: kAudioHardwarePropertyDefaultOutputDevice,
         mScope: kAudioObjectPropertyScopeGlobal,
         mElement: kAudioObjectPropertyElementMain,
     };
-    let mut size = size_of::<u32>() as u32;
-    let mut device = 0_u32;
-    // SAFETY: All pointers reference initialized, correctly sized stack values.
-    let status = unsafe {
-        AudioObjectGetPropertyData(
-            kAudioObjectSystemObject as u32,
-            NonNull::from(&mut address),
-            0,
-            std::ptr::null(),
-            NonNull::from(&mut size),
-            NonNull::from(&mut device).cast::<c_void>(),
-        )
-    };
-    (status == 0 && device != 0).then_some(device)
+    read_property::<u32>(kAudioObjectSystemObject as u32, address).filter(|&device| device != 0)
 }
 
 fn output_volume(device: u32) -> Option<f32> {
-    let mut address = volume_address();
-    let mut size = size_of::<f32>() as u32;
-    let mut volume = 0.0_f32;
-    // SAFETY: All pointers reference initialized, correctly sized stack values.
-    let status = unsafe {
-        AudioObjectGetPropertyData(
-            device,
-            NonNull::from(&mut address),
-            0,
-            std::ptr::null(),
-            NonNull::from(&mut size),
-            NonNull::from(&mut volume).cast::<c_void>(),
-        )
-    };
-    (status == 0).then_some(volume)
+    read_property(device, volume_address())
 }
 
 fn set_output_volume(device: u32, volume: f32) -> bool {

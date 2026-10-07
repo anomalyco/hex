@@ -1,10 +1,9 @@
 import { describe, expect, it, vi } from "vitest"
-import { mkdtemp, rm, writeFile } from "node:fs/promises"
-import { tmpdir } from "node:os"
+import { writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { connect, create, HexError } from "../src/index.js"
 import { makeClient } from "../src/client.js"
-import { helper, options, processIsAlive } from "./support.js"
+import { fixtureEndpoint, helper, options, processIsAlive, withTempDir } from "./support.js"
 
 describe("Promise client", () => {
   it.each([
@@ -13,29 +12,23 @@ describe("Promise client", () => {
     ["{}", "invalid-handshake", "HEX returned an invalid startup handshake"],
     [JSON.stringify({ port: "bad", token: "", apiVersion: "2", pid: 1 }), "invalid-handshake", "HEX returned an invalid service URL"],
   ])("preserves discovery errors for %s without making a request", async (contents, code, message) => {
-    const directory = await mkdtemp(join(tmpdir(), "hex-discovery-"))
-    const discoveryPath = join(directory, "local-api.json")
-    const fetch = vi.fn<typeof globalThis.fetch>()
-    try {
+    await withTempDir("hex-discovery-", async (directory) => {
+      const discoveryPath = join(directory, "local-api.json")
+      const fetch = vi.fn<typeof globalThis.fetch>()
       await writeFile(discoveryPath, contents)
       await expect(connect({ discoveryPath, fetch })).rejects.toMatchObject({ code, message })
       expect(fetch).not.toHaveBeenCalled()
-    } finally {
-      await rm(directory, { recursive: true, force: true })
-    }
+    })
   })
 
   it("continues accepting a string discovery port and an empty token", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "hex-discovery-"))
-    const discoveryPath = join(directory, "local-api.json")
-    const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(Response.json({ version: "test", apiVersion: "2" }))
-    try {
+    await withTempDir("hex-discovery-", async (directory) => {
+      const discoveryPath = join(directory, "local-api.json")
+      const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(Response.json({ version: "test", apiVersion: "2" }))
       await writeFile(discoveryPath, JSON.stringify({ port: "1234", token: "", apiVersion: "2", pid: 1 }))
       await connect({ discoveryPath, fetch })
       expect(fetch).toHaveBeenCalledWith("http://127.0.0.1:1234/health", expect.any(Object))
-    } finally {
-      await rm(directory, { recursive: true, force: true })
-    }
+    })
   })
 
   it("owns the helper and exercises the complete protocol", async () => {
@@ -103,46 +96,46 @@ describe("Promise client", () => {
   })
 
   it("owns a running-app dictation handle with live levels and raw completion", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "hex-client-"))
-    const discoveryPath = join(directory, "local-api.json")
-    const host = await create({
-      ...options(),
-      env: {
-        HEX_FAKE_SERVICE_CAPTURE: "1",
-        HEX_FAKE_DISCOVERY_PATH: discoveryPath,
-        HEX_FAKE_FINISH_RETRY: "1",
-      },
-    })
-    try {
-      const hex = await connect({ discoveryPath })
-      expect(await hex.capabilities()).toMatchObject({ serviceCapture: true })
-      const recording = await hex.dictation.start({ source: "tp7" })
-      expect(recording.ownerToken).toMatch(/^hex_capture_/)
-      expect(recording.sampleRate).toBe(48_000)
-      const levelIterator = recording.levels[Symbol.asyncIterator]()
-      const first = await levelIterator.next()
-      expect(first).toEqual({ value: { rmsDb: -24.5, peakDb: -8 }, done: false })
-      const audioIterator = recording.audio[Symbol.asyncIterator]()
-      const audio = await audioIterator.next()
-      expect(audio.done).toBe(false)
-      expect(Array.from(audio.value ?? [])).toEqual([0.25, -0.5])
-      await levelIterator.return?.()
-      await audioIterator.return?.()
-      await expect(recording.finish()).rejects.toMatchObject({
-        code: "request-failed",
-        status: 503,
-      } satisfies Partial<HexError>)
-      expect(await recording.finish()).toEqual({
-        transcript: "running app text",
-        durationMs: 1234,
+    await withTempDir("hex-client-", async (directory) => {
+      const discoveryPath = join(directory, "local-api.json")
+      const host = await create({
+        ...options(),
+        env: {
+          HEX_FAKE_SERVICE_CAPTURE: "1",
+          HEX_FAKE_DISCOVERY_PATH: discoveryPath,
+          HEX_FAKE_FINISH_RETRY: "1",
+        },
       })
-      const cancelled = await hex.dictation.start({ source: "tp7" })
-      await cancelled.cancel()
-      await cancelled.cancel()
-    } finally {
-      await host.close()
-      await rm(directory, { recursive: true, force: true })
-    }
+      try {
+        const hex = await connect({ discoveryPath })
+        expect(await hex.capabilities()).toMatchObject({ serviceCapture: true })
+        const recording = await hex.dictation.start({ source: "tp7" })
+        expect(recording.ownerToken).toMatch(/^hex_capture_/)
+        expect(recording.sampleRate).toBe(48_000)
+        const levelIterator = recording.levels[Symbol.asyncIterator]()
+        const first = await levelIterator.next()
+        expect(first).toEqual({ value: { rmsDb: -24.5, peakDb: -8 }, done: false })
+        const audioIterator = recording.audio[Symbol.asyncIterator]()
+        const audio = await audioIterator.next()
+        expect(audio.done).toBe(false)
+        expect(Array.from(audio.value ?? [])).toEqual([0.25, -0.5])
+        await levelIterator.return?.()
+        await audioIterator.return?.()
+        await expect(recording.finish()).rejects.toMatchObject({
+          code: "request-failed",
+          status: 503,
+        } satisfies Partial<HexError>)
+        expect(await recording.finish()).toEqual({
+          transcript: "running app text",
+          durationMs: 1234,
+        })
+        const cancelled = await hex.dictation.start({ source: "tp7" })
+        await cancelled.cancel()
+        await cancelled.cancel()
+      } finally {
+        await host.close()
+      }
+    })
   })
 
   it.each([
@@ -159,9 +152,7 @@ describe("Promise client", () => {
     const transport = vi.fn<typeof fetch>()
       .mockResolvedValueOnce(Response.json({ id: 1, ownerToken: "x".repeat(32), sampleRate: 48_000 }))
       .mockImplementation(async () => Response.json({ code }, { status }))
-    const client = makeClient({
-      type: "ready", url: "http://127.0.0.1:1", token: "fixture", apiVersion: "2", pid: 1,
-    }, transport, lifetime.signal)
+    const client = makeClient(fixtureEndpoint, transport, lifetime.signal)
     try {
       const recording = await client.dictation.start({ source: "test" })
       if (operation === "heartbeat") {
@@ -190,9 +181,7 @@ describe("Promise client", () => {
       .mockImplementation(async (url) => String(url).endsWith("/finish")
         ? Response.json(transcript)
         : new Response(null, { status: 204 }))
-    const client = makeClient({
-      type: "ready", url: "http://127.0.0.1:1", token: "fixture", apiVersion: "2", pid: 1,
-    }, transport, lifetime.signal)
+    const client = makeClient(fixtureEndpoint, transport, lifetime.signal)
     try {
       const recording = await client.dictation.start({ source: "test" })
       if (operation === "heartbeat") {
@@ -216,10 +205,9 @@ describe("Promise client", () => {
   })
 
   it("rejects a legacy running app before sending a request", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "hex-client-legacy-"))
-    const discoveryPath = join(directory, "local-api.json")
-    let requested = false
-    try {
+    await withTempDir("hex-client-legacy-", async (directory) => {
+      const discoveryPath = join(directory, "local-api.json")
+      let requested = false
       await writeFile(discoveryPath, JSON.stringify({
         port: 1,
         token: "a".repeat(64),
@@ -234,9 +222,7 @@ describe("Promise client", () => {
         },
       })).rejects.toMatchObject({ code: "incompatible-api" } satisfies Partial<HexError>)
       expect(requested).toBe(false)
-    } finally {
-      await rm(directory, { recursive: true, force: true })
-    }
+    })
   })
 
   it("does not let a buffered terminal event overtake cancellation", async () => {

@@ -41,14 +41,7 @@ impl AppleSpeech {
         }
         let ready =
             with_locale(language, |locale| unsafe { hex_apple_speech_ready(locale) }).unwrap_or(-1);
-        if ready < 0 {
-            return None;
-        }
-        let ready = ready != 0;
-        if ready {
-            return Some(true);
-        }
-        Some(false)
+        (ready >= 0).then_some(ready != 0)
     }
 
     pub fn is_ready(language: &str) -> bool {

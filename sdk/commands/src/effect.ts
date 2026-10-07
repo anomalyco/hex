@@ -13,14 +13,15 @@ import {
   union,
 } from "./model.js"
 import type {
+  CapturesFor,
   CommandDefinitionFor,
   CaptureSchema,
-  CaptureValues,
   CommandMetadata,
   HandlerContext,
   HexCapabilities,
   HexConfigFor,
   NativeAction,
+  UntypedCaptures,
 } from "./model.js"
 
 export class ToolCallError extends Schema.TaggedError<ToolCallError>()(
@@ -30,12 +31,12 @@ export class ToolCallError extends Schema.TaggedError<ToolCallError>()(
 
 export interface HexService extends HexCapabilities<Effect.Effect<void, ToolCallError>> {
   readonly context: HandlerContext
-  readonly captures: Readonly<Record<string, string | number>>
+  readonly captures: UntypedCaptures
 }
 
 export class Hex extends Context.Service<Hex, HexService>()("@hex/commands/Hex") {}
 
-export interface EffectHandlerArguments<Captures extends Readonly<Record<string, string | number>> = Readonly<Record<string, string>>> {
+export interface EffectHandlerArguments<Captures extends UntypedCaptures = Readonly<Record<string, string>>> {
   readonly context: HandlerContext
   readonly captures: Captures
 }
@@ -48,29 +49,23 @@ export type EffectCommandDefinition = CommandDefinitionFor<EffectHandler>
 
 export interface EffectHexConfig extends HexConfigFor<EffectCommandDefinition> {}
 
-type EffectCapturesFor<Schema> = [Schema] extends [never]
-  ? Readonly<Record<string, string>>
-  : [Schema] extends [CaptureSchema]
-  ? CaptureValues<Extract<NoInfer<Schema>, CaptureSchema>>
-  : Readonly<Record<string, string>>
-
 type EffectCommandFor<Schema> = CommandMetadata
   & { readonly captures?: Schema & CaptureSchema }
   & (
     | {
       readonly action: [Schema] extends [never]
-        ? import("./model.js").NativeAction
-        : [Schema] extends [CaptureSchema] ? never : import("./model.js").NativeAction
+        ? NativeAction
+        : [Schema] extends [CaptureSchema] ? never : NativeAction
       readonly run?: never
     }
     | {
       readonly action?: never
       readonly run: [Schema] extends [CaptureSchema]
         ? Effect.Effect<void, unknown, Hex>
-          | ((arguments_: EffectHandlerArguments<EffectCapturesFor<Schema>>) => Effect.Effect<void, unknown, Hex>)
+          | ((arguments_: EffectHandlerArguments<CapturesFor<Schema>>) => Effect.Effect<void, unknown, Hex>)
         : NativeAction
           | Effect.Effect<void, unknown, Hex>
-          | ((arguments_: EffectHandlerArguments<EffectCapturesFor<Schema>>) => Effect.Effect<void, unknown, Hex>)
+          | ((arguments_: EffectHandlerArguments<CapturesFor<Schema>>) => Effect.Effect<void, unknown, Hex>)
     }
   )
 

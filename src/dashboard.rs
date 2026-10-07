@@ -106,14 +106,7 @@ fn draw(
         .split(frame.area());
     let state = events.iter().rev().find_map(|event| match event {
         VoiceEvent::State { state, device, .. } => Some((*state, device.as_str())),
-        VoiceEvent::SessionStarted { .. }
-        | VoiceEvent::Transcript { .. }
-        | VoiceEvent::Command { .. }
-        | VoiceEvent::Dictation { .. }
-        | VoiceEvent::Context { .. }
-        | VoiceEvent::ApiServerStarted { .. }
-        | VoiceEvent::ApiServerStopped { .. }
-        | VoiceEvent::ApiAuthFailed { .. } => None,
+        _ => None,
     });
     let (state, device) = state.unwrap_or((VoiceState::Stopping, "waiting for listener"));
     let (state_label, state_color) = match state {
@@ -130,14 +123,7 @@ fn draw(
             text,
             ..
         } => Some((*phase, *latency_ms, text.as_str())),
-        VoiceEvent::SessionStarted { .. }
-        | VoiceEvent::State { .. }
-        | VoiceEvent::Command { .. }
-        | VoiceEvent::Dictation { .. }
-        | VoiceEvent::Context { .. }
-        | VoiceEvent::ApiServerStarted { .. }
-        | VoiceEvent::ApiServerStopped { .. }
-        | VoiceEvent::ApiAuthFailed { .. } => None,
+        _ => None,
     });
     let latest_action = events.iter().rev().find_map(|event| match event {
         VoiceEvent::Command {
@@ -309,21 +295,13 @@ fn draw_meetings(
         .enumerate()
         .map(|(index, meeting)| {
             let marker = if index == selected { "›" } else { " " };
-            let status = match meeting.status {
-                MeetingStatus::Starting => "...",
-                MeetingStatus::Recording => "REC",
-                MeetingStatus::Transcribing => "ASR",
-                MeetingStatus::Complete => "OK ",
-                MeetingStatus::Interrupted => "INT",
-                MeetingStatus::Failed => "ERR",
-            };
-            let color = match meeting.status {
-                MeetingStatus::Starting => Color::Yellow,
-                MeetingStatus::Recording => Color::Red,
-                MeetingStatus::Transcribing => Color::Cyan,
-                MeetingStatus::Complete => Color::Green,
-                MeetingStatus::Interrupted => Color::Yellow,
-                MeetingStatus::Failed => Color::Red,
+            let (status, color) = match meeting.status {
+                MeetingStatus::Starting => ("...", Color::Yellow),
+                MeetingStatus::Recording => ("REC", Color::Red),
+                MeetingStatus::Transcribing => ("ASR", Color::Cyan),
+                MeetingStatus::Complete => ("OK ", Color::Green),
+                MeetingStatus::Interrupted => ("INT", Color::Yellow),
+                MeetingStatus::Failed => ("ERR", Color::Red),
             };
             ListItem::new(Line::from(vec![
                 Span::styled(format!("{marker} {status} "), Style::default().fg(color)),
@@ -557,12 +535,12 @@ fn dictation_color(phase: &DictationPhase) -> Color {
     match phase {
         DictationPhase::Started => Color::Magenta,
         DictationPhase::Transcribing => Color::Cyan,
-        DictationPhase::Pasted => Color::Green,
-        DictationPhase::Edited => Color::Green,
-        DictationPhase::VoiceAction => Color::Green,
-        DictationPhase::Logged => Color::Green,
-        DictationPhase::Repasted => Color::Green,
-        DictationPhase::MeetingPasted => Color::Green,
+        DictationPhase::Pasted
+        | DictationPhase::Edited
+        | DictationPhase::VoiceAction
+        | DictationPhase::Logged
+        | DictationPhase::Repasted
+        | DictationPhase::MeetingPasted => Color::Green,
         DictationPhase::Discarded => Color::DarkGray,
         DictationPhase::Cancelled => Color::Yellow,
         DictationPhase::Failed(_) => Color::Red,

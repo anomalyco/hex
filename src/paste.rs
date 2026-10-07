@@ -380,56 +380,63 @@ fn capture_clipboard(clipboard: &NSPasteboard) -> Result<ClipboardSnapshot> {
             return Err(eyre!("could not list clipboard formats"));
         }
         let flavor_count = unsafe { CFArrayGetCount(flavors) };
-        let has_authoritative_flavor = (0..flavor_count).any(|flavor_index| {
-            let flavor = unsafe { CFArrayGetValueAtIndex(flavors, flavor_index) };
-            if flavor.is_null() {
-                return false;
-            }
-            let mut flags = 0;
-            (unsafe { PasteboardGetItemFlavorFlags(pasteboard.0, item, flavor, &mut flags) }) == 0
-                && flags & SYSTEM_TRANSLATED_FLAVOR == 0
-        });
         let result = (0..flavor_count)
             .map(|flavor_index| {
                 let flavor = unsafe { CFArrayGetValueAtIndex(flavors, flavor_index) };
                 if flavor.is_null() {
                     return Err(eyre!("clipboard format was unavailable"));
                 }
-                let data_type = cf_string(flavor)?;
                 let mut flags = 0;
                 check_status(
                     unsafe { PasteboardGetItemFlavorFlags(pasteboard.0, item, flavor, &mut flags) },
                     "inspect clipboard format",
                 )?;
-                if !should_preserve_flavor(flags, has_authoritative_flavor) {
-                    tracing::debug!(%data_type, "skipping synthesized clipboard format");
-                    return Ok(None);
-                }
-                let mut data = ptr::null();
-                let flavor_started = Instant::now();
-                let status =
-                    unsafe { PasteboardCopyItemFlavorData(pasteboard.0, item, flavor, &mut data) };
-                let flavor_ms = flavor_started.elapsed().as_millis();
-                if flavor_ms >= 100 {
-                    tracing::warn!(%data_type, flavor_ms, "clipboard format was slow to materialize");
-                }
-                if status == BAD_PASTEBOARD_FLAVOR {
-                    tracing::debug!(%data_type, "skipping unavailable clipboard format");
-                    return Ok(None);
-                }
-                check_status(status, "preserve clipboard format")?;
-                if data.is_null() {
-                    return Err(eyre!("clipboard format data was unavailable"));
-                }
-                let bytes = cf_data(data);
-                unsafe { CFRelease(data) };
-                Ok(Some(ClipboardFlavor {
-                    data_type,
-                    data: bytes?,
-                    flags: flags & 0x0f,
-                }))
+                Ok((flavor, flags))
             })
-            .collect::<Result<Vec<_>>>();
+            .collect::<Result<Vec<_>>>()
+            .and_then(|flavor_entries| {
+                let has_authoritative_flavor = flavor_entries
+                    .iter()
+                    .any(|&(_, flags)| flags & SYSTEM_TRANSLATED_FLAVOR == 0);
+                flavor_entries
+                    .into_iter()
+                    .map(|(flavor, flags)| {
+                        let data_type = cf_string(flavor)?;
+                        if !should_preserve_flavor(flags, has_authoritative_flavor) {
+                            tracing::debug!(%data_type, "skipping synthesized clipboard format");
+                            return Ok(None);
+                        }
+                        let mut data = ptr::null();
+                        let flavor_started = Instant::now();
+                        let status = unsafe {
+                            PasteboardCopyItemFlavorData(pasteboard.0, item, flavor, &mut data)
+                        };
+                        let flavor_ms = flavor_started.elapsed().as_millis();
+                        if flavor_ms >= 100 {
+                            tracing::warn!(
+                                %data_type,
+                                flavor_ms,
+                                "clipboard format was slow to materialize"
+                            );
+                        }
+                        if status == BAD_PASTEBOARD_FLAVOR {
+                            tracing::debug!(%data_type, "skipping unavailable clipboard format");
+                            return Ok(None);
+                        }
+                        check_status(status, "preserve clipboard format")?;
+                        if data.is_null() {
+                            return Err(eyre!("clipboard format data was unavailable"));
+                        }
+                        let bytes = cf_data(data);
+                        unsafe { CFRelease(data) };
+                        Ok(Some(ClipboardFlavor {
+                            data_type,
+                            data: bytes?,
+                            flags: flags & 0x0f,
+                        }))
+                    })
+                    .collect::<Result<Vec<_>>>()
+            });
         unsafe { CFRelease(flavors) };
         items.push(result?.into_iter().flatten().collect());
     }
@@ -557,7 +564,8 @@ fn cf_string(value: CfStringRef) -> Result<String> {
         .iter()
         .position(|byte| *byte == 0)
         .unwrap_or(bytes.len());
-    String::from_utf8(bytes[..length].to_vec()).map_err(Into::into)
+    bytes.truncate(length);
+    String::from_utf8(bytes).map_err(Into::into)
 }
 
 fn cf_data(value: CfDataRef) -> Result<Vec<u8>> {

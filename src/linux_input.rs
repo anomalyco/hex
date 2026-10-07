@@ -19,11 +19,27 @@ pub(crate) use crate::linux_wayland_input::{WaylandModifierState, capture_waylan
 
 const XK_SPACE: u32 = 0x20;
 const XK_ESCAPE: u32 = 0xff1b;
+pub(crate) const XK_SHIFT_L: u32 = 0xffe1;
+pub(crate) const XK_SHIFT_R: u32 = 0xffe2;
+pub(crate) const XK_CONTROL_L: u32 = 0xffe3;
+pub(crate) const XK_CONTROL_R: u32 = 0xffe4;
 pub(crate) const XK_ALT_L: u32 = 0xffe9;
 pub(crate) const XK_ALT_R: u32 = 0xffea;
+pub(crate) const XK_SUPER_L: u32 = 0xffeb;
+pub(crate) const XK_SUPER_R: u32 = 0xffec;
 const XK_NUM_LOCK: u32 = 0xff7f;
+pub(crate) const KEY_PRESS: u8 = 2;
+pub(crate) const KEY_RELEASE: u8 = 3;
 const RELEASE_GRACE: Duration = Duration::from_millis(50);
 pub(crate) const DOUBLE_TAP_WINDOW: Duration = Duration::from_millis(300);
+
+pub(crate) fn connect_x11() -> Result<(RustConnection, Window, Keymap)> {
+    let (connection, screen) =
+        RustConnection::connect(None).wrap_err("could not connect to X11")?;
+    let root = connection.setup().roots[screen].root;
+    let keymap = Keymap::read(&connection)?;
+    Ok((connection, root, keymap))
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum HotkeyEvent {
@@ -152,10 +168,7 @@ fn run(
     started: Arc<AtomicBool>,
     status: HotkeyStatus,
 ) -> Result<()> {
-    let (connection, screen) =
-        RustConnection::connect(None).wrap_err("could not connect to X11")?;
-    let root = connection.setup().roots[screen].root;
-    let keymap = Keymap::read(&connection)?;
+    let (connection, root, keymap) = connect_x11()?;
     let trigger = keymap.keycode(keysym(&binding.key)?)?;
     let escape = keymap.keycode(XK_ESCAPE)?;
     let modifiers = binding.modifier_mask(&connection, &keymap)?;
@@ -429,12 +442,60 @@ impl Keymap {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Mutex;
+    use std::sync::{Mutex, MutexGuard};
     use x11rb::protocol::xtest;
 
-    const KEY_PRESS: u8 = 2;
-    const KEY_RELEASE: u8 = 3;
     static X11_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+    struct X11TestHarness {
+        _guard: MutexGuard<'static, ()>,
+        connection: RustConnection,
+        root: Window,
+        keymap: Keymap,
+        alt: u8,
+        space: u8,
+        escape: u8,
+    }
+
+    impl X11TestHarness {
+        fn new() -> Self {
+            let guard = X11_TEST_LOCK
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
+            let (connection, root, keymap) = connect_x11().unwrap();
+            let alt = keymap.keycode(XK_ALT_L).unwrap();
+            let space = keymap.keycode(XK_SPACE).unwrap();
+            let escape = keymap.keycode(XK_ESCAPE).unwrap();
+            Self {
+                _guard: guard,
+                connection,
+                root,
+                keymap,
+                alt,
+                space,
+                escape,
+            }
+        }
+
+        fn send_key(&self, type_: u8, key: u8) {
+            send_key(&self.connection, self.root, type_, key);
+        }
+
+        fn tap_alt_space(&self) {
+            for (type_, key) in [
+                (KEY_PRESS, self.alt),
+                (KEY_PRESS, self.space),
+                (KEY_RELEASE, self.space),
+                (KEY_RELEASE, self.alt),
+            ] {
+                self.send_key(type_, key);
+            }
+        }
+    }
+
+    fn recv_event(monitor: &LinuxHotkeyMonitor) -> HotkeyEvent {
+        monitor.events.recv_timeout(Duration::from_secs(1)).unwrap()
+    }
 
     fn send_key(connection: &RustConnection, root: Window, type_: u8, key: u8) {
         xtest::fake_input(connection, type_, key, 0, root, 0, 0, 0)
@@ -541,9 +602,7 @@ mod tests {
     #[test]
     #[ignore = "requires the active X11 desktop"]
     fn grabbed_alt_space_delivers_press_and_release() {
-        let _guard = X11_TEST_LOCK
-            .lock()
-            .unwrap_or_else(|error| error.into_inner());
+        let harness = X11TestHarness::new();
         let monitor = LinuxHotkeyMonitor::start_for(
             LinuxHotkey::default(),
             true,
@@ -551,35 +610,15 @@ mod tests {
             Default::default(),
         )
         .unwrap();
-        let (connection, screen) = RustConnection::connect(None).unwrap();
-        let root = connection.setup().roots[screen].root;
-        let keymap = Keymap::read(&connection).unwrap();
-        let alt = keymap.keycode(XK_ALT_L).unwrap();
-        let space = keymap.keycode(XK_SPACE).unwrap();
-        for (type_, key) in [
-            (KEY_PRESS, alt),
-            (KEY_PRESS, space),
-            (KEY_RELEASE, space),
-            (KEY_RELEASE, alt),
-        ] {
-            send_key(&connection, root, type_, key);
-        }
-        assert_eq!(
-            monitor.events.recv_timeout(Duration::from_secs(1)).unwrap(),
-            HotkeyEvent::Start
-        );
-        assert_eq!(
-            monitor.events.recv_timeout(Duration::from_secs(1)).unwrap(),
-            HotkeyEvent::Finish
-        );
+        harness.tap_alt_space();
+        assert_eq!(recv_event(&monitor), HotkeyEvent::Start);
+        assert_eq!(recv_event(&monitor), HotkeyEvent::Finish);
     }
 
     #[test]
     #[ignore = "requires the active X11 desktop"]
     fn second_tap_locks_until_the_trigger_is_pressed_again() {
-        let _guard = X11_TEST_LOCK
-            .lock()
-            .unwrap_or_else(|error| error.into_inner());
+        let harness = X11TestHarness::new();
         let monitor = LinuxHotkeyMonitor::start_for(
             LinuxHotkey::default(),
             true,
@@ -587,51 +626,26 @@ mod tests {
             Default::default(),
         )
         .unwrap();
-        let (connection, screen) = RustConnection::connect(None).unwrap();
-        let root = connection.setup().roots[screen].root;
-        let keymap = Keymap::read(&connection).unwrap();
-        let alt = keymap.keycode(XK_ALT_L).unwrap();
-        let space = keymap.keycode(XK_SPACE).unwrap();
-        let tap = || {
-            send_key(&connection, root, KEY_PRESS, alt);
-            send_key(&connection, root, KEY_PRESS, space);
-            send_key(&connection, root, KEY_RELEASE, space);
-            send_key(&connection, root, KEY_RELEASE, alt);
-        };
 
-        tap();
-        assert_eq!(
-            monitor.events.recv_timeout(Duration::from_secs(1)).unwrap(),
-            HotkeyEvent::Start
-        );
-        assert_eq!(
-            monitor.events.recv_timeout(Duration::from_secs(1)).unwrap(),
-            HotkeyEvent::Finish
-        );
-        tap();
-        assert_eq!(
-            monitor.events.recv_timeout(Duration::from_secs(1)).unwrap(),
-            HotkeyEvent::Start
-        );
+        harness.tap_alt_space();
+        assert_eq!(recv_event(&monitor), HotkeyEvent::Start);
+        assert_eq!(recv_event(&monitor), HotkeyEvent::Finish);
+        harness.tap_alt_space();
+        assert_eq!(recv_event(&monitor), HotkeyEvent::Start);
         assert!(
             monitor
                 .events
                 .recv_timeout(Duration::from_millis(100))
                 .is_err()
         );
-        tap();
-        assert_eq!(
-            monitor.events.recv_timeout(Duration::from_secs(1)).unwrap(),
-            HotkeyEvent::Finish
-        );
+        harness.tap_alt_space();
+        assert_eq!(recv_event(&monitor), HotkeyEvent::Finish);
     }
 
     #[test]
     #[ignore = "requires the active X11 desktop"]
     fn standalone_function_key_delivers_press_and_release() {
-        let _guard = X11_TEST_LOCK
-            .lock()
-            .unwrap_or_else(|error| error.into_inner());
+        let harness = X11TestHarness::new();
         let binding = LinuxHotkey {
             alt: false,
             key: "f24".into(),
@@ -640,47 +654,26 @@ mod tests {
         let monitor =
             LinuxHotkeyMonitor::start_for(binding, false, LinuxSession::X11, Default::default())
                 .unwrap();
-        let (connection, screen) = RustConnection::connect(None).unwrap();
-        let root = connection.setup().roots[screen].root;
-        let trigger = Keymap::read(&connection)
-            .unwrap()
-            .keycode(keysym("f24").unwrap())
-            .unwrap();
-        send_key(&connection, root, KEY_PRESS, trigger);
-        send_key(&connection, root, KEY_RELEASE, trigger);
+        let trigger = harness.keymap.keycode(keysym("f24").unwrap()).unwrap();
+        harness.send_key(KEY_PRESS, trigger);
+        harness.send_key(KEY_RELEASE, trigger);
 
-        assert_eq!(
-            monitor.events.recv_timeout(Duration::from_secs(1)).unwrap(),
-            HotkeyEvent::Start
-        );
-        assert_eq!(
-            monitor.events.recv_timeout(Duration::from_secs(1)).unwrap(),
-            HotkeyEvent::Finish
-        );
+        assert_eq!(recv_event(&monitor), HotkeyEvent::Start);
+        assert_eq!(recv_event(&monitor), HotkeyEvent::Finish);
     }
 
     #[test]
     #[ignore = "requires the active X11 desktop"]
     fn conflicted_escape_still_dictates_without_cancel() {
-        let _guard = X11_TEST_LOCK
-            .lock()
-            .unwrap_or_else(|error| error.into_inner());
-        let (holder, holder_screen) = RustConnection::connect(None).unwrap();
-        let holder_root = holder.setup().roots[holder_screen].root;
-        let escape = Keymap::read(&holder).unwrap().keycode(XK_ESCAPE).unwrap();
-        holder
-            .grab_key(
-                false,
-                holder_root,
-                ModMask::ANY,
-                escape,
-                GrabMode::ASYNC,
-                GrabMode::ASYNC,
-            )
-            .unwrap()
-            .check()
-            .unwrap();
-        holder.flush().unwrap();
+        let harness = X11TestHarness::new();
+        grab_variants(
+            &harness.connection,
+            harness.root,
+            harness.escape,
+            &[ModMask::ANY],
+        )
+        .unwrap();
+        harness.connection.flush().unwrap();
         let status = HotkeyStatus::default();
         let monitor = LinuxHotkeyMonitor::start_for(
             LinuxHotkey::default(),
@@ -689,25 +682,11 @@ mod tests {
             status.clone(),
         )
         .unwrap();
-        let (connection, screen) = RustConnection::connect(None).unwrap();
-        let root = connection.setup().roots[screen].root;
-        let keymap = Keymap::read(&connection).unwrap();
-        let alt = keymap.keycode(XK_ALT_L).unwrap();
-        let space = keymap.keycode(XK_SPACE).unwrap();
         for _ in 0..2 {
-            send_key(&connection, root, KEY_PRESS, alt);
-            send_key(&connection, root, KEY_PRESS, space);
-            send_key(&connection, root, KEY_RELEASE, space);
-            send_key(&connection, root, KEY_RELEASE, alt);
-            assert_eq!(
-                monitor.events.recv_timeout(Duration::from_secs(1)).unwrap(),
-                HotkeyEvent::Start
-            );
+            harness.tap_alt_space();
+            assert_eq!(recv_event(&monitor), HotkeyEvent::Start);
             assert_eq!(status.warning().as_deref(), Some(ESCAPE_CANCEL_WARNING));
-            assert_eq!(
-                monitor.events.recv_timeout(Duration::from_secs(1)).unwrap(),
-                HotkeyEvent::Finish
-            );
+            assert_eq!(recv_event(&monitor), HotkeyEvent::Finish);
             assert!(
                 monitor
                     .events
@@ -716,38 +695,33 @@ mod tests {
             );
             assert!(monitor.errors.try_recv().is_err());
         }
-        holder
-            .ungrab_key(escape, holder_root, ModMask::ANY)
+        harness
+            .connection
+            .ungrab_key(harness.escape, harness.root, ModMask::ANY)
             .unwrap();
-        holder.flush().unwrap();
-        send_key(&connection, root, KEY_PRESS, alt);
-        send_key(&connection, root, KEY_PRESS, space);
-        assert_eq!(
-            monitor.events.recv_timeout(Duration::from_secs(1)).unwrap(),
-            HotkeyEvent::Start
-        );
+        harness.connection.flush().unwrap();
+        harness.send_key(KEY_PRESS, harness.alt);
+        harness.send_key(KEY_PRESS, harness.space);
+        assert_eq!(recv_event(&monitor), HotkeyEvent::Start);
         assert!(status.warning().is_none());
-        send_key(&connection, root, KEY_PRESS, escape);
-        assert_eq!(
-            monitor.events.recv_timeout(Duration::from_secs(1)).unwrap(),
-            HotkeyEvent::Cancel
-        );
-        send_key(&connection, root, KEY_RELEASE, escape);
-        send_key(&connection, root, KEY_RELEASE, space);
-        send_key(&connection, root, KEY_RELEASE, alt);
+        harness.send_key(KEY_PRESS, harness.escape);
+        assert_eq!(recv_event(&monitor), HotkeyEvent::Cancel);
+        harness.send_key(KEY_RELEASE, harness.escape);
+        harness.send_key(KEY_RELEASE, harness.space);
+        harness.send_key(KEY_RELEASE, harness.alt);
     }
 
     #[test]
     #[ignore = "requires an isolated X11 display"]
     fn modified_escape_conflict_keeps_plain_escape_cancel() {
-        let _guard = X11_TEST_LOCK
-            .lock()
-            .unwrap_or_else(|error| error.into_inner());
-        let (holder, screen) = RustConnection::connect(None).unwrap();
-        let root = holder.setup().roots[screen].root;
-        let keymap = Keymap::read(&holder).unwrap();
-        let escape = keymap.keycode(XK_ESCAPE).unwrap();
-        grab_variants(&holder, root, escape, &[ModMask::M4]).unwrap();
+        let harness = X11TestHarness::new();
+        grab_variants(
+            &harness.connection,
+            harness.root,
+            harness.escape,
+            &[ModMask::M4],
+        )
+        .unwrap();
         let status = HotkeyStatus::default();
         let monitor = LinuxHotkeyMonitor::start_for(
             LinuxHotkey::default(),
@@ -756,19 +730,11 @@ mod tests {
             status.clone(),
         )
         .unwrap();
-        let alt = keymap.keycode(XK_ALT_L).unwrap();
-        let space = keymap.keycode(XK_SPACE).unwrap();
         for expected in [HotkeyEvent::Start, HotkeyEvent::Finish, HotkeyEvent::Start] {
             if expected != HotkeyEvent::Finish {
-                send_key(&holder, root, KEY_PRESS, alt);
-                send_key(&holder, root, KEY_PRESS, space);
-                send_key(&holder, root, KEY_RELEASE, space);
-                send_key(&holder, root, KEY_RELEASE, alt);
+                harness.tap_alt_space();
             }
-            assert_eq!(
-                monitor.events.recv_timeout(Duration::from_secs(1)).unwrap(),
-                expected,
-            );
+            assert_eq!(recv_event(&monitor), expected);
         }
         // The second tap locks recording and releases the shortcut modifiers.
         assert!(
@@ -778,36 +744,34 @@ mod tests {
                 .is_err()
         );
         assert!(status.warning().is_none());
-        send_key(&holder, root, KEY_PRESS, escape);
-        assert_eq!(
-            monitor.events.recv_timeout(Duration::from_secs(1)).unwrap(),
-            HotkeyEvent::Cancel,
-        );
-        send_key(&holder, root, KEY_RELEASE, escape);
+        harness.send_key(KEY_PRESS, harness.escape);
+        assert_eq!(recv_event(&monitor), HotkeyEvent::Cancel);
+        harness.send_key(KEY_RELEASE, harness.escape);
         drop(monitor);
         let variants = lock_variants(ModMask::default(), ModMask::M2);
-        grab_variants(&holder, root, escape, &variants).unwrap();
+        grab_variants(&harness.connection, harness.root, harness.escape, &variants).unwrap();
     }
 
     #[test]
     #[ignore = "requires an isolated X11 display"]
     fn conflicted_escape_fallback_releases_partial_grabs() {
-        let _guard = X11_TEST_LOCK
-            .lock()
-            .unwrap_or_else(|error| error.into_inner());
-        let (holder, screen) = RustConnection::connect(None).unwrap();
-        let root = holder.setup().roots[screen].root;
-        let escape = Keymap::read(&holder).unwrap().keycode(XK_ESCAPE).unwrap();
-        grab_variants(&holder, root, escape, &[ModMask::LOCK]).unwrap();
+        let harness = X11TestHarness::new();
+        grab_variants(
+            &harness.connection,
+            harness.root,
+            harness.escape,
+            &[ModMask::LOCK],
+        )
+        .unwrap();
         let (connection, _) = RustConnection::connect(None).unwrap();
         let variants = lock_variants(ModMask::default(), ModMask::M2);
         assert!(
-            grab_escape(&connection, root, escape, &variants)
+            grab_escape(&connection, harness.root, harness.escape, &variants)
                 .unwrap()
                 .is_empty()
         );
         // Plain Escape was grabbed before the lock variant failed. It must be freed.
-        grab_variants(&holder, root, escape, &variants).unwrap();
-        assert!(grab_escape(&connection, 0, escape, &variants).is_err());
+        grab_variants(&harness.connection, harness.root, harness.escape, &variants).unwrap();
+        assert!(grab_escape(&connection, 0, harness.escape, &variants).is_err());
     }
 }

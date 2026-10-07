@@ -7,8 +7,8 @@ team_id=${VOICE_CONTROL_TEAM_ID:?Set VOICE_CONTROL_TEAM_ID to the Apple Develope
 identity=$(hex_codesign_identity "$team_id")
 bundle="$root/target/HEX Service.app"
 executable="$bundle/Contents/MacOS/hex-service"
-version=${HEX_VERSION:-$(cargo metadata --no-deps --format-version 1 --manifest-path "$root/Cargo.toml" | jq -r '.packages[0].version')}
-build_number=${HEX_BUILD_NUMBER:-$(printf '%s\n' "$version" | awk -F. '{ print ($1 * 10000) + ($2 * 100) + $3 }')}
+version=$(hex_version "$root")
+build_number=$(hex_build_number "$version")
 
 cargo build --release --manifest-path "$root/Cargo.toml"
 rm -rf "$bundle"

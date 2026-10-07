@@ -33,16 +33,8 @@ body {
   margin: 0;
 }
 
-button,
 a {
   font: inherit;
-}
-
-button {
-  color: inherit;
-}
-
-a {
   color: inherit;
   text-decoration: none;
 }
@@ -74,17 +66,14 @@ a {
   position: relative;
   z-index: 1;
   display: flex;
+  align-items: center;
+  justify-content: space-between;
   width: 100%;
   max-width: 88rem;
   margin: 0 auto;
+  padding-top: clamp(1.5rem, 4vh, 2.75rem);
   padding-right: clamp(1.25rem, 4vw, 4rem);
   padding-left: clamp(1.25rem, 4vw, 4rem);
-}
-
-.header {
-  align-items: center;
-  justify-content: space-between;
-  padding-top: clamp(1.5rem, 4vh, 2.75rem);
 }
 
 .wordmark {
@@ -121,6 +110,7 @@ a {
 
 .requirements {
   color: #777b82;
+  font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
   font-size: 0.75rem;
   letter-spacing: 0.02em;
 }
@@ -241,10 +231,6 @@ a.download:hover {
 .download__arrow {
   color: #686a6e;
   font-size: 1rem;
-}
-
-.requirements {
-  font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
 }
 
 @media (max-width: 39rem) {

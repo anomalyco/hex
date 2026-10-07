@@ -111,14 +111,7 @@ pub(crate) fn completion_recorded_at(directory: &Path) -> bool {
 
 pub(crate) fn record_pending_at(directory: &Path) -> color_eyre::Result<()> {
     fs::create_dir_all(directory)?;
-    let file = OpenOptions::new()
-        .create(true)
-        .truncate(false)
-        .write(true)
-        .mode(0o600)
-        .open(directory.join("onboarding-pending"))?;
-    file.set_permissions(fs::Permissions::from_mode(0o600))?;
-    file.sync_all()?;
+    write_owner_only_marker(&directory.join("onboarding-pending"), false)?;
     File::open(directory)?.sync_all()?;
     Ok(())
 }
@@ -127,16 +120,21 @@ pub(crate) fn record_completion_at(directory: &Path) -> color_eyre::Result<()> {
     fs::create_dir_all(directory)?;
     let destination = directory.join("onboarding-complete");
     let temporary = directory.join(".onboarding-complete.tmp");
-    let file = OpenOptions::new()
-        .create(true)
-        .truncate(true)
-        .write(true)
-        .mode(0o600)
-        .open(&temporary)?;
-    file.set_permissions(fs::Permissions::from_mode(0o600))?;
-    file.sync_all()?;
+    write_owner_only_marker(&temporary, true)?;
     fs::rename(temporary, destination)?;
     File::open(directory)?.sync_all()?;
+    Ok(())
+}
+
+fn write_owner_only_marker(path: &Path, truncate: bool) -> color_eyre::Result<()> {
+    let file = OpenOptions::new()
+        .create(true)
+        .truncate(truncate)
+        .write(true)
+        .mode(0o600)
+        .open(path)?;
+    file.set_permissions(fs::Permissions::from_mode(0o600))?;
+    file.sync_all()?;
     Ok(())
 }
 

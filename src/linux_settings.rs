@@ -7,7 +7,10 @@ use serde::{Deserialize, Serialize};
 use x11rb::protocol::xproto::ModMask;
 use x11rb::rust_connection::RustConnection;
 
-use crate::linux_input::{Keymap, XK_ALT_L, XK_ALT_R};
+use crate::linux_input::{
+    Keymap, XK_ALT_L, XK_ALT_R, XK_CONTROL_L, XK_CONTROL_R, XK_SHIFT_L, XK_SHIFT_R, XK_SUPER_L,
+    XK_SUPER_R,
+};
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(default)]
@@ -140,10 +143,10 @@ impl LinuxHotkey {
     ) -> Result<ModMask> {
         let mut result = ModMask::default();
         for (enabled, symbols) in [
-            (self.control, &[0xffe3, 0xffe4][..]),
+            (self.control, &[XK_CONTROL_L, XK_CONTROL_R][..]),
             (self.alt, &[XK_ALT_L, XK_ALT_R][..]),
-            (self.shift, &[0xffe1, 0xffe2][..]),
-            (self.super_key, &[0xffeb, 0xffec][..]),
+            (self.shift, &[XK_SHIFT_L, XK_SHIFT_R][..]),
+            (self.super_key, &[XK_SUPER_L, XK_SUPER_R][..]),
         ] {
             if enabled {
                 result |= keymap.modifier_for(connection, symbols)?;

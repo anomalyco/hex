@@ -3,9 +3,10 @@ set -eu
 
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 team_id=${VOICE_CONTROL_TEAM_ID:?Set VOICE_CONTROL_TEAM_ID to the Apple Developer signing team}
+. "$root/scripts/macos-signing.sh"
 mode=${1:-prepare}
-version=${HEX_VERSION:-$(cargo metadata --no-deps --format-version 1 --manifest-path "$root/Cargo.toml" | jq -r '.packages[0].version')}
-build_number=${HEX_BUILD_NUMBER:-$(printf '%s\n' "$version" | awk -F. '{ print ($1 * 10000) + ($2 * 100) + $3 }')}
+version=$(hex_version "$root")
+build_number=$(hex_build_number "$version")
 notary_profile=${HEX_NOTARY_PROFILE:?Set HEX_NOTARY_PROFILE to the matching notarization profile}
 bucket=${HEX_RELEASE_BUCKET:-hex-releases}
 base_url=${HEX_RELEASE_BASE_URL:-https://downloads.hex.kitlangton.dev}
@@ -112,7 +113,6 @@ export HEX_VERSION="$version" HEX_BUILD_NUMBER="$build_number"
 bundle=$("$root/scripts/build-app.sh")
 bundle_name=$(basename "$bundle")
 "$root/scripts/validate-app.sh" "$bundle" Hex.app "$version" "$build_number" >/dev/null
-. "$root/scripts/macos-signing.sh"
 identity=$(hex_codesign_identity "$team_id")
 rm -rf "$dist/staging" "$dist/update-staging" "$updates"
 rm -f "$dist/HEX-$version.zip" "$dist/$artifact" "$dist/$update_artifact"

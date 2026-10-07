@@ -23,7 +23,7 @@ const VERSION: u32 = 1;
 const MAX_FRAME: usize = 128 * 1024;
 const IO_TIMEOUT: Duration = Duration::from_secs(2);
 const CLIENTS: usize = 8;
-pub const UNIT: &str = "hex.service";
+const UNIT: &str = "hex.service";
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum Request {
@@ -162,11 +162,12 @@ fn write_frame<T: Serialize>(stream: &mut UnixStream, message: &T) -> Result<()>
     if body.len() > MAX_FRAME {
         bail!("HEX service message exceeds the size limit");
     }
-    let mut frame = Vec::with_capacity(body.len() + 4);
-    frame.extend_from_slice(&(body.len() as u32).to_be_bytes());
-    frame.extend(body);
     let deadline = Instant::now() + IO_TIMEOUT;
-    let mut bytes = frame.as_slice();
+    write_all(stream, &(body.len() as u32).to_be_bytes(), deadline)?;
+    write_all(stream, &body, deadline)
+}
+
+fn write_all(stream: &mut UnixStream, mut bytes: &[u8], deadline: Instant) -> Result<()> {
     while !bytes.is_empty() {
         let remaining = deadline
             .checked_duration_since(Instant::now())
@@ -485,7 +486,7 @@ fn systemctl(arguments: &[&str]) -> Result<()> {
     }
 }
 
-pub fn ensure_started() -> Result<()> {
+fn ensure_started() -> Result<()> {
     if let Ok(state) = request(Request::Snapshot) {
         if state.session != Session::current() {
             bail!(
@@ -519,10 +520,14 @@ pub fn ensure_started() -> Result<()> {
 }
 
 pub fn start() -> Result<()> {
-    if request(Request::Snapshot).is_ok_and(|state| state.session != Session::current()) {
-        restart()?;
+    match request(Request::Snapshot) {
+        Ok(state) if state.session == Session::current() => {}
+        Ok(_) => {
+            restart()?;
+            ensure_started()?;
+        }
+        Err(_) => ensure_started()?,
     }
-    ensure_started()?;
     request(Request::Desktop(DesktopAction::StartListening))?;
     Ok(())
 }

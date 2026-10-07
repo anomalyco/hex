@@ -353,7 +353,6 @@ impl HotkeyModifiers {
             && self.option.is_some() == expected.option.is_some()
             && self.shift.is_some() == expected.shift.is_some()
             && self.command.is_some() == expected.command.is_some()
-            && self.function == expected.function
     }
 }
 
@@ -495,7 +494,7 @@ impl Default for DictationPostProcessing {
 }
 
 impl RecordingAudioBehavior {
-    pub const ALL: [Self; 3] = [Self::DoNothing, Self::Mute, Self::PauseMedia];
+    pub const ALL: [Self; 3] = [Self::Mute, Self::PauseMedia, Self::DoNothing];
 
     pub const fn label(self) -> &'static str {
         match self {
@@ -863,9 +862,7 @@ impl AppSettings {
     }
 
     fn repair_hotkey_conflict(&mut self) {
-        if !self.voice_action.enabled
-            || !hotkeys_conflict(&self.dictation_hotkey, &self.edit_hotkey)
-        {
+        if !self.voice_action.enabled || !self.dictation_hotkey.overlaps(&self.edit_hotkey) {
             return;
         }
         let edit_with_key = crate::keyboard::key_code_for('e')
@@ -892,7 +889,7 @@ impl AppSettings {
         ]
         .into_iter()
         .flatten()
-        .find(|binding| !hotkeys_conflict(&self.dictation_hotkey, binding))
+        .find(|binding| !self.dictation_hotkey.overlaps(binding))
         {
             tracing::warn!("replaced a conflicting Voice Action shortcut");
             self.edit_hotkey = binding;
@@ -903,10 +900,6 @@ impl AppSettings {
 fn settings_temporary_path(path: &std::path::Path) -> PathBuf {
     let sequence = SETTINGS_TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed);
     path.with_extension(format!("json.{}.{}.tmp", std::process::id(), sequence))
-}
-
-pub fn hotkeys_conflict(dictation: &HotkeyBinding, edit: &HotkeyBinding) -> bool {
-    dictation.overlaps(edit)
 }
 
 pub fn hotkey_conflicts(
@@ -1101,32 +1094,50 @@ mod tests {
         );
     }
 
+    struct TestSettingsDir {
+        directory: PathBuf,
+        path: PathBuf,
+    }
+
+    impl TestSettingsDir {
+        fn new(prefix: &str) -> Self {
+            let directory = std::env::temp_dir().join(format!(
+                "hex-{prefix}-{}-{}",
+                std::process::id(),
+                SETTINGS_TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed),
+            ));
+            fs::create_dir(&directory).unwrap();
+            let path = directory.join("settings.json");
+            Self { directory, path }
+        }
+    }
+
+    impl Drop for TestSettingsDir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.directory);
+        }
+    }
+
     #[test]
     fn new_settings_require_onboarding_across_reloads() {
         use crate::onboarding::{completion_recorded_at, record_completion_at};
         use std::os::unix::fs::PermissionsExt;
 
-        let directory = std::env::temp_dir().join(format!(
-            "hex-new-onboarding-{}-{}",
-            std::process::id(),
-            SETTINGS_TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed),
-        ));
-        fs::create_dir(&directory).unwrap();
-        let path = directory.join("settings.json");
-        assert!(!completion_recorded_at(&directory));
+        let dir = TestSettingsDir::new("new-onboarding");
+        assert!(!completion_recorded_at(&dir.directory));
 
-        let mut settings = AppSettings::load_from(&path).unwrap();
-        assert!(!path.exists());
+        let mut settings = AppSettings::load_from(&dir.path).unwrap();
+        assert!(!dir.path.exists());
         assert_eq!(settings.sound_effects, AppSettings::default().sound_effects);
         settings.sound_effects = false;
         settings.double_tap_lock = false;
-        settings.write_to(&path).unwrap();
-        assert!(path.is_file());
-        assert!(!directory.join("models").exists());
-        assert!(!completion_recorded_at(&directory));
-        assert!(!directory.join("onboarding-complete").exists());
+        settings.write_to(&dir.path).unwrap();
+        assert!(dir.path.is_file());
+        assert!(!dir.directory.join("models").exists());
+        assert!(!completion_recorded_at(&dir.directory));
+        assert!(!dir.directory.join("onboarding-complete").exists());
         assert_eq!(
-            fs::metadata(directory.join("onboarding-pending"))
+            fs::metadata(dir.directory.join("onboarding-pending"))
                 .unwrap()
                 .permissions()
                 .mode()
@@ -1135,114 +1146,88 @@ mod tests {
         );
         drop(settings);
 
-        let reloaded = AppSettings::load_from(&path).unwrap();
+        let reloaded = AppSettings::load_from(&dir.path).unwrap();
         assert!(!reloaded.sound_effects);
         assert!(!reloaded.double_tap_lock);
-        reloaded.write_to(&path).unwrap();
-        assert!(!completion_recorded_at(&directory));
-        assert!(!directory.join("onboarding-complete").exists());
+        reloaded.write_to(&dir.path).unwrap();
+        assert!(!completion_recorded_at(&dir.directory));
+        assert!(!dir.directory.join("onboarding-complete").exists());
 
-        record_completion_at(&directory).unwrap();
-        assert!(completion_recorded_at(&directory));
+        record_completion_at(&dir.directory).unwrap();
+        assert!(completion_recorded_at(&dir.directory));
         drop(reloaded);
-        AppSettings::load_from(&path).unwrap();
-        assert!(completion_recorded_at(&directory));
-        fs::remove_dir_all(directory).unwrap();
+        AppSettings::load_from(&dir.path).unwrap();
+        assert!(completion_recorded_at(&dir.directory));
     }
 
     #[test]
     fn loading_strips_finder_bundle_extensions_from_mode_applications() {
-        let directory = std::env::temp_dir().join(format!(
-            "hex-mode-applications-{}-{}",
-            std::process::id(),
-            SETTINGS_TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed),
-        ));
-        fs::create_dir(&directory).unwrap();
-        let path = directory.join("settings.json");
+        let dir = TestSettingsDir::new("mode-applications");
         fs::write(
-            &path,
+            &dir.path,
             br#"{"dictation_processing":{"modes":[{"name":"Code","applications":["Zed.app","Ghostty.app","Zed"]}]}}"#,
         )
         .unwrap();
 
-        let settings = AppSettings::load_from(&path).unwrap();
+        let settings = AppSettings::load_from(&dir.path).unwrap();
         assert_eq!(
             settings.dictation_processing.modes[0].applications,
             vec!["Ghostty".to_string(), "Zed".to_string()]
         );
-        let persisted: AppSettings = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        let persisted: AppSettings = serde_json::from_slice(&fs::read(&dir.path).unwrap()).unwrap();
         assert_eq!(
             persisted.dictation_processing.modes[0].applications,
             vec!["Ghostty".to_string(), "Zed".to_string()]
         );
-        fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
     fn loading_persists_normalizations_only_when_they_change_settings() {
-        let directory = std::env::temp_dir().join(format!(
-            "hex-normalized-settings-{}-{}",
-            std::process::id(),
-            SETTINGS_TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed),
-        ));
-        fs::create_dir(&directory).unwrap();
-        let path = directory.join("settings.json");
+        let dir = TestSettingsDir::new("normalized-settings");
         fs::write(
-            &path,
+            &dir.path,
             br#"{"text_replacements":[{"matched_phrase":"open code","output":"OpenCode"}]}"#,
         )
         .unwrap();
 
-        let settings = AppSettings::load_from(&path).unwrap();
+        let settings = AppSettings::load_from(&dir.path).unwrap();
         assert!(settings.text_replacements.is_empty());
-        let persisted = fs::read_to_string(&path).unwrap();
+        let persisted = fs::read_to_string(&dir.path).unwrap();
         assert!(!persisted.contains("text_replacements"));
         assert!(persisted.contains("OpenCode"));
 
-        let written = fs::metadata(&path).unwrap().modified().unwrap();
+        let written = fs::metadata(&dir.path).unwrap().modified().unwrap();
         std::thread::sleep(std::time::Duration::from_millis(10));
-        let reloaded = AppSettings::load_from(&path).unwrap();
+        let reloaded = AppSettings::load_from(&dir.path).unwrap();
         assert_eq!(
             reloaded.dictation_processing.default_mode.replacements,
             settings.dictation_processing.default_mode.replacements
         );
-        assert_eq!(fs::metadata(&path).unwrap().modified().unwrap(), written);
-        fs::remove_dir_all(directory).unwrap();
+        assert_eq!(
+            fs::metadata(&dir.path).unwrap().modified().unwrap(),
+            written
+        );
     }
 
     #[test]
     fn rewriting_legacy_rust_settings_preserves_onboarding_migration() {
-        let directory = std::env::temp_dir().join(format!(
-            "hex-legacy-onboarding-{}-{}",
-            std::process::id(),
-            SETTINGS_TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed),
-        ));
-        fs::create_dir(&directory).unwrap();
-        let path = directory.join("settings.json");
-        fs::write(&path, b"{}").unwrap();
+        let dir = TestSettingsDir::new("legacy-onboarding");
+        fs::write(&dir.path, b"{}").unwrap();
 
-        let settings = AppSettings::load_from(&path).unwrap();
-        settings.write_to(&path).unwrap();
-        assert!(!directory.join("onboarding-pending").exists());
-        assert!(crate::onboarding::completion_recorded_at(&directory));
-        assert!(directory.join("onboarding-complete").is_file());
-        fs::remove_dir_all(directory).unwrap();
+        let settings = AppSettings::load_from(&dir.path).unwrap();
+        settings.write_to(&dir.path).unwrap();
+        assert!(!dir.directory.join("onboarding-pending").exists());
+        assert!(crate::onboarding::completion_recorded_at(&dir.directory));
+        assert!(dir.directory.join("onboarding-complete").is_file());
     }
 
     #[test]
     fn first_settings_write_requires_the_pending_marker() {
-        let directory = std::env::temp_dir().join(format!(
-            "hex-pending-onboarding-{}-{}",
-            std::process::id(),
-            SETTINGS_TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed),
-        ));
-        fs::create_dir(&directory).unwrap();
-        fs::create_dir(directory.join("onboarding-pending")).unwrap();
-        let path = directory.join("settings.json");
+        let dir = TestSettingsDir::new("pending-onboarding");
+        fs::create_dir(dir.directory.join("onboarding-pending")).unwrap();
 
-        assert!(AppSettings::default().write_to(&path).is_err());
-        assert!(!path.exists());
-        fs::remove_dir_all(directory).unwrap();
+        assert!(AppSettings::default().write_to(&dir.path).is_err());
+        assert!(!dir.path.exists());
     }
 
     #[test]
@@ -1729,10 +1714,7 @@ mod tests {
 
         settings.repair_hotkey_conflict();
 
-        assert!(!hotkeys_conflict(
-            &settings.dictation_hotkey,
-            &settings.edit_hotkey
-        ));
+        assert!(!settings.dictation_hotkey.overlaps(&settings.edit_hotkey));
     }
 
     #[test]

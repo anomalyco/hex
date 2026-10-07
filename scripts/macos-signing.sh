@@ -21,3 +21,11 @@ hex_codesign_identity() {
   esac
   printf '%s\n' "$identity"
 }
+
+hex_version() {
+  printf '%s\n' "${HEX_VERSION:-$(cargo metadata --no-deps --format-version 1 --manifest-path "$1/Cargo.toml" | jq -r '.packages[0].version')}"
+}
+
+hex_build_number() {
+  printf '%s\n' "${HEX_BUILD_NUMBER:-$(printf '%s\n' "$1" | awk -F. '{ print ($1 * 10000) + ($2 * 100) + $3 }')}"
+}

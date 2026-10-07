@@ -55,6 +55,7 @@ for _ in 0..<200 {
         let bounds = window[kCGWindowBounds as String] as? [String: CGFloat]
         return (title == nil || title == "" || title == "HEX")
             && (bounds?["Width"] ?? 0) >= 800
+            && (bounds?["Height"] ?? 0) >= 400
     }
     if let window = candidates.max(by: {
         let lhs = $0[kCGWindowBounds as String] as! [String: CGFloat]

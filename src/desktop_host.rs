@@ -10,8 +10,7 @@ pub(crate) struct DesktopSnapshot {
     pub(crate) activity: DesktopActivity,
     pub(crate) dictation_shortcut: Vec<String>,
     pub(crate) double_tap_lock: bool,
-    pub(crate) double_tap_only: bool,
-    pub(crate) listener: Option<DesktopListenerSnapshot>,
+    pub(crate) listener: DesktopListenerSnapshot,
     pub(crate) operation_error: Option<String>,
     pub(crate) transcription: DesktopTranscriptionSnapshot,
     pub(crate) update_status: DesktopUpdateStatus,
@@ -59,7 +58,6 @@ pub(crate) enum DesktopAction {
     RestartIntoUpdate,
     SetDictationShortcut(DesktopShortcut),
     SetDoubleTapLock(bool),
-    SetDoubleTapOnly(bool),
     StartListening,
     StopListening,
 }
@@ -73,40 +71,6 @@ pub(crate) trait DesktopHost {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn owns_host_object(_: Box<dyn DesktopHost>) {}
-
-    struct TestHost;
-
-    impl DesktopHost for TestHost {
-        fn snapshot(&self) -> DesktopSnapshot {
-            DesktopSnapshot {
-                activity: DesktopActivity::default(),
-                dictation_shortcut: Vec::new(),
-                double_tap_lock: false,
-                double_tap_only: false,
-                listener: None,
-                operation_error: None,
-                transcription: DesktopTranscriptionSnapshot {
-                    downloaded_bytes: 0,
-                    error: None,
-                    preparation_stage: None,
-                    selection: TranscriptionSelection::default(),
-                    preparing: None,
-                },
-                update_status: DesktopUpdateStatus::Unavailable,
-            }
-        }
-
-        fn dispatch(&mut self, _: DesktopAction) -> Result<()> {
-            Ok(())
-        }
-    }
-
-    #[test]
-    fn host_can_be_contained_by_the_shared_window() {
-        owns_host_object(Box::new(TestHost));
-    }
 
     #[test]
     fn older_listener_snapshots_have_no_warning() {

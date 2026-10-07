@@ -97,9 +97,6 @@ export interface Host {
 
 export class Service extends Context.Service<Service, Interface>()("@kitlangton/hex/Hex") {}
 
-const causeFields = (cause: unknown): { readonly cause?: unknown } =>
-  cause === undefined ? {} : { cause }
-
 const toHexError = (error: unknown): HexError => {
   if (!(error instanceof PromiseHexError)) {
     return new RequestError({ code: "unknown", message: "HEX operation failed", cause: error })
@@ -108,7 +105,7 @@ const toHexError = (error: unknown): HexError => {
     code: error.code,
     message: error.message,
     ...(error.remoteCode === undefined ? {} : { remoteCode: error.remoteCode }),
-    ...causeFields(error.cause),
+    ...(error.cause === undefined ? {} : { cause: error.cause }),
   }
   switch (error.code) {
     case "startup-failed":

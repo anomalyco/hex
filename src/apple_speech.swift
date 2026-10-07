@@ -356,22 +356,6 @@ private func authorization() async -> SFSpeechRecognizerAuthorizationStatus {
     }
 }
 
-@_cdecl("hex_apple_speech_supported")
-public func hexAppleSpeechSupported(_ identifier: UnsafePointer<CChar>?) -> Int32 {
-    guard #available(macOS 26.0, *),
-          SpeechTranscriber.isAvailable,
-          let requested = locale(identifier) else {
-        return 0
-    }
-    let result = blocking(timeout: capabilityTimeout, operationName: "Apple Speech capability check") {
-        await SpeechTranscriber.supportedLocale(equivalentTo: requested) != nil
-    }
-    return switch result {
-    case .success(let supported): supported ? 1 : 0
-    case .failure: -1
-    }
-}
-
 @_cdecl("hex_apple_speech_ready")
 public func hexAppleSpeechReady(_ identifier: UnsafePointer<CChar>?) -> Int32 {
     guard #available(macOS 26.0, *),

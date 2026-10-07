@@ -781,12 +781,7 @@ fn default_manifest() -> Manifest {
 }
 
 fn save_manifest(path: &Path, manifest: &Manifest) -> Result<()> {
-    let temporary = path.with_extension("json.tmp");
-    let mut bytes = serde_json::to_vec_pretty(manifest)?;
-    bytes.push(b'\n');
-    fs::write(&temporary, bytes)?;
-    fs::rename(temporary, path)?;
-    Ok(())
+    crate::transcription_models::write_json_atomically(path, manifest)
 }
 
 fn save_recording(

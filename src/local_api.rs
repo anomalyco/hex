@@ -610,27 +610,43 @@ fn transcription_action(
 }
 
 fn developer_control_action(request: HttpRequest, available: bool) -> RequestAction {
-    if !available {
-        return RequestAction::Respond(HttpResponse::code(404, "developer-control-unavailable"));
-    }
-    if !request.has_content_type("application/json") {
-        return RequestAction::Respond(HttpResponse::code(415, "unsupported-content-type"));
-    }
-    let Some(content_length) = request.content_length else {
-        return RequestAction::Respond(HttpResponse::code(411, "length-required"));
-    };
-    if content_length > MAX_DEVELOPER_CONTROL_BYTES {
-        return RequestAction::Respond(HttpResponse::code(413, "developer-control-too-large"));
-    }
-    RequestAction::DeveloperControl {
-        content_length,
-        body_prefix: request.body_prefix,
-    }
+    json_post_action(
+        request,
+        available,
+        "developer-control-unavailable",
+        MAX_DEVELOPER_CONTROL_BYTES,
+        "developer-control-too-large",
+        |content_length, body_prefix| RequestAction::DeveloperControl {
+            content_length,
+            body_prefix,
+        },
+    )
 }
 
 fn dictation_start_action(request: HttpRequest, available: bool) -> RequestAction {
+    json_post_action(
+        request,
+        available,
+        "service-capture-unavailable",
+        MAX_DICTATION_SOURCE_BYTES + 32,
+        "source-too-large",
+        |content_length, body_prefix| RequestAction::DictationStart {
+            content_length,
+            body_prefix,
+        },
+    )
+}
+
+fn json_post_action(
+    request: HttpRequest,
+    available: bool,
+    unavailable_code: &'static str,
+    max_bytes: usize,
+    too_large_code: &'static str,
+    build: impl FnOnce(usize, Vec<u8>) -> RequestAction,
+) -> RequestAction {
     if !available {
-        return RequestAction::Respond(HttpResponse::code(404, "service-capture-unavailable"));
+        return RequestAction::Respond(HttpResponse::code(404, unavailable_code));
     }
     if !request.has_content_type("application/json") {
         return RequestAction::Respond(HttpResponse::code(415, "unsupported-content-type"));
@@ -638,13 +654,10 @@ fn dictation_start_action(request: HttpRequest, available: bool) -> RequestActio
     let Some(content_length) = request.content_length else {
         return RequestAction::Respond(HttpResponse::code(411, "length-required"));
     };
-    if content_length > MAX_DICTATION_SOURCE_BYTES + 32 {
-        return RequestAction::Respond(HttpResponse::code(413, "source-too-large"));
+    if content_length > max_bytes {
+        return RequestAction::Respond(HttpResponse::code(413, too_large_code));
     }
-    RequestAction::DictationStart {
-        content_length,
-        body_prefix: request.body_prefix,
-    }
+    build(content_length, request.body_prefix)
 }
 
 #[derive(Deserialize)]
@@ -1004,11 +1017,16 @@ fn transcription_selection(
 ) -> std::result::Result<crate::transcription_models::TranscriptionSelection, &'static str> {
     let query = selection_query(path)?;
     let model = query.model.ok_or("unknown-model")?;
+    validate_selection(model, query.into_language())
+}
+
+fn validate_selection(
+    model: crate::transcription_models::TranscriptionModelId,
+    language: String,
+) -> std::result::Result<crate::transcription_models::TranscriptionSelection, &'static str> {
     let selection = crate::transcription_models::TranscriptionSelection {
         model,
-        language: query.language.unwrap_or_else(|| {
-            crate::transcription_models::TranscriptionSelection::default().language
-        }),
+        language,
         recognition_hints: String::new(),
     };
     crate::transcription_models::validate(&selection).map_err(|_| "unsupported-model")?;
@@ -1019,6 +1037,14 @@ fn transcription_selection(
 struct SelectionQuery {
     model: Option<crate::transcription_models::TranscriptionModelId>,
     language: Option<String>,
+}
+
+impl SelectionQuery {
+    fn into_language(self) -> String {
+        self.language.unwrap_or_else(|| {
+            crate::transcription_models::TranscriptionSelection::default().language
+        })
+    }
 }
 
 fn selection_query(path: &str) -> std::result::Result<SelectionQuery, &'static str> {
@@ -1049,7 +1075,14 @@ fn transcribe_audio(
     shutdown: &AtomicBool,
     admission: crate::transcription_service::AudioAdmission,
 ) -> Option<HttpResponse> {
-    if let Err(error) = read_body(stream, content_length, &mut body, shutdown) {
+    if let Err(error) = read_body_bounded(
+        stream,
+        content_length,
+        &mut body,
+        shutdown,
+        MAX_AUDIO_BYTES,
+        UPLOAD_DEADLINE,
+    ) {
         return Some(match error {
             BodyReadError::ResourceExhausted => HttpResponse::code(413, "resource-exhausted"),
             BodyReadError::Invalid => HttpResponse::code(400, "invalid-audio"),
@@ -1150,22 +1183,6 @@ enum BodyReadError {
     Io(std::io::Error),
 }
 
-fn read_body(
-    stream: &mut TcpStream,
-    content_length: usize,
-    body: &mut Vec<u8>,
-    shutdown: &AtomicBool,
-) -> std::result::Result<(), BodyReadError> {
-    read_body_bounded(
-        stream,
-        content_length,
-        body,
-        shutdown,
-        MAX_AUDIO_BYTES,
-        UPLOAD_DEADLINE,
-    )
-}
-
 fn read_body_bounded(
     stream: &mut TcpStream,
     content_length: usize,
@@ -1222,9 +1239,7 @@ fn model_prepare_path(path: &str) -> Option<&str> {
 }
 
 fn model_infos(path: &str) -> std::result::Result<Vec<ModelInfo>, &'static str> {
-    let language = selection_query(path)?
-        .language
-        .unwrap_or_else(|| crate::transcription_models::TranscriptionSelection::default().language);
+    let language = selection_query(path)?.into_language();
     if !crate::transcription_models::LANGUAGES
         .iter()
         .any(|(code, _)| *code == language)
@@ -1257,17 +1272,9 @@ fn model_infos(path: &str) -> std::result::Result<Vec<ModelInfo>, &'static str> 
 fn installation_selection(
     model: &crate::transcription_models::ModelDefinition,
     path: &str,
-) -> Result<crate::transcription_models::TranscriptionSelection> {
-    let query = selection_query(path).map_err(|code| eyre!(code))?;
-    let selection = crate::transcription_models::TranscriptionSelection {
-        model: model.id,
-        language: query.language.unwrap_or_else(|| {
-            crate::transcription_models::TranscriptionSelection::default().language
-        }),
-        recognition_hints: String::new(),
-    };
-    crate::transcription_models::validate(&selection)?;
-    Ok(selection)
+) -> std::result::Result<crate::transcription_models::TranscriptionSelection, &'static str> {
+    let query = selection_query(path)?;
+    validate_selection(model.id, query.into_language())
 }
 
 fn stream_model_prepare(
@@ -1383,17 +1390,9 @@ fn stream_model_prepare_with(
         last_stage = Some(current_stage);
         last_downloaded = current_downloaded;
         match result_receiver.try_recv() {
-            Ok(result) => {
-                break Some((
-                    result,
-                    crate::transcription_models::ModelPreparationStage::load(&stage),
-                ));
-            }
+            Ok(result) => break Some(result),
             Err(TryRecvError::Disconnected) => {
-                break Some((
-                    Err(eyre!("model preparer stopped unexpectedly")),
-                    crate::transcription_models::ModelPreparationStage::load(&stage),
-                ));
+                break Some(Err(eyre!("model preparer stopped unexpectedly")));
             }
             Err(TryRecvError::Empty) => {}
         }
@@ -1417,7 +1416,7 @@ fn stream_model_prepare_with(
         }
         return;
     }
-    let Some((result, failed_stage)) = result else {
+    let Some(result) = result else {
         return;
     };
     match result {
@@ -1432,6 +1431,7 @@ fn stream_model_prepare_with(
             );
         }
         Err(error) => {
+            let failed_stage = crate::transcription_models::ModelPreparationStage::load(&stage);
             let code = match failed_stage {
                 crate::transcription_models::ModelPreparationStage::Downloading => {
                     "download-failed"
@@ -1843,10 +1843,13 @@ fn prepare_discovery_path(path: &Path) -> Result<()> {
 }
 
 fn valid_discovery(document: &DiscoveryDocument) -> bool {
-    document.api_version == API_VERSION
-        && document.token.len() == 68
-        && document.token.starts_with("hex_")
-        && document.token[4..]
+    document.api_version == API_VERSION && valid_token(&document.token)
+}
+
+fn valid_token(token: &str) -> bool {
+    token.len() == 68
+        && token.starts_with("hex_")
+        && token[4..]
             .bytes()
             .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
 }
@@ -2566,13 +2569,7 @@ mod tests {
     fn tokens_have_256_bits_of_random_lowercase_hex() {
         let first = generate_token().unwrap();
         let second = generate_token().unwrap();
-        assert_eq!(first.len(), 68);
-        assert!(first.starts_with("hex_"));
-        assert!(
-            first[4..]
-                .bytes()
-                .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
-        );
+        assert!(valid_token(&first));
         assert_ne!(first, second);
     }
 
@@ -2614,13 +2611,17 @@ mod tests {
     }
 
     fn raw_request(port: u16, request: &str) -> String {
+        String::from_utf8(raw_request_bytes(port, request)).unwrap()
+    }
+
+    fn raw_request_bytes(port: u16, request: &str) -> Vec<u8> {
         let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
         stream
             .set_read_timeout(Some(Duration::from_secs(2)))
             .unwrap();
         stream.write_all(request.as_bytes()).unwrap();
-        let mut response = String::new();
-        stream.read_to_string(&mut response).unwrap();
+        let mut response = Vec::new();
+        stream.read_to_end(&mut response).unwrap();
         response
     }
 
@@ -2640,18 +2641,12 @@ mod tests {
     }
 
     fn request_bytes(port: u16, token: &str, owner_token: &str, path: &str) -> Vec<u8> {
-        let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
-        stream
-            .set_read_timeout(Some(Duration::from_secs(2)))
-            .unwrap();
-        write!(
-            stream,
-            "GET {path} HTTP/1.1\r\nAuthorization: Bearer {token}\r\nX-Hex-Dictation-Token: {owner_token}\r\nConnection: close\r\n\r\n"
+        raw_request_bytes(
+            port,
+            &format!(
+                "GET {path} HTTP/1.1\r\nAuthorization: Bearer {token}\r\nX-Hex-Dictation-Token: {owner_token}\r\nConnection: close\r\n\r\n"
+            ),
         )
-        .unwrap();
-        let mut response = Vec::new();
-        stream.read_to_end(&mut response).unwrap();
-        response
     }
 
     fn response_body(response: &str) -> &str {

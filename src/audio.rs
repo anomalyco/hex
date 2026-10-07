@@ -61,13 +61,19 @@ impl CaptureInstant {
         self.0.checked_sub(earlier.0).map(Duration::from_nanos)
     }
 
-    pub fn saturating_duration_since(self, earlier: Self) -> Duration {
+    pub fn duration_since(self, earlier: Self) -> Duration {
         Duration::from_nanos(self.0.saturating_sub(earlier.0))
     }
 
-    pub fn duration_since(self, earlier: Self) -> Duration {
-        self.saturating_duration_since(earlier)
+    pub fn sub_frames(self, frames: usize, sample_rate: u32) -> Self {
+        self.checked_sub(duration_for_frames(frames, sample_rate))
+            .unwrap_or(self)
     }
+}
+
+pub fn duration_for_frames(frames: usize, sample_rate: u32) -> Duration {
+    let nanos = frames as u128 * 1_000_000_000 / u128::from(sample_rate);
+    Duration::from_nanos(nanos as u64)
 }
 
 #[cfg(target_os = "macos")]
@@ -252,12 +258,7 @@ impl AudioInput {
         let device = host
             .input_devices()
             .wrap_err("could not enumerate input devices")?
-            .find(|device| {
-                device
-                    .to_string()
-                    .to_lowercase()
-                    .contains(&query.to_lowercase())
-            })
+            .find(|device| device_matches(device, query))
             .ok_or_else(|| eyre!("microphone is unavailable: {query}"))?;
         Self::open_device(device)
     }
@@ -413,6 +414,10 @@ impl RecoveringAudioInput {
 
     pub fn is_opening(&self) -> bool {
         self.replacement.is_some()
+    }
+
+    pub fn is_active(&self) -> bool {
+        self.is_open() || self.is_opening() || self.is_recovering()
     }
 
     pub fn cancel_open(&mut self) {
@@ -596,18 +601,20 @@ pub fn input_device_names() -> Result<Vec<String>> {
     Ok(names)
 }
 
+fn device_matches(device: &Device, query: &str) -> bool {
+    device
+        .to_string()
+        .to_lowercase()
+        .contains(&query.to_lowercase())
+}
+
 fn find_device(host: &cpal::Host, queries: &[&str]) -> Result<Device> {
     let devices: Vec<_> = host
         .input_devices()
         .wrap_err("could not enumerate input devices")?
         .collect();
     for query in queries {
-        if let Some(device) = devices.iter().find(|device| {
-            device
-                .to_string()
-                .to_lowercase()
-                .contains(&query.to_lowercase())
-        }) {
+        if let Some(device) = devices.iter().find(|device| device_matches(device, query)) {
             return Ok(device.clone());
         }
     }
@@ -740,18 +747,6 @@ fn mono<T>(samples: &[T], channels: usize, convert: impl Fn(&T) -> f32) -> Vec<f
         .collect()
 }
 
-fn send(
-    sender: &Sender<(Vec<f32>, CaptureInstant)>,
-    chunk: Vec<f32>,
-    captured_through: CaptureInstant,
-) {
-    let _ = sender.send((chunk, captured_through));
-}
-
-fn stream_error(sender: &SyncSender<String>, error: cpal::Error) {
-    report_stream_error(sender, error.to_string());
-}
-
 fn report_stream_error(sender: &SyncSender<String>, error: String) {
     tracing::error!(%error, "microphone stream failed");
     let _ = sender.try_send(error);
@@ -771,13 +766,12 @@ fn build_stream<T: SizedSample>(
             *config,
             move |data: &[T], info| {
                 let captured_through = captured_through(info, data.len() / channels, sample_rate);
-                send(
-                    &sender,
+                let _ = sender.send((
                     mono(data, channels, |sample| convert(*sample)),
                     captured_through,
-                )
+                ));
             },
-            move |error| stream_error(&error_sender, error),
+            move |error| report_stream_error(&error_sender, error.to_string()),
             None,
         )
         .wrap_err_with(|| format!("could not open {} microphone stream", T::FORMAT))
@@ -789,8 +783,7 @@ fn captured_through(
     sample_rate: u32,
 ) -> CaptureInstant {
     let captured_at = CaptureInstant::from_stream(info.timestamp().capture);
-    let nanos = (frames as u128 * 1_000_000_000 / u128::from(sample_rate)) as u64;
-    let duration = Duration::from_nanos(nanos);
+    let duration = duration_for_frames(frames, sample_rate);
     captured_at.checked_add(duration).unwrap_or(captured_at)
 }
 

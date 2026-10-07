@@ -103,7 +103,7 @@ impl MeetingUi {
 struct RuntimeWorkers {
     local_api: Option<crate::local_api::LocalApi>,
     recognition: Option<thread::JoinHandle<()>>,
-    controller: thread::JoinHandle<()>,
+    controller: Option<thread::JoinHandle<()>>,
 }
 
 impl RuntimeWorkers {
@@ -116,9 +116,11 @@ impl RuntimeWorkers {
                 .join()
                 .map_err(|_| eyre!("recognition worker panicked during shutdown"))?;
         }
-        self.controller
-            .join()
-            .map_err(|_| eyre!("meeting controller panicked during shutdown"))?;
+        if let Some(controller) = self.controller {
+            controller
+                .join()
+                .map_err(|_| eyre!("meeting controller panicked during shutdown"))?;
+        }
         Ok(())
     }
 
@@ -256,16 +258,10 @@ pub fn run(shutdown: &'static AtomicBool, launch: Launch) -> Result<()> {
             }
         });
     }
-    let controller_worker =
-        if shell_preview.is_some() || dictation_preview || !crate::DEVELOPER_FEATURES_ENABLED {
-            thread::spawn(move || {
-                while !shutdown.load(Ordering::Relaxed) {
-                    command_receiver.try_iter().for_each(drop);
-                    meeting_request_receiver.try_iter().for_each(drop);
-                    thread::sleep(Duration::from_millis(50));
-                }
-            })
-        } else {
+    let controller_worker = (!shell_preview.is_some()
+        && !dictation_preview
+        && crate::DEVELOPER_FEATURES_ENABLED)
+        .then(|| {
             let controller_events = event_sender.clone();
             thread::spawn(move || {
                 if preview {
@@ -289,7 +285,7 @@ pub fn run(shutdown: &'static AtomicBool, launch: Launch) -> Result<()> {
                     });
                 }
             })
-        };
+        });
 
     let recognition_meeting_requests = meeting_request_sender.clone();
     let (recognition_start_sender, recognition_start_receiver) = if listener.is_some() {
@@ -1146,7 +1142,7 @@ fn button(
         .on_click(move |_, window, _| on_click(window))
 }
 
-#[cfg_attr(not(debug_assertions), allow(dead_code))]
+#[cfg(debug_assertions)]
 pub fn probe() -> Result<()> {
     for application in active_microphone_applications()? {
         println!(

@@ -137,7 +137,6 @@ pub struct ModelDefinition {
     pub id: TranscriptionModelId,
     pub name: &'static str,
     pub realtime: &'static str,
-    pub realtime_context: &'static str,
     pub quality: &'static str,
     pub quality_context: &'static str,
     pub coverage: &'static str,
@@ -308,7 +307,6 @@ pub const MODELS: &[ModelDefinition] = &[
         id: TranscriptionModelId::ParakeetUnifiedEnglish,
         name: "Parakeet Unified English",
         realtime: "~163x",
-        realtime_context: "published speed · M4 Max",
         quality: "1.60%",
         quality_context: "English benchmark",
         coverage: "English",
@@ -323,7 +321,6 @@ pub const MODELS: &[ModelDefinition] = &[
         id: TranscriptionModelId::ParakeetV2,
         name: "Parakeet v2",
         realtime: "~55x",
-        realtime_context: "local speed · M2 Max",
         quality: "1.69%",
         quality_context: "English benchmark",
         coverage: "English",
@@ -338,7 +335,6 @@ pub const MODELS: &[ModelDefinition] = &[
         id: TranscriptionModelId::ParakeetV3,
         name: "Parakeet v3",
         realtime: "~33x",
-        realtime_context: "local speed · M2 Max",
         quality: "1.94%",
         quality_context: "English benchmark",
         coverage: "25 languages",
@@ -354,7 +350,6 @@ pub const MODELS: &[ModelDefinition] = &[
         id: TranscriptionModelId::WhisperLargeV3Turbo,
         name: "Whisper large-v3-turbo",
         realtime: "~19x",
-        realtime_context: "local speed · M2 Max",
         quality: "2.01%",
         quality_context: "English benchmark",
         coverage: "100 languages",
@@ -369,7 +364,6 @@ pub const MODELS: &[ModelDefinition] = &[
         id: TranscriptionModelId::Qwen3Asr06B,
         name: "Qwen3-ASR 0.6B",
         realtime: "~16x",
-        realtime_context: "local speed · M2 Max",
         quality: "7.64%",
         quality_context: "Mandarin benchmark",
         coverage: "30 languages",
@@ -384,7 +378,6 @@ pub const MODELS: &[ModelDefinition] = &[
         id: TranscriptionModelId::SenseVoiceSmall,
         name: "SenseVoice Small",
         realtime: "~72x",
-        realtime_context: "local speed · M2 Max",
         quality: "10.11%",
         quality_context: "Mandarin benchmark",
         coverage: "5 languages",
@@ -399,7 +392,6 @@ pub const MODELS: &[ModelDefinition] = &[
         id: TranscriptionModelId::CohereTranscribe,
         name: "Cohere Transcribe",
         realtime: "73x",
-        realtime_context: "published speed · M4 Max",
         quality: "1.27%",
         quality_context: "English benchmark",
         coverage: "14 languages",
@@ -414,7 +406,6 @@ pub const MODELS: &[ModelDefinition] = &[
         id: TranscriptionModelId::AppleSpeech,
         name: "Apple Speech",
         realtime: "On device",
-        realtime_context: "macOS 26",
         quality: "System",
         quality_context: "Apple managed",
         coverage: "System locales",
@@ -775,24 +766,23 @@ pub fn download_with_stage_progress(
         }
     }
     let partial = destination.with_extension("gguf.partial");
-    if fs::metadata(&partial).is_ok_and(|metadata| metadata.len() > artifact.bytes) {
+    let mut partial_len = fs::metadata(&partial).ok().map(|metadata| metadata.len());
+    if partial_len > Some(artifact.bytes) {
         fs::remove_file(&partial)?;
+        partial_len = None;
     }
-    downloaded_bytes.store(
-        fs::metadata(&partial).map_or(0, |metadata| metadata.len()),
-        Ordering::Relaxed,
-    );
-    if fs::metadata(&partial).is_ok_and(|metadata| metadata.len() == artifact.bytes) {
-        ModelPreparationStage::Verifying.store(stage);
-        match verify_file_with_cancel(&partial, model, canceled) {
-            Ok(()) => {
-                File::open(&partial)?.sync_all()?;
-                fs::rename(&partial, &destination)?;
-                File::open(&directory)?.sync_all()?;
-                write_verification_receipt(&destination, model)?;
-                downloaded_bytes.store(artifact.bytes, Ordering::Relaxed);
-                return Ok(destination);
-            }
+    downloaded_bytes.store(partial_len.unwrap_or(0), Ordering::Relaxed);
+    if partial_len == Some(artifact.bytes) {
+        match verify_and_promote_partial(
+            &partial,
+            &destination,
+            &directory,
+            model,
+            canceled,
+            downloaded_bytes,
+            stage,
+        ) {
+            Ok(()) => return Ok(destination),
             Err(error) if canceled.load(Ordering::Relaxed) => return Err(error),
             Err(error) => {
                 tracing::warn!(%error, path = %partial.display(), "replacing invalid partial transcription model");
@@ -855,19 +845,42 @@ pub fn download_with_stage_progress(
         );
     }
     check_canceled(canceled)?;
-    ModelPreparationStage::Verifying.store(stage);
-    if let Err(error) = verify_file_with_cancel(&partial, model, canceled) {
+    if let Err(error) = verify_and_promote_partial(
+        &partial,
+        &destination,
+        &directory,
+        model,
+        canceled,
+        downloaded_bytes,
+        stage,
+    ) {
         if !canceled.load(Ordering::Relaxed) {
             let _ = fs::remove_file(&partial);
         }
         return Err(error);
     }
-    File::open(&partial)?.sync_all()?;
-    fs::rename(&partial, &destination)?;
-    File::open(&directory)?.sync_all()?;
-    write_verification_receipt(&destination, model)?;
-    downloaded_bytes.store(artifact.bytes, Ordering::Relaxed);
     Ok(destination)
+}
+
+fn verify_and_promote_partial(
+    partial: &Path,
+    destination: &Path,
+    directory: &Path,
+    model: &ModelDefinition,
+    canceled: &AtomicBool,
+    downloaded_bytes: &AtomicU64,
+    stage: &AtomicU8,
+) -> Result<()> {
+    ModelPreparationStage::Verifying.store(stage);
+    verify_file_with_cancel(partial, model, canceled)?;
+    File::open(partial)?.sync_all()?;
+    fs::rename(partial, destination)?;
+    File::open(directory)?.sync_all()?;
+    write_verification_receipt(destination, model)?;
+    if let Some(bytes) = model.download_bytes() {
+        downloaded_bytes.store(bytes, Ordering::Relaxed);
+    }
+    Ok(())
 }
 
 fn verification_receipt_path(model_path: &Path) -> PathBuf {

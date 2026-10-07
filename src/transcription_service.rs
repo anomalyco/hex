@@ -211,6 +211,7 @@ impl AudioClip {
             return Err(AudioError::ResourceExhausted);
         }
         let channels = usize::from(spec.channels);
+        let int_scale = 2_f32.powi(i32::from(spec.bits_per_sample) - 1);
         let mono = match (spec.sample_format, spec.bits_per_sample) {
             (SampleFormat::Float, 32) => {
                 decode_mono::<_, f32, _>(&mut reader, channels, frames, |sample| sample)?
@@ -221,15 +222,13 @@ impl AudioClip {
                 })?
             }
             (SampleFormat::Int, 9..=16) => {
-                let scale = 2_f32.powi(spec.bits_per_sample as i32 - 1);
                 decode_mono::<_, i16, _>(&mut reader, channels, frames, |sample| {
-                    f32::from(sample) / scale
+                    f32::from(sample) / int_scale
                 })?
             }
             (SampleFormat::Int, 17..=32) => {
-                let scale = 2_f32.powi(spec.bits_per_sample as i32 - 1);
                 decode_mono::<_, i32, _>(&mut reader, channels, frames, |sample| {
-                    sample as f32 / scale
+                    sample as f32 / int_scale
                 })?
             }
             _ => return Err(AudioError::Unsupported),
@@ -293,7 +292,7 @@ fn run(commands: Receiver<Command>) {
                 selection,
                 response,
             } => {
-                let _ = response.send(prepare(&mut active, &selection));
+                let _ = response.send(prepare(&mut active, &selection).map(drop));
             }
             Command::Transcribe {
                 selection,
@@ -309,14 +308,21 @@ fn run(commands: Receiver<Command>) {
     }
 }
 
-fn prepare(
-    active: &mut WarmTranscriber,
+fn check_canceled(canceled: &AtomicBool) -> std::result::Result<(), TranscriptionServiceError> {
+    if canceled.load(Ordering::Acquire) {
+        Err(TranscriptionServiceError::Cancelled)
+    } else {
+        Ok(())
+    }
+}
+
+fn prepare<'a>(
+    active: &'a mut WarmTranscriber,
     selection: &TranscriptionSelection,
-) -> std::result::Result<(), TranscriptionServiceError> {
+) -> std::result::Result<&'a mut crate::transcription::Transcriber, TranscriptionServiceError> {
     active
         .activate(selection)
-        .map_err(|error| TranscriptionServiceError::Model(error.to_string()))?;
-    Ok(())
+        .map_err(|error| TranscriptionServiceError::Model(error.to_string()))
 }
 
 fn transcribe(
@@ -325,23 +331,14 @@ fn transcribe(
     clip: AudioClip,
     canceled: &AtomicBool,
 ) -> std::result::Result<String, TranscriptionServiceError> {
-    if canceled.load(Ordering::Acquire) {
-        return Err(TranscriptionServiceError::Cancelled);
-    }
-    let model = active
-        .activate(selection)
-        .map_err(|error| TranscriptionServiceError::Model(error.to_string()))?;
-    if canceled.load(Ordering::Acquire) {
-        return Err(TranscriptionServiceError::Cancelled);
-    }
+    check_canceled(canceled)?;
+    let model = prepare(active, selection)?;
+    check_canceled(canceled)?;
     let transcript = model
         .transcribe(clip.samples)
         .map_err(|error| TranscriptionServiceError::Inference(error.to_string()))?;
-    if canceled.load(Ordering::Acquire) {
-        Err(TranscriptionServiceError::Cancelled)
-    } else {
-        Ok(transcript)
-    }
+    check_canceled(canceled)?;
+    Ok(transcript)
 }
 
 #[cfg(test)]

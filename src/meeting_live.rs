@@ -212,7 +212,7 @@ pub(super) fn persist_error(directory: &Path, error: &color_eyre::Report) {
     }
 }
 
-#[cfg_attr(not(debug_assertions), allow(dead_code))]
+#[cfg(any(debug_assertions, test))]
 pub(super) fn read_snapshot(path: &Path) -> Result<Vec<TranscriptEntry>> {
     let events: Vec<Event> = read_ndjson(path)?;
     Ok(project(events))

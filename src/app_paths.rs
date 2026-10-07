@@ -39,6 +39,7 @@ pub fn init_process_logging(shutdown: &'static AtomicBool) -> Result<PathBuf> {
     Ok(log_dir)
 }
 
+#[cfg(target_os = "macos")]
 pub fn opencode_workspace() -> Result<PathBuf> {
     Ok(support_dir()?.join("opencode"))
 }
@@ -58,18 +59,6 @@ pub fn personal_commands_workspace() -> Result<PathBuf> {
     Ok(dirs::home_dir()
         .ok_or_else(|| eyre!("home directory is unavailable"))?
         .join(".config/hex"))
-}
-
-#[cfg(target_os = "macos")]
-pub fn personal_commands_host() -> Result<PathBuf> {
-    let workspace_host =
-        personal_commands_workspace()?.join("node_modules/@hex/commands/dist/bin.js");
-    if workspace_host.is_file() {
-        return Ok(workspace_host);
-    }
-    Err(eyre!(
-        "personal command SDK is not installed; run `hex commands init`"
-    ))
 }
 
 #[cfg(target_os = "macos")]

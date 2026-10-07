@@ -53,9 +53,9 @@ impl NavigationIcon {
 #[cfg(target_os = "macos")]
 fn navigation_icon(icon: NavigationIcon, selected: bool) -> AnyElement {
     gpui_symbols::Icon::new(icon.sf_symbol())
-        .size(px(12.0))
-        .color(rgb(if selected { TEXT } else { TEXT_SOFT }))
-        .weight(gpui_symbols::SymbolWeight::Semibold)
+        .size(px(14.0))
+        .color(rgb(if selected { TEXT } else { MUTED }))
+        .weight(gpui_symbols::SymbolWeight::Medium)
         .rendering_mode(gpui_symbols::RenderingMode::Monochrome)
         .into_any_element()
 }
@@ -118,19 +118,25 @@ fn navigation_icon(icon: NavigationIcon, selected: bool) -> AnyElement {
 
 pub(crate) const SIDEBAR_WIDTH: f32 = 220.0;
 
-pub(crate) const CANVAS: u32 = 0x111111;
-pub(crate) const SIDEBAR: u32 = 0x202020;
-pub(crate) const SURFACE: u32 = 0x171717;
-pub(crate) const SURFACE_HOVER: u32 = 0x1d1d1d;
-pub(crate) const SURFACE_SELECTED: u32 = 0x3a3a3a;
-const SEGMENTED_ITEM_HOVER: u32 = 0x262626;
-pub(crate) const LINE: u32 = 0x292929;
+pub(crate) const SIDEBAR: u32 = 0x111111;
+pub(crate) const CANVAS: u32 = 0x161616;
+pub(crate) const SURFACE: u32 = 0x1d1d1d;
+pub(crate) const SURFACE_HOVER: u32 = 0x252525;
+pub(crate) const SURFACE_SELECTED: u32 = 0x2e2e2e;
+const SEGMENTED_ITEM_HOVER: u32 = 0x222222;
+pub(crate) const LINE: u32 = 0x2a2a2a;
 pub(crate) const ACCENT: u32 = 0x3b5cf6;
-pub(crate) const TEXT: u32 = 0xeeeeee;
-pub(crate) const TEXT_SOFT: u32 = 0xb8b8b8;
-pub(crate) const MUTED: u32 = 0x858585;
-pub(crate) const FAINT: u32 = 0x626262;
-pub(crate) const NEGATIVE: u32 = 0xc98f89;
+pub(crate) const ACCENT_SOFT: u32 = 0x8390ff;
+pub(crate) const ACCENT_SURFACE: u32 = 0x1c2030;
+pub(crate) const POSITIVE: u32 = 0x69d89f;
+pub(crate) const POSITIVE_SURFACE: u32 = 0x17231a;
+pub(crate) const TEXT: u32 = 0xf2f2f2;
+pub(crate) const TEXT_SOFT: u32 = 0xd0d0d0;
+pub(crate) const MUTED: u32 = 0x969696;
+pub(crate) const FAINT: u32 = 0x6e6e6e;
+pub(crate) const NEGATIVE: u32 = 0xf17471;
+pub(crate) const DANGER_SURFACE: u32 = 0x2b1718;
+pub(crate) const DANGER_BORDER: u32 = 0x66292c;
 
 pub(crate) const CONTROL_HEIGHT: f32 = 32.0;
 pub(crate) const TEXT_INPUT_HEIGHT: f32 = 34.0;
@@ -160,27 +166,30 @@ pub(crate) fn sidebar_frame() -> Div {
 
 pub(crate) fn navigation_item(icon: NavigationIcon, selected: bool) -> Div {
     div()
-        .h(px(38.0))
+        .h(px(34.0))
         .px_3()
         .flex()
         .items_center()
-        .gap_2()
+        .gap_2p5()
         .rounded(px(6.0))
         .text_size(px(13.0))
+        .font_weight(if selected {
+            FontWeight::MEDIUM
+        } else {
+            FontWeight::NORMAL
+        })
         .text_color(if selected { rgb(TEXT) } else { rgb(MUTED) })
         .when(selected, |item| item.bg(rgb(SURFACE_SELECTED)))
-        .hover(|item| item.bg(rgb(0x2a2a2a)).text_color(rgb(TEXT_SOFT)))
+        .when(!selected, |item| {
+            item.hover(|item| item.bg(rgb(0x1b1b1b)).text_color(rgb(TEXT_SOFT)))
+        })
         .child(
             div()
-                .size(px(22.0))
+                .size(px(18.0))
                 .flex_none()
                 .flex()
                 .items_center()
                 .justify_center()
-                .rounded(px(6.0))
-                .border_1()
-                .border_color(rgb(if selected { 0x606060 } else { 0x3a3a3a }))
-                .bg(rgb(if selected { 0x494949 } else { 0x2b2b2b }))
                 .child(navigation_icon(icon, selected)),
         )
 }
@@ -332,7 +341,7 @@ pub(crate) fn listener_status(
                 .size(px(8.0))
                 .flex_none()
                 .rounded_full()
-                .bg(if active { rgb(0x69d89f) } else { rgb(FAINT) }),
+                .bg(if active { rgb(POSITIVE) } else { rgb(FAINT) }),
         )
         .child(
             div()
@@ -370,12 +379,12 @@ pub(crate) fn hotkey_keycaps(parts: Vec<String>, opacity: f32) -> AnyElement {
                 .flex()
                 .items_center()
                 .justify_center()
-                .rounded(px(5.0))
+                .rounded(px(4.0))
                 .border_1()
-                .border_color(rgb(0x444444))
-                .bg(rgb(0x2b2b2b))
+                .border_color(rgb(0x3f3f3f))
+                .bg(rgb(0x282828))
                 .text_size(px(12.0))
-                .font_weight(FontWeight::NORMAL)
+                .font_weight(FontWeight::MEDIUM)
                 .text_color(rgb(TEXT))
                 .when_some(side, |keycap, side| {
                     keycap.child(
@@ -431,17 +440,17 @@ pub(crate) fn toggle(position: f32) -> AnyElement {
 
 pub(crate) fn settings_section_label(label: &'static str) -> AnyElement {
     div()
-        .pt_5()
+        .pt_6()
         .pb_2()
         .px_1()
         .text_size(px(11.0))
         .font_weight(FontWeight::SEMIBOLD)
-        .text_color(rgb(FAINT))
+        .text_color(rgb(MUTED))
         .child(label)
         .into_any_element()
 }
 
-pub(crate) fn settings_copy(title: &'static str, description: &'static str) -> AnyElement {
+pub(crate) fn settings_copy(title: &'static str, description: impl IntoElement) -> AnyElement {
     div()
         .debug_selector(|| "settings-copy".into())
         .flex()
@@ -525,15 +534,18 @@ pub(crate) fn compact_section_label(label: impl IntoElement) -> Div {
         .child(label)
 }
 
-pub(crate) fn disclosure_button(label: impl IntoElement) -> Div {
+pub(crate) const SOUND_VOLUME_STEPS: [(&str, f32); 5] = [
+    ("Off", 0.0),
+    ("25%", 0.25),
+    ("50%", 0.5),
+    ("75%", 0.75),
+    ("100%", 1.0),
+];
+
+pub(crate) fn canvas_button() -> Div {
     div()
-        .w(px(220.0))
-        .h(px(CONTROL_HEIGHT))
-        .px_3()
-        .flex_none()
         .flex()
         .items_center()
-        .gap_2()
         .rounded(px(6.0))
         .border_1()
         .border_color(rgb(LINE))
@@ -541,7 +553,23 @@ pub(crate) fn disclosure_button(label: impl IntoElement) -> Div {
         .text_size(px(11.0))
         .text_color(rgb(TEXT_SOFT))
         .hover(|button| button.bg(rgb(SURFACE_HOVER)).text_color(rgb(TEXT)))
-        .child(div().min_w(px(0.0)).flex_1().truncate().child(label))
+}
+
+pub(crate) fn disclosure_button(label: impl IntoElement) -> Div {
+    canvas_button()
+        .w(px(220.0))
+        .h(px(CONTROL_HEIGHT))
+        .px_3()
+        .flex_none()
+        .gap_2()
+        .child(
+            div()
+                .min_w(px(0.0))
+                .flex_1()
+                .overflow_x_hidden()
+                .truncate()
+                .child(label),
+        )
         .child(
             div()
                 .size(px(10.0))
@@ -555,7 +583,7 @@ pub(crate) fn disclosure_button(label: impl IntoElement) -> Div {
 
 pub(crate) fn settings_row(
     title: &'static str,
-    description: &'static str,
+    description: impl IntoElement,
     control: impl IntoElement,
 ) -> Div {
     div()
@@ -603,6 +631,11 @@ pub(crate) fn segmented_item(selected: bool) -> Div {
         .items_center()
         .rounded(px(4.0))
         .text_size(px(11.0))
+        .font_weight(if selected {
+            FontWeight::MEDIUM
+        } else {
+            FontWeight::NORMAL
+        })
         .text_color(if selected { rgb(TEXT) } else { rgb(MUTED) })
         .when(selected, |item| item.bg(rgb(SURFACE_SELECTED)))
         .when(!selected, |item| {
@@ -626,6 +659,8 @@ pub(crate) fn sliding_segmented_control(position: f32, widths: &[f32]) -> Div {
             .w(px(width))
             .h(px(26.0))
             .rounded(px(4.0))
+            .border_1()
+            .border_color(rgb(0x3d3d3d))
             .bg(rgb(SURFACE_SELECTED)),
     )
 }

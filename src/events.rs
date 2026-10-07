@@ -129,17 +129,6 @@ pub struct DictationProcessing {
     pub fallback: Option<String>,
 }
 
-#[cfg(target_os = "macos")]
-impl From<crate::dictation_processor::ProcessingObservation> for DictationProcessing {
-    fn from(observation: crate::dictation_processor::ProcessingObservation) -> Self {
-        Self {
-            profile: observation.profile,
-            latency_ms: observation.latency_ms,
-            fallback: observation.fallback,
-        }
-    }
-}
-
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CommandOutcome {
@@ -316,6 +305,12 @@ fn run_event_writer(
     receiver: mpsc::Receiver<WriterMessage>,
     error: Arc<Mutex<Option<(io::ErrorKind, String)>>>,
 ) {
+    let record_error = |result: io::Result<()>| -> Option<(io::ErrorKind, String)> {
+        let write_error = result.err()?;
+        let failure = (write_error.kind(), write_error.to_string());
+        *error.lock().unwrap_or_else(|error| error.into_inner()) = Some(failure.clone());
+        Some(failure)
+    };
     while let Ok(message) = receiver.recv() {
         match message {
             WriterMessage::Event(event) => {
@@ -323,21 +318,12 @@ fn run_event_writer(
                     .map_err(io::Error::other)
                     .and_then(|()| writer.write_all(b"\n"))
                     .and_then(|()| writer.flush());
-                if let Err(write_error) = result {
-                    *error.lock().unwrap_or_else(|error| error.into_inner()) =
-                        Some((write_error.kind(), write_error.to_string()));
+                if record_error(result).is_some() {
                     break;
                 }
             }
             WriterMessage::Flush(reply) => {
-                let failure = writer
-                    .flush()
-                    .err()
-                    .map(|write_error| (write_error.kind(), write_error.to_string()));
-                if let Some(failure) = &failure {
-                    *error.lock().unwrap_or_else(|error| error.into_inner()) =
-                        Some(failure.clone());
-                }
+                let failure = record_error(writer.flush());
                 let failed = failure.is_some();
                 let _ = reply.send(failure);
                 if failed {

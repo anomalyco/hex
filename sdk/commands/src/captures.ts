@@ -8,14 +8,14 @@ const MAX_UNION_MEMBERS = 16
 const MAX_UNION_DEPTH = 4
 const MAX_UNION_SERIALIZED_BYTES = 16 * 1024
 
-const utf8Length = (value: string): number => new TextEncoder().encode(value).byteLength
-const boundedString = (value: unknown, label: string, maxBytes: number): string => {
+export const utf8Length = (value: string): number => Buffer.byteLength(value, "utf8")
+export const boundedString = (value: unknown, label: string, maxBytes: number): string => {
   if (typeof value !== "string" || value.length === 0 || utf8Length(value) > maxBytes) {
     throw new Error(`${label} must be a non-empty string no longer than ${maxBytes} UTF-8 bytes`)
   }
   return value
 }
-const record = (value: unknown): Record<string, unknown> | undefined =>
+export const record = (value: unknown): Record<string, unknown> | undefined =>
   typeof value === "object" && value !== null && !Array.isArray(value)
     ? Object.fromEntries(Object.entries(value))
     : undefined
@@ -34,7 +34,7 @@ const letterAliases = new Set([
 ])
 
 // Match spoken_text::normalize: ASCII punctuation/case and spoken digits.
-export const normalizeSpokenWord = (value: string): string =>
+const normalizeSpokenWord = (value: string): string =>
   value.split(/\s+/u).flatMap((word) => {
     const trimmed = word.replace(
       /^[\x21-\x2f\x3a-\x40\x5b-\x60\x7b-\x7e]+|[\x21-\x2f\x3a-\x40\x5b-\x60\x7b-\x7e]+$/g,

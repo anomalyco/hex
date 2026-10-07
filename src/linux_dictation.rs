@@ -83,21 +83,19 @@ pub fn run(
                 break;
             }
             let started = Instant::now();
-            let result = transcriber
-                .transcribe(&job.samples)
-                .map_err(|error| format!("{error:#}"))
-                .and_then(|text| {
-                    let text = text.trim().to_string();
-                    if text.is_empty() {
-                        return Err("transcription was empty".into());
-                    }
-                    let paste_result = paster
-                        .as_mut()
-                        .map_err(|error| format!("{error:#}"))?
-                        .paste(&text)
-                        .map_err(|error| format!("{error:#}"));
-                    paste_result.map(|()| text)
-                });
+            let result = (|| -> Result<String> {
+                let text = transcriber.transcribe(&job.samples)?;
+                let text = text.trim().to_string();
+                if text.is_empty() {
+                    return Err(eyre!("transcription was empty"));
+                }
+                paster
+                    .as_mut()
+                    .map_err(|error| eyre!("{error:#}"))?
+                    .paste(&text)?;
+                Ok(text)
+            })()
+            .map_err(|error| format!("{error:#}"));
             tracing::info!(
                 audio_ms = job.audio_ms,
                 elapsed_ms = started.elapsed().as_millis(),
@@ -111,7 +109,6 @@ pub fn run(
 
     let mut events = EventLog::create(event_path)?;
     let mut capture = DictationCapture::new(input.sample_rate);
-    let mut recording = false;
     let mut captured_through = CaptureInstant::ZERO;
     let mut pending = 0_usize;
     events.emit(&VoiceEvent::SessionStarted {
@@ -129,14 +126,12 @@ pub fn run(
         }
         while let Ok(action) = hotkey.events.try_recv() {
             match action {
-                HotkeyEvent::Start if !recording => {
+                HotkeyEvent::Start if !capture.is_recording() => {
                     start_capture(&mut capture, captured_through, feedback::play);
-                    recording = true;
                     events.dictation(DictationPhase::Started, "")?;
                     emit_state(&mut events, VoiceState::Dictating, &input.device_name)?;
                 }
-                HotkeyEvent::Finish if recording => {
-                    recording = false;
+                HotkeyEvent::Finish if capture.is_recording() => {
                     submit_capture(
                         &mut capture,
                         captured_through,
@@ -146,18 +141,17 @@ pub fn run(
                     )?;
                     emit_state(
                         &mut events,
-                        active_state(recording, pending),
+                        active_state(capture.is_recording(), pending),
                         &input.device_name,
                     )?;
                 }
-                HotkeyEvent::Cancel if recording => {
+                HotkeyEvent::Cancel if capture.is_recording() => {
                     capture.cancel();
-                    recording = false;
                     feedback::play(Tone::Cancel);
                     events.dictation(DictationPhase::Cancelled, "")?;
                     emit_state(
                         &mut events,
-                        active_state(recording, pending),
+                        active_state(capture.is_recording(), pending),
                         &input.device_name,
                     )?;
                 }
@@ -180,12 +174,12 @@ pub fn run(
             }
             emit_state(
                 &mut events,
-                active_state(recording, pending),
+                active_state(capture.is_recording(), pending),
                 &input.device_name,
             )?;
         }
 
-        indicator.update(recording, pending);
+        indicator.update(capture.is_recording(), pending);
         let chunk = match input.recv_timeout(UPDATE_INTERVAL) {
             AudioInputEvent::Chunk {
                 samples,
@@ -199,12 +193,8 @@ pub fn run(
                 return Err(eyre!("microphone stream stopped: {error}"));
             }
         };
-        if recording {
-            capture.ingest(&chunk, captured_through);
-            capture.become_intentional(captured_through);
-        } else {
-            capture.keep_warm(&chunk);
-        }
+        capture.ingest(&chunk, captured_through);
+        capture.become_intentional(captured_through);
     }
 
     indicator.update(false, pending);

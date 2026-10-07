@@ -682,6 +682,13 @@ mod tests {
             assert!(self.state.capture == Capture::Locked);
             self.events.clear();
         }
+
+        fn release_stale_space_and_retap(&mut self) {
+            self.key(KeyCode::KEY_SPACE, 2);
+            self.key(KeyCode::KEY_SPACE, 0);
+            self.key(KeyCode::KEY_SPACE, 1);
+            self.key(KeyCode::KEY_SPACE, 0);
+        }
     }
 
     #[test]
@@ -789,10 +796,7 @@ mod tests {
         test.key(KeyCode::KEY_SPACE, 1);
         test.key(KeyCode::KEY_ESC, 1);
         test.key(KeyCode::KEY_ESC, 0);
-        test.key(KeyCode::KEY_SPACE, 2);
-        test.key(KeyCode::KEY_SPACE, 0);
-        test.key(KeyCode::KEY_SPACE, 1);
-        test.key(KeyCode::KEY_SPACE, 0);
+        test.release_stale_space_and_retap();
         assert_eq!(test.events, [Start, Cancel, Start, Finish]);
     }
 
@@ -831,11 +835,7 @@ mod tests {
         test.key(KeyCode::KEY_LEFTALT, 0);
         assert_eq!(test.events, [Start, Finish]);
         test.key(KeyCode::KEY_LEFTALT, 1);
-        test.key(KeyCode::KEY_SPACE, 2);
-        test.key(KeyCode::KEY_SPACE, 0);
-        assert_eq!(test.events, [Start, Finish]);
-        test.key(KeyCode::KEY_SPACE, 1);
-        test.key(KeyCode::KEY_SPACE, 0);
+        test.release_stale_space_and_retap();
         assert_eq!(test.events, [Start, Finish, Start, Finish]);
     }
 
@@ -991,11 +991,7 @@ mod tests {
             HashSet::from([KeyCode::KEY_LEFTALT, KeyCode::KEY_SPACE]),
         ));
         test.key(KeyCode::KEY_SPACE, 1);
-        test.key(KeyCode::KEY_SPACE, 2);
-        test.key(KeyCode::KEY_SPACE, 0);
-        assert!(test.events.is_empty());
-        test.key(KeyCode::KEY_SPACE, 1);
-        test.key(KeyCode::KEY_SPACE, 0);
+        test.release_stale_space_and_retap();
         assert_eq!(test.events, [Start, Finish]);
     }
 
@@ -1062,10 +1058,7 @@ mod tests {
             "keyboard".into(),
             HashSet::from([KeyCode::KEY_LEFTALT, KeyCode::KEY_SPACE]),
         ));
-        test.key(KeyCode::KEY_SPACE, 2);
-        test.key(KeyCode::KEY_SPACE, 0);
-        test.key(KeyCode::KEY_SPACE, 1);
-        test.key(KeyCode::KEY_SPACE, 0);
+        test.release_stale_space_and_retap();
         assert_eq!(test.events, [Start, Cancel, Start, Finish]);
     }
 

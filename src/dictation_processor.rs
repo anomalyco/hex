@@ -455,12 +455,7 @@ pub struct Processed {
     pub transformations: Vec<String>,
 }
 
-#[derive(Clone, Debug)]
-pub struct ProcessingObservation {
-    pub profile: String,
-    pub latency_ms: u64,
-    pub fallback: Option<String>,
-}
+pub type ProcessingObservation = crate::events::DictationProcessing;
 
 fn prompt(profile: &Profile, transcript: &str, context: &ContextSnapshot) -> String {
     let application = context.application.as_deref().unwrap_or("unknown");
