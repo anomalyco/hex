@@ -3013,17 +3013,7 @@ impl AppWindow {
     }
 
     fn capture_hotkey_modifiers(&mut self, event: &ModifiersChangedEvent, cx: &mut Context<Self>) {
-        let current = hotkey_modifiers(event.modifiers);
-        if !current.is_empty() {
-            self.hotkey_width_spring.set_target(hotkey_capture_width(
-                HotkeyBinding {
-                    modifiers: current,
-                    key: None,
-                }
-                .keycaps()
-                .len(),
-            ));
-        }
+        let current = normalize_captured_modifiers(hotkey_modifiers(event.modifiers));
         let released = {
             let HotkeyCaptureState::Listening {
                 modifiers, message, ..
@@ -3036,6 +3026,15 @@ impl AppWindow {
                     *modifiers = current;
                     *message = None;
                 }
+                let active_modifiers = *modifiers;
+                self.hotkey_width_spring.set_target(hotkey_capture_width(
+                    HotkeyBinding {
+                        modifiers: active_modifiers,
+                        key: None,
+                    }
+                    .keycaps()
+                    .len(),
+                ));
                 cx.notify();
                 None
             } else if message.is_some() {
@@ -3048,11 +3047,6 @@ impl AppWindow {
             }
         };
         if let Some(modifiers) = released {
-            let modifiers = if modifiers.count() == 1 {
-                modifiers
-            } else {
-                modifiers.without_side_constraints()
-            };
             self.save_hotkey_binding(
                 HotkeyBinding {
                     modifiers,
@@ -7620,30 +7614,54 @@ const fn hotkey_side_index(side: ModifierSide) -> usize {
     }
 }
 
+fn normalize_captured_modifiers(modifiers: HotkeyModifiers) -> HotkeyModifiers {
+    let mut sides = [
+        modifiers.control,
+        modifiers.option,
+        modifiers.shift,
+        modifiers.command,
+    ]
+    .into_iter()
+    .flatten();
+    let Some(first) = sides.next() else {
+        return modifiers;
+    };
+    if sides.all(|side| side == first) {
+        modifiers
+    } else {
+        modifiers.without_side_constraints()
+    }
+}
+
 fn standalone_modifier_side(binding: &HotkeyBinding) -> Option<ModifierSide> {
-    if binding.key.is_some() || binding.modifiers.count() != 1 {
+    if binding.key.is_some() {
         return None;
     }
-    binding
-        .modifiers
-        .control
-        .or(binding.modifiers.option)
-        .or(binding.modifiers.shift)
-        .or(binding.modifiers.command)
+    let mut sides = [
+        binding.modifiers.control,
+        binding.modifiers.option,
+        binding.modifiers.shift,
+        binding.modifiers.command,
+    ]
+    .into_iter()
+    .flatten();
+    let first = sides.next()?;
+    sides.all(|side| side == first).then_some(first)
 }
 
 fn set_standalone_modifier_side(binding: &mut HotkeyBinding, side: ModifierSide) {
     if standalone_modifier_side(binding).is_none() {
         return;
     }
-    if binding.modifiers.control.is_some() {
-        binding.modifiers.control = Some(side);
-    } else if binding.modifiers.option.is_some() {
-        binding.modifiers.option = Some(side);
-    } else if binding.modifiers.shift.is_some() {
-        binding.modifiers.shift = Some(side);
-    } else if binding.modifiers.command.is_some() {
-        binding.modifiers.command = Some(side);
+    for current in [
+        &mut binding.modifiers.control,
+        &mut binding.modifiers.option,
+        &mut binding.modifiers.shift,
+        &mut binding.modifiers.command,
+    ] {
+        if current.is_some() {
+            *current = Some(side);
+        }
     }
 }
 
@@ -9434,7 +9452,7 @@ mod tests {
     }
 
     #[test]
-    fn side_selection_only_changes_a_standalone_modifier() {
+    fn side_selection_changes_modifier_only_bindings_and_ignores_key_chords() {
         let mut standalone = HotkeyBinding {
             modifiers: HotkeyModifiers {
                 option: Some(ModifierSide::Left),
@@ -9446,6 +9464,43 @@ mod tests {
         assert_eq!(
             standalone_modifier_side(&standalone),
             Some(ModifierSide::Either)
+        );
+
+        let mut modifier_chord = HotkeyBinding {
+            modifiers: normalize_captured_modifiers(HotkeyModifiers {
+                option: Some(ModifierSide::Right),
+                command: Some(ModifierSide::Right),
+                ..Default::default()
+            }),
+            key: None,
+        };
+        assert_eq!(
+            standalone_modifier_side(&modifier_chord),
+            Some(ModifierSide::Right)
+        );
+        assert_eq!(modifier_chord.keycaps(), vec!["R⌥", "R⌘"]);
+        set_standalone_modifier_side(&mut modifier_chord, ModifierSide::Left);
+        assert_eq!(
+            modifier_chord.modifiers,
+            HotkeyModifiers {
+                option: Some(ModifierSide::Left),
+                command: Some(ModifierSide::Left),
+                ..Default::default()
+            }
+        );
+
+        let mixed = normalize_captured_modifiers(HotkeyModifiers {
+            option: Some(ModifierSide::Left),
+            command: Some(ModifierSide::Right),
+            ..Default::default()
+        });
+        assert_eq!(
+            mixed,
+            HotkeyModifiers {
+                option: Some(ModifierSide::Either),
+                command: Some(ModifierSide::Either),
+                ..Default::default()
+            }
         );
 
         let mut chord = HotkeyBinding {
