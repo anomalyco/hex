@@ -235,6 +235,17 @@ after Ruby syntax, style, strict online audit, checksum fetch, and livecheck
 No installed app was replaced, physical dictation performed, or native GUI
 verification added for this release.
 
+## macOS 2.1.25
+
+**Published October 7, 2026:** [2.1.25](../releases/2.1.25.md), release commit
+`d5cd203`, build `20125`. Before tagging, 496 Rust unit tests, 12 keyboard-layout
+child processes, Clippy, formatting, app identity guards, and 70 TypeScript SDK
+tests passed. The DMG SHA-256 is
+`43dd3db534d625f4fb6f21a1b9ad44b96900f0b95fe923dca19b47f8e70120fa`; the ZIP
+SHA-256 is
+`3184e141c281d6d1bb3fcce5a4306f269795a4c9e4d92bea376a306dca7d2ef8`. The live
+feed leads with build `20125`, and both downloaded DMGs match the checksum.
+
 ## macOS 2.1.24
 
 **Published October 3, 2026:** [2.1.24](../releases/2.1.24.md), release commit
