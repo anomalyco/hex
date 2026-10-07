@@ -139,7 +139,13 @@ Sources: the `TranscriptionTarget::VoiceAction` processing branch in
 [parakeet.rs](../../src/parakeet.rs), `process_voice_action_cancellable` and
 `voice_action_failure` in [dictation_processor.rs](../../src/dictation_processor.rs).
 Voice Action uses its own model/variant and persisted deadline (60 seconds by
-default); no explicit model selection delegates to OpenCode's default.
+default); when no explicit model is selected, HEX ranks available fast models
+from `RECOMMENDED_OPENCODE_MODELS` (starting with `gemini-3.1-flash-lite` on
+`minimal` thinking, `claude-haiku-4-5`, and `gpt-5.4-nano` on `none`) and walks
+those candidates in order before falling back to OpenCode's default.
+`model_catalog_ranks_recommended_models_and_selects_top_available_default_with_variant`
+and `ranked_generation_walks_candidates_until_one_succeeds` cover catalog
+ranking, preferred variant selection, and candidate fallback.
 Audio transcription stays local, but the prompt text goes to the configured
 OpenCode provider.
 

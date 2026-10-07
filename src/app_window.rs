@@ -1205,14 +1205,34 @@ impl AppWindow {
         } else if preview_mode {
             (
                 ModelCatalogState::Loaded(ModelCatalog {
-                    models: vec![ModelChoice {
-                        key: "anthropic/claude-sonnet-4".into(),
-                        name: "Claude Sonnet 4".into(),
-                        provider: "Anthropic".into(),
-                        variants: vec!["low".into(), "medium".into(), "high".into()],
-                    }],
-                    default_key: Some("anthropic/claude-sonnet-4".into()),
-                    default_name: Some("Claude Sonnet 4".into()),
+                    models: vec![
+                        ModelChoice {
+                            key: "google/gemini-3.1-flash-lite".into(),
+                            name: "Gemini 3.1 Flash Lite".into(),
+                            provider: "Google".into(),
+                            variants: vec![
+                                "minimal".into(),
+                                "low".into(),
+                                "medium".into(),
+                                "high".into(),
+                            ],
+                        },
+                        ModelChoice {
+                            key: "anthropic/claude-haiku-4-5".into(),
+                            name: "Claude Haiku 4.5".into(),
+                            provider: "Anthropic".into(),
+                            variants: Vec::new(),
+                        },
+                        ModelChoice {
+                            key: "openai/gpt-5.4-nano".into(),
+                            name: "GPT-5.4 Nano".into(),
+                            provider: "OpenAI".into(),
+                            variants: vec!["none".into(), "low".into(), "medium".into()],
+                        },
+                    ],
+                    default_key: Some("google/gemini-3.1-flash-lite".into()),
+                    default_name: Some("Gemini 3.1 Flash Lite".into()),
+                    default_variant: Some("minimal".into()),
                 }),
                 None,
             )
@@ -5572,6 +5592,14 @@ impl AppWindow {
                         )
                     }))
             });
+        let effective_variant = selected_variant.or_else(|| {
+            selected_model.is_none().then(|| {
+                let ModelCatalogState::Loaded(catalog) = &self.model_catalog else {
+                    return None;
+                };
+                catalog.default_variant.as_deref()
+            })?
+        });
         let has_variants = !variants.is_empty();
         let variant_open = self.variant_picker_open == Some(target);
         let variant_list = (has_variants && variant_open).then(|| {
@@ -5586,7 +5614,7 @@ impl AppWindow {
                 .border_color(rgb(LINE))
                 .bg(rgb(SURFACE))
                 .children(choices.into_iter().enumerate().map(|(index, variant)| {
-                    let selected = selected_variant == variant.as_deref();
+                    let selected = effective_variant == variant.as_deref();
                     let label = variant.clone().unwrap_or_else(|| "Default".into());
                     div()
                         .id(("model-variant", index))
@@ -5611,7 +5639,7 @@ impl AppWindow {
             .w(px(160.0))
             .flex_none()
             .child(
-                disclosure_button(selected_variant.unwrap_or("Default").to_string())
+                disclosure_button(effective_variant.unwrap_or("Default").to_string())
                     .id("model-variant-trigger")
                     .w(px(160.0))
                     .on_click(cx.listener(move |this, _, _, cx| {
@@ -5892,17 +5920,23 @@ impl AppWindow {
         model: Option<String>,
         cx: &mut Context<Self>,
     ) {
+        let recommended_variant = model.as_deref().and_then(|key| {
+            let ModelCatalogState::Loaded(catalog) = &self.model_catalog else {
+                return None;
+            };
+            catalog.recommended_variant_for(key).map(str::to_owned)
+        });
         let text = model.clone().unwrap_or_default();
         let saved = match target {
             ModelPickerTarget::Mode(selection) => {
                 self.update_mode_settings(selection, cx, |mode| {
                     mode.post_processing.model = model;
-                    mode.post_processing.variant = None;
+                    mode.post_processing.variant = recommended_variant;
                 })
             }
             ModelPickerTarget::VoiceAction => self.update_settings(cx, |settings| {
                 settings.voice_action.model = model;
-                settings.voice_action.variant = None;
+                settings.voice_action.variant = recommended_variant;
             }),
         };
         if saved {
@@ -9600,6 +9634,7 @@ mod tests {
             }],
             default_key: Some("opencode/example-rewrite".into()),
             default_name: Some("Example Rewrite".into()),
+            default_variant: None,
         });
 
         let selected = model_presentation(&catalog, Some("opencode/example-rewrite")).unwrap();
@@ -9623,6 +9658,7 @@ mod tests {
             }],
             default_key: None,
             default_name: None,
+            default_variant: None,
         };
 
         assert_eq!(
@@ -9700,6 +9736,7 @@ mod tests {
             models: Vec::new(),
             default_key: None,
             default_name: None,
+            default_variant: None,
         });
         for feature in [
             OpenCodeFeature::VoiceAction,
@@ -9730,6 +9767,7 @@ mod tests {
             }],
             default_key: Some("opencode/example-rewrite".into()),
             default_name: Some("Example Rewrite".into()),
+            default_variant: None,
         };
 
         assert_eq!(model_variants(&catalog, None), ["low", "high"]);
@@ -9741,6 +9779,7 @@ mod tests {
             models: Vec::new(),
             default_key: Some("example/rewrite-default".into()),
             default_name: Some("Example Rewrite".into()),
+            default_variant: None,
         });
         for (target, path) in [
             (

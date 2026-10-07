@@ -87,14 +87,82 @@ impl Profile {
     }
 }
 
-#[derive(Clone, Serialize)]
-struct Model {
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct Model {
     #[serde(rename = "providerID")]
-    provider: String,
-    id: String,
+    pub provider: String,
+    pub id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    variant: Option<String>,
+    pub variant: Option<String>,
 }
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RecommendedModel {
+    pub id: &'static str,
+    pub preferred_variants: &'static [&'static str],
+}
+
+/// Ranked fast, 100%-protocol-compliant OpenCode models for Voice Action and
+/// dictation rewriting, ordered by latency, cost, and strict paste-ready output
+/// compliance.
+pub const RECOMMENDED_OPENCODE_MODELS: &[RecommendedModel] = &[
+    RecommendedModel {
+        id: "gemini-3.1-flash-lite",
+        preferred_variants: &["minimal", "none", "low"],
+    },
+    RecommendedModel {
+        id: "claude-haiku-4-5",
+        preferred_variants: &["none", "minimal", "low"],
+    },
+    RecommendedModel {
+        id: "gpt-5.4-nano",
+        preferred_variants: &["none", "minimal", "low"],
+    },
+    RecommendedModel {
+        id: "gpt-4.1-mini",
+        preferred_variants: &["none", "minimal", "low"],
+    },
+    RecommendedModel {
+        id: "gpt-4.1-nano",
+        preferred_variants: &["none", "minimal", "low"],
+    },
+    RecommendedModel {
+        id: "gpt-5.4-mini",
+        preferred_variants: &["none", "minimal", "low"],
+    },
+    RecommendedModel {
+        id: "gemini-3-flash",
+        preferred_variants: &["minimal", "none", "low"],
+    },
+    RecommendedModel {
+        id: "gpt-4o-mini",
+        preferred_variants: &["none", "minimal", "low"],
+    },
+    RecommendedModel {
+        id: "gpt-4.1",
+        preferred_variants: &["none", "minimal", "low"],
+    },
+    RecommendedModel {
+        id: "gpt-5.4",
+        preferred_variants: &["none", "minimal", "low"],
+    },
+    RecommendedModel {
+        id: "claude-sonnet-4-6",
+        preferred_variants: &["none", "minimal", "low"],
+    },
+    RecommendedModel {
+        id: "claude-sonnet-4-5",
+        preferred_variants: &["none", "minimal", "low"],
+    },
+    RecommendedModel {
+        id: "gemini-2.5-flash-lite",
+        preferred_variants: &["none", "minimal", "low"],
+    },
+    RecommendedModel {
+        id: "gemini-2.5-flash",
+        preferred_variants: &["none", "minimal", "low"],
+    },
+];
 
 #[derive(Clone)]
 struct ContextualProfile {
@@ -281,6 +349,91 @@ pub struct ModelCatalog {
     pub models: Vec<ModelChoice>,
     pub default_key: Option<String>,
     pub default_name: Option<String>,
+    pub default_variant: Option<String>,
+}
+
+impl ModelCatalog {
+    pub fn recommended_variant_for(&self, key: &str) -> Option<&str> {
+        let choice = self.models.iter().find(|choice| choice.key == key)?;
+        recommended_variant_for_choice(choice)
+    }
+
+    pub fn ranked_candidates(&self, variant_override: Option<&str>) -> Vec<Model> {
+        ranked_choice_indices(&self.models)
+            .into_iter()
+            .filter_map(|index| {
+                let choice = &self.models[index];
+                let (provider, id) = choice.key.split_once('/')?;
+                let variant = variant_override
+                    .filter(|v| choice.variants.iter().any(|candidate| candidate == *v))
+                    .or_else(|| recommended_variant_for_choice(choice))
+                    .map(str::to_owned);
+                Some(Model {
+                    provider: provider.into(),
+                    id: id.into(),
+                    variant,
+                })
+            })
+            .collect()
+    }
+}
+
+fn leaf_model_id(key: &str) -> &str {
+    key.rsplit_once('/').map_or(key, |(_, id)| id)
+}
+
+fn matches_recommended_model_id(leaf: &str, recommended_id: &str) -> bool {
+    if leaf == recommended_id {
+        return true;
+    }
+    let Some(suffix) = leaf.strip_prefix(recommended_id) else {
+        return false;
+    };
+    suffix == "-preview"
+        || suffix == "-latest"
+        || (suffix.starts_with("-20") && suffix[1..].bytes().all(|byte| byte.is_ascii_digit()))
+}
+
+fn recommendation_entry_for_key(key: &str) -> Option<(usize, &'static RecommendedModel)> {
+    let leaf = leaf_model_id(key);
+    RECOMMENDED_OPENCODE_MODELS
+        .iter()
+        .enumerate()
+        .find(|(_, rec)| matches_recommended_model_id(leaf, rec.id))
+}
+
+fn recommended_variant_for_choice(choice: &ModelChoice) -> Option<&str> {
+    let (_, rec) = recommendation_entry_for_key(&choice.key)?;
+    rec.preferred_variants
+        .iter()
+        .copied()
+        .find(|preferred| choice.variants.iter().any(|v| v == *preferred))
+}
+
+fn provider_priority(provider: &str) -> usize {
+    match provider {
+        "google" | "anthropic" | "openai" => 0,
+        "opencode" => 1,
+        "github-copilot" => 2,
+        p if p.starts_with("console-") => 3,
+        _ => 4,
+    }
+}
+
+fn ranked_choice_indices(choices: &[ModelChoice]) -> Vec<usize> {
+    let mut ranked = Vec::new();
+    for rec in RECOMMENDED_OPENCODE_MODELS {
+        if let Some((best_idx, _)) = choices
+            .iter()
+            .enumerate()
+            .filter(|(_, choice)| matches_recommended_model_id(leaf_model_id(&choice.key), rec.id))
+            .min_by_key(|(idx, choice)| (provider_priority(&choice.provider), *idx))
+            && !ranked.contains(&best_idx)
+        {
+            ranked.push(best_idx);
+        }
+    }
+    ranked
 }
 
 #[derive(Deserialize)]
@@ -323,6 +476,35 @@ fn model_is_available(model: &ModelInfo) -> bool {
             .any(|output| output == "text")
 }
 
+static CACHED_RANKED_CANDIDATES: std::sync::Mutex<Option<(String, Vec<Model>)>> =
+    std::sync::Mutex::new(None);
+
+fn cache_ranked_candidates(endpoint: &str, catalog: &ModelCatalog) {
+    if let Ok(mut guard) = CACHED_RANKED_CANDIDATES.lock() {
+        *guard = Some((endpoint.to_owned(), catalog.ranked_candidates(None)));
+    }
+}
+
+fn ranked_candidates_for_endpoint(endpoint: &str, password: &str) -> Vec<Model> {
+    if let Ok(guard) = CACHED_RANKED_CANDIDATES.lock()
+        && let Some((cached_endpoint, candidates)) = guard.as_ref()
+        && cached_endpoint == endpoint
+    {
+        return candidates.clone();
+    }
+    let Ok(workspace) = crate::app_paths::opencode_workspace() else {
+        return Vec::new();
+    };
+    let Ok(models) = opencode_api::<ModelsResponse>(endpoint, password, &workspace, "/api/model")
+    else {
+        return Vec::new();
+    };
+    let catalog = build_model_catalog(models.data, None);
+    let candidates = catalog.ranked_candidates(None);
+    cache_ranked_candidates(endpoint, &catalog);
+    candidates
+}
+
 pub fn load_model_catalog() -> Result<ModelCatalog> {
     let (endpoint, password) =
         discover_opencode_service(Duration::from_secs(10), &AtomicBool::new(false))?;
@@ -330,16 +512,18 @@ pub fn load_model_catalog() -> Result<ModelCatalog> {
     let models: ModelsResponse = opencode_api(&endpoint, &password, &workspace, "/api/model")?;
     let default: DefaultModelResponse =
         opencode_api(&endpoint, &password, &workspace, "/api/model/default")?;
-    Ok(build_model_catalog(models.data, default.data))
+    let catalog = build_model_catalog(models.data, default.data);
+    cache_ranked_candidates(&endpoint, &catalog);
+    Ok(catalog)
 }
 
 fn build_model_catalog(models: Vec<ModelInfo>, default: Option<ModelInfo>) -> ModelCatalog {
-    let default_key = default
+    let fallback_default_key = default
         .as_ref()
         .map(|model| format!("{}/{}", model.provider_id, model.id));
-    let default_name = default.as_ref().map(|model| model.name.clone());
+    let fallback_default_name = default.as_ref().map(|model| model.name.clone());
     let mut seen = HashSet::new();
-    let choices = models
+    let raw_choices: Vec<ModelChoice> = models
         .into_iter()
         .chain(default)
         .filter(model_is_available)
@@ -357,9 +541,31 @@ fn build_model_catalog(models: Vec<ModelInfo>, default: Option<ModelInfo>) -> Mo
             })
         })
         .collect();
+    let ranked_indices = ranked_choice_indices(&raw_choices);
+    let mut choices = Vec::with_capacity(raw_choices.len());
+    for &idx in &ranked_indices {
+        choices.push(raw_choices[idx].clone());
+    }
+    for (idx, choice) in raw_choices.into_iter().enumerate() {
+        if !ranked_indices.contains(&idx) {
+            choices.push(choice);
+        }
+    }
+    let (default_key, default_name, default_variant) = if !ranked_indices.is_empty()
+        && let Some(top) = choices.first()
+    {
+        (
+            Some(top.key.clone()),
+            Some(top.name.clone()),
+            recommended_variant_for_choice(top).map(str::to_owned),
+        )
+    } else {
+        (fallback_default_key, fallback_default_name, None)
+    };
     ModelCatalog {
         default_key,
         default_name,
+        default_variant,
         models: choices,
     }
 }
@@ -525,11 +731,79 @@ fn generate_cancellable(
     deadline: Duration,
     cancelled: &AtomicBool,
 ) -> Result<String> {
-    let request = Request { prompt, model };
-    let data = serde_json::to_string(&request)?;
     let started = Instant::now();
     let (endpoint, password) =
         discover_opencode_service(deadline.saturating_sub(started.elapsed()), cancelled)?;
+    if model.is_none() {
+        let candidates = ranked_candidates_for_endpoint(&endpoint, &password);
+        if !candidates.is_empty() {
+            return generate_with_ranked_candidates(
+                prompt,
+                &candidates,
+                &endpoint,
+                &password,
+                started,
+                deadline,
+                cancelled,
+            );
+        }
+    }
+    generate_single_model(
+        prompt, model, &endpoint, &password, started, deadline, cancelled,
+    )
+}
+
+fn generate_with_ranked_candidates(
+    prompt: &str,
+    candidates: &[Model],
+    endpoint: &str,
+    password: &str,
+    started: Instant,
+    deadline: Duration,
+    cancelled: &AtomicBool,
+) -> Result<String> {
+    let mut last_error = None;
+    for (index, candidate) in candidates.iter().enumerate() {
+        let remaining = deadline.saturating_sub(started.elapsed());
+        if remaining.is_zero() {
+            return Err(eyre!(
+                "opencode2 generation exceeded {} seconds",
+                deadline.as_secs()
+            ));
+        }
+        let data = serde_json::to_string(&Request {
+            prompt,
+            model: Some(candidate),
+        })?;
+        match post_generation(endpoint, password, &data, remaining, cancelled)? {
+            Response::Success { data } => return Ok(data.text),
+            Response::Error { message } => {
+                if index + 1 < candidates.len() {
+                    tracing::warn!(
+                        provider = %candidate.provider,
+                        model = %candidate.id,
+                        %message,
+                        "ranked OpenCode model failed; trying next available candidate"
+                    );
+                }
+                last_error = Some(eyre!("OpenCode generation failed: {message}"));
+            }
+        }
+    }
+    Err(last_error.unwrap_or_else(|| eyre!("no OpenCode models available")))
+}
+
+fn generate_single_model(
+    prompt: &str,
+    model: Option<&Model>,
+    endpoint: &str,
+    password: &str,
+    started: Instant,
+    deadline: Duration,
+    cancelled: &AtomicBool,
+) -> Result<String> {
+    let request = Request { prompt, model };
+    let data = serde_json::to_string(&request)?;
     for attempt in 0..2 {
         let remaining = deadline.saturating_sub(started.elapsed());
         if remaining.is_zero() {
@@ -538,7 +812,7 @@ fn generate_cancellable(
                 deadline.as_secs()
             ));
         }
-        let response = post_generation(&endpoint, &password, &data, remaining, cancelled)?;
+        let response = post_generation(endpoint, password, &data, remaining, cancelled)?;
         match response {
             Response::Success { data } => return Ok(data.text),
             Response::Error { message } if attempt == 0 && retryable_generation_error(&message) => {
@@ -2085,6 +2359,154 @@ mod tests {
         .unwrap();
         assert!(error.to_string().contains("exceeded"));
         assert!(started.elapsed() < Duration::from_secs(1));
+    }
+
+    #[test]
+    fn model_catalog_ranks_recommended_models_and_selects_top_available_default_with_variant() {
+        let model_info = |provider: &str, id: &str, name: &str, variants: &[&str]| ModelInfo {
+            id: id.into(),
+            provider_id: provider.into(),
+            name: name.into(),
+            enabled: true,
+            capabilities: ModelCapabilities {
+                output: vec!["text".into()],
+            },
+            variants: variants
+                .iter()
+                .map(|v| ModelVariant { id: (*v).into() })
+                .collect(),
+        };
+        let heavy_default = model_info("example", "heavy-agent", "Heavy Agent", &["high"]);
+        let models = vec![
+            model_info("example", "unranked-a", "Unranked A", &[]),
+            model_info(
+                "openai",
+                "gpt-5.4-nano",
+                "GPT-5.4 Nano",
+                &["none", "low", "medium"],
+            ),
+            model_info(
+                "anthropic",
+                "claude-haiku-4-5-20251001",
+                "Claude Haiku 4.5",
+                &[],
+            ),
+            model_info(
+                "google",
+                "gemini-3.1-flash-lite",
+                "Gemini 3.1 Flash Lite",
+                &["minimal", "low", "high"],
+            ),
+        ];
+
+        let catalog = build_model_catalog(models.clone(), Some(heavy_default.clone()));
+        assert_eq!(
+            catalog.default_key.as_deref(),
+            Some("google/gemini-3.1-flash-lite")
+        );
+        assert_eq!(
+            catalog.default_name.as_deref(),
+            Some("Gemini 3.1 Flash Lite")
+        );
+        assert_eq!(catalog.default_variant.as_deref(), Some("minimal"));
+        assert_eq!(
+            catalog
+                .models
+                .iter()
+                .map(|choice| choice.key.as_str())
+                .collect::<Vec<_>>(),
+            [
+                "google/gemini-3.1-flash-lite",
+                "anthropic/claude-haiku-4-5-20251001",
+                "openai/gpt-5.4-nano",
+                "example/unranked-a",
+                "example/heavy-agent",
+            ]
+        );
+
+        // Removing the #1 recommendation falls back to #2 (`claude-haiku-4-5`), then #3 (`gpt-5.4-nano` with `none`).
+        let without_gemini: Vec<_> = models
+            .iter()
+            .filter(|m| m.id != "gemini-3.1-flash-lite")
+            .cloned()
+            .collect();
+        let catalog2 = build_model_catalog(without_gemini.clone(), Some(heavy_default.clone()));
+        assert_eq!(
+            catalog2.default_key.as_deref(),
+            Some("anthropic/claude-haiku-4-5-20251001")
+        );
+        assert_eq!(catalog2.default_variant, None);
+
+        let only_nano: Vec<_> = without_gemini
+            .into_iter()
+            .filter(|m| !m.id.starts_with("claude-haiku-4-5"))
+            .collect();
+        let catalog3 = build_model_catalog(only_nano, Some(heavy_default));
+        assert_eq!(catalog3.default_key.as_deref(), Some("openai/gpt-5.4-nano"));
+        assert_eq!(catalog3.default_variant.as_deref(), Some("none"));
+    }
+
+    #[test]
+    fn ranked_generation_walks_candidates_until_one_succeeds() {
+        let candidates = vec![
+            Model {
+                provider: "google".into(),
+                id: "gemini-3.1-flash-lite".into(),
+                variant: Some("minimal".into()),
+            },
+            Model {
+                provider: "anthropic".into(),
+                id: "claude-haiku-4-5".into(),
+                variant: None,
+            },
+            Model {
+                provider: "openai".into(),
+                id: "gpt-5.4-nano".into(),
+                variant: Some("none".into()),
+            },
+        ];
+        let (endpoint, server) = generation_server(vec![
+            (
+                "/api/experimental/generate",
+                400,
+                r#"{"message":"Model unavailable: google/gemini-3.1-flash-lite"}"#,
+            ),
+            (
+                "/api/experimental/generate",
+                200,
+                r#"{"data":{"text":"resolved from second ranked model"}}"#,
+            ),
+        ]);
+        let output = generate_with_ranked_candidates(
+            "Make this concise.",
+            &candidates,
+            &endpoint,
+            "fixture-password",
+            Instant::now(),
+            Duration::from_secs(5),
+            &AtomicBool::new(false),
+        )
+        .unwrap();
+        assert_eq!(output, "resolved from second ranked model");
+        let requests = server.join().unwrap();
+        assert_eq!(requests.len(), 2);
+        let first: serde_json::Value = serde_json::from_slice(&requests[0]).unwrap();
+        let second: serde_json::Value = serde_json::from_slice(&requests[1]).unwrap();
+        assert_eq!(
+            first["model"],
+            serde_json::json!({
+                "providerID": "google",
+                "id": "gemini-3.1-flash-lite",
+                "variant": "minimal"
+            })
+        );
+        assert_eq!(
+            second["model"],
+            serde_json::json!({
+                "providerID": "anthropic",
+                "id": "claude-haiku-4-5"
+            })
+        );
     }
 
     #[test]
