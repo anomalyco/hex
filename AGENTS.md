@@ -327,10 +327,24 @@ CoreAudio formats, AppleScript details, or event serialization.
   boundaries, steal focus, or block controls in the foreground application.
 - Every desktop pane renders the shared scaffold from `desktop_ui`: the
   bounded pane header plus one centered content column at `PANE_CONTENT_WIDTH`,
-  with list+detail panes using the fixed `PANE_LIST_WIDTH` list column. Panes
-  must not introduce their own header treatments or content widths, and text
-  columns beside a fixed column carry `flex_1` with a zero min-width so long
-  lines wrap instead of widening the pane.
+  with list+detail panes using the fixed `PANE_LIST_WIDTH` list column (`pane_list_card`
+  and `compact_panel` detail cards with rounded `list_row` items). Panes
+  must not introduce their own header treatments, ad-hoc row helpers, or content
+  widths, and text columns beside a fixed column carry `flex_1` with a zero
+  min-width so long lines wrap instead of widening the pane. Any `.truncate()`
+  element must also set `.overflow_x_hidden()` so GPUI shapes an ellipsis (`…`)
+  rather than clipping mid-glyph.
+- Desktop UI follows the OpenCode V2 dark surface hierarchy (`SIDEBAR` recessed
+  at `#111111`, `CANVAS` base at `#161616`, elevated `SURFACE` cards at `#1d1d1d`,
+  and recessed `CANVAS` controls with `LINE` borders inside cards). Interactive
+  controls inside `SURFACE` cards must use bordered chips (`canvas_button`,
+  `header_button`, or `disclosure_button`) rather than borderless `SURFACE`
+  buttons, and dropdown/picker triggers must include a visible disclosure
+  affordance. Keep copy to one direct line per control; never add intro
+  paragraphs above setting cards, repeated per-row field labels, or redundant
+  "cannot be undone" warnings beside two-step confirmation buttons. Render
+  modal/list errors at the top of the scrollable container so they are never
+  hidden below the fold.
 - Public app updates are Developer ID signed, notarized, stapled, EdDSA signed,
   published artifact-first/feed-last, and installed through Sparkle.
 - Linux direct-install updates accept only a strictly newer signed stable

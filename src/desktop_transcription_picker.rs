@@ -169,6 +169,40 @@ pub(crate) fn render_transcription_picker<T: TranscriptionPickerDelegate>(
                 }
             })
             .child(state_label);
+        let actions = div()
+            .flex()
+            .items_center()
+            .gap_2()
+            .child(badge)
+            .when_some(
+                match deletion {
+                    ModelDeletion::Unavailable => None,
+                    ModelDeletion::Offered => Some(false),
+                    ModelDeletion::Confirming => Some(true),
+                },
+                |actions, confirming| {
+                    actions.child(
+                        card_button(if confirming {
+                            format!("Delete {}?", definition.size_label())
+                        } else {
+                            "Delete".into()
+                        })
+                        .id(("transcription-model-delete", index))
+                        .when(confirming, |button| {
+                            button
+                                .border_color(rgb(DANGER_BORDER))
+                                .bg(rgb(DANGER_SURFACE))
+                                .text_color(rgb(NEGATIVE))
+                        })
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            cx.stop_propagation();
+                            this.delete_transcription_model(definition.id, cx);
+                            cx.notify();
+                        })),
+                    )
+                },
+            )
+            .when_some(action, |actions, action| actions.child(card_button(action)));
         div()
             .id(("transcription-model", index))
             .w_full()
@@ -186,15 +220,30 @@ pub(crate) fn render_transcription_picker<T: TranscriptionPickerDelegate>(
             .child(
                 div()
                     .flex()
-                    .items_center()
+                    .items_start()
                     .justify_between()
+                    .gap_3()
                     .child(
                         div()
-                            .text_size(px(13.0))
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .child(definition.name),
+                            .flex_1()
+                            .min_w(px(0.0))
+                            .flex()
+                            .flex_col()
+                            .gap_1()
+                            .child(
+                                div()
+                                    .text_size(px(13.0))
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .child(definition.name),
+                            )
+                            .child(
+                                div()
+                                    .text_size(px(11.0))
+                                    .text_color(rgb(MUTED))
+                                    .child(metadata),
+                            ),
                     )
-                    .child(badge),
+                    .child(actions),
             )
             .child(
                 div()
@@ -242,58 +291,6 @@ pub(crate) fn render_transcription_picker<T: TranscriptionPickerDelegate>(
                     ),
                 )
             })
-            .child(
-                div()
-                    .pt_2p5()
-                    .min_h(px(24.0))
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .child(
-                        div()
-                            .text_size(px(11.0))
-                            .text_color(rgb(FAINT))
-                            .child(metadata),
-                    )
-                    .child(
-                        div()
-                            .flex()
-                            .gap_2()
-                            .when_some(
-                                match deletion {
-                                    ModelDeletion::Unavailable => None,
-                                    ModelDeletion::Offered => Some(false),
-                                    ModelDeletion::Confirming => Some(true),
-                                },
-                                |actions, confirming| {
-                                    actions.child(
-                                        card_button(if confirming {
-                                            format!("Delete {}?", definition.size_label())
-                                        } else {
-                                            "Delete".into()
-                                        })
-                                        .id(("transcription-model-delete", index))
-                                        .when(confirming, |button| {
-                                            button
-                                                .border_color(rgb(DANGER_BORDER))
-                                                .bg(rgb(DANGER_SURFACE))
-                                                .text_color(rgb(NEGATIVE))
-                                        })
-                                        .on_click(
-                                            cx.listener(move |this, _, _, cx| {
-                                                cx.stop_propagation();
-                                                this.delete_transcription_model(definition.id, cx);
-                                                cx.notify();
-                                            }),
-                                        ),
-                                    )
-                                },
-                            )
-                            .when_some(action, |actions, action| {
-                                actions.child(card_button(action))
-                            }),
-                    ),
-            )
             .on_click(cx.listener(move |this, _, _, cx| {
                 cx.stop_propagation();
                 if preparing {
@@ -383,18 +380,37 @@ pub(crate) fn render_transcription_picker<T: TranscriptionPickerDelegate>(
                                 .flex_1()
                                 .min_w_0()
                                 .h_full()
-                                .p_5()
+                                .p_4()
                                 .overflow_y_scroll()
-                                .children(model_cards)
                                 .when_some(view.error, |list, error| {
-                                    list.child(error_message(
-                                        "Model could not be installed.",
-                                        error,
-                                    ))
+                                    list.child(
+                                        div()
+                                            .mb_3()
+                                            .rounded(px(PANEL_RADIUS))
+                                            .border_1()
+                                            .border_color(rgb(DANGER_BORDER))
+                                            .bg(rgb(DANGER_SURFACE))
+                                            .child(error_message(
+                                                "Model could not be installed.",
+                                                error,
+                                            )),
+                                    )
                                 })
                                 .when_some(view.deletion_error, |list, error| {
-                                    list.child(error_message("Model could not be deleted.", error))
-                                }),
+                                    list.child(
+                                        div()
+                                            .mb_3()
+                                            .rounded(px(PANEL_RADIUS))
+                                            .border_1()
+                                            .border_color(rgb(DANGER_BORDER))
+                                            .bg(rgb(DANGER_SURFACE))
+                                            .child(error_message(
+                                                "Model could not be deleted.",
+                                                error,
+                                            )),
+                                    )
+                                })
+                                .children(model_cards),
                         ),
                 ),
         )

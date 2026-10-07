@@ -3295,20 +3295,25 @@ impl AppWindow {
         if self.setup_visible || warnings.is_empty() {
             return None;
         }
+        let warning_count = warnings.len();
         Some(
             div()
                 .child(settings_section_label("PERMISSIONS NEEDED"))
                 .child(
-                    settings_panel().children(warnings.into_iter().map(|warning| {
-                        let (name, description) = permission_warning_copy(warning.kind);
-                        let action = compact_button(permission_action_label(warning.action))
-                            .id(permission_warning_id(warning.kind))
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.perform_permission_action(warning);
-                                cx.notify();
-                            }));
-                        settings_row(name, description, action)
-                    })),
+                    settings_panel().children(warnings.into_iter().enumerate().map(
+                        |(index, warning)| {
+                            let (name, description) = permission_warning_copy(warning.kind);
+                            let action = header_button(permission_action_label(warning.action))
+                                .id(permission_warning_id(warning.kind))
+                                .bg(rgb(CANVAS))
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.perform_permission_action(warning);
+                                    cx.notify();
+                                }));
+                            settings_row(name, description, action)
+                                .when(index + 1 == warning_count, |row| row.border_b_0())
+                        },
+                    )),
                 )
                 .into_any_element(),
         )
@@ -3331,6 +3336,7 @@ impl AppWindow {
                 .id("choose-required-model")
                 .bg(rgb(ACCENT))
                 .text_color(rgb(TEXT))
+                .font_weight(FontWeight::MEDIUM)
                 .on_click(cx.listener(|this, _, _, cx| {
                     this.transcription_picker_language =
                         Some(this.settings.transcription.language.clone());
@@ -3345,18 +3351,22 @@ impl AppWindow {
                 .when(
                     matches!(self.command_model_status, CommandModelStatus::Failed),
                     |controls| {
-                        controls.child(compact_button("Retry").id("retry-command-model").on_click(
-                            cx.listener(|this, _, _, cx| {
-                                if !this.preview {
-                                    cx.dispatch_action(&RetryCommands);
-                                }
-                            }),
-                        ))
+                        controls.child(
+                            header_button("Retry")
+                                .id("retry-command-model")
+                                .bg(rgb(CANVAS))
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    if !this.preview {
+                                        cx.dispatch_action(&RetryCommands);
+                                    }
+                                })),
+                        )
                     },
                 )
                 .child(
-                    compact_button("Turn off commands")
+                    header_button("Turn off commands")
                         .id("disable-unavailable-commands")
+                        .bg(rgb(CANVAS))
                         .on_click(cx.listener(|this, _, _, cx| {
                             if let Err(error) = this.developer_set_commands_enabled(false, cx) {
                                 tracing::warn!(%error, "could not disable voice commands");
@@ -3560,32 +3570,30 @@ impl AppWindow {
                 .px_4()
                 .py_3()
                 .flex()
-                .flex_col()
-                .gap_2()
+                .items_center()
+                .justify_between()
+                .gap_4()
                 .border_b_1()
                 .border_color(rgb(LINE))
                 .bg(rgb(CANVAS))
-                .child(settings_copy(
-                    "Release the microphone when idle?",
-                    "HEX will open the microphone when you press the shortcut. This adds a start-up delay and removes pre-roll, so the beginning of speech may be missed if you speak right away.",
-                ))
                 .child(
-                    div()
-                        .text_size(px(11.0))
-                        .text_color(rgb(MUTED))
-                        .child(if self.settings.commands_enabled {
-                            "Commands need an open microphone. Confirming will also turn Commands off. You can switch back to Keep ready at any time."
+                    div().flex_1().min_w_0().child(settings_copy(
+                        "Release the microphone when idle?",
+                        if self.settings.commands_enabled {
+                            "Opens the microphone on shortcut press without pre-roll and turns Commands off."
                         } else {
-                            "Commands need an open microphone and will remain off. You can switch back to Keep ready at any time."
-                        }),
+                            "Opens the microphone on shortcut press without pre-roll. Commands remain off."
+                        },
+                    )),
                 )
                 .child(
                     div()
+                        .flex_none()
                         .flex()
-                        .justify_end()
+                        .items_center()
                         .gap_2()
                         .child(
-                            compact_button("Cancel")
+                            header_button("Cancel")
                                 .id("cancel-release-microphone")
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.pending_microphone_policy = None;
@@ -3593,11 +3601,10 @@ impl AppWindow {
                                 })),
                         )
                         .child(
-                            compact_button("Release microphone")
+                            header_button("Release microphone")
                                 .id("confirm-release-microphone")
-                                .border_1()
-                                .border_color(rgb(LINE))
                                 .bg(rgb(SURFACE_SELECTED))
+                                .text_color(rgb(TEXT))
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     if let Err(error) = this.update_microphone_policy(
                                         MicrophonePolicyChange::DisableCommandsAndRelease,
@@ -3821,26 +3828,26 @@ impl AppWindow {
         let status = self.setup_status;
         let microphone = match status.microphone {
             PermissionState::Ready => setup_ready_badge(),
-            PermissionState::NeedsRequest => compact_button("Allow")
+            PermissionState::NeedsRequest => header_button("Allow")
                 .id("setup-microphone")
-                .bg(rgb(SURFACE_SELECTED))
+                .bg(rgb(CANVAS))
                 .on_click(cx.listener(|_this, _, _, cx| {
                     crate::onboarding::request_microphone();
                     cx.notify();
                 }))
                 .into_any_element(),
-            PermissionState::NeedsSettings => compact_button("Open Settings")
+            PermissionState::NeedsSettings => header_button("Open Settings")
                 .id("setup-microphone")
-                .bg(rgb(SURFACE_SELECTED))
+                .bg(rgb(CANVAS))
                 .on_click(cx.listener(|_this, _, _, cx| {
                     crate::onboarding::open_permission_settings("microphone");
                     cx.notify();
                 }))
                 .into_any_element(),
         };
-        let mut permission_rows = Vec::new();
+        let mut permission_items: Vec<(&'static str, &'static str, AnyElement)> = Vec::new();
         if status.microphone != PermissionState::Ready {
-            permission_rows.push(setup_row(
+            permission_items.push((
                 "Microphone",
                 if self.settings.commands_enabled {
                     "Hear commands and dictation."
@@ -3851,30 +3858,30 @@ impl AppWindow {
             ));
         }
         if status.input_monitoring != PermissionState::Ready {
-            let input_monitoring = compact_button("Grant Access")
+            let input_monitoring = header_button("Grant Access")
                 .id("setup-input-monitoring")
-                .bg(rgb(SURFACE_SELECTED))
+                .bg(rgb(CANVAS))
                 .on_click(cx.listener(|_this, _, _, cx| {
                     crate::permission_guide::show_input_monitoring();
                     cx.notify();
                 }))
                 .into_any_element();
-            permission_rows.push(setup_row(
+            permission_items.push((
                 "Input Monitoring",
                 "Recognize the dictation shortcut anywhere.",
                 input_monitoring,
             ));
         }
         if status.accessibility != PermissionState::Ready {
-            let accessibility = compact_button("Grant Access")
+            let accessibility = header_button("Grant Access")
                 .id("setup-accessibility")
-                .bg(rgb(SURFACE_SELECTED))
+                .bg(rgb(CANVAS))
                 .on_click(cx.listener(|_this, _, _, cx| {
                     crate::permission_guide::show_accessibility();
                     cx.notify();
                 }))
                 .into_any_element();
-            permission_rows.push(setup_row(
+            permission_items.push((
                 "Accessibility",
                 if self.settings.commands_enabled {
                     "Paste text and run keyboard commands."
@@ -3884,6 +3891,15 @@ impl AppWindow {
                 accessibility,
             ));
         }
+        let permission_count = permission_items.len();
+        let permission_rows = permission_items
+            .into_iter()
+            .enumerate()
+            .map(|(index, (title, description, control))| {
+                settings_row(title, description, control)
+                    .when(index + 1 == permission_count, |row| row.border_b_0())
+            })
+            .collect::<Vec<_>>();
         let models_ready = status.transcription_model;
         let model_notice =
             dictation_model_notice(status, self.transcription_status.model.is_some());
@@ -3892,8 +3908,8 @@ impl AppWindow {
         } else {
             compact_button("Choose model")
                 .id("setup-models")
-                .bg(rgb(TEXT))
-                .text_color(rgb(CANVAS))
+                .bg(rgb(ACCENT))
+                .text_color(rgb(TEXT))
                 .font_weight(FontWeight::SEMIBOLD)
                 .on_click(cx.listener(|this, _, _, cx| {
                     this.transcription_picker_language =
@@ -3919,26 +3935,28 @@ impl AppWindow {
                 div()
                     .id("setup")
                     .w(px(640.0))
-                    .rounded_lg()
+                    .p_6()
+                    .flex()
+                    .flex_col()
+                    .gap_4()
+                    .rounded(px(PANEL_RADIUS + 2.0))
                     .border_1()
                     .border_color(rgb(LINE))
                     .bg(rgb(CANVAS))
                     .child(
                         div()
-                            .px_7()
-                            .pt_7()
-                            .pb_5()
+                            .flex()
+                            .flex_col()
+                            .gap_1()
                             .child(
                                 div()
-                                    .text_size(px(22.0))
+                                    .text_size(px(18.0))
                                     .font_weight(FontWeight::SEMIBOLD)
                                     .child("Set up HEX"),
                             )
                             .child(
                                 div()
-                                    .pt_2()
                                     .text_size(px(12.0))
-                                    .line_height(px(19.0))
                                     .text_color(rgb(MUTED))
                                     .child("Grant permissions and choose a local model to start dictating."),
                             ),
@@ -3946,37 +3964,41 @@ impl AppWindow {
                     .when(!permission_rows.is_empty(), |setup| {
                         setup.child(
                             div()
-                                .mx_7()
-                                .pb_5()
+                                .flex()
+                                .flex_col()
+                                .gap_2()
                                 .child(setup_group_label("PERMISSIONS NEEDED"))
-                                .child(div().border_t_1().border_color(rgb(LINE)).children(permission_rows)),
+                                .child(settings_panel().children(permission_rows)),
                         )
                     })
                     .child(
                         div()
-                            .mx_7()
+                            .flex()
+                            .flex_col()
+                            .gap_2()
                             .child(setup_group_label("LOCAL MODELS"))
                             .child(
-                                div().border_t_1().border_color(rgb(LINE)).child(setup_row(
-                                    if let Some((title, _)) = model_notice {
-                                        title
-                                    } else {
-                                        "Local dictation model"
-                                    },
-                                    if let Some((_, description)) = model_notice {
-                                        description
-                                    } else {
-                                        "The selected model transcribes speech entirely on this Mac."
-                                    },
-                                    models,
-                                )),
+                                settings_panel().child(
+                                    settings_row(
+                                        if let Some((title, _)) = model_notice {
+                                            title
+                                        } else {
+                                            "Local dictation model"
+                                        },
+                                        if let Some((_, description)) = model_notice {
+                                            description
+                                        } else {
+                                            "The selected model transcribes speech entirely on this Mac."
+                                        },
+                                        models,
+                                    )
+                                    .border_b_0(),
+                                ),
                             ),
                     )
                     .when(crate::DEVELOPER_FEATURES_ENABLED, |setup| {
                         setup.child(
                             div()
-                                .px_7()
-                                .py_5()
                                 .text_size(px(10.0))
                                 .line_height(px(16.0))
                                 .text_color(rgb(FAINT))
@@ -4978,9 +5000,10 @@ impl AppWindow {
                                 }),
                         )
                         .child(
-                            div()
+                            canvas_button()
+                                .h(px(24.0))
+                                .px_2()
                                 .text_size(px(10.0))
-                                .text_color(rgb(TEXT_SOFT))
                                 .child("Add"),
                         )
                         .on_click(cx.listener(move |this, _, _, cx| {
@@ -8116,28 +8139,9 @@ fn command_model_notice(status: &CommandModelStatus) -> Option<(&'static str, &'
     }
 }
 
-fn setup_row(title: &'static str, description: &'static str, control: AnyElement) -> Div {
-    div()
-        .w_full()
-        .min_h(px(70.0))
-        .py_3()
-        .flex()
-        .items_center()
-        .gap_4()
-        .border_b_1()
-        .border_color(rgb(LINE))
-        .child(
-            div()
-                .flex_1()
-                .min_w_0()
-                .child(settings_copy(title, description)),
-        )
-        .child(div().flex_shrink_0().child(control))
-}
-
 fn setup_group_label(label: &'static str) -> Div {
     div()
-        .pb_2()
+        .px_1()
         .text_size(px(10.0))
         .font_weight(FontWeight::SEMIBOLD)
         .text_color(rgb(MUTED))
