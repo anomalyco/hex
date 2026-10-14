@@ -287,10 +287,11 @@ impl MetalIndicator {
         }) else {
             return;
         };
+        let screen_frame = screen.frame();
         let visible = screen.visibleFrame();
         let capsule_margin = f64::from((WINDOW_HEIGHT - CAPSULE_HEIGHT) / 2.0);
         let top_left = NSPoint::new(
-            visible.origin.x + (visible.size.width - f64::from(WINDOW_WIDTH)) / 2.0,
+            screen_frame.origin.x + (screen_frame.size.width - f64::from(WINDOW_WIDTH)) / 2.0,
             visible.origin.y + visible.size.height + capsule_margin - TOP_OFFSET,
         );
         let frame = self.window.frame();
