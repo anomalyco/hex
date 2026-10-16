@@ -111,20 +111,24 @@ fn final_transcript_supplements_gaps_without_replacing_live_entries() {
 
 #[test]
 fn live_timestamps_preserve_dropped_packet_gaps_and_match_final_origin() {
+    // A dropped 10 ms microphone packet is far below any media-time jitter
+    // threshold, but the recorded position still accounts for it.
     let packet = AudioPacket {
-        source: MeetingSource::System,
+        source: MeetingSource::Microphone,
         pts_us: None,
         arrival_us: 1_200_000,
-        sample_rate: 16_000,
-        samples: vec![0.0; 1_600],
+        position: 44_100 + 441,
+        sample_rate: 44_100,
+        samples: vec![0.0; 441],
     };
     assert_eq!(
-        live::audio_gap(None, Some(1_000_000), &packet),
+        live::audio_gap(44_100, &packet),
         Some(live::AudioGap {
-            silence_samples: 3_200,
+            silence_samples: 441,
             skipped_us: 0,
         })
     );
+    assert_eq!(live::audio_gap(44_100 + 441, &packet), None);
     assert_eq!(live::source_offset([Some(500_000), Some(700_000)], 0), 0);
     assert_eq!(
         live::source_offset([Some(500_000), Some(700_000)], 1),
@@ -133,25 +137,17 @@ fn live_timestamps_preserve_dropped_packet_gaps_and_match_final_origin() {
 }
 
 #[test]
-fn live_gaps_prefer_media_time_and_bound_synthesized_silence() {
-    let contiguous = AudioPacket {
+fn live_gaps_bound_synthesized_silence() {
+    let delayed = AudioPacket {
         source: MeetingSource::Microphone,
-        pts_us: Some(1_200_000),
+        pts_us: None,
         arrival_us: 2_000_000,
+        position: 44_100 * 3,
         sample_rate: 44_100,
         samples: vec![0.0; 8_820],
     };
     assert_eq!(
-        live::audio_gap(Some(1_200_000), Some(1_000_000), &contiguous),
-        None
-    );
-
-    let delayed = AudioPacket {
-        pts_us: Some(3_200_000),
-        ..contiguous
-    };
-    assert_eq!(
-        live::audio_gap(Some(1_200_000), Some(1_000_000), &delayed),
+        live::audio_gap(44_100, &delayed),
         Some(live::AudioGap {
             silence_samples: 22_050,
             skipped_us: 1_500_000,
@@ -443,6 +439,7 @@ fn live_transcription_replays_both_recorded_tracks() {
                     source: *source,
                     pts_us: None,
                     arrival_us: index as u64 * 200_000,
+                    position: start as u64,
                     sample_rate: *sample_rate,
                     samples: samples[start..end].to_vec(),
                 })
@@ -490,6 +487,10 @@ fn rolling_entries_replace_the_live_draft_for_the_time_they_cover() {
         entry(MeetingSource::Microphone, 9_500, 10_000, "draft mic tail"),
         entry(MeetingSource::System, 21_000, 22_000, "draft system tail"),
     ];
+    let rolling = transcript::RollingView {
+        entries: rolling.to_vec(),
+        ..Default::default()
+    };
     let merged = live::merge_rolling(&rolling, live.clone());
     assert_eq!(
         merged
@@ -503,7 +504,37 @@ fn rolling_entries_replace_the_live_draft_for_the_time_they_cover() {
             "draft system tail"
         ]
     );
-    assert_eq!(live::merge_rolling(&[], live.clone()), live);
+    assert_eq!(live::merge_rolling(&Default::default(), live.clone()), live);
+}
+
+#[test]
+fn rolling_coverage_hides_draft_echo_that_rolling_dropped() {
+    let entry = |source, start_ms, end_ms, text: &str| TranscriptEntry {
+        source,
+        start_ms,
+        end_ms,
+        text: text.into(),
+    };
+    // Rolling transcribed the microphone through 30 s and dropped all of it
+    // as echo, so no microphone entry marks how far it got.
+    let rolling = transcript::RollingView {
+        entries: vec![entry(MeetingSource::System, 0, 29_000, "Final system.")],
+        covered_ms: transcript::RollingCoverage {
+            system: Some(30_000),
+            microphone: Some(30_000),
+        },
+    };
+    let live = vec![
+        entry(MeetingSource::Microphone, 12_000, 13_000, "draft echo"),
+        entry(MeetingSource::Microphone, 31_000, 32_000, "draft tail"),
+    ];
+    assert_eq!(
+        live::merge_rolling(&rolling, live)
+            .iter()
+            .map(|entry| entry.text.as_str())
+            .collect::<Vec<_>>(),
+        ["Final system.", "draft tail"]
+    );
 }
 
 fn live_event(
@@ -611,7 +642,7 @@ fn live_view_hides_microphone_twins_of_remote_speech() {
             None,
         ),
     ];
-    let entries = live::live_view(&[], events.iter());
+    let entries = live::live_view(&Default::default(), events.iter());
     assert_eq!(
         shown(&entries),
         [
@@ -649,14 +680,17 @@ fn an_undecided_draft_line_waits_while_the_remote_side_speaks() {
             None,
         )
     };
-    let entries = live::live_view(&[], [&system, &draft(Updated, "Basically")]);
+    let entries = live::live_view(&Default::default(), [&system, &draft(Updated, "Basically")]);
     assert_eq!(
         shown(&entries),
         [(MeetingSource::System, "Basically, I want")]
     );
 
     // No twin arrived: once complete, the line is the user's.
-    let entries = live::live_view(&[], [&system, &draft(Completed, "Hold on a second.")]);
+    let entries = live::live_view(
+        &Default::default(),
+        [&system, &draft(Completed, "Hold on a second.")],
+    );
     assert_eq!(
         shown(&entries),
         [
@@ -683,7 +717,7 @@ fn an_undecided_draft_line_waits_while_the_remote_side_speaks() {
         "So anyway",
         None,
     );
-    let entries = live::live_view(&[], [&system, &local, &alone]);
+    let entries = live::live_view(&Default::default(), [&system, &local, &alone]);
     assert_eq!(
         shown(&entries),
         [
@@ -708,6 +742,10 @@ fn live_view_keeps_rolling_microphone_entries_that_rolling_already_judged() {
         entry(MeetingSource::System, 0, 2_000, "Yeah, totally."),
         entry(MeetingSource::Microphone, 50, 2_000, "Yeah, totally."),
     ];
+    let rolling = transcript::RollingView {
+        entries: rolling.to_vec(),
+        ..Default::default()
+    };
     let entries = live::live_view(&rolling, std::iter::empty());
     assert_eq!(entries.len(), 2);
 }

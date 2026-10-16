@@ -108,6 +108,27 @@ impl ModelComponent {
     }
 }
 
+const SINGLE_THREAD_VARIABLE: &str = "MOONSHINE_ORT_SINGLE_THREAD";
+
+/// Runs every Moonshine session on its calling thread. By default ONNX
+/// Runtime gives each of a recognizer's sessions a spinning thread pool as
+/// wide as the machine, which spends far more CPU waiting than decoding:
+/// on a Mac Studio the command recognizer used 115% of a core instead of
+/// 22%, and the two-stream meeting draft 113% instead of 31%, with the
+/// command update p95 rising from 67 to 127 ms. Moonshine reads the
+/// variable when it creates a session. An explicit value, including `0`,
+/// is kept.
+///
+/// Call first thing in `main`, before any thread exists: changing the
+/// environment of a multi-threaded process is unsound.
+pub fn run_sessions_single_threaded() {
+    if std::env::var_os(SINGLE_THREAD_VARIABLE).is_none() {
+        // SAFETY: called from `main` before any other thread is spawned,
+        // so nothing can read the environment concurrently.
+        unsafe { std::env::set_var(SINGLE_THREAD_VARIABLE, "1") };
+    }
+}
+
 pub fn model_installed() -> bool {
     model_path().is_ok_and(|path| verification_receipt_matches(&path))
 }
@@ -376,6 +397,7 @@ impl Moonshine {
         Ok(moonshine)
     }
 
+    #[cfg(test)]
     pub fn load_with_streams(project_root: &Path, stream_count: usize) -> Result<Self> {
         Self::load_with_config(project_root, stream_count, MoonshineConfig::default())
     }

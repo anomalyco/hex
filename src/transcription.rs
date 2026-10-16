@@ -1,5 +1,5 @@
 use color_eyre::eyre::Result;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::apple_speech::AppleSpeech;
 use crate::dictation::DictationProtocol;
@@ -20,7 +20,7 @@ pub struct WarmTranscriber {
     active: Option<Transcriber>,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TranscriptSegment {
     pub start_ms: i64,
@@ -28,7 +28,7 @@ pub struct TranscriptSegment {
     pub text: String,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Transcript {
     pub text: String,

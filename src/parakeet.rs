@@ -2773,3 +2773,10 @@ mod dictation_tail_tests;
 #[cfg(test)]
 #[path = "dictation_corpus_tests.rs"]
 mod dictation_corpus_tests;
+
+/// Loads a GGUF model file directly, for opt-in harnesses that replay
+/// recordings without the installed model catalog.
+#[cfg(test)]
+pub(crate) fn load_test_model(path: &std::path::Path) -> Result<Parakeet> {
+    Parakeet::load_from(path, false, Some(&TranscriptionSelection::default()))
+}

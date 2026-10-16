@@ -238,6 +238,10 @@ struct AudioPacket {
     source: MeetingSource,
     pts_us: Option<i64>,
     arrival_us: u64,
+    /// Samples of this source recorded before the packet: its place in the
+    /// WAV, set by the writer. Consumers that drop packets use it to keep
+    /// later audio on the recording's timeline.
+    position: u64,
     sample_rate: u32,
     samples: Vec<f32>,
 }
@@ -662,6 +666,7 @@ fn add_audio_handler(
                 source,
                 pts_us,
                 arrival_us: capture_clock.elapsed().as_micros() as u64,
+                position: 0,
                 sample_rate,
                 samples,
             };
@@ -795,7 +800,7 @@ fn write_tracks(
     let mut stats = CaptureStats::default();
     stats.system.file = "system.wav".into();
     stats.microphone.file = "microphone.wav".into();
-    while let Ok(packet) = receiver.recv() {
+    while let Ok(mut packet) = receiver.recv() {
         let (writer, track, file_name) = match packet.source {
             MeetingSource::System => (&mut system, &mut stats.system, "system.wav"),
             MeetingSource::Microphone => (&mut microphone, &mut stats.microphone, "microphone.wav"),
@@ -831,6 +836,7 @@ fn write_tracks(
             track.last_pts_us = Some(pts_us);
         }
         track.first_arrival_us.get_or_insert(packet.arrival_us);
+        packet.position = track.samples;
         track.samples += packet.samples.len() as u64;
         for &sample in &packet.samples {
             writer.write_sample(sample)?;
@@ -1337,3 +1343,7 @@ fn set_owner_only(path: &Path, directory: bool) -> Result<()> {
 #[cfg(test)]
 #[path = "meeting_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "meeting_echo_replay_tests.rs"]
+mod echo_replay_tests;

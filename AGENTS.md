@@ -375,6 +375,14 @@ CoreAudio formats, AppleScript details, or event serialization.
   GUI, or permission setup; never writes, recovers, or indexes on disk inside
   the meetings folder; runs no model; and makes no network request. Stdout
   carries only MCP messages.
+- Meeting echo is judged on one timeline built from WAV sample positions, never
+  from packet arrival. A `You` line or rolling entry is judged only once the
+  system audio that could explain it has arrived (bounded when the system track
+  stalls). Measure echo changes with `meeting_echo_replay` on a recorded
+  speaker-mode call, counting genuine `You` lines lost as well as echo kept.
+- Moonshine sessions run single-threaded (`MOONSHINE_ORT_SINGLE_THREAD`, set
+  first thing in `main`); ONNX Runtime's default spinning pools cost several
+  times the CPU of the decoding itself.
 - Live meeting drafts remain available if final transcription fails. Final
   publication is atomic; adjacent same-source entries within three seconds form
   one displayed turn labeled `You` or `Them`. Speaker echo never shows as `You`:

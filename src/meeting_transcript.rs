@@ -17,6 +17,7 @@ use std::time::{Duration, Instant};
 
 use color_eyre::eyre::{Result, WrapErr, eyre};
 use hound::WavReader;
+use serde::{Deserialize, Serialize};
 
 use crate::dictation::StreamingResampler;
 use crate::pause_segmenter::PauseSegmenter;
@@ -142,6 +143,8 @@ pub(super) struct TrackTranscript {
     source: MeetingSource,
     origin_ms: u64,
     entries: Vec<TranscriptEntry>,
+    /// Capture-clock end of the audio transcribed so far.
+    through_ms: u64,
 }
 
 impl TrackTranscript {
@@ -150,12 +153,14 @@ impl TrackTranscript {
             source,
             origin_ms,
             entries: Vec::new(),
+            through_ms: origin_ms,
         }
     }
 
     fn accept(&mut self, chunk: &Chunk, transcript: Transcript) {
         let chunk_ms = self.origin_ms + samples_ms(chunk.start);
         let duration_ms = samples_ms(chunk.samples.len());
+        self.through_ms = self.through_ms.max(chunk_ms + duration_ms);
         let segments = if transcript.words.is_empty() {
             transcript.segments
         } else {
@@ -333,29 +338,12 @@ pub(super) fn suppress_echo(
             _ => utterances.push(vec![(index, entry)]),
         }
     }
-    let echo_score = |spoken: &[String], start_ms: u64, end_ms: u64| {
-        let start = start_ms.saturating_sub(ECHO_WINDOW_MS);
-        let end = end_ms + ECHO_WINDOW_MS;
-        let remote = system
-            .iter()
-            .filter(|entry| entry.start_ms < end && start < entry.end_ms)
-            .flat_map(|entry| tokens(&entry.text))
-            .collect::<Vec<_>>();
-        if remote.is_empty() || spoken.is_empty() {
-            return 0.0;
-        }
-        let matched = spoken
-            .iter()
-            .filter(|token| remote.iter().any(|remote| tokens_match(token, remote)))
-            .count();
-        matched as f32 / spoken.len() as f32
-    };
     let is_echo = |spoken: &[String], start_ms: u64, end_ms: u64, judge_words: bool| match signal(
         start_ms, end_ms,
     ) {
         Some(Signal::Bleed) => true,
         Some(Signal::Local) => false,
-        None => judge_words && echo_score(spoken, start_ms, end_ms) >= ECHO_SIMILARITY,
+        None => judge_words && echo_score(spoken, start_ms, end_ms, &system) >= ECHO_SIMILARITY,
     };
     let mut dropped = vec![false; entries.len()];
     let mut dropped_utterances = 0;
@@ -371,8 +359,11 @@ pub(super) fn suppress_echo(
             .unwrap_or_default();
         if is_echo(&spoken, utterance[0].1.start_ms, end, true) {
             dropped_utterances += 1;
-            for (index, _) in utterance {
-                dropped[index] = true;
+            // Bleed can run straight into the user's own sentence; a sentence
+            // the signal shows is local survives its echoing neighbours.
+            for (index, entry) in utterance {
+                dropped[index] = tokens(&entry.text).len() < SENTENCE_WORDS
+                    || signal(entry.start_ms, entry.end_ms) != Some(Signal::Local);
             }
             continue;
         }
@@ -398,6 +389,30 @@ pub(super) fn suppress_echo(
         .filter_map(|(entry, dropped)| (!dropped).then_some(entry))
         .collect();
     (kept, dropped_utterances)
+}
+
+/// Whether a microphone entry's words repeat remote speech around it.
+pub(super) fn repeats_remote(entry: &TranscriptEntry, remote: &[&TranscriptEntry]) -> bool {
+    echo_score(&tokens(&entry.text), entry.start_ms, entry.end_ms, remote) >= ECHO_SIMILARITY
+}
+
+/// The share of `spoken` that remote speech within the echo window contains.
+fn echo_score(spoken: &[String], start_ms: u64, end_ms: u64, remote: &[&TranscriptEntry]) -> f32 {
+    let start = start_ms.saturating_sub(ECHO_WINDOW_MS);
+    let end = end_ms + ECHO_WINDOW_MS;
+    let remote = remote
+        .iter()
+        .filter(|entry| entry.start_ms < end && start < entry.end_ms)
+        .flat_map(|entry| tokens(&entry.text))
+        .collect::<Vec<_>>();
+    if remote.is_empty() || spoken.is_empty() {
+        return 0.0;
+    }
+    let matched = spoken
+        .iter()
+        .filter(|token| remote.iter().any(|remote| tokens_match(token, remote)))
+        .count();
+    matched as f32 / spoken.len() as f32
 }
 
 /// Removes echo from both sources' entries, then moves them onto the
@@ -492,6 +507,7 @@ impl RollingFeed {
             source: packet.source,
             pts_us: packet.pts_us,
             arrival_us: packet.arrival_us,
+            position: packet.position,
             sample_rate: packet.sample_rate,
             samples: Vec::with_capacity(packet.sample_rate as usize),
         });
@@ -745,6 +761,95 @@ fn transcribe_pending(
     }
 }
 
+/// Meeting-timeline milliseconds through which each source's rolling
+/// transcript replaces the live draft, including entries dropped as echo.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+pub(super) struct RollingCoverage {
+    pub system: Option<u64>,
+    pub microphone: Option<u64>,
+}
+
+impl RollingCoverage {
+    pub(super) fn get(&self, source: MeetingSource) -> Option<u64> {
+        match source {
+            MeetingSource::System => self.system,
+            MeetingSource::Microphone => self.microphone,
+        }
+    }
+}
+
+/// One line of the rolling snapshot: its coverage, then its entries.
+#[derive(Deserialize, Serialize)]
+#[serde(untagged)]
+pub(super) enum RollingLine {
+    Coverage { covered_ms: RollingCoverage },
+    Entry(TranscriptEntry),
+}
+
+/// The rolling snapshot as the Meetings pane reads it.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(super) struct RollingView {
+    pub entries: Vec<TranscriptEntry>,
+    pub covered_ms: RollingCoverage,
+}
+
+impl FromIterator<RollingLine> for RollingView {
+    fn from_iter<I: IntoIterator<Item = RollingLine>>(lines: I) -> Self {
+        let mut view = Self::default();
+        for line in lines {
+            match line {
+                RollingLine::Coverage { covered_ms } => view.covered_ms = covered_ms,
+                RollingLine::Entry(entry) => view.entries.push(entry),
+            }
+        }
+        view
+    }
+}
+
+/// The joined rolling transcript. A microphone entry is published only once
+/// the system track is transcribed through its end, so echo is judged
+/// against the remote words regardless of which chunk finished first. A
+/// system track that stopped advancing is not waited for.
+fn rolling_view(
+    tracks: [Option<&TrackTranscript>; 2],
+    system_advancing: bool,
+    envelope: &EchoEnvelope,
+) -> RollingView {
+    let origin_ms = tracks
+        .iter()
+        .flatten()
+        .map(|track| track.origin_ms)
+        .min()
+        .unwrap_or_default();
+    let [system, microphone] = tracks;
+    let system_through = system.map(|track| track.through_ms);
+    let microphone_through = microphone.map(|track| match system_through {
+        Some(system) if system_advancing => track.through_ms.min(system),
+        _ => track.through_ms,
+    });
+    // A track that fell behind keeps showing what it transcribed; the live
+    // draft continues after it.
+    let entries = system
+        .into_iter()
+        .flat_map(|track| track.entries.iter().cloned())
+        .chain(microphone.into_iter().flat_map(|track| {
+            track
+                .entries
+                .iter()
+                .filter(|entry| microphone_through.is_none_or(|through| entry.end_ms <= through))
+                .cloned()
+        }))
+        .collect::<Vec<_>>();
+    let (entries, _) = join_entries(entries, origin_ms, envelope);
+    RollingView {
+        entries,
+        covered_ms: RollingCoverage {
+            system: system_through.map(|through| through.saturating_sub(origin_ms)),
+            microphone: microphone_through.map(|through| through.saturating_sub(origin_ms)),
+        },
+    }
+}
+
 /// Atomically replaces the draft that the Meetings pane shows while recording.
 fn write_rolling_snapshot(
     directory: &Path,
@@ -752,24 +857,23 @@ fn write_rolling_snapshot(
     envelope: &EchoEnvelope,
 ) {
     let result = (|| -> Result<()> {
-        let origin_ms = tracks
-            .iter()
-            .flatten()
-            .map(|track| track.transcript.origin_ms)
-            .min()
-            .unwrap_or_default();
-        // A track that fell behind keeps showing what it transcribed; the
-        // live draft continues after it.
-        let entries = tracks
-            .iter()
-            .flatten()
-            .flat_map(|track| track.transcript.entries.iter().cloned())
-            .collect::<Vec<_>>();
-        let (entries, _) = join_entries(entries, origin_ms, envelope);
+        let [system, microphone] = tracks;
+        let view = rolling_view(
+            [system, microphone].map(|track| track.as_ref().map(|track| &track.transcript)),
+            system.as_ref().is_some_and(|track| !track.failed),
+            envelope,
+        );
         let temporary = directory.join(format!("{ROLLING_FILE}.tmp"));
         let mut file = BufWriter::new(File::create(&temporary)?);
         set_owner_only(&temporary, false)?;
-        for entry in &entries {
+        serde_json::to_writer(
+            &mut file,
+            &RollingLine::Coverage {
+                covered_ms: view.covered_ms,
+            },
+        )?;
+        file.write_all(b"\n")?;
+        for entry in &view.entries {
             serde_json::to_writer(&mut file, entry)?;
             file.write_all(b"\n")?;
         }
@@ -981,7 +1085,7 @@ pub(super) fn echo_report(
                 event.signal = envelope.assess(event.start_ms, event.end_ms);
             }
         }
-        let shown = super::live::live_view(&[], events.iter());
+        let shown = super::live::live_view(&RollingView::default(), events.iter());
         let after = shown
             .iter()
             .filter(|entry| entry.source == MeetingSource::Microphone)
@@ -994,7 +1098,7 @@ pub(super) fn echo_report(
                 event
             })
             .collect::<Vec<_>>();
-        let words_only = super::live::live_view(&[], text_only.iter())
+        let words_only = super::live::live_view(&RollingView::default(), text_only.iter())
             .iter()
             .filter(|entry| entry.source == MeetingSource::Microphone)
             .count();
@@ -1022,8 +1126,8 @@ pub(super) fn echo_report(
                     None => "?",
                 },
                 envelope
-                    .local_share(event.start_ms, event.end_ms)
-                    .map_or("-".into(), |share| format!("{share:.2}")),
+                    .locality(event.start_ms, event.end_ms)
+                    .map_or("-".into(), |locality| format!("{:.2}", locality.share)),
                 event.text
             )?;
         }
@@ -1236,6 +1340,104 @@ pub(super) fn export_markdown(
     fs::rename(&temporary, &path)?;
     sync_directory(folder)?;
     Ok(path)
+}
+
+/// One transcribed chunk, cached by the opt-in meeting replay so echo
+/// suppression can be re-evaluated without the model.
+#[cfg(test)]
+#[derive(Deserialize, Serialize)]
+pub(super) struct ReplayChunk {
+    start: usize,
+    overlap: usize,
+    len: usize,
+    transcript: Transcript,
+}
+
+/// Resamples a whole track to 16 kHz, as the rolling worker does.
+#[cfg(test)]
+pub(super) fn replay_resample(rate: u32, samples: &[f32]) -> Vec<f32> {
+    let mut resampler = StreamingResampler::new(rate).unwrap();
+    let mut resampled = samples
+        .chunks(rate as usize)
+        .flat_map(|block| resampler.push(block))
+        .collect::<Vec<_>>();
+    resampled.extend(resampler.finish());
+    resampled
+}
+
+#[cfg(test)]
+pub(super) fn replay_transcribe(model: &mut Transcriber, audio: &[f32]) -> Vec<ReplayChunk> {
+    let mut chunker = Chunker::default();
+    let mut chunks = audio
+        .chunks(RATE)
+        .flat_map(|block| chunker.push(block))
+        .collect::<Vec<_>>();
+    chunks.extend(chunker.finish());
+    chunks
+        .into_iter()
+        .map(|chunk| ReplayChunk {
+            start: chunk.start,
+            overlap: chunk.overlap,
+            len: chunk.samples.len(),
+            transcript: model.transcribe_segments(chunk.samples).unwrap(),
+        })
+        .collect()
+}
+
+/// The track as rolling transcription had it once audio through
+/// `through_ms` was transcribed, on a timeline starting at zero.
+#[cfg(test)]
+pub(super) fn replay_track(
+    source: MeetingSource,
+    chunks: &[ReplayChunk],
+    through_ms: u64,
+) -> TrackTranscript {
+    let mut track = TrackTranscript::new(source, 0);
+    for cached in chunks {
+        if samples_ms(cached.start + cached.len) > through_ms {
+            break;
+        }
+        let chunk = Chunk {
+            start: cached.start,
+            overlap: cached.overlap,
+            samples: vec![0.0; cached.len],
+        };
+        track.accept(&chunk, cached.transcript.clone());
+    }
+    track
+}
+
+#[cfg(test)]
+pub(super) fn replay_envelope(system: &[f32], microphone: &[f32]) -> EchoEnvelope {
+    let mut envelope = EchoEnvelope::default();
+    for (source, audio) in [
+        (MeetingSource::System, system),
+        (MeetingSource::Microphone, microphone),
+    ] {
+        for (index, block) in audio.chunks(RATE).enumerate() {
+            envelope.push(source, index as u64 * 1_000, block, RATE as u32);
+        }
+    }
+    envelope
+}
+
+/// What the pane shows from rolling transcription, the final transcript,
+/// and every entry before echo suppression.
+#[cfg(test)]
+pub(super) fn replay_views(
+    system: &TrackTranscript,
+    microphone: &TrackTranscript,
+    envelope: &EchoEnvelope,
+) -> (RollingView, Vec<TranscriptEntry>, Vec<TranscriptEntry>) {
+    let view = rolling_view([Some(system), Some(microphone)], true, envelope);
+    let entries = system
+        .entries
+        .iter()
+        .chain(&microphone.entries)
+        .cloned()
+        .collect::<Vec<_>>();
+    let (kept, _) = join_entries(entries.clone(), 0, envelope);
+    (view, kept, entries)
 }
 
 #[cfg(test)]
@@ -1534,6 +1736,127 @@ mod tests {
                 .iter()
                 .any(|entry| entry.text == "Shipped a better Friday.")
         );
+    }
+
+    #[test]
+    fn a_local_sentence_inside_an_echo_utterance_is_kept() {
+        let entries = vec![
+            entry(
+                MeetingSource::System,
+                1_000,
+                9_000,
+                "That's why I'm gonna get the plugin registry out. I wake up.",
+            ),
+            entry(
+                MeetingSource::Microphone,
+                1_100,
+                4_000,
+                "That's why I'm gonna get the plugin registry out.",
+            ),
+            entry(
+                MeetingSource::Microphone,
+                4_300,
+                6_500,
+                "Also, can you add some knobs?",
+            ),
+            entry(MeetingSource::Microphone, 6_800, 9_000, "Yeah, I wake up."),
+        ];
+        let (kept, dropped) = suppress_echo(entries, |start, end| {
+            Some(if (4_300, 6_500) == (start, end) {
+                Signal::Local
+            } else {
+                Signal::Bleed
+            })
+        });
+        assert_eq!(dropped, 1);
+        assert_eq!(
+            kept.iter()
+                .filter(|entry| entry.source == MeetingSource::Microphone)
+                .map(|entry| entry.text.as_str())
+                .collect::<Vec<_>>(),
+            ["Also, can you add some knobs?"]
+        );
+    }
+
+    fn track(
+        source: MeetingSource,
+        through_ms: u64,
+        entries: &[(u64, u64, &str)],
+    ) -> TrackTranscript {
+        let mut track = TrackTranscript::new(source, 0);
+        track.through_ms = through_ms;
+        track.entries = entries
+            .iter()
+            .map(|(start, end, text)| entry(source, *start, *end, text))
+            .collect();
+        track
+    }
+
+    #[test]
+    fn microphone_entries_wait_until_the_system_track_covers_them() {
+        let system = track(
+            MeetingSource::System,
+            10_000,
+            &[(4_000, 6_000, "Does it have AISDK support?")],
+        );
+        // The microphone chunk finished first: its echo of the remote line
+        // after 10 s cannot be judged until the system chunk arrives.
+        let microphone = track(
+            MeetingSource::Microphone,
+            20_000,
+            &[
+                (4_100, 6_100, "Does it have AICK support?"),
+                (8_000, 9_000, "Yes, since version two."),
+                (12_000, 14_000, "Ship the beta on Friday."),
+            ],
+        );
+        let envelope = EchoEnvelope::default();
+        let view = rolling_view([Some(&system), Some(&microphone)], true, &envelope);
+        assert_eq!(
+            view.entries
+                .iter()
+                .map(|entry| entry.text.as_str())
+                .collect::<Vec<_>>(),
+            ["Does it have AISDK support?", "Yes, since version two."]
+        );
+        assert_eq!(
+            view.covered_ms,
+            RollingCoverage {
+                system: Some(10_000),
+                microphone: Some(10_000),
+            }
+        );
+
+        // Before any system chunk, the microphone covers nothing yet.
+        let pending = track(MeetingSource::System, 0, &[]);
+        let view = rolling_view([Some(&pending), Some(&microphone)], true, &envelope);
+        assert!(view.entries.is_empty());
+        assert_eq!(view.covered_ms.microphone, Some(0));
+
+        // A system track that stopped advancing is not waited for.
+        let view = rolling_view([Some(&system), Some(&microphone)], false, &envelope);
+        assert_eq!(view.entries.len(), 3);
+        assert_eq!(view.covered_ms.microphone, Some(20_000));
+    }
+
+    #[test]
+    fn rolling_snapshots_parse_with_and_without_coverage() {
+        let line = |json: &str| serde_json::from_str::<RollingLine>(json).unwrap();
+        let view: RollingView = [
+            line(r#"{"covered_ms":{"system":30000,"microphone":28000}}"#),
+            line(r#"{"source":"system","start_ms":1,"end_ms":2,"text":"Hi."}"#),
+        ]
+        .into_iter()
+        .collect();
+        assert_eq!(view.covered_ms.get(MeetingSource::Microphone), Some(28_000));
+        assert_eq!(view.entries.len(), 1);
+        let legacy: RollingView = [line(
+            r#"{"source":"microphone","start_ms":1,"end_ms":2,"text":"Hi."}"#,
+        )]
+        .into_iter()
+        .collect();
+        assert_eq!(legacy.covered_ms, RollingCoverage::default());
+        assert_eq!(legacy.entries[0].source, MeetingSource::Microphone);
     }
 
     #[test]

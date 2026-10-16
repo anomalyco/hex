@@ -444,6 +444,7 @@ enum MeetingCommand {
 
 #[cfg(target_os = "macos")]
 fn main() -> Result<()> {
+    moonshine::run_sessions_single_threaded();
     color_eyre::install()?;
     let cli = Cli::parse_from(mcp_alias_arguments(std::env::args_os().collect()));
     // Before process logging, the instance lock, or any GUI or permission

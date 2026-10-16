@@ -19,6 +19,7 @@ use unicode_normalization::UnicodeNormalization;
 use unicode_normalization::char::is_combining_mark;
 
 use super::live::{Event, live_view};
+use super::transcript::{RollingLine, RollingView};
 use super::{
     MeetingManifest, MeetingSource, MeetingStatus, TranscriptEntry, coalesce_transcript,
     display_title, format_duration, notes_markdown, recovered_status, transcript_markdown,
@@ -564,15 +565,17 @@ fn load(directory: &Path, id: &str, in_progress: bool) -> Result<Meeting> {
             read_lines::<TranscriptEntry>(&final_path, &mut warnings),
         )
     } else {
-        let rolling = read_lines::<TranscriptEntry>(
+        let rolling: RollingView = read_lines::<RollingLine>(
             &directory.join(super::transcript::ROLLING_FILE),
             &mut warnings,
-        );
+        )
+        .into_iter()
+        .collect();
         let mut latest = HashMap::new();
         for event in read_lines::<Event>(&directory.join("transcript.live.ndjson"), &mut warnings) {
             latest.insert((event.source, event.line_id), event);
         }
-        let source = if !rolling.is_empty() {
+        let source = if !rolling.entries.is_empty() {
             TranscriptSource::Rolling
         } else if !latest.is_empty() {
             TranscriptSource::Draft

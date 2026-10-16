@@ -77,6 +77,13 @@ are unverified.
 ### Transcribe
 
 ```ts
+While recording                                      // meetings.live
+  -> Live draft: Moonshine, one stream per track, update every 1 s
+     ├── Packets carry their sample position in the WAV -> exact timeline
+     │   └── Dropped packets -> up to 0.5 s of silence, the rest skipped in time
+     └── Completed You line -> written once the system track is 1 s past it
+         └── System track stalled -> written after 3 s more microphone audio
+
 While recording                                      // meetings.rolling
   -> Each track -> one-second blocks -> bounded queue (about 5 minutes)
   -> 16 kHz streaming resampler -> chunker + echo envelope
@@ -84,7 +91,9 @@ While recording                                      // meetings.rolling
      └── No pause by 30 s -> hard cut; next chunk overlaps 2 s
   -> Utility-QoS worker transcribes a chunk only while dictation is idle
   -> Timed words -> sentences (punctuation or a 600 ms pause)
-  -> transcript.rolling.ndjson replaces the Moonshine draft for covered time
+  -> transcript.rolling.ndjson: per-track coverage line, then entries
+     ├── You entries publish only once the system track is transcribed past them
+     ├── Covered time replaces the draft, including You audio dropped as echo
      └── Queue full -> that track keeps its entries; the draft continues after
          them; rebuilt from its WAV after Stop
 
@@ -104,52 +113,73 @@ one chunk's inference time, and the second model stays resident while recording.
 Seams: segments starting before the middle of an overlap belong to the earlier
 chunk, and repeated words (two to twelve) at the join are removed.
 
+CPU: every Moonshine session (commands and the meeting draft) runs on its calling
+thread (`MOONSHINE_ORT_SINGLE_THREAD=1`, set at launch unless already set).
+ONNX Runtime's default per-session spinning thread pools were the main cost of
+meeting mode. Mac Studio, replayed in real time:
+
+```ts
+Meeting draft, two streams     113% of a core -> 31%
+Command recognizer             115% of a core -> 22%
+  └── update p50 21 -> 41 ms, p95 67 -> 127 ms (200 ms update interval)
+Rolling Parakeet               well under 1 s of compute per minute of audio
+```
+
 ### Echo Suppression
 
 ```ts
-Call on speakers -> the microphone hears the remote side 0-300 ms later
-Each microphone utterance or sentence                // meetings.echo
+Call on speakers -> the microphone hears the remote side tens of ms later
+Each microphone segment                              // meetings.echo
 ├── Signal (meeting_echo): 20 ms energy of both tracks on one timeline
-│   ├── Lag (-100..+400 ms) and coupling from envelope correlation over ±60 s
+│   ├── Lag (-300..+600 ms) and coupling from envelope correlation over ±60 s,
+│   │   cached per 10 s block once its audio is complete
 │   │   └── Correlation < 0.2 (headphones) -> every sound is local
-│   ├── Bleed gain = 35th percentile of mic − delayed system over ±5 s
-│   └── Frame is local when mic > predicted bleed (160 ms reverb) + 9 dB
-│       ├── ≤ 20% local -> Bleed -> dropped, whatever the words
+│   ├── Bleed gain = 35th percentile of mic − delayed system, before or after
+│   └── Frame is local when mic > predicted bleed (decaying reverb) + 9 dB
 │       ├── ≥ 50% local -> Local -> kept, even with matching words (double-talk)
+│       ├── ≤ 20% local and no 0.5 s of local sound within 1 s -> Bleed -> dropped
 │       └── otherwise   -> decided by words
 └── Words: ≥ 60% match Them speech within ±1.5 s (60% edit similarity) -> echo
 
+Rolling and final: segments are sentences, grouped into utterances
+└── An echo utterance keeps its sentences of 3+ words that the signal shows local
+Live draft (meeting_live::live_view): each Moonshine line on its own
+├── Signal stamped by the live worker -> Bleed hidden, Local shown
+├── Undecided, still in progress, overlapping remote speech -> hidden for now
+└── Undecided and completed -> hidden when its words repeat remote speech
+Rolling microphone entries are already judged; not re-judged by words
 Applied in: rolling snapshot, final transcript, live view, Option-Control-V
-Live view (meeting_live::live_view)
-├── Live worker stamps each microphone draft line Bleed / Local
-├── Rolling microphone entries are already judged; not re-judged by words
-└── Undecided draft line overlapping remote speech -> hidden until it completes
-    └── No twin by then -> shown as You
 ```
 
 Dropped counts are saved as `echo_suppressed_utterances` in the manifest.
 
-Root cause of `You` twins (Kit's 2026-10-15 call on speakers, Pro): ten minutes
-in, the packet-bounded rolling queue filled (`rolling meeting transcription fell
-behind` for both sources), the rolling snapshot became empty, and the pane
-showed the raw Moonshine draft, which had no echo suppression. Rolling
-transcripts were also one model segment per 20-30 s chunk, so a chunk mixing
-echo and Kit's speech was kept or dropped whole.
+Root causes of `You` twins in Kit's 2026-10-16 call (laptop speakers, built-in
+microphone, Pro under load):
 
-Observed (`hex meeting echo <dir> [--microphone-offset-ms 300] [--transcribe]`,
-copied 17-minute recording, Mac Studio):
+- The live worker's bounded queue dropped 10 ms microphone packets under CPU
+  load, and gaps under 20 ms of arrival time were not counted. The draft's
+  microphone timeline drifted up to 6 s ahead of the system track over 18
+  minutes, so the echo envelope compared unrelated audio and bleed read as
+  `Local` (84 lines) or undecided (70). The echoed `You` line appeared before
+  its `Them` twin. Packets now carry their WAV sample position.
+- The rolling snapshot had no coverage, so the draft took over after the last
+  kept `You` entry (616 s) even though rolling had judged that audio as echo.
+- A rolling `You` entry could be published before the system chunk that
+  explained it.
+
+Observed with an opt-in replay of that recording through every layer
+(`meeting_echo_replay`, Mac Studio). Echo-like = at least 60% of the words occur
+in remote speech within 6 s. Six utterances where Kit really spoke were
+labeled by hand.
 
 ```ts
-Live draft You lines shown      212 -> 72
-├── Twins of remote lines (word match)          105 -> 2
-├── Kit's lines (240-274 s, 780 s on)            67 -> 67 kept
-└── Other unmatched lines (mostly misheard bleed) 31 -> 3
-   Word matching alone would show 80
-
-Final, parakeet-unified-en
-├── Before: 35 chunk-sized You entries, 10 kept, 25 dropped whole
-└── After: 205 sentences, 74 kept; Kit's 240-274 s and 780 s+ speech kept,
-    about 8 short fragments of uncertain origin kept
+Pane as recorded (old code)          77 You entries, 49 echo-like
+Draft only (rolling unavailable)     11 You, 2 echo-like, 2 of 6 local lost*
+Pane, rolling caught up              10 You, 1 echo-like, 0 of 6 lost
+Pane while recording, rolling 25-300 s behind: 25 ever shown, 3 echo-like
+Final transcript                     10 You, 1 echo-like, 0 of 6 lost
+* Moonshine lines that mix bleed with Kit's sentence stay hidden until
+  rolling, which splits them into sentences, covers that time.
 ```
 
 Acoustic echo cancellation (Voice Processing IO) was evaluated, not adopted:
@@ -164,8 +194,14 @@ Sources: [meeting_transcript.rs](../../src/meeting_transcript.rs),
 `StreamingResampler` in [dictation.rs](../../src/dictation.rs). Echo checks:
 `speaker_bleed_is_classified_as_bleed`, `talking_over_the_remote_side_is_local`,
 `speech_during_remote_silence_is_local`, `headphones_make_every_microphone_sound_local`,
+`late_muffled_bleed_is_bleed_and_speech_over_it_is_local`,
+`a_short_phrase_inside_a_long_bleed_segment_is_not_bleed`,
 `the_signal_overrides_word_matching_both_ways`,
 `synthetic_speaker_bleed_is_dropped_and_double_talk_kept`,
+`a_local_sentence_inside_an_echo_utterance_is_kept`,
+`microphone_entries_wait_until_the_system_track_covers_them`,
+`rolling_coverage_hides_draft_echo_that_rolling_dropped`,
+`completed_microphone_lines_wait_for_the_system_audio_that_judges_them`,
 `live_view_hides_microphone_twins_of_remote_speech`,
 `an_undecided_draft_line_waits_while_the_remote_side_speaks`,
 `live_view_keeps_rolling_microphone_entries_that_rolling_already_judged`, and
@@ -175,9 +211,16 @@ Other checks:
 `chunks_end_at_the_first_pause_after_the_target_length`,
 `overlapping_chunks_join_at_the_middle_of_the_overlap`, `seam_drops_repeated_words`,
 `speaker_echo_of_remote_speech_is_dropped`, `word_level_echo_is_dropped_as_one_utterance`,
-`distinct_or_distant_local_speech_is_kept`, and
+`distinct_or_distant_local_speech_is_kept`,
+`live_timestamps_preserve_dropped_packet_gaps_and_match_final_origin`, and
 `streaming_resampler_matches_whole_buffer_conversion`. They use synthetic audio
 and transcripts, not model inference or real speaker echo.
+
+Opt-in measurements (ignored tests in
+[meeting_echo_replay_tests.rs](../../src/meeting_echo_replay_tests.rs); they
+need a private recording and are never part of CI): `meeting_echo_replay`
+(every layer, cached transcripts, hand labels), `meeting_live_cpu`,
+`moonshine_command_update_latency`, and `dictation_latency`.
 
 ### Save And Reuse
 
@@ -444,10 +487,16 @@ Granola import: see [granola-import.md](../plans/granola-import.md).
   failed on the build host (`could not create image from window`; the Studio
   session was locked, `CGSSessionScreenIsLocked 1`). The redesigned pane is
   verified only by GPUI layout checks, not visually.
-- Echo thresholds are tuned on one speaker-mode call. The offline replay assumed
-  the microphone started 300 ms after the system track because the recording's
-  manifest had no arrival times yet. Real NSFileManager trashing and the native
-  rename field are unexercised in the app.
+- Echo thresholds are tuned on two speaker-mode calls (2026-10-15 and
+  2026-10-16), with six hand-labeled local utterances; other rooms, external
+  speakers, and Bluetooth are unmeasured. The 2026-10-16 replay audio was lost
+  with Studio's temporary directory, so those numbers cannot be re-run. Real
+  NSFileManager trashing and the native rename field are unexercised in the app.
+- The live draft judges a Moonshine line whole: a line that mixes bleed with
+  the user's own sentence stays hidden until rolling covers it.
+- The CPU change was measured on the Studio, not on the Pro during a call.
+- Apple SpeechTranscriber for the live draft is evaluated, not implemented:
+  [meeting-live-transcription.md](../plans/meeting-live-transcription.md).
 - Why the rolling worker stalled for over a minute on the Pro is unknown; slow
   chunks (> 5 s) are now logged.
 - Titles and summaries have not run after a real recording in the app; the CLI

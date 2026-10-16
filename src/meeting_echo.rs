@@ -5,6 +5,9 @@
 //! delayed, attenuated system audio) or as local speech, which survives
 //! double-talk because it is louder than the predicted bleed.
 
+use std::cell::RefCell;
+use std::collections::HashMap;
+
 use serde::{Deserialize, Serialize};
 
 use super::MeetingSource;
@@ -15,15 +18,19 @@ const SILENT_DB: f32 = -100.0;
 /// one ended is re-anchored instead of appended.
 const DISCONTINUITY_MS: u64 = 40;
 /// Lag search, in frames, of the microphone behind the system track. The
-/// small negative margin absorbs arrival-clock jitter between the sources.
-const LAG_MIN_FRAMES: i64 = -5;
-const LAG_MAX_FRAMES: i64 = 20;
+/// acoustic path adds tens of milliseconds; the margins absorb the arrival
+/// latency of each source's first packet, which anchors its timeline.
+const LAG_MIN_FRAMES: i64 = -15;
+const LAG_MAX_FRAMES: i64 = 30;
 /// Bleed gain and the noise floor are estimated over this much audio on
 /// each side of a segment.
 const CONTEXT_MS: u64 = 5_000;
 /// Whether and how late the microphone hears the call is estimated over
 /// this much audio on each side; it changes only with the user's setup.
 const COUPLING_CONTEXT_MS: u64 = 60_000;
+/// Segments whose centres share a block of this many frames share one
+/// coupling estimate, computed once the audio around it is complete.
+const COUPLING_BLOCK_FRAMES: i64 = 500;
 /// Remote speech in the system track; digital silence is far below this.
 const SYSTEM_ACTIVE_DB: f32 = -55.0;
 const MIN_SYSTEM_FRAMES: usize = 25;
@@ -32,15 +39,32 @@ const ACTIVE_ABOVE_FLOOR_DB: f32 = 6.0;
 const GAIN_PERCENTILE: f32 = 0.35;
 /// Frames this far above the predicted bleed are local speech.
 const LOCAL_MARGIN_DB: f32 = 9.0;
-/// Reverberation keeps bleed audible after the system frame that caused it.
+/// Reverberation keeps bleed audible after the system frame that caused it,
+/// decaying across subsequent frames.
 const REVERB_FRAMES: i64 = 8;
+const REVERB_DECAY_DB: f32 = 1.5;
 /// Below this envelope correlation the microphone does not hear the call.
 const MIN_CORRELATION: f32 = 0.2;
 const MIN_ACTIVE_FRAMES: usize = 10;
+const MIN_GAIN_FRAMES: usize = 10;
 /// A segment is bleed when at most this share of its sound is local.
 const BLEED_MAX_LOCAL: f32 = 0.2;
 /// A segment is local speech when at least this share of its sound is local.
 const LOCAL_MIN_LOCAL: f32 = 0.5;
+/// Half a second of local frames within one second is someone speaking in
+/// the room, even inside a segment that is mostly bleed; keyboard clicks
+/// and other incidental sounds stay far below it.
+const BURST_WINDOW_FRAMES: usize = 50;
+const BURST_MIN_FRAMES: usize = 25;
+
+/// How much of a microphone segment delayed system audio does not explain.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) struct Locality {
+    /// Share of the segment's sound frames that are local.
+    pub share: f32,
+    /// Most local frames within any one-second window.
+    pub burst: usize,
+}
 
 /// What the signal says about one microphone segment.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -111,6 +135,8 @@ impl Track {
 #[derive(Debug, Default)]
 pub(super) struct EchoEnvelope {
     tracks: [Track; 2],
+    /// Envelope correlation and lag per coupling block.
+    couplings: RefCell<HashMap<i64, Option<(f32, i64)>>>,
 }
 
 impl EchoEnvelope {
@@ -125,44 +151,37 @@ impl EchoEnvelope {
         self.tracks[index(source)].push(start_ms, samples, rate);
     }
 
-    /// Forgets one source, before rebuilding it from its recording.
-    pub(super) fn clear(&mut self, source: MeetingSource) {
-        self.tracks[index(source)] = Track::default();
-    }
-
-    /// Classifies the microphone between `start_ms` and `end_ms`, or `None`
-    /// when there is too little sound or remote audio to tell.
-    pub(super) fn assess(&self, start_ms: u64, end_ms: u64) -> Option<Signal> {
-        let share = self.local_share(start_ms, end_ms)?;
-        if share <= BLEED_MAX_LOCAL {
-            Some(Signal::Bleed)
-        } else if share >= LOCAL_MIN_LOCAL {
-            Some(Signal::Local)
+    /// Timeline milliseconds through which `source` has audio.
+    pub(super) fn covered_ms(&self, source: MeetingSource) -> u64 {
+        let track = &self.tracks[index(source)];
+        if track.rate == 0 {
+            0
         } else {
-            None
+            track.expected_ms()
         }
     }
 
-    /// The share of the segment's sound frames that delayed system audio
-    /// does not explain, or `None` when the segment is nearly silent.
-    pub(super) fn local_share(&self, start_ms: u64, end_ms: u64) -> Option<f32> {
-        let [system, microphone] = &self.tracks;
-        let first = (start_ms / FRAME_MS) as i64;
-        let last = ((end_ms / FRAME_MS) as i64).max(first + 1);
-        let around = |margin_ms: u64| {
-            let start = (start_ms.saturating_sub(margin_ms) / FRAME_MS) as i64;
-            let end = (((end_ms + margin_ms) / FRAME_MS) as i64)
-                .min(microphone.frames.len() as i64)
-                .max(last);
-            start..end
-        };
-        let context = around(CONTEXT_MS);
-        let coupling = around(COUPLING_CONTEXT_MS);
+    /// Forgets one source, before rebuilding it from its recording.
+    pub(super) fn clear(&mut self, source: MeetingSource) {
+        self.tracks[index(source)] = Track::default();
+        self.couplings.get_mut().clear();
+    }
 
+    /// The best envelope correlation and lag, in frames, of the microphone
+    /// behind the system track around the frames `first..last`.
+    fn coupling(&self, first: i64, last: i64) -> Option<(f32, i64)> {
+        let block = (first + last) / 2 / COUPLING_BLOCK_FRAMES;
+        if let Some(coupling) = self.couplings.borrow().get(&block) {
+            return *coupling;
+        }
+        let [system, microphone] = &self.tracks;
+        let center = block * COUPLING_BLOCK_FRAMES + COUPLING_BLOCK_FRAMES / 2;
+        let reach = (COUPLING_CONTEXT_MS / FRAME_MS) as i64;
+        let end = center + reach;
+        let recorded = microphone.frames.len().min(system.frames.len()) as i64;
         let mut best: Option<(f32, i64)> = None;
         for lag in LAG_MIN_FRAMES..=LAG_MAX_FRAMES {
-            let pairs = coupling
-                .clone()
+            let pairs = ((center - reach).max(0)..end.min(microphone.frames.len() as i64))
                 .map(|frame| (microphone.at(frame), system.at(frame - lag)))
                 .filter(|(_, system)| *system > SYSTEM_ACTIVE_DB)
                 .collect::<Vec<_>>();
@@ -174,6 +193,41 @@ impl EchoEnvelope {
                 best = Some((correlation, lag));
             }
         }
+        // Audio still arriving can change the estimate.
+        if end + LAG_MAX_FRAMES <= recorded {
+            self.couplings.borrow_mut().insert(block, best);
+        }
+        best
+    }
+
+    /// Classifies the microphone between `start_ms` and `end_ms`, or `None`
+    /// when there is too little sound or remote audio to tell.
+    pub(super) fn assess(&self, start_ms: u64, end_ms: u64) -> Option<Signal> {
+        let Locality { share, burst } = self.locality(start_ms, end_ms)?;
+        if share >= LOCAL_MIN_LOCAL {
+            Some(Signal::Local)
+        } else if share <= BLEED_MAX_LOCAL && burst < BURST_MIN_FRAMES {
+            Some(Signal::Bleed)
+        } else {
+            None
+        }
+    }
+
+    /// How much of the segment's sound delayed system audio does not
+    /// explain, or `None` when the segment is nearly silent.
+    pub(super) fn locality(&self, start_ms: u64, end_ms: u64) -> Option<Locality> {
+        let [system, microphone] = &self.tracks;
+        let first = (start_ms / FRAME_MS) as i64;
+        let last = ((end_ms / FRAME_MS) as i64).max(first + 1);
+        let around = |margin_ms: u64| {
+            let start = (start_ms.saturating_sub(margin_ms) / FRAME_MS) as i64;
+            let end = (((end_ms + margin_ms) / FRAME_MS) as i64)
+                .min(microphone.frames.len() as i64)
+                .max(last);
+            start..end
+        };
+        let context = around(CONTEXT_MS);
+        let best = self.coupling(first, last);
 
         let mut floor = context
             .clone()
@@ -183,41 +237,83 @@ impl EchoEnvelope {
         let active = (first..last)
             .filter(|&frame| microphone.at(frame) >= floor + ACTIVE_ABOVE_FLOOR_DB)
             .collect::<Vec<_>>();
-        if active.len() < MIN_ACTIVE_FRAMES {
-            return None;
-        }
         // Without remote audio nearby, or when the microphone does not hear
         // it, nothing can explain the sound.
         let Some((_, lag)) = best.filter(|(correlation, _)| *correlation >= MIN_CORRELATION) else {
-            return Some(1.0);
+            return (active.len() >= MIN_ACTIVE_FRAMES).then_some(Locality {
+                share: 1.0,
+                burst: active.len().min(BURST_WINDOW_FRAMES),
+            });
         };
 
-        let mut loud = context
-            .clone()
-            .map(|frame| system.at(frame - lag))
-            .filter(|level| *level > SYSTEM_ACTIVE_DB)
-            .collect::<Vec<_>>();
-        let loud_threshold = percentile(&mut loud, 0.5)?;
-        let mut differences = context
-            .clone()
-            .filter(|&frame| system.at(frame - lag) >= loud_threshold)
-            .map(|frame| microphone.at(frame) - system.at(frame - lag))
-            .collect::<Vec<_>>();
-        // A low percentile, so the user's own speech over loud remote frames
-        // does not inflate the bleed estimate.
-        let gain = percentile(&mut differences, GAIN_PERCENTILE)?;
+        let remote_at = |frame: i64| {
+            let source = frame - lag;
+            (0..=REVERB_FRAMES)
+                .map(|reverb| system.at(source - reverb) - reverb as f32 * REVERB_DECAY_DB)
+                .chain(std::iter::once(system.at(source + 1) - REVERB_DECAY_DB))
+                .fold(SILENT_DB, f32::max)
+        };
+        let span_gain = |span: std::ops::Range<i64>, min_frames: usize| {
+            let mut loud = span
+                .clone()
+                .map(|frame| system.at(frame - lag))
+                .filter(|level| *level > SYSTEM_ACTIVE_DB)
+                .collect::<Vec<_>>();
+            if loud.len() < min_frames {
+                return None;
+            }
+            let loud_threshold = percentile(&mut loud, 0.5)?;
+            let mut differences = span
+                .filter(|&frame| system.at(frame - lag) >= loud_threshold)
+                .map(|frame| microphone.at(frame) - remote_at(frame))
+                .collect::<Vec<_>>();
+            // A low percentile, so the user's own speech over loud remote frames
+            // does not inflate the bleed estimate.
+            percentile(&mut differences, GAIN_PERCENTILE)
+        };
+        // Estimating before and after the segment keeps a speaker mute or
+        // volume change on one side from dragging down the bleed reference.
+        let gain = [
+            span_gain(context.start..first, MIN_GAIN_FRAMES),
+            span_gain(last..context.end, MIN_GAIN_FRAMES),
+        ]
+        .into_iter()
+        .flatten()
+        .reduce(f32::max)
+        .or_else(|| span_gain(context, 1))?;
 
         let local = active
             .iter()
-            .filter(|&&frame| {
-                let source = frame - lag;
-                let remote = (source - REVERB_FRAMES..=source + 1)
-                    .map(|frame| system.at(frame))
-                    .fold(SILENT_DB, f32::max);
-                microphone.at(frame) > (gain + remote).max(floor) + LOCAL_MARGIN_DB
+            .copied()
+            .filter(|&frame| {
+                microphone.at(frame) > (gain + remote_at(frame)).max(floor) + LOCAL_MARGIN_DB
             })
-            .count();
-        Some(local as f32 / active.len() as f32)
+            .collect::<Vec<_>>();
+        if active.len() < MIN_ACTIVE_FRAMES {
+            let remote_frames = (first..last)
+                .filter(|&frame| remote_at(frame) > SYSTEM_ACTIVE_DB)
+                .count();
+            if local.is_empty() && remote_frames * 2 >= (last - first) as usize {
+                return Some(Locality {
+                    share: 0.0,
+                    burst: 0,
+                });
+            }
+            return None;
+        }
+        let window = BURST_WINDOW_FRAMES as i64;
+        let mut burst = 0;
+        let mut from = 0;
+        for (to, frame) in local.iter().enumerate() {
+            while local[from] <= frame - window {
+                from += 1;
+            }
+            burst = burst.max(to + 1 - from);
+        }
+        Some(Locality {
+            share: local.len() as f32 / active.len() as f32,
+            burst,
+        })
     }
 }
 
@@ -372,6 +468,56 @@ pub(super) mod tests {
         }
         let envelope = envelope(&system, &microphone);
         assert_eq!(envelope.assess(7_200, 10_800), Some(Signal::Local));
+    }
+
+    /// A muffled, reverberant copy: one-pole low-pass plus a decaying tail.
+    fn room(system: &[f32], delay_ms: usize, gain: f32) -> Vec<f32> {
+        let mut low = 0.0;
+        let filtered = system
+            .iter()
+            .map(|sample| {
+                low += 0.15 * (sample - low);
+                low
+            })
+            .collect::<Vec<_>>();
+        let echo = RATE as usize * 35 / 1_000;
+        let mut wet = filtered.clone();
+        for index in echo..wet.len() {
+            wet[index] += wet[index - echo] * 0.55;
+        }
+        bleed(&wet, delay_ms, gain)
+    }
+
+    #[test]
+    fn late_muffled_bleed_is_bleed_and_speech_over_it_is_local() {
+        let system = speech(14.0, 11);
+        let mut microphone = room(&system, 450, 0.25);
+        let envelope_without_speech = envelope(&system, &microphone);
+        assert_eq!(
+            envelope_without_speech.assess(2_000, 5_000),
+            Some(Signal::Bleed)
+        );
+        for (offset, sample) in speech(3.0, 29).iter().enumerate() {
+            microphone[7 * RATE as usize + offset] += sample * 0.9;
+        }
+        let envelope = envelope(&system, &microphone);
+        assert_eq!(envelope.assess(7_000, 10_000), Some(Signal::Local));
+        assert_eq!(envelope.assess(2_000, 5_000), Some(Signal::Bleed));
+    }
+
+    #[test]
+    fn a_short_phrase_inside_a_long_bleed_segment_is_not_bleed() {
+        let system = speech(16.0, 11);
+        let mut microphone = bleed(&system, 60, 0.08);
+        for (offset, sample) in speech(1.2, 29).iter().enumerate() {
+            microphone[8 * RATE as usize + offset] += sample * 0.9;
+        }
+        let envelope = envelope(&system, &microphone);
+        let locality = envelope.locality(1_000, 15_000).unwrap();
+        assert!(locality.share < BLEED_MAX_LOCAL, "{locality:?}");
+        assert!(locality.burst >= BURST_MIN_FRAMES, "{locality:?}");
+        assert_eq!(envelope.assess(1_000, 15_000), None);
+        assert_eq!(envelope.assess(1_000, 7_500), Some(Signal::Bleed));
     }
 
     #[test]
