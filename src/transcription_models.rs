@@ -21,7 +21,7 @@ pub enum TranscriptionModelId {
     ParakeetV2,
     ParakeetV3,
     WhisperLargeV3Turbo,
-    WhisperLargeV3,
+    WhisperLargeV3TurboF16,
     Qwen3Asr06B,
     SenseVoiceSmall,
     CohereTranscribe,
@@ -35,7 +35,7 @@ impl TranscriptionModelId {
             Self::ParakeetV2 => "parakeet_v2",
             Self::ParakeetV3 => "parakeet_v3",
             Self::WhisperLargeV3Turbo => "whisper_large_v3_turbo",
-            Self::WhisperLargeV3 => "whisper_large_v3",
+            Self::WhisperLargeV3TurboF16 => "whisper_large_v3_turbo_f16",
             Self::Qwen3Asr06B => "qwen3_asr06_b",
             Self::SenseVoiceSmall => "sense_voice_small",
             Self::CohereTranscribe => "cohere_transcribe",
@@ -53,7 +53,7 @@ impl FromStr for TranscriptionModelId {
             "parakeet_v2" => Ok(Self::ParakeetV2),
             "parakeet_v3" => Ok(Self::ParakeetV3),
             "whisper_large_v3_turbo" => Ok(Self::WhisperLargeV3Turbo),
-            "whisper_large_v3" => Ok(Self::WhisperLargeV3),
+            "whisper_large_v3_turbo_f16" => Ok(Self::WhisperLargeV3TurboF16),
             "qwen3_asr06_b" => Ok(Self::Qwen3Asr06B),
             "sense_voice_small" => Ok(Self::SenseVoiceSmall),
             "cohere_transcribe" => Ok(Self::CohereTranscribe),
@@ -193,7 +193,8 @@ impl ModelDefinition {
     pub fn runtime_language<'a>(&self, language: &'a str) -> &'a str {
         if matches!(
             self.id,
-            TranscriptionModelId::WhisperLargeV3Turbo | TranscriptionModelId::WhisperLargeV3
+            TranscriptionModelId::WhisperLargeV3Turbo
+                | TranscriptionModelId::WhisperLargeV3TurboF16
         ) && language == "fil"
         {
             "tl"
@@ -281,14 +282,14 @@ const WHISPER_ARTIFACT: GgufArtifact = GgufArtifact {
     architecture: "whisper",
     variant: "whisper-large-v3-turbo",
 };
-const WHISPER_LARGE_V3_ARTIFACT: GgufArtifact = GgufArtifact {
-    filename: "whisper-large-v3-Q8_0.gguf",
-    revision: "b33a05f1459f33b0c876f014a57d51618b77d754",
-    repository: "handy-computer/whisper-large-v3-gguf",
-    bytes: 1_668_741_440,
-    sha256: "2fa1a5f179f8a511a53e2108db270aa4af3ce08cd976af4180e2854666bb4ba3",
+const WHISPER_F16_ARTIFACT: GgufArtifact = GgufArtifact {
+    filename: "whisper-large-v3-turbo-F16.gguf",
+    revision: "d222c9f621c1128299248f2ded4d8a1820519780",
+    repository: "handy-computer/whisper-large-v3-turbo-gguf",
+    bytes: 1_636_749_024,
+    sha256: "cb56b859e97d7c89386b88c5cd992d8da25a12da055da0a2e049e573c8a17800",
     architecture: "whisper",
-    variant: "whisper-large-v3",
+    variant: "whisper-large-v3-turbo",
 };
 const QWEN_ARTIFACT: GgufArtifact = GgufArtifact {
     filename: "Qwen3-ASR-0.6B-Q8_0.gguf",
@@ -377,14 +378,14 @@ pub const MODELS: &[ModelDefinition] = &[
         supports_recognition_hints: true,
     },
     ModelDefinition {
-        id: TranscriptionModelId::WhisperLargeV3,
-        name: "Whisper large-v3",
-        realtime: "~7x",
-        quality: "1.82%",
+        id: TranscriptionModelId::WhisperLargeV3TurboF16,
+        name: "Whisper large-v3-turbo (full precision)",
+        realtime: "~19x",
+        quality: "2.01%",
         quality_context: "English benchmark",
         coverage: "100 languages",
         timestamps: "Segment timestamps",
-        runtime: ModelRuntime::Gguf(&WHISPER_LARGE_V3_ARTIFACT),
+        runtime: ModelRuntime::Gguf(&WHISPER_F16_ARTIFACT),
         languages: &["*"],
         accepts_language_hint: true,
         supports_language_detection: true,
@@ -519,6 +520,10 @@ pub(crate) fn choices_for_runtime(language: &str) -> Vec<ModelChoice> {
                 Recommendation::Recommended,
             ),
             choice(
+                TranscriptionModelId::WhisperLargeV3TurboF16,
+                Recommendation::Recommended,
+            ),
+            choice(
                 TranscriptionModelId::SenseVoiceSmall,
                 Recommendation::Fastest,
             ),
@@ -540,6 +545,10 @@ pub(crate) fn choices_for_runtime(language: &str) -> Vec<ModelChoice> {
                 TranscriptionModelId::WhisperLargeV3Turbo,
                 Recommendation::RecognitionHints,
             ),
+            choice(
+                TranscriptionModelId::WhisperLargeV3TurboF16,
+                Recommendation::RecognitionHints,
+            ),
         ],
         "zh" | "yue" | "ja" | "ko" => vec![
             choice(
@@ -554,6 +563,10 @@ pub(crate) fn choices_for_runtime(language: &str) -> Vec<ModelChoice> {
                 TranscriptionModelId::WhisperLargeV3Turbo,
                 Recommendation::RecognitionHints,
             ),
+            choice(
+                TranscriptionModelId::WhisperLargeV3TurboF16,
+                Recommendation::RecognitionHints,
+            ),
         ],
         language if PARAKEET_V3_LANGUAGES.contains(&language) => vec![
             choice(
@@ -561,11 +574,11 @@ pub(crate) fn choices_for_runtime(language: &str) -> Vec<ModelChoice> {
                 Recommendation::Recommended,
             ),
             choice(
-                TranscriptionModelId::WhisperLargeV3,
-                Recommendation::MostAccurate,
+                TranscriptionModelId::WhisperLargeV3Turbo,
+                Recommendation::RecognitionHints,
             ),
             choice(
-                TranscriptionModelId::WhisperLargeV3Turbo,
+                TranscriptionModelId::WhisperLargeV3TurboF16,
                 Recommendation::RecognitionHints,
             ),
         ],
@@ -575,11 +588,11 @@ pub(crate) fn choices_for_runtime(language: &str) -> Vec<ModelChoice> {
                 Recommendation::Recommended,
             ),
             choice(
-                TranscriptionModelId::WhisperLargeV3,
-                Recommendation::MostAccurate,
+                TranscriptionModelId::WhisperLargeV3Turbo,
+                Recommendation::RecognitionHints,
             ),
             choice(
-                TranscriptionModelId::WhisperLargeV3Turbo,
+                TranscriptionModelId::WhisperLargeV3TurboF16,
                 Recommendation::RecognitionHints,
             ),
         ],
@@ -589,8 +602,8 @@ pub(crate) fn choices_for_runtime(language: &str) -> Vec<ModelChoice> {
                 Recommendation::Recommended,
             ),
             choice(
-                TranscriptionModelId::WhisperLargeV3,
-                Recommendation::MostAccurate,
+                TranscriptionModelId::WhisperLargeV3TurboF16,
+                Recommendation::Recommended,
             ),
         ],
     }
@@ -1066,15 +1079,20 @@ mod tests {
         let mandarin = choices_for_runtime("zh");
         assert_eq!(mandarin[0].model.id, TranscriptionModelId::Qwen3Asr06B);
         assert_eq!(mandarin[1].model.id, TranscriptionModelId::SenseVoiceSmall);
-        let dutch = choices_for_runtime("nl");
-        assert_eq!(dutch[0].model.id, TranscriptionModelId::ParakeetV3);
-        assert_eq!(dutch[1].model.id, TranscriptionModelId::WhisperLargeV3);
-        assert_eq!(dutch[1].recommendation, Recommendation::MostAccurate);
-        assert!(
-            choices_for_runtime("en")
+    }
+
+    #[test]
+    fn full_precision_whisper_follows_every_turbo_choice() {
+        for language in [AUTO_LANGUAGE, "en", "zh", "nl", "ar", "sw"] {
+            let choices = choices_for_runtime(language);
+            let turbo = choices
                 .iter()
-                .all(|choice| choice.model.id != TranscriptionModelId::WhisperLargeV3)
-        );
+                .position(|choice| choice.model.id == TranscriptionModelId::WhisperLargeV3Turbo)
+                .unwrap();
+            let full = choices[turbo + 1];
+            assert_eq!(full.model.id, TranscriptionModelId::WhisperLargeV3TurboF16);
+            assert_eq!(full.recommendation, choices[turbo].recommendation);
+        }
     }
 
     #[test]
@@ -1090,7 +1108,10 @@ mod tests {
                 TranscriptionModelId::WhisperLargeV3Turbo,
                 "whisper_large_v3_turbo",
             ),
-            (TranscriptionModelId::WhisperLargeV3, "whisper_large_v3"),
+            (
+                TranscriptionModelId::WhisperLargeV3TurboF16,
+                "whisper_large_v3_turbo_f16",
+            ),
             (TranscriptionModelId::Qwen3Asr06B, "qwen3_asr06_b"),
             (TranscriptionModelId::SenseVoiceSmall, "sense_voice_small"),
             (TranscriptionModelId::CohereTranscribe, "cohere_transcribe"),
@@ -1183,7 +1204,7 @@ mod tests {
         assert_eq!(whisper.runtime_language_hint(AUTO_LANGUAGE), None);
         assert_eq!(whisper.runtime_language_hint("fil"), Some("tl"));
         assert_eq!(
-            definition(TranscriptionModelId::WhisperLargeV3).runtime_language_hint("fil"),
+            definition(TranscriptionModelId::WhisperLargeV3TurboF16).runtime_language_hint("fil"),
             Some("tl")
         );
         assert_eq!(qwen.runtime_language_hint(AUTO_LANGUAGE), None);
