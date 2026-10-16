@@ -108,7 +108,11 @@ Choose a supported language              // setup.language-conditioning; macOS +
 Parakeet v3 remains available for Portuguese and its other existing language
 choices. Its card explains the limitation and suggests Whisper for
 language-guided transcription. This does not change saved selections or expand
-the Auto picker choices. Multilingual audio support is not language conditioning:
+the Auto picker choices. Non-English languages outside the CJK set also offer
+Whisper large-v3 as **Most accurate**: it shares turbo's language hints,
+detection, and recognition hints, but runs about 2.5 times slower. Its label
+follows the pinned artifact's published FLEURS WER; Hex has not run its own
+accuracy or speed benchmark for it. Multilingual audio support is not language conditioning:
 the pinned v3 GGUF has no `stt.parakeet.prompt.num_prompts` metadata, which gates
 language prompting in `transcribe-cpp-sys` 0.1.3.
 

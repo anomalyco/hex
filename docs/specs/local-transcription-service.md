@@ -170,6 +170,7 @@ export type ModelId =
   | "parakeet_v2"
   | "parakeet_v3"
   | "whisper_large_v3_turbo"
+  | "whisper_large_v3"
   | "qwen3_asr06_b"
   | "sense_voice_small"
   | "cohere_transcribe"
