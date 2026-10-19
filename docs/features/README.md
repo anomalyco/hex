@@ -19,13 +19,13 @@ HEX                                      // macOS release
 ├── Use the result                       // paste, Send, paste-last, History
 ├── Adjust behavior                      // shortcut, microphone, recording preferences
 ├── Process text                         // context-selected Modes
-├── Opt in                               // Voice Action, Commands, Meetings: separately off
+├── Opt in                               // Voice Action, Commands, Meetings, Scrawl: separately off
 ├── Recover                              // prove the next attempt works
 └── Maintain the app                     // menu bar, login, updates, quit
 ```
 
 [Dictation](dictation.md), [Voice Commands](commands.md),
-[Voice Action](voice-action.md), [Meetings](meetings.md), and [Recovery](recovery.md)
+[Voice Action](voice-action.md), [Meetings](meetings.md), [Scrawl](scrawl.md), and [Recovery](recovery.md)
 have detailed maps.
 The other capabilities stay here until they need their own verification recipe.
 

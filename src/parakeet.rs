@@ -102,6 +102,34 @@ struct InferenceJob {
     context: ContextSnapshot,
 }
 
+/// Word-timed transcription handle backed by Hex's warm transcription engine.
+#[derive(Clone)]
+pub struct HexWordTranscriber {
+    engine: Option<Arc<TranscriptionEngine>>,
+}
+
+impl HexWordTranscriber {
+    pub fn transcribe_samples_16khz(
+        &self,
+        samples: Vec<f32>,
+    ) -> Result<scrawl_core::TranscriptData> {
+        let Some(engine) = &self.engine else {
+            return Err(eyre!("dictation worker is unavailable"));
+        };
+        let (reply_tx, reply_rx) = mpsc::sync_channel(1);
+        engine.run(move |transcriber| {
+            let _busy = DictationInference::begin();
+            let (_, selection) = crate::app_settings::transcription_selection();
+            let result = transcribe_word_timed(transcriber, &selection, samples);
+            let _ = reply_tx.send(result);
+        })?;
+        reply_rx
+            .recv()
+            .map_err(|_| eyre!("transcription engine disconnected"))?
+            .map_err(|error| eyre!(error))
+    }
+}
+
 struct ProcessorJob {
     job_id: DictationJobId,
     control: Arc<JobControl>,
@@ -397,6 +425,12 @@ impl DictationWorker {
         self.engine.clone()
     }
 
+    pub fn word_transcriber(&self) -> HexWordTranscriber {
+        HexWordTranscriber {
+            engine: self.engine.clone(),
+        }
+    }
+
     pub fn prepare_paste(&self) {
         let state = self.state.lock().unwrap_or_else(|error| error.into_inner());
         if !state.jobs.is_empty() || state.pending_pastes > 0 {
@@ -624,6 +658,69 @@ fn process_job_text(
         }
         profiles.process_cancellable(&job.text, &job.context, &job.control.cancelled)
     }
+}
+
+fn transcribe_word_timed(
+    transcriber: &mut WarmTranscriber,
+    selection: &TranscriptionSelection,
+    samples: Vec<f32>,
+) -> Result<scrawl_core::TranscriptData, String> {
+    if samples.is_empty() {
+        return Ok(scrawl_core::TranscriptData {
+            source: "hex".into(),
+            model: Some(selection.model.as_str().into()),
+            ..Default::default()
+        });
+    }
+    let active = transcriber
+        .activate(selection)
+        .map_err(|error| error.to_string())?;
+    const CHUNK_SAMPLES: usize = 30 * 16_000;
+    let mut texts = Vec::new();
+    let mut segments = Vec::new();
+    let mut words = Vec::new();
+    for (chunk_idx, chunk) in samples.chunks(CHUNK_SAMPLES).enumerate() {
+        let offset_ms = (chunk_idx * 30_000) as u64;
+        let result = active
+            .transcribe_segments(chunk.to_vec())
+            .map_err(|error| error.to_string())?;
+        let text = result.text.trim();
+        if !text.is_empty() {
+            texts.push(text.to_string());
+        }
+        for segment in result.segments {
+            let trimmed = segment.text.trim().to_string();
+            if !trimmed.is_empty() {
+                let start = segment.start_ms.max(0) as u64 + offset_ms;
+                let end = segment.end_ms.max(segment.start_ms).max(0) as u64 + offset_ms;
+                segments.push(scrawl_core::TranscriptSegment {
+                    t0: start,
+                    t1: end,
+                    text: trimmed,
+                });
+            }
+        }
+        for word in result.words {
+            let trimmed = word.text.trim().to_string();
+            if !trimmed.is_empty() {
+                let start = word.start_ms.max(0) as u64 + offset_ms;
+                let end = word.end_ms.max(word.start_ms).max(0) as u64 + offset_ms;
+                words.push(scrawl_core::WordTiming {
+                    t0: start,
+                    t1: end,
+                    text: trimmed,
+                });
+            }
+        }
+    }
+    Ok(scrawl_core::TranscriptData {
+        source: "hex".into(),
+        model: Some(selection.model.as_str().into()),
+        text: texts.join(" "),
+        segments,
+        words,
+        estimated: false,
+    })
 }
 
 /// Waits for each accepted job's transcript in submission order, then hands

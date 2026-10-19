@@ -7061,6 +7061,45 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
 
 [[package]]
+name = "scrawl-capture-linux"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "scrawl-core",
+]
+
+[[package]]
+name = "scrawl-capture-macos"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "core-foundation 0.10.0",
+ "objc2",
+ "objc2-app-kit",
+ "objc2-foundation",
+ "scrawl-core",
+ "screencapturekit 11.0.0",
+]
+
+[[package]]
+name = "scrawl-capture-windows"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "scrawl-core",
+]
+
+[[package]]
+name = "scrawl-core"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "png 0.18.1",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "screencapturekit"
 version = "0.2.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8934,6 +8973,10 @@ dependencies = [
  "rmcp",
  "rodio",
  "rubato",
+ "scrawl-capture-linux",
+ "scrawl-capture-macos",
+ "scrawl-capture-windows",
+ "scrawl-core",
  "screencapturekit 11.0.0",
  "semver",
  "serde",

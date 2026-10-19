@@ -368,6 +368,7 @@ pub fn listen(
         .flatten();
     let mut next_programmatic_id = 1_u64;
     let mut programmatic = None::<ProgrammaticDictation>;
+    let mut scrawl_controller = crate::scrawl::ScrawlController::new();
     let mut programmatic_results =
         BTreeMap::<crate::parakeet::DictationJobId, FinishingProgrammaticDictation>::new();
     let mut programmatic_completions = VecDeque::<ProgrammaticCompletion>::new();
@@ -901,32 +902,48 @@ pub fn listen(
                 );
             }
             if let Some(action) = hotkeys.dictation.process(input_event, capture_at) {
-                if matches!(action, HotkeyAction::PasteLast | HotkeyAction::PasteMeeting) {
+                if matches!(
+                    action,
+                    HotkeyAction::PasteLast | HotkeyAction::PasteMeeting | HotkeyAction::Scrawl
+                ) {
                     voice = None;
                 }
-                let voice_action_takeover = voice_action_owns_action(
-                    action,
-                    edit_pending_since.is_some(),
-                    hotkeys.edit_recording(),
-                    edit_action,
-                );
-                if voice_action_takeover {
-                    let _ = hotkeys.dictation.suspend();
-                } else if voice.is_none() {
-                    let accepted = handle_hotkey_action(
-                        action,
-                        capture_at,
-                        &mut recognizer,
-                        &input,
+                if matches!(action, HotkeyAction::Scrawl) {
+                    input.cancel()?;
+                    reset_command_recognizer(&input, &mut recognizer)?;
+                    scrawl_controller.toggle(&input, &dictation_worker)?;
+                    emit_engine_state(
+                        &mut events,
+                        false,
                         &dictation_worker,
                         mode,
-                        &context,
                         &input.device_name(),
-                        &mut events,
-                        indicator.as_ref(),
                     )?;
-                    if !accepted {
-                        hotkeys.dictation.suspend();
+                } else {
+                    let voice_action_takeover = voice_action_owns_action(
+                        action,
+                        edit_pending_since.is_some(),
+                        hotkeys.edit_recording(),
+                        edit_action,
+                    );
+                    if voice_action_takeover {
+                        let _ = hotkeys.dictation.suspend();
+                    } else if voice.is_none() {
+                        let accepted = handle_hotkey_action(
+                            action,
+                            capture_at,
+                            &mut recognizer,
+                            &input,
+                            &dictation_worker,
+                            mode,
+                            &context,
+                            &input.device_name(),
+                            &mut events,
+                            indicator.as_ref(),
+                        )?;
+                        if !accepted {
+                            hotkeys.dictation.suspend();
+                        }
                     }
                 }
             }
@@ -1610,6 +1627,7 @@ fn handle_hotkey_action(
             }
             emit_engine_state(events, false, worker, mode, device)
         }
+        HotkeyAction::Scrawl => Ok(()),
     }?;
     Ok(true)
 }
@@ -1717,7 +1735,7 @@ fn handle_edit_hotkey_action(
             )?;
             Ok(true)
         }
-        HotkeyAction::PasteLast | HotkeyAction::PasteMeeting => Ok(false),
+        HotkeyAction::PasteLast | HotkeyAction::PasteMeeting | HotkeyAction::Scrawl => Ok(false),
     }
 }
 

@@ -1,0 +1,10 @@
+[package]
+name = "scrawl-capture-windows"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+
+[dependencies]
+anyhow = "1.0"
+scrawl-core = { path = "../scrawl-core" }

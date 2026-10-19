@@ -517,6 +517,7 @@ impl ShortcutSuppression {
             hotkeys.edit,
             hotkeys.paste_last,
             hotkeys.paste_meeting,
+            hotkeys.scrawl,
         ];
         match input {
             InputEvent::Key {
@@ -557,6 +558,7 @@ impl ShortcutSuppression {
                 edit: None,
                 paste_last: Some(paste_last),
                 paste_meeting: Some(paste_meeting),
+                scrawl: None,
             },
             delivered,
             false,
@@ -582,6 +584,12 @@ fn paste_action(input: InputEvent, hotkeys: RuntimeHotkeys) -> Option<HotkeyActi
                 .paste_meeting
                 .filter(|binding| binding.matches_key_press(code, flags))
                 .map(|_| HotkeyAction::PasteMeeting)
+        })
+        .or_else(|| {
+            hotkeys
+                .scrawl
+                .filter(|binding| binding.matches_key_press(code, flags))
+                .map(|_| HotkeyAction::Scrawl)
         })
 }
 
@@ -611,6 +619,7 @@ pub enum HotkeyAction {
     Cancel,
     PasteLast,
     PasteMeeting,
+    Scrawl,
 }
 
 #[derive(Debug)]
@@ -908,6 +917,15 @@ impl DictationHotkey {
     }
 
     pub fn process(&mut self, event: InputEvent, now: CaptureInstant) -> Option<HotkeyAction> {
+        self.process_with_hotkeys(event, now, crate::app_settings::runtime_hotkeys())
+    }
+
+    pub fn process_with_hotkeys(
+        &mut self,
+        event: InputEvent,
+        now: CaptureInstant,
+        hotkeys: RuntimeHotkeys,
+    ) -> Option<HotkeyAction> {
         self.stale_keys_neutral_since = None;
         if matches!(event, InputEvent::TapDisabled) {
             let was_recording = self.is_recording();
@@ -944,7 +962,7 @@ impl DictationHotkey {
 
         if self.paste_actions_enabled
             && fresh_key_down
-            && let Some(action) = paste_action(event, crate::app_settings::runtime_hotkeys())
+            && let Some(action) = paste_action(event, hotkeys)
         {
             self.state = State::Dirty;
             return Some(action);
@@ -3302,5 +3320,137 @@ mod tests {
         activity.invalidate();
 
         assert_ne!(activity.revision(), revision);
+    }
+
+    #[test]
+    fn scrawl_chord_is_inert_when_disabled_and_never_leaks_into_option_dictation() {
+        let now = capture_time();
+        let scrawl_binding = HotkeyBinding::scrawl_default();
+        let scrawl_key_code = scrawl_binding
+            .key
+            .as_ref()
+            .expect("default scrawl key")
+            .code;
+        let key_down = InputEvent::Key {
+            code: scrawl_key_code,
+            down: true,
+            flags: OPTION_KEY_MASK | SHIFT_KEY_MASK,
+        };
+        let key_up = InputEvent::Key {
+            code: scrawl_key_code,
+            down: false,
+            flags: OPTION_KEY_MASK | SHIFT_KEY_MASK,
+        };
+
+        // 1. Disabled by default: ⌥⇧S is treated as an ordinary chord and is not suppressed.
+        let disabled_hotkeys = RuntimeHotkeys::default();
+        assert_eq!(disabled_hotkeys.scrawl, None);
+        assert_eq!(paste_action(key_down, disabled_hotkeys), None);
+        let mut suppression = ShortcutSuppression::default();
+        assert!(!suppression.process_all(key_down, disabled_hotkeys, true, false));
+        assert!(!suppression.process_all(key_up, disabled_hotkeys, true, false));
+
+        // 2. Enabled: ⌥⇧S suppresses the S keystroke and emits HotkeyAction::Scrawl without leaking
+        // into Option-dictation under fast (⌥ -> ⇧ <300ms -> S), slow (⌥ >300ms -> ⇧ -> S), or
+        // Shift-first (⇧ -> ⌥ -> S) chord orderings.
+        let enabled_hotkeys = RuntimeHotkeys {
+            scrawl: Some(scrawl_binding.runtime()),
+            ..RuntimeHotkeys::default()
+        };
+        assert!(suppression.process_all(key_down, enabled_hotkeys, true, false));
+        assert!(suppression.process_all(key_up, enabled_hotkeys, true, false));
+
+        // Fast chord: ⌥ down -> ⇧ down within 300ms -> S down -> release all.
+        let mut fast = test_hotkey(false, now);
+        assert_eq!(
+            fast.process_with_hotkeys(InputEvent::Flags(OPTION_KEY_MASK), now, enabled_hotkeys),
+            Some(HotkeyAction::Start)
+        );
+        assert_eq!(
+            fast.process_with_hotkeys(
+                InputEvent::Flags(OPTION_KEY_MASK | SHIFT_KEY_MASK),
+                now + Duration::from_millis(40),
+                enabled_hotkeys
+            ),
+            Some(HotkeyAction::Discard)
+        );
+        assert_eq!(
+            fast.process_with_hotkeys(key_down, now + Duration::from_millis(80), enabled_hotkeys),
+            Some(HotkeyAction::Scrawl)
+        );
+        assert!(!fast.is_recording());
+        assert_eq!(
+            fast.process_with_hotkeys(key_up, now + Duration::from_millis(120), enabled_hotkeys),
+            None
+        );
+        assert_eq!(
+            fast.process_with_hotkeys(
+                InputEvent::Flags(NO_FLAGS),
+                now + Duration::from_millis(150),
+                enabled_hotkeys
+            ),
+            None
+        );
+
+        // Slow chord: ⌥ held > 300ms -> ⇧ down -> S down -> transitions to Dirty and emits Scrawl.
+        let mut slow = test_hotkey(false, now);
+        assert_eq!(
+            slow.process_with_hotkeys(InputEvent::Flags(OPTION_KEY_MASK), now, enabled_hotkeys),
+            Some(HotkeyAction::Start)
+        );
+        assert_eq!(
+            slow.process_with_hotkeys(
+                InputEvent::Flags(OPTION_KEY_MASK | SHIFT_KEY_MASK),
+                now + Duration::from_millis(450),
+                enabled_hotkeys
+            ),
+            None
+        );
+        assert!(slow.is_recording());
+        assert_eq!(
+            slow.process_with_hotkeys(key_down, now + Duration::from_millis(500), enabled_hotkeys),
+            Some(HotkeyAction::Scrawl)
+        );
+        assert!(!slow.is_recording());
+        assert_eq!(
+            slow.process_with_hotkeys(key_up, now + Duration::from_millis(540), enabled_hotkeys),
+            None
+        );
+        assert_eq!(
+            slow.process_with_hotkeys(
+                InputEvent::Flags(NO_FLAGS),
+                now + Duration::from_millis(580),
+                enabled_hotkeys
+            ),
+            None
+        );
+
+        // Shift-first chord: ⇧ down -> ⌥ down -> S down -> never starts dictation, emits Scrawl.
+        let mut shift_first = test_hotkey(false, now);
+        assert_eq!(
+            shift_first.process_with_hotkeys(
+                InputEvent::Flags(SHIFT_KEY_MASK),
+                now,
+                enabled_hotkeys
+            ),
+            None
+        );
+        assert_eq!(
+            shift_first.process_with_hotkeys(
+                InputEvent::Flags(OPTION_KEY_MASK | SHIFT_KEY_MASK),
+                now + Duration::from_millis(40),
+                enabled_hotkeys
+            ),
+            None
+        );
+        assert_eq!(
+            shift_first.process_with_hotkeys(
+                key_down,
+                now + Duration::from_millis(80),
+                enabled_hotkeys
+            ),
+            Some(HotkeyAction::Scrawl)
+        );
+        assert!(!shift_first.is_recording());
     }
 }

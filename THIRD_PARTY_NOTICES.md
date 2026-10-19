@@ -1,7 +1,10 @@
 # Third-Party Notices
 
-HEX's own source is covered by the root `LICENSE`. The following notices cover
-vendored icon assets. Dependencies retain their respective upstream licenses.
+HEX's own source is covered by the root `LICENSE`. The `crates/scrawl-core` and
+`crates/scrawl-capture-*` crates are imported from Scrawl under the MIT License
+(`crates/scrawl-core/LICENSE`, Copyright (c) 2026 Kit Langton). The following
+notices cover vendored icon assets. Dependencies retain their respective
+upstream licenses.
 
 ## Heroicons
 

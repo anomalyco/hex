@@ -70,6 +70,8 @@ fn shortcut_target(kind: HotkeyKind) -> Option<ShortcutTarget> {
         HotkeyKind::Dictation => Some(ShortcutTarget::Dictation),
         HotkeyKind::PasteLast => Some(ShortcutTarget::PasteLast),
         HotkeyKind::Edit => Some(ShortcutTarget::VoiceAction),
+        // Scrawl capture is macOS-only for now.
+        HotkeyKind::Scrawl => None,
     }
 }
 
@@ -405,6 +407,7 @@ impl AppWindow {
                 HotkeyKind::PasteLast => self.settings.paste_last_hotkey = Some(binding),
                 HotkeyKind::Edit => self.settings.edit_hotkey = binding,
                 HotkeyKind::Dictation => self.settings.dictation_hotkey = binding,
+                HotkeyKind::Scrawl => {}
             }
             self.hotkey_width_spring
                 .set_target(hotkey_saved_width(keycaps.len()) + hotkey_label_overflow(&keycaps));

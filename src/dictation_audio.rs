@@ -129,6 +129,10 @@ enum Command {
         expected_generation: u64,
         reply: SyncSender<bool>,
     },
+    SetScrawlSink {
+        sink: Option<SyncSender<(Vec<f32>, u32)>>,
+        reply: SyncSender<()>,
+    },
 }
 
 struct Owner {
@@ -148,6 +152,7 @@ struct Owner {
     engine: Option<Arc<TranscriptionEngine>>,
     /// Whether the active capture streams once it is intentional.
     stream_capture: bool,
+    scrawl_sink: Option<SyncSender<(Vec<f32>, u32)>>,
 }
 
 #[derive(Clone, Copy)]
@@ -329,6 +334,10 @@ impl DictationAudio {
         self.call(|reply| Command::Cancel { reply })
     }
 
+    pub fn set_scrawl_sink(&self, sink: Option<SyncSender<(Vec<f32>, u32)>>) -> Result<()> {
+        self.call(|reply| Command::SetScrawlSink { sink, reply })
+    }
+
     pub fn recv_timeout(&self, timeout: Duration) -> Result<Option<RecognitionAudio>> {
         match self.recognition.recv_timeout(timeout) {
             Ok(audio) => Ok(Some(audio)),
@@ -439,6 +448,7 @@ impl Owner {
             last_captured_through: None,
             engine,
             stream_capture: false,
+            scrawl_sink: None,
         };
         let audio = DictationAudio {
             commands: command_sender,
@@ -548,7 +558,7 @@ impl Owner {
             }
             Command::Cancel { reply } => {
                 self.pending_capture = None;
-                if !self.input.is_open() {
+                if !self.input.is_open() && self.scrawl_sink.is_none() {
                     self.input.cancel_open();
                 }
                 self.capture.cancel();
@@ -574,6 +584,13 @@ impl Owner {
                     self.next_recognition_generation();
                 }
                 let _ = reply.send(current);
+            }
+            Command::SetScrawlSink { sink, reply } => {
+                self.scrawl_sink = sink;
+                if self.scrawl_sink.is_some() && !self.input.is_active() {
+                    self.input.request_open();
+                }
+                let _ = reply.send(());
             }
             Command::Shutdown => return false,
         }
@@ -684,6 +701,14 @@ impl Owner {
                     && let Some(engine) = &self.engine
                 {
                     self.capture.begin_stream(engine);
+                }
+                if let Some(sink) = &self.scrawl_sink {
+                    let rate = self.sample_rate();
+                    if let Err(TrySendError::Disconnected(_)) =
+                        sink.try_send((samples.clone(), rate))
+                    {
+                        self.scrawl_sink = None;
+                    }
                 }
                 self.forward_recognition(samples, captured_through);
             }
@@ -842,7 +867,7 @@ impl Owner {
     }
 
     fn reconcile_input(&mut self) {
-        if self.release_while_idle {
+        if self.release_while_idle && self.scrawl_sink.is_none() {
             if self.capture_idle() && self.input.is_active() {
                 self.close_input();
             }

@@ -1,0 +1,17 @@
+[package]
+name = "scrawl-capture-macos"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+
+[dependencies]
+anyhow = "1.0"
+scrawl-core = { path = "../scrawl-core" }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+core-foundation = "0.10"
+objc2 = "0.6.4"
+objc2-app-kit = "0.3.2"
+objc2-foundation = "0.3.2"
+screencapturekit = { version = "=11.0.0", features = ["macos_15_0"] }

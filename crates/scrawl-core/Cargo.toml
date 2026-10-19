@@ -1,0 +1,14 @@
+# Publish blocker: upstream /Users/kit/code/open-source/scrawl declares `license = "MIT"`
+# in Cargo.toml without a LICENSE file. Resolve with Kit before merging to `main`.
+[package]
+name = "scrawl-core"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+
+[dependencies]
+anyhow = "1.0.104"
+png = "0.18.1"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"

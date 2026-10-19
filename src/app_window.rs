@@ -662,6 +662,7 @@ enum HotkeyKind {
     Dictation,
     Edit,
     PasteLast,
+    Scrawl,
 }
 
 fn set_hotkey_binding(settings: &mut AppSettings, kind: HotkeyKind, binding: HotkeyBinding) {
@@ -674,6 +675,7 @@ fn set_hotkey_binding(settings: &mut AppSettings, kind: HotkeyKind, binding: Hot
         }
         HotkeyKind::Edit => settings.edit_hotkey = binding,
         HotkeyKind::PasteLast => settings.paste_last_hotkey = Some(binding),
+        HotkeyKind::Scrawl => settings.scrawl.hotkey = binding,
     }
 }
 
@@ -803,6 +805,7 @@ pub struct AppWindow {
     terminal_paste_toggle: ToggleSpring,
     indicator_position_spring: ToggleSpring,
     interface_language_open: bool,
+    scrawl_error: Option<String>,
     sound_volume_spring: ToggleSpring,
     recording_audio_spring: ToggleSpring,
     variant_picker_open: Option<ModelPickerTarget>,
@@ -834,8 +837,8 @@ pub struct AppWindow {
     hotkey_capture: HotkeyCaptureState,
     hotkey_capture_animation: ToggleSpring,
     hotkey_width_spring: ToggleSpring,
-    hotkey_side_animations: [ToggleSpring; 3],
-    hotkey_side_selection_springs: [ToggleSpring; 3],
+    hotkey_side_animations: [ToggleSpring; 4],
+    hotkey_side_selection_springs: [ToggleSpring; 4],
     window_focus: FocusHandle,
     hotkey_focus: FocusHandle,
     _hotkey_blur_subscription: Subscription,
@@ -1177,6 +1180,7 @@ impl AppWindow {
                 settings.indicator_position,
             ) as f32),
             interface_language_open: false,
+            scrawl_error: None,
             sound_volume_spring: ToggleSpring::at(sound_volume_index(&settings) as f32),
             recording_audio_spring: ToggleSpring::at(recording_audio_index(
                 settings.recording_audio_behavior,
@@ -1263,6 +1267,7 @@ impl AppWindow {
                 HotkeyKind::Dictation,
                 HotkeyKind::Edit,
                 HotkeyKind::PasteLast,
+                HotkeyKind::Scrawl,
             ]
             .map(|kind| {
                 ToggleSpring::new(
@@ -1275,6 +1280,7 @@ impl AppWindow {
                 HotkeyKind::Dictation,
                 HotkeyKind::Edit,
                 HotkeyKind::PasteLast,
+                HotkeyKind::Scrawl,
             ]
             .map(|kind| {
                 ToggleSpring::at(hotkey_side_index(
@@ -2286,6 +2292,7 @@ impl AppWindow {
                                 HotkeyKind::Dictation => "cancel-dictation-hotkey-capture",
                                 HotkeyKind::Edit => "cancel-edit-hotkey-capture",
                                 HotkeyKind::PasteLast => "cancel-paste-last-hotkey-capture",
+                                HotkeyKind::Scrawl => "cancel-scrawl-hotkey-capture",
                             })
                             .ml_1()
                             .on_click(cx.listener(|this, _, _, cx| {
@@ -2322,6 +2329,7 @@ impl AppWindow {
                 HotkeyKind::Dictation => "dictation-hotkey-control",
                 HotkeyKind::Edit => "edit-hotkey-control",
                 HotkeyKind::PasteLast => "paste-last-hotkey-control",
+                HotkeyKind::Scrawl => "scrawl-hotkey-control",
             })
             .track_focus(&self.hotkey_focus)
             .w(px(control_width))
@@ -2566,6 +2574,10 @@ impl AppWindow {
             HotkeyCaptureState::Listening { kind, .. } => kind,
             HotkeyCaptureState::Idle | HotkeyCaptureState::Saved { .. } => return,
         };
+        if kind == HotkeyKind::Scrawl && binding.key.is_none() {
+            self.set_hotkey_capture_message("Add a key", cx);
+            return;
+        }
         if let Err(message) = platform::validate_hotkey(kind, &binding) {
             self.set_hotkey_capture_message(message, cx);
             return;
@@ -2589,6 +2601,8 @@ impl AppWindow {
             .set_target(hotkey_saved_width(keycap_count) + label_overflow);
         if kind == HotkeyKind::Edit {
             self.voice_action_inputs.error = None;
+        } else if kind == HotkeyKind::Scrawl {
+            self.scrawl_error = None;
         }
         if !self.preview {
             platform::set_hotkey_capture_active(false);
@@ -6028,6 +6042,17 @@ fn set_voice_action_enabled(settings: &mut AppSettings, enabled: bool) -> Result
     Ok(())
 }
 
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn set_scrawl_enabled(settings: &mut AppSettings, enabled: bool) -> Result<(), &'static str> {
+    if enabled && hotkey_binding_conflicts(settings, HotkeyKind::Scrawl, &settings.scrawl.hotkey) {
+        return Err(
+            "The Scrawl shortcut is already in use. Change the other shortcut before enabling Scrawl.",
+        );
+    }
+    settings.scrawl.enabled = enabled;
+    Ok(())
+}
+
 fn hotkey_idle_width(keycap_count: usize) -> f32 {
     (112.0 + hotkey_keycaps_width(keycap_count)).max(HOTKEY_MIN_WIDTH)
 }
@@ -6037,6 +6062,7 @@ const fn hotkey_kind_index(kind: HotkeyKind) -> usize {
         HotkeyKind::Dictation => 0,
         HotkeyKind::Edit => 1,
         HotkeyKind::PasteLast => 2,
+        HotkeyKind::Scrawl => 3,
     }
 }
 
@@ -6106,7 +6132,9 @@ fn hotkey_binding_conflicts(
 ) -> bool {
     let mut others = match kind {
         HotkeyKind::Dictation => Vec::new(),
-        HotkeyKind::Edit | HotkeyKind::PasteLast => vec![settings.dictation_hotkey.clone()],
+        HotkeyKind::Edit | HotkeyKind::PasteLast | HotkeyKind::Scrawl => {
+            vec![settings.dictation_hotkey.clone()]
+        }
     };
     if kind != HotkeyKind::Edit && settings.voice_action.enabled {
         others.push(settings.edit_hotkey.clone());
@@ -6115,6 +6143,9 @@ fn hotkey_binding_conflicts(
         && let Some(paste) = &settings.paste_last_hotkey
     {
         others.push(paste.clone());
+    }
+    if kind != HotkeyKind::Scrawl && settings.scrawl.enabled {
+        others.push(settings.scrawl.hotkey.clone());
     }
     if settings.meetings.available() {
         others.push(HotkeyBinding::paste_meeting_default());
@@ -6127,6 +6158,7 @@ fn hotkey_binding(settings: &AppSettings, kind: HotkeyKind) -> Option<&HotkeyBin
         HotkeyKind::Dictation => Some(&settings.dictation_hotkey),
         HotkeyKind::Edit => Some(&settings.edit_hotkey),
         HotkeyKind::PasteLast => settings.paste_last_hotkey.as_ref(),
+        HotkeyKind::Scrawl => Some(&settings.scrawl.hotkey),
     }
 }
 
@@ -7638,6 +7670,30 @@ mod tests {
         assert!(hotkey_binding_conflicts(
             &settings,
             HotkeyKind::Edit,
+            &settings.dictation_hotkey,
+        ));
+    }
+
+    #[test]
+    fn disabled_scrawl_does_not_reserve_its_shortcut() {
+        let mut settings = AppSettings::default();
+        for enabled in [false, true] {
+            settings.scrawl.enabled = enabled;
+            for kind in [
+                HotkeyKind::Dictation,
+                HotkeyKind::Edit,
+                HotkeyKind::PasteLast,
+            ] {
+                assert_eq!(
+                    hotkey_binding_conflicts(&settings, kind, &settings.scrawl.hotkey),
+                    enabled,
+                );
+            }
+        }
+        settings.scrawl.enabled = false;
+        assert!(hotkey_binding_conflicts(
+            &settings,
+            HotkeyKind::Scrawl,
             &settings.dictation_hotkey,
         ));
     }

@@ -89,6 +89,8 @@ pub(super) struct Platform {
     pub(super) command_model_status: CommandModelStatus,
     pub(super) meetings_toggle: ToggleSpring,
     pub(super) meeting_notes_toggle: ToggleSpring,
+    pub(super) scrawl_toggle: ToggleSpring,
+    pub(super) scrawl_auto_crop_toggle: ToggleSpring,
     pub(super) screen_recording_permitted: bool,
     pub(super) meeting_folder_error: Option<String>,
     pub(super) meetings: Vec<MeetingManifest>,
@@ -176,9 +178,14 @@ impl Platform {
             meeting_notes_toggle: ToggleSpring::new(
                 settings.meetings.summarize_with_apple_intelligence,
             ),
+            scrawl_toggle: ToggleSpring::new(settings.scrawl.enabled),
+            scrawl_auto_crop_toggle: ToggleSpring::new(settings.scrawl.auto_crop),
             screen_recording_permitted: match preview {
                 Some(preview) => !preview.screen_recording_missing,
-                None => crate::meeting::screen_recording_permitted(),
+                None => {
+                    (settings.meetings.available() || settings.scrawl.enabled)
+                        && crate::meeting::screen_recording_permitted()
+                }
             },
             meeting_folder_error: None,
             meetings: Vec::new(),
@@ -386,6 +393,8 @@ impl AppWindow {
         vec![
             settings_section_label(tr("Meetings")).into_any_element(),
             self.render_meeting_settings(window, cx).into_any_element(),
+            settings_section_label("Scrawl").into_any_element(),
+            self.render_scrawl_settings(window, cx).into_any_element(),
         ]
     }
 
@@ -401,7 +410,7 @@ impl AppWindow {
     }
 
     pub(super) fn platform_poll_setup(&mut self) -> bool {
-        if !self.settings.meetings.available() {
+        if !self.settings.meetings.available() && !self.settings.scrawl.enabled {
             return false;
         }
         let permitted = crate::meeting::screen_recording_permitted();
@@ -1825,6 +1834,106 @@ impl AppWindow {
                         self.platform.meeting_folder_error.clone(),
                         |panel, error| panel.child(inline_error(error)),
                     )
+            })
+    }
+
+    pub(super) fn render_scrawl_settings(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        let enabled = self.settings.scrawl.enabled;
+        let position = self.platform.scrawl_toggle.render_position(window);
+        let auto_crop_position = self
+            .platform
+            .scrawl_auto_crop_toggle
+            .render_position(window);
+        let hotkey_control = self.render_hotkey_setting_control(HotkeyKind::Scrawl, window, cx);
+        let permission_control = if self.platform.screen_recording_permitted {
+            tag(Tone::Success, "Ready").into_any_element()
+        } else {
+            button(ButtonKind::Secondary, "Open settings")
+                .id("scrawl-screen-recording")
+                .on_click(cx.listener(|this, _, _, cx| {
+                    if !crate::meeting::request_screen_recording() {
+                        crate::meeting::open_screen_recording_settings();
+                    }
+                    this.permission_refresh_at = Instant::now();
+                    cx.notify();
+                }))
+                .into_any_element()
+        };
+        panel()
+            .child(
+                settings_row(
+                    "Scrawl (beta)",
+                    "Record the display under the pointer with your voice and copy a visual bundle",
+                    toggle(position),
+                )
+                .when(!enabled && self.scrawl_error.is_none(), |row| row.border_b_0())
+                .id("scrawl-setting")
+                .on_click(cx.listener(|this, _, _, cx| {
+                    let enabled = !this.settings.scrawl.enabled;
+                    let mut conflict_error = None;
+                    let saved = this.update_settings(cx, |settings| {
+                        if let Err(error) = super::set_scrawl_enabled(settings, enabled) {
+                            conflict_error = Some(error);
+                        }
+                    });
+                    if let Some(error) = conflict_error {
+                        this.scrawl_error = Some(error.into());
+                        cx.notify();
+                        return;
+                    }
+                    if saved {
+                        this.scrawl_error = None;
+                        this.platform.scrawl_toggle.set_enabled(enabled);
+                        if enabled {
+                            this.platform.screen_recording_permitted =
+                                this.preview || crate::meeting::screen_recording_permitted();
+                        }
+                    }
+                })),
+            )
+            .when(enabled, |panel| {
+                panel
+                    .child(settings_row(
+                        "Screen & System Audio Recording",
+                        if self.platform.screen_recording_permitted {
+                            "Captures the display under the pointer"
+                        } else {
+                            "Required to capture the screen. Allow Hex, then reopen it."
+                        },
+                        permission_control,
+                    ))
+                    .child(
+                        settings_row(
+                            "Scrawl shortcut",
+                            "Tap to start recording the screen and your voice, then tap again to finish",
+                            hotkey_control,
+                        )
+                        .id("scrawl-hotkey-setting"),
+                    )
+                    .child(
+                        settings_row(
+                            "Auto-crop full-screen captures",
+                            "Crop full-screen captures to the active window or click region",
+                            toggle(auto_crop_position),
+                        )
+                        .border_b_0()
+                        .id("scrawl-auto-crop-setting")
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            let auto_crop = !this.settings.scrawl.auto_crop;
+                            if this.update_settings(cx, |settings| {
+                                settings.scrawl.auto_crop = auto_crop;
+                            }) {
+                                this.platform.scrawl_auto_crop_toggle.set_enabled(auto_crop);
+                            }
+                        })),
+                    )
+            })
+            .when_some(self.scrawl_error.clone(), |panel, error| {
+                panel.child(inline_error(error))
             })
     }
 
