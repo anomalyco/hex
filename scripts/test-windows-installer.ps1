@@ -72,6 +72,7 @@ $updated = Join-Path $support 'versions\99.0.0\hex.exe'
 New-Item -ItemType Directory -Force (Split-Path $updated) | Out-Null
 Copy-Item $installed $updated
 New-Item -ItemType Directory -Force (Join-Path $support 'updates') | Out-Null
+if (-not (Test-Path $runKey)) { New-Item -Path $runKey | Out-Null }
 Set-ItemProperty -Path $runKey -Name 'HEX' -Value "`"$updated`" app --hidden"
 Set-Content -Path (Join-Path $support 'settings.json') -Value '{}'
 

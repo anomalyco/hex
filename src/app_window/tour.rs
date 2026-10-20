@@ -873,10 +873,22 @@ impl AppWindow {
             .child(art)
             .child(page_title(
                 tr("You're all set"),
-                Some(tr_fill(
-                    "Hex waits in the menu bar. Use {} in any app to dictate.",
-                    &self.shortcut_label(),
-                )),
+                Some(if cfg!(target_os = "windows") {
+                    tr_fill(
+                        "Hex waits in the system tray. Use {} in any app to dictate.",
+                        &self.shortcut_label(),
+                    )
+                } else if cfg!(target_os = "linux") {
+                    tr_fill(
+                        "Hex keeps running after you close this window. Use {} in any app to dictate.",
+                        &self.shortcut_label(),
+                    )
+                } else {
+                    tr_fill(
+                        "Hex waits in the menu bar. Use {} in any app to dictate.",
+                        &self.shortcut_label(),
+                    )
+                }),
             ))
             .when(count > 0, |page| {
                 page.child(
