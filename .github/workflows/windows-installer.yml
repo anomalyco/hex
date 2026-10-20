@@ -1,0 +1,99 @@
+name: Windows installer
+
+# Builds and silently tests HEX-Setup-<version>-<x64|arm64>.exe around the
+# executables already published in the signed update feeds, so installer
+# changes are tested on real Windows runners and a published release can gain
+# installers without rebuilding or re-signing it. Release desktop builds the
+# installers for new releases itself.
+on:
+  pull_request:
+    paths:
+      - packaging/windows/**
+      - resources/windows/hex.ico
+      - scripts/build-windows-installer.ps1
+      - scripts/test-windows-installer.ps1
+      - .github/workflows/windows-installer.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-installer-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  published:
+    name: Fetch the published release
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.fetch.outputs.version }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - id: fetch
+        name: Download and verify the signed feeds and their artifacts
+        run: |
+          base=https://downloads.hex.kitlangton.dev
+          mkdir -p dist
+          for feed in linux-update.json windows-update.json windows-aarch64-update.json; do
+            curl --fail --silent --show-error --proto '=https' "$base/$feed" -o "dist/$feed"
+            artifact=$(jq -r .payload "dist/$feed" | base64 -d | jq -r .artifact)
+            curl --fail --silent --show-error --proto '=https' "$base/releases/$artifact" -o "dist/$artifact"
+          done
+          scripts/release-feed.sh verify dist linux-update.json windows-update.json windows-aarch64-update.json
+          echo "version=$(jq -r .payload dist/windows-update.json | base64 -d | jq -r .version)" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: published
+          path: dist/
+          if-no-files-found: error
+
+  installer:
+    name: Installer ${{ matrix.arch }}
+    needs: published
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            label: x64
+            runner: windows-latest
+          - arch: aarch64
+            label: arm64
+            runner: windows-11-arm
+    env:
+      HEX_VERSION: ${{ needs.published.outputs.version }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v8
+        with:
+          name: published
+          path: published
+      - name: Build the installer
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem published -Filter "HEX-$env:HEX_VERSION-*-${{ matrix.arch }}-windows.exe" | Select-Object -First 1
+          if (-not $exe) { throw 'The published executable is missing.' }
+          "HEX_EXE=$($exe.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append
+          scripts/build-windows-installer.ps1 -Executable $exe.FullName -Version $env:HEX_VERSION -Arch ${{ matrix.arch }} -OutDir installers
+      - name: Install, reinstall, refuse a downgrade, and uninstall silently
+        shell: pwsh
+        run: scripts/test-windows-installer.ps1 -Installer "installers/HEX-Setup-$env:HEX_VERSION-${{ matrix.label }}.exe" -Executable $env:HEX_EXE -Version $env:HEX_VERSION
+      - name: Upload installer logs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: installer-logs-${{ matrix.label }}
+          path: ${{ runner.temp }}/hex-installer-logs
+          if-no-files-found: ignore
+      - uses: actions/upload-artifact@v7
+        with:
+          name: hex-setup-${{ matrix.label }}
+          path: installers/
+          if-no-files-found: error
