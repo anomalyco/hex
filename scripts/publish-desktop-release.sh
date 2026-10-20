@@ -2,7 +2,8 @@
 # Publish the Linux and Windows release signed by a successful Release desktop
 # workflow run, using this Mac's Wrangler login (the personal Cloudflare
 # account that owns hex-releases). Artifacts go first and feeds last; nothing
-# replaces different bytes or an equal or newer version.
+# replaces different bytes or an equal or newer version. The Setup.exe
+# installers and the GitHub mirror follow; see publish-desktop-downloads.sh.
 #
 #   scripts/publish-desktop-release.sh <run-id>
 set -eu
@@ -58,3 +59,6 @@ echo "Publishing HEX $version from $commit (run $run)." >&2
 # shellcheck disable=SC2086
 HEX_VERSION="$version" HEX_RELEASE_SOURCE="$source" \
   "$root/scripts/release-feed.sh" publish "$dist" $feeds
+
+# Setup.exe installers to R2, then the GitHub mirror of the downloads.
+"$root/scripts/publish-desktop-downloads.sh" "$dist" "$version"

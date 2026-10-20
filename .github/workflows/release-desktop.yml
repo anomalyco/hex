@@ -190,6 +190,15 @@ jobs:
           $imports
           $redist = $imports | Select-String -Pattern 'VCRUNTIME|MSVCP|vcomp'
           if ($redist) { throw "hex.exe imports Visual C++ runtime DLLs: $redist" }
+      - name: Build and silently test the Setup.exe installer
+        shell: pwsh
+        run: |
+          $feed = if ($env:HEX_WINDOWS_ARCH -eq 'x86_64') { 'windows-update.json' } else { 'windows-aarch64-update.json' }
+          $label = if ($env:HEX_WINDOWS_ARCH -eq 'x86_64') { 'x64' } else { 'arm64' }
+          $payload = Get-Content "dist/$feed.payload.json" | ConvertFrom-Json
+          $exe = "dist/$($payload.artifact)"
+          tools/scripts/build-windows-installer.ps1 -Executable $exe -Version $env:HEX_VERSION -Arch $env:HEX_WINDOWS_ARCH -OutDir dist
+          tools/scripts/test-windows-installer.ps1 -Installer "dist/HEX-Setup-$env:HEX_VERSION-$label.exe" -Executable $exe -Version $env:HEX_VERSION
       - uses: actions/upload-artifact@v7
         with:
           name: hex-windows-${{ matrix.arch }}
@@ -227,6 +236,11 @@ jobs:
           for feed in $FEEDS; do
             jq -r .payload "dist/$feed" | base64 -d | jq -c . | tee -a "$GITHUB_STEP_SUMMARY"
           done
+          for label in x64 arm64; do
+            test -s "dist/HEX-Setup-$HEX_VERSION-$label.exe"
+            test "$(head -c 2 "dist/HEX-Setup-$HEX_VERSION-$label.exe")" = MZ
+          done
+          (cd dist && sha256sum HEX-Setup-*.exe) | tee -a "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v7
         with:
           name: signed-release

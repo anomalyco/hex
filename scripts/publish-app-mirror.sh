@@ -18,7 +18,7 @@ temporary=$(mktemp -d "${TMPDIR:-/tmp}/hex-app-mirror.XXXXXX")
 trap 'rm -rf "$temporary"' EXIT HUP INT TERM
 if ! gh release view "$tag" --repo "$repo" --json assets > "$temporary/release.json"; then
   gh release create "$tag" --repo "$repo" --target "$commit" \
-    --title "Hex $version for macOS" --notes-file "$notes" --draft --latest=false
+    --title "Hex $version" --notes-file "$notes" --draft --latest=false
   gh release view "$tag" --repo "$repo" --json assets > "$temporary/release.json"
 fi
 if ! jq -e --arg name "$artifact" '.assets | any(.name == $name)' "$temporary/release.json" >/dev/null; then

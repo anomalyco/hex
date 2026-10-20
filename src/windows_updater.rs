@@ -28,6 +28,8 @@ const RELEASES_PAGE: &str = "https://github.com/anomalyco/hex/releases/latest";
 const STARTUP_DELAY: Duration = Duration::from_secs(10);
 const CHECK_INTERVAL: Duration = Duration::from_secs(6 * 60 * 60);
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+/// The Apps & Features entry that packaging/windows/hex.iss registers.
+const UNINSTALL_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Uninstall\{8FCF0256-C55C-40C3-865D-5FADB32D13B3}_is1";
 #[cfg(target_arch = "x86_64")]
 const TARGET: UpdateTarget = UpdateTarget {
     target: "x86_64-pc-windows-msvc",
@@ -237,6 +239,9 @@ fn install_latest() -> Result<Option<InstalledUpdate>> {
     if let Err(error) = repoint_start_menu_shortcut(&executable) {
         tracing::warn!(%error, "could not repoint the Start Menu shortcut to the updated HEX");
     }
+    if let Err(error) = update_uninstall_entry(&manifest.version) {
+        tracing::warn!(%error, "could not update the Apps & Features version");
+    }
     Ok(Some(InstalledUpdate {
         version: manifest.version,
         executable,
@@ -283,6 +288,23 @@ fn repoint_start_menu_shortcut(executable: &Path) -> Result<()> {
     if !status.success() {
         bail!("the Start Menu shortcut update exited with {status}");
     }
+    Ok(())
+}
+
+/// Show the activated version in Apps & Features when Setup.exe installed
+/// HEX; script installs have no entry and are left alone.
+fn update_uninstall_entry(version: &str) -> Result<()> {
+    use winreg::RegKey;
+    use winreg::enums::{HKEY_CURRENT_USER, KEY_WRITE};
+
+    let key =
+        match RegKey::predef(HKEY_CURRENT_USER).open_subkey_with_flags(UNINSTALL_KEY, KEY_WRITE) {
+            Ok(key) => key,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(error) => return Err(error).wrap_err("could not open the Apps & Features entry"),
+        };
+    key.set_value("DisplayVersion", &version)
+        .wrap_err("could not write the Apps & Features version")?;
     Ok(())
 }
 
