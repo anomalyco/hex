@@ -345,7 +345,7 @@ pub fn run(shutdown: &'static AtomicBool, launch: Launch) -> Result<()> {
     }
     // The controller idles without inspecting microphone activity until the
     // user opts in to meetings (always available in developer builds).
-    let controller_worker = (!shell_preview.is_some() && !dictation_preview).then(|| {
+    let controller_worker = (shell_preview.is_none() && !dictation_preview).then(|| {
         let controller_events = event_sender.clone();
         thread::spawn(move || {
             if preview {
