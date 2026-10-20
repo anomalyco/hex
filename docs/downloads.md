@@ -3,14 +3,22 @@
 ## Public Paths
 
 ```ts
-hex.kitlangton.dev                         // versioned links and platform requirements
+hex.kitlangton.dev                         // the one site: platform-aware download
+├── hex.kitlangton.com/*                   // 301 to the same path on .dev (site/worker.ts)
 ├── downloads.hex.kitlangton.dev           // direct R2 Custom Domain; no redirect
 │   ├── releases/HEX-<version>-arm64.dmg
 │   ├── releases/HEX-<version>-arm64.zip    // signed Sparkle artifact
 │   ├── releases/HEX-latest-arm64.dmg      // mutable pointer; no-cache
+│   ├── releases/HEX-Setup-<version>-x64.exe    // per-user Windows installers
+│   ├── releases/HEX-Setup-<version>-arm64.exe
+│   ├── releases/HEX-<version>-<sha256>-<target>  // content-addressed feed artifacts
+│   ├── install-linux.sh, install-windows.ps1     // script installers
+│   ├── linux-update.json, windows-update.json, windows-aarch64-update.json
 │   └── appcast.xml                       // mutable pointer; published last
-└── github.com/anomalyco/hex
-    └── releases/download/app-v<version>/HEX-<version>-arm64.dmg
+└── github.com/anomalyco/hex/releases/tag/app-v<version>
+    ├── HEX-<version>-arm64.dmg
+    ├── HEX-Setup-<version>-x64.exe, HEX-Setup-<version>-arm64.exe
+    └── HEX-<version>-x86_64-linux        // identical bytes to the feed artifact
 ```
 
 The `hex-releases` bucket retains its existing `r2.dev` public endpoint so older
@@ -33,17 +41,15 @@ Only then does the publisher move the latest DMG and publish the appcast.
 App tags remain separate from TypeScript SDK tags; do not use GitHub's generic
 `releases/latest` redirect for an app download.
 
-After each macOS publication, update the site's `MAC_VERSION`, the README's
-explicit app mirror link, and `anomalyco/homebrew-tap/Casks/hex.rb`. Deploy the
-site using its checked-in Wrangler config and verify both rendered links.
+After each publication, bump `MAC_VERSION` or `DESKTOP_VERSION` in
+`site/src/release.ts`, the README's explicit app mirror link, and (macOS)
+`anomalyco/homebrew-tap/Casks/hex.rb`. `bun run --cwd site check:downloads`
+must pass before deploying; then verify the live links.
 
-There is a second marketing site at **https://hex.kitlangton.com/**. Its repo is
-`/Users/kit/code/projects/hex-marketing-site`, with `MAC_VERSION` in
-`src/app/components/TerminalSimulation.tsx`. Deploy it separately using
-`vercel --prod`. The linked `hex-marketing-site` Vercel project also updates its
-`hex-marketing-site.vercel.app` and
-`hex-marketing-site-kit-langtons-projects.vercel.app` production aliases.
-Updating the Cloudflare `.dev` site does not update this Vercel `.com` site.
+`hex.kitlangton.com` was a second, Mac-only site
+(`/Users/kit/code/projects/hex-marketing-site`, Worker `hex-marketing-site`).
+It is retired: its custom domain now belongs to `hex-voice-site`, whose worker
+301s every path to `hex.kitlangton.dev`. Do not deploy the old project again.
 
 ## Network Recovery
 

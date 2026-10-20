@@ -1,14 +1,8 @@
 import * as m from "motion/react-m"
-import type { ReactNode } from "react"
+import { useEffect, useState } from "react"
 import ChatteringTeeth from "./ChatteringTeeth"
-
-const MAC_VERSION = "2.3.0"
-const DOWNLOAD_URL =
-  `https://downloads.hex.kitlangton.dev/releases/HEX-${MAC_VERSION}-arm64.dmg`
-const GITHUB_DOWNLOAD_URL =
-  `https://github.com/anomalyco/hex/releases/download/app-v${MAC_VERSION}/HEX-${MAC_VERSION}-arm64.dmg`
-const LINUX_INSTALL_URL = "https://github.com/anomalyco/hex/blob/main/docs/linux.md"
-const WINDOWS_INSTALL_URL = "https://github.com/anomalyco/hex/blob/main/docs/windows.md#install"
+import Download, { PLATFORM_NAMES, SHORTCUTS } from "./Download"
+import { guessPlatform, refinePlatform } from "./platform"
 
 function HexMark() {
   return (
@@ -20,81 +14,27 @@ function HexMark() {
   )
 }
 
-function AppleMark() {
+function GitHubMark() {
   return (
-    <svg aria-hidden="true" viewBox="0 0 24 24" className="download__apple">
-      <path d="M16.68 12.9c.02 2.3 2.02 3.06 2.04 3.07-.02.06-.32 1.1-1.05 2.17-.63.92-1.29 1.84-2.32 1.86-1.01.02-1.34-.6-2.5-.6-1.15 0-1.51.58-2.47.62-.99.04-1.74-.99-2.38-1.91-1.3-1.88-2.3-5.32-.96-7.65a3.7 3.7 0 0 1 3.15-1.91c.98-.02 1.91.66 2.5.66.6 0 1.72-.82 2.9-.7.49.02 1.88.2 2.77 1.5-.07.04-1.65.96-1.68 2.89ZM14.81 7.27c.53-.64.89-1.53.79-2.41-.76.03-1.68.51-2.23 1.15-.49.57-.92 1.47-.8 2.34.85.07 1.71-.43 2.24-1.08Z" />
+    <svg aria-hidden="true" viewBox="0 0 16 16" className="header__github-icon">
+      <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z" />
     </svg>
   )
-}
-
-function LinuxMark() {
-  return (
-    <svg aria-hidden="true" viewBox="0 0 24 24" className="download__linux">
-      <path d="M5 5.5h14v13H5zM8 9l2.5 2.5L8 14M12.5 14H16" />
-    </svg>
-  )
-}
-
-function WindowsMark() {
-  return (
-    <svg aria-hidden="true" viewBox="0 0 24 24" className="download__apple">
-      <path d="M4 5.6 10.5 4.7v6.6H4zM11.4 4.6 20 3.4v7.9h-8.6zM4 12.2h6.5v6.6L4 17.9zM11.4 12.2H20v7.9l-8.6-1.2z" />
-    </svg>
-  )
-}
-
-type Platform = "mac" | "linux" | "windows"
-
-interface Download {
-  href: string
-  label: string
-  mark: ReactNode
-  arrow: string
-  shortcut: string
-  requirements: string
-  alternative?: string
-}
-
-const DOWNLOADS: Record<Platform, Download> = {
-  mac: {
-    href: DOWNLOAD_URL,
-    label: "Download for Mac",
-    mark: <AppleMark />,
-    arrow: "\u2193",
-    shortcut: "Option",
-    requirements: `Version ${MAC_VERSION}  \u00b7  Apple silicon  \u00b7  macOS 15+`,
-    alternative: GITHUB_DOWNLOAD_URL,
-  },
-  linux: {
-    href: LINUX_INSTALL_URL,
-    label: "Install on Linux",
-    mark: <LinuxMark />,
-    arrow: "\u2197",
-    shortcut: "Alt-Space",
-    requirements: "x86_64 Arch Linux beta",
-  },
-  windows: {
-    href: WINDOWS_INSTALL_URL,
-    label: "Install on Windows",
-    mark: <WindowsMark />,
-    arrow: "\u2197",
-    shortcut: "Ctrl-Space",
-    requirements: "Windows 10 and 11 beta  \u00b7  x64 and ARM64",
-  },
-}
-
-function detectPlatform(): Platform {
-  const agent = navigator.userAgent
-  if (/\bWindows NT\b/i.test(agent)) return "windows"
-  if (/\bLinux\b/i.test(agent) && !/\bAndroid\b/i.test(agent)) return "linux"
-  return "mac"
 }
 
 export default function App() {
-  const platform = detectPlatform()
-  const download = DOWNLOADS[platform]
-  const name = { mac: "Mac", linux: "Linux", windows: "Windows" }[platform]
+  const [platform, setPlatform] = useState(guessPlatform)
+  useEffect(() => {
+    let current = true
+    void refinePlatform(platform).then((refined) => {
+      if (current && refined !== platform) setPlatform(refined)
+    })
+    return () => {
+      current = false
+    }
+    // Refine the first guess once.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   return (
     <m.main
@@ -104,9 +44,13 @@ export default function App() {
       transition={{ duration: 0.35, ease: "easeOut" }}
     >
       <header className="header">
-        <a className="wordmark" href="/" aria-label="HEX home">
+        <a className="wordmark" href="/" aria-label="Hex home">
           <HexMark />
           <span>HEX</span>
+        </a>
+        <a className="header__github" href="https://github.com/anomalyco/hex">
+          <GitHubMark />
+          <span>GitHub</span>
         </a>
       </header>
 
@@ -117,31 +61,12 @@ export default function App() {
             <ChatteringTeeth />
           </div>
           <p>
-            Local voice dictation for {name}. Hold {download.shortcut}, say what you mean, and HEX
-            pastes it where you are.
+            Local voice dictation for {PLATFORM_NAMES[platform]}. Hold {SHORTCUTS[platform]}, say what you mean, and
+            Hex pastes it where you are.
           </p>
         </div>
 
-        <div className="hero__action">
-          <m.a
-            className="download"
-            href={download.href}
-            whileHover={{ y: -1 }}
-            whileTap={{ scale: 0.985 }}
-          >
-            {download.mark}
-            <span>{download.label}</span>
-            <span className="download__arrow" aria-hidden="true">
-              {download.arrow}
-            </span>
-          </m.a>
-          <p className="requirements">{download.requirements}</p>
-          {download.alternative && (
-            <a className="download-alternative" href={download.alternative}>
-              Alternative download: GitHub
-            </a>
-          )}
-        </div>
+        <Download platform={platform} />
       </section>
     </m.main>
   )

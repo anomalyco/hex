@@ -40,9 +40,27 @@ leaves runtime settings, models, and retained data intact.
 
 ```ts
 Download Hex                              // setup.download-recovery
+├── hex.kitlangton.dev names the visitor's platform  // setup.download-button
+│   ├── Mac -> DMG | Intel Mac -> disabled, "needs Apple silicon"
+│   ├── Windows x64 / ARM64 (UA-CH) -> HEX-Setup-<version>-<arch>.exe + SmartScreen note
+│   ├── Linux -> copyable `curl … install-linux.sh | sh` + Arch/glibc requirement
+│   ├── Phone -> Send yourself the link
+│   └── Other platforms -> every build, Homebrew, the GitHub release
+├── hex.kitlangton.com/* -> 301 same path on .dev
 ├── Website / README / Homebrew -> downloads.hex.kitlangton.dev -> R2 bytes
-├── Alternative download: GitHub -> app-v<version> -> identical signed DMG
+├── GitHub app-v<version> -> identical DMG, Setup.exe, and Linux bytes
 └── Older app cannot reach its update feed -> manually install the DMG
+
+Install on Windows                        // setup.windows-installer
+├── Setup.exe, per user, no admin -> managed versions\<version>\hex.exe
+│   ├── x64 without vulkan-1.dll -> stop with driver guidance
+│   ├── newer self-updated version installed -> refuse, nothing changed
+│   └── finish -> Open Hex -> first-run tour downloads a model
+└── Settings › Apps -> uninstall every version, shortcut, Launch at login; keep data
+
+Install on Linux                          // setup.linux-installer
+└── curl … | sh -> signed feed -> verified artifact -> launcher + hex.service
+    └── cannot start -> name the glibc floor or the missing Arch packages
 
 Prepare local models                      // separate network dependency
 ├── Dictation -> huggingface.co and its download CDN
@@ -69,7 +87,16 @@ Its Open Graph image uses the same model; see
 inspected, and reduced-motion canvas captures were pixel-identical four seconds
 apart in Chromium. These checks do not exercise a live microphone.
 
-Sources: [website](../../site/src/App.tsx), [mirror publisher](../../scripts/publish-app-mirror.sh),
+The Windows installer is silently installed, reinstalled, refused as a
+downgrade, and uninstalled on x64 and ARM64 runners by
+[test-windows-installer.ps1](../../scripts/test-windows-installer.ps1); no
+interactive install, SmartScreen prompt, or first launch on a real PC has been
+observed. The Linux library diagnosis has no automated check. The site's
+platform states were captured once in headless Chromium with `?platform=`.
+
+Sources: [website](../../site/src/Download.tsx), [installer](../../packaging/windows/hex.iss),
+[download publisher](../../scripts/publish-desktop-downloads.sh),
+[mirror publisher](../../scripts/publish-app-mirror.sh),
 [macOS release publisher](../../scripts/release-app.sh),
 [Linux installer](../../scripts/install-linux-release.sh), and
 [Linux updater](../../src/linux_updater.rs). The macOS publisher verifies the

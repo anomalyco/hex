@@ -87,8 +87,11 @@ a {
 }
 
 .wordmark:focus-visible,
+.header__github:focus-visible,
 .download:focus-visible,
-.download-alternative:focus-visible {
+.command__copy:focus-visible,
+.platforms summary:focus-visible,
+.platforms a:focus-visible {
   outline: 2px solid #a9b9ff;
   outline-offset: 4px;
 }
@@ -115,15 +118,32 @@ a {
   letter-spacing: 0.02em;
 }
 
-.download-alternative {
-  color: #a7aab0;
+.download-note {
+  max-width: 40ch;
+  color: #777b82;
   font-size: 0.8rem;
-  text-decoration: underline;
-  text-underline-offset: 0.2em;
+  line-height: 1.5;
+  text-wrap: pretty;
 }
 
-.download-alternative:hover {
+.header__github {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  border-radius: 0.35rem;
+  color: #9b9da3;
+  font-size: 0.8rem;
+  transition: color 160ms ease;
+}
+
+.header__github:hover {
   color: #f3f3f0;
+}
+
+.header__github-icon {
+  width: 1rem;
+  height: 1rem;
+  fill: currentColor;
 }
 
 .hero {
@@ -187,6 +207,7 @@ h1 {
 
 .hero__action {
   display: flex;
+  width: min(100%, 41rem);
   flex-direction: column;
   align-items: center;
   gap: 0.8rem;
@@ -209,18 +230,168 @@ h1 {
   transition: background-color 160ms ease, border-color 160ms ease;
 }
 
-a.download:hover {
+button.download {
+  font-family: inherit;
+  cursor: pointer;
+}
+
+a.download:hover,
+button.download:hover {
   border-color: #fff;
   background: #fff;
 }
 
-.download__apple,
-.download__linux {
+.download--disabled {
+  border-color: rgba(242, 242, 239, 0.14);
+  color: #777b82;
+  background: transparent;
+  cursor: not-allowed;
+}
+
+.command {
+  display: flex;
+  align-items: center;
+  width: min(100%, 41rem);
+  min-width: 0;
+  border: 1px solid rgba(242, 242, 239, 0.14);
+  border-radius: 0.8rem;
+  background: rgba(242, 242, 239, 0.04);
+}
+
+.command code {
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  padding: 0.85rem 0 0.85rem 1rem;
+  color: #f2f2ef;
+  font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
+  font-size: 0.8rem;
+  white-space: pre;
+  scrollbar-width: none;
+}
+
+.command__copy {
+  flex: none;
+  min-width: 4.75rem;
+  margin: 0.35rem;
+  padding: 0.5rem 0.8rem;
+  border: 0;
+  border-radius: 0.5rem;
+  color: #0c0d0f;
+  background: #f2f2ef;
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 590;
+  cursor: pointer;
+  transition: background-color 160ms ease;
+}
+
+.command__copy:hover {
+  background: #fff;
+}
+
+.platforms {
+  width: min(100%, 41rem);
+  margin-top: 0.4rem;
+  color: #9b9da3;
+  font-size: 0.8rem;
+}
+
+.platforms summary {
+  width: fit-content;
+  margin: 0 auto;
+  border-radius: 0.35rem;
+  cursor: pointer;
+  list-style: none;
+  text-decoration: underline;
+  text-decoration-color: rgba(155, 157, 163, 0.4);
+  text-underline-offset: 0.2em;
+}
+
+.platforms summary::-webkit-details-marker {
+  display: none;
+}
+
+.platforms summary:hover {
+  color: #f3f3f0;
+}
+
+.platforms ul {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  margin: 1rem 0 0;
+  padding: 0.25rem 0;
+  border: 1px solid rgba(242, 242, 239, 0.1);
+  border-radius: 0.8rem;
+  list-style: none;
+  text-align: left;
+}
+
+.platform {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem 0.6rem;
+  padding: 0.6rem 1rem;
+}
+
+.platform + .platform {
+  border-top: 1px solid rgba(242, 242, 239, 0.06);
+}
+
+.platform .mark {
+  width: 0.9rem;
+  height: 0.9rem;
+  color: #9b9da3;
+}
+
+.platform__name {
+  color: #f2f2ef;
+}
+
+.platform__detail {
+  flex: 1;
+  color: #777b82;
+}
+
+.platform__link,
+.platform--github a {
+  color: #f2f2ef;
+  text-decoration: underline;
+  text-decoration-color: rgba(242, 242, 239, 0.35);
+  text-underline-offset: 0.2em;
+}
+
+.platform__link:hover,
+.platform--github a:hover {
+  text-decoration-color: currentColor;
+}
+
+.platform .command {
+  width: 100%;
+  max-width: none;
+}
+
+.platform .command code {
+  padding-top: 0.55rem;
+  padding-bottom: 0.55rem;
+  font-size: 0.75rem;
+}
+
+.platform .command__copy {
+  min-width: 4rem;
+  padding: 0.35rem 0.6rem;
+  font-size: 0.75rem;
+}
+
+.mark {
   width: 1.05rem;
+  height: 1.05rem;
+  flex: none;
   fill: currentColor;
 }
 
-.download__linux {
+.mark--stroke {
   fill: none;
   stroke: currentColor;
   stroke-linecap: round;

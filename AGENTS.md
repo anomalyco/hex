@@ -626,18 +626,15 @@ installed clients. The publisher verifies both R2 artifacts and the identical
 GitHub DMG mirror before publishing the appcast. GitHub app releases use
 `app-v<VERSION>` tags with `--latest=false`, keeping them distinct from SDK
 releases. Never overwrite a published artifact with different bytes.
-After publishing a new macOS version, update `MAC_VERSION` in `site/src/App.tsx`,
-the explicit GitHub mirror/version link in `README.md`, and the Homebrew cask.
-Build the site with `bun run --cwd site build`, then deploy from `site` with
-`wrangler deploy`; its checked-in config targets `hex-voice-site` at
-`hex.kitlangton.dev`. Verify both download links after deployment.
-Also update the separate `https://hex.kitlangton.com` site in
-`/Users/kit/code/projects/hex-marketing-site`: its `MAC_VERSION` lives in
-`src/app/components/TerminalSimulation.tsx`. Run its documented checks and
-`vercel --prod` from that repo. The linked Vercel project also owns
-`hex-marketing-site.vercel.app` and `hex-marketing-site-kit-langtons-projects.vercel.app`.
-Both marketing sites must show the same release, custom-host download, and
-explicit GitHub alternative; verify the production domains after deploying.
+`https://hex.kitlangton.dev` (in-repo `site/`, Worker `hex-voice-site`) is the
+only Hex website; its Worker 301s `hex.kitlangton.com` and every other host to
+the same path there. After publishing a version, bump `MAC_VERSION` or
+`DESKTOP_VERSION` in `site/src/release.ts`, the explicit GitHub mirror/version
+link in `README.md`, and (macOS) the Homebrew cask. `bun run --cwd site
+check:downloads` fails until every download link serves a file; the Site
+workflow runs it and deploys from `main` when the repository has a
+`CLOUDFLARE_API_TOKEN` secret, otherwise deploy from `site` on the Pro with
+`bun run build && bunx wrangler deploy`. Verify the live links afterwards.
 The Rust app is named `Hex`, packaged as `Hex.app`,
 with bundle identifier `com.kitlangton.hex2` and executable `hex`. Kit has approved
 his personal Developer ID signing team `QC99C9JE59` for this app. Signing requires
@@ -694,8 +691,26 @@ the personal account that owns `hex-releases`:
 re-verifies it, uploads content-addressed artifacts first (never replacing
 different bytes), then the installers as committed at the release commit, then
 the feeds after rechecking that the version is newer, and re-downloads each
-object from `downloads.hex.kitlangton.dev`. Rerunning it after an interruption
-is safe.
+object from `downloads.hex.kitlangton.dev`. It then runs
+`scripts/publish-desktop-downloads.sh`, which uploads the immutable
+`releases/HEX-Setup-<version>-x64.exe` and `-arm64.exe` and attaches them and
+`HEX-<version>-x86_64-linux` to the `app-v<version>` GitHub release as
+identical-byte mirrors. Rerunning either after an interruption is safe. `gh` on
+the Pro is not logged in; pass `GH_TOKEN` for the session only.
+
+`HEX-Setup-<version>-<x64|arm64>.exe` is a per-user Inno Setup installer
+(`packaging/windows/hex.iss`, built by `scripts/build-windows-installer.ps1`)
+that installs exactly the managed layout `install-windows.ps1` creates, so
+self-updates keep working: `%APPDATA%\voice-control\versions\<version>\hex.exe`,
+`current-version`, and a Start Menu shortcut carrying the managed mark. Its
+uninstaller lives in `voice-control\uninstall` because updates prune old version
+directories; it removes every version, the shortcut, and Launch at login, and
+keeps settings. It refuses to roll back a newer self-updated version. Keep its
+`AppId` forever: the updater rewrites that Apps & Features entry's version.
+Release desktop and the Windows installer workflow install, reinstall, refuse a
+downgrade with, and uninstall it silently on x64 and ARM64 runners
+(`scripts/test-windows-installer.ps1`). The installer and `hex.exe` are not
+Authenticode-signed, so SmartScreen warns on first run.
 
 Both scripts still work locally: `prepare` builds and signs with the Ed25519
 private PEM in `HEX_RELEASE_SIGNING_KEY` (or `HEX_LINUX_SIGNING_KEY`), and

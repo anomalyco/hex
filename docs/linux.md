@@ -71,7 +71,19 @@ Legacy `hex app --hidden` now means `hex start`; it never creates a hidden UI.
 
 ## Install A Published Build
 
-Download and inspect the installer before running it:
+The published build targets current x86_64 Arch Linux and needs glibc 2.44 or
+later. Install it with:
+
+```sh
+curl -fsSL https://downloads.hex.kitlangton.dev/install-linux.sh | sh
+```
+
+If a runtime library is missing, the installer names the Arch packages to
+install. Then open Hex from your application launcher, or run
+`~/.local/bin/hex app`; its first run downloads a speech model.
+
+To install the dependencies up front, or to inspect the installer before
+running it:
 
 ```sh
 sudo pacman -S --needed alsa-lib curl gtk3 gtk-layer-shell jq libappindicator-gtk3 \

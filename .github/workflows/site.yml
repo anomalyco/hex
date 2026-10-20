@@ -1,6 +1,14 @@
-name: Deploy site
+name: Site
 
+# Builds hex.kitlangton.dev and checks every download link it shows. On main it
+# deploys the Cloudflare Worker when the repository has a CLOUDFLARE_API_TOKEN
+# secret (Workers Scripts: Edit on the personal account); without one, deploy
+# from a Mac with `cd site && bun run build && bunx wrangler deploy`.
 on:
+  pull_request:
+    paths:
+      - "site/**"
+      - ".github/workflows/site.yml"
   push:
     branches: [main]
     paths:
@@ -10,36 +18,33 @@ on:
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
 concurrency:
-  group: pages
+  group: site-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  build:
+  site:
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: site
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
       - uses: oven-sh/setup-bun@v2
       - run: bun install --frozen-lockfile
       - run: bun run build
-      - uses: actions/configure-pages@v6
-      - uses: actions/upload-pages-artifact@v5
-        with:
-          path: site/dist
-
-  deploy:
-    needs: build
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
+      - name: Check every download link
+        run: bun run check:downloads
       - name: Deploy
-        id: deployment
-        uses: actions/deploy-pages@v5
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ]; then
+            echo "::notice::No CLOUDFLARE_API_TOKEN secret; deploy hex.kitlangton.dev from a Mac."
+            exit 0
+          fi
+          bunx wrangler@4 deploy

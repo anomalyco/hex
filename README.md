@@ -10,8 +10,7 @@
 </p>
 
 <p align="center">
-  <a href="https://downloads.hex.kitlangton.dev/releases/HEX-latest-arm64.dmg"><strong>Download for macOS</strong></a>
-  · <a href="https://hex.kitlangton.dev/">Website</a>
+  <a href="https://hex.kitlangton.dev/"><strong>Download for Mac, Windows, or Linux</strong></a>
   · <a href="docs/windows.md">Windows beta</a>
   · <a href="docs/linux.md">Linux beta</a>
   · <a href="sdk/typescript/README.md">TypeScript SDK</a>
@@ -203,7 +202,13 @@ History, a tray icon, and signed self-updates. On x64 with a Vulkan graphics
 driver, Parakeet Unified English streams while you speak, so text arrives within
 about 100 ms of release even after minutes of talking; ARM64 transcribes on the
 CPU. Voice commands, meetings, and the local transcription API are not included.
-See the [Windows guide](docs/windows.md) to install or build from source.
+Download the installer for
+[x64](https://downloads.hex.kitlangton.dev/releases/HEX-Setup-2.3.0-x64.exe) or
+[ARM64](https://downloads.hex.kitlangton.dev/releases/HEX-Setup-2.3.0-arm64.exe)
+and run it; it installs for your user without administrator rights. It is not
+code-signed yet, so SmartScreen may warn: choose **More info**, then **Run
+anyway**. See the [Windows guide](docs/windows.md) for details or to build from
+source.
 
 ## Linux Beta
 
@@ -214,8 +219,14 @@ streams while you speak, as on macOS and Windows. Native Wayland requires explic
 access and compositor support for clipboard, virtual-keyboard, and layer-shell
 protocols. Voice commands and meetings are not included.
 
-Use the [Linux installation guide](docs/linux.md) to install the signed
-release with the user-local installer or build from source. It also describes
+Install the signed release on x86_64 Arch Linux (glibc 2.44 or later) with:
+
+```sh
+curl -fsSL https://downloads.hex.kitlangton.dev/install-linux.sh | sh
+```
+
+The [Linux installation guide](docs/linux.md) covers inspecting the installer
+first, uninstalling, and building from source. It also describes
 requirements and limitations.
 For Nix/NixOS packaging and per-user autostart, see the [Nix guide](docs/nix.md).
 

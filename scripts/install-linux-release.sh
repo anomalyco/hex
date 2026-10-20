@@ -201,10 +201,60 @@ fi
 printf '%s\n' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' \
   || fail "Linux release has an invalid version."
 test -x "$artifact_path" || fail "HEX executable is missing: $artifact_path"
-if ! reported_version=$("$artifact_path" --version 2>/dev/null \
-  | awk 'NF { value=$NF } END { print value }')
-then
+
+# Explain why the downloaded executable cannot start: a glibc older than the
+# one it was built against, or the Arch packages behind missing libraries.
+explain_unrunnable() {
+  needed=$(grep -ao 'GLIBC_2\.[0-9][0-9]*' "$artifact_path" 2>/dev/null \
+    | sed 's/^GLIBC_//' | sort -uV | tail -1)
+  have=$(getconf GNU_LIBC_VERSION 2>/dev/null | awk '{ print $2 }')
+  if [ -n "$needed" ] && [ -n "$have" ] &&
+    [ "$(printf '%s\n%s\n' "$needed" "$have" | sort -V | head -1)" != "$needed" ]; then
+    fail "HEX $version needs glibc $needed or newer, and this system has glibc $have. The Linux beta targets current x86_64 Arch Linux."
+  fi
+  packages=
+  if command -v ldd >/dev/null 2>&1; then
+    for library in $(ldd "$artifact_path" 2>/dev/null | awk '/not found/ { print $1 }'); do
+      case "$library" in
+        libasound.*) package=alsa-lib ;;
+        libgtk-layer-shell.*) package=gtk-layer-shell ;;
+        libgtk-3.* | libgdk-3.*) package=gtk3 ;;
+        libappindicator3.* | libayatana-appindicator3.*) package=libappindicator-gtk3 ;;
+        libopenblas.* | libblas.*) package=openblas ;;
+        libvulkan.*) package=vulkan-icd-loader ;;
+        libxkbcommon-x11.*) package=libxkbcommon-x11 ;;
+        libxkbcommon.*) package=libxkbcommon ;;
+        libX11.* | libX11-xcb.*) package=libx11 ;;
+        libxcb*) package=libxcb ;;
+        libXcursor.*) package=libxcursor ;;
+        libXi.*) package=libxi ;;
+        libXrandr.*) package=libxrandr ;;
+        libfontconfig.*) package=fontconfig ;;
+        libfreetype.*) package=freetype2 ;;
+        libwayland-*) package=wayland ;;
+        libudev.* | libsystemd.*) package=systemd-libs ;;
+        libssl.* | libcrypto.*) package=openssl ;;
+        *) package=$library ;;
+      esac
+      case " $packages " in
+        *" $package "*) ;;
+        *) packages="$packages $package" ;;
+      esac
+    done
+  fi
+  if [ -n "$packages" ]; then
+    fail "HEX needs libraries that are not installed. Install them, then run this installer again:
+  sudo pacman -S --needed$packages"
+  fi
   fail "HEX could not run. Install the required Arch runtime libraries."
+}
+
+# The pipeline's status is awk's, so an executable that cannot start shows up
+# as an empty version.
+reported_version=$("$artifact_path" --version 2>/dev/null \
+  | awk 'NF { value=$NF } END { print value }') || true
+if [ -z "$reported_version" ]; then
+  explain_unrunnable
 fi
 test "$reported_version" = "$version" \
   || fail "Downloaded executable reports the wrong version."

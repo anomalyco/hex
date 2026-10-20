@@ -25,15 +25,34 @@ app and **Disabled** when it does nothing.
 
 ## Install
 
+Download and run the installer for your PC:
+
+- x64: [`HEX-Setup-2.3.0-x64.exe`](https://downloads.hex.kitlangton.dev/releases/HEX-Setup-2.3.0-x64.exe)
+- ARM64: [`HEX-Setup-2.3.0-arm64.exe`](https://downloads.hex.kitlangton.dev/releases/HEX-Setup-2.3.0-arm64.exe)
+
+[hex.kitlangton.dev](https://hex.kitlangton.dev/) picks the right one. The
+installer needs no administrator rights: it installs for the current user,
+adds Hex to the Start menu and to **Settings › Apps** for uninstalling, and
+opens Hex, whose first run downloads a speech model. Neither the installer nor
+`hex.exe` is code-signed yet, so SmartScreen may say it protected your PC;
+choose **More info**, then **Run anyway**.
+
+**x64** decodes on the GPU through Vulkan and needs a current NVIDIA, AMD, or
+Intel graphics driver (it supplies `vulkan-1.dll`); the installer stops with an
+explanation when it is missing. **ARM64** decodes on the CPU. Both are
+self-contained: no Visual C++ Redistributable is required. Hex then keeps
+itself current through the signed update feed. Uninstalling removes every
+installed version, the shortcut, and Launch at login, and keeps settings, logs,
+history, and models in `%APPDATA%\voice-control`.
+
+The installer and the script below create the same managed layout, so either
+can replace the other. For a scripted install:
+
 ```powershell
 powershell -ExecutionPolicy Bypass -Command "iwr https://downloads.hex.kitlangton.dev/install-windows.ps1 -OutFile install-windows.ps1; ./install-windows.ps1"
 ```
 
-The installer picks the build for the PC: **x64** decodes on the GPU through
-Vulkan and needs a current NVIDIA, AMD, or Intel graphics driver (it supplies
-`vulkan-1.dll`); **ARM64** decodes on the CPU. Both are self-contained: no
-Visual C++ Redistributable is required. The app then keeps itself current
-through the signed update feed. Uninstall with `install-windows.ps1 -Uninstall`.
+Uninstall a script install with `install-windows.ps1 -Uninstall`.
 
 ## Streaming Dictation
 

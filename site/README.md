@@ -1,7 +1,17 @@
-# HEX marketing site (.dev)
+# Hex website
 
-`bun run dev` starts Vite. `bun run build` checks TypeScript and builds the site;
-`wrangler deploy` publishes it to `hex.kitlangton.dev`.
+`hex.kitlangton.dev` is the one Hex site. `bun run dev` starts Vite. `bun run
+build` checks TypeScript and builds it; `bun run check:downloads` checks that
+every download link serves a file; `bunx wrangler deploy` publishes the Worker,
+whose `worker.ts` 301s `hex.kitlangton.com`, plain HTTP, and workers.dev to the
+same path on `hex.kitlangton.dev`.
+
+The download section (`src/Download.tsx`) names the visitor's platform on first
+paint and refines it with UA client hints: a DMG for Apple silicon Macs, the
+x64 or ARM64 `Setup.exe` for Windows, the copyable install command for Linux,
+and "Send yourself the link" on phones. Versions and URLs live in
+`src/release.ts`. Add `?platform=mac|mac-intel|windows-x64|windows-arm64|linux|mobile`
+to see each state.
 
 The wind-up teeth in `src/ChatteringTeeth.tsx` use separate body and foot groups:
 the soles remain planted during anticipation, the whole toy travels during the
@@ -30,7 +40,5 @@ bun run generate:og
 # If Vite chose another port:
 HEX_SITE_URL=http://127.0.0.1:5174 bun run generate:og
 ```
-
 Inspect the resulting image, rebuild, then deploy. Verify the production HTML's
-image metadata and fetch the published PNG. The separate `.com` site lives in
-`/Users/kit/code/projects/hex-marketing-site` and deploys through Vercel.
+image metadata and fetch the published PNG.
