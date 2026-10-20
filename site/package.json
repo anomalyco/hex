@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "build": "tsc -b && vite build && vite build --ssr src/prerender.tsx --outDir dist-server && bun scripts/prerender.ts",
     "preview": "vite preview",
     "generate:og": "bun scripts/generate-og.ts",
     "check:downloads": "bun scripts/check-downloads.ts"

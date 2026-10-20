@@ -1,8 +1,7 @@
-import * as m from "motion/react-m"
-import { useEffect, useState } from "react"
+import { useLayoutEffect, useState } from "react"
 import ChatteringTeeth from "./ChatteringTeeth"
 import Download, { PLATFORM_NAMES, SHORTCUTS } from "./Download"
-import { guessPlatform, refinePlatform } from "./platform"
+import { guessPlatform, refinePlatform, type Platform } from "./platform"
 
 function HexMark() {
   return (
@@ -23,26 +22,23 @@ function GitHubMark() {
 }
 
 export default function App() {
-  const [platform, setPlatform] = useState(guessPlatform)
-  useEffect(() => {
+  // The prerendered HTML is the Mac page; switch before the first paint, then
+  // refine with client hints.
+  const [platform, setPlatform] = useState<Platform>("mac")
+  useLayoutEffect(() => {
     let current = true
-    void refinePlatform(platform).then((refined) => {
-      if (current && refined !== platform) setPlatform(refined)
+    const guess = guessPlatform()
+    setPlatform(guess)
+    void refinePlatform(guess).then((refined) => {
+      if (current && refined !== guess) setPlatform(refined)
     })
     return () => {
       current = false
     }
-    // Refine the first guess once.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   return (
-    <m.main
-      className="page"
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      transition={{ duration: 0.35, ease: "easeOut" }}
-    >
+    <main className="page">
       <header className="header">
         <a className="wordmark" href="/" aria-label="Hex home">
           <HexMark />
@@ -68,6 +64,6 @@ export default function App() {
 
         <Download platform={platform} />
       </section>
-    </m.main>
+    </main>
   )
 }

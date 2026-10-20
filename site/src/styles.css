@@ -46,6 +46,7 @@ a {
   min-height: 100vh;
   min-height: 100dvh;
   grid-template-rows: auto 1fr;
+  grid-template-columns: minmax(0, 1fr);
   overflow-x: clip;
   background:
     radial-gradient(circle at 50% 42%, rgba(87, 95, 112, 0.08), transparent 32rem),

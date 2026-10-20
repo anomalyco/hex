@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://hex.kitlangton.dev/sitemap.xml

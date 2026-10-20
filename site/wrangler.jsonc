@@ -4,6 +4,7 @@
   "compatibility_date": "2026-07-19",
   "main": "./worker.ts",
   "workers_dev": true,
+  "preview_urls": false,
   "assets": {
     "directory": "./dist",
     "binding": "ASSETS",
