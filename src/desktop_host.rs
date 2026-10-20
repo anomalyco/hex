@@ -14,6 +14,8 @@ pub(crate) struct DesktopSnapshot {
 
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct DesktopTranscriptionSnapshot {
+    #[serde(default)]
+    pub(crate) downloads: Vec<crate::model_downloads::DownloadStatus>,
     pub(crate) downloaded_bytes: u64,
     pub(crate) error: Option<String>,
     pub(crate) preparation_stage: Option<ModelPreparationStage>,

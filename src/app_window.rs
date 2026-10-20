@@ -1357,6 +1357,22 @@ impl AppWindow {
                 downloaded_bytes: preview_downloading
                     .and_then(|model| definition(model).download_bytes())
                     .map_or(0, |bytes| bytes * 37 / 100),
+                downloads: preview_picker
+                    .filter(|(_, state)| matches!(state, PreviewModelState::Downloading))
+                    .map(|(language, _)| {
+                        preview_choices(language)
+                            .into_iter()
+                            .take(2)
+                            .enumerate()
+                            .map(|(index, choice)| crate::model_downloads::DownloadStatus {
+                                model: choice.model.id,
+                                downloaded_bytes: choice.model.download_bytes().unwrap_or(0)
+                                    * (37 + index as u64 * 24)
+                                    / 100,
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default(),
                 error: matches!(preview_model_state, Some(PreviewModelState::Error))
                     .then(|| "Preview download failed while verifying the model checksum.".into()),
                 ..Default::default()
@@ -1670,7 +1686,9 @@ impl AppWindow {
         let status = self.preparation_status();
         let changed = self.transcription_status != status;
         self.transcription_status = status;
-        changed || self.transcription_status.model.is_some()
+        changed
+            || self.transcription_status.model.is_some()
+            || !self.transcription_status.downloads.is_empty()
     }
 
     /// The model preparation the window shows: this OS's service when it
@@ -1856,7 +1874,6 @@ impl AppWindow {
             input.set_text(&self.settings.transcription.recognition_hints, cx);
         });
         self.permission_refresh_at = Instant::now();
-        self.transcription_picker_language = None;
         self.clear_transcription_error();
         Ok(())
     }
@@ -1867,7 +1884,6 @@ impl AppWindow {
         language: String,
         cx: &mut Context<Self>,
     ) {
-        self.cancel_transcription_download();
         let selection = TranscriptionSelection {
             model: model.id,
             language,
@@ -1898,9 +1914,9 @@ impl AppWindow {
         self.poll_transcription_download();
     }
 
-    fn cancel_transcription_download(&mut self) {
-        if !self.platform_cancel_transcription() {
-            self.transcription_preparation.cancel();
+    fn cancel_transcription_download(&mut self, model: TranscriptionModelId) {
+        if !self.platform_cancel_transcription(model) {
+            self.transcription_preparation.cancel_model(model);
         }
         self.transcription_status = self.preparation_status();
     }
@@ -1923,6 +1939,11 @@ impl AppWindow {
             || !matches!(model.runtime, ModelRuntime::Gguf(_))
             || self.settings.transcription.model == model.id
             || self.transcription_status.model == Some(model.id)
+            || self
+                .transcription_status
+                .downloads
+                .iter()
+                .any(|download| download.model == model.id)
         {
             ModelDeletion::Unavailable
         } else if self.transcription_deletion == Some(model.id) {
@@ -2858,7 +2879,13 @@ impl AppWindow {
             .map(|choice| {
                 let model = choice.model;
                 let installed = self.transcription_model_installed(model, selected_language);
-                let downloading = self.transcription_status.model == Some(model.id);
+                let download = self
+                    .transcription_status
+                    .downloads
+                    .iter()
+                    .find(|download| download.model == model.id);
+                let downloading =
+                    download.is_some() || self.transcription_status.model == Some(model.id);
                 let active = transcription_selection_is_active(
                     &self.settings.transcription,
                     model,
@@ -2867,7 +2894,10 @@ impl AppWindow {
                 );
                 let progress = if downloading {
                     model.download_bytes().map_or(0.0, |bytes| {
-                        (self.transcription_status.downloaded_bytes as f32 / bytes as f32)
+                        (download.map_or(self.transcription_status.downloaded_bytes, |download| {
+                            download.downloaded_bytes
+                        }) as f32
+                            / bytes as f32)
                             .clamp(0.0, 1.0)
                     })
                 } else {
@@ -5856,8 +5886,8 @@ impl Drop for AppWindow {
 }
 
 impl TranscriptionPickerDelegate for AppWindow {
-    fn cancel_transcription_preparation(&mut self) {
-        self.cancel_transcription_download();
+    fn cancel_transcription_preparation(&mut self, model: TranscriptionModelId) {
+        self.cancel_transcription_download(model);
     }
 
     fn choose_transcription_model(
@@ -5879,9 +5909,9 @@ impl TranscriptionPickerDelegate for AppWindow {
 
     fn select_transcription_language(&mut self, language: String, cx: &mut Context<Self>) {
         if self.transcription_picker_language.as_deref() != Some(&language) {
-            self.cancel_transcription_download();
             self.transcription_picker_language = Some(language);
-            self.clear_transcription_error();
+            self.transcription_deletion = None;
+            self.transcription_deletion_error = None;
             cx.notify();
         }
     }
@@ -7101,6 +7131,95 @@ mod tests {
 
     fn reject_settings_save(_: &AppSettings) -> color_eyre::Result<()> {
         Err(color_eyre::eyre::eyre!("fixture persistence failure"))
+    }
+
+    #[gpui::test]
+    fn browsing_languages_keeps_model_preparation_running(cx: &mut gpui::TestAppContext) {
+        let (view, cx) = cx.add_window_view(editor_fixture);
+        let (started, starts) = std::sync::mpsc::channel();
+        let (release, releases) = std::sync::mpsc::channel();
+        let releases = std::sync::Mutex::new(releases);
+        let preparation =
+            TranscriptionPreparation::with_prepare(std::sync::Arc::new(move |_, canceled, _| {
+                started.send(()).unwrap();
+                releases.lock().unwrap().recv().unwrap();
+                assert!(!canceled.load(std::sync::atomic::Ordering::Acquire));
+                Ok(())
+            }));
+        preparation.start(TranscriptionSelection::default(), true);
+        starts.recv_timeout(Duration::from_secs(3)).unwrap();
+        cx.update(|_, cx| {
+            view.update(cx, |view, cx| {
+                view.transcription_preparation = preparation.clone();
+                view.transcription_picker_language = Some("en".into());
+                view.select_transcription_language("fr".into(), cx);
+                assert!(preparation.status().model.is_some());
+                assert_eq!(view.transcription_picker_language.as_deref(), Some("fr"));
+            });
+        });
+        release.send(()).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(3);
+        loop {
+            if let Some(result) = preparation.poll() {
+                result.unwrap();
+                break;
+            }
+            assert!(Instant::now() < deadline);
+            std::thread::yield_now();
+        }
+    }
+
+    #[gpui::test]
+    fn model_completion_keeps_the_browsed_language_open(cx: &mut gpui::TestAppContext) {
+        let (view, cx) = cx.add_window_view(editor_fixture);
+        cx.update(|_, cx| {
+            view.update(cx, |view, cx| {
+                view.transcription_picker_language = Some("fr".into());
+                view.apply_transcription_selection(TranscriptionSelection::default(), cx)
+                    .unwrap();
+                assert_eq!(view.transcription_picker_language.as_deref(), Some("fr"));
+            });
+        });
+    }
+
+    #[gpui::test]
+    fn browsing_languages_preserves_each_models_progress(cx: &mut gpui::TestAppContext) {
+        let (view, cx) = cx.add_window_view(editor_fixture);
+        cx.update(|_, cx| {
+            view.update(cx, |view, cx| {
+                view.transcription_preview_installed = Some(false);
+                let a = TranscriptionModelId::ParakeetUnifiedEnglish;
+                let b = TranscriptionModelId::WhisperLargeV3Turbo;
+                view.transcription_status.downloads = vec![
+                    crate::model_downloads::DownloadStatus {
+                        model: a,
+                        downloaded_bytes: definition(a).download_bytes().unwrap() / 4,
+                    },
+                    crate::model_downloads::DownloadStatus {
+                        model: b,
+                        downloaded_bytes: definition(b).download_bytes().unwrap() / 2,
+                    },
+                ];
+                view.select_transcription_language("fr".into(), cx);
+                view.select_transcription_language("en".into(), cx);
+                let picker = view.transcription_picker_view("en");
+                for (model, expected) in [(a, 0.25), (b, 0.5)] {
+                    let card = picker
+                        .models
+                        .iter()
+                        .find(|card| card.choice.model.id == model)
+                        .unwrap();
+                    let TranscriptionPickerStatus::Preparing {
+                        progress: Some(TranscriptionPickerProgress::Downloading(progress)),
+                        ..
+                    } = card.status
+                    else {
+                        panic!("download progress disappeared")
+                    };
+                    assert!((progress - expected).abs() < 0.001);
+                }
+            });
+        });
     }
 
     #[gpui::test]

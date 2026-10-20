@@ -55,7 +55,7 @@ with tempfile.TemporaryDirectory(prefix="hex-service-", dir=os.environ.get("TMPD
             data += chunk
         return data
 
-    def call(client, request="Snapshot", version=1):
+    def call(client, request="Snapshot", version=2):
         body = json.dumps({"version": version, "request": request}).encode()
         client.sendall(struct.pack(">I", len(body)) + body)
         size, = struct.unpack(">I", exact(client, 4))
@@ -86,6 +86,11 @@ with tempfile.TemporaryDirectory(prefix="hex-service-", dir=os.environ.get("TMPD
             assert call(client)["state"]["pid"] == service.pid
         assert snapshot()["pid"] == service.pid
 
+        with connection() as client:
+            reply = call(client, {"CancelModelFor": {"model": "parakeet_v3"}})
+            assert reply["error"] is None
+            assert reply["state"]["desktop"]["transcription"]["downloads"] == []
+
         # Settings saves settings.json itself and asks the service to adopt it.
         (support / "settings.json").write_text(
             json.dumps({"sound_effects": False, "paste_with_shift": True})
@@ -104,6 +109,8 @@ with tempfile.TemporaryDirectory(prefix="hex-service-", dir=os.environ.get("TMPD
         wait_for(lambda: (s := snapshot()) and not s["editing"])
         assert service.poll() is None
 
+        with connection() as client:
+            assert "restart the service" in call(client, version=1)["error"]
         with connection() as client:
             assert call(client, version=999)["error"]
         with connection() as client:

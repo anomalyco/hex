@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use crate::desktop_host::{DesktopAction, DesktopSnapshot};
 use crate::transcription_models::TranscriptionModelId;
 
-const VERSION: u32 = 1;
+const VERSION: u32 = 2;
 const MAX_FRAME: usize = 128 * 1024;
 const IO_TIMEOUT: Duration = Duration::from_secs(2);
 const CLIENTS: usize = 8;
@@ -42,6 +42,9 @@ pub enum Request {
         language: String,
     },
     CancelModel,
+    CancelModelFor {
+        model: TranscriptionModelId,
+    },
     /// Settings saved `settings.json`; adopt it.
     ReloadSettings,
     Shutdown,

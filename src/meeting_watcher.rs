@@ -653,7 +653,7 @@ async fn drive_ui(
 
     loop {
         if shutdown.load(Ordering::Relaxed) {
-            ui.transcription_preparation.cancel();
+            ui.transcription_preparation.cancel_all();
             let _ = cx.update(|cx| cx.quit());
             return;
         }
@@ -741,7 +741,7 @@ async fn drive_ui(
                     Err(error) => tracing::error!(%error, "could not open Meetings"),
                 },
                 crate::status_item::StatusItemAction::Quit => {
-                    ui.transcription_preparation.cancel();
+                    ui.transcription_preparation.cancel_all();
                     cx.quit();
                 }
             });

@@ -260,7 +260,10 @@ impl AppWindow {
         false
     }
 
-    pub(super) fn platform_cancel_transcription(&mut self) -> bool {
+    pub(super) fn platform_cancel_transcription(
+        &mut self,
+        _: crate::transcription_models::TranscriptionModelId,
+    ) -> bool {
         false
     }
 
