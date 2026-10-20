@@ -366,7 +366,8 @@ Settings                                 // settings
 │       └── Commands enabled? -> Confirm turning Commands off
 ├── While dictating -> Mute / Pause media / Do nothing
 │   ├── Intentional capture only, not ordinary shortcut chords
-│   └── Pause/resume only players already reported running by macOS
+│   ├── Pause/resume only players already reported running by macOS
+│   └── Linux restore -> Waits 300 ms; a new capture keeps it suppressed // double-tap lock
 └── Sound volume -> Immediate feedback setting; zero suppresses tones
 
 Intentional recording                    // recording.environment

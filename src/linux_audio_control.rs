@@ -5,7 +5,8 @@
 //! waits on a slow player.
 
 use std::process::Command;
-use std::sync::mpsc::{self, Sender};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
+use std::time::Duration;
 
 use gtk::gio;
 use gtk::glib::{self, ToVariant};
@@ -16,6 +17,7 @@ const MPRIS_PREFIX: &str = "org.mpris.MediaPlayer2.";
 const MPRIS_PATH: &str = "/org/mpris/MediaPlayer2";
 const MPRIS_PLAYER: &str = "org.mpris.MediaPlayer2.Player";
 const DBUS_TIMEOUT_MS: i32 = 500;
+const RESTORE_GRACE: Duration = Duration::from_millis(300);
 
 enum Request {
     Suppress,
@@ -34,25 +36,7 @@ impl AudioSuppressor {
         let (requests, receiver) = mpsc::channel();
         let spawned = std::thread::Builder::new()
             .name("linux-audio-control".into())
-            .spawn(move || {
-                let mut suppressed: Option<Suppressed> = None;
-                while let Ok(request) = receiver.recv() {
-                    match request {
-                        Request::Suppress if suppressed.is_none() => {
-                            suppressed = Some(suppress(behavior));
-                        }
-                        Request::Restore => {
-                            if let Some(suppressed) = suppressed.take() {
-                                restore(suppressed);
-                            }
-                        }
-                        Request::Suppress => {}
-                    }
-                }
-                if let Some(suppressed) = suppressed {
-                    restore(suppressed);
-                }
-            });
+            .spawn(move || serve(receiver, || suppress(behavior), restore));
         if let Err(error) = &spawned {
             tracing::warn!(%error, "could not start Linux audio control");
         }
@@ -71,6 +55,35 @@ impl AudioSuppressor {
         if let Some(requests) = &self.requests {
             let _ = requests.send(Request::Restore);
         }
+    }
+}
+
+/// Applies requests in order. A double-tap restores and suppresses back to
+/// back, before wpctl or the player reports the restored state, so a restore
+/// waits briefly and is dropped when another recording starts.
+fn serve<S>(
+    receiver: Receiver<Request>,
+    mut suppress: impl FnMut() -> S,
+    mut restore: impl FnMut(S),
+) {
+    let mut suppressed: Option<S> = None;
+    while let Ok(request) = receiver.recv() {
+        match request {
+            Request::Suppress if suppressed.is_none() => suppressed = Some(suppress()),
+            Request::Restore if suppressed.is_some() => {
+                match receiver.recv_timeout(RESTORE_GRACE) {
+                    Ok(Request::Suppress) => {}
+                    Ok(Request::Restore) | Err(RecvTimeoutError::Timeout) => {
+                        restore(suppressed.take().unwrap());
+                    }
+                    Err(RecvTimeoutError::Disconnected) => break,
+                }
+            }
+            Request::Restore | Request::Suppress => {}
+        }
+    }
+    if let Some(suppressed) = suppressed {
+        restore(suppressed);
     }
 }
 
@@ -239,5 +252,38 @@ mod tests {
         assert!(suppressor.requests.is_none());
         suppressor.suppress();
         suppressor.restore();
+    }
+
+    #[test]
+    fn back_to_back_restore_and_suppress_stay_suppressed() {
+        use std::sync::{Arc, Mutex};
+        let log = Arc::new(Mutex::new(Vec::new()));
+        let (requests, receiver) = mpsc::channel();
+        let (suppress_log, restore_log) = (log.clone(), log.clone());
+        let worker = std::thread::spawn(move || {
+            serve(
+                receiver,
+                move || suppress_log.lock().unwrap().push("suppress"),
+                move |()| restore_log.lock().unwrap().push("restore"),
+            )
+        });
+        // Double-tap: the first tap's restore is followed at once by a start.
+        for request in [Request::Suppress, Request::Restore, Request::Suppress] {
+            requests.send(request).unwrap();
+        }
+        std::thread::sleep(RESTORE_GRACE * 2);
+        assert_eq!(*log.lock().unwrap(), ["suppress"]);
+        // A lone restore applies once the grace period passes.
+        requests.send(Request::Restore).unwrap();
+        std::thread::sleep(RESTORE_GRACE * 2);
+        assert_eq!(*log.lock().unwrap(), ["suppress", "restore"]);
+        // A later recording suppresses again.
+        requests.send(Request::Suppress).unwrap();
+        drop(requests);
+        worker.join().unwrap();
+        assert_eq!(
+            *log.lock().unwrap(),
+            ["suppress", "restore", "suppress", "restore"]
+        );
     }
 }
