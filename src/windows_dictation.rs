@@ -61,6 +61,7 @@ pub struct WindowsDictationConfig {
     pub voice_action_hotkey: Option<WindowsHotkey>,
     pub double_tap_lock: bool,
     pub double_tap_only: bool,
+    pub pass_through_dictation_shortcut: bool,
     pub shortcut_mode: crate::dictation::ShortcutMode,
     pub while_dictating: crate::app_settings::RecordingAudioBehavior,
     pub release_microphone_while_idle: bool,
@@ -88,6 +89,7 @@ impl WindowsDictationConfig {
                 .then(|| WindowsHotkey::from(&settings.edit_hotkey)),
             double_tap_lock: settings.double_tap_lock,
             double_tap_only: settings.double_tap_only,
+            pass_through_dictation_shortcut: settings.pass_through_dictation_shortcut,
             shortcut_mode: settings.shortcut_mode,
             while_dictating: settings.recording_audio_behavior,
             release_microphone_while_idle: settings.release_microphone_while_idle,
@@ -145,6 +147,7 @@ pub fn run_with_transcriber(
         voice_action_hotkey,
         double_tap_lock,
         double_tap_only,
+        pass_through_dictation_shortcut,
         shortcut_mode,
         while_dictating,
         release_microphone_while_idle,
@@ -206,6 +209,7 @@ pub fn run_with_transcriber(
         voice_action_hotkey,
         double_tap_lock,
         double_tap_lock && double_tap_only,
+        pass_through_dictation_shortcut,
         shortcut_mode,
     )?;
     let audio_suppressor = crate::windows_audio_control::AudioSuppressor::start(while_dictating);

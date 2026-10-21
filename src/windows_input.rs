@@ -215,6 +215,10 @@ fn voice_action_variant(action: HotkeyAction) -> HotkeyAction {
     }
 }
 
+fn dictation_key_is_suppressed(pass_through: bool) -> bool {
+    !pass_through
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct HotkeyEvent {
     pub action: HotkeyAction,
@@ -257,6 +261,7 @@ struct CallbackState {
     escape_down: bool,
     double_tap_enabled: bool,
     double_tap_only: bool,
+    pass_through_dictation_shortcut: bool,
     capture: CaptureState,
     dirty: bool,
 }
@@ -270,6 +275,7 @@ struct HookBindings {
     voice_trigger_vk: Option<u32>,
     double_tap_enabled: bool,
     double_tap_only: bool,
+    pass_through_dictation_shortcut: bool,
     shortcut_mode: ShortcutMode,
 }
 
@@ -430,6 +436,7 @@ impl WindowsHotkeyMonitor {
         voice_action: Option<WindowsHotkey>,
         double_tap_enabled: bool,
         double_tap_only: bool,
+        pass_through_dictation_shortcut: bool,
         shortcut_mode: ShortcutMode,
     ) -> Result<Self> {
         binding.validate()?;
@@ -473,6 +480,7 @@ impl WindowsHotkeyMonitor {
                         voice_trigger_vk,
                         double_tap_enabled,
                         double_tap_only,
+                        pass_through_dictation_shortcut,
                         shortcut_mode,
                     },
                     event_sender,
@@ -544,6 +552,7 @@ fn run_hook(
             escape_down: false,
             double_tap_enabled: bindings.double_tap_enabled,
             double_tap_only: bindings.double_tap_only,
+            pass_through_dictation_shortcut: bindings.pass_through_dictation_shortcut,
             capture: CaptureState {
                 toggle: bindings.shortcut_mode == ShortcutMode::Toggle,
                 ..CaptureState::default()
@@ -665,13 +674,15 @@ unsafe extern "system" fn keyboard_hook(code: i32, wparam: WPARAM, lparam: LPARA
             } else if state.trigger_vk == Some(event.vkCode) {
                 if is_down {
                     if state.trigger_down {
-                        suppressed = true;
+                        suppressed =
+                            dictation_key_is_suppressed(state.pass_through_dictation_shortcut);
                     } else if !state.dirty
                         && !state.voice_capture.active
                         && state.modifiers.matches(&state.binding)
                     {
                         state.trigger_down = true;
-                        suppressed = true;
+                        suppressed =
+                            dictation_key_is_suppressed(state.pass_through_dictation_shortcut);
                         let was_locked = state.capture.locked;
                         if let Some(action) = state.capture.press(
                             state.double_tap_enabled,
@@ -686,7 +697,7 @@ unsafe extern "system" fn keyboard_hook(code: i32, wparam: WPARAM, lparam: LPARA
                     }
                 } else if state.trigger_down {
                     state.trigger_down = false;
-                    suppressed = true;
+                    suppressed = dictation_key_is_suppressed(state.pass_through_dictation_shortcut);
                     if let Some(action) =
                         state.capture.release(state.double_tap_enabled, event.time)
                     {
@@ -1049,6 +1060,12 @@ mod tests {
         let binding = WindowsHotkey::default();
         assert_eq!(binding.label(), "Ctrl+Space");
         assert!(binding.validate().is_ok());
+    }
+
+    #[test]
+    fn dictation_key_passes_through_only_when_sharing_is_enabled() {
+        assert!(dictation_key_is_suppressed(false));
+        assert!(!dictation_key_is_suppressed(true));
     }
 
     #[test]

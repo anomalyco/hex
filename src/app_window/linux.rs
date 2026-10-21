@@ -23,6 +23,7 @@ pub(super) const CAPABILITIES: Capabilities = Capabilities {
     recording_audio: true,
     release_microphone: true,
     double_tap_only: true,
+    shared_dictation_shortcut: false,
     modifier_sides: false,
     indicator_position: true,
     interface_language: true,

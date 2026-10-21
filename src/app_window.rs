@@ -121,6 +121,8 @@ struct Capabilities {
     release_microphone: bool,
     /// Recording can wait for a second tap of the shortcut.
     double_tap_only: bool,
+    /// Windows can forward the dictation key to other applications.
+    shared_dictation_shortcut: bool,
     /// Shortcuts can require the left or right modifier key.
     modifier_sides: bool,
     indicator_position: bool,
@@ -3984,7 +3986,27 @@ impl AppWindow {
                             )
                             .border_b_0()
                             .id("dictation-hotkey-setting"),
-                        ),
+                        )
+                        .when(capabilities.shared_dictation_shortcut, |panel| {
+                            panel.child(
+                                settings_row(
+                                    tr("Share dictation shortcut with other apps"),
+                                    tr("Lets apps such as Discord detect the same key"),
+                                    toggle(if self.settings.pass_through_dictation_shortcut {
+                                        1.0
+                                    } else {
+                                        0.0
+                                    }),
+                                )
+                                .id("share-dictation-shortcut-setting")
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    let enabled = !this.settings.pass_through_dictation_shortcut;
+                                    this.update_settings(cx, |settings| {
+                                        settings.pass_through_dictation_shortcut = enabled;
+                                    });
+                                })),
+                            )
+                        })
                 )
                 .child(settings_section_label(tr("Behavior")))
                 .child(
