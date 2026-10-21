@@ -757,6 +757,8 @@ pub struct AppSettings {
     pub double_tap_only: bool,
     pub shortcut_mode: crate::dictation::ShortcutMode,
     pub dictation_hotkey: HotkeyBinding,
+    /// On Windows, forward the dictation key events after Hex observes them.
+    pub pass_through_dictation_shortcut: bool,
     #[serde(
         default = "HotkeyBinding::edit_default",
         deserialize_with = "deserialize_edit_hotkey"
@@ -814,6 +816,7 @@ impl Default for AppSettings {
             double_tap_only: false,
             shortcut_mode: crate::dictation::ShortcutMode::Hold,
             dictation_hotkey: HotkeyBinding::default(),
+            pass_through_dictation_shortcut: false,
             edit_hotkey: HotkeyBinding::edit_default(),
             paste_last_hotkey: Some(HotkeyBinding::paste_last_default()),
             show_dock_icon: true,
@@ -2119,6 +2122,20 @@ mod tests {
             decoded.shortcut_mode,
             crate::dictation::ShortcutMode::Toggle
         );
+    }
+
+    #[test]
+    fn dictation_shortcut_pass_through_defaults_off_and_round_trips() {
+        let legacy: AppSettings = serde_json::from_str("{}").unwrap();
+        assert!(!legacy.pass_through_dictation_shortcut);
+
+        let settings = AppSettings {
+            pass_through_dictation_shortcut: true,
+            ..Default::default()
+        };
+        let decoded: AppSettings =
+            serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
+        assert!(decoded.pass_through_dictation_shortcut);
     }
 
     #[test]

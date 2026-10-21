@@ -388,6 +388,7 @@ fn listener_settings_changed(previous: &AppSettings, current: &AppSettings) -> b
         || (current.voice_action.enabled && previous.edit_hotkey != current.edit_hotkey)
         || previous.double_tap_lock != current.double_tap_lock
         || previous.double_tap_only != current.double_tap_only
+        || previous.pass_through_dictation_shortcut != current.pass_through_dictation_shortcut
         || previous.shortcut_mode != current.shortcut_mode
         || previous.recording_audio_behavior != current.recording_audio_behavior
         || previous.release_microphone_while_idle != current.release_microphone_while_idle
@@ -865,6 +866,9 @@ mod tests {
         current.sound_effect_volume = 0.25;
         assert!(!listener_settings_changed(&previous, &current));
         current.microphone = Some("Headset".into());
+        assert!(listener_settings_changed(&previous, &current));
+        current = previous.clone();
+        current.pass_through_dictation_shortcut = true;
         assert!(listener_settings_changed(&previous, &current));
     }
 

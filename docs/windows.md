@@ -15,7 +15,11 @@ speaking and release Space to transcribe and paste. In **Toggle** mode, press
 `Ctrl+Space` to start and again to finish. Only Escape cancels; holding a
 modifier on its own does nothing. HEX consumes the chord while it matches, so
 applications and input methods no longer see `Ctrl+Space`; rebind it in Settings
-if you rely on that chord elsewhere. In Hold mode, tap the shortcut twice within
+if you rely on that chord elsewhere. To let another app use the same shortcut,
+enable **Share dictation shortcut with other apps** in Settings. Hex still reacts
+to the physical key, but forwards its key-down and key-up events so apps such as
+Discord can also detect them. This can activate the same binding in other apps.
+In Hold mode, tap the shortcut twice within
 300 ms to lock recording, then press it again to finish. Paste Last defaults to
 `Ctrl+Alt+V`. Settings changes apply live or through an automatic listener
 restart.

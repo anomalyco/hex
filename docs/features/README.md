@@ -721,10 +721,20 @@ Windows beta                             // x64 (Vulkan GPU) and ARM64 (CPU)
 ├── Install -> install-windows.ps1 -> per-architecture signed feed -> hex.exe
 ├── HEX app -> Settings, tray, HUD; Enabled = shortcut works in every app
 ├── Ctrl+Space -> Hold or Toggle -> Capture -> Stream (GPU) -> Paste
+│   └── Share dictation shortcut (off by default) -> Forward key-down/up to other apps
 ├── Escape -> Cancel; a held modifier alone never ends or cancels a capture
 ├── Paste -> Waits for Shift, Alt, and Win; a held Ctrl is kept and harmless
 └── Modes, Voice Action, History, Activity, transformations -> as on macOS
 ```
+
+Windows forwards the dictation key's down/up events to other apps only when
+**Share dictation shortcut with other apps** is enabled; the persisted setting
+defaults off to preserve the existing consume-the-chord behavior. Changing it
+restarts the listener. `dictation_key_passes_through_only_when_sharing_is_enabled`
+in [windows_input.rs](../../src/windows_input.rs), the settings default/round-trip
+check in [app_settings.rs](../../src/app_settings.rs), and listener restart check
+in [windows_app.rs](../../src/windows_app.rs) cover the policy. Discord/F24
+behavior still needs a native Windows smoke test.
 
 No Windows Commands, Meetings, or local transcription API. See the
 [Windows guide](../windows.md) for the parity table, streaming notes, and
