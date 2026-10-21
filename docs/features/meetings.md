@@ -137,10 +137,15 @@ While recording                                      // meetings.live
         └── Completed You line -> written once the system track is 1 s past it
             └── System track stalled -> written after 3 s more microphone audio
   -> Selected language is a specific other language, such as Spanish
-     -> No Moonshine draft
-     -> The pane and Copy transcript show the selected model's rolling text,
-        then its final transcript
-     -> Option-Control-V pastes that final transcript
+     -> Live draft: the selected model, on audio the chunker has not committed
+        ├── First text after about 2 s of that tail
+        ├── Next text after about 3 s of new audio, or after as much audio as
+        │   the previous pass took when that was longer
+        └── A pass slower than its audio, or slower than 4 s, stops further
+            drafts on that track
+     -> The pane shows that draft on the same path as the English lines
+     -> A rolling chunk replaces the draft for the audio it covers
+     -> Option-Control-V pastes the final transcript of those committed chunks
 
 While recording                                      // meetings.rolling
   -> Each track -> one-second blocks -> bounded queue (about 5 minutes)
@@ -167,6 +172,14 @@ inference worker. Before each chunk it waits (up to 20 s per chunk) while
 `parakeet::dictation_busy()` reports an intentional capture or dictation
 inference. A chunk already running can still delay a dictation job by roughly
 one chunk's inference time, and the second model stays resident while recording.
+For any other selected language that same session drafts the uncommitted tail
+while no committed chunk is waiting and dictation is idle. It does not wait out
+the 20 s dictation pause for a draft. English and Auto keep the Moonshine draft
+and do not run this pass. Checks:
+`draft_waits_until_two_seconds_then_every_three_seconds_of_new_audio` and
+`a_slow_pass_stops_or_waits_for_enough_new_audio` in
+[meeting_provisional.rs](../../src/meeting_provisional.rs). The tail check
+`uncommitted_tail_is_audio_the_chunker_has_not_cut` compiles on macOS only.
 
 Seams: segments starting before the middle of an overlap belong to the earlier
 chunk, and repeated words (two to twelve) at the join are removed.
@@ -205,6 +218,9 @@ Live draft (meeting_live::live_view): each Moonshine line on its own
 ├── Signal stamped by the live worker -> Bleed hidden, Local shown
 ├── Undecided, still in progress, overlapping remote speech -> hidden for now
 └── Undecided and completed -> hidden when its words repeat remote speech
+Selected-model tail draft: the same signal and word check, then the lines are
+written after the committed rolling entries. Those drops are not counted in
+echo_suppressed_utterances.
 Rolling microphone entries are already judged; not re-judged by words
 Applied in: rolling snapshot, final transcript, live view, Option-Control-V
 ```
@@ -465,7 +481,7 @@ Mac only through whatever transport the MCP client uses (stdio, or SSH).
 Concurrency: a recorder holds `active.lock`; the server probes it with a
 read-only, non-blocking shared `flock` and releases it immediately. Held ->
 `recording (in progress)` with the rolling transcript plus the live draft
-(`meeting_live::live_view`, echo-filtered), labeled provisional. Not held ->
+(`meeting_live::shown_while_recording`, echo-filtered), labeled provisional. Not held ->
 the app's recovery rules apply without writing: published `transcript.ndjson`
 is final, an unfinished draft is `interrupted`. Stale lock files from finished
 recordings read as not held. A mirror cannot see the Pro's lock, so a meeting
@@ -547,9 +563,12 @@ Granola import: see [granola-import.md](../plans/granola-import.md).
   speakers echo in this change; see the test script in the handoff.
 - Calendar titles (EventKit) are not implemented.
 - The live Moonshine draft needs the command model when the selected language
-  is English or Auto. Without that model, the pane shows rolling chunks only
-  as they complete (about every 20–30 s). Parakeet v3 still identifies
-  language from the audio; it has no prompt input, the same as dictation.
+  is English or Auto. Without that model, an English meeting shows rolling
+  chunks only as they complete (about every 20–30 s). Another language drafts
+  the uncommitted tail with the selected model instead. Parakeet v3 still
+  identifies language from the audio; it has no prompt input, the same as
+  dictation. The cadence tests ran on Linux. A macOS recording of the tail
+  draft was not run.
 - Settings, capsule, and Meetings pane previews launched, but screenshot capture
   failed on the build host (`could not create image from window`; the Studio
   session was locked, `CGSSessionScreenIsLocked 1`). The redesigned pane is
