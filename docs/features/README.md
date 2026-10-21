@@ -721,6 +721,7 @@ Linux beta                               // not macOS feature parity
 Windows beta                             // x64 (Vulkan GPU) and ARM64 (CPU)
 ├── Install -> install-windows.ps1 -> per-architecture signed feed -> hex.exe
 ├── HEX app -> Settings, tray, HUD; Enabled = shortcut works in every app
+├── Launch again -> Running app shows its window; hidden (login) launch -> no-op
 ├── Ctrl+Space -> Hold or Toggle -> Capture -> Stream (GPU) -> Paste
 ├── Escape -> Cancel; a held modifier alone never ends or cancels a capture
 ├── Paste -> Waits for Shift, Alt, and Win; a held Ctrl is kept and harmless

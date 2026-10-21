@@ -20,11 +20,17 @@ use tray_icon::{
     Icon, MouseButton as TrayMouseButton, MouseButtonState, TrayIcon, TrayIconBuilder,
     TrayIconEvent,
 };
-use windows_sys::Win32::Foundation::{HWND, RECT};
+use windows_sys::Win32::Foundation::{
+    CloseHandle, ERROR_ALREADY_EXISTS, GetLastError, HANDLE, HWND, RECT, WAIT_OBJECT_0,
+};
+use windows_sys::Win32::System::Threading::{
+    CreateEventW, INFINITE, SetEvent, WaitForSingleObject,
+};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    GWL_EXSTYLE, GetSystemMetrics, GetWindowLongPtrW, HWND_TOPMOST, SM_CXSCREEN, SM_CYSCREEN,
-    SPI_GETWORKAREA, SW_HIDE, SW_SHOW, SWP_NOACTIVATE, SetWindowLongPtrW, SetWindowPos, ShowWindow,
-    SystemParametersInfoW, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT,
+    ASFW_ANY, AllowSetForegroundWindow, GWL_EXSTYLE, GetSystemMetrics, GetWindowLongPtrW,
+    HWND_TOPMOST, SM_CXSCREEN, SM_CYSCREEN, SPI_GETWORKAREA, SW_HIDE, SW_SHOW, SWP_NOACTIVATE,
+    SetWindowLongPtrW, SetWindowPos, ShowWindow, SystemParametersInfoW, WS_EX_NOACTIVATE,
+    WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT,
 };
 
 use crate::app_settings::{AppSettings, IndicatorPosition};
@@ -79,9 +85,79 @@ enum TrayCommand {
     Quit,
 }
 
+/// Names the event that marks the running Hex app in this login session.
+const APP_INSTANCE_EVENT: &str = r"Local\com.kitlangton.hex.app";
+
+/// Ownership of the one Hex app in this login session.
+///
+/// Windows does not bring a running app forward when it is launched again, so
+/// a Start menu launch while the login item runs in the tray would start a
+/// second app whose listener cannot take `windows-listener.lock`. The first
+/// app process creates a named auto-reset event and keeps it for its
+/// lifetime; a later launch signals it to show the window and exits.
+struct AppInstance(HANDLE);
+
+impl AppInstance {
+    /// Returns `None` when a Hex app already runs in this session, after
+    /// asking it to show its window unless this launch is a hidden (login)
+    /// launch, which must never pop up an app that is already running.
+    fn claim(start_hidden: bool) -> Result<Option<Self>> {
+        let name: Vec<u16> = APP_INSTANCE_EVENT.encode_utf16().chain([0]).collect();
+        // SAFETY: `name` is a NUL-terminated UTF-16 string that outlives the call.
+        let event = unsafe { CreateEventW(std::ptr::null(), 0, 0, name.as_ptr()) };
+        if event.is_null() {
+            return Err(eyre!(
+                "could not create the Hex instance event: {}",
+                std::io::Error::last_os_error()
+            ));
+        }
+        // SAFETY: read immediately after the call whose result it describes.
+        if unsafe { GetLastError() } != ERROR_ALREADY_EXISTS {
+            return Ok(Some(Self(event)));
+        }
+        if !start_hidden {
+            tracing::info!("Hex is already running; showing its window");
+            // SAFETY: `event` is a valid handle owned by this function. A
+            // launched app may take the foreground; pass that right on so
+            // the running app can activate its window.
+            unsafe {
+                AllowSetForegroundWindow(ASFW_ANY);
+                SetEvent(event);
+            }
+        }
+        // SAFETY: `event` is a valid handle owned by this function.
+        unsafe { CloseHandle(event) };
+        Ok(None)
+    }
+
+    /// Shows the window whenever a later launch signals the event. The
+    /// handle stays open until the process exits, keeping this process the
+    /// session's Hex app.
+    fn forward_launches(self, commands: mpsc::Sender<TrayCommand>) {
+        let event = self.0 as usize;
+        let spawned = std::thread::Builder::new()
+            .name("hex-relaunch".into())
+            .spawn(move || {
+                // SAFETY: the handle is never closed while the process runs.
+                while unsafe { WaitForSingleObject(event as HANDLE, INFINITE) } == WAIT_OBJECT_0 {
+                    if commands.send(TrayCommand::Show).is_err() {
+                        return;
+                    }
+                }
+            });
+        if let Err(error) = spawned {
+            tracing::warn!(%error, "relaunching Hex will not show the running window");
+        }
+    }
+}
+
 pub fn open(event_path: PathBuf, shutdown: &'static AtomicBool, start_hidden: bool) -> Result<()> {
+    let Some(instance) = AppInstance::claim(start_hidden)? else {
+        return Ok(());
+    };
     shutdown.store(false, Ordering::Relaxed);
     let (tray_sender, tray_commands) = mpsc::channel();
+    instance.forward_launches(tray_sender.clone());
     let (indicator_sender, indicator_events) = crate::windows_indicator::channel();
     let (settings, settings_error) = match AppSettings::load() {
         Ok(settings) => (settings, None),
