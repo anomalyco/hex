@@ -604,6 +604,7 @@ fn run_rolling(
     let mut envelope = EchoEnvelope::default();
     let mut model = None;
     let mut model_failed = false;
+    let drafting = !crate::transcription_models::use_english_meeting_draft(selection);
     loop {
         let mut disconnected = false;
         loop {
@@ -627,16 +628,16 @@ fn run_rolling(
                 &mut model_failed,
                 selection,
             );
-            write_rolling_snapshot(directory, &tracks, &envelope);
+            write_rolling_snapshot(directory, &tracks, &envelope, drafting);
             continue;
         }
-        if pending.is_empty()
+        if drafting
+            && pending.is_empty()
             && !model_failed
             && !crate::parakeet::dictation_busy()
-            && !crate::transcription_models::use_english_meeting_draft(selection)
             && draft_uncommitted(&mut tracks, &mut model, &mut model_failed, selection)
         {
-            write_rolling_snapshot(directory, &tracks, &envelope);
+            write_rolling_snapshot(directory, &tracks, &envelope, drafting);
             continue;
         }
         match receiver.recv_timeout(Duration::from_millis(200)) {
@@ -805,8 +806,8 @@ fn draft_uncommitted(
     selection: &TranscriptionSelection,
 ) -> bool {
     let mut choice: Option<(usize, usize)> = None;
-    for index in 0..tracks.len() {
-        let Some(track) = tracks[index].as_mut() else {
+    for (index, track) in tracks.iter_mut().enumerate() {
+        let Some(track) = track else {
             continue;
         };
         if track.failed || track.provisional_stopped {
@@ -817,23 +818,10 @@ fn draft_uncommitted(
             track.drafted_samples = 0;
             track.provisional.clear();
         }
-        match crate::meeting_provisional::draft_step(
-            tail,
-            track.drafted_samples,
-            track.provisional_stopped,
-            track.last_pass,
-        ) {
-            crate::meeting_provisional::DraftStep::Stop => track.provisional_stopped = true,
-            crate::meeting_provisional::DraftStep::Wait => {}
-            crate::meeting_provisional::DraftStep::Transcribe => {
-                let undrafted = tail.saturating_sub(track.drafted_samples);
-                let replace = match &choice {
-                    None => true,
-                    Some((_, best)) => undrafted > *best,
-                };
-                if replace {
-                    choice = Some((index, undrafted));
-                }
+        if crate::meeting_provisional::should_draft(tail, track.drafted_samples, track.last_pass) {
+            let undrafted = tail - track.drafted_samples;
+            if choice.is_none_or(|(_, best)| undrafted > best) {
+                choice = Some((index, undrafted));
             }
         }
     }
@@ -864,10 +852,11 @@ fn draft_uncommitted(
     let Some(track) = tracks[index].as_mut() else {
         return false;
     };
-    track.last_pass = Some(crate::meeting_provisional::LastPass {
+    let pass = crate::meeting_provisional::LastPass {
         elapsed,
         samples: audio_len,
-    });
+    };
+    track.last_pass = Some(pass);
     track.drafted_samples = audio_len;
     match result {
         Ok(transcript) => {
@@ -884,13 +873,7 @@ fn draft_uncommitted(
             track.provisional_stopped = true;
         }
     }
-    if crate::meeting_provisional::draft_step(
-        audio_len,
-        track.drafted_samples,
-        false,
-        track.last_pass,
-    ) == crate::meeting_provisional::DraftStep::Stop
-    {
+    if pass.too_slow() {
         tracing::warn!(
             elapsed_ms = elapsed.as_millis() as u64,
             audio_ms = samples_ms(audio_len),
@@ -990,35 +973,31 @@ fn rolling_view(
     }
 }
 
+/// What the selected-model draft shows after the rolling view: each track's
+/// uncommitted tail, and microphone entries the view holds back until the
+/// system track covers them. Only Moonshine fills that gap otherwise.
 fn provisional_entries(
     tracks: &[Option<RollingTrack>; 2],
+    covered_ms: RollingCoverage,
     envelope: &EchoEnvelope,
 ) -> Vec<TranscriptEntry> {
-    if tracks
-        .iter()
-        .flatten()
-        .all(|track| track.provisional.is_empty())
-    {
-        return Vec::new();
-    }
     let origin_ms = tracks
         .iter()
         .flatten()
         .map(|track| track.transcript.origin_ms)
         .min()
         .unwrap_or_default();
-    let mut entries = Vec::new();
-    for track in tracks.iter().flatten() {
-        if track.transcript.source == MeetingSource::System {
-            entries.extend(track.transcript.entries.iter().cloned());
-        }
-        entries.extend(track.provisional.iter().cloned());
-    }
+    let entries = tracks
+        .iter()
+        .flatten()
+        .flat_map(|track| track.transcript.entries.iter().chain(&track.provisional))
+        .cloned()
+        .collect();
     let (mut entries, _) = suppress_echo(entries, |start, end| envelope.assess(start, end));
     entries.retain(|entry| {
-        tracks[source_index(entry.source)]
-            .as_ref()
-            .is_none_or(|track| entry.start_ms >= track.transcript.through_ms)
+        covered_ms
+            .get(entry.source)
+            .is_none_or(|covered| entry.end_ms > origin_ms + covered)
     });
     for entry in &mut entries {
         entry.start_ms = entry.start_ms.saturating_sub(origin_ms);
@@ -1033,6 +1012,7 @@ fn write_rolling_snapshot(
     directory: &Path,
     tracks: &[Option<RollingTrack>; 2],
     envelope: &EchoEnvelope,
+    drafting: bool,
 ) {
     let result = (|| -> Result<()> {
         let [system, microphone] = tracks;
@@ -1051,7 +1031,11 @@ fn write_rolling_snapshot(
             },
         )?;
         file.write_all(b"\n")?;
-        let provisional = provisional_entries(tracks, envelope);
+        let provisional = if drafting {
+            provisional_entries(tracks, view.covered_ms, envelope)
+        } else {
+            Vec::new()
+        };
         for entry in view.entries.iter().chain(&provisional) {
             serde_json::to_writer(&mut file, entry)?;
             file.write_all(b"\n")?;
@@ -2036,6 +2020,69 @@ mod tests {
         let view = rolling_view([Some(&system), Some(&microphone)], false, &envelope);
         assert_eq!(view.entries.len(), 3);
         assert_eq!(view.covered_ms.microphone, Some(20_000));
+    }
+
+    #[test]
+    fn selected_model_draft_shows_what_the_rolling_view_holds_back() {
+        let rolling = |transcript, provisional| RollingTrack {
+            resampler: None,
+            sample_rate: RATE as u32,
+            chunker: Chunker::default(),
+            transcript,
+            fed: 0,
+            pending: 0,
+            failed: false,
+            provisional,
+            drafted_samples: 0,
+            provisional_stopped: false,
+            last_pass: None,
+        };
+        let tracks = [
+            Some(rolling(
+                track(
+                    MeetingSource::System,
+                    10_000,
+                    &[(4_000, 6_000, "¿Tiene soporte?")],
+                ),
+                vec![entry(
+                    MeetingSource::System,
+                    11_000,
+                    12_000,
+                    "Sigo hablando.",
+                )],
+            )),
+            Some(rolling(
+                track(
+                    MeetingSource::Microphone,
+                    20_000,
+                    &[
+                        (8_000, 9_000, "Sí, desde la versión dos."),
+                        (12_500, 14_000, "Publicamos el viernes."),
+                    ],
+                ),
+                vec![entry(MeetingSource::Microphone, 21_000, 22_000, "Y luego.")],
+            )),
+        ];
+        let envelope = EchoEnvelope::default();
+        let view = rolling_view(
+            [0, 1].map(|index| tracks[index].as_ref().map(|track| &track.transcript)),
+            true,
+            &envelope,
+        );
+        let shown = |entries: &[TranscriptEntry]| {
+            entries
+                .iter()
+                .map(|entry| entry.text.clone())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            shown(&view.entries),
+            ["¿Tiene soporte?", "Sí, desde la versión dos."]
+        );
+        assert_eq!(
+            shown(&provisional_entries(&tracks, view.covered_ms, &envelope)),
+            ["Sigo hablando.", "Publicamos el viernes.", "Y luego."]
+        );
     }
 
     #[test]
