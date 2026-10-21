@@ -10,11 +10,9 @@ use gpui::{
 use unicode_segmentation::UnicodeSegmentation;
 
 use crate::design_tokens::{
-    ACCENT, BODY, CANVAS, CONTROL_HEIGHT, LINE, MULTILINE_INPUT_HEIGHT, RADIUS_CONTROL, SELECTION,
-    TEXT_PRIMARY, TEXT_TERTIARY, Typography,
+    BODY, CONTROL_HEIGHT, MULTILINE_INPUT_HEIGHT, RADIUS_CONTROL, Typography, accent, canvas, line,
+    selection, text_primary, text_tertiary,
 };
-
-const FOCUS: u32 = ACCENT;
 
 actions!(
     text_input,
@@ -1088,7 +1086,7 @@ impl Element for TextElement {
         let selected_range = input.selected_range.clone();
         let style = window.text_style();
         let (display_text, color) = if content.is_empty() {
-            (input.placeholder.clone(), rgb(TEXT_TERTIARY).into())
+            (input.placeholder.clone(), rgb(text_tertiary()).into())
         } else {
             (content, style.color)
         };
@@ -1159,7 +1157,7 @@ impl Element for TextElement {
                         point(bounds.left() + caret.x, bounds.top() + caret.y - scroll_y),
                         size(px(1.), layout.line_height),
                     ),
-                    rgb(TEXT_PRIMARY),
+                    rgb(text_primary()),
                 )
             });
             let selections = if selected_range.is_empty() {
@@ -1201,7 +1199,7 @@ impl Element for TextElement {
                         ),
                         size(px(1.), bounds.bottom() - bounds.top()),
                     ),
-                    rgb(TEXT_PRIMARY),
+                    rgb(text_primary()),
                 )),
             )
         } else {
@@ -1217,7 +1215,7 @@ impl Element for TextElement {
                             bounds.bottom(),
                         ),
                     ),
-                    rgba(SELECTION),
+                    rgba(selection()),
                 )],
                 None,
             )
@@ -1316,7 +1314,7 @@ fn multiline_selection_quads(
                 point(bounds.left() + start.x, top + start.y),
                 point(bounds.left() + end.x, top + start.y + layout.line_height),
             ),
-            rgba(SELECTION),
+            rgba(selection()),
         )];
     }
     let mut quads = vec![fill(
@@ -1324,7 +1322,7 @@ fn multiline_selection_quads(
             point(bounds.left() + start.x, top + start.y),
             point(bounds.right(), top + start.y + layout.line_height),
         ),
-        rgba(SELECTION),
+        rgba(selection()),
     )];
     let middle_top = start.y + layout.line_height;
     if end.y > middle_top {
@@ -1333,7 +1331,7 @@ fn multiline_selection_quads(
                 point(bounds.left(), top + middle_top),
                 point(bounds.right(), top + end.y),
             ),
-            rgba(SELECTION),
+            rgba(selection()),
         ));
     }
     quads.push(fill(
@@ -1341,7 +1339,7 @@ fn multiline_selection_quads(
             point(bounds.left(), top + end.y),
             point(bounds.left() + end.x, top + end.y + layout.line_height),
         ),
-        rgba(SELECTION),
+        rgba(selection()),
     ));
     quads
 }
@@ -1349,9 +1347,9 @@ fn multiline_selection_quads(
 impl Render for TextInput {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let border = if self.focus_handle.is_focused(window) {
-            FOCUS
+            accent()
         } else {
-            LINE
+            line()
         };
         div()
             .key_context("TextInput")
@@ -1408,9 +1406,9 @@ impl Render for TextInput {
             .rounded(RADIUS_CONTROL)
             .border_1()
             .border_color(rgb(border))
-            .bg(rgb(CANVAS))
+            .bg(rgb(canvas()))
             .overflow_hidden()
-            .text_color(rgb(TEXT_PRIMARY))
+            .text_color(rgb(text_primary()))
             .text_body()
             .child(TextElement { input: cx.entity() })
     }

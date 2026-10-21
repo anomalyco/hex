@@ -13,8 +13,8 @@ use gpui::{
 };
 
 use crate::app_settings::{
-    AppSettings, DictationMode, HotkeyBinding, HotkeyKey, HotkeyModifiers, IndicatorPosition,
-    ModifierSide, RecordingAudioBehavior, TextReplacement,
+    AppSettings, Appearance, DictationMode, HotkeyBinding, HotkeyKey, HotkeyModifiers,
+    IndicatorPosition, ModifierSide, RecordingAudioBehavior, TextReplacement,
 };
 use crate::application_catalog::InstalledApplication;
 use crate::design_tokens::*;
@@ -171,7 +171,7 @@ fn microphone_picker_menu(
 
 /// The sidebar's Update button, shown while an update is available.
 fn sidebar_update_button() -> gpui::Stateful<Div> {
-    button(ButtonKind::Secondary, status_dot(ACCENT_TEXT))
+    button(ButtonKind::Secondary, status_dot(accent_text()))
         .child(tr("Update"))
         .id("check-for-updates-sidebar")
 }
@@ -386,6 +386,7 @@ pub struct AppWindowPreview {
     pub experimental_mic: bool,
     pub fun_mode: Option<crate::voice_filter::VoiceFilterMode>,
     pub fun_driver_missing: bool,
+    pub light: bool,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -612,11 +613,11 @@ impl Render for TransformationDrag {
                     .items_center()
                     .rounded(RADIUS_CONTROL)
                     .border_1()
-                    .border_color(rgb(LINE_STRONG))
-                    .bg(rgb(SURFACE_SELECTED))
+                    .border_color(rgb(line_strong()))
+                    .bg(rgb(surface_selected()))
                     .shadow_lg()
                     .text_body()
-                    .text_color(rgb(TEXT_PRIMARY))
+                    .text_color(rgb(text_primary()))
                     .child(self.name.clone()),
             )
     }
@@ -922,7 +923,7 @@ impl Render for NavigationSidebar {
                             .flex_none()
                             .pl_3()
                             .text_caption()
-                            .text_color(rgb(TEXT_TERTIARY))
+                            .text_color(rgb(text_tertiary()))
                             .child(tr_fill("Version {}", env!("CARGO_PKG_VERSION"))),
                     )
                     .children(update_button),
@@ -1021,17 +1022,21 @@ impl Render for FunWaveformView {
                 .items_center()
                 .gap(px(2.0))
                 .rounded(RADIUS_SMALL)
-                .bg(rgb(SURFACE))
+                .bg(rgb(surface()))
                 .children(bars.iter().enumerate().map(|(idx, &bar_val)| {
                     let bar_ms = ((idx as f64) + 0.5) / (total_bars as f64) * duration_f;
                     let in_span = bar_ms >= demo.span.start_ms && bar_ms <= demo.span.end_ms;
                     let height = ((bar_val.clamp(0.06, 1.0) * 20.0) * 64.0).round() / 64.0;
                     let color = if call_track {
-                        if in_span { ACCENT_TEXT } else { TEXT_SECONDARY }
+                        if in_span {
+                            accent_text()
+                        } else {
+                            text_secondary()
+                        }
                     } else if in_span {
-                        TEXT_PRIMARY
+                        text_primary()
                     } else {
-                        TEXT_TERTIARY
+                        text_tertiary()
                     };
                     div()
                         .flex_1()
@@ -1052,8 +1057,8 @@ impl Render for FunWaveformView {
             .gap_2p5()
             .rounded(RADIUS_CONTROL)
             .border_1()
-            .border_color(rgb(LINE))
-            .bg(rgb(CANVAS))
+            .border_color(rgb(line()))
+            .bg(rgb(canvas()))
             .child(
                 div()
                     .h(px(TAG_HEIGHT))
@@ -1070,7 +1075,7 @@ impl Render for FunWaveformView {
                             .child(
                                 div()
                                     .text_footnote()
-                                    .text_color(rgb(TEXT_SECONDARY))
+                                    .text_color(rgb(text_secondary()))
                                     .child(clip_quote),
                             )
                             .child(span_badge),
@@ -1083,7 +1088,7 @@ impl Render for FunWaveformView {
                             .justify_end()
                             .text_caption()
                             .text_monospace()
-                            .text_color(rgb(TEXT_TERTIARY))
+                            .text_color(rgb(text_tertiary()))
                             .child(format!("{duration_s:.1}s")),
                     ),
             )
@@ -1097,7 +1102,7 @@ impl Render for FunWaveformView {
                             .w(px(80.0))
                             .flex_none()
                             .text_caption()
-                            .text_color(rgb(TEXT_TERTIARY))
+                            .text_color(rgb(text_tertiary()))
                             .child(tr("You")),
                     )
                     .child(render_waveform_bars(&bars_you, false)),
@@ -1113,7 +1118,7 @@ impl Render for FunWaveformView {
                             .flex_none()
                             .text_caption()
                             .font_weight(FontWeight::MEDIUM)
-                            .text_color(rgb(ACCENT_TEXT))
+                            .text_color(rgb(accent_text()))
                             .child(tr("Call hears")),
                     )
                     .child(render_waveform_bars(&bars_call, true)),
@@ -1173,6 +1178,7 @@ pub struct AppWindow {
     enable_on_launch_toggle: ToggleSpring,
     terminal_paste_toggle: ToggleSpring,
     indicator_position_spring: ToggleSpring,
+    appearance_spring: ToggleSpring,
     interface_language_open: bool,
     sound_volume_spring: ToggleSpring,
     recording_audio_spring: ToggleSpring,
@@ -1319,6 +1325,9 @@ impl AppWindow {
                 preview.meetings_enabled || matches!(preview.pane, DeveloperPane::Meetings);
             settings.experimental.hex_microphone =
                 preview.experimental_mic || matches!(preview.pane, DeveloperPane::Fun);
+            if preview.light {
+                settings.appearance = Appearance::Light;
+            }
             if let Some(mode) = preview.fun_mode {
                 settings.experimental.hex_microphone_mode = mode;
             }
@@ -1650,6 +1659,7 @@ impl AppWindow {
             indicator_position_spring: ToggleSpring::at(indicator_position_index(
                 settings.indicator_position,
             ) as f32),
+            appearance_spring: ToggleSpring::at(appearance_index(settings.appearance) as f32),
             interface_language_open: false,
             sound_volume_spring: ToggleSpring::at(sound_volume_index(&settings) as f32),
             recording_audio_spring: ToggleSpring::at(recording_audio_index(
@@ -2525,7 +2535,7 @@ impl AppWindow {
             tr_fill("Keep: {}", tr(retention.label())),
         )
         .id("history-retention")
-        .child(icon(Icon::ChevronDown, TEXT_TERTIARY))
+        .child(icon(Icon::ChevronDown, text_tertiary()))
         .on_click(cx.listener(|this, _, _, cx| {
             this.history_retention_open = true;
             cx.notify();
@@ -2678,7 +2688,7 @@ impl AppWindow {
             div()
                 .w_full()
                 .when(!first, |section| {
-                    section.mt_5().pt_5().border_t_1().border_color(rgb(LINE))
+                    section.mt_5().pt_5().border_t_1().border_color(rgb(line()))
                 })
                 .child(section_label(label))
         };
@@ -2711,7 +2721,7 @@ impl AppWindow {
                             div()
                                 .pt_2()
                                 .text_body()
-                                .text_color(rgb(TEXT_PRIMARY))
+                                .text_color(rgb(text_primary()))
                                 .child(entry.final_text.clone()),
                         ),
                     )
@@ -2721,7 +2731,7 @@ impl AppWindow {
                                 div()
                                     .pt_2()
                                     .text_body()
-                                    .text_color(rgb(TEXT_TERTIARY))
+                                    .text_color(rgb(text_tertiary()))
                                     .child(entry.raw_text.clone()),
                             ),
                         )
@@ -2733,7 +2743,7 @@ impl AppWindow {
                             .flex()
                             .flex_col()
                             .border_t_1()
-                            .border_color(rgb(LINE))
+                            .border_color(rgb(line()))
                             .when_some(entry.application.clone(), |rows, application| {
                                 rows.child(detail_row(tr("Application"), application))
                             })
@@ -2817,9 +2827,9 @@ impl AppWindow {
             self.hotkey_capture,
             HotkeyCaptureState::Saved { kind: active, .. } if active == kind
         ) {
-            rgb(SUCCESS_SURFACE)
+            rgb(success_surface())
         } else {
-            rgb(DANGER_SURFACE)
+            rgb(danger_surface())
         };
         let pulse = match &self.hotkey_capture {
             HotkeyCaptureState::Listening {
@@ -2859,7 +2869,7 @@ impl AppWindow {
                             .size(px(5.0 + pulse * 3.0))
                             .ml_2()
                             .rounded_full()
-                            .bg(rgb(DANGER))
+                            .bg(rgb(danger()))
                             .opacity(0.6 + pulse * 0.4),
                     )
                     .when(!modifiers.is_empty() && message.is_none(), |content| {
@@ -2875,7 +2885,7 @@ impl AppWindow {
                     .child(
                         div()
                             .text_footnote()
-                            .text_color(rgb(TEXT_SECONDARY))
+                            .text_color(rgb(text_secondary()))
                             .child(label),
                     )
                     .child(
@@ -2910,7 +2920,7 @@ impl AppWindow {
                 .child(
                     div()
                         .text_footnote()
-                        .text_color(rgb(TEXT_SECONDARY))
+                        .text_color(rgb(text_secondary()))
                         .child(tr("Change shortcut")),
                 )
                 .into_any_element(),
@@ -2932,17 +2942,17 @@ impl AppWindow {
             .rounded(RADIUS_CONTROL)
             .border_1()
             .border_color(mix_color(
-                rgb(LINE),
-                rgb(TEXT_SECONDARY),
+                rgb(line()),
+                rgb(text_secondary()),
                 control_intensity * 0.55,
             ))
             .bg(mix_color(
-                rgb(CANVAS),
+                rgb(canvas()),
                 capture_color,
                 control_intensity * (0.55 + pulse * 0.15),
             ))
             .when(!capture_active, |control| {
-                control.hover(|control| control.bg(rgb(SURFACE_HOVER)))
+                control.hover(|control| control.bg(rgb(surface_hover())))
             })
             .child(content)
             .on_click(cx.listener(move |this, _, window, cx| {
@@ -3219,7 +3229,7 @@ impl AppWindow {
                     .items_center()
                     .gap_2()
                     .when(index + 1 < replacement_count, |row| {
-                        row.border_b_1().border_color(rgb(LINE))
+                        row.border_b_1().border_color(rgb(line()))
                     })
                     .child(
                         div()
@@ -3227,7 +3237,7 @@ impl AppWindow {
                             .min_w(px(0.0))
                             .child(inputs.matched_phrase.entity.clone()),
                     )
-                    .child(icon(Icon::ArrowRight, TEXT_TERTIARY))
+                    .child(icon(Icon::ArrowRight, text_tertiary()))
                     .child(
                         div()
                             .flex_1()
@@ -3273,7 +3283,7 @@ impl AppWindow {
                         .px_4()
                         .py_3()
                         .text_footnote()
-                        .text_color(rgb(TEXT_TERTIARY))
+                        .text_color(rgb(text_tertiary()))
                         .child(tr("No corrections in this mode.")),
                 )
             })
@@ -3494,9 +3504,9 @@ impl AppWindow {
                                     .items_center()
                                     .gap_3()
                                     .child(status_dot(if running {
-                                        SUCCESS
+                                        success()
                                     } else {
-                                        TEXT_TERTIARY
+                                        text_tertiary()
                                     }))
                                     .child(
                                         div()
@@ -3508,7 +3518,7 @@ impl AppWindow {
                                             .child(
                                                 div()
                                                     .text_body()
-                                                    .text_color(rgb(TEXT_PRIMARY))
+                                                    .text_color(rgb(text_primary()))
                                                     .child(tr(&listener.status).to_string()),
                                             )
                                             .child(truncated_line(FOOTNOTE, hint))
@@ -3521,7 +3531,7 @@ impl AppWindow {
                                                             &failure,
                                                         ),
                                                     )
-                                                    .text_color(rgb(DANGER)),
+                                                    .text_color(rgb(danger())),
                                                 )
                                             }),
                                     ),
@@ -3613,12 +3623,12 @@ impl AppWindow {
             ),
             SoftwareUpdate::Current if !platform::MANUAL_UPDATE_CHECK => div()
                 .text_footnote()
-                .text_color(rgb(TEXT_TERTIARY))
+                .text_color(rgb(text_tertiary()))
                 .child(tr("Up to date"))
                 .into_any_element(),
             SoftwareUpdate::Failed if !platform::MANUAL_UPDATE_CHECK => div()
                 .text_footnote()
-                .text_color(rgb(TEXT_TERTIARY))
+                .text_color(rgb(text_tertiary()))
                 .child(tr("Check failed; retrying later"))
                 .into_any_element(),
             SoftwareUpdate::Current | SoftwareUpdate::Failed => {
@@ -3635,7 +3645,7 @@ impl AppWindow {
     }
 
     fn render_update_button(&self, label: String, cx: &mut Context<Self>) -> AnyElement {
-        button(ButtonKind::Secondary, status_dot(ACCENT_TEXT))
+        button(ButtonKind::Secondary, status_dot(accent_text()))
             .child(label)
             .id("software-update")
             .debug_selector(|| "software-update".into())
@@ -3718,6 +3728,34 @@ impl AppWindow {
                         }))
                 }),
             );
+        let appearance_position = self.appearance_spring.render_position(window);
+        let appearance_control = sliding_segmented_control(appearance_position, &[64.0; 2])
+            .id("appearance")
+            .debug_selector(|| "appearance".into())
+            .children(
+                [
+                    (tr("Dark"), Appearance::Dark),
+                    (tr("Light"), Appearance::Light),
+                ]
+                .into_iter()
+                .enumerate()
+                .map(|(index, (label, appearance))| {
+                    sliding_segmented_item(64.0, self.settings.appearance == appearance)
+                        .id(("appearance", index))
+                        .child(label)
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            if this.settings.appearance != appearance
+                                && this.update_settings(cx, |settings| {
+                                    settings.appearance = appearance;
+                                })
+                            {
+                                crate::design_tokens::set_appearance(appearance);
+                                this.appearance_spring.set_target(index as f32);
+                                cx.refresh_windows();
+                            }
+                        }))
+                }),
+            );
         let interface_language_control = capabilities
             .interface_language
             .then(|| self.render_interface_language_control(window, cx));
@@ -3777,7 +3815,7 @@ impl AppWindow {
         let launch_at_login_control = if self.launch_at_login_status.is_none() {
             div()
                 .text_footnote()
-                .text_color(rgb(TEXT_TERTIARY))
+                .text_color(rgb(text_tertiary()))
                 .child(if self.login_item_worker.is_some() {
                     tr("Checking…")
                 } else {
@@ -3882,8 +3920,8 @@ impl AppWindow {
                 .justify_between()
                 .gap_4()
                 .border_b_1()
-                .border_color(rgb(LINE))
-                .bg(rgb(CANVAS))
+                .border_color(rgb(line()))
+                .bg(rgb(canvas()))
                 .child(
                     div().flex_1().min_w_0().child(settings_copy(
                         tr("Release the microphone when idle?"),
@@ -4160,6 +4198,14 @@ impl AppWindow {
                                     .set_enabled(this.settings.show_dock_icon);
                             })),
                         ))
+                        .child(
+                            settings_row(
+                                tr("Appearance"),
+                                tr("Switch the Hex interface between dark and light"),
+                                appearance_control,
+                            )
+                            .id("appearance-setting"),
+                        )
                         .when_some(interface_language_control, |panel, control| {
                             panel.child(
                                 settings_row(
@@ -4475,14 +4521,14 @@ impl AppWindow {
                     .items_center()
                     .justify_between()
                     .text_footnote()
-                    .child(div().text_color(rgb(TEXT_SECONDARY)).child(label))
+                    .child(div().text_color(rgb(text_secondary())).child(label))
                     .child(
                         div()
                             .min_w(px(56.0))
                             .flex()
                             .justify_end()
                             .text_monospace()
-                            .text_color(rgb(TEXT_TERTIARY))
+                            .text_color(rgb(text_tertiary()))
                             .child(display),
                     ),
             )
@@ -4496,9 +4542,9 @@ impl AppWindow {
                     .flex()
                     .items_center()
                     .rounded(RADIUS_CONTROL)
-                    .bg(rgb(CANVAS))
+                    .bg(rgb(canvas()))
                     .border_1()
-                    .border_color(rgb(LINE))
+                    .border_color(rgb(line()))
                     .cursor_pointer()
                     .child(
                         div()
@@ -4506,13 +4552,13 @@ impl AppWindow {
                             .h(px(4.0))
                             .relative()
                             .rounded(RADIUS_KNOB)
-                            .bg(rgb(LINE_STRONG))
+                            .bg(rgb(line_strong()))
                             .child(
                                 div()
                                     .w(gpui::relative(value))
                                     .h_full()
                                     .rounded(RADIUS_KNOB)
-                                    .bg(rgb(ACCENT)),
+                                    .bg(rgb(accent())),
                             )
                             .child(
                                 div()
@@ -4522,7 +4568,7 @@ impl AppWindow {
                                         .clamp(0.0, TRACK_WIDTH - 24.0)))
                                     .size(px(12.0))
                                     .rounded_full()
-                                    .bg(rgb(TEXT_PRIMARY)),
+                                    .bg(rgb(text_primary())),
                             ),
                     )
                     .child(
@@ -5014,7 +5060,7 @@ impl AppWindow {
         });
 
         let record_btn = if demo.is_recording {
-            button(ButtonKind::Danger, status_dot(DANGER))
+            button(ButtonKind::Danger, status_dot(danger()))
                 .id("fun-demo-record")
                 .min_w(px(124.0))
                 .justify_center()
@@ -5025,7 +5071,7 @@ impl AppWindow {
                     cx.notify();
                 }))
         } else {
-            button(ButtonKind::Secondary, status_dot(DANGER))
+            button(ButtonKind::Secondary, status_dot(danger()))
                 .id("fun-demo-record")
                 .min_w(px(124.0))
                 .justify_center()
@@ -5104,7 +5150,7 @@ impl AppWindow {
                                 .flex()
                                 .flex_col()
                                 .border_b_1()
-                                .border_color(rgb(LINE))
+                                .border_color(rgb(line()))
                                 .child(
                                     div()
                                         .flex()
@@ -5180,7 +5226,7 @@ impl AppWindow {
                                         .child(
                                             div()
                                                 .text_caption()
-                                                .text_color(rgb(TEXT_TERTIARY))
+                                                .text_color(rgb(text_tertiary()))
                                                 .child(tr("Stays in memory")),
                                         ),
                                 ),
@@ -5840,7 +5886,7 @@ impl AppWindow {
                         .justify_between()
                         .gap_4()
                         .border_b_1()
-                        .border_color(rgb(LINE))
+                        .border_color(rgb(line()))
                         .child(
                             div()
                                 .text_body()
@@ -5853,7 +5899,7 @@ impl AppWindow {
                     panel.child(
                         div()
                             .when(platform::WEB_PAGES_DESCRIPTION.is_some(), |row| {
-                                row.border_b_1().border_color(rgb(LINE))
+                                row.border_b_1().border_color(rgb(line()))
                             })
                             .child(picker),
                     )
@@ -5930,7 +5976,7 @@ impl AppWindow {
                 .justify_between()
                 .gap_4()
                 .border_t_1()
-                .border_color(rgb(LINE))
+                .border_color(rgb(line()))
                 .child(
                     div()
                         .min_w(px(0.0))
@@ -5948,9 +5994,9 @@ impl AppWindow {
                             div()
                                 .text_footnote()
                                 .text_color(rgb(if copy.error.is_some() {
-                                    DANGER
+                                    danger()
                                 } else {
-                                    TEXT_TERTIARY
+                                    text_tertiary()
                                 }))
                                 .child(copy.error.unwrap_or_else(|| copy.description.into())),
                         ),
@@ -6077,7 +6123,7 @@ impl AppWindow {
                     .items_center()
                     .gap_2()
                     .when(target_index + 1 < selected.len(), |row| {
-                        row.border_b_1().border_color(rgb(LINE))
+                        row.border_b_1().border_color(rgb(line()))
                     })
                     .can_drop(move |value, _, _| {
                         value
@@ -6106,7 +6152,7 @@ impl AppWindow {
                             .items_center()
                             .justify_center()
                             .cursor_grab()
-                            .child(icon(Icon::DragHandle, TEXT_DISABLED))
+                            .child(icon(Icon::DragHandle, text_disabled()))
                             .on_drag(drag, |drag, position, _, cx| {
                                 cx.new(|_| drag.clone().at(position))
                             }),
@@ -6114,7 +6160,7 @@ impl AppWindow {
                     .child(
                         truncated_line(BODY, name)
                             .flex_1()
-                            .text_color(rgb(TEXT_SECONDARY)),
+                            .text_color(rgb(text_secondary())),
                     )
                     .child(
                         icon_button(ButtonKind::Ghost, Icon::Close)
@@ -6149,8 +6195,8 @@ impl AppWindow {
                         .justify_between()
                         .gap_3()
                         .border_t_1()
-                        .border_color(rgb(LINE))
-                        .hover(|row| row.bg(rgb(SURFACE_HOVER)))
+                        .border_color(rgb(line()))
+                        .hover(|row| row.bg(rgb(surface_hover())))
                         .child(
                             div()
                                 .flex_1()
@@ -6159,7 +6205,7 @@ impl AppWindow {
                                     div()
                                         .text_body()
                                         .font_weight(FontWeight::MEDIUM)
-                                        .text_color(rgb(TEXT_SECONDARY))
+                                        .text_color(rgb(text_secondary()))
                                         .child(name),
                                 )
                                 .when_some(description, |copy, description| {
@@ -6167,7 +6213,7 @@ impl AppWindow {
                                         div()
                                             .pt_0p5()
                                             .text_footnote()
-                                            .text_color(rgb(TEXT_TERTIARY))
+                                            .text_color(rgb(text_tertiary()))
                                             .child(description),
                                     )
                                 }),
@@ -6221,11 +6267,11 @@ impl AppWindow {
                             list.child(
                                 div()
                                     .border_t_1()
-                                    .border_color(rgb(LINE))
+                                    .border_color(rgb(line()))
                                     .px_4()
                                     .py_3()
                                     .text_footnote()
-                                    .text_color(rgb(TEXT_TERTIARY))
+                                    .text_color(rgb(text_tertiary()))
                                     .child(tr(
                                         "Every registered transformation is already included.",
                                     )),
@@ -6289,7 +6335,7 @@ impl AppWindow {
                 .justify_between()
                 .gap_3()
                 .border_t_1()
-                .border_color(rgb(LINE))
+                .border_color(rgb(line()))
                 .child(
                     div()
                         .flex_1()
@@ -6337,10 +6383,10 @@ impl AppWindow {
                 .items_center()
                 .gap_1p5()
                 .rounded(RADIUS_SMALL)
-                .bg(rgb(SURFACE_SELECTED))
+                .bg(rgb(surface_selected()))
                 .text_caption()
                 .font_weight(FontWeight::MEDIUM)
-                .text_color(rgb(TEXT_SECONDARY))
+                .text_color(rgb(text_secondary()))
                 .child(application_icon(
                     application,
                     Some(name.as_str()),
@@ -6430,8 +6476,8 @@ impl AppWindow {
                 .gap_1()
                 .rounded(RADIUS_CONTROL)
                 .border_1()
-                .border_color(rgb(LINE))
-                .bg(rgb(CANVAS))
+                .border_color(rgb(line()))
+                .bg(rgb(canvas()))
                 .child(self.application_search.entity.clone())
                 .when_some(picker_status, |tray, status| {
                     tray.child(
@@ -6439,7 +6485,7 @@ impl AppWindow {
                             .px_2()
                             .py_3()
                             .text_footnote()
-                            .text_color(rgb(TEXT_TERTIARY))
+                            .text_color(rgb(text_tertiary()))
                             .child(status),
                     )
                 })
@@ -6853,19 +6899,19 @@ impl AppWindow {
                     truncated_line(FOOTNOTE, presentation.name)
                         .flex_1()
                         .font_weight(FontWeight::MEDIUM)
-                        .text_color(rgb(TEXT_PRIMARY)),
+                        .text_color(rgb(text_primary())),
                 )
                 .child(
                     div()
                         .flex_none()
                         .text_caption()
-                        .text_color(rgb(TEXT_TERTIARY))
+                        .text_color(rgb(text_tertiary()))
                         .child(presentation.provider),
                 )
                 .when(presentation.is_default, |control| {
                     control.child(tag(Tone::Neutral, tr("Default")))
                 })
-                .child(icon(Icon::ChevronDown, TEXT_TERTIARY))
+                .child(icon(Icon::ChevronDown, text_tertiary()))
                 .on_click(cx.listener(move |_, _, window, cx| {
                     model_input.focus_handle(cx).focus(window);
                     cx.notify();
@@ -7241,9 +7287,9 @@ impl AppWindow {
                             if boundary {
                                 text.text_caption()
                                     .font_weight(FontWeight::SEMIBOLD)
-                                    .text_color(rgb(TEXT_TERTIARY))
+                                    .text_color(rgb(text_tertiary()))
                             } else {
-                                text.text_body().text_color(rgb(TEXT_SECONDARY))
+                                text.text_body().text_color(rgb(text_secondary()))
                             }
                         })
                         .child(summary),
@@ -7309,14 +7355,14 @@ impl AppWindow {
                     .mt_6()
                     .pt_5()
                     .border_t_1()
-                    .border_color(rgb(LINE))
+                    .border_color(rgb(line()))
                     .child(section_label("Raw event"))
                     .child(
                         div()
                             .pt_2()
                             .text_footnote()
                             .text_monospace()
-                            .text_color(rgb(TEXT_TERTIARY))
+                            .text_color(rgb(text_tertiary()))
                             .child(raw),
                     ),
             )
@@ -7737,6 +7783,13 @@ fn indicator_position_index(position: IndicatorPosition) -> usize {
     }
 }
 
+fn appearance_index(appearance: Appearance) -> usize {
+    match appearance {
+        Appearance::Dark => 0,
+        Appearance::Light => 1,
+    }
+}
+
 fn recording_audio_index(behavior: RecordingAudioBehavior) -> usize {
     match behavior {
         RecordingAudioBehavior::Mute => 0,
@@ -7828,8 +7881,8 @@ fn mode_activation_icons(
                 .items_center()
                 .justify_center()
                 .rounded(icon_radius(ACTIVATION_ICON_SIZE))
-                .bg(rgb(SURFACE_SELECTED))
-                .child(icon(Icon::Globe, TEXT_SECONDARY))
+                .bg(rgb(surface_selected()))
+                .child(icon(Icon::Globe, text_secondary()))
                 .into_any_element(),
         );
     }
@@ -7867,7 +7920,7 @@ fn application_icon(
         .items_center()
         .justify_center()
         .rounded(icon_radius(size))
-        .bg(rgb(SURFACE_SELECTED))
+        .bg(rgb(surface_selected()))
         .map(|monogram| {
             if size >= CONTROL_HEIGHT {
                 monogram.text_body()
@@ -7876,7 +7929,7 @@ fn application_icon(
             }
         })
         .font_weight(FontWeight::SEMIBOLD)
-        .text_color(rgb(TEXT_SECONDARY))
+        .text_color(rgb(text_secondary()))
         .child(initial)
         .into_any_element()
 }
@@ -8013,7 +8066,7 @@ fn model_choice_row(
             div()
                 .flex_none()
                 .text_caption()
-                .text_color(rgb(TEXT_TERTIARY))
+                .text_color(rgb(text_tertiary()))
                 .child(subtitle.into()),
         )
 }
@@ -8039,7 +8092,7 @@ fn settings_control(
                 .child(
                     div()
                         .text_caption()
-                        .text_color(rgb(TEXT_TERTIARY))
+                        .text_color(rgb(text_tertiary()))
                         .child(description.into()),
                 ),
         )
@@ -8052,7 +8105,7 @@ fn field_label(label: &'static str) -> Div {
     div()
         .text_footnote()
         .font_weight(FontWeight::MEDIUM)
-        .text_color(rgb(TEXT_SECONDARY))
+        .text_color(rgb(text_secondary()))
         .child(label)
 }
 
@@ -8183,9 +8236,9 @@ fn timestamped_list_row(
                 .pt(px(baseline_offset(BODY, CAPTION)))
                 .text_caption()
                 .text_color(rgb(if selected {
-                    TEXT_SECONDARY
+                    text_secondary()
                 } else {
-                    TEXT_TERTIARY
+                    text_tertiary()
                 }))
                 .child(age),
         )
@@ -8369,6 +8422,7 @@ mod tests {
             experimental_mic: false,
             fun_mode: None,
             fun_driver_missing: false,
+            light: false,
         }
     }
 
@@ -8411,6 +8465,28 @@ mod tests {
         cx.run_until_parked();
         assert!(cx.debug_bounds("software-update").is_some());
         assert!(cx.debug_bounds("indicator-position").is_some());
+    }
+
+    #[gpui::test]
+    fn appearance_setting_persists_and_switches_the_palette(cx: &mut gpui::TestAppContext) {
+        let (view, cx) = cx.add_window_view(|window, cx| {
+            preview_fixture(pane_preview(DeveloperPane::Settings), window, cx)
+        });
+        cx.simulate_resize(size(px(WINDOW_WIDTH), px(4000.0)));
+        cx.update(|window, _| window.refresh());
+        cx.run_until_parked();
+        let appearance = cx.debug_bounds("appearance").expect("appearance control");
+        cx.simulate_click(
+            gpui::point(appearance.right() - px(10.0), appearance.center().y),
+            GpuiModifiers::default(),
+        );
+        cx.run_until_parked();
+        let light_primary = crate::design_tokens::text_primary();
+        view.update(cx, |view, _| {
+            crate::design_tokens::set_appearance(Appearance::Dark);
+            assert_eq!(view.settings.appearance, Appearance::Light);
+        });
+        assert_eq!(light_primary, 0x161616, "the light palette applies");
     }
 
     #[gpui::test]

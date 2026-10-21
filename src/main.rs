@@ -306,6 +306,9 @@ enum Command {
         /// For `fun`: show the virtual microphone driver as not yet installed.
         #[arg(long)]
         fun_driver_missing: bool,
+        /// Preview the light appearance.
+        #[arg(long)]
+        light: bool,
     },
     /// Listen and transcribe until interrupted.
     Listen {
@@ -625,7 +628,7 @@ fn main() -> Result<()> {
             let _instance = instance::acquire("listener")?;
             hex_microphone::ensure_service_started();
             let launch = if preview_dictation {
-                meeting_watcher::Launch::DictationHudPreview
+                meeting_watcher::Launch::DictationHudPreview { light: false }
             } else {
                 meeting_watcher::Launch::App(meeting_watcher::ListenerConfig {
                     project_root: root,
@@ -661,8 +664,12 @@ fn main() -> Result<()> {
             experimental_mic,
             fun_mode,
             fun_driver_missing,
+            light,
             step,
         } => {
+            if light {
+                design_tokens::set_appearance(app_settings::Appearance::Light);
+            }
             if matches!(target, AppPreviewTarget::MeetingOffer) {
                 return meeting_watcher::run(
                     &SHUTDOWN,
@@ -683,7 +690,7 @@ fn main() -> Result<()> {
             if matches!(target, AppPreviewTarget::DictationHud) {
                 return meeting_watcher::run(
                     &SHUTDOWN,
-                    meeting_watcher::Launch::DictationHudPreview,
+                    meeting_watcher::Launch::DictationHudPreview { light },
                 );
             }
             if !transcription_models::LANGUAGES
@@ -783,6 +790,7 @@ fn main() -> Result<()> {
                     experimental_mic,
                     fun_mode,
                     fun_driver_missing,
+                    light,
                 }),
             )
         }
@@ -1201,6 +1209,21 @@ mod tests {
             assert_eq!(update_available, expected);
         }
         assert!(Cli::try_parse_from(["hex", "app", "--update-available"]).is_err());
+    }
+
+    #[test]
+    fn light_appearance_requires_an_explicit_preview_flag() {
+        for (args, expected) in [
+            (vec!["hex", "preview", "settings"], false),
+            (vec!["hex", "preview", "settings", "--light"], true),
+        ] {
+            let cli = Cli::try_parse_from(args).unwrap();
+            let Some(Command::Preview { light, .. }) = cli.command else {
+                panic!("expected preview command");
+            };
+            assert_eq!(light, expected);
+        }
+        assert!(Cli::try_parse_from(["hex", "app", "--light"]).is_err());
     }
 
     #[test]

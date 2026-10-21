@@ -208,7 +208,7 @@ impl AppWindow {
             .top_0()
             .left_0()
             .size_full()
-            .bg(rgb(CANVAS))
+            .bg(rgb(canvas()))
             .flex()
             .flex_col()
             .items_center()
@@ -388,7 +388,7 @@ impl AppWindow {
             .child(
                 div()
                     .text_footnote()
-                    .text_color(rgb(TEXT_TERTIARY))
+                    .text_color(rgb(text_tertiary()))
                     .text_center()
                     .child(tr("Press Esc while speaking to cancel. Nothing is pasted.")),
             )
@@ -489,11 +489,14 @@ impl AppWindow {
             .items_center()
             .justify_center()
             .bg(rgb(if ready {
-                SUCCESS_SURFACE
+                success_surface()
             } else {
-                SURFACE_HOVER
+                surface_hover()
             }))
-            .child(icon(glyph, if ready { SUCCESS } else { TEXT_SECONDARY }));
+            .child(icon(
+                glyph,
+                if ready { success() } else { text_secondary() },
+            ));
         let trailing = self.render_setup_control(row, cx);
         div()
             .w_full()
@@ -503,7 +506,7 @@ impl AppWindow {
             .flex()
             .items_center()
             .gap_3()
-            .when(!last, |row| row.border_b_1().border_color(rgb(LINE)))
+            .when(!last, |row| row.border_b_1().border_color(rgb(line())))
             .child(badge)
             .child(
                 div()
@@ -521,7 +524,7 @@ impl AppWindow {
                     .child(
                         div()
                             .text_footnote()
-                            .text_color(rgb(TEXT_TERTIARY))
+                            .text_color(rgb(text_tertiary()))
                             .child(description),
                     ),
             )
@@ -565,8 +568,8 @@ impl AppWindow {
                 .items_center()
                 .gap_1p5()
                 .text_footnote()
-                .text_color(rgb(SUCCESS))
-                .child(icon(Icon::Check, SUCCESS))
+                .text_color(rgb(success()))
+                .child(icon(Icon::Check, success()))
                 .child(if item == SetupItem::Model {
                     tr("Ready")
                 } else {
@@ -595,9 +598,9 @@ impl AppWindow {
                 .items_center()
                 .gap_3()
                 .child(if crate::onboarding::reduce_motion() {
-                    status_dot(ACCENT).into_any_element()
+                    status_dot(accent()).into_any_element()
                 } else {
-                    status_dot(ACCENT)
+                    status_dot(accent())
                         .with_animation(
                             ("setup-waiting", setup_item_index(item)),
                             Animation::new(LISTENING_LOOP)
@@ -627,7 +630,7 @@ impl AppWindow {
                 .child(
                     div()
                         .text_caption()
-                        .text_color(rgb(TEXT_SECONDARY))
+                        .text_color(rgb(text_secondary()))
                         .child(format!("{:.0}%", progress * 100.0)),
                 )
                 .into_any_element(),
@@ -681,7 +684,7 @@ impl AppWindow {
                 .gap_3()
                 .child(hint_text(
                     tr("Hex needs to reopen before it can hear the shortcut."),
-                    TEXT_SECONDARY,
+                    text_secondary(),
                 ))
                 .child(
                     small_button(ButtonKind::Secondary, tr("Reopen Hex"))
@@ -703,20 +706,20 @@ impl AppWindow {
                         } else {
                             tr("Press to talk")
                         },
-                        TEXT_TERTIARY,
+                        text_tertiary(),
                     ))
                     .into_any_element();
             }
             Practice::Listening => (
-                Some(DANGER),
+                Some(danger()),
                 if self.holds() {
                     tr_fill("Listening… let go of {} when you are done.", shortcut)
                 } else {
                     tr_fill("Listening… press {} again when you are done.", shortcut)
                 },
-                TEXT_SECONDARY,
+                text_secondary(),
             ),
-            Practice::Transcribing => (None, tr("Transcribing…").into(), TEXT_TERTIARY),
+            Practice::Transcribing => (None, tr("Transcribing…").into(), text_tertiary()),
             Practice::TooShort => (
                 None,
                 if self.holds() {
@@ -728,27 +731,27 @@ impl AppWindow {
                     tr("That was too short to hear. Speak a full sentence before you finish.")
                         .into()
                 },
-                TEXT_SECONDARY,
+                text_secondary(),
             ),
             Practice::NothingHeard => (
                 None,
                 tr("Hex did not catch any words. Speak a little closer, or pick another microphone in Settings.").into(),
-                TEXT_SECONDARY,
+                text_secondary(),
             ),
             Practice::Failed => (
                 None,
                 tr("Something went wrong while transcribing. Try once more.").into(),
-                DANGER,
+                danger(),
             ),
             Practice::Landed => {
                 return div()
                     .flex()
                     .items_center()
                     .gap_2()
-                    .child(icon(Icon::Check, SUCCESS))
+                    .child(icon(Icon::Check, success()))
                     .child(hint_text(
                         tr("That's it. Hex pastes wherever your cursor is, in any app."),
-                        SUCCESS,
+                        success(),
                     ))
                     .into_any_element();
             }
@@ -790,8 +793,8 @@ impl AppWindow {
             .flex()
             .items_center()
             .justify_center()
-            .bg(rgb(SUCCESS_SURFACE))
-            .child(icon_at(Icon::Check, HERO_ICON_SIZE, SUCCESS));
+            .bg(rgb(success_surface()))
+            .child(icon_at(Icon::Check, HERO_ICON_SIZE, success()));
         let art = div()
             .h(px(ONBOARDING_ART_HEIGHT))
             .flex()
@@ -844,7 +847,7 @@ impl AppWindow {
                     .items_center()
                     .gap_3()
                     .when(index + 1 < count, |row| {
-                        row.border_b_1().border_color(rgb(LINE))
+                        row.border_b_1().border_color(rgb(line()))
                     })
                     .child(
                         div()
@@ -862,7 +865,7 @@ impl AppWindow {
                             .child(
                                 div()
                                     .text_footnote()
-                                    .text_color(rgb(TEXT_TERTIARY))
+                                    .text_color(rgb(text_tertiary()))
                                     .child(description),
                             ),
                     )
@@ -977,7 +980,7 @@ fn page_title(title: &'static str, body: Option<String>) -> Div {
                 div()
                     .max_w(px(ONBOARDING_BODY_WIDTH))
                     .text_body()
-                    .text_color(rgb(TEXT_SECONDARY))
+                    .text_color(rgb(text_secondary()))
                     .text_center()
                     .child(body),
             )
@@ -1004,7 +1007,7 @@ fn how_row(art: impl IntoElement, text: String, last: bool) -> Div {
         .flex()
         .items_center()
         .gap_4()
-        .when(!last, |row| row.border_b_1().border_color(rgb(LINE)))
+        .when(!last, |row| row.border_b_1().border_color(rgb(line())))
         .child(
             div()
                 .w(px(ONBOARDING_ART_COLUMN))
@@ -1018,7 +1021,7 @@ fn how_row(art: impl IntoElement, text: String, last: bool) -> Div {
                 .flex_1()
                 .min_w(px(0.0))
                 .text_body()
-                .text_color(rgb(TEXT_SECONDARY))
+                .text_color(rgb(text_secondary()))
                 .child(text),
         )
 }
@@ -1035,7 +1038,7 @@ fn notice(text: &'static str) -> Div {
         .px_4()
         .py_3()
         .text_footnote()
-        .text_color(rgb(TEXT_SECONDARY))
+        .text_color(rgb(text_secondary()))
         .child(text)
 }
 
@@ -1065,7 +1068,7 @@ fn listening_art(parts: Vec<String>, phase: f32) -> Div {
             .size(px(size))
             .rounded_full()
             .border_1()
-            .border_color(rgb(ACCENT_BORDER))
+            .border_color(rgb(accent_border()))
             .opacity(opacity)
     });
     div()
@@ -1089,8 +1092,8 @@ fn waveform_art(phase: f32) -> Div {
         .gap_1()
         .rounded_full()
         .border_1()
-        .border_color(rgb(LINE_STRONG))
-        .bg(rgb(SURFACE_HOVER))
+        .border_color(rgb(line_strong()))
+        .bg(rgb(surface_hover()))
         .children(LEVELS.iter().enumerate().map(move |(index, level)| {
             let wave = (std::f32::consts::TAU * (phase + index as f32 * 0.18)).sin() * 0.5 + 0.5;
             let height = 4.0 + 10.0 * level * (0.35 + 0.65 * wave);
@@ -1098,7 +1101,7 @@ fn waveform_art(phase: f32) -> Div {
                 .w(px(2.0))
                 .h(px(height))
                 .rounded_full()
-                .bg(rgb(TEXT_SECONDARY))
+                .bg(rgb(text_secondary()))
         }))
 }
 
@@ -1112,12 +1115,17 @@ fn pasted_art() -> Div {
         .gap_0p5()
         .rounded(RADIUS_SMALL)
         .border_1()
-        .border_color(rgb(LINE))
-        .bg(rgb(CANVAS))
+        .border_color(rgb(line()))
+        .bg(rgb(canvas()))
         .text_footnote()
-        .text_color(rgb(TEXT_PRIMARY))
+        .text_color(rgb(text_primary()))
         .child(tr("Hello"))
-        .child(div().w(px(1.0)).h(px(FOOTNOTE.line_height)).bg(rgb(ACCENT)))
+        .child(
+            div()
+                .w(px(1.0))
+                .h(px(FOOTNOTE.line_height))
+                .bg(rgb(accent())),
+        )
 }
 
 /// Dim, bright, dim over one loop.

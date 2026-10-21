@@ -4,7 +4,7 @@
 
 use gpui::{
     AnyElement, App, Div, ElementId, FontWeight, IntoElement, Pixels, Rgba, ShapedLine,
-    SharedString, Stateful, Window, canvas, div, prelude::*, px, rgb,
+    SharedString, Stateful, Window, div, prelude::*, px, rgb,
 };
 
 #[cfg(any(target_os = "linux", target_os = "windows"))]
@@ -65,9 +65,9 @@ fn navigation_icon(icon: NavigationIcon, selected: bool) -> AnyElement {
     gpui_symbols::Icon::new(icon.sf_symbol())
         .size(px(ICON_SIZE))
         .color(rgb(if selected {
-            TEXT_PRIMARY
+            text_primary()
         } else {
-            TEXT_TERTIARY
+            text_tertiary()
         }))
         .weight(gpui_symbols::SymbolWeight::Medium)
         .rendering_mode(gpui_symbols::RenderingMode::Monochrome)
@@ -79,9 +79,9 @@ fn navigation_icon(icon: NavigationIcon, selected: bool) -> AnyElement {
     let color = format!(
         "#{:06x}",
         if selected {
-            TEXT_PRIMARY
+            text_primary()
         } else {
-            TEXT_TERTIARY
+            text_tertiary()
         }
     );
     let image = Image::from_bytes(
@@ -249,9 +249,9 @@ pub(crate) fn window_frame() -> Div {
         .relative()
         .overflow_hidden()
         .flex()
-        .bg(rgb(CANVAS))
+        .bg(rgb(canvas()))
         .text_body()
-        .text_color(rgb(TEXT_PRIMARY))
+        .text_color(rgb(text_primary()))
 }
 
 /// The navigation column: [`SIDEBAR_WIDTH`] wide, clear of the title bar.
@@ -265,9 +265,9 @@ pub(crate) fn sidebar_frame() -> Div {
         .flex()
         .flex_col()
         .flex_none()
-        .bg(rgb(SIDEBAR))
+        .bg(rgb(sidebar()))
         .border_r_1()
-        .border_color(rgb(LINE))
+        .border_color(rgb(line()))
 }
 
 pub(crate) fn navigation_item(icon: NavigationIcon, selected: bool) -> Div {
@@ -285,13 +285,16 @@ pub(crate) fn navigation_item(icon: NavigationIcon, selected: bool) -> Div {
             FontWeight::NORMAL
         })
         .text_color(rgb(if selected {
-            TEXT_PRIMARY
+            text_primary()
         } else {
-            TEXT_TERTIARY
+            text_tertiary()
         }))
-        .when(selected, |item| item.bg(rgb(SURFACE_SELECTED)))
+        .when(selected, |item| item.bg(rgb(surface_selected())))
         .when(!selected, |item| {
-            item.hover(|item| item.bg(rgb(SIDEBAR_HOVER)).text_color(rgb(TEXT_SECONDARY)))
+            item.hover(|item| {
+                item.bg(rgb(sidebar_hover()))
+                    .text_color(rgb(text_secondary()))
+            })
         })
         .child(
             div()
@@ -330,7 +333,7 @@ pub(crate) fn pane_header_with_action(
                 .justify_between()
                 .gap_4()
                 .border_b_1()
-                .border_color(rgb(LINE))
+                .border_color(rgb(line()))
                 .child(div().flex_none().text_title().child(title))
                 .when_some(action, |header, action| {
                     header.child(div().flex().items_center().gap_2().child(action))
@@ -452,8 +455,10 @@ pub(crate) fn list_row(selected: bool) -> Div {
         .flex_col()
         .gap_1()
         .rounded(RADIUS_CONTROL)
-        .when(selected, |row| row.bg(rgb(SURFACE_SELECTED)))
-        .when(!selected, |row| row.hover(|row| row.bg(rgb(SURFACE_HOVER))))
+        .when(selected, |row| row.bg(rgb(surface_selected())))
+        .when(!selected, |row| {
+            row.hover(|row| row.bg(rgb(surface_hover())))
+        })
 }
 
 /// The title line of a [`list_row`].
@@ -461,18 +466,18 @@ pub(crate) fn list_row_title(text: impl Into<SharedString>, selected: bool) -> D
     truncated_line(BODY, text)
         .font_weight(FontWeight::MEDIUM)
         .text_color(rgb(if selected {
-            TEXT_PRIMARY
+            text_primary()
         } else {
-            TEXT_SECONDARY
+            text_secondary()
         }))
 }
 
 /// The metadata line of a [`list_row`].
 pub(crate) fn list_row_meta(text: impl Into<SharedString>, selected: bool) -> Div {
     truncated_line(CAPTION, text).text_color(rgb(if selected {
-        TEXT_SECONDARY
+        text_secondary()
     } else {
-        TEXT_TERTIARY
+        text_tertiary()
     }))
 }
 
@@ -491,7 +496,7 @@ pub(crate) fn truncated_line(step: TypeStep, text: impl Into<SharedString>) -> D
         .flex_shrink()
         .text_step(step)
         .child(
-            canvas(
+            gpui::canvas(
                 move |bounds, window, cx| fit_line(text, bounds.size.width, window, cx),
                 |bounds, line, window, cx| {
                     let _ = line.paint(bounds.origin, bounds.size.height, window, cx);
@@ -522,8 +527,8 @@ pub(crate) fn panel() -> Div {
         .relative()
         .rounded(RADIUS_PANEL)
         .border_1()
-        .border_color(rgb(LINE))
-        .bg(rgb(SURFACE))
+        .border_color(rgb(line()))
+        .bg(rgb(surface()))
         .overflow_hidden()
 }
 
@@ -537,7 +542,7 @@ pub(crate) fn panel_header(title: impl IntoElement, action: Option<AnyElement>) 
         .items_center()
         .justify_between()
         .border_b_1()
-        .border_color(rgb(LINE))
+        .border_color(rgb(line()))
         .child(
             div()
                 .text_body()
@@ -552,7 +557,7 @@ pub(crate) fn section_label(label: impl IntoElement) -> Div {
     div()
         .text_caption()
         .font_weight(FontWeight::SEMIBOLD)
-        .text_color(rgb(TEXT_TERTIARY))
+        .text_color(rgb(text_tertiary()))
         .child(label)
 }
 
@@ -579,7 +584,7 @@ pub(crate) fn detail_header(
         .flex_col()
         .gap_2()
         .border_b_1()
-        .border_color(rgb(LINE))
+        .border_color(rgb(line()))
         .child(title)
         .when(!meta.is_empty(), |header| {
             header.child(
@@ -588,7 +593,7 @@ pub(crate) fn detail_header(
                     .items_center()
                     .gap_2()
                     .text_footnote()
-                    .text_color(rgb(TEXT_TERTIARY))
+                    .text_color(rgb(text_tertiary()))
                     .children(meta),
             )
         })
@@ -639,7 +644,7 @@ pub(crate) fn settings_copy(title: &'static str, description: impl IntoElement) 
         .child(
             div()
                 .text_footnote()
-                .text_color(rgb(TEXT_TERTIARY))
+                .text_color(rgb(text_tertiary()))
                 .child(description),
         )
         .into_any_element()
@@ -661,7 +666,7 @@ pub(crate) fn settings_row(
         .justify_between()
         .gap_4()
         .border_b_1()
-        .border_color(rgb(LINE))
+        .border_color(rgb(line()))
         .child(
             div()
                 .flex_1()
@@ -681,14 +686,14 @@ pub(crate) fn detail_row(label: &'static str, value: impl Into<String>) -> AnyEl
         .items_start()
         .gap_4()
         .border_b_1()
-        .border_color(rgb(LINE))
+        .border_color(rgb(line()))
         .child(
             div()
                 .w(px(92.0))
                 .flex_none()
                 .pt(px(baseline_offset(BODY, FOOTNOTE)))
                 .text_footnote()
-                .text_color(rgb(TEXT_TERTIARY))
+                .text_color(rgb(text_tertiary()))
                 .child(label),
         )
         .child(
@@ -697,7 +702,7 @@ pub(crate) fn detail_row(label: &'static str, value: impl Into<String>) -> AnyEl
                 .flex_1()
                 .min_w_0()
                 .text_body()
-                .text_color(rgb(TEXT_SECONDARY))
+                .text_color(rgb(text_secondary()))
                 .child(value.into()),
         )
         .into_any_element()
@@ -712,7 +717,7 @@ pub(crate) fn listener_status(
         .flex()
         .items_center()
         .gap_2()
-        .child(status_dot(if active { SUCCESS } else { TEXT_DISABLED }))
+        .child(status_dot(if active { success() } else { text_disabled() }))
         .child(
             div()
                 .min_w(px(0.0))
@@ -721,13 +726,13 @@ pub(crate) fn listener_status(
                 .child(
                     div()
                         .text_footnote()
-                        .text_color(rgb(TEXT_SECONDARY))
+                        .text_color(rgb(text_secondary()))
                         .child(status),
                 )
                 .child(
                     div()
                         .text_caption()
-                        .text_color(rgb(TEXT_TERTIARY))
+                        .text_color(rgb(text_tertiary()))
                         .child(device),
                 ),
         )
@@ -760,11 +765,11 @@ pub(crate) fn hotkey_keycaps(parts: Vec<String>, opacity: f32) -> AnyElement {
                 .justify_center()
                 .rounded(RADIUS_SMALL)
                 .border_1()
-                .border_color(rgb(LINE_STRONG))
-                .bg(rgb(SURFACE_HOVER))
+                .border_color(rgb(line_strong()))
+                .bg(rgb(surface_hover()))
                 .text_footnote()
                 .font_weight(FontWeight::MEDIUM)
-                .text_color(rgb(TEXT_PRIMARY))
+                .text_color(rgb(text_primary()))
                 .when_some(side, |keycap, side| {
                     keycap.child(
                         div()
@@ -772,7 +777,7 @@ pub(crate) fn hotkey_keycaps(parts: Vec<String>, opacity: f32) -> AnyElement {
                             .top(px(2.0))
                             .left(px(4.0))
                             .text_step(KEYCAP_SIDE_BADGE)
-                            .text_color(rgb(TEXT_TERTIARY))
+                            .text_color(rgb(text_tertiary()))
                             .child(side),
                     )
                 })
@@ -802,11 +807,15 @@ pub(crate) fn hero_keycaps(parts: Vec<String>, pressed: f32) -> Div {
                 .rounded(RADIUS_PANEL)
                 .border_1()
                 .border_b(px(1.0 + HERO_KEYCAP_DEPTH * (1.0 - pressed)))
-                .border_color(mix_color(rgb(LINE_STRONG), rgb(ACCENT), pressed))
-                .bg(mix_color(rgb(SURFACE_HOVER), rgb(ACCENT_SURFACE), pressed))
+                .border_color(mix_color(rgb(line_strong()), rgb(accent()), pressed))
+                .bg(mix_color(
+                    rgb(surface_hover()),
+                    rgb(accent_surface()),
+                    pressed,
+                ))
                 .text_title()
                 .font_weight(FontWeight::MEDIUM)
-                .text_color(rgb(TEXT_PRIMARY))
+                .text_color(rgb(text_primary()))
                 .child(label)
         }))
 }
@@ -817,8 +826,8 @@ pub(crate) fn progress_track(indicator: Div) -> Div {
         .flex_1()
         .h(px(PROGRESS_HEIGHT))
         .rounded(RADIUS_KNOB)
-        .bg(rgb(CANVAS))
-        .child(indicator.h_full().rounded(RADIUS_KNOB).bg(rgb(ACCENT)))
+        .bg(rgb(canvas()))
+        .child(indicator.h_full().rounded(RADIUS_KNOB).bg(rgb(accent())))
 }
 
 /// Where a multi-step flow is: one dot per step, the current one stretched.
@@ -837,9 +846,9 @@ pub(crate) fn step_dots(index: usize, count: usize) -> Div {
                 }))
                 .rounded_full()
                 .bg(rgb(if step == index {
-                    TEXT_PRIMARY
+                    text_primary()
                 } else {
-                    LINE_STRONG
+                    line_strong()
                 }))
         }))
 }
@@ -869,7 +878,7 @@ pub(crate) fn toggle(position: f32) -> AnyElement {
         .flex()
         .items_center()
         .rounded(RADIUS_SMALL)
-        .bg(mix_color(rgb(LINE_STRONG), rgb(ACCENT), color_position))
+        .bg(mix_color(rgb(line_strong()), rgb(accent()), color_position))
         .child(
             div()
                 .ml(px(
@@ -878,8 +887,8 @@ pub(crate) fn toggle(position: f32) -> AnyElement {
                 .size(px(knob))
                 .rounded(RADIUS_KNOB)
                 .bg(mix_color(
-                    rgb(TEXT_SECONDARY),
-                    rgb(TEXT_PRIMARY),
+                    rgb(text_secondary()),
+                    rgb(on_accent()),
                     color_position,
                 )),
         )
@@ -923,10 +932,10 @@ pub(crate) fn small_button(kind: ButtonKind, label: impl IntoElement) -> Div {
 /// where the icon stands alone, such as a pane header.
 pub(crate) fn icon_button(kind: ButtonKind, glyph: Icon) -> Div {
     let color = match kind {
-        ButtonKind::Ghost => TEXT_TERTIARY,
-        ButtonKind::Secondary => TEXT_SECONDARY,
-        ButtonKind::Primary => TEXT_PRIMARY,
-        ButtonKind::Danger => DANGER,
+        ButtonKind::Ghost => text_tertiary(),
+        ButtonKind::Secondary => text_secondary(),
+        ButtonKind::Primary => on_accent(),
+        ButtonKind::Danger => danger(),
     };
     button_frame(kind)
         .size(px(CONTROL_HEIGHT))
@@ -945,24 +954,30 @@ fn button_frame(kind: ButtonKind) -> Div {
         .cursor_pointer();
     match kind {
         ButtonKind::Primary => frame
-            .bg(rgb(ACCENT))
-            .text_color(rgb(TEXT_PRIMARY))
-            .hover(|button| button.bg(mix_color(rgb(ACCENT), rgb(TEXT_PRIMARY), 0.12))),
+            .bg(rgb(accent()))
+            .text_color(rgb(on_accent()))
+            .hover(|button| button.bg(mix_color(rgb(accent()), rgb(on_accent()), 0.12))),
         ButtonKind::Secondary => frame
             .border_1()
-            .border_color(rgb(LINE))
-            .bg(rgb(CANVAS))
-            .text_color(rgb(TEXT_SECONDARY))
-            .hover(|button| button.bg(rgb(SURFACE_HOVER)).text_color(rgb(TEXT_PRIMARY))),
-        ButtonKind::Ghost => frame
-            .text_color(rgb(TEXT_SECONDARY))
-            .hover(|button| button.bg(rgb(SURFACE_HOVER)).text_color(rgb(TEXT_PRIMARY))),
+            .border_color(rgb(line()))
+            .bg(rgb(canvas()))
+            .text_color(rgb(text_secondary()))
+            .hover(|button| {
+                button
+                    .bg(rgb(surface_hover()))
+                    .text_color(rgb(text_primary()))
+            }),
+        ButtonKind::Ghost => frame.text_color(rgb(text_secondary())).hover(|button| {
+            button
+                .bg(rgb(surface_hover()))
+                .text_color(rgb(text_primary()))
+        }),
         ButtonKind::Danger => frame
             .border_1()
-            .border_color(rgb(DANGER_BORDER))
-            .bg(rgb(DANGER_SURFACE))
-            .text_color(rgb(DANGER))
-            .hover(|button| button.border_color(rgb(DANGER))),
+            .border_color(rgb(danger_border()))
+            .bg(rgb(danger_surface()))
+            .text_color(rgb(danger()))
+            .hover(|button| button.border_color(rgb(danger()))),
     }
 }
 
@@ -975,7 +990,7 @@ pub(crate) fn busy_label(label: impl IntoElement) -> Div {
         .flex_none()
         .items_center()
         .text_footnote()
-        .text_color(rgb(TEXT_TERTIARY))
+        .text_color(rgb(text_tertiary()))
         .child(label)
 }
 
@@ -984,7 +999,7 @@ pub(crate) fn disclosure_button(label: impl Into<SharedString>) -> Div {
     disclosure_frame()
         .w(px(DISCLOSURE_WIDTH))
         .child(truncated_line(FOOTNOTE, label).flex_1())
-        .child(icon(Icon::ChevronDown, TEXT_TERTIARY))
+        .child(icon(Icon::ChevronDown, text_tertiary()))
 }
 
 /// The frame of a dropdown trigger for custom content; end it with an
@@ -999,12 +1014,16 @@ pub(crate) fn disclosure_frame() -> Div {
         .gap_2()
         .rounded(RADIUS_CONTROL)
         .border_1()
-        .border_color(rgb(LINE))
-        .bg(rgb(CANVAS))
+        .border_color(rgb(line()))
+        .bg(rgb(canvas()))
         .text_footnote()
-        .text_color(rgb(TEXT_SECONDARY))
+        .text_color(rgb(text_secondary()))
         .cursor_pointer()
-        .hover(|button| button.bg(rgb(SURFACE_HOVER)).text_color(rgb(TEXT_PRIMARY)))
+        .hover(|button| {
+            button
+                .bg(rgb(surface_hover()))
+                .text_color(rgb(text_primary()))
+        })
 }
 
 /// The tone of a [`tag`].
@@ -1019,10 +1038,10 @@ pub(crate) enum Tone {
 /// A non-interactive status label: tinted fill, no border, never clickable.
 pub(crate) fn tag(tone: Tone, label: impl IntoElement) -> Div {
     let (text, fill) = match tone {
-        Tone::Neutral => (TEXT_SECONDARY, SURFACE_SELECTED),
-        Tone::Accent => (ACCENT_TEXT, ACCENT_SURFACE),
-        Tone::Success => (SUCCESS, SUCCESS_SURFACE),
-        Tone::Danger => (DANGER, DANGER_SURFACE),
+        Tone::Neutral => (text_secondary(), surface_selected()),
+        Tone::Accent => (accent_text(), accent_surface()),
+        Tone::Success => (success(), success_surface()),
+        Tone::Danger => (danger(), danger_surface()),
     };
     div()
         .h(px(TAG_HEIGHT))
@@ -1047,8 +1066,8 @@ pub(crate) fn menu() -> Div {
         .flex_col()
         .rounded(RADIUS_PANEL)
         .border_1()
-        .border_color(rgb(LINE_STRONG))
-        .bg(rgb(SURFACE))
+        .border_color(rgb(line_strong()))
+        .bg(rgb(surface()))
         .shadow_lg()
         .occlude()
 }
@@ -1073,29 +1092,29 @@ pub(crate) fn dropdown_menu_with_progress(progress: f32) -> Div {
 pub(crate) fn menu_item(selected: bool) -> Div {
     menu_item_frame()
         .text_color(rgb(if selected {
-            TEXT_PRIMARY
+            text_primary()
         } else {
-            TEXT_SECONDARY
+            text_secondary()
         }))
-        .when(selected, |item| item.bg(rgb(SURFACE_SELECTED)))
-        .hover(|item| item.bg(rgb(SURFACE_HOVER)))
+        .when(selected, |item| item.bg(rgb(surface_selected())))
+        .hover(|item| item.bg(rgb(surface_hover())))
 }
 
 /// A destructive choice: last in its [`menu`], after a [`menu_separator`].
 pub(crate) fn danger_menu_item() -> Div {
     menu_item_frame()
-        .text_color(rgb(DANGER))
-        .hover(|item| item.bg(rgb(DANGER_SURFACE)))
+        .text_color(rgb(danger()))
+        .hover(|item| item.bg(rgb(danger_surface())))
 }
 
 /// A choice that is temporarily unavailable, such as work in progress.
 pub(crate) fn disabled_menu_item() -> Div {
-    menu_item_frame().text_color(rgb(TEXT_TERTIARY))
+    menu_item_frame().text_color(rgb(text_tertiary()))
 }
 
 /// A rule between groups of [`menu`] choices.
 pub(crate) fn menu_separator() -> Div {
-    div().mx_2().my_1().h(px(1.0)).flex_none().bg(rgb(LINE))
+    div().mx_2().my_1().h(px(1.0)).flex_none().bg(rgb(line()))
 }
 
 fn menu_item_frame() -> Div {
@@ -1129,8 +1148,8 @@ pub(crate) fn segmented_control() -> Div {
         .items_center()
         .rounded(RADIUS_CONTROL)
         .border_1()
-        .border_color(rgb(LINE))
-        .bg(rgb(CANVAS))
+        .border_color(rgb(line()))
+        .bg(rgb(canvas()))
 }
 
 const SEGMENT_HEIGHT: f32 = CONTROL_HEIGHT - 6.0;
@@ -1149,13 +1168,16 @@ pub(crate) fn segmented_item(selected: bool) -> Div {
             FontWeight::NORMAL
         })
         .text_color(rgb(if selected {
-            TEXT_PRIMARY
+            text_primary()
         } else {
-            TEXT_TERTIARY
+            text_tertiary()
         }))
-        .when(selected, |item| item.bg(rgb(SURFACE_SELECTED)))
+        .when(selected, |item| item.bg(rgb(surface_selected())))
         .when(!selected, |item| {
-            item.hover(|item| item.bg(rgb(SURFACE_HOVER)).text_color(rgb(TEXT_SECONDARY)))
+            item.hover(|item| {
+                item.bg(rgb(surface_hover()))
+                    .text_color(rgb(text_secondary()))
+            })
         })
 }
 
@@ -1197,8 +1219,8 @@ fn sliding_segmented_rect(left: f32, width: f32) -> Div {
             .h(px(SEGMENT_HEIGHT))
             .rounded(RADIUS_SMALL)
             .border_1()
-            .border_color(rgb(LINE_STRONG))
-            .bg(rgb(SURFACE_SELECTED)),
+            .border_color(rgb(line_strong()))
+            .bg(rgb(surface_selected())),
     )
 }
 
@@ -1245,7 +1267,7 @@ pub(crate) fn empty_state(message: &'static str) -> AnyElement {
         .justify_center()
         .text_center()
         .text_footnote()
-        .text_color(rgb(TEXT_TERTIARY))
+        .text_color(rgb(text_tertiary()))
         .child(message)
         .into_any_element()
 }
@@ -1269,12 +1291,12 @@ pub(crate) fn error_message(message: &'static str, error: String) -> AnyElement 
         .flex_col()
         .gap_1()
         .text_footnote()
-        .text_color(rgb(DANGER))
+        .text_color(rgb(danger()))
         .child(message)
         .child(
             div()
                 .text_caption()
-                .text_color(rgb(TEXT_TERTIARY))
+                .text_color(rgb(text_tertiary()))
                 .child(error),
         )
         .into_any_element()
@@ -1286,8 +1308,8 @@ pub(crate) fn error_panel(message: &'static str, error: String) -> Div {
         .w_full()
         .rounded(RADIUS_CONTROL)
         .border_1()
-        .border_color(rgb(DANGER_BORDER))
-        .bg(rgb(DANGER_SURFACE))
+        .border_color(rgb(danger_border()))
+        .bg(rgb(danger_surface()))
         .child(error_message(message, error))
 }
 
@@ -1297,7 +1319,7 @@ pub(crate) fn inline_error(error: impl IntoElement) -> Div {
         .px_4()
         .py_2()
         .text_footnote()
-        .text_color(rgb(DANGER))
+        .text_color(rgb(danger()))
         .child(error)
 }
 

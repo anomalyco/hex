@@ -192,9 +192,10 @@ substitute for source inspection or a second roadmap.
 - `desktop_activity`: the shared listener, device, session, and latest-failure
   projection over `EventReader`. Transcript rows read retained events directly.
 - `desktop_host`: the Linux Settings/service snapshot-and-action contract.
-- `design_tokens`: the desktop design tokens (surface, text and role colours,
-  the five-step type scale, spacing, radii, and control geometry) plus the
-  `Typography` trait and the test that rejects raw styles in desktop sources.
+- `design_tokens`: the desktop design tokens (Dark and Light surface, text, and
+  role colours, the five-step type scale, spacing, radii, and control geometry)
+  plus the `Typography` trait and the test that rejects raw styles in desktop
+  sources.
 - `desktop_ui`: the platform-neutral GPUI components shared by both desktop
   roots: the pane scaffold, cards and rows, the one button system, tags, menus,
   segmented controls, icons, and empty and error states.
@@ -549,6 +550,7 @@ cargo run -- app --preview-dictation
 cargo run -- preview onboarding
 cargo run -- preview transcription-picker --language zh --model-state installed
 ./scripts/capture-preview.sh /tmp/hex-preview.png settings
+./scripts/capture-preview.sh /tmp/hex-light.png settings --light
 ./scripts/capture-preview.sh /tmp/hex-update.png settings --update-available
 ./scripts/capture-preview.sh /tmp/hex-model-missing.png settings --model-missing
 ./scripts/capture-preview.sh /tmp/hex-command-model-missing.png settings --command-model-missing
@@ -577,6 +579,7 @@ for that process's `Hex` window, captures only that window, and terminates the
 preview. Targets include `settings`, `modes`, `voice-action`, `commands`,
 `meetings`, `activity`, `onboarding`, `transcription-picker`, `hud-lab`,
 `dictation-hud`, and `meeting-offer` (with `--meeting-panel call-ended|ready`).
+Pass `--light` to any design-system target to preview the light palette; the HUD stays dark.
 Pass `--meetings-enabled` and `--screen-recording-missing` to Settings for the
 Meetings section. The `meetings` preview has sample meetings with notes and a
 transcript; add `--meeting-recording` for the live state,

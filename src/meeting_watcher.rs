@@ -168,7 +168,7 @@ pub enum Launch {
     /// The production app with local dictation.
     App(ListenerConfig),
     /// The dictation HUD driven by a synthetic capture loop, without recognition.
-    DictationHudPreview,
+    DictationHudPreview { light: bool },
     /// Developer meeting detection; `offer_preview` shows an offer immediately.
     #[cfg(debug_assertions)]
     MeetingWatch { offer_preview: bool },
@@ -270,13 +270,16 @@ pub fn run(shutdown: &'static AtomicBool, launch: Launch) -> Result<()> {
     if objc2::MainThreadMarker::new().is_none() {
         return Err(eyre!("desktop startup requires the main thread"));
     }
-    let (listener, dictation_preview, preview, shell_preview) = match launch {
+    let (listener, dictation_preview, preview, shell_preview, light) = match launch {
         Launch::MeetingPanelPreview(preview) => return run_panel_preview(preview),
-        Launch::App(listener) => (Some(listener), false, false, None),
-        Launch::DictationHudPreview => (None, true, false, None),
+        Launch::App(listener) => (Some(listener), false, false, None, false),
+        Launch::DictationHudPreview { light } => (None, true, false, None, light),
         #[cfg(debug_assertions)]
-        Launch::MeetingWatch { offer_preview } => (None, false, offer_preview, None),
-        Launch::Shell(shell_preview) => (None, false, false, Some(shell_preview)),
+        Launch::MeetingWatch { offer_preview } => (None, false, offer_preview, None, false),
+        Launch::Shell(shell_preview) => {
+            let light = shell_preview.light;
+            (None, false, false, Some(shell_preview), light)
+        }
     };
     shutdown.store(false, Ordering::Relaxed);
     crate::keyboard::initialize_layout()?;
@@ -285,6 +288,9 @@ pub fn run(shutdown: &'static AtomicBool, launch: Launch) -> Result<()> {
     } else {
         AppSettings::load()?
     };
+    if light {
+        crate::design_tokens::set_appearance(crate::app_settings::Appearance::Light);
+    }
     let show_dock_icon = settings.show_dock_icon;
     let setup_ready = crate::onboarding::status(&settings.transcription).ready();
     let onboarding_completed = shell_preview.is_some() || crate::onboarding::completion_recorded();
@@ -1915,9 +1921,9 @@ impl MeetingPanel {
                     .gap_2p5()
                     .pl_3p5()
                     .pr_2()
-                    .bg(rgb(CANVAS))
+                    .bg(rgb(canvas()))
                     .border_1()
-                    .border_color(rgb(LINE_STRONG))
+                    .border_color(rgb(line_strong()))
                     .rounded_full()
                     .shadow_lg()
                     .overflow_hidden()
@@ -1925,21 +1931,21 @@ impl MeetingPanel {
                         gpui::MouseButton::Left,
                         cx.listener(|panel, _, _, cx| panel.begin_drag(cx)),
                     )
-                    .child(status_dot(DANGER).size_2().opacity(pulse))
+                    .child(status_dot(danger()).size_2().opacity(pulse))
                     .child(
                         div()
                             .flex_none()
                             .text_caption()
                             .text_monospace()
                             .font_weight(gpui::FontWeight::MEDIUM)
-                            .text_color(rgb(TEXT_SECONDARY))
+                            .text_color(rgb(text_secondary()))
                             .child(elapsed),
                     )
                     .child(
                         div().flex_1().min_w_0().child(
                             truncated_line(FOOTNOTE, title)
                                 .font_weight(gpui::FontWeight::MEDIUM)
-                                .text_color(rgb(TEXT_PRIMARY)),
+                                .text_color(rgb(text_primary())),
                         ),
                     )
                     .when(!expanded && pending_turns > 0, |pill| {
@@ -2037,7 +2043,7 @@ impl Render for MeetingPanel {
                     format!("{} call detected", candidate.source.label())
                 };
                 (
-                    TEXT_SECONDARY,
+                    text_secondary(),
                     title,
                     "Record locally? Tell participants.".to_string(),
                     div()
@@ -2077,7 +2083,7 @@ impl Render for MeetingPanel {
             PanelKind::CallEnded { app } => {
                 let stop = self.commands.clone();
                 (
-                    DANGER,
+                    danger(),
                     format!("{app} left the call"),
                     "Hex is still recording.".into(),
                     div()
@@ -2133,7 +2139,7 @@ impl Render for MeetingPanel {
                 };
                 let label = if self.copied { "Copied" } else { "Copy" };
                 (
-                    SUCCESS,
+                    success(),
                     title,
                     subtitle,
                     div()
@@ -2192,9 +2198,9 @@ impl Render for MeetingPanel {
                     .gap_3()
                     .pl_4()
                     .pr_2()
-                    .bg(rgb(CANVAS))
+                    .bg(rgb(canvas()))
                     .border_1()
-                    .border_color(rgb(LINE_STRONG))
+                    .border_color(rgb(line_strong()))
                     .rounded_full()
                     .shadow_lg()
                     .overflow_hidden()
@@ -2208,10 +2214,10 @@ impl Render for MeetingPanel {
                             .child(
                                 truncated_line(BODY, title)
                                     .font_weight(gpui::FontWeight::SEMIBOLD)
-                                    .text_color(rgb(TEXT_PRIMARY)),
+                                    .text_color(rgb(text_primary())),
                             )
                             .child(
-                                truncated_line(CAPTION, subtitle).text_color(rgb(TEXT_TERTIARY)),
+                                truncated_line(CAPTION, subtitle).text_color(rgb(text_tertiary())),
                             ),
                     )
                     .child(actions.flex_none()),

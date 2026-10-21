@@ -2,39 +2,213 @@
 //! heights, radii, and control heights are written down. Panes and components
 //! name these tokens; `docs/design-system.md` explains when to use each one.
 
+use std::sync::atomic::{AtomicU8, Ordering};
+
 use gpui::{FontWeight, Pixels, Styled, px};
 
-// Surfaces: the OpenCode V2 dark hierarchy, darkest (recessed) to lightest.
-pub(crate) const SIDEBAR: u32 = 0x111111;
-pub(crate) const SIDEBAR_HOVER: u32 = 0x1b1b1b;
-pub(crate) const CANVAS: u32 = 0x161616;
-pub(crate) const SURFACE: u32 = 0x1d1d1d;
-pub(crate) const SURFACE_HOVER: u32 = 0x252525;
-pub(crate) const SURFACE_SELECTED: u32 = 0x2e2e2e;
-pub(crate) const LINE: u32 = 0x2a2a2a;
-pub(crate) const LINE_STRONG: u32 = 0x3d3d3d;
+use crate::app_settings::Appearance;
+
+/// One appearance's colour values.
+struct Palette {
+    sidebar: u32,
+    sidebar_hover: u32,
+    canvas: u32,
+    surface: u32,
+    surface_hover: u32,
+    surface_selected: u32,
+    line: u32,
+    line_strong: u32,
+    scrim: u32,
+    text_primary: u32,
+    text_secondary: u32,
+    text_tertiary: u32,
+    text_disabled: u32,
+    on_accent: u32,
+    accent: u32,
+    accent_text: u32,
+    accent_surface: u32,
+    accent_border: u32,
+    selection: u32,
+    success: u32,
+    success_surface: u32,
+    danger: u32,
+    danger_surface: u32,
+    danger_border: u32,
+}
+
+/// The dark palette: the OpenCode V2 hierarchy, darkest (recessed) to lightest.
+const DARK: Palette = Palette {
+    sidebar: 0x111111,
+    sidebar_hover: 0x1b1b1b,
+    canvas: 0x161616,
+    surface: 0x1d1d1d,
+    surface_hover: 0x252525,
+    surface_selected: 0x2e2e2e,
+    line: 0x2a2a2a,
+    line_strong: 0x3d3d3d,
+    scrim: 0x000000cc,
+    text_primary: 0xf2f2f2,
+    text_secondary: 0xd0d0d0,
+    text_tertiary: 0x969696,
+    text_disabled: 0x6e6e6e,
+    on_accent: 0xf2f2f2,
+    accent: 0x3b5cf6,
+    accent_text: 0x8390ff,
+    accent_surface: 0x1c2030,
+    accent_border: 0x2c3560,
+    selection: 0x3b5cf655,
+    success: 0x69d89f,
+    success_surface: 0x17231a,
+    danger: 0xf17471,
+    danger_surface: 0x2b1718,
+    danger_border: 0x66292c,
+};
+
+/// The light palette: the same hierarchy on a bright window.
+const LIGHT: Palette = Palette {
+    sidebar: 0xf0f0f0,
+    sidebar_hover: 0xe6e6e6,
+    canvas: 0xf7f7f7,
+    surface: 0xffffff,
+    surface_hover: 0xf2f2f2,
+    surface_selected: 0xe6e6e6,
+    line: 0xe2e2e2,
+    line_strong: 0xc8c8c8,
+    scrim: 0x00000066,
+    text_primary: 0x161616,
+    text_secondary: 0x3a3a3a,
+    text_tertiary: 0x5f5f5f,
+    text_disabled: 0x9a9a9a,
+    on_accent: 0xffffff,
+    accent: 0x3b5cf6,
+    accent_text: 0x2f4ad8,
+    accent_surface: 0xe8ecff,
+    accent_border: 0xc3ccf8,
+    selection: 0x3b5cf655,
+    success: 0x167a46,
+    success_surface: 0xe3f5ea,
+    danger: 0xc0322f,
+    danger_surface: 0xfdeaea,
+    danger_border: 0xf0b8b8,
+};
+
+static APPEARANCE: AtomicU8 = AtomicU8::new(0);
+
+/// Switches every colour token to `appearance`'s palette.
+pub(crate) fn set_appearance(appearance: Appearance) {
+    APPEARANCE.store(appearance as u8, Ordering::Relaxed);
+}
+
+fn palette() -> &'static Palette {
+    if APPEARANCE.load(Ordering::Relaxed) == Appearance::Light as u8 {
+        &LIGHT
+    } else {
+        &DARK
+    }
+}
+
+// Surfaces, darkest (recessed) to lightest.
+pub(crate) fn sidebar() -> u32 {
+    palette().sidebar
+}
+
+pub(crate) fn sidebar_hover() -> u32 {
+    palette().sidebar_hover
+}
+
+pub(crate) fn canvas() -> u32 {
+    palette().canvas
+}
+
+pub(crate) fn surface() -> u32 {
+    palette().surface
+}
+
+pub(crate) fn surface_hover() -> u32 {
+    palette().surface_hover
+}
+
+pub(crate) fn surface_selected() -> u32 {
+    palette().surface_selected
+}
+
+pub(crate) fn line() -> u32 {
+    palette().line
+}
+
+pub(crate) fn line_strong() -> u32 {
+    palette().line_strong
+}
+
 /// Modal backdrops.
-pub(crate) const SCRIM: u32 = 0x000000cc;
+pub(crate) fn scrim() -> u32 {
+    palette().scrim
+}
 
 // Text, strongest to weakest. Tertiary is the weakest colour that still meets
 // 4.5:1 on every surface; disabled is reserved for unavailable controls.
-pub(crate) const TEXT_PRIMARY: u32 = 0xf2f2f2;
-pub(crate) const TEXT_SECONDARY: u32 = 0xd0d0d0;
-pub(crate) const TEXT_TERTIARY: u32 = 0x969696;
-pub(crate) const TEXT_DISABLED: u32 = 0x6e6e6e;
+pub(crate) fn text_primary() -> u32 {
+    palette().text_primary
+}
+
+pub(crate) fn text_secondary() -> u32 {
+    palette().text_secondary
+}
+
+pub(crate) fn text_tertiary() -> u32 {
+    palette().text_tertiary
+}
+
+pub(crate) fn text_disabled() -> u32 {
+    palette().text_disabled
+}
+
+/// Text and glyphs on an accent fill.
+pub(crate) fn on_accent() -> u32 {
+    palette().on_accent
+}
 
 // Roles. Each has a text/fill colour, a tinted surface, and a border.
-pub(crate) const ACCENT: u32 = 0x3b5cf6;
-pub(crate) const ACCENT_TEXT: u32 = 0x8390ff;
-pub(crate) const ACCENT_SURFACE: u32 = 0x1c2030;
-pub(crate) const ACCENT_BORDER: u32 = 0x2c3560;
+pub(crate) fn accent() -> u32 {
+    palette().accent
+}
+
+pub(crate) fn accent_text() -> u32 {
+    palette().accent_text
+}
+
+pub(crate) fn accent_surface() -> u32 {
+    palette().accent_surface
+}
+
+pub(crate) fn accent_border() -> u32 {
+    palette().accent_border
+}
+
 /// Text selection highlight: the accent at one-third opacity.
-pub(crate) const SELECTION: u32 = 0x3b5cf655;
-pub(crate) const SUCCESS: u32 = 0x69d89f;
-pub(crate) const SUCCESS_SURFACE: u32 = 0x17231a;
-pub(crate) const DANGER: u32 = 0xf17471;
-pub(crate) const DANGER_SURFACE: u32 = 0x2b1718;
-pub(crate) const DANGER_BORDER: u32 = 0x66292c;
+pub(crate) fn selection() -> u32 {
+    palette().selection
+}
+
+pub(crate) fn success() -> u32 {
+    palette().success
+}
+
+pub(crate) fn success_surface() -> u32 {
+    palette().success_surface
+}
+
+pub(crate) fn danger() -> u32 {
+    palette().danger
+}
+
+pub(crate) fn danger_surface() -> u32 {
+    palette().danger_surface
+}
+
+pub(crate) fn danger_border() -> u32 {
+    palette().danger_border
+}
 
 /// One step of the type scale.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -311,22 +485,35 @@ mod tests {
 
     #[test]
     fn readable_text_meets_aa_contrast_on_every_surface() {
-        for background in [SIDEBAR, CANVAS, SURFACE, SURFACE_HOVER, SURFACE_SELECTED] {
-            for text in [TEXT_PRIMARY, TEXT_SECONDARY, TEXT_TERTIARY] {
-                let ratio = contrast(text, background);
-                assert!(
-                    ratio >= 4.5,
-                    "{text:06x} on {background:06x} is {ratio:.2}:1"
-                );
+        for palette in [DARK, LIGHT] {
+            for background in [
+                palette.sidebar,
+                palette.canvas,
+                palette.surface,
+                palette.surface_hover,
+                palette.surface_selected,
+            ] {
+                for text in [
+                    palette.text_primary,
+                    palette.text_secondary,
+                    palette.text_tertiary,
+                ] {
+                    let ratio = contrast(text, background);
+                    assert!(
+                        ratio >= 4.5,
+                        "{text:06x} on {background:06x} is {ratio:.2}:1"
+                    );
+                }
             }
-        }
-        for (text, surface) in [
-            (ACCENT_TEXT, ACCENT_SURFACE),
-            (SUCCESS, SUCCESS_SURFACE),
-            (DANGER, DANGER_SURFACE),
-        ] {
-            let ratio = contrast(text, surface);
-            assert!(ratio >= 4.5, "{text:06x} on {surface:06x} is {ratio:.2}:1");
+            for (text, surface) in [
+                (palette.accent_text, palette.accent_surface),
+                (palette.on_accent, palette.accent),
+                (palette.success, palette.success_surface),
+                (palette.danger, palette.danger_surface),
+            ] {
+                let ratio = contrast(text, surface);
+                assert!(ratio >= 4.5, "{text:06x} on {surface:06x} is {ratio:.2}:1");
+            }
         }
     }
 
