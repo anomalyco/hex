@@ -670,6 +670,16 @@ pub enum IndicatorPosition {
     Hidden = 2,
 }
 
+/// The desktop interface's colour scheme.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+#[repr(u8)]
+pub enum Appearance {
+    #[default]
+    Dark = 0,
+    Light = 1,
+}
+
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RecordingAudioBehavior {
@@ -819,6 +829,7 @@ pub struct AppSettings {
     /// The interface language code; `None` follows the system language.
     pub ui_language: Option<String>,
     pub indicator_position: IndicatorPosition,
+    pub appearance: Appearance,
     /// One-time settings changes already applied. A file that predates a
     /// change lacks its ID, so the change runs once on the next load; new
     /// settings start with every ID because they need none.
@@ -867,6 +878,7 @@ impl Default for AppSettings {
             paste_with_shift: false,
             ui_language: None,
             indicator_position: IndicatorPosition::default(),
+            appearance: Appearance::default(),
             migrations: MIGRATIONS.iter().map(|id| id.to_string()).collect(),
             text_replacements: Vec::new(),
         }
@@ -1076,6 +1088,7 @@ impl AppSettings {
         crate::feedback::set_volume(self.sound_effect_volume.clamp(0.0, 1.0));
         crate::desktop_i18n::apply(self.ui_language.as_deref());
         INDICATOR_POSITION.store(self.indicator_position as u8, Ordering::Relaxed);
+        crate::design_tokens::set_appearance(self.appearance);
         RECORDING_AUDIO_BEHAVIOR.store(self.recording_audio_behavior.encoded(), Ordering::Relaxed);
         DOUBLE_TAP_LOCK.store(self.double_tap_lock, Ordering::Relaxed);
         DOUBLE_TAP_ONLY.store(
@@ -1618,6 +1631,22 @@ mod tests {
                 .ends_with("Hex Meetings")
         );
         assert!(settings.text_replacements.is_empty());
+    }
+
+    #[test]
+    fn missing_appearance_starts_dark() {
+        let settings: AppSettings = serde_json::from_str("{}").unwrap();
+        assert_eq!(settings.appearance, Appearance::Dark);
+    }
+
+    #[test]
+    fn appearance_round_trips_as_snake_case() {
+        let settings: AppSettings = serde_json::from_str(r#"{"appearance":"light"}"#).unwrap();
+        assert_eq!(settings.appearance, Appearance::Light);
+        assert_eq!(
+            serde_json::to_value(settings).unwrap()["appearance"],
+            "light"
+        );
     }
 
     #[test]

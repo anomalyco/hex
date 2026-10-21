@@ -364,6 +364,8 @@ Settings                                 // settings
 ├── While dictating -> Mute / Pause media / Do nothing
 │   ├── Intentional capture only, not ordinary shortcut chords
 │   └── Pause/resume only players already reported running by macOS
+├── Appearance -> Dark / Light; open Hex windows repaint (the dictation HUD stays dark)
+├── Interface language -> System or a saved language; applies immediately
 └── Sound volume -> Immediate feedback setting; zero suppresses tones
 
 Intentional recording                    // recording.environment
@@ -374,6 +376,8 @@ Intentional recording                    // recording.environment
 ```
 
 Successful settings saves persist and project changes at safe runtime boundaries.
+Appearance and interface language are available on every platform; a palette
+change repaints every open Hex window except the dictation HUD.
 Immediate settings controls commit a candidate before changing the saved UI
 choice or applying dependent native/history effects. A failed shortcut save
 stays in capture instead of showing Saved; failed retention saves keep the old

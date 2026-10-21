@@ -47,34 +47,40 @@ outside the system: its glossy capsule is hand-tuned in HUD Lab.
 
 ### Surfaces
 
-These are the OpenCode V2 dark hierarchy, from most recessed to most elevated.
+The surface hierarchy, most recessed to most elevated; values read Dark / Light.
 
 ```ts
-SIDEBAR           #111111  // navigation column, picker language list
-SIDEBAR_HOVER     #1b1b1b  // hover on SIDEBAR rows
-CANVAS            #161616  // window base, recessed controls inside cards
-SURFACE           #1d1d1d  // cards (panel), menus
-SURFACE_HOVER     #252525  // hover on SURFACE rows and secondary buttons
-SURFACE_SELECTED  #2e2e2e  // selected row, segment, nav item
-LINE              #2a2a2a  // card borders, dividers, control borders
-LINE_STRONG       #3d3d3d  // menu borders, keycaps, toggle track, capsule edge
-SCRIM             #000000cc // every modal backdrop
+SIDEBAR           #111111 / #f0f0f0  // navigation column, picker language list
+SIDEBAR_HOVER     #1b1b1b / #e6e6e6  // hover on SIDEBAR rows
+CANVAS            #161616 / #f7f7f7  // window base, recessed controls inside cards
+SURFACE           #1d1d1d / #ffffff  // cards (panel), menus
+SURFACE_HOVER     #252525 / #f2f2f2  // hover on SURFACE rows and secondary buttons
+SURFACE_SELECTED  #2e2e2e / #e6e6e6  // selected row, segment, nav item
+LINE              #2a2a2a / #e2e2e2  // card borders, dividers, control borders
+LINE_STRONG       #3d3d3d / #c8c8c8  // menu borders, keycaps, toggle track, capsule edge
+SCRIM             #000000cc / #00000066 // every modal backdrop
 ```
 
 ### Text
 
 ```ts
-TEXT_PRIMARY    #f2f2f2  // titles, values, selected items
-TEXT_SECONDARY  #d0d0d0  // body copy, unselected list titles, button labels
-TEXT_TERTIARY   #969696  // descriptions, metadata, section labels, placeholders
-TEXT_DISABLED   #6e6e6e  // unavailable controls and idle status dots only
-ACCENT_TEXT     #8390ff  // accent text on ACCENT_SURFACE, links
-DANGER          #f17471  // errors, destructive labels
-SUCCESS         #69d89f  // ready and live states
+TEXT_PRIMARY    #f2f2f2 / #161616  // titles, values, selected items
+TEXT_SECONDARY  #d0d0d0 / #3a3a3a  // body copy, unselected list titles, button labels
+TEXT_TERTIARY   #969696 / #5f5f5f  // descriptions, metadata, section labels, placeholders
+TEXT_DISABLED   #6e6e6e / #9a9a9a  // unavailable controls and idle status dots only
+ON_ACCENT       #f2f2f2 / #ffffff  // text and glyphs on an ACCENT fill
+ACCENT_TEXT     #8390ff / #2f4ad8  // accent text on ACCENT_SURFACE, links
+DANGER          #f17471 / #c0322f  // errors, destructive labels
+SUCCESS         #69d89f / #167a46  // ready and live states
 ```
 
 `TEXT_TERTIARY` is the weakest colour allowed for readable text. It measures at
-least 4.5:1 on every surface (`readable_text_meets_aa_contrast_on_every_surface`).
+least 4.5:1 on every surface in both appearances
+(`readable_text_meets_aa_contrast_on_every_surface`).
+
+Settings › Appearance switches the active palette through
+`design_tokens::set_appearance`; every colour token reads the current palette at
+draw time, so open windows repaint on the next frame.
 
 ### Roles
 
@@ -82,13 +88,13 @@ Each role has a text or fill colour, a tinted surface, and, where needed, a
 border.
 
 ```ts
-ACCENT   #3b5cf6  ACCENT_SURFACE  #1c2030  ACCENT_BORDER  #2c3560  SELECTION #3b5cf655
-SUCCESS  #69d89f  SUCCESS_SURFACE #17231a
-DANGER   #f17471  DANGER_SURFACE  #2b1718  DANGER_BORDER  #66292c
+ACCENT   #3b5cf6 / #3b5cf6  ACCENT_SURFACE  #1c2030 / #e8ecff  ACCENT_BORDER  #2c3560 / #c3ccf8  SELECTION #3b5cf655 / #3b5cf655
+SUCCESS  #69d89f / #167a46  SUCCESS_SURFACE #17231a / #e3f5ea
+DANGER   #f17471 / #c0322f  DANGER_SURFACE  #2b1718 / #fdeaea  DANGER_BORDER  #66292c / #f0b8b8
 ```
 
 `ACCENT` is the only primary-action fill, the toggle "on" colour, and the
-focus ring.
+focus ring. Text and glyphs drawn on it use `ON_ACCENT`, never `TEXT_PRIMARY`.
 
 ### Colour
 

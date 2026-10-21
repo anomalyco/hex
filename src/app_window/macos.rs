@@ -749,15 +749,15 @@ pub(super) fn render_meeting_notes(notes: meeting::MeetingNotes) -> Div {
         .flex_col()
         .gap(px(6.0))
         .border_b_1()
-        .border_color(rgb(LINE))
+        .border_color(rgb(line()))
         .child(section_label(tr("Summary")))
         .child(
             div()
                 .text_body()
                 .text_color(rgb(if summary.is_empty() {
-                    TEXT_TERTIARY
+                    text_tertiary()
                 } else {
-                    TEXT_SECONDARY
+                    text_secondary()
                 }))
                 .child(if summary.is_empty() {
                     tr("Nothing to summarize.").to_string()
@@ -786,7 +786,7 @@ pub(super) fn meeting_status_chip(
     let live =
         matches!(status, MeetingStatus::Starting | MeetingStatus::Recording) && !stop_pending;
     Some(tag(tone, label).when(live, |chip| {
-        chip.child(status_dot(DANGER).size(px(5.0)))
+        chip.child(status_dot(danger()).size(px(5.0)))
             .flex_row_reverse()
     }))
 }
@@ -827,13 +827,13 @@ pub(super) fn transcript_lines(turns: &[TranscriptEntry]) -> Vec<TranscriptLine>
 
 /// One conversational turn: the other side on the left, the user on the
 /// right in the accent color.
-pub(super) fn transcript_turn(index: usize, line: &TranscriptLine) -> AnyElement {
-    let mine = line.source == MeetingSource::Microphone;
+pub(super) fn transcript_turn(index: usize, turn: &TranscriptLine) -> AnyElement {
+    let mine = turn.source == MeetingSource::Microphone;
     div()
         .id(("transcript-line", index))
         .flex()
         .flex_col()
-        .when_some(line.pause_before_ms, |row, pause| {
+        .when_some(turn.pause_before_ms, |row, pause| {
             row.child(
                 div()
                     .py_2()
@@ -841,10 +841,10 @@ pub(super) fn transcript_turn(index: usize, line: &TranscriptLine) -> AnyElement
                     .items_center()
                     .gap_3()
                     .text_caption()
-                    .text_color(rgb(TEXT_TERTIARY))
-                    .child(div().h(px(1.0)).flex_1().bg(rgb(LINE)))
+                    .text_color(rgb(text_tertiary()))
+                    .child(div().h(px(1.0)).flex_1().bg(rgb(line())))
                     .child(tr_fill("{} pause", &meeting_length(pause)))
-                    .child(div().h(px(1.0)).flex_1().bg(rgb(LINE))),
+                    .child(div().h(px(1.0)).flex_1().bg(rgb(line()))),
             )
         })
         .child(
@@ -852,8 +852,8 @@ pub(super) fn transcript_turn(index: usize, line: &TranscriptLine) -> AnyElement
                 .flex()
                 .flex_col()
                 .gap_1()
-                .when(mine, |turn| turn.items_end())
-                .when(!mine, |turn| turn.items_start())
+                .when(mine, |row| row.items_end())
+                .when(!mine, |row| row.items_start())
                 .child(
                     // Inset to the bubble's text, not its rounded edge.
                     div()
@@ -861,14 +861,14 @@ pub(super) fn transcript_turn(index: usize, line: &TranscriptLine) -> AnyElement
                         .flex()
                         .gap_2()
                         .text_caption()
-                        .text_color(rgb(TEXT_TERTIARY))
+                        .text_color(rgb(text_tertiary()))
                         .child(
                             div()
                                 .font_weight(FontWeight::SEMIBOLD)
-                                .text_color(rgb(if mine { ACCENT_TEXT } else { TEXT_TERTIARY }))
-                                .child(line.source.label()),
+                                .text_color(rgb(if mine { accent_text() } else { text_tertiary() }))
+                                .child(turn.source.label()),
                         )
-                        .child(line.clock.clone()),
+                        .child(turn.clock.clone()),
                 )
                 .child(
                     div()
@@ -880,18 +880,18 @@ pub(super) fn transcript_turn(index: usize, line: &TranscriptLine) -> AnyElement
                         .border_1()
                         .when(mine, |bubble| {
                             bubble
-                                .border_color(rgb(ACCENT_BORDER))
-                                .bg(rgb(ACCENT_SURFACE))
-                                .text_color(rgb(TEXT_PRIMARY))
+                                .border_color(rgb(accent_border()))
+                                .bg(rgb(accent_surface()))
+                                .text_color(rgb(text_primary()))
                         })
                         .when(!mine, |bubble| {
                             bubble
-                                .border_color(rgb(LINE))
-                                .bg(rgb(CANVAS))
-                                .text_color(rgb(TEXT_SECONDARY))
+                                .border_color(rgb(line()))
+                                .bg(rgb(canvas()))
+                                .text_color(rgb(text_secondary()))
                         })
                         .text_body()
-                        .child(line.text.clone()),
+                        .child(turn.text.clone()),
                 ),
         )
         .into_any_element()
@@ -1856,11 +1856,11 @@ impl AppWindow {
             Some(MeetingStatus::Starting) => busy_label(tr("Starting…")).into_any_element(),
             // Recording is a state, not the screen's main action: a neutral
             // button in the same red-dot language as the Recording tag.
-            Some(MeetingStatus::Recording) => button(ButtonKind::Secondary, status_dot(DANGER))
+            Some(MeetingStatus::Recording) => button(ButtonKind::Secondary, status_dot(danger()))
                 .child(tr("Stop & transcribe"))
                 .children(active_meeting.map(|meeting| {
                     div()
-                        .text_color(rgb(TEXT_TERTIARY))
+                        .text_color(rgb(text_tertiary()))
                         .child(meeting::format_duration(meeting_duration(meeting)))
                 }))
                 .id("stop-meeting")
@@ -2363,7 +2363,7 @@ impl AppWindow {
                 div()
                     .pb_5()
                     .text_footnote()
-                    .text_color(rgb(TEXT_TERTIARY))
+                    .text_color(rgb(text_tertiary()))
                     .child(tr("Writing a title and summary with Apple Intelligence…"))
             })
         });
@@ -2406,8 +2406,8 @@ impl AppWindow {
                             .items_center()
                             .gap_2()
                             .text_caption()
-                            .text_color(rgb(TEXT_TERTIARY))
-                            .child(status_dot(DANGER))
+                            .text_color(rgb(text_tertiary()))
+                            .child(status_dot(danger()))
                             .child(tr("Listening…")),
                     )
                 })
@@ -2460,7 +2460,7 @@ impl AppWindow {
                             .items_center()
                             .gap_2()
                             .child(section_label(transcript_label))
-                            .when(recording, |label| label.child(status_dot(DANGER))),
+                            .when(recording, |label| label.child(status_dot(danger()))),
                     )
                     .child(transcript),
             )
@@ -2568,7 +2568,7 @@ impl AppWindow {
                 .child(
                     div()
                         .text_footnote()
-                        .text_color(rgb(TEXT_SECONDARY))
+                        .text_color(rgb(text_secondary()))
                         .child(tr("Voice commands")),
                 )
                 .child(toggle(commands_position))
@@ -2580,7 +2580,7 @@ impl AppWindow {
             .gap_2()
             .child(config_control)
             .when_some(copy_prompt, |controls, prompt| controls.child(prompt))
-            .child(div().mx_1().w(px(1.0)).h_5().bg(rgb(LINE)))
+            .child(div().mx_1().w(px(1.0)).h_5().bg(rgb(line())))
             .child(
                 div()
                     .id("commands-enabled")
@@ -2985,7 +2985,7 @@ impl AppWindow {
                     .justify_between()
                     .text_footnote()
                     .child(label)
-                    .child(div().text_color(rgb(TEXT_TERTIARY)).child(display)),
+                    .child(div().text_color(rgb(text_tertiary())).child(display)),
             )
             .child(
                 div()
@@ -3001,7 +3001,7 @@ impl AppWindow {
                             .top(px(7.0))
                             .h(px(4.0))
                             .rounded_full()
-                            .bg(rgb(SURFACE_SELECTED)),
+                            .bg(rgb(surface_selected())),
                     )
                     .child(
                         div()
@@ -3011,7 +3011,7 @@ impl AppWindow {
                             .w(relative(value))
                             .h(px(4.0))
                             .rounded_full()
-                            .bg(rgb(ACCENT)),
+                            .bg(rgb(accent())),
                     )
                     .child(
                         div()
@@ -3022,8 +3022,8 @@ impl AppWindow {
                             .size(px(14.0))
                             .rounded_full()
                             .border_2()
-                            .border_color(rgb(TEXT_PRIMARY))
-                            .bg(rgb(SURFACE_SELECTED)),
+                            .border_color(rgb(text_primary()))
+                            .bg(rgb(surface_selected())),
                     )
                     .on_mouse_down(
                         MouseButton::Left,
@@ -3090,10 +3090,19 @@ impl AppWindow {
                         .gap_1()
                         .rounded(RADIUS_PANEL)
                         .border_1()
-                        .border_color(rgb(if selected { ACCENT } else { LINE }))
-                        .bg(rgb(if selected { ACCENT_SURFACE } else { SURFACE }))
-                        .hover(|card| card.bg(rgb(SURFACE_HOVER)))
-                        .child(div().text_caption().text_color(rgb(ACCENT_TEXT)).child(key))
+                        .border_color(rgb(if selected { accent() } else { line() }))
+                        .bg(rgb(if selected {
+                            accent_surface()
+                        } else {
+                            surface()
+                        }))
+                        .hover(|card| card.bg(rgb(surface_hover())))
+                        .child(
+                            div()
+                                .text_caption()
+                                .text_color(rgb(accent_text()))
+                                .child(key),
+                        )
                         .child(
                             div()
                                 .text_body()
@@ -3103,7 +3112,7 @@ impl AppWindow {
                         .child(
                             div()
                                 .text_caption()
-                                .text_color(rgb(TEXT_TERTIARY))
+                                .text_color(rgb(text_tertiary()))
                                 .child(description),
                         )
                         .on_click(
@@ -3199,7 +3208,7 @@ impl AppWindow {
                                     .child(
                                         div()
                                             .text_caption()
-                                            .text_color(rgb(TEXT_TERTIARY))
+                                            .text_color(rgb(text_tertiary()))
                                             .child("Queued"),
                                     )
                                     .child(
@@ -3228,11 +3237,11 @@ impl AppWindow {
                             .p_3()
                             .rounded(RADIUS_PANEL)
                             .border_1()
-                            .border_color(rgb(LINE))
-                            .bg(rgb(SURFACE))
+                            .border_color(rgb(line()))
+                            .bg(rgb(surface()))
                             .text_monospace()
                             .text_caption()
-                            .text_color(rgb(TEXT_SECONDARY))
+                            .text_color(rgb(text_secondary()))
                             .child(preset),
                     ),
             ))
