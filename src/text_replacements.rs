@@ -202,11 +202,23 @@ fn phrase_boundary(text: &str, start: usize, end: usize) -> bool {
 }
 
 fn word_character(character: char) -> bool {
-    static WORD_CHARACTER: OnceLock<Regex> = OnceLock::new();
-    let mut encoded = [0; 4];
-    WORD_CHARACTER
-        .get_or_init(|| Regex::new(r"^\w$").expect("Unicode word regex must compile"))
-        .is_match(character.encode_utf8(&mut encoded))
+    space_delimited_script(character) && (character.is_alphanumeric() || character == '_')
+}
+
+/// Scripts that do not put spaces between words, or attach particles to the
+/// word they modify. Their characters are Unicode word characters, so a phrase
+/// surrounded by them would never look like it stands on its own and
+/// replacements inside these sentences would never match.
+fn space_delimited_script(character: char) -> bool {
+    static UNSPACED: OnceLock<Regex> = OnceLock::new();
+    let unspaced = UNSPACED.get_or_init(|| {
+        Regex::new(
+            r"^[\p{Han}\p{Hiragana}\p{Katakana}\p{Hangul}\p{Thai}\p{Lao}\p{Khmer}\p{Myanmar}\p{Tibetan}]$",
+        )
+        .expect("the unspaced-script pattern is valid")
+    });
+    let mut buffer = [0; 4];
+    !unspaced.is_match(character.encode_utf8(&mut buffer))
 }
 
 #[cfg(test)]
@@ -236,6 +248,26 @@ mod tests {
             replacements.replace("reopen code, open codes, übercool"),
             "reopen code, open codes, übercool"
         );
+    }
+
+    #[test]
+    fn replaces_phrases_adjacent_to_unspaced_scripts() {
+        let replacements = ReplacementSet::new(&[
+            rule("issue", "Issue"),
+            rule("open code", "OpenCode"),
+            rule("严肃", "严肃"),
+            rule("이슈", "issue"),
+        ]);
+
+        assert_eq!(replacements.replace("这个issue很重要"), "这个Issue很重要");
+        assert_eq!(replacements.replace("用open code写"), "用OpenCode写");
+        assert_eq!(replacements.replace("ใช้issueบ่อย"), "ใช้Issueบ่อย");
+        assert_eq!(replacements.replace("이슈를 만들었다"), "issue를 만들었다");
+        assert_eq!(replacements.replace("issue很重要"), "Issue很重要");
+        assert_eq!(replacements.replace("这个很重要issue"), "这个很重要Issue");
+        assert_eq!(replacements.replace("issue_id"), "issue_id");
+        assert_eq!(replacements.replace("issue2"), "issue2");
+        assert_eq!(replacements.replace("reissues"), "reissues");
     }
 
     #[test]
