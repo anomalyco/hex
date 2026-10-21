@@ -537,6 +537,52 @@ fn live_transcription_replays_both_recorded_tracks() {
 }
 
 #[test]
+fn spanish_selection_shows_the_model_transcript_not_the_english_draft() {
+    use crate::transcription_models::{TranscriptionModelId, TranscriptionSelection};
+
+    let spanish = TranscriptionSelection {
+        model: TranscriptionModelId::ParakeetV3,
+        language: "es".into(),
+        recognition_hints: String::new(),
+    };
+    let rolling = transcript::RollingView {
+        entries: vec![TranscriptEntry {
+            source: MeetingSource::System,
+            start_ms: 0,
+            end_ms: 20_000,
+            text: "Hola a todos.".into(),
+        }],
+        ..Default::default()
+    };
+    let draft = [live_event(
+        MeetingSource::System,
+        1,
+        TranscriptPhase::Completed,
+        (1_000, 2_000),
+        "Hello everyone",
+        None,
+    )];
+    assert_eq!(
+        shown(&live::shown_while_recording(
+            &spanish,
+            &rolling,
+            draft.iter()
+        )),
+        [(MeetingSource::System, "Hola a todos.")]
+    );
+
+    let english = TranscriptionSelection::default();
+    assert_eq!(
+        shown(&live::shown_while_recording(
+            &english,
+            &transcript::RollingView::default(),
+            draft.iter(),
+        )),
+        [(MeetingSource::System, "Hello everyone")]
+    );
+}
+
+#[test]
 fn rolling_entries_replace_the_live_draft_for_the_time_they_cover() {
     let entry = |source, start_ms, end_ms, text: &str| TranscriptEntry {
         source,

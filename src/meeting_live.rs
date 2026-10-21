@@ -78,7 +78,11 @@ impl TranscriptReader {
 
         self.read_live_tail(&directory.join("transcript.live.ndjson"))?;
         self.read_rolling(&directory.join(super::transcript::ROLLING_FILE))?;
-        Ok(live_view(&self.rolling, self.live_events.values()))
+        Ok(shown_while_recording(
+            &crate::app_settings::transcription_selection().1,
+            &self.rolling,
+            self.live_events.values(),
+        ))
     }
 
     fn read_rolling(&mut self, path: &Path) -> Result<()> {
@@ -233,6 +237,18 @@ pub(super) fn merge_rolling(
     }));
     entries.sort_by_key(|entry| entry.start_ms);
     entries
+}
+
+pub(super) fn shown_while_recording<'a>(
+    selection: &crate::transcription_models::TranscriptionSelection,
+    rolling: &RollingView,
+    events: impl IntoIterator<Item = &'a Event>,
+) -> Vec<TranscriptEntry> {
+    if crate::transcription_models::use_english_meeting_draft(selection) {
+        live_view(rolling, events)
+    } else {
+        live_view(rolling, std::iter::empty())
+    }
 }
 
 pub(super) fn transcribe(

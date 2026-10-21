@@ -130,11 +130,17 @@ are unverified.
 
 ```ts
 While recording                                      // meetings.live
-  -> Live draft: Moonshine, one stream per track, update every 1 s
-     ├── Packets carry their sample position in the WAV -> exact timeline
-     │   └── Dropped packets -> up to 0.5 s of silence, the rest skipped in time
-     └── Completed You line -> written once the system track is 1 s past it
-         └── System track stalled -> written after 3 s more microphone audio
+  -> Selected language is English or Auto
+     -> Live draft: Moonshine, one stream per track, update every 1 s
+        ├── Packets carry their sample position in the WAV -> exact timeline
+        │   └── Dropped packets -> up to 0.5 s of silence, the rest skipped in time
+        └── Completed You line -> written once the system track is 1 s past it
+            └── System track stalled -> written after 3 s more microphone audio
+  -> Selected language is a specific other language, such as Spanish
+     -> No Moonshine draft
+     -> The pane and Copy transcript show the selected model's rolling text,
+        then its final transcript
+     -> Option-Control-V pastes that final transcript
 
 While recording                                      // meetings.rolling
   -> Each track -> one-second blocks -> bounded queue (about 5 minutes)
@@ -540,8 +546,10 @@ Granola import: see [granola-import.md](../plans/granola-import.md).
 - No executed end-to-end recording with a real call, Screen Recording grant, or
   speakers echo in this change; see the test script in the handoff.
 - Calendar titles (EventKit) are not implemented.
-- The live Moonshine draft needs the command model; without it, the pane shows
-  rolling chunks only as they complete (about every 20–30 s).
+- The live Moonshine draft needs the command model when the selected language
+  is English or Auto. Without that model, the pane shows rolling chunks only
+  as they complete (about every 20–30 s). Parakeet v3 still identifies
+  language from the audio; it has no prompt input, the same as dictation.
 - Settings, capsule, and Meetings pane previews launched, but screenshot capture
   failed on the build host (`could not create image from window`; the Studio
   session was locked, `CGSSessionScreenIsLocked 1`). The redesigned pane is

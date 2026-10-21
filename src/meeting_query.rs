@@ -18,7 +18,7 @@ use serde::de::DeserializeOwned;
 use unicode_normalization::UnicodeNormalization;
 use unicode_normalization::char::is_combining_mark;
 
-use super::live::{Event, live_view};
+use super::live::{Event, shown_while_recording};
 use super::transcript::{RollingLine, RollingView};
 use super::{
     MeetingManifest, MeetingSource, MeetingStatus, TranscriptEntry, coalesce_transcript,
@@ -575,14 +575,20 @@ fn load(directory: &Path, id: &str, in_progress: bool) -> Result<Meeting> {
         for event in read_lines::<Event>(&directory.join("transcript.live.ndjson"), &mut warnings) {
             latest.insert((event.source, event.line_id), event);
         }
+        let selection = crate::app_settings::transcription_selection().1;
         let source = if !rolling.entries.is_empty() {
             TranscriptSource::Rolling
-        } else if !latest.is_empty() {
+        } else if !latest.is_empty()
+            && crate::transcription_models::use_english_meeting_draft(&selection)
+        {
             TranscriptSource::Draft
         } else {
             TranscriptSource::Missing
         };
-        (source, live_view(&rolling, latest.values()))
+        (
+            source,
+            shown_while_recording(&selection, &rolling, latest.values()),
+        )
     };
     entries.retain(|entry| !entry.text.trim().is_empty());
     entries.sort_by_key(|entry| entry.start_ms);
