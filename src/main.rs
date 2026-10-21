@@ -104,6 +104,7 @@ mod meeting_mcp;
 mod meeting_watcher;
 #[cfg(target_os = "macos")]
 mod microphone_activity;
+mod model_downloads;
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 #[cfg_attr(target_os = "linux", allow(dead_code))]
 mod moonshine;

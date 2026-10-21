@@ -91,8 +91,10 @@ substitute for source inspection or a second roadmap.
   `PendingTranscript` whose wait enforces the stream deadline and falls back to
   the whole clip.
 - `transcription_preparation`: application-owned model preparation shared by
-  Settings and the menu bar, with one worker, latest-choice pending admission,
+  Settings and the menu bar, with one activation worker, latest-choice pending admission,
   cancellation fences, and an installed-only path that never downloads a model.
+- `model_downloads`: independent, deduplicated catalog-model transfers with per-model
+  progress, cancellation, and retry, shared by desktop preparation and the Linux service.
 - `transcription_models`: the compiled model catalog, language recommendations,
   pinned artifact verification, and lazy installation.
 - `transcription_service`: bounded host-audio admission, hostile WAV validation,
@@ -347,8 +349,12 @@ CoreAudio formats, AppleScript details, or event serialization.
 - The menu-bar model picker lists only downloaded, available models and remembers
   each model's last selected language and recognition hints. It works without a
   Settings window. Settings and the menu bar share one preparation owner; a newer
-  choice supersedes uncommitted work, and preparation/save failures leave the old
+  choice supersedes uncommitted activation, and preparation/save failures leave the old
   selection intact. Menu-bar selections never silently download or repair a model.
+- Browsing languages and closing the picker never cancel downloads.
+  Different models download concurrently; languages that share a model share its transfer.
+  Cancel affects only that model, and older downloads finish installed without activating.
+  Activation remains serialized and only the latest explicit choice can save its selection.
 - Cohere's advertised encoder input capacity is not its recommended inference
   window. Both GGUF adapters cap Cohere chunks at the reference processor's
   35 seconds (or a stricter advertised bound); capture duration remains unlimited.

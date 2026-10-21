@@ -131,10 +131,16 @@ Launch Hex, setup incomplete              // setup.tour; full-window, own column
 │   └── Within 2 min of that relaunch -> "Reopen Hex" button; dev binaries ask to reopen
 └── Done -> paste last, Voice Action, Modes tips -> Start using Hex
 
-Settings > Local transcription
-  -> Prepare candidate
-     ├── Success -> Save selection
-     └── Failure -> Preserve previous selection and show error
+Settings > Local transcription            // setup.concurrent-model-downloads
+├── Download a model -> Browse other languages; transfer continues
+├── Download another model -> Concurrent transfers, separate progress and Cancel
+│   └── Languages sharing a model -> One transfer for that model
+├── Cancel one model -> Other transfers continue; retry resumes its partial file
+├── Close picker / Settings -> Application or Linux service keeps downloads
+└── Latest explicit model choice -> Verify -> Load -> Save selection
+    ├── Older downloads finish -> Installed, without changing the selection
+    ├── Success -> Keep the picker on the language being browsed
+    └── Failure -> Preserve previous selection and show error
 
 Permissions revoked later
   -> Settings shows the missing access and repair action
@@ -226,9 +232,11 @@ language in Settings once to establish it. No additional model is loaded at star
 just to populate the menu, and the checkmark means selected, not live-worker readiness.
 
 [transcription_preparation.rs](../../src/transcription_preparation.rs) is shared
-by Settings and the menu bar: one worker plus one replaceable pending choice.
-Closing Settings does not abandon preparation. A superseded/cancelled completion
-cannot save, and delivered menu controls are drained before accepting completions.
+by Settings and the menu bar: one activation worker plus one replaceable pending choice.
+[model_downloads.rs](../../src/model_downloads.rs) owns concurrent downloads independently of that choice, with at most one transfer per catalog model.
+The Linux service owns the same download manager and serializes model activation separately.
+Closing Settings does not abandon preparation.
+A superseded/cancelled activation cannot save, and delivered menu controls are drained before accepting completions.
 The desktop root commits through an existing editor to retain unrelated unsaved
 settings, or through persisted settings when no window exists.
 
@@ -244,6 +252,25 @@ Additional checks cover worker failure/retry, installed-only checksum verificati
 and menu choice/tag projection. These do not establish a physical menu click or
 an installed-app switch. Remembering a language does not change the language
 conditioning limitations described above.
+
+Checks for `setup.concurrent-model-downloads`: `browsing_languages_keeps_model_preparation_running`, `browsing_languages_preserves_each_models_progress`, and `model_completion_keeps_the_browsed_language_open` exercise the GPUI delegate and picker state.
+`downloads_finish_independently_and_only_the_latest_choice_loads` covers concurrent transfers, shared model/language deduplication, and late completion without activation.
+The download manager tests cover independent progress, targeted cancellation, and retry while a canceled worker exits.
+`model_locks_allow_parallel_transfers_but_exclude_the_same_artifact` uses real filesystem locks, including compatibility with the older directory lock.
+`model_downloads_survive_client_close_and_cancel_independently` covers Linux service snapshots and listener continuity with controlled download workers.
+`canceled_activation_preserves_a_newer_download_error` prevents an obsolete activation from hiding another transfer's failure.
+Neither Linux check has been run on Linux.
+These controlled checks do not prove native HTTP downloads, model inference, or installed-app interaction.
+The `downloading` picker preview shows two model cards with separate progress values.
+Linux service protocol 2 adds per-model cancellation and download snapshots; a version 1 client or service must restart with the matching binary, as checked by `scripts/test-linux-service.py`.
+
+**Observed October 20, 2026:** the language-browse GPUI regression failed with the old cancellation handler and passed after its removal.
+An isolated macOS verification checkout passed 653 tests (19 ignored), the 12 keyboard-layout child scenarios, and the MCP integration test; 37 focused tests passed after the final download-lock changes.
+That checkout substitutes a constant only for the unrelated Apple Intelligence context-size bridge, because the installed Xcode 26.3 SDK lacks `SystemLanguageModel.contextSize`; the repository's unmodified native build remains blocked by that SDK mismatch.
+Formatting, whitespace checks, and strict all-target/all-feature Clippy passed; Clippy used the same SDK compatibility checkout.
+A separate harness ran the production download manager, preparation owner, and model-file helpers with native model loading disabled; all 25 checks passed.
+The debug picker preview was captured with `scripts/capture-preview.sh` and inspected with two progress bars and independent Cancel buttons.
+Native HTTP transfers, release inference, Linux service execution, and Windows execution remain unverified; the local Docker engine could not create a container because of a disk I/O error.
 
 **Observed September 4, 2026 (2.1.16):** all 455 Rust tests
 passed in debug and release, with ten opt-in tests skipped per profile. All twelve
@@ -263,9 +290,11 @@ Settings picker > Downloaded model card   // setup.delete-model; macOS
 └── Language change, model choice, or closing the picker -> Confirmation cleared
 ```
 
-Deletion takes the shared model-directory download lock without waiting, so it
-cannot race a Settings, menu-bar, or local API download. The menu bar drops a
-deleted model because it reads installation state when it builds the menu. Linux
+Deletion takes the model's exclusive lock without waiting, so it cannot race a Settings, menu-bar, or local API download of that artifact.
+Other models may continue downloading.
+A shared directory lock also coordinates with older Hex processes that lock the entire directory exclusively.
+The menu bar drops a deleted model because it reads installation state when it builds the menu.
+Linux
 Settings does not offer deletion: the service owns model files and has no delete
 request yet.
 

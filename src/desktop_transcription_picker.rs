@@ -65,7 +65,7 @@ pub(crate) struct TranscriptionPickerView {
 }
 
 pub(crate) trait TranscriptionPickerDelegate: Sized + 'static {
-    fn cancel_transcription_preparation(&mut self);
+    fn cancel_transcription_preparation(&mut self, model: TranscriptionModelId);
     fn choose_transcription_model(
         &mut self,
         model: TranscriptionModelId,
@@ -293,7 +293,7 @@ pub(crate) fn render_transcription_picker<T: TranscriptionPickerDelegate>(
             .on_click(cx.listener(move |this, _, _, cx| {
                 cx.stop_propagation();
                 if preparing {
-                    this.cancel_transcription_preparation();
+                    this.cancel_transcription_preparation(definition.id);
                 } else if !active {
                     this.choose_transcription_model(definition.id, language.clone(), cx);
                 }

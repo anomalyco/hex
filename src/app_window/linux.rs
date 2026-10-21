@@ -343,8 +343,11 @@ impl AppWindow {
         true
     }
 
-    pub(super) fn platform_cancel_transcription(&mut self) -> bool {
-        self.send(Request::CancelModel);
+    pub(super) fn platform_cancel_transcription(
+        &mut self,
+        model: crate::transcription_models::TranscriptionModelId,
+    ) -> bool {
+        self.send(Request::CancelModelFor { model });
         true
     }
 
@@ -352,7 +355,14 @@ impl AppWindow {
         let transcription = &self.platform.client.state.as_ref()?.desktop.transcription;
         Some(PreparationStatus {
             model: transcription.preparing,
-            downloaded_bytes: transcription.downloaded_bytes,
+            downloaded_bytes: transcription
+                .downloads
+                .iter()
+                .find(|download| Some(download.model) == transcription.preparing)
+                .map_or(transcription.downloaded_bytes, |download| {
+                    download.downloaded_bytes
+                }),
+            downloads: transcription.downloads.clone(),
             started: self.platform.preparing.map(|(_, started)| started),
             error: transcription.error.clone(),
         })
@@ -445,7 +455,6 @@ impl AppWindow {
         self.transcription_hints
             .entity
             .update(cx, |input, cx| input.set_text(&hints, cx));
-        self.transcription_picker_language = None;
         true
     }
 

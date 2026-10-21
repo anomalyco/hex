@@ -108,6 +108,8 @@ struct LinuxDesktopHost {
     settings_edit: Option<SettingsEdit>,
     prepared_transcriber: Option<crate::local_transcriber::LocalTranscriber>,
     transcription_preparation: Option<TranscriptionPreparation>,
+    model_downloads: crate::model_downloads::ModelDownloads,
+    pending_transcription: Option<crate::transcription_models::TranscriptionSelection>,
     transcription_error: Option<String>,
     update: UpdateState,
     output: crate::linux_dictation::DictationOutput,
@@ -239,6 +241,7 @@ pub fn run_service(event_path: PathBuf, shutdown: &'static AtomicBool) -> Result
                             host.choose_transcription(model, language)?
                         }
                         Request::CancelModel => host.cancel_transcription_preparation(),
+                        Request::CancelModelFor { model } => host.cancel_transcription_model(model),
                         Request::ReloadSettings => host.reload_settings()?,
                         Request::Shutdown => shutdown.store(true, Ordering::Release),
                     }
@@ -334,6 +337,8 @@ impl LinuxDesktopHost {
             settings_edit: None,
             prepared_transcriber: None,
             transcription_preparation: None,
+            model_downloads: crate::model_downloads::ModelDownloads::default(),
+            pending_transcription: None,
             transcription_error: None,
             update,
             output,
@@ -476,6 +481,21 @@ impl LinuxDesktopHost {
             };
         }
 
+        for (model, result) in self.model_downloads.poll() {
+            if let Err(error) = result {
+                if self
+                    .pending_transcription
+                    .as_ref()
+                    .is_some_and(|selection| selection.model == model)
+                {
+                    self.pending_transcription = None;
+                }
+                self.transcription_error = Some(format!(
+                    "{}: {error}",
+                    crate::transcription_models::definition(model).name
+                ));
+            }
+        }
         let mut start_listener = false;
         if let Some(preparation) = self
             .transcription_preparation
@@ -486,9 +506,7 @@ impl LinuxDesktopHost {
                 .worker
                 .join()
                 .unwrap_or_else(|_| Err("model preparation worker stopped unexpectedly".into()));
-            if was_canceled {
-                self.transcription_error = None;
-            } else {
+            if !was_canceled {
                 match result {
                     Ok(prepared) => {
                         let selection = prepared.selection.clone();
@@ -514,6 +532,19 @@ impl LinuxDesktopHost {
                     }
                 }
             }
+        }
+        if self.transcription_preparation.is_none()
+            && self.settings_edit.is_none()
+            && self
+                .pending_transcription
+                .as_ref()
+                .is_some_and(|selection| !self.model_downloads.contains(selection.model))
+        {
+            let selection = self
+                .pending_transcription
+                .take()
+                .expect("pending selection exists");
+            self.prepare_transcription(selection);
         }
         if start_listener {
             self.start();
@@ -663,6 +694,8 @@ impl LinuxDesktopHost {
         self.is_running()
             || self.settings_edit.is_some()
             || self.transcription_preparation.is_some()
+            || self.pending_transcription.is_some()
+            || !self.model_downloads.is_idle()
     }
 
     fn refresh_settings_edit(&mut self) {
@@ -767,12 +800,6 @@ impl LinuxDesktopHost {
             self.transcription_error = Some(error.clone());
             return Err(color_eyre::eyre::eyre!(error));
         }
-        if self.transcription_preparation.is_some() {
-            self.cancel_transcription_preparation();
-            let error = "The previous model preparation is still stopping".to_string();
-            self.transcription_error = Some(error.clone());
-            return Err(color_eyre::eyre::eyre!(error));
-        }
         let definition = crate::transcription_models::definition(model);
         let selection = crate::transcription_models::TranscriptionSelection {
             model,
@@ -785,6 +812,23 @@ impl LinuxDesktopHost {
             },
         };
         crate::transcription_models::validate(&selection)?;
+        self.model_downloads
+            .start(model)
+            .map_err(|error| color_eyre::eyre::eyre!(error))?;
+        if let Some(preparation) = &self.transcription_preparation {
+            preparation.canceled.store(true, Ordering::Release);
+        }
+        self.pending_transcription = Some(selection);
+        self.transcription_error = None;
+        Ok(())
+    }
+
+    fn prepare_transcription(
+        &mut self,
+        selection: crate::transcription_models::TranscriptionSelection,
+    ) {
+        let model = selection.model;
+        let definition = crate::transcription_models::definition(model);
         // A running listener stops for the swap and starts again with the
         // prepared model.
         if self.is_running() {
@@ -801,12 +845,8 @@ impl LinuxDesktopHost {
         let worker_stage = stage.clone();
         let worker = std::thread::spawn(move || {
             (|| {
-                crate::transcription_models::download_with_stage_progress(
-                    definition,
-                    &worker_canceled,
-                    &worker_progress,
-                    &worker_stage,
-                )?;
+                crate::transcription_models::verify_installed(definition, &worker_canceled)?;
+                worker_progress.store(definition.download_bytes().unwrap_or(0), Ordering::Relaxed);
                 if worker_canceled.load(Ordering::Relaxed) {
                     return Err(color_eyre::eyre::eyre!("model activation canceled"));
                 }
@@ -830,10 +870,33 @@ impl LinuxDesktopHost {
             worker,
         });
         self.transcription_error = None;
-        Ok(())
+    }
+
+    fn cancel_transcription_model(
+        &mut self,
+        model: crate::transcription_models::TranscriptionModelId,
+    ) {
+        self.model_downloads.cancel(model);
+        if self
+            .pending_transcription
+            .as_ref()
+            .is_some_and(|selection| selection.model == model)
+        {
+            self.pending_transcription = None;
+        }
+        if let Some(preparation) = &self.transcription_preparation
+            && preparation.model == model
+        {
+            preparation.canceled.store(true, Ordering::Release);
+        }
+        self.transcription_error = None;
     }
 
     fn cancel_transcription_preparation(&mut self) {
+        self.pending_transcription = None;
+        for download in self.model_downloads.status() {
+            self.model_downloads.cancel(download.model);
+        }
         if let Some(preparation) = &self.transcription_preparation {
             preparation.canceled.store(true, Ordering::Relaxed);
         }
@@ -926,9 +989,16 @@ impl LinuxDesktopHost {
                 }),
                 selection: self.settings.transcription.clone(),
                 preparing: self
-                    .transcription_preparation
+                    .pending_transcription
                     .as_ref()
-                    .map(|preparation| preparation.model),
+                    .map(|selection| selection.model)
+                    .or_else(|| {
+                        self.transcription_preparation
+                            .as_ref()
+                            .filter(|preparation| !preparation.canceled.load(Ordering::Acquire))
+                            .map(|preparation| preparation.model)
+                    }),
+                downloads: self.model_downloads.status(),
             },
             update_status,
         }
@@ -1171,6 +1241,29 @@ mod tests {
     }
 
     #[test]
+    fn canceled_activation_preserves_a_newer_download_error() {
+        let mut host = host_for_edit(false);
+        host.transcription_preparation = Some(TranscriptionPreparation {
+            canceled: Arc::new(AtomicBool::new(true)),
+            model: TranscriptionModelId::ParakeetV2,
+            progress: Arc::new(AtomicU64::new(0)),
+            stage: Arc::new(AtomicU8::new(ModelPreparationStage::Loading as u8)),
+            worker: std::thread::spawn(|| Err("old activation canceled".into())),
+        });
+        host.transcription_error = Some("newer download failed".into());
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while host.transcription_preparation.is_some() {
+            host.refresh();
+            assert!(Instant::now() < deadline);
+            std::thread::yield_now();
+        }
+        assert_eq!(
+            host.transcription_error.as_deref(),
+            Some("newer download failed")
+        );
+    }
+
+    #[test]
     fn preference_edits_wait_for_stop_and_only_restart_a_previously_running_listener() {
         for running in [false, true] {
             let mut host = host_for_edit(running);
@@ -1274,6 +1367,64 @@ mod tests {
         host.refresh_settings_edit();
         assert!(host.listen_when_ready);
         assert!(editor.is_none());
+    }
+
+    #[test]
+    fn model_downloads_survive_client_close_and_cancel_independently() {
+        let mut host = host_for_edit(true);
+        let original = host.settings.transcription.clone();
+        let (started, starts) = mpsc::channel();
+        let (release_a, releases_a) = mpsc::channel();
+        let (release_b, releases_b) = mpsc::channel();
+        let releases_a = std::sync::Mutex::new(releases_a);
+        let releases_b = std::sync::Mutex::new(releases_b);
+        let a = TranscriptionModelId::ParakeetV2;
+        let b = TranscriptionModelId::ParakeetV3;
+        host.model_downloads = crate::model_downloads::ModelDownloads::with_download(Arc::new(
+            move |model, canceled, progress| {
+                progress.store(123, Ordering::Relaxed);
+                started.send(model).unwrap();
+                if model == a {
+                    releases_a.lock().unwrap().recv().unwrap();
+                    assert!(canceled.load(Ordering::Acquire));
+                } else {
+                    releases_b.lock().unwrap().recv().unwrap();
+                    assert!(!canceled.load(Ordering::Acquire));
+                }
+                Err("fixture download failed".into())
+            },
+        ));
+        host.choose_transcription(a, "en".into()).unwrap();
+        assert_eq!(starts.recv_timeout(Duration::from_secs(3)).unwrap(), a);
+        host.choose_transcription(b, "fr".into()).unwrap();
+        assert_eq!(starts.recv_timeout(Duration::from_secs(3)).unwrap(), b);
+        disconnect_editor(&mut host, &mut None, 1);
+        let snapshot = service_snapshot(&host, false);
+        let received: ServiceSnapshot =
+            serde_json::from_slice(&serde_json::to_vec(&snapshot).unwrap()).unwrap();
+        assert_eq!(received.desktop.transcription.downloads.len(), 2);
+        assert_eq!(received.desktop.transcription.preparing, Some(b));
+        assert!(!host.listener.as_ref().unwrap().stop.load(Ordering::Acquire));
+        host.cancel_transcription_model(a);
+        assert_eq!(host.pending_transcription.as_ref().unwrap().model, b);
+        release_a.send(()).unwrap();
+        release_b.send(()).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while !host.model_downloads.is_idle() {
+            host.refresh();
+            assert!(Instant::now() < deadline);
+            std::thread::yield_now();
+        }
+        assert_eq!(host.settings.transcription, original);
+        assert!(
+            host.transcription_error
+                .as_deref()
+                .unwrap()
+                .contains("fixture download failed")
+        );
+        assert!(host.pending_transcription.is_none());
+        assert!(host.transcription_preparation.is_none());
+        assert!(!host.listener.as_ref().unwrap().stop.load(Ordering::Acquire));
     }
 
     #[test]

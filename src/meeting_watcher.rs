@@ -400,7 +400,7 @@ pub fn run(shutdown: &'static AtomicBool, launch: Launch) -> Result<()> {
     }
     // The controller idles without inspecting microphone activity until the
     // user opts in to meetings (always available in developer builds).
-    let controller_worker = (!shell_preview.is_some() && !dictation_preview).then(|| {
+    let controller_worker = (shell_preview.is_none() && !dictation_preview).then(|| {
         let controller_events = event_sender.clone();
         thread::spawn(move || {
             if preview {
@@ -710,7 +710,7 @@ async fn drive_ui(
 
     loop {
         if shutdown.load(Ordering::Relaxed) {
-            ui.transcription_preparation.cancel();
+            ui.transcription_preparation.cancel_all();
             let _ = cx.update(|cx| cx.quit());
             return;
         }
@@ -806,7 +806,7 @@ async fn drive_ui(
                     Err(error) => tracing::error!(%error, "could not open Meetings"),
                 },
                 crate::status_item::StatusItemAction::Quit => {
-                    ui.transcription_preparation.cancel();
+                    ui.transcription_preparation.cancel_all();
                     cx.quit();
                 }
             });
