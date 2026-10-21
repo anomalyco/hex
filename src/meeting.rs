@@ -1399,20 +1399,17 @@ pub fn completed_transcript(
     });
     let entries = match publication {
         TranscriptPublication::Final => read_ndjson(&final_path)?,
-        TranscriptPublication::Live if live_path.exists() => {
-            let selection = crate::app_settings::transcription_selection().1;
-            let mut entries = if crate::transcription_models::use_english_meeting_draft(&selection)
-            {
+        TranscriptPublication::Live => {
+            let mut entries = if live_path.exists() {
                 live::read_completed_snapshot(&live_path)?
             } else {
-                Vec::new()
+                live::read_committed_rolling(&directory.join(transcript::ROLLING_FILE))?
             };
             if final_transcript_exists(&directory) {
                 supplement_live_transcript(&mut entries, read_ndjson(&final_path)?);
             }
             entries
         }
-        TranscriptPublication::Live => Vec::new(),
     };
     Ok(CompletedTranscript {
         publication,

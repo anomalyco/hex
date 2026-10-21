@@ -145,7 +145,9 @@ While recording                                      // meetings.live
             drafts on that track
      -> The pane shows that draft on the same path as the English lines
      -> A rolling chunk replaces the draft for the audio it covers
-     -> Option-Control-V pastes the final transcript of those committed chunks
+     -> You lines waiting for the system track stay in the draft meanwhile
+  -> No transcript.live.ndjson (any language without the Moonshine draft)
+     -> Option-Control-V pastes the committed rolling entries
 
 While recording                                      // meetings.rolling
   -> Each track -> one-second blocks -> bounded queue (about 5 minutes)
@@ -179,7 +181,10 @@ and do not run this pass. Checks:
 `draft_waits_until_two_seconds_then_every_three_seconds_of_new_audio` and
 `a_slow_pass_stops_or_waits_for_enough_new_audio` in
 [meeting_provisional.rs](../../src/meeting_provisional.rs). The tail check
-`uncommitted_tail_is_audio_the_chunker_has_not_cut` compiles on macOS only.
+`uncommitted_tail_is_audio_the_chunker_has_not_cut`, the held-back You check
+`selected_model_draft_shows_what_the_rolling_view_holds_back`, and the paste
+check `live_paste_without_a_moonshine_draft_uses_committed_rolling_entries`
+compile on macOS only and were not run in this change.
 
 Seams: segments starting before the middle of an overlap belong to the earlier
 chunk, and repeated words (two to twelve) at the join are removed.
@@ -481,7 +486,7 @@ Mac only through whatever transport the MCP client uses (stdio, or SSH).
 Concurrency: a recorder holds `active.lock`; the server probes it with a
 read-only, non-blocking shared `flock` and releases it immediately. Held ->
 `recording (in progress)` with the rolling transcript plus the live draft
-(`meeting_live::shown_while_recording`, echo-filtered), labeled provisional. Not held ->
+(`meeting_live::live_view`, echo-filtered), labeled provisional. Not held ->
 the app's recovery rules apply without writing: published `transcript.ndjson`
 is final, an unfinished draft is `interrupted`. Stale lock files from finished
 recordings read as not held. A mirror cannot see the Pro's lock, so a meeting

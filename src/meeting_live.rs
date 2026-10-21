@@ -78,11 +78,7 @@ impl TranscriptReader {
 
         self.read_live_tail(&directory.join("transcript.live.ndjson"))?;
         self.read_rolling(&directory.join(super::transcript::ROLLING_FILE))?;
-        Ok(shown_while_recording(
-            &crate::app_settings::transcription_selection().1,
-            &self.rolling,
-            self.live_events.values(),
-        ))
+        Ok(live_view(&self.rolling, self.live_events.values()))
     }
 
     fn read_rolling(&mut self, path: &Path) -> Result<()> {
@@ -237,18 +233,6 @@ pub(super) fn merge_rolling(
     }));
     entries.sort_by_key(|entry| entry.start_ms);
     entries
-}
-
-pub(super) fn shown_while_recording<'a>(
-    selection: &crate::transcription_models::TranscriptionSelection,
-    rolling: &RollingView,
-    events: impl IntoIterator<Item = &'a Event>,
-) -> Vec<TranscriptEntry> {
-    if crate::transcription_models::use_english_meeting_draft(selection) {
-        live_view(rolling, events)
-    } else {
-        live_view(rolling, std::iter::empty())
-    }
 }
 
 pub(super) fn transcribe(
@@ -414,6 +398,26 @@ pub(super) fn read_completed_snapshot(path: &Path) -> Result<Vec<TranscriptEntry
         )
         .values(),
     ))
+}
+
+/// Rolling entries of committed chunks, without the selected-model draft
+/// written after them.
+pub(super) fn read_committed_rolling(path: &Path) -> Result<Vec<TranscriptEntry>> {
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+    let RollingView {
+        entries,
+        covered_ms,
+    } = read_ndjson::<RollingLine>(path)?.into_iter().collect();
+    Ok(entries
+        .into_iter()
+        .filter(|entry| {
+            covered_ms
+                .get(entry.source)
+                .is_none_or(|covered| entry.end_ms <= covered)
+        })
+        .collect())
 }
 
 #[cfg(debug_assertions)]

@@ -537,49 +537,52 @@ fn live_transcription_replays_both_recorded_tracks() {
 }
 
 #[test]
-fn spanish_selection_shows_the_model_transcript_not_the_english_draft() {
-    use crate::transcription_models::{TranscriptionModelId, TranscriptionSelection};
+fn live_paste_without_a_moonshine_draft_uses_committed_rolling_entries() {
+    use transcript::{RollingCoverage, RollingLine};
 
-    let spanish = TranscriptionSelection {
-        model: TranscriptionModelId::ParakeetV3,
-        language: "es".into(),
-        recognition_hints: String::new(),
+    let directory = std::env::temp_dir().join(format!(
+        "voice-control-meeting-rolling-paste-{}-{}",
+        std::process::id(),
+        now_ms()
+    ));
+    fs::create_dir_all(&directory).unwrap();
+    let entry = |source, start_ms, end_ms, text: &str| {
+        RollingLine::Entry(TranscriptEntry {
+            source,
+            start_ms,
+            end_ms,
+            text: text.into(),
+        })
     };
-    let rolling = transcript::RollingView {
-        entries: vec![TranscriptEntry {
-            source: MeetingSource::System,
-            start_ms: 0,
-            end_ms: 20_000,
-            text: "Hola a todos.".into(),
-        }],
-        ..Default::default()
-    };
-    let draft = [live_event(
-        MeetingSource::System,
-        1,
-        TranscriptPhase::Completed,
-        (1_000, 2_000),
-        "Hello everyone",
-        None,
-    )];
+    let lines = [
+        RollingLine::Coverage {
+            covered_ms: RollingCoverage {
+                system: Some(20_000),
+                microphone: Some(10_000),
+            },
+        },
+        entry(MeetingSource::System, 0, 20_000, "Hola a todos."),
+        entry(MeetingSource::Microphone, 2_000, 9_000, "Buenos días."),
+        entry(MeetingSource::Microphone, 12_000, 15_000, "Esperando."),
+        entry(MeetingSource::System, 20_500, 22_000, "Borrador"),
+    ];
+    let path = directory.join(transcript::ROLLING_FILE);
+    fs::write(
+        &path,
+        lines
+            .iter()
+            .map(|line| serde_json::to_string(line).unwrap() + "\n")
+            .collect::<String>(),
+    )
+    .unwrap();
     assert_eq!(
-        shown(&live::shown_while_recording(
-            &spanish,
-            &rolling,
-            draft.iter()
-        )),
-        [(MeetingSource::System, "Hola a todos.")]
+        shown(&live::read_committed_rolling(&path).unwrap()),
+        [
+            (MeetingSource::System, "Hola a todos."),
+            (MeetingSource::Microphone, "Buenos días."),
+        ]
     );
-
-    let english = TranscriptionSelection::default();
-    assert_eq!(
-        shown(&live::shown_while_recording(
-            &english,
-            &transcript::RollingView::default(),
-            draft.iter(),
-        )),
-        [(MeetingSource::System, "Hello everyone")]
-    );
+    fs::remove_dir_all(directory).unwrap();
 }
 
 #[test]
