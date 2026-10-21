@@ -848,17 +848,19 @@ fn draft_uncommitted(
         (start, audio.to_vec())
     };
     let audio_len = samples.len();
-    let model = match load_model(model, selection) {
-        Ok(model) => model,
-        Err(error) => {
-            tracing::warn!(%error, "meeting draft could not load the model");
-            *model_failed = true;
-            return false;
-        }
+    let (elapsed, result) = {
+        let model = match load_model(model, selection) {
+            Ok(model) => model,
+            Err(error) => {
+                tracing::warn!(%error, "meeting draft could not load the model");
+                *model_failed = true;
+                return false;
+            }
+        };
+        let started = Instant::now();
+        let result = model.transcribe_segments(samples);
+        (started.elapsed(), result)
     };
-    let started = Instant::now();
-    let result = model.transcribe_segments(samples);
-    let elapsed = started.elapsed();
     let Some(track) = tracks[index].as_mut() else {
         return false;
     };
