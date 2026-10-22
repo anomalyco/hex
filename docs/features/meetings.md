@@ -231,7 +231,8 @@ Italian call the detector found speech in none of 152 invented microphone
 entries and in 32 of 33 real ones (the miss: a 40 ms "Certo." at a chunk
 boundary), and scanned the call in 1.6 s on the CPU. Invented text inside a
 chunk that also holds speech is not addressed. Without the detector every chunk
-is transcribed, as before.
+is transcribed, as before. A Whisper chunk that returns only the recognition
+hints is emptied too ([models](README.md#get-ready)).
 
 CPU: every Moonshine session (commands and the meeting draft) runs on its calling
 thread (`MOONSHINE_ORT_SINGLE_THREAD=1`, set at launch unless already set).

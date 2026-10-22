@@ -433,7 +433,9 @@ downloads with every transcription model; with a model installed earlier it
 downloads in the background at the first dictation, and launch-time preparation
 only loads it when present. It runs on the CPU. While it is missing or fails to
 load, captures above the threshold still reach the model, as before.
-Hallucinations after real speech are not addressed.
+Whisper output that only repeats the recognition hints is dropped as well
+([models](README.md#get-ready)). Other hallucinations after real
+speech are not addressed.
 `silence_gate_discards_only_near_silent_captures` and
 `speech_detector_discards_loud_captures_without_speech` in
 [dictation.rs](../../src/dictation.rs) check the policy on synthetic samples

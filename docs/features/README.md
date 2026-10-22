@@ -154,7 +154,16 @@ Apple Speech is currently excluded from the desktop picker.
 Choose a supported language              // setup.language-conditioning; macOS + Linux picker
 ├── Parakeet v3 -> Detect language from audio; selected language does not constrain output
 └── Whisper -> Use selected language to guide decoding; accuracy is not guaranteed
+    └── Recognition hints -> initial prompt; output that only repeats them is dropped
 ```
+
+Whisper reads the recognition hints as its initial prompt and, on silence or
+noise, often returns them verbatim. A segment whose text equals the hints after
+normalization (case, ASCII punctuation, spelled-out digits) is removed, in
+dictation and meetings alike; speech that contains a hint among other words is
+kept, and so is a repeat of only some hints. Checks: `prompt_echo_is_dropped`,
+`speech_containing_the_hints_is_kept`, and `only_the_echo_segment_is_removed` in
+[gguf_session.rs](../../src/gguf_session.rs).
 
 ```ts
 Settings picker or setup > model card     // setup.model-card; shared by every desktop root
