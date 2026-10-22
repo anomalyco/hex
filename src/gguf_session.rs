@@ -109,7 +109,7 @@ impl OfflineGgufSession {
             Ok("1") => true,
             _ => false,
         };
-        if !self.model.capabilities().supports_streaming {
+        if !self.model.capabilities().ok()?.supports_streaming {
             return None;
         }
         let device_type = self.model.device().ok()?.device_type;

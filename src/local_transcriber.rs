@@ -131,7 +131,7 @@ impl LocalTranscriber {
         let device = model.device()?;
         let variant = model.variant();
         let architecture = model.arch();
-        let capabilities = model.capabilities();
+        let capabilities = model.capabilities()?;
         let language = crate::gguf_session::validate_gguf_artifact(
             &path,
             definition,
