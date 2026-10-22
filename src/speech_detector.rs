@@ -55,11 +55,11 @@ pub(crate) fn contains_speech(samples: &[f32]) -> Option<bool> {
     }
 }
 
-/// Loads the detector in the background so the first dictation does not pay
-/// for it.
+/// Loads an installed detector in the background so the first dictation does
+/// not pay for it. It never downloads: preparation at launch stays offline.
 pub(crate) fn prewarm() {
     #[cfg(not(test))]
-    {
+    if transcription_models::speech_detector_installed() {
         let _ = std::thread::Builder::new()
             .name("hex-speech-detector".into())
             .spawn(|| {

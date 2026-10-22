@@ -396,18 +396,33 @@ impl DictationClip {
         loudest_window_dbfs(&self.samples[..released])
     }
 
+    /// Whether the capture holds no speech worth transcribing: its level stays
+    /// below the silence threshold or, once the speech detector is installed,
+    /// the detector finds no speech in it (a key click, the start tone, or a
+    /// noisy room).
     pub fn is_near_silent(&self) -> bool {
         let level_dbfs = self.loudest_window_dbfs();
-        let silent = level_dbfs < SILENCE_THRESHOLD_DBFS;
-        if silent {
+        if level_dbfs < SILENCE_THRESHOLD_DBFS {
             tracing::info!(
                 level_dbfs,
                 threshold_dbfs = SILENCE_THRESHOLD_DBFS,
                 audio_ms = self.duration_ms(),
                 "discarded near-silent dictation without transcribing it"
             );
+            return true;
         }
-        silent
+        let released = self.samples.len().saturating_sub(self.tail_samples);
+        let started = std::time::Instant::now();
+        if crate::speech_detector::contains_speech(&self.samples[..released]) == Some(false) {
+            tracing::info!(
+                level_dbfs,
+                audio_ms = self.duration_ms(),
+                vad_ms = started.elapsed().as_millis() as u64,
+                "discarded dictation without detected speech"
+            );
+            return true;
+        }
+        false
     }
 
     #[cfg(test)]
@@ -1059,6 +1074,20 @@ mod tests {
         assert!(!quiet_speech.is_near_silent());
         assert!((quiet_speech.loudest_window_dbfs() - -43.0).abs() < 0.5);
         assert!(!clip(tone(0.1, 16_000).collect()).is_near_silent());
+    }
+
+    #[test]
+    fn speech_detector_discards_loud_captures_without_speech() {
+        let clip = |samples: Vec<f32>| DictationClip::for_test(samples);
+        {
+            let _detector = crate::speech_detector::override_for_test(Some(false));
+            assert!(clip(tone(0.1, 16_000).collect()).is_near_silent());
+        }
+        let _detector = crate::speech_detector::override_for_test(Some(true));
+        assert!(!clip(tone(0.1, 16_000).collect()).is_near_silent());
+        // The level gate runs first: a silent capture never reaches the
+        // detector.
+        assert!(clip(vec![0.0; 16_000]).is_near_silent());
     }
 
     fn capture_time() -> CaptureInstant {

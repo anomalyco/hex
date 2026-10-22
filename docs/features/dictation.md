@@ -136,7 +136,8 @@ Release that will transcribe                          // dictate.stop-tone
   -> Linux, Windows: stop tone and mute/pause restore at the release, while the
      tail is still captured; a muted Linux output unmutes first, then the tone
      ├── Short tap or chord -> No stop tone; the start tone is retracted
-     ├── Clip later near-silent -> Tone already played; discard, nothing pasted
+     ├── Clip later near-silent or without speech -> Tone already played;
+     │   discard, nothing pasted
      └── Escape after the release -> Not bound; the clip still transcribes
   -> macOS: stop tone after the tail (up to 200 ms later; 300 ms on a stall)
   -> The silence gate ignores the tail, so a tone the microphone hears there
@@ -396,6 +397,10 @@ Finish
   ├── Near-silent capture -> Discard, no inference    // dictate.silence-gate
   │       // loudest 30 ms window (DC removed) below -50 dBFS; no paste,
   │       // History, or last-result update; process.log records the level
+  ├── Louder capture, no detected speech -> Discard, no inference
+  │       // the Silero speech detector, once installed, finds no speech of
+  │       // at least 160 ms before the release; process.log records
+  │       // audio_ms and vad_ms
   ├── Capacity available -> Accepted job -> Local transcription -> Mode processing
   │    -> Paste successful nonempty output once, at current focus
   │       // the clipboard write carries nspasteboard.org Transient and
@@ -420,11 +425,21 @@ covers hotkey, voice-delimited, and Voice Action captures on macOS, and the Linu
 hotkey loop. The local API's programmatic dictation and host-audio transcription
 are deliberately left ungated: they return the model's raw output to the caller.
 The threshold is conservative, so speech is not dropped; a noisy room, the start
-tone, or a key click can lift a capture above it, and those captures still reach
-the model. Hallucinations after real speech are not addressed.
-`silence_gate_discards_only_near_silent_captures` in
-[dictation.rs](../../src/dictation.rs) checks the level policy on synthetic
-samples, not real microphone noise floors.
+tone, or a key click can lift a capture above it. Those captures then go to the
+Silero speech detector ([speech_detector.rs](../../src/speech_detector.rs)),
+which discards them when it finds no speech. The detector (1.2 MB, pinned
+revision and checksum in [transcription_models.rs](../../src/transcription_models.rs))
+downloads with every transcription model; with a model installed earlier it
+downloads in the background at the first dictation, and launch-time preparation
+only loads it when present. It runs on the CPU. While it is missing or fails to
+load, captures above the threshold still reach the model, as before.
+Hallucinations after real speech are not addressed.
+`silence_gate_discards_only_near_silent_captures` and
+`speech_detector_discards_loud_captures_without_speech` in
+[dictation.rs](../../src/dictation.rs) check the policy on synthetic samples
+with the detector's verdict fixed; `real_detector_rejects_silence_and_noise` and
+`real_detector_hears_speech` (ignored; `HEX_VAD_MODEL`, `HEX_VAD_SPEECH_WAV`)
+run the real detector.
 Key resolution: [keyboard.rs](../../src/keyboard.rs); non-Latin layout
 fallback details live in [shortcut recovery](recovery.md#keyboard-layout-resolution).
 Checks in [parakeet.rs](../../src/parakeet.rs):
