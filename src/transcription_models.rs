@@ -446,6 +446,7 @@ pub const LANGUAGES: &[(&str, &str)] = &[
     ("it", "Italian"),
     ("ar", "Arabic"),
     ("hi", "Hindi"),
+    ("bn", "Bangla"),
     ("vi", "Vietnamese"),
     ("ru", "Russian"),
     ("uk", "Ukrainian"),
@@ -1270,6 +1271,26 @@ mod tests {
             !choices_for_runtime(AUTO_LANGUAGE)
                 .iter()
                 .any(|choice| choice.model.id == model.id)
+        );
+    }
+
+    #[test]
+    fn bangla_is_transcribed_by_whisper_with_its_language_hint() {
+        let selection = recommended_selection("bn");
+        assert_eq!(selection.model, TranscriptionModelId::WhisperLargeV3Turbo);
+        assert_eq!(selection.language, "bn");
+        let model = validate(&selection).unwrap();
+        assert_eq!(model.runtime_language_hint("bn"), Some("bn"));
+        let choices = choices_for_runtime("bn");
+        assert_eq!(choices.len(), 1);
+        assert_eq!(choices[0].recommendation, Recommendation::Recommended);
+        assert!(
+            validate(&TranscriptionSelection {
+                model: TranscriptionModelId::Qwen3Asr06B,
+                language: "bn".into(),
+                recognition_hints: String::new(),
+            })
+            .is_err()
         );
     }
 

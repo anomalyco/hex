@@ -1,15 +1,17 @@
 use gpui::{
-    AnyElement, Context, FontWeight, IntoElement, div, prelude::*, px, relative, rgb, rgba,
+    AnyElement, Context, FontWeight, IntoElement, SharedString, div, prelude::*, px, relative, rgb,
+    rgba,
 };
 
 use crate::design_tokens::*;
 use crate::desktop_i18n::{tr, tr_fill};
 use crate::desktop_ui::{
-    ButtonKind, Icon, Tone, error_panel, icon_button, menu_item, progress_track, small_button,
-    status_dot, tag,
+    ButtonKind, Icon, Tone, error_panel, icon_button, menu_item, progress_track, section_label,
+    small_button, status_dot, tag,
 };
 use crate::transcription_models::{
-    ModelChoice, ModelDefinition, TranscriptionModelId, TranscriptionSelection, language_name,
+    AUTO_LANGUAGE, ModelChoice, ModelDefinition, TranscriptionModelId, TranscriptionSelection,
+    language_name,
 };
 
 pub(crate) fn transcription_selection_is_active(
@@ -122,7 +124,11 @@ pub(crate) fn render_transcription_picker<T: TranscriptionPickerDelegate>(
                 installed_inactive = installed;
                 (
                     None,
-                    Some(if installed { tr("Use") } else { tr("Download") }),
+                    Some(if installed {
+                        use_label(&language)
+                    } else {
+                        tr("Download").into()
+                    }),
                 )
             }
             TranscriptionPickerStatus::Preparing { label, progress } => (
@@ -134,7 +140,7 @@ pub(crate) fn render_transcription_picker<T: TranscriptionPickerDelegate>(
                     }
                     None => Some(model_state(label)),
                 },
-                Some(tr("Cancel")),
+                Some(tr("Cancel").into()),
             ),
         };
         let metadata = definition
@@ -371,6 +377,9 @@ pub(crate) fn render_transcription_picker<T: TranscriptionPickerDelegate>(
                                 .bg(rgb(SIDEBAR))
                                 .border_r_1()
                                 .border_color(rgb(LINE))
+                                // Choosing a model saves this language, so the list is
+                                // labeled as a setting; the label is inset to the rows' text.
+                                .child(section_label(tr("Spoken language")).px_2().pt_1().pb_1())
                                 .children(language_rows),
                         )
                         .child(
@@ -409,6 +418,16 @@ pub(crate) fn render_transcription_picker<T: TranscriptionPickerDelegate>(
 const STREAMING_DESCRIPTION: &str = "Transcribes while you speak";
 #[cfg(not(target_os = "macos"))]
 const STREAMING_DESCRIPTION: &str = "Transcribes while you speak on a GPU";
+
+/// The Use action names the language it saves with the model; Auto leaves
+/// the language to the model.
+fn use_label(language: &str) -> SharedString {
+    if language == AUTO_LANGUAGE {
+        tr("Use").into()
+    } else {
+        tr_fill("Use for {}", language_name(language)).into()
+    }
+}
 
 /// A card's ongoing state on its trailing edge: an accent dot and a label.
 fn model_state(label: impl IntoElement) -> gpui::Div {
@@ -471,5 +490,12 @@ mod tests {
         assert!(!transcription_selection_is_active(
             &selection, model, "en", true,
         ));
+    }
+
+    #[test]
+    fn use_names_the_language_it_saves() {
+        assert_eq!(use_label("bn"), "Use for Bangla");
+        assert_eq!(use_label("zh"), "Use for Mandarin Chinese");
+        assert_eq!(use_label(AUTO_LANGUAGE), "Use");
     }
 }

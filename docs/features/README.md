@@ -152,8 +152,10 @@ Apple Speech is currently excluded from the desktop picker.
 
 ```ts
 Choose a supported language              // setup.language-conditioning; macOS + Linux picker
+├── "Spoken language" list -> Browse only; choosing a model card saves its language
 ├── Parakeet v3 -> Detect language from audio; selected language does not constrain output
-└── Whisper -> Use selected language to guide decoding; accuracy is not guaranteed
+├── Whisper -> Use selected language to guide decoding; accuracy is not guaranteed
+└── Bangla -> Whisper only, with the `bn` hint; Auto lets Whisper guess per clip
 ```
 
 ```ts
@@ -163,7 +165,8 @@ Settings picker or setup > model card     // setup.model-card; shared by every d
 │   └── Streams -> Catalog `streams` (pinned artifact advertises streaming)
 ├── Detail line -> "Transcribes while you speak" (non-macOS: "… on a GPU"),
 │                  coverage when it differs, benchmark, timestamps, Installed
-├── Trailing edge -> Active as dot + label; Cancel while preparing; else Use/Download
+├── Trailing edge -> Active as dot + label; Cancel while preparing; else
+│                    "Use for <language>" (Auto: Use) or Download
 ├── Preparing -> Progress bar with its "Downloading 37%" / "Loading model" label
 └── Speed · Size · WER
 ```
@@ -199,6 +202,15 @@ reports Portuguese speech misrecognized as English. Source and pinned-model
 metadata inspection establish the prompting limitation, not the cause or repair
 of those transcripts. No v3 audio reproduction or transcription-quality fix has
 been demonstrated.
+
+Bangla (`bn`) is offered because Whisper large-v3-turbo was trained on it; no
+other catalog model supports it, so Whisper is its only, recommended choice and a
+Mac whose first preferred language is Bangla starts on Whisper. Auto is not a
+substitute: in a manual test, Whisper's per-clip detection labeled Bangla speech
+as Arabic, Turkish, and Spanish. `bangla_is_transcribed_by_whisper_with_its_language_hint`
+checks the recommendation, the `bn` hint, and that Qwen3-ASR rejects it;
+`use_names_the_language_it_saves` checks the card label. Neither runs inference,
+and Bangla accuracy has not been measured.
 
 Checks start in [onboarding.rs](../../src/onboarding.rs),
 [transcription.rs](../../src/transcription.rs), and
