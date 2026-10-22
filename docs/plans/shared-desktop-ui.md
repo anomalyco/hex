@@ -52,5 +52,6 @@ wrote it).
 ## Interface Language
 
 Every string the shared window shows goes through `desktop_i18n::tr`,
-`tr_fill`, or `tr_named`, with Polish, Chinese, Japanese, German, and Spanish
-translations. A test fails if any translated string lacks a language.
+`tr_fill`, or `tr_named`, with Polish, Chinese, Japanese, German, Spanish,
+and Ukrainian translations. A test fails if any translated string lacks a
+language.
