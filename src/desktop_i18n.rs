@@ -227,6 +227,8 @@ const TRANSLATIONS: &[(&str, [&str; 5])] = &[
     ("Most accurate", ["Najdokładniejszy", "最准确", "最高精度", "Am genauesten", "Más preciso"]),
     ("Switches dictation to {}", ["Zmieni język dyktowania na {}", "会将听写语言切换为 {}", "音声入力言語を {} に切り替えます", "Wechselt die Diktiersprache zu {}", "Cambia el dictado a {}"]),
     ("Use", ["Użyj", "使用", "使用", "Verwenden", "Usar"]),
+    ("Use for {}", ["Użyj dla: {}", "用于 {}", "{} で使用", "Für {} verwenden", "Usar para {}"]),
+    ("Spoken language", ["Język dyktowania", "听写语言", "音声入力言語", "Diktiersprache", "Idioma del dictado"]),
     ("Download", ["Pobierz", "下载", "ダウンロード", "Herunterladen", "Descargar"]),
     ("Cancel", ["Anuluj", "取消", "キャンセル", "Abbrechen", "Cancelar"]),
     ("Active", ["Aktywny", "使用中", "有効", "Aktiv", "Activo"]),
