@@ -2351,11 +2351,12 @@ impl AppWindow {
                     .relative()
                     .child(trigger)
                     .when(self.platform.meeting_actions_open, |more| {
-                        more.child(deferred(
-                            dropdown_menu_with_progress(menu_progress)
+                        more.child(dropdown(
+                            DropdownAlign::Left,
+                            menu_progress,
+                            menu()
                                 .id("meeting-actions-menu")
                                 .debug_selector(|| "meeting-actions-menu".into())
-                                .left_0()
                                 .w(px(MENU_WIDTH))
                                 .on_mouse_down_out(cx.listener(|this, _, _, cx| {
                                     this.platform.meeting_actions_open = false;

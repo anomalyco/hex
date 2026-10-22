@@ -377,7 +377,8 @@ List (grouped Today / Yesterday / date)
     └── Recording (red dot) / Transcribing / Interrupted / Failed; Ready in detail
 Detail
 ├── Title, status chip, date · time · duration · app
-├── Actions: Copy transcript, Rename (finished only), "…" overflow menu
+├── Actions: Copy transcript, Rename (finished only), "…" overflow menu (opens
+│   above the button, or right-aligned to it, when the window has no room)
 │   └── Copy summary (stays open to show "Copied"), Reveal Markdown, Summarize /
 │       Regenerate summary ("Summarizing…" disabled while running), separator,
 │       Delete… (finished meetings only for the last three)

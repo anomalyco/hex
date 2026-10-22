@@ -3,8 +3,9 @@
 //! does which job.
 
 use gpui::{
-    AnyElement, App, Div, ElementId, FontWeight, IntoElement, Pixels, Rgba, ShapedLine,
-    SharedString, Stateful, Window, canvas, div, prelude::*, px, rgb,
+    AnyElement, App, Bounds, Deferred, Div, Element, ElementId, FontWeight, GlobalElementId,
+    InspectorElementId, IntoElement, LayoutId, Pixels, Position, Rgba, ShapedLine, SharedString,
+    Stateful, Style, Window, canvas, deferred, div, point, prelude::*, px, rgb,
 };
 
 #[cfg(any(target_os = "linux", target_os = "windows"))]
@@ -1110,15 +1111,152 @@ pub(crate) fn menu_with_progress(progress: f32) -> Div {
     menu().opacity(progress.clamp(0.0, 1.0))
 }
 
-/// A [`menu`] that drops [`MENU_OFFSET`] below the [`CONTROL_HEIGHT`] control
-/// that opens it, with entrance progress (`0.0..=1.0`) fading and sliding
-/// [`MENU_ENTER_OFFSET`] down from its trigger.
-pub(crate) fn dropdown_menu_with_progress(progress: f32) -> Div {
+/// Which edge of its trigger a [`dropdown`] lines up with when it fits.
+#[derive(Clone, Copy)]
+pub(crate) enum DropdownAlign {
+    Left,
+    Right,
+}
+
+/// Floats a [`menu`] [`MENU_OFFSET`] below the [`CONTROL_HEIGHT`] control
+/// that opens it, painted over the rest of the window. Without room it opens
+/// above the control or lines up with the control's other edge, and otherwise
+/// stays inside the window. Entrance progress (`0.0..=1.0`) fades it in and
+/// slides it [`MENU_ENTER_OFFSET`] away from the control. The control's parent
+/// must be `relative()`.
+pub(crate) fn dropdown(align: DropdownAlign, progress: f32, menu: impl IntoElement) -> Deferred {
     let progress = progress.clamp(0.0, 1.0);
-    let offset = ((1.0 - progress) * MENU_ENTER_OFFSET * 64.0).round() / 64.0;
-    menu_with_progress(progress)
-        .absolute()
-        .top(px(CONTROL_HEIGHT + MENU_OFFSET - offset))
+    deferred(DropdownPlacement {
+        align,
+        slide: px(((1.0 - progress) * MENU_ENTER_OFFSET * 64.0).round() / 64.0),
+        menu: div()
+            .absolute()
+            .opacity(progress)
+            .child(menu)
+            .into_any_element(),
+    })
+}
+
+/// Lays out over the [`CONTROL_HEIGHT`] strip of the trigger's parent and
+/// moves its menu to the first side of that strip where it fits.
+struct DropdownPlacement {
+    align: DropdownAlign,
+    slide: Pixels,
+    menu: AnyElement,
+}
+
+impl IntoElement for DropdownPlacement {
+    type Element = Self;
+
+    fn into_element(self) -> Self::Element {
+        self
+    }
+}
+
+impl Element for DropdownPlacement {
+    type RequestLayoutState = LayoutId;
+    type PrepaintState = ();
+
+    fn id(&self) -> Option<ElementId> {
+        None
+    }
+
+    fn source_location(&self) -> Option<&'static core::panic::Location<'static>> {
+        None
+    }
+
+    fn request_layout(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> (LayoutId, Self::RequestLayoutState) {
+        let menu = self.menu.request_layout(window, cx);
+        let mut style = Style {
+            position: Position::Absolute,
+            ..Style::default()
+        };
+        style.inset.top = px(0.0).into();
+        style.inset.left = px(0.0).into();
+        style.inset.right = px(0.0).into();
+        style.size.height = px(CONTROL_HEIGHT).into();
+        (window.request_layout(style, [menu], cx), menu)
+    }
+
+    fn prepaint(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        trigger: Bounds<Pixels>,
+        menu: &mut Self::RequestLayoutState,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        let menu = window.layout_bounds(*menu);
+        let size = menu.size;
+        let inset = window.client_inset().unwrap_or_default();
+        let viewport = window.viewport_size();
+        let left = trigger.left();
+        let right = trigger.right() - size.width;
+        let (preferred_x, fallback_x) = match self.align {
+            DropdownAlign::Left => (left, right),
+            DropdownAlign::Right => (right, left),
+        };
+        let x = place_on_axis(
+            preferred_x,
+            fallback_x,
+            size.width,
+            inset,
+            viewport.width - inset,
+        );
+        let below = trigger.bottom() + px(MENU_OFFSET);
+        let above = trigger.top() - px(MENU_OFFSET) - size.height;
+        let y = place_on_axis(below, above, size.height, inset, viewport.height - inset);
+        let slide = if y < trigger.top() {
+            self.slide
+        } else {
+            -self.slide
+        };
+        let offset = point(x, y + slide) - menu.origin;
+        window.with_element_offset(point(offset.x.round(), offset.y.round()), |window| {
+            self.menu.prepaint(window, cx)
+        });
+    }
+
+    fn paint(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        _: Bounds<Pixels>,
+        _: &mut Self::RequestLayoutState,
+        _: &mut Self::PrepaintState,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        self.menu.paint(window, cx);
+    }
+}
+
+/// Where a `size`-long span starts on one axis: at `preferred` when it fits
+/// within `min..max`, else at `fallback` when that fits, else shifted inside.
+fn place_on_axis(
+    preferred: Pixels,
+    fallback: Pixels,
+    size: Pixels,
+    min: Pixels,
+    max: Pixels,
+) -> Pixels {
+    let fits = |start: Pixels| start >= min && start + size <= max;
+    if fits(preferred) {
+        preferred
+    } else if fits(fallback) {
+        fallback
+    } else if preferred + size > max && max - size > min {
+        max - size
+    } else {
+        min
+    }
 }
 
 /// One choice inside a [`menu`].
@@ -1355,7 +1493,109 @@ pub(crate) fn inline_error(error: impl IntoElement) -> Div {
 
 #[cfg(test)]
 mod tests {
-    use super::{segmented_geometry, split_sided_keycap};
+    use super::{
+        ButtonKind, DropdownAlign, Icon, dropdown, icon_button, menu, place_on_axis,
+        segmented_geometry, split_sided_keycap,
+    };
+    use crate::design_tokens::{CONTROL_HEIGHT, MENU_OFFSET, MENU_WIDTH};
+    use gpui::{Context, IntoElement, Pixels, Point, Render, Window, div, point, prelude::*, px};
+
+    #[test]
+    fn dropdown_axis_prefers_its_side_then_the_other_then_stays_inside() {
+        let place = |preferred: f32, fallback: f32, size: f32| {
+            place_on_axis(px(preferred), px(fallback), px(size), px(0.0), px(300.0))
+        };
+        assert_eq!(place(150.0, 20.0, 100.0), px(150.0));
+        assert_eq!(place(250.0, 20.0, 100.0), px(20.0));
+        assert_eq!(place(-40.0, 120.0, 100.0), px(120.0));
+        assert_eq!(place(250.0, -60.0, 100.0), px(200.0));
+        assert_eq!(place(-40.0, 250.0, 100.0), px(0.0));
+        assert_eq!(place(10.0, -500.0, 400.0), px(0.0));
+    }
+
+    #[gpui::test]
+    fn dropdown_opens_on_the_sides_of_its_trigger_with_room(cx: &mut gpui::TestAppContext) {
+        struct Corner {
+            align: DropdownAlign,
+            origin: Point<Pixels>,
+            progress: f32,
+        }
+
+        impl Render for Corner {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                div().size_full().child(
+                    div()
+                        .absolute()
+                        .left(self.origin.x)
+                        .top(self.origin.y)
+                        .child(
+                            icon_button(ButtonKind::Secondary, Icon::Ellipsis)
+                                .id("trigger")
+                                .debug_selector(|| "trigger".into()),
+                        )
+                        .child(dropdown(
+                            self.align,
+                            self.progress,
+                            menu()
+                                .debug_selector(|| "menu".into())
+                                .w(px(MENU_WIDTH))
+                                .h(px(120.0)),
+                        )),
+                )
+            }
+        }
+
+        let (view, cx) = cx.add_window_view(|_, _| Corner {
+            align: DropdownAlign::Left,
+            origin: point(px(0.0), px(0.0)),
+            progress: 1.0,
+        });
+        let viewport = cx.update(|window, _| window.viewport_size());
+        let near = px(40.0);
+        let far = point(
+            viewport.width - px(CONTROL_HEIGHT) - near,
+            viewport.height - px(CONTROL_HEIGHT) - near,
+        );
+        let mut place = |align, origin, progress| {
+            view.update(cx, |view, cx| {
+                *view = Corner {
+                    align,
+                    origin,
+                    progress,
+                };
+                cx.notify();
+            });
+            cx.run_until_parked();
+            (
+                cx.debug_bounds("trigger").unwrap(),
+                cx.debug_bounds("menu").unwrap(),
+            )
+        };
+
+        let (trigger, menu) = place(DropdownAlign::Left, point(px(0.0), px(0.0)), 1.0);
+        assert_eq!(menu.left(), trigger.left());
+        assert_eq!(menu.top(), trigger.bottom() + px(MENU_OFFSET));
+
+        let (trigger, menu) = place(DropdownAlign::Left, point(far.x, px(0.0)), 1.0);
+        assert_eq!(menu.right(), trigger.right(), "no room on the right");
+        assert_eq!(menu.top(), trigger.bottom() + px(MENU_OFFSET));
+
+        let (trigger, menu) = place(DropdownAlign::Right, point(near, far.y), 1.0);
+        assert_eq!(menu.left(), trigger.left(), "no room on the left");
+        assert_eq!(
+            menu.bottom(),
+            trigger.top() - px(MENU_OFFSET),
+            "no room below"
+        );
+
+        for progress in [0.0, 0.5, 1.0] {
+            let (trigger, menu) = place(DropdownAlign::Left, far, progress);
+            assert_eq!(menu.right(), trigger.right(), "progress {progress}");
+            assert!(menu.bottom() <= trigger.top(), "progress {progress}");
+        }
+        let (trigger, menu) = place(DropdownAlign::Left, far, 1.0);
+        assert_eq!(menu.bottom(), trigger.top() - px(MENU_OFFSET));
+    }
 
     #[test]
     fn side_badges_only_apply_to_sided_modifiers() {

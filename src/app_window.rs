@@ -5,11 +5,11 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use gpui::{
-    AnyElement, AnyView, App, Bounds, Context, Div, Entity, FocusHandle, Focusable, FontWeight,
-    IntoElement, KeyDownEvent, Modifiers as GpuiModifiers, ModifiersChangedEvent, MouseButton,
-    MouseDownEvent, PathPromptOptions, Pixels, Point, Render, SharedString, StyleRefinement,
-    Subscription, Timer, TitlebarOptions, WeakEntity, Window, WindowBounds, WindowHandle,
-    WindowOptions, actions, deferred, div, img, prelude::*, px, rgb, size,
+    AnyElement, AnyView, App, Bounds, Context, Deferred, Div, Entity, FocusHandle, Focusable,
+    FontWeight, IntoElement, KeyDownEvent, Modifiers as GpuiModifiers, ModifiersChangedEvent,
+    MouseButton, MouseDownEvent, PathPromptOptions, Pixels, Point, Render, SharedString,
+    StyleRefinement, Subscription, Timer, TitlebarOptions, WeakEntity, Window, WindowBounds,
+    WindowHandle, WindowOptions, actions, div, img, prelude::*, px, rgb, size,
 };
 
 use crate::app_settings::{
@@ -27,15 +27,15 @@ use crate::desktop_transcription_picker::{
     transcription_selection_is_active,
 };
 use crate::desktop_ui::{
-    ButtonKind, Icon, NavigationIcon, Tone, busy_label, button, danger_menu_item, detail_body,
-    detail_header, detail_placeholder, detail_row, detail_title, disclosure_button,
-    disclosure_frame, dropdown_menu_with_progress, error_message, error_panel, hotkey_keycaps,
-    icon, icon_button, inline_error, list_row, list_row_meta, list_row_title, listener_status,
-    menu_item, menu_with_progress, mix_color, navigation_item, pane_body, pane_content,
-    pane_detail, pane_header, pane_header_with_action, pane_list, pane_scroll_body, panel,
-    panel_header, progress_track, section_label, settings_copy, settings_row,
-    settings_section_label, sidebar_frame, sliding_segmented_control, sliding_segmented_for,
-    sliding_segmented_item, small_button, status_dot, tag, toggle, truncated_line, window_frame,
+    ButtonKind, DropdownAlign, Icon, NavigationIcon, Tone, busy_label, button, danger_menu_item,
+    detail_body, detail_header, detail_placeholder, detail_row, detail_title, disclosure_button,
+    disclosure_frame, dropdown, error_message, error_panel, hotkey_keycaps, icon, icon_button,
+    inline_error, list_row, list_row_meta, list_row_title, listener_status, menu, menu_item,
+    menu_with_progress, mix_color, navigation_item, pane_body, pane_content, pane_detail,
+    pane_header, pane_header_with_action, pane_list, pane_scroll_body, panel, panel_header,
+    progress_track, section_label, settings_copy, settings_row, settings_section_label,
+    sidebar_frame, sliding_segmented_control, sliding_segmented_for, sliding_segmented_item,
+    small_button, status_dot, tag, toggle, truncated_line, window_frame,
 };
 use crate::developer_control::DeveloperPane;
 use crate::dictation_processor::{ModelCatalog, ModelChoice};
@@ -143,12 +143,11 @@ fn microphone_picker_menu(
     progress: f32,
     choose: impl Fn(&Option<String>, &mut Window, &mut App) + 'static,
     dismiss: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
-) -> gpui::Stateful<Div> {
+) -> Deferred {
     let choose = Rc::new(choose);
-    dropdown_menu_with_progress(progress)
+    let picker = menu()
         .id("microphone-picker")
         .debug_selector(|| "microphone-picker".into())
-        .right_0()
         .w(px(DISCLOSURE_WIDTH))
         .max_h(px(240.0))
         .overflow_y_scroll()
@@ -166,7 +165,8 @@ fn microphone_picker_menu(
                     choose(&device, window, cx);
                 })
         }))
-        .when_some(error, |picker, error| picker.child(inline_error(error)))
+        .when_some(error, |picker, error| picker.child(inline_error(error)));
+    dropdown(DropdownAlign::Right, progress, picker)
 }
 
 /// The sidebar's Update button, shown while an update is available.
@@ -2615,10 +2615,11 @@ impl AppWindow {
         let retention_control = div().relative().child(retention_control).when(
             self.history_retention_open || (!cfg!(test) && retention_menu_progress > 0.01),
             |control| {
-                control.child(deferred(
-                    dropdown_menu_with_progress(retention_menu_progress)
+                control.child(dropdown(
+                    DropdownAlign::Right,
+                    retention_menu_progress,
+                    menu()
                         .id("history-retention-menu")
-                        .right_0()
                         .w(px(MENU_WIDTH))
                         .on_mouse_down_out(cx.listener(|this, _, _, cx| {
                             this.history_retention_open = false;
@@ -3630,9 +3631,8 @@ impl AppWindow {
         );
         let menu =
             (self.interface_language_open || (!cfg!(test) && menu_progress > 0.01)).then(|| {
-                dropdown_menu_with_progress(menu_progress)
+                let picker = menu()
                     .id("interface-language-picker")
-                    .right_0()
                     .w(px(DISCLOSURE_WIDTH))
                     .max_h(px(240.0))
                     .overflow_y_scroll()
@@ -3660,7 +3660,8 @@ impl AppWindow {
                                         }
                                     }))
                             }),
-                    )
+                    );
+                dropdown(DropdownAlign::Right, menu_progress, picker)
             });
         div()
             .relative()
@@ -3673,7 +3674,7 @@ impl AppWindow {
                         cx.notify();
                     })),
             )
-            .children(menu.map(deferred))
+            .children(menu)
             .into_any_element()
     }
 
@@ -4032,7 +4033,7 @@ impl AppWindow {
                                             this.toggle_microphone_picker(cx)
                                         })),
                                 )
-                                .children(microphone_picker.map(deferred)),
+                                .children(microphone_picker),
                         ))
                         .when(
                             transcription_model.supports_recognition_hints,
@@ -9142,7 +9143,7 @@ mod tests {
                             .relative()
                             .w(px(220.0))
                             .child(disclosure_button("Automatic").id("anchor"))
-                            .child(deferred(microphone_picker_menu(
+                            .child(microphone_picker_menu(
                                 vec![None, Some("Studio Microphone".into())],
                                 None,
                                 None,
@@ -9151,7 +9152,7 @@ mod tests {
                                     chosen.borrow_mut().chosen = Some(device.clone());
                                 },
                                 move |_, _, _| dismissed.borrow_mut().dismissed += 1,
-                            )))
+                            ))
                             .child(
                                 div()
                                     .id("beneath")
@@ -9218,6 +9219,20 @@ mod tests {
         cx.simulate_click(outside.center(), GpuiModifiers::default());
         cx.run_until_parked();
         assert_eq!(observed.borrow().dismissed, 1);
+
+        let below_menu = gpui::point(menu.center().x, menu.bottom() + px(MENU_OFFSET));
+        assert!(
+            beneath.contains(&below_menu),
+            "fixture must place the control just under the menu"
+        );
+        cx.simulate_click(below_menu, GpuiModifiers::default());
+        cx.run_until_parked();
+        let observed = observed.borrow();
+        assert_eq!(
+            observed.beneath_clicks, 1,
+            "a click just under the menu missed the control"
+        );
+        assert_eq!(observed.dismissed, 2);
     }
 
     #[test]
