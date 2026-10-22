@@ -43,7 +43,7 @@ serde_json = "1.0.151"
 sha2 = "0.11.0"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
-transcribe-cpp = "=0.2.4"
+transcribe-cpp = "=0.4.0"
 transcribe-rs = { git = "https://github.com/cjpais/transcribe-rs", rev = "e37c66b6df43af51fde8dec34f98a07aaf09564c", features = ["onnx"], optional = true }
 unicode-segmentation = "1.13.3"
 url = "2.5.8"
@@ -83,7 +83,7 @@ ed25519-dalek = "3.0.0"
 gpui = { version = "0.2.2", default-features = false, features = ["font-kit", "wayland", "x11"] }
 gtk = "0.18.2"
 gtk-layer-shell = { version = "0.8.2", features = ["v0_6"] }
-transcribe-cpp = { version = "=0.2.4", features = ["vulkan"] }
+transcribe-cpp = { version = "=0.4.0", features = ["vulkan"] }
 x11-clipboard = "0.9.3"
 x11rb = { version = "0.14.0", features = ["xtest"] }
 
@@ -119,7 +119,7 @@ windows-future = "0.3.2"
 # as Handy ships it: ggml's ARM CPU backend needs clang-cl, and Vulkan drivers
 # on Windows-on-ARM are not a dependable target yet.
 [target.'cfg(all(target_os = "windows", target_arch = "x86_64"))'.dependencies]
-transcribe-cpp = { version = "=0.2.4", features = ["vulkan"] }
+transcribe-cpp = { version = "=0.4.0", features = ["vulkan"] }
 
 # GPUI 0.2.2 plus:
 # 1. Wayland XKB early-return when key/modifier events arrive before any keymap (from Hona/gpui a0c6474).

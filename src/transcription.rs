@@ -28,7 +28,7 @@ pub struct TranscriptSegment {
     pub text: String,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Transcript {
     pub text: String,

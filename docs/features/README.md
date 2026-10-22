@@ -154,7 +154,20 @@ Apple Speech is currently excluded from the desktop picker.
 Choose a supported language              // setup.language-conditioning; macOS + Linux picker
 ├── Parakeet v3 -> Detect language from audio; selected language does not constrain output
 └── Whisper -> Use selected language to guide decoding; accuracy is not guaranteed
+    └── Recognition hints -> initial prompt; output that only repeats them is dropped
 ```
+
+Whisper reads the recognition hints as its initial prompt and, on silence or
+noise, often returns them verbatim. A segment whose text equals the hints after
+normalization (case, ASCII punctuation, spelled-out digits; commas, semicolons
+and line breaks separate words) is removed, in dictation, meetings, and the
+local API alike. The filter needs at least two hints, so dictating the one
+listed name still pastes it; speech that contains a hint among other words is
+kept, and so is a repeat of only some hints. Checks: `prompt_echo_is_dropped`,
+`speech_containing_the_hints_is_kept`, `only_the_echo_segment_is_removed`,
+`single_hint_dictation_is_kept`, and
+`hints_without_spaces_after_commas_are_matched` in
+[gguf_session.rs](../../src/gguf_session.rs).
 
 ```ts
 Settings picker or setup > model card     // setup.model-card; shared by every desktop root
@@ -853,7 +866,8 @@ Capture                                  // hex app and hex dictate
 ├── Hold passes 300 ms -> While dictating mute/pause begins, never at the press
 ├── Finish retained recording -> Stop sound at the release, while the 200 ms
 │   tail is still captured; a muted output unmutes first   // dictate.stop-tone
-│   └── Clip turns out near-silent -> Stop sound already played, nothing pasted
+│   └── Clip turns out near-silent or speechless -> Stop sound already played,
+│       nothing pasted
 ├── Brief discarded tap -> Start sound, but no stop sound or transcription
 └── Cancel active capture -> Cancel sound; idle Escape stays silent
 ```
@@ -898,7 +912,8 @@ layout evidence.
 TypeScript SDK + macOS local service
 ├── Caller records audio -> Explicit helper -> Raw transcription
 ├── Running desktop capture API -> Separate microphone ownership protocol
-│   └── No silence gate                  // raw model output, unlike hotkey dictation
+│   └── No silence gate                  // model output, unlike hotkey dictation;
+│                                         // only Whisper hint echoes are dropped
 └── Distribution
     ├── SDK 0.3.0 -> Published
     └── Turnkey signed helper -> Unfinished

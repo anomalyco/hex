@@ -184,6 +184,8 @@ While recording                                      // meetings.rolling
      ├── First pause after 20 s (pause segmenter) -> chunk boundary
      └── No pause by 30 s -> hard cut; next chunk overlaps 2 s
   -> Each chunk runs on dictation's loaded model, only while dictation is idle
+     ├── No speech detected (Silero, once installed) -> empty transcript, no
+     │   inference; coverage still advances
      └── A dictation request or live stream came first -> retried once idle
   -> Timed words -> sentences (punctuation or a 600 ms pause)
   -> transcript.rolling.ndjson: per-track coverage line, then entries
@@ -218,6 +220,20 @@ meeting loads its own transcriber as before.
 
 Seams: segments starting before the middle of an overlap belong to the earlier
 chunk, and repeated words (two to twelve) at the join are removed.
+
+Speechless chunks: models invent text for silence and noise ("Thank you",
+"Grazie a tutti", or the recognition hints), so every chunk first goes through
+the Silero speech detector used by dictation (see
+[dictation](dictation.md#ongoing-jobs-and-output)). A chunk with no speech of at
+least 160 ms becomes an empty transcript without inference, in rolling
+transcription, the Stop & Transcribe fallback, and `meeting echo`. In a probe
+outside the tree, run on each microphone entry of one 63-minute Italian call,
+the detector found speech in 1 of 152 invented entries (a "Grazie a tutti.")
+and in 32 of 33 real ones (the miss: a 40 ms "Certo." at a chunk boundary), and
+scanned the call in 1.6 s on the CPU. Invented text inside a
+chunk that also holds speech is not addressed. Without the detector every chunk
+is transcribed, as before. A Whisper chunk that returns only the recognition
+hints is emptied too ([models](README.md#get-ready)).
 
 CPU: every Moonshine session (commands and the meeting draft) runs on its calling
 thread (`MOONSHINE_ORT_SINGLE_THREAD=1`, set at launch unless already set).
@@ -338,6 +354,8 @@ Other checks:
 `continuous_speech_is_hard_cut_with_overlap_and_covers_every_sample`,
 `chunks_end_at_the_first_pause_after_the_target_length`,
 `overlapping_chunks_join_at_the_middle_of_the_overlap`, `seam_drops_repeated_words`,
+`speechless_chunks_skip_the_model_and_still_advance_coverage`,
+`a_speechless_chunk_after_an_overlap_keeps_earlier_entries`,
 `speaker_echo_of_remote_speech_is_dropped`, `word_level_echo_is_dropped_as_one_utterance`,
 `distinct_or_distant_local_speech_is_kept`,
 `live_timestamps_preserve_dropped_packet_gaps_and_match_final_origin`, and

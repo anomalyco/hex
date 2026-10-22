@@ -164,7 +164,8 @@ Release that will transcribe                          // dictate.stop-tone
   -> Stop tone and mute/pause/sleep restore at the release, while the tail is
      still captured; a muted output (macOS, Linux) unmutes first, then the tone
      ├── Short tap or chord -> No stop tone; the start tone is retracted
-     ├── Clip later near-silent -> Tone already played; discard, nothing pasted
+     ├── Clip later near-silent or without speech -> Tone already played;
+     │   discard, nothing pasted
      └── Escape after the release -> Not bound; the clip still transcribes
   -> macOS: the audio owner announces it before draining the tail; HUD
      Transcribing and submission still follow the tail
@@ -433,6 +434,10 @@ Finish
   ├── Near-silent capture -> Discard, no inference    // dictate.silence-gate
   │       // loudest 30 ms window (DC removed) below -50 dBFS; no paste,
   │       // History, or last-result update; process.log records the level
+  ├── Louder capture, no detected speech -> Discard, no inference
+  │       // the Silero speech detector, once installed, finds no speech of
+  │       // at least 160 ms before the release; process.log records
+  │       // audio_ms and vad_ms (at debug level when speech passes)
   ├── Capacity available -> Accepted job -> Local transcription -> Mode processing
   │    -> Paste successful nonempty output once, at current focus
   │       // the clipboard write carries nspasteboard.org Transient and
@@ -455,13 +460,30 @@ The silence gate stops models from hallucinating closing phrases such as "thank
 you" on an empty hold ([#108](https://github.com/anomalyco/hex/issues/108)). It
 covers hotkey, voice-delimited, and Voice Action captures on macOS, and the Linux
 hotkey loop. The local API's programmatic dictation and host-audio transcription
-are deliberately left ungated: they return the model's raw output to the caller.
+are deliberately left ungated: they skip both silence checks, and only Whisper
+output that repeats the recognition hints is dropped there.
 The threshold is conservative, so speech is not dropped; a noisy room, the start
-tone, or a key click can lift a capture above it, and those captures still reach
-the model. Hallucinations after real speech are not addressed.
-`silence_gate_discards_only_near_silent_captures` in
-[dictation.rs](../../src/dictation.rs) checks the level policy on synthetic
-samples, not real microphone noise floors.
+tone, or a key click can lift a capture above it. Those captures then go to the
+Silero speech detector ([speech_detector.rs](../../src/speech_detector.rs)),
+which discards them when it finds no speech. The detector (1.2 MB, pinned
+revision and checksum in [transcription_models.rs](../../src/transcription_models.rs))
+downloads in the background whenever a transcription model is downloaded or
+activated, and at the first dictation, so an installed model still activates at
+once offline. On macOS, launch-time preparation loads it when present and never
+downloads it. It runs on the CPU with a speech threshold of 0.4 instead of
+Silero's 0.5, which misses a whisper at -43 dBFS. While it is missing or fails to
+load, captures above the threshold still reach the model, as before.
+Whisper output that only repeats the recognition hints is dropped as well
+([models](README.md#get-ready)). Other hallucinations after real
+speech are not addressed.
+`silence_gate_discards_only_near_silent_captures` and
+`speech_detector_discards_loud_captures_without_speech` in
+[dictation.rs](../../src/dictation.rs) check the policy on synthetic samples
+with the detector's verdict fixed; `real_detector_rejects_silence_and_noise`,
+`real_detector_hears_speech`, and `real_detector_hears_quiet_whispers` (ignored;
+`HEX_VAD_MODEL`, `HEX_VAD_SPEECH_WAV`, `HEX_VAD_WHISPER_WAV`) run the real
+detector, and `an_installed_model_does_not_wait_for_the_speech_detector` checks
+the background download.
 Key resolution: [keyboard.rs](../../src/keyboard.rs); non-Latin layout
 fallback details live in [shortcut recovery](recovery.md#keyboard-layout-resolution).
 Checks in [parakeet.rs](../../src/parakeet.rs):

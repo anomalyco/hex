@@ -128,6 +128,7 @@ mod recognition;
 mod recording_environment;
 #[cfg(target_os = "macos")]
 mod sparkle;
+mod speech_detector;
 #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
 mod spoken_text;
 #[cfg(target_os = "macos")]
