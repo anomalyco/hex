@@ -168,19 +168,18 @@ pub struct GgufArtifact {
     pub variant: &'static str,
 }
 
+impl GgufArtifact {
+    fn download_url(&self) -> String {
+        format!(
+            "https://huggingface.co/{}/resolve/{}/{}",
+            self.repository, self.revision, self.filename
+        )
+    }
+}
+
 impl ModelDefinition {
     pub const fn available(&self) -> bool {
         !matches!(self.runtime, ModelRuntime::AppleSpeech)
-    }
-
-    fn download_url(&self) -> Result<String> {
-        let ModelRuntime::Gguf(artifact) = self.runtime else {
-            bail!("{} is managed by macOS and has no GGUF artifact", self.name);
-        };
-        Ok(format!(
-            "https://huggingface.co/{}/resolve/{}/{}",
-            artifact.repository, artifact.revision, artifact.filename
-        ))
     }
 
     pub fn supports_language(&self, language: &str) -> bool {
@@ -305,6 +304,19 @@ const COHERE_ARTIFACT: GgufArtifact = GgufArtifact {
     architecture: "cohere_asr",
     variant: "cohere-transcribe-03-2026",
 };
+/// Silero VAD v6.2. Dictation and meetings skip audio it finds no speech in,
+/// because models hallucinate closing phrases such as "thank you" on silence
+/// and room noise. It downloads with every transcription model.
+pub const SPEECH_DETECTOR_ARTIFACT: GgufArtifact = GgufArtifact {
+    filename: "silero-vad-v6.2-F32.gguf",
+    revision: "a9b2d61c20ae4ddf3644edb34969e8185a485448",
+    repository: "handy-computer/silero-vad-v6.2-gguf",
+    bytes: 1_241_056,
+    sha256: "0d871a800c420fdd5d1b17a3aea4296d1c39608f0ff4a9295eb76457eb1c88e6",
+    architecture: "silero_vad",
+    variant: "v6.2",
+};
+const SPEECH_DETECTOR_NAME: &str = "the speech detector";
 
 pub const MODELS: &[ModelDefinition] = &[
     ModelDefinition {
@@ -714,6 +726,10 @@ fn verification_receipt_matches(path: &Path, model: &ModelDefinition) -> bool {
     let ModelRuntime::Gguf(artifact) = model.runtime else {
         return false;
     };
+    artifact_receipt_matches(path, artifact)
+}
+
+fn artifact_receipt_matches(path: &Path, artifact: &GgufArtifact) -> bool {
     let Ok(metadata) = fs::metadata(path) else {
         return false;
     };
@@ -750,6 +766,45 @@ pub fn download_with_stage_progress(
     let ModelRuntime::Gguf(artifact) = model.runtime else {
         bail!("{} is installed and managed by macOS", model.name);
     };
+    let path = download_artifact(artifact, model.name, canceled, downloaded_bytes, stage)?;
+    // Best effort: without the speech detector, dictation and meetings keep
+    // their level-only silence handling.
+    if let Err(error) = download_speech_detector(canceled) {
+        tracing::warn!(%error, "could not download the speech detector");
+    }
+    Ok(path)
+}
+
+/// Downloads the speech detector unless a verified copy is installed.
+pub fn download_speech_detector(canceled: &AtomicBool) -> Result<PathBuf> {
+    download_artifact(
+        &SPEECH_DETECTOR_ARTIFACT,
+        SPEECH_DETECTOR_NAME,
+        canceled,
+        &AtomicU64::new(0),
+        &AtomicU8::new(ModelPreparationStage::Downloading as u8),
+    )
+}
+
+pub fn speech_detector_path() -> Result<PathBuf> {
+    Ok(models_dir()?.join(SPEECH_DETECTOR_ARTIFACT.filename))
+}
+
+/// Whether the speech detector is installed at its pinned size. Its checksum
+/// is checked when it downloads.
+pub fn speech_detector_installed() -> bool {
+    speech_detector_path()
+        .and_then(|path| Ok(fs::metadata(path)?.len() == SPEECH_DETECTOR_ARTIFACT.bytes))
+        .unwrap_or(false)
+}
+
+fn download_artifact(
+    artifact: &GgufArtifact,
+    name: &str,
+    canceled: &AtomicBool,
+    downloaded_bytes: &AtomicU64,
+    stage: &AtomicU8,
+) -> Result<PathBuf> {
     ModelPreparationStage::Downloading.store(stage);
     check_canceled(canceled)?;
     let directory = models_dir()?;
@@ -758,14 +813,14 @@ pub fn download_with_stage_progress(
     check_canceled(canceled)?;
     let destination = directory.join(artifact.filename);
     if destination.exists() {
-        if is_verified(model) {
+        if artifact_receipt_matches(&destination, artifact) {
             downloaded_bytes.store(artifact.bytes, Ordering::Relaxed);
             return Ok(destination);
         }
         ModelPreparationStage::Verifying.store(stage);
-        match verify_file_with_cancel(&destination, model, canceled) {
+        match verify_artifact(&destination, artifact, name, canceled) {
             Ok(()) => {
-                write_verification_receipt(&destination, model)?;
+                write_artifact_receipt(&destination, artifact)?;
                 downloaded_bytes.store(artifact.bytes, Ordering::Relaxed);
                 return Ok(destination);
             }
@@ -787,7 +842,8 @@ pub fn download_with_stage_progress(
             &partial,
             &destination,
             &directory,
-            model,
+            artifact,
+            name,
             canceled,
             downloaded_bytes,
             stage,
@@ -821,7 +877,7 @@ pub fn download_with_stage_progress(
             "--output",
         ])
         .arg(&partial)
-        .arg(model.download_url()?)
+        .arg(artifact.download_url())
         .stderr(Stdio::piped())
         .spawn()
         .wrap_err("could not start model download")?;
@@ -859,7 +915,8 @@ pub fn download_with_stage_progress(
         &partial,
         &destination,
         &directory,
-        model,
+        artifact,
+        name,
         canceled,
         downloaded_bytes,
         stage,
@@ -872,24 +929,24 @@ pub fn download_with_stage_progress(
     Ok(destination)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn verify_and_promote_partial(
     partial: &Path,
     destination: &Path,
     directory: &Path,
-    model: &ModelDefinition,
+    artifact: &GgufArtifact,
+    name: &str,
     canceled: &AtomicBool,
     downloaded_bytes: &AtomicU64,
     stage: &AtomicU8,
 ) -> Result<()> {
     ModelPreparationStage::Verifying.store(stage);
-    verify_file_with_cancel(partial, model, canceled)?;
+    verify_artifact(partial, artifact, name, canceled)?;
     sync_file(partial)?;
     fs::rename(partial, destination)?;
     sync_directory(directory)?;
-    write_verification_receipt(destination, model)?;
-    if let Some(bytes) = model.download_bytes() {
-        downloaded_bytes.store(bytes, Ordering::Relaxed);
-    }
+    write_artifact_receipt(destination, artifact)?;
+    downloaded_bytes.store(artifact.bytes, Ordering::Relaxed);
     Ok(())
 }
 
@@ -1036,6 +1093,10 @@ fn write_verification_receipt(path: &Path, model: &ModelDefinition) -> Result<()
     let ModelRuntime::Gguf(artifact) = model.runtime else {
         bail!("{} has no artifact verification receipt", model.name);
     };
+    write_artifact_receipt(path, artifact)
+}
+
+fn write_artifact_receipt(path: &Path, artifact: &GgufArtifact) -> Result<()> {
     let metadata = fs::metadata(path)?;
     let receipt = VerificationReceipt {
         bytes: artifact.bytes,
@@ -1066,17 +1127,26 @@ fn verify_file_with_cancel(
     let ModelRuntime::Gguf(artifact) = model.runtime else {
         bail!("{} has no artifact to verify", model.name);
     };
+    verify_artifact(path, artifact, model.name, canceled)
+}
+
+fn verify_artifact(
+    path: &Path,
+    artifact: &GgufArtifact,
+    name: &str,
+    canceled: &AtomicBool,
+) -> Result<()> {
     let metadata = fs::metadata(path)?;
     if metadata.len() != artifact.bytes {
         bail!(
             "downloaded {} bytes for {}, expected {}",
             metadata.len(),
-            model.name,
+            name,
             artifact.bytes
         );
     }
     if sha256_hex(path, Some(canceled))? != artifact.sha256 {
-        bail!("checksum mismatch for {}", model.name);
+        bail!("checksum mismatch for {}", name);
     }
     Ok(())
 }
@@ -1296,6 +1366,38 @@ mod tests {
         assert!(verify_file(&path, &model).is_ok());
         fs::write(&path, b"world").unwrap();
         assert!(verify_file(&path, &model).is_err());
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn speech_detector_artifact_downloads_from_its_pinned_revision() {
+        assert_eq!(
+            SPEECH_DETECTOR_ARTIFACT.download_url(),
+            "https://huggingface.co/handy-computer/silero-vad-v6.2-gguf/resolve/\
+             a9b2d61c20ae4ddf3644edb34969e8185a485448/silero-vad-v6.2-F32.gguf"
+        );
+        assert_eq!(SPEECH_DETECTOR_ARTIFACT.bytes, 1_241_056);
+    }
+
+    #[test]
+    fn artifact_verification_names_the_artifact_it_rejects() {
+        let ModelRuntime::Gguf(artifact) = fixture_model().runtime else {
+            unreachable!("the fixture is a GGUF model");
+        };
+        let path = std::env::temp_dir().join(format!(
+            "hex-artifact-verification-{}-{}",
+            std::process::id(),
+            NEXT_TEMP_FILE.fetch_add(1, Ordering::Relaxed)
+        ));
+        let canceled = AtomicBool::new(false);
+        fs::write(&path, b"hello!").unwrap();
+        let error = verify_artifact(&path, artifact, "the fixture", &canceled).unwrap_err();
+        assert!(error.to_string().contains("for the fixture, expected 5"));
+        fs::write(&path, b"world").unwrap();
+        let error = verify_artifact(&path, artifact, "the fixture", &canceled).unwrap_err();
+        assert_eq!(error.to_string(), "checksum mismatch for the fixture");
+        fs::write(&path, b"hello").unwrap();
+        assert!(verify_artifact(&path, artifact, "the fixture", &canceled).is_ok());
         let _ = fs::remove_file(path);
     }
 
