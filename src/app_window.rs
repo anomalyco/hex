@@ -169,6 +169,57 @@ fn microphone_picker_menu(
         .when_some(error, |picker, error| picker.child(inline_error(error)))
 }
 
+/// The bundled classic set, then each procedural preset, as `(id, label)`.
+fn sound_set_choices() -> Vec<(String, SharedString)> {
+    std::iter::once((
+        crate::feedback::CLASSIC_SOUND_SET.to_owned(),
+        SharedString::from(tr("Classic")),
+    ))
+    .chain(
+        crate::sound_synth::presets()
+            .iter()
+            .map(|preset| (preset.id.clone(), SharedString::from(preset.name.clone()))),
+    )
+    .collect()
+}
+
+fn sound_set_label(id: &str) -> SharedString {
+    sound_set_choices()
+        .into_iter()
+        .find(|(choice, _)| choice == id)
+        .map_or_else(|| tr("Classic").into(), |(_, label)| label)
+}
+
+fn sound_set_picker_menu(
+    selected: &str,
+    progress: f32,
+    choose: impl Fn(&String, &mut Window, &mut App) + 'static,
+    dismiss: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
+) -> gpui::Stateful<Div> {
+    let choose = Rc::new(choose);
+    dropdown_menu_with_progress(progress)
+        .id("sound-set-picker")
+        .debug_selector(|| "sound-set-picker".into())
+        .right_0()
+        .w(px(DISCLOSURE_WIDTH))
+        .on_mouse_down_out(dismiss)
+        .children(
+            sound_set_choices()
+                .into_iter()
+                .enumerate()
+                .map(|(index, (id, label))| {
+                    let choose = choose.clone();
+                    menu_item(id == selected)
+                        .id(("sound-set-choice", index))
+                        .child(truncated_line(FOOTNOTE, label))
+                        .on_click(move |_, window, cx| {
+                            cx.stop_propagation();
+                            choose(&id, window, cx);
+                        })
+                }),
+        )
+}
+
 /// The sidebar's Update button, shown while an update is available.
 fn sidebar_update_button() -> gpui::Stateful<Div> {
     button(ButtonKind::Secondary, status_dot(ACCENT_TEXT))
@@ -1235,6 +1286,7 @@ pub struct AppWindow {
     microphone_devices: Vec<String>,
     microphone_picker_open: bool,
     microphone_picker_error: Option<String>,
+    sound_set_picker_open: bool,
     launch_at_login_status: Option<LoginItemStatus>,
     login_item_worker: Option<LoginItemWorker>,
     launch_at_login_error: Option<String>,
@@ -1701,6 +1753,7 @@ impl AppWindow {
             microphone_devices,
             microphone_picker_open: false,
             microphone_picker_error: None,
+            sound_set_picker_open: false,
             launch_at_login_status,
             login_item_worker,
             launch_at_login_error,
@@ -3821,6 +3874,44 @@ impl AppWindow {
         let microphone_picker = (self.microphone_picker_open
             || (!cfg!(test) && microphone_picker_progress > 0.01))
             .then(|| self.render_microphone_picker(microphone_picker_progress, cx));
+        let sound_set_picker_progress = window.spring_when(
+            "sound-set-picker-progress",
+            self.sound_set_picker_open,
+            SPRING_SNAP,
+        );
+        let sound_set_picker = (self.sound_set_picker_open
+            || (!cfg!(test) && sound_set_picker_progress > 0.01))
+            .then(|| {
+                sound_set_picker_menu(
+                    &self.settings.sound_set,
+                    sound_set_picker_progress,
+                    cx.listener(|this, id: &String, _, cx| {
+                        if this.update_settings(cx, |settings| settings.sound_set = id.clone()) {
+                            this.sound_set_picker_open = false;
+                            if this.settings.sound_effects && !this.preview {
+                                crate::feedback::play(crate::feedback::Tone::DictationStart);
+                            }
+                        }
+                    }),
+                    cx.listener(|this, _, _, cx| {
+                        this.sound_set_picker_open = false;
+                        cx.notify();
+                    }),
+                )
+                .into_any_element()
+            });
+        let sound_set_control = div()
+            .relative()
+            .flex_none()
+            .child(
+                disclosure_button(sound_set_label(&self.settings.sound_set))
+                    .id("sound-set-setting")
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.sound_set_picker_open = !this.sound_set_picker_open;
+                        cx.notify();
+                    })),
+            )
+            .children(sound_set_picker.map(deferred));
         let sound_volume_position = self.sound_volume_spring.render_position(window);
         let selected_volume = sound_volume_index(&self.settings);
         let sound_volume =
@@ -4263,8 +4354,16 @@ impl AppWindow {
                                 tr("Recording, cancellation, and error tones"),
                                 sound_volume,
                             )
-                            .when(software_update_control.is_none(), |row| row.border_b_0())
                             .id("sound-effects-setting"),
+                        )
+                        .child(
+                            settings_row(
+                                tr("Sound"),
+                                tr("Style of the recording and cancellation tones"),
+                                sound_set_control,
+                            )
+                            .when(software_update_control.is_none(), |row| row.border_b_0())
+                            .id("sound-set-row"),
                         )
                         .when_some(software_update_control, |panel, control| {
                             panel.child(

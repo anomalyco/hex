@@ -551,6 +551,7 @@ fn run_voice_action(instruction: &str, paster: &mut LinuxPaster) -> Result<Strin
 pub(crate) fn initialize_feedback(settings: &crate::app_settings::AppSettings) {
     feedback::set_enabled(settings.sound_effects);
     feedback::set_volume(settings.sound_effect_volume.clamp(0.0, 1.0));
+    feedback::set_sound_set(&settings.sound_set);
     if let Err(error) = feedback::preload() {
         tracing::warn!(%error, "recording sounds are unavailable; continuing without feedback");
     }

@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Hex Sound Tuner</title>
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <div id="stage">
+    <main id="app">
+      <header>
+        <div class="eyebrow">Hex · procedural sounds</div>
+        <h1 id="name">Breath Ping</h1>
+        <p id="note"></p>
+      </header>
+
+      <section class="pads">
+        <button class="pad" data-cue="start"><canvas></canvas><span class="label">Start</span><span class="meta"></span></button>
+        <button class="pad" data-cue="stop"><canvas></canvas><span class="label">Stop</span><span class="meta"></span></button>
+        <button class="pad" data-cue="cancel"><canvas></canvas><span class="label">Cancel</span><span class="meta"></span></button>
+      </section>
+      <button id="sequence" class="wide">Play a dictation: start · 1 s · stop</button>
+
+      <section class="card" id="knobs"></section>
+
+      <div class="actions">
+        <button id="reset" class="wide">Reset</button>
+        <button id="copy" class="wide primary">Copy preset</button>
+      </div>
+      <textarea id="json" readonly spellcheck="false" hidden></textarea>
+      <p class="foot">Rendered live by the same synth Hex runs in Rust: no audio files. Every cue is loudness-matched to the Volume knob.</p>
+    </main>
+  </div>
+  <script type="module" src="./main.js"></script>
+</body>
+</html>

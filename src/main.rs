@@ -126,6 +126,8 @@ mod personal_commands;
 mod recognition;
 #[cfg(target_os = "macos")]
 mod recording_environment;
+#[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
+mod sound_synth;
 #[cfg(target_os = "macos")]
 mod sparkle;
 #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]

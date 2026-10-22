@@ -510,6 +510,24 @@ samples remain decoded in memory. A tone that arrives after the grace pays a
 cold device open first; the tone is delayed, not clipped or dropped.
 Overlapping tones extend the playing window rather than shortening it.
 
+```ts
+Settings > Sound                          // dictate.feedback.sound_set; macOS, Windows, Linux
+├── Classic (default) -> Bundled recorded start/stop/cancel sounds
+└── Procedural set -> Rendered from a compiled recipe at loader start; no files
+    └── Choose -> Save, apply live, preview the start tone
+```
+
+Procedural sets (`src/sound_synth.rs`, recipes in `resources/sounds/presets.json`)
+are sine or triangle pings with a pitch glide, raised-cosine attack, exponential
+decay, a band-passed noise breath, low-pass and optional saturation, each
+loudness-normalized (K-weighted, 400 ms window) to its recipe's target. The
+tuning prototype runs the same algorithm in `prototypes/sound-synth/synth.js`.
+Wake, sleep, and error tones remain macOS system sounds. Checks:
+`every_preset_renders_a_subtle_immediate_cue` (half-peak onset ≤10 ms, ≤250 ms,
+no clipping, loudness, spectral centroid), `matches_the_reference_js_renders`,
+and `procedural_sound_sets_render_and_select_by_id`. No listening or device
+playback check has been run.
+
 **Fixed after 2.3.0:** the start tone used to wait for the 300 ms intentional
 hold, then pay rodio's default 50 ms output buffer, so it sounded about 345 ms
 after the press (about 375 ms from a cold device) where the Swift app rang on

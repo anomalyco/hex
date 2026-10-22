@@ -1,7 +1,7 @@
 use std::io::Cursor;
 #[cfg(target_os = "macos")]
 use std::process::{Command, Stdio};
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, SyncSender};
 use std::sync::{Arc, OnceLock};
 use std::thread;
@@ -40,6 +40,20 @@ static DICTATION_PLAYER: OnceLock<SyncSender<Request>> = OnceLock::new();
 static LOADER_STARTED: AtomicBool = AtomicBool::new(false);
 static ENABLED: AtomicBool = AtomicBool::new(true);
 static VOLUME: AtomicU32 = AtomicU32::new(0.5_f32.to_bits());
+/// 0 is the bundled classic set; `n` is the `n - 1`th procedural preset.
+static SOUND_SET: AtomicUsize = AtomicUsize::new(0);
+
+/// The id of the bundled recorded sounds, the default sound set.
+pub const CLASSIC_SOUND_SET: &str = "classic";
+
+/// Selects the sound set by id; an unknown id falls back to the classic set.
+pub fn set_sound_set(id: &str) {
+    let index = crate::sound_synth::presets()
+        .iter()
+        .position(|preset| preset.id == id)
+        .map_or(0, |index| index + 1);
+    SOUND_SET.store(index, Ordering::Relaxed);
+}
 
 pub fn set_enabled(enabled: bool) {
     ENABLED.store(enabled, Ordering::Relaxed);
@@ -161,13 +175,24 @@ pub fn preload() -> Result<()> {
                 env!("CARGO_MANIFEST_DIR"),
                 "/resources/audio/cancel.mp3"
             )))?;
-            Ok((start, stop, cancel))
+            Ok(SoundSet {
+                start,
+                stop,
+                cancel,
+            })
         })();
-        let Ok((start, stop, cancel)) = result else {
-            let _ = ready_sender.send(result.map(|_| ()));
-            LOADER_STARTED.store(false, Ordering::Release);
-            return;
+        let classic = match result {
+            Ok(classic) => classic,
+            Err(error) => {
+                let _ = ready_sender.send(Err(error));
+                LOADER_STARTED.store(false, Ordering::Release);
+                return;
+            }
         };
+        let sets: Vec<SoundSet> = std::iter::once(classic)
+            .chain(crate::sound_synth::presets().iter().map(SoundSet::render))
+            .collect();
+        let current = || &sets[SOUND_SET.load(Ordering::Relaxed).min(sets.len() - 1)];
         let mut output = FeedbackOutput::new();
         // The device opens for the first tone, not at startup, so an idle app
         // holds no output stream. Publish before any tone arrives.
@@ -213,10 +238,11 @@ pub fn preload() -> Result<()> {
                 None => None,
             };
             if let Some(tone) = tone {
+                let set = current();
                 let sound = match tone {
-                    Tone::DictationStart => &start,
-                    Tone::DictationStop => &stop,
-                    Tone::Cancel => &cancel,
+                    Tone::DictationStart => &set.start,
+                    Tone::DictationStop => &set.stop,
+                    Tone::Cancel => &set.cancel,
                     #[cfg(target_os = "macos")]
                     Tone::Wake | Tone::Sleep | Tone::Error => continue,
                 };
@@ -224,7 +250,7 @@ pub fn preload() -> Result<()> {
             } else if timed_out && start_tone.is_due(Instant::now()) {
                 // Only an empty queue reaches here, so a retraction sent while
                 // the device opened always wins over the tone.
-                let (sound, retracted) = Retractable::new(start.clone());
+                let (sound, retracted) = Retractable::new(current().start.clone());
                 if output.play(sound, Tone::DictationStart) {
                     start_tone.sounding(retracted);
                 } else {
@@ -467,6 +493,32 @@ fn play_system_sound(tone: Tone) {
     }
 }
 
+/// One sound set's start, stop and cancel tones, ready for the mixer.
+struct SoundSet {
+    start: SamplesBuffer,
+    stop: SamplesBuffer,
+    cancel: SamplesBuffer,
+}
+
+impl SoundSet {
+    /// Synthesizes a procedural preset's three cues.
+    fn render(preset: &crate::sound_synth::Preset) -> Self {
+        use crate::sound_synth::{Cue, SAMPLE_RATE, render};
+        let buffer = |cue| {
+            SamplesBuffer::new(
+                std::num::NonZero::new(1).unwrap(),
+                std::num::NonZero::new(SAMPLE_RATE).unwrap(),
+                render(preset, cue),
+            )
+        };
+        Self {
+            start: buffer(Cue::Start),
+            stop: buffer(Cue::Stop),
+            cancel: buffer(Cue::Cancel),
+        }
+    }
+}
+
 fn decode(bytes: &'static [u8]) -> Result<SamplesBuffer> {
     let decoder = Decoder::new(Cursor::new(bytes)).wrap_err("could not decode feedback audio")?;
     let channels = decoder.channels();
@@ -519,6 +571,30 @@ mod tests {
                 "{name} tone starts after {silence} ms of silence"
             );
         }
+    }
+
+    #[test]
+    fn procedural_sound_sets_render_and_select_by_id() {
+        for preset in crate::sound_synth::presets() {
+            let set = SoundSet::render(preset);
+            for sound in [set.start, set.stop, set.cancel] {
+                let duration = sound.total_duration().unwrap();
+                assert!(duration > Duration::ZERO && duration <= Duration::from_millis(250));
+                let samples = sound.collect::<Vec<f32>>();
+                let first = samples.iter().position(|sample| sample.abs() > 0.001);
+                assert!(
+                    first.is_some_and(|first| first < 48),
+                    "{} starts late",
+                    preset.id
+                );
+            }
+        }
+        set_sound_set("breath_ping");
+        assert_eq!(SOUND_SET.load(Ordering::Relaxed), 1);
+        set_sound_set("no-such-set");
+        assert_eq!(SOUND_SET.load(Ordering::Relaxed), 0);
+        set_sound_set(CLASSIC_SOUND_SET);
+        assert_eq!(SOUND_SET.load(Ordering::Relaxed), 0);
     }
 
     #[test]
