@@ -205,7 +205,7 @@ honors `NSWorkspace.accessibilityDisplayShouldReduceMotion` (or
 | Icon-only action | `icon_button(ButtonKind::Ghost, Icon)` in cards and rows; `Secondary` when it stands alone |
 | Work in progress where a button was | `busy_label` |
 | Dropdown trigger | `disclosure_button(label)`; custom content: `disclosure_frame()` + `Icon::ChevronDown` |
-| Popover / menu and its choices | `menu()`, `menu_item(selected)`; under a control: `dropdown(align, progress, menu())` at `MENU_WIDTH`, which opens above the control or lines up with its other edge when the window has no room |
+| Popover / menu and its choices | `menu()`, `menu_item(selected)`; under a control: `dropdown(align, progress, menu(), dismiss)` at `MENU_WIDTH`, which flips when the window has no room |
 | Destructive / unavailable menu choice | `danger_menu_item()` after `menu_separator()`; `disabled_menu_item()` |
 | Overflow of less common actions | `icon_button(ButtonKind::Secondary, Icon::Ellipsis)` opening a `dropdown()` |
 | On/off | `toggle(position)`; never repeat "On"/"Off" beside it |

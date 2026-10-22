@@ -425,17 +425,15 @@ report or a connected headset.
 occluding the panel, so hovering or clicking a device also reached the setting
 under the pointer ([#94](https://github.com/anomalyco/hex/issues/94)), and it
 only closed by choosing or reopening. The menu is now anchored to its button,
-occludes the controls beneath it, and closes on any outside mouse-down.
+occludes the controls beneath it, and closes on a press outside it or on its button.
 `microphone_picker_occludes_the_controls_beneath_it` in
 [app_window.rs](../../src/app_window.rs) renders the production menu over a
 hoverable, clickable control and fails without the occlusion; it does not prove
-a native pointer session. This menu and the interface language, History
-retention, and meeting overflow menus open above their button near the window
-bottom, and line up with the button's other edge near a side, instead of being
-cut off. `dropdown_opens_on_the_sides_of_its_trigger_with_room` in
-[desktop_ui.rs](../../src/desktop_ui.rs) checks each corner through the entrance
-animation; preview captures showed the flipped language menu, not a native
-session. The recognition-hints editor also now uses the compact
+a native pointer session. This menu and the language, History retention, and
+meeting "…" menus flip above their button or to its other edge when the window
+has no room; `dropdown_opens_on_the_sides_of_its_trigger_with_room` in
+[desktop_ui.rs](../../src/desktop_ui.rs) checks the placement. Closing on a second
+press of the button has no test. The recognition-hints editor also now uses the compact
 multiline height, so it no longer overlaps the shortcut row for Whisper models.
 Screen Recording was unavailable, so that layout is unverified visually.
 

@@ -2338,7 +2338,7 @@ impl AppWindow {
             let trigger = icon_button(ButtonKind::Secondary, Icon::Ellipsis)
                 .id("meeting-action-more")
                 .on_click(cx.listener(|this, _, _, cx| {
-                    this.platform.meeting_actions_open = true;
+                    this.platform.meeting_actions_open = !this.platform.meeting_actions_open;
                     cx.notify();
                 }));
             let menu_progress = window.spring_when(
@@ -2358,11 +2358,11 @@ impl AppWindow {
                                 .id("meeting-actions-menu")
                                 .debug_selector(|| "meeting-actions-menu".into())
                                 .w(px(MENU_WIDTH))
-                                .on_mouse_down_out(cx.listener(|this, _, _, cx| {
-                                    this.platform.meeting_actions_open = false;
-                                    cx.notify();
-                                }))
                                 .children(menu_items),
+                            cx.listener(|this, _, _, cx| {
+                                this.platform.meeting_actions_open = false;
+                                cx.notify();
+                            }),
                         ))
                     })
                     .into_any_element(),

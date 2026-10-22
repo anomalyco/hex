@@ -3,10 +3,12 @@
 //! does which job.
 
 use gpui::{
-    AnyElement, App, Bounds, Deferred, Div, Element, ElementId, FontWeight, GlobalElementId,
-    InspectorElementId, IntoElement, LayoutId, Pixels, Position, Rgba, ShapedLine, SharedString,
-    Stateful, Style, Window, canvas, deferred, div, point, prelude::*, px, rgb,
+    AnyElement, App, Bounds, Deferred, DispatchPhase, Div, Element, ElementId, FontWeight,
+    GlobalElementId, InspectorElementId, IntoElement, LayoutId, MouseDownEvent, Pixels, Refineable,
+    Rgba, ShapedLine, SharedString, Stateful, Style, StyleRefinement, Window, canvas, deferred,
+    div, point, prelude::*, px, rgb, size,
 };
+use std::rc::Rc;
 
 #[cfg(any(target_os = "linux", target_os = "windows"))]
 use gpui::{Image, ImageFormat, img};
@@ -1118,32 +1120,35 @@ pub(crate) enum DropdownAlign {
     Right,
 }
 
-/// Floats a [`menu`] [`MENU_OFFSET`] below the [`CONTROL_HEIGHT`] control
-/// that opens it, painted over the rest of the window. Without room it opens
-/// above the control or lines up with the control's other edge, and otherwise
-/// stays inside the window. Entrance progress (`0.0..=1.0`) fades it in and
-/// slides it [`MENU_ENTER_OFFSET`] away from the control. The control's parent
-/// must be `relative()`.
-pub(crate) fn dropdown(align: DropdownAlign, progress: f32, menu: impl IntoElement) -> Deferred {
+/// Floats a [`menu`] under the control that opens it, flipping above or to the
+/// control's other edge when the window has no room. `progress` (`0.0..=1.0`)
+/// fades and slides it in. A press outside both the menu and the control calls
+/// `dismiss`. The control's parent must be `relative()`.
+pub(crate) fn dropdown(
+    align: DropdownAlign,
+    progress: f32,
+    menu: impl Styled + IntoElement,
+    dismiss: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
+) -> Deferred {
     let progress = progress.clamp(0.0, 1.0);
     deferred(DropdownPlacement {
         align,
-        slide: px(((1.0 - progress) * MENU_ENTER_OFFSET * 64.0).round() / 64.0),
-        menu: div()
-            .absolute()
-            .opacity(progress)
-            .child(menu)
-            .into_any_element(),
+        slide: px((1.0 - progress) * MENU_ENTER_OFFSET),
+        menu: menu.absolute().opacity(progress).into_any_element(),
+        dismiss: Rc::new(dismiss),
     })
 }
 
-/// Lays out over the [`CONTROL_HEIGHT`] strip of the trigger's parent and
+/// Lays out over the [`CONTROL_HEIGHT`] strip of the control's parent, then
 /// moves its menu to the first side of that strip where it fits.
 struct DropdownPlacement {
     align: DropdownAlign,
     slide: Pixels,
     menu: AnyElement,
+    dismiss: Rc<Dismiss>,
 }
+
+type Dismiss = dyn Fn(&MouseDownEvent, &mut Window, &mut App);
 
 impl IntoElement for DropdownPlacement {
     type Element = Self;
@@ -1155,7 +1160,7 @@ impl IntoElement for DropdownPlacement {
 
 impl Element for DropdownPlacement {
     type RequestLayoutState = LayoutId;
-    type PrepaintState = ();
+    type PrepaintState = Bounds<Pixels>;
 
     fn id(&self) -> Option<ElementId> {
         None
@@ -1171,16 +1176,17 @@ impl Element for DropdownPlacement {
         _: Option<&InspectorElementId>,
         window: &mut Window,
         cx: &mut App,
-    ) -> (LayoutId, Self::RequestLayoutState) {
+    ) -> (LayoutId, LayoutId) {
         let menu = self.menu.request_layout(window, cx);
-        let mut style = Style {
-            position: Position::Absolute,
-            ..Style::default()
-        };
-        style.inset.top = px(0.0).into();
-        style.inset.left = px(0.0).into();
-        style.inset.right = px(0.0).into();
-        style.size.height = px(CONTROL_HEIGHT).into();
+        let mut style = Style::default();
+        style.refine(
+            &StyleRefinement::default()
+                .absolute()
+                .top_0()
+                .left_0()
+                .right_0()
+                .h(px(CONTROL_HEIGHT)),
+        );
         (window.request_layout(style, [menu], cx), menu)
     }
 
@@ -1188,58 +1194,65 @@ impl Element for DropdownPlacement {
         &mut self,
         _: Option<&GlobalElementId>,
         _: Option<&InspectorElementId>,
-        trigger: Bounds<Pixels>,
-        menu: &mut Self::RequestLayoutState,
+        control: Bounds<Pixels>,
+        menu: &mut LayoutId,
         window: &mut Window,
         cx: &mut App,
-    ) {
+    ) -> Bounds<Pixels> {
         let menu = window.layout_bounds(*menu);
-        let size = menu.size;
         let inset = window.client_inset().unwrap_or_default();
-        let viewport = window.viewport_size();
-        let left = trigger.left();
-        let right = trigger.right() - size.width;
-        let (preferred_x, fallback_x) = match self.align {
-            DropdownAlign::Left => (left, right),
-            DropdownAlign::Right => (right, left),
+        let window_end = window.viewport_size() - size(inset, inset);
+        let (start, end) = (control.left(), control.right() - menu.size.width);
+        let (preferred, fallback) = match self.align {
+            DropdownAlign::Left => (start, end),
+            DropdownAlign::Right => (end, start),
         };
         let x = place_on_axis(
-            preferred_x,
-            fallback_x,
-            size.width,
+            preferred,
+            fallback,
+            menu.size.width,
             inset,
-            viewport.width - inset,
+            window_end.width,
         );
-        let below = trigger.bottom() + px(MENU_OFFSET);
-        let above = trigger.top() - px(MENU_OFFSET) - size.height;
-        let y = place_on_axis(below, above, size.height, inset, viewport.height - inset);
-        let slide = if y < trigger.top() {
+        let below = control.bottom() + px(MENU_OFFSET);
+        let above = control.top() - px(MENU_OFFSET) - menu.size.height;
+        let y = place_on_axis(below, above, menu.size.height, inset, window_end.height);
+        let slide = if y < control.top() {
             self.slide
         } else {
             -self.slide
         };
-        let offset = point(x, y + slide) - menu.origin;
-        window.with_element_offset(point(offset.x.round(), offset.y.round()), |window| {
+        let origin = point(x.round(), (y + slide).round());
+        window.with_element_offset(origin - menu.origin, |window| {
             self.menu.prepaint(window, cx)
         });
+        Bounds::new(origin, menu.size)
     }
 
     fn paint(
         &mut self,
         _: Option<&GlobalElementId>,
         _: Option<&InspectorElementId>,
-        _: Bounds<Pixels>,
-        _: &mut Self::RequestLayoutState,
-        _: &mut Self::PrepaintState,
+        control: Bounds<Pixels>,
+        _: &mut LayoutId,
+        menu: &mut Bounds<Pixels>,
         window: &mut Window,
         cx: &mut App,
     ) {
         self.menu.paint(window, cx);
+        let menu = *menu;
+        let dismiss = self.dismiss.clone();
+        window.on_mouse_event(move |event: &MouseDownEvent, phase, window, cx| {
+            let outside = !menu.contains(&event.position) && !control.contains(&event.position);
+            if phase == DispatchPhase::Capture && outside {
+                dismiss(event, window, cx);
+            }
+        });
     }
 }
 
-/// Where a `size`-long span starts on one axis: at `preferred` when it fits
-/// within `min..max`, else at `fallback` when that fits, else shifted inside.
+/// Where a `size`-long span starts on one axis: at `preferred` or else
+/// `fallback` when it fits within `min..max`, otherwise shifted inside.
 fn place_on_axis(
     preferred: Pixels,
     fallback: Pixels,
@@ -1247,16 +1260,10 @@ fn place_on_axis(
     min: Pixels,
     max: Pixels,
 ) -> Pixels {
-    let fits = |start: Pixels| start >= min && start + size <= max;
-    if fits(preferred) {
-        preferred
-    } else if fits(fallback) {
-        fallback
-    } else if preferred + size > max && max - size > min {
-        max - size
-    } else {
-        min
-    }
+    [preferred, fallback]
+        .into_iter()
+        .find(|&start| start >= min && start + size <= max)
+        .unwrap_or_else(|| preferred.min(max - size).max(min))
 }
 
 /// One choice inside a [`menu`].
@@ -1540,6 +1547,7 @@ mod tests {
                                 .debug_selector(|| "menu".into())
                                 .w(px(MENU_WIDTH))
                                 .h(px(120.0)),
+                            |_, _, _| {},
                         )),
                 )
             }

@@ -151,7 +151,6 @@ fn microphone_picker_menu(
         .w(px(DISCLOSURE_WIDTH))
         .max_h(px(240.0))
         .overflow_y_scroll()
-        .on_mouse_down_out(dismiss)
         .children(choices.into_iter().enumerate().map(|(index, device)| {
             let is_selected = selected == device;
             let label = device.clone().unwrap_or_else(|| tr("Automatic").into());
@@ -166,7 +165,7 @@ fn microphone_picker_menu(
                 })
         }))
         .when_some(error, |picker, error| picker.child(inline_error(error)));
-    dropdown(DropdownAlign::Right, progress, picker)
+    dropdown(DropdownAlign::Right, progress, picker, dismiss)
 }
 
 /// The sidebar's Update button, shown while an update is available.
@@ -2604,7 +2603,7 @@ impl AppWindow {
         .id("history-retention")
         .child(icon(Icon::ChevronDown, TEXT_TERTIARY))
         .on_click(cx.listener(|this, _, _, cx| {
-            this.history_retention_open = true;
+            this.history_retention_open = !this.history_retention_open;
             cx.notify();
         }));
         let retention_menu_progress = window.spring_when(
@@ -2621,10 +2620,6 @@ impl AppWindow {
                     menu()
                         .id("history-retention-menu")
                         .w(px(MENU_WIDTH))
-                        .on_mouse_down_out(cx.listener(|this, _, _, cx| {
-                            this.history_retention_open = false;
-                            cx.notify();
-                        }))
                         .children(HistoryRetention::ALL.into_iter().enumerate().map(
                             |(index, choice)| {
                                 menu_item(choice == retention)
@@ -2638,6 +2633,10 @@ impl AppWindow {
                                     }))
                             },
                         )),
+                    cx.listener(|this, _, _, cx| {
+                        this.history_retention_open = false;
+                        cx.notify();
+                    }),
                 ))
             },
         );
@@ -3636,10 +3635,6 @@ impl AppWindow {
                     .w(px(DISCLOSURE_WIDTH))
                     .max_h(px(240.0))
                     .overflow_y_scroll()
-                    .on_mouse_down_out(cx.listener(|this, _, _, cx| {
-                        this.interface_language_open = false;
-                        cx.notify();
-                    }))
                     .children(
                         crate::desktop_i18n::LANGUAGE_CHOICES
                             .iter()
@@ -3661,7 +3656,11 @@ impl AppWindow {
                                     }))
                             }),
                     );
-                dropdown(DropdownAlign::Right, menu_progress, picker)
+                let dismiss = cx.listener(|this, _, _, cx| {
+                    this.interface_language_open = false;
+                    cx.notify();
+                });
+                dropdown(DropdownAlign::Right, menu_progress, picker, dismiss)
             });
         div()
             .relative()
