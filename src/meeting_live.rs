@@ -400,6 +400,26 @@ pub(super) fn read_completed_snapshot(path: &Path) -> Result<Vec<TranscriptEntry
     ))
 }
 
+/// Rolling entries of committed chunks, without the selected-model draft
+/// written after them.
+pub(super) fn read_committed_rolling(path: &Path) -> Result<Vec<TranscriptEntry>> {
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+    let RollingView {
+        entries,
+        covered_ms,
+    } = read_ndjson::<RollingLine>(path)?.into_iter().collect();
+    Ok(entries
+        .into_iter()
+        .filter(|entry| {
+            covered_ms
+                .get(entry.source)
+                .is_none_or(|covered| entry.end_ms <= covered)
+        })
+        .collect())
+}
+
 #[cfg(debug_assertions)]
 pub(super) fn latest_events(path: &Path) -> Result<Vec<Event>> {
     Ok(latest(read_ndjson(path)?).into_values().collect())

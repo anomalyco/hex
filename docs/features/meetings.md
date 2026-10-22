@@ -172,11 +172,24 @@ that fits its 4 px inset.
 
 ```ts
 While recording                                      // meetings.live
-  -> Live draft: Moonshine, one stream per track, update every 1 s
-     ├── Packets carry their sample position in the WAV -> exact timeline
-     │   └── Dropped packets -> up to 0.5 s of silence, the rest skipped in time
-     └── Completed You line -> written once the system track is 1 s past it
-         └── System track stalled -> written after 3 s more microphone audio
+  -> Selected language is English or Auto
+     -> Live draft: Moonshine, one stream per track, update every 1 s
+        ├── Packets carry their sample position in the WAV -> exact timeline
+        │   └── Dropped packets -> up to 0.5 s of silence, the rest skipped in time
+        └── Completed You line -> written once the system track is 1 s past it
+            └── System track stalled -> written after 3 s more microphone audio
+  -> Selected language is a specific other language, such as Spanish
+     -> Live draft: the selected model, on audio the chunker has not committed
+        ├── First text after about 2 s of that tail
+        ├── Next text after about 3 s of new audio, or after as much audio as
+        │   the previous pass took when that was longer
+        └── A pass slower than its audio, or slower than 4 s, stops further
+            drafts on that track
+     -> The pane shows that draft on the same path as the English lines
+     -> A rolling chunk replaces the draft for the audio it covers
+     -> You lines waiting for the system track stay in the draft meanwhile
+  -> No transcript.live.ndjson (any language without the Moonshine draft)
+     -> Option-Control-V pastes the committed rolling entries
 
 While recording                                      // meetings.rolling
   -> Each track -> one-second blocks -> bounded queue (about 5 minutes)
@@ -215,6 +228,19 @@ the shortest hold that added about 85 ms at p95 on the Pro. The job runs at util
 the engine thread, which returns to user-interactive afterwards. Apple Speech runs outside the process, so with
 Apple Speech selected, and in a process without the engine (the CLI), the
 meeting loads its own transcriber as before.
+For any other selected language the same model drafts the uncommitted tail,
+through the same background job, while no committed chunk is waiting and
+dictation is idle. A preempted draft is skipped, not retried; a draft does not
+wait out the 20 s dictation pause. A pass that had to load its own transcriber
+is not judged slow by the load. English and Auto keep the Moonshine draft and
+do not run this pass. Checks:
+`draft_waits_until_two_seconds_then_every_three_seconds_of_new_audio` and
+`a_slow_pass_stops_or_waits_for_enough_new_audio` in
+[meeting_provisional.rs](../../src/meeting_provisional.rs). The tail check
+`uncommitted_tail_is_audio_the_chunker_has_not_cut`, the held-back You check
+`selected_model_draft_shows_what_the_rolling_view_holds_back`, and the paste
+check `live_paste_without_a_moonshine_draft_uses_committed_rolling_entries`
+compile on macOS only and were not run in this change.
 
 Seams: segments starting before the middle of an overlap belong to the earlier
 chunk, and repeated words (two to twelve) at the join are removed.
@@ -275,6 +301,9 @@ Live draft (meeting_live::live_view): each Moonshine line on its own
 ├── Signal stamped by the live worker -> Bleed hidden, Local shown
 ├── Undecided, still in progress, overlapping remote speech -> hidden for now
 └── Undecided and completed -> hidden when its words repeat remote speech
+Selected-model tail draft: the same signal and word check, then the lines are
+written after the committed rolling entries. Those drops are not counted in
+echo_suppressed_utterances.
 Rolling microphone entries are already judged; not re-judged by words
 Applied in: rolling snapshot, final transcript, live view, Option-Control-V
 ```
@@ -622,8 +651,13 @@ Granola import: see [granola-import.md](../plans/granola-import.md).
   arrival time; drift below the 1 s gap threshold is uncorrected and echo
   thresholds were tuned on ScreenCaptureKit's shared clock.
 - Calendar titles (EventKit) are not implemented.
-- The live Moonshine draft needs the command model; without it, the pane shows
-  rolling chunks only as they complete (about every 20–30 s).
+- The live Moonshine draft needs the command model when the selected language
+  is English or Auto. Without that model, an English meeting shows rolling
+  chunks only as they complete (about every 20–30 s). Another language drafts
+  the uncommitted tail with the selected model instead. Parakeet v3 still
+  identifies language from the audio; it has no prompt input, the same as
+  dictation. The cadence tests ran on Linux. A macOS recording of the tail
+  draft was not run.
 - Settings, capsule, and Meetings pane previews launched, but screenshot capture
   failed on the build host (`could not create image from window`; the Studio
   session was locked, `CGSSessionScreenIsLocked 1`). The redesigned pane is

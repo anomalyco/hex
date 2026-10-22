@@ -388,26 +388,32 @@ pub fn record(
             return Err(eyre!("meeting recording stopped before capture started"));
         }
         let (sender, receiver) = mpsc::sync_channel::<AudioPacket>(128);
-        let (live_sender, live_receiver) = mpsc::sync_channel(live::QUEUE_CAPACITY);
         let system_drops = Arc::new(AtomicU64::new(0));
         let microphone_drops = Arc::new(AtomicU64::new(0));
         let live_drops = Arc::new(AtomicU64::new(0));
         let manifest_live_drops = live_drops.clone();
-        let live_worker_dir = meeting_dir.clone();
-        let live_worker_root = project_root.to_path_buf();
-        let live_worker_drops = live_drops.clone();
-        let live_worker = thread::spawn(move || {
-            let result = live::transcribe(
-                &live_worker_root,
-                &live_worker_dir,
-                live_receiver,
-                &live_worker_drops,
-            );
-            if let Err(error) = &result {
-                live::persist_error(&live_worker_dir, error);
-            }
-            result
-        });
+        let (live_sender, live_worker) =
+            if crate::transcription_models::use_english_meeting_draft(&transcription_selection) {
+                let (live_sender, live_receiver) = mpsc::sync_channel(live::QUEUE_CAPACITY);
+                let live_worker_dir = meeting_dir.clone();
+                let live_worker_root = project_root.to_path_buf();
+                let live_worker_drops = live_drops.clone();
+                let live_worker = thread::spawn(move || {
+                    let result = live::transcribe(
+                        &live_worker_root,
+                        &live_worker_dir,
+                        live_receiver,
+                        &live_worker_drops,
+                    );
+                    if let Err(error) = &result {
+                        live::persist_error(&live_worker_dir, error);
+                    }
+                    result
+                });
+                (Some(live_sender), Some(live_worker))
+            } else {
+                (None, None)
+            };
         let mut rolling =
             transcript::Rolling::start(meeting_dir.clone(), transcription_selection.clone());
         let rolling_feed = rolling.feed();
@@ -416,7 +422,7 @@ pub fn record(
             write_tracks(
                 &writer_dir,
                 receiver,
-                Some(live_sender),
+                live_sender,
                 rolling_feed,
                 &live_drops,
             )
@@ -424,7 +430,7 @@ pub fn record(
         let cleanup_failed_setup =
             |sender: SyncSender<AudioPacket>,
              writer: thread::JoinHandle<Result<CaptureStats>>,
-             live_worker: thread::JoinHandle<Result<()>>| {
+             live_worker: Option<thread::JoinHandle<Result<()>>>| {
                 drop(sender);
                 if let Err(cleanup_error) = join_capture_workers(writer, live_worker) {
                     tracing::error!(%cleanup_error, "could not finalize failed meeting setup");
@@ -548,7 +554,7 @@ fn record_provisional_title(
 
 fn join_capture_workers(
     writer: thread::JoinHandle<Result<CaptureStats>>,
-    live_worker: thread::JoinHandle<Result<()>>,
+    live_worker: Option<thread::JoinHandle<Result<()>>>,
 ) -> Result<CaptureStats> {
     let stats = join_audio_writer(writer);
     let _ = finish_live_worker(live_worker);
@@ -562,7 +568,10 @@ fn join_audio_writer(writer: thread::JoinHandle<Result<CaptureStats>>) -> Result
         .and_then(|result| result)
 }
 
-fn finish_live_worker(live_worker: thread::JoinHandle<Result<()>>) -> Option<String> {
+fn finish_live_worker(live_worker: Option<thread::JoinHandle<Result<()>>>) -> Option<String> {
+    let Some(live_worker) = live_worker else {
+        return None;
+    };
     match live_worker.join() {
         Ok(Ok(())) => None,
         Ok(Err(error)) => {
@@ -1254,14 +1263,17 @@ pub fn completed_transcript(
     });
     let entries = match publication {
         TranscriptPublication::Final => read_ndjson(&final_path)?,
-        TranscriptPublication::Live if live_path.exists() => {
-            let mut entries = live::read_completed_snapshot(&live_path)?;
+        TranscriptPublication::Live => {
+            let mut entries = if live_path.exists() {
+                live::read_completed_snapshot(&live_path)?
+            } else {
+                live::read_committed_rolling(&directory.join(transcript::ROLLING_FILE))?
+            };
             if final_transcript_exists(&directory) {
                 supplement_live_transcript(&mut entries, read_ndjson(&final_path)?);
             }
             entries
         }
-        TranscriptPublication::Live => Vec::new(),
     };
     Ok(CompletedTranscript {
         publication,

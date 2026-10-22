@@ -105,6 +105,11 @@ impl Chunker {
         self.buffer_start + self.buffer.len()
     }
 
+    fn uncommitted(&self) -> (usize, &[f32]) {
+        let start = self.chunk_start;
+        (start, &self.buffer[start - self.buffer_start..])
+    }
+
     fn next_chunk(&mut self) -> Option<Chunk> {
         let start = self.chunk_start;
         let end = self.end();
@@ -163,39 +168,8 @@ impl TrackTranscript {
         let chunk_ms = self.origin_ms + samples_ms(chunk.start);
         let duration_ms = samples_ms(chunk.samples.len());
         self.through_ms = self.through_ms.max(chunk_ms + duration_ms);
-        let segments = if transcript.words.is_empty() {
-            transcript.segments
-        } else {
-            sentences(transcript.words)
-        };
-        let segmented = !segments.is_empty();
-        let mut incoming: Vec<TranscriptEntry> = if segmented {
-            segments
-                .into_iter()
-                .filter_map(|segment| {
-                    let text = segment.text.trim().to_string();
-                    let start = (segment.start_ms.max(0) as u64).min(duration_ms);
-                    let end = (segment.end_ms.max(0) as u64).min(duration_ms);
-                    (!text.is_empty() && end > start).then(|| TranscriptEntry {
-                        source: self.source,
-                        start_ms: chunk_ms + start,
-                        end_ms: chunk_ms + end,
-                        text,
-                    })
-                })
-                .collect()
-        } else {
-            let text = transcript.text.trim();
-            (!text.is_empty())
-                .then(|| TranscriptEntry {
-                    source: self.source,
-                    start_ms: chunk_ms,
-                    end_ms: chunk_ms + duration_ms,
-                    text: text.into(),
-                })
-                .into_iter()
-                .collect()
-        };
+        let (mut incoming, segmented) =
+            timed_entries(self.source, chunk_ms, duration_ms, transcript);
         if chunk.overlap > 0 {
             if segmented {
                 let seam = chunk_ms + samples_ms(chunk.overlap) / 2;
@@ -209,6 +183,48 @@ impl TrackTranscript {
         }
         self.entries.extend(incoming);
     }
+}
+
+fn timed_entries(
+    source: MeetingSource,
+    start_ms: u64,
+    duration_ms: u64,
+    transcript: Transcript,
+) -> (Vec<TranscriptEntry>, bool) {
+    let segments = if transcript.words.is_empty() {
+        transcript.segments
+    } else {
+        sentences(transcript.words)
+    };
+    let segmented = !segments.is_empty();
+    let entries = if segmented {
+        segments
+            .into_iter()
+            .filter_map(|segment| {
+                let text = segment.text.trim().to_string();
+                let start = (segment.start_ms.max(0) as u64).min(duration_ms);
+                let end = (segment.end_ms.max(0) as u64).min(duration_ms);
+                (!text.is_empty() && end > start).then(|| TranscriptEntry {
+                    source,
+                    start_ms: start_ms + start,
+                    end_ms: start_ms + end,
+                    text,
+                })
+            })
+            .collect()
+    } else {
+        let text = transcript.text.trim();
+        (!text.is_empty())
+            .then(|| TranscriptEntry {
+                source,
+                start_ms,
+                end_ms: start_ms + duration_ms,
+                text: text.into(),
+            })
+            .into_iter()
+            .collect()
+    };
+    (entries, segmented)
 }
 
 /// Groups timed words into sentences: a group ends after sentence
@@ -589,6 +605,10 @@ struct RollingTrack {
     next_position: u64,
     pending: usize,
     failed: bool,
+    provisional: Vec<TranscriptEntry>,
+    drafted_samples: usize,
+    provisional_stopped: bool,
+    last_pass: Option<crate::meeting_provisional::LastPass>,
 }
 
 /// Transcribes completed chunks while the meeting is still recording so the
@@ -703,6 +723,7 @@ fn run_rolling(
     let mut envelope = EchoEnvelope::default();
     let mut model = ChunkModel::new(selection.clone());
     let mut model_failed = false;
+    let drafting = !crate::transcription_models::use_english_meeting_draft(selection);
     loop {
         let mut disconnected = false;
         loop {
@@ -724,7 +745,16 @@ fn run_rolling(
             && !crate::parakeet::dictation_busy()
             && transcribe_pending(&mut tracks, &mut pending, &mut model, &mut model_failed)
         {
-            write_rolling_snapshot(directory, &tracks, &envelope);
+            write_rolling_snapshot(directory, &tracks, &envelope, drafting);
+            continue;
+        }
+        if drafting
+            && pending.is_empty()
+            && !model_failed
+            && !crate::parakeet::dictation_busy()
+            && draft_uncommitted(&mut tracks, &mut model, &mut model_failed)
+        {
+            write_rolling_snapshot(directory, &tracks, &envelope, drafting);
             continue;
         }
         match receiver.recv_timeout(Duration::from_millis(200)) {
@@ -800,6 +830,10 @@ fn ingest(
             fed: 0,
             next_position: packet.position,
             pending: 0,
+            provisional: Vec::new(),
+            drafted_samples: 0,
+            provisional_stopped: false,
+            last_pass: None,
         }
     });
     if !track.failed && packet.position != track.next_position {
@@ -880,12 +914,102 @@ fn transcribe_pending(
         );
     }
     match result {
-        Ok(transcript) => track.transcript.accept(&chunk, transcript),
+        Ok(transcript) => {
+            track.transcript.accept(&chunk, transcript);
+            track.provisional.clear();
+            track.drafted_samples = 0;
+        }
         Err(error) => {
             tracing::warn!(%error, "rolling meeting chunk failed");
             track.failed = true;
             pending.retain(|(source, _)| *source != index);
         }
+    }
+    true
+}
+
+fn draft_uncommitted(
+    tracks: &mut [Option<RollingTrack>; 2],
+    model: &mut ChunkModel,
+    model_failed: &mut bool,
+) -> bool {
+    let mut choice: Option<(usize, usize)> = None;
+    for (index, track) in tracks.iter_mut().enumerate() {
+        let Some(track) = track else {
+            continue;
+        };
+        if track.failed || track.provisional_stopped {
+            continue;
+        }
+        let tail = track.chunker.uncommitted().1.len();
+        if track.drafted_samples > tail {
+            track.drafted_samples = 0;
+            track.provisional.clear();
+        }
+        if crate::meeting_provisional::should_draft(tail, track.drafted_samples, track.last_pass) {
+            let undrafted = tail - track.drafted_samples;
+            if choice.is_none_or(|(_, best)| undrafted > best) {
+                choice = Some((index, undrafted));
+            }
+        }
+    }
+    let Some((index, _)) = choice else {
+        return false;
+    };
+    let (audio_start, samples) = {
+        let Some(track) = tracks[index].as_ref() else {
+            return false;
+        };
+        let (start, audio) = track.chunker.uncommitted();
+        (start, audio.to_vec())
+    };
+    let audio_len = samples.len();
+    let had_model = model.owned.is_some();
+    let started = Instant::now();
+    let result = match model.transcribe(&samples) {
+        Ok(Chunked::Done(transcript)) => Ok(transcript),
+        Ok(Chunked::Preempted) => return false,
+        Ok(Chunked::Unavailable(error)) => {
+            tracing::warn!(%error, "meeting draft could not load the model");
+            *model_failed = true;
+            return false;
+        }
+        Err(error) => Err(error),
+    };
+    let elapsed = started.elapsed();
+    // A pass that loaded its own model is not judged by the load.
+    let loaded = !had_model && model.owned.is_some();
+    let Some(track) = tracks[index].as_mut() else {
+        return false;
+    };
+    let pass = crate::meeting_provisional::LastPass {
+        elapsed,
+        samples: audio_len,
+    };
+    track.last_pass = Some(pass);
+    track.drafted_samples = audio_len;
+    match result {
+        Ok(transcript) => {
+            let (lines, _) = timed_entries(
+                track.transcript.source,
+                track.transcript.origin_ms + samples_ms(audio_start),
+                samples_ms(audio_len),
+                transcript,
+            );
+            track.provisional = lines;
+        }
+        Err(error) => {
+            tracing::warn!(%error, "meeting draft pass failed");
+            track.provisional_stopped = true;
+        }
+    }
+    if !loaded && pass.too_slow() {
+        tracing::warn!(
+            elapsed_ms = elapsed.as_millis() as u64,
+            audio_ms = samples_ms(audio_len),
+            "meeting draft pass was slower than live audio; further drafts stopped"
+        );
+        track.provisional_stopped = true;
     }
     true
 }
@@ -979,11 +1103,46 @@ fn rolling_view(
     }
 }
 
+/// What the selected-model draft shows after the rolling view: each track's
+/// uncommitted tail, and microphone entries the view holds back until the
+/// system track covers them. Only Moonshine fills that gap otherwise.
+fn provisional_entries(
+    tracks: &[Option<RollingTrack>; 2],
+    covered_ms: RollingCoverage,
+    envelope: &EchoEnvelope,
+) -> Vec<TranscriptEntry> {
+    let origin_ms = tracks
+        .iter()
+        .flatten()
+        .map(|track| track.transcript.origin_ms)
+        .min()
+        .unwrap_or_default();
+    let entries = tracks
+        .iter()
+        .flatten()
+        .flat_map(|track| track.transcript.entries.iter().chain(&track.provisional))
+        .cloned()
+        .collect();
+    let (mut entries, _) = suppress_echo(entries, |start, end| envelope.assess(start, end));
+    entries.retain(|entry| {
+        covered_ms
+            .get(entry.source)
+            .is_none_or(|covered| entry.end_ms > origin_ms + covered)
+    });
+    for entry in &mut entries {
+        entry.start_ms = entry.start_ms.saturating_sub(origin_ms);
+        entry.end_ms = entry.end_ms.saturating_sub(origin_ms);
+    }
+    entries.sort_by_key(|entry| (entry.start_ms, source_index(entry.source)));
+    entries
+}
+
 /// Atomically replaces the draft that the Meetings pane shows while recording.
 fn write_rolling_snapshot(
     directory: &Path,
     tracks: &[Option<RollingTrack>; 2],
     envelope: &EchoEnvelope,
+    drafting: bool,
 ) {
     let result = (|| -> Result<()> {
         let [system, microphone] = tracks;
@@ -1002,7 +1161,12 @@ fn write_rolling_snapshot(
             },
         )?;
         file.write_all(b"\n")?;
-        for entry in &view.entries {
+        let provisional = if drafting {
+            provisional_entries(tracks, view.covered_ms, envelope)
+        } else {
+            Vec::new()
+        };
+        for entry in view.entries.iter().chain(&provisional) {
             serde_json::to_writer(&mut file, entry)?;
             file.write_all(b"\n")?;
         }
@@ -1626,6 +1790,26 @@ mod tests {
     }
 
     #[test]
+    fn uncommitted_tail_is_audio_the_chunker_has_not_cut() {
+        let audio = speech(25);
+        let mut chunker = Chunker::default();
+        assert!(chunker.push(&audio).is_empty());
+        let (start, tail) = chunker.uncommitted();
+        assert_eq!(start, 0);
+        assert_eq!(tail, audio.as_slice());
+
+        let audio = speech(40);
+        let mut chunker = Chunker::default();
+        let chunks = chunker.push(&audio);
+        assert_eq!(chunks.len(), 1);
+        let (start, tail) = chunker.uncommitted();
+        assert_eq!(start, chunks[0].start + chunks[0].samples.len());
+        assert_eq!(tail, &audio[start..]);
+        assert!(start > chunks[0].start);
+        assert_eq!(&audio[chunks[0].start..start], chunks[0].samples.as_slice());
+    }
+
+    #[test]
     fn chunks_end_at_the_first_pause_after_the_target_length() {
         let audio = crate::pause_segmenter::tests::utterance(
             &[(12_000, 800), (9_000, 800), (6_000, 800), (4_000, 0)],
@@ -1967,6 +2151,70 @@ mod tests {
         let view = rolling_view([Some(&system), Some(&microphone)], false, &envelope);
         assert_eq!(view.entries.len(), 3);
         assert_eq!(view.covered_ms.microphone, Some(20_000));
+    }
+
+    #[test]
+    fn selected_model_draft_shows_what_the_rolling_view_holds_back() {
+        let rolling = |transcript, provisional| RollingTrack {
+            resampler: None,
+            sample_rate: RATE as u32,
+            chunker: Chunker::default(),
+            transcript,
+            fed: 0,
+            next_position: 0,
+            pending: 0,
+            failed: false,
+            provisional,
+            drafted_samples: 0,
+            provisional_stopped: false,
+            last_pass: None,
+        };
+        let tracks = [
+            Some(rolling(
+                track(
+                    MeetingSource::System,
+                    10_000,
+                    &[(4_000, 6_000, "¿Tiene soporte?")],
+                ),
+                vec![entry(
+                    MeetingSource::System,
+                    11_000,
+                    12_000,
+                    "Sigo hablando.",
+                )],
+            )),
+            Some(rolling(
+                track(
+                    MeetingSource::Microphone,
+                    20_000,
+                    &[
+                        (8_000, 9_000, "Sí, desde la versión dos."),
+                        (12_500, 14_000, "Publicamos el viernes."),
+                    ],
+                ),
+                vec![entry(MeetingSource::Microphone, 21_000, 22_000, "Y luego.")],
+            )),
+        ];
+        let envelope = EchoEnvelope::default();
+        let view = rolling_view(
+            [0, 1].map(|index| tracks[index].as_ref().map(|track| &track.transcript)),
+            true,
+            &envelope,
+        );
+        let shown = |entries: &[TranscriptEntry]| {
+            entries
+                .iter()
+                .map(|entry| entry.text.clone())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            shown(&view.entries),
+            ["¿Tiene soporte?", "Sí, desde la versión dos."]
+        );
+        assert_eq!(
+            shown(&provisional_entries(&tracks, view.covered_ms, &envelope)),
+            ["Sigo hablando.", "Publicamos el viernes.", "Y luego."]
+        );
     }
 
     #[test]

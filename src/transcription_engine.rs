@@ -7,9 +7,11 @@
 //! that cannot stream always takes the offline path. Commands are handled in
 //! order on one thread, because a live stream holds the model's compute lease.
 
+use std::sync::Arc;
+#[cfg(target_os = "macos")]
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
-use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 

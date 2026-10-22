@@ -537,6 +537,55 @@ fn live_transcription_replays_both_recorded_tracks() {
 }
 
 #[test]
+fn live_paste_without_a_moonshine_draft_uses_committed_rolling_entries() {
+    use transcript::{RollingCoverage, RollingLine};
+
+    let directory = std::env::temp_dir().join(format!(
+        "voice-control-meeting-rolling-paste-{}-{}",
+        std::process::id(),
+        now_ms()
+    ));
+    fs::create_dir_all(&directory).unwrap();
+    let entry = |source, start_ms, end_ms, text: &str| {
+        RollingLine::Entry(TranscriptEntry {
+            source,
+            start_ms,
+            end_ms,
+            text: text.into(),
+        })
+    };
+    let lines = [
+        RollingLine::Coverage {
+            covered_ms: RollingCoverage {
+                system: Some(20_000),
+                microphone: Some(10_000),
+            },
+        },
+        entry(MeetingSource::System, 0, 20_000, "Hola a todos."),
+        entry(MeetingSource::Microphone, 2_000, 9_000, "Buenos días."),
+        entry(MeetingSource::Microphone, 12_000, 15_000, "Esperando."),
+        entry(MeetingSource::System, 20_500, 22_000, "Borrador"),
+    ];
+    let path = directory.join(transcript::ROLLING_FILE);
+    fs::write(
+        &path,
+        lines
+            .iter()
+            .map(|line| serde_json::to_string(line).unwrap() + "\n")
+            .collect::<String>(),
+    )
+    .unwrap();
+    assert_eq!(
+        shown(&live::read_committed_rolling(&path).unwrap()),
+        [
+            (MeetingSource::System, "Hola a todos."),
+            (MeetingSource::Microphone, "Buenos días."),
+        ]
+    );
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
 fn rolling_entries_replace_the_live_draft_for_the_time_they_cover() {
     let entry = |source, start_ms, end_ms, text: &str| TranscriptEntry {
         source,

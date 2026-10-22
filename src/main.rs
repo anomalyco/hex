@@ -100,6 +100,8 @@ mod meeting;
 mod meeting_detection;
 #[cfg(target_os = "macos")]
 mod meeting_mcp;
+#[cfg(any(target_os = "macos", test))]
+mod meeting_provisional;
 #[cfg(target_os = "macos")]
 mod meeting_watcher;
 #[cfg(target_os = "macos")]
