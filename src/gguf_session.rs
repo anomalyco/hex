@@ -218,13 +218,20 @@ impl OfflineGgufSession {
 
 /// Drops Whisper segments that only repeat the recognition hints. Whisper
 /// reads the hints as its initial prompt and, on silence or noise, often
-/// returns them verbatim. Speech that merely contains a hint is kept.
+/// returns them verbatim. Speech that merely contains a hint is kept, and so
+/// is a single hint: dictating the one listed name must still paste it.
 fn drop_prompt_echo(transcript: &mut transcribe_cpp::Transcript, prompt: &str) {
-    let prompt = crate::spoken_text::normalize(prompt);
-    if prompt.is_empty() {
+    let is_separator = |character: char| matches!(character, ',' | ';' | '\n');
+    let hints = prompt
+        .split(is_separator)
+        .filter(|hint| !hint.trim().is_empty())
+        .count();
+    if hints < 2 {
         return;
     }
-    let echoes = |text: &str| crate::spoken_text::normalize(text) == prompt;
+    let normalize = |text: &str| crate::spoken_text::normalize(&text.replace(is_separator, " "));
+    let prompt = normalize(prompt);
+    let echoes = |text: &str| normalize(text) == prompt;
     if transcript.segments.is_empty() {
         if echoes(&transcript.text) {
             transcript.text.clear();
@@ -317,7 +324,7 @@ mod tests {
     #[test]
     fn prompt_echo_is_dropped() {
         let mut echo = transcript(&["T3 Code, Ottobit."]);
-        drop_prompt_echo(&mut echo, "t3 code ottobit");
+        drop_prompt_echo(&mut echo, "t3 code, ottobit");
         assert_eq!(echo.text, "");
         assert!(echo.segments.is_empty());
         assert!(echo.words.is_empty());
@@ -354,6 +361,30 @@ mod tests {
             (leading.segments[0].first_word, leading.segments[0].n_words),
             (0, 3)
         );
+    }
+
+    #[test]
+    fn single_hint_dictation_is_kept() {
+        let mut dictation = transcript(&["Ottobit."]);
+        let before = dictation.clone();
+        drop_prompt_echo(&mut dictation, "Ottobit");
+        assert_eq!(dictation, before);
+
+        let mut spaced = transcript(&["T3 Code Ottobit"]);
+        let before = spaced.clone();
+        drop_prompt_echo(&mut spaced, "T3 Code Ottobit");
+        assert_eq!(spaced, before);
+    }
+
+    #[test]
+    fn hints_without_spaces_after_commas_are_matched() {
+        let mut echo = transcript(&["T3 Code, Ottobit."]);
+        drop_prompt_echo(&mut echo, "T3 Code,Ottobit");
+        assert_eq!(echo.text, "");
+
+        let mut joined = transcript(&["T3 Code;Ottobit"]);
+        drop_prompt_echo(&mut joined, "T3 Code\nOttobit");
+        assert_eq!(joined.text, "");
     }
 
     #[test]

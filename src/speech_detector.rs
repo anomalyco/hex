@@ -5,7 +5,9 @@
 //! background, and every caller falls back to its level-only silence check.
 
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::AtomicBool;
+#[cfg(not(test))]
+use std::sync::atomic::Ordering;
 use std::sync::{Mutex, MutexGuard};
 
 use color_eyre::eyre::Result;
@@ -18,6 +20,11 @@ use crate::transcription_models;
 /// and room noise.
 const MIN_SPEECH_MS: i32 = 160;
 
+/// Speech probability that counts as speech. Silero's default of 0.5 misses
+/// a whisper at -43 dBFS, which the level gate deliberately keeps; 0.4 hears
+/// it and still rejects the silence in a recorded meeting.
+const THRESHOLD: f64 = 0.4;
+
 #[cfg_attr(test, allow(dead_code))]
 enum State {
     Unloaded,
@@ -27,6 +34,7 @@ enum State {
 
 #[cfg_attr(test, allow(dead_code))]
 static STATE: Mutex<State> = Mutex::new(State::Unloaded);
+#[cfg_attr(test, allow(dead_code))]
 static DOWNLOAD_STARTED: AtomicBool = AtomicBool::new(false);
 #[cfg_attr(test, allow(dead_code))]
 static RUN_FAILURE_LOGGED: AtomicBool = AtomicBool::new(false);
@@ -96,8 +104,17 @@ fn loaded_session(state: &mut State) -> Option<&mut VadSession> {
     }
 }
 
-#[cfg_attr(test, allow(dead_code))]
-fn start_download() {
+/// Starts one background download of the detector per process. Tests only
+/// count the request.
+pub(crate) fn start_download() {
+    #[cfg(test)]
+    DOWNLOAD_REQUESTS.with(|requests| requests.set(requests.get() + 1));
+    #[cfg(not(test))]
+    start_download_once();
+}
+
+#[cfg(not(test))]
+fn start_download_once() {
     if DOWNLOAD_STARTED.swap(true, Ordering::Relaxed) {
         return;
     }
@@ -127,6 +144,7 @@ fn load(path: &Path) -> Result<VadSession> {
 
 fn detect(session: &mut VadSession, samples: &[f32]) -> Result<bool> {
     let options = VadOptions {
+        threshold: THRESHOLD,
         min_speech_ms: MIN_SPEECH_MS,
         ..VadOptions::default()
     };
@@ -136,6 +154,13 @@ fn detect(session: &mut VadSession, samples: &[f32]) -> Result<bool> {
 #[cfg(test)]
 thread_local! {
     static OVERRIDE: std::cell::Cell<Option<bool>> = const { std::cell::Cell::new(None) };
+    static DOWNLOAD_REQUESTS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// How many detector downloads this thread requested.
+#[cfg(test)]
+pub(crate) fn download_requests_for_test() -> usize {
+    DOWNLOAD_REQUESTS.with(std::cell::Cell::get)
 }
 
 /// Makes `contains_speech` answer `verdict` on this thread until the guard
@@ -196,14 +221,23 @@ mod tests {
         assert!(!detect(&mut session, &noise).unwrap());
     }
 
+    fn clip(variable: &str) -> Vec<f32> {
+        let mut reader = hound::WavReader::open(std::env::var(variable).unwrap()).unwrap();
+        assert_eq!(reader.spec().sample_rate, 16_000);
+        reader.samples::<f32>().map(Result::unwrap).collect()
+    }
+
     #[test]
     #[ignore = "requires HEX_VAD_MODEL and HEX_VAD_SPEECH_WAV (16 kHz mono float speech)"]
     fn real_detector_hears_speech() {
         let mut session = load(Path::new(&std::env::var("HEX_VAD_MODEL").unwrap())).unwrap();
-        let mut reader =
-            hound::WavReader::open(std::env::var("HEX_VAD_SPEECH_WAV").unwrap()).unwrap();
-        assert_eq!(reader.spec().sample_rate, 16_000);
-        let speech: Vec<f32> = reader.samples::<f32>().map(Result::unwrap).collect();
-        assert!(detect(&mut session, &speech).unwrap());
+        assert!(detect(&mut session, &clip("HEX_VAD_SPEECH_WAV")).unwrap());
+    }
+
+    #[test]
+    #[ignore = "requires HEX_VAD_MODEL and HEX_VAD_WHISPER_WAV (16 kHz mono float whisper at about -43 dBFS)"]
+    fn real_detector_hears_quiet_whispers() {
+        let mut session = load(Path::new(&std::env::var("HEX_VAD_MODEL").unwrap())).unwrap();
+        assert!(detect(&mut session, &clip("HEX_VAD_WHISPER_WAV")).unwrap());
     }
 }

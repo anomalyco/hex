@@ -316,6 +316,7 @@ pub const SPEECH_DETECTOR_ARTIFACT: GgufArtifact = GgufArtifact {
     architecture: "silero_vad",
     variant: "v6.2",
 };
+#[cfg_attr(test, allow(dead_code))]
 const SPEECH_DETECTOR_NAME: &str = "the speech detector";
 
 pub const MODELS: &[ModelDefinition] = &[
@@ -601,7 +602,16 @@ pub fn validate(selection: &TranscriptionSelection) -> Result<&'static ModelDefi
 }
 
 pub fn models_dir() -> Result<PathBuf> {
+    #[cfg(test)]
+    if let Some(directory) = TEST_MODELS_DIR.with(|directory| directory.borrow().clone()) {
+        return Ok(directory);
+    }
     Ok(crate::app_paths::support_dir()?.join("models"))
+}
+
+#[cfg(test)]
+thread_local! {
+    static TEST_MODELS_DIR: std::cell::RefCell<Option<PathBuf>> = const { std::cell::RefCell::new(None) };
 }
 
 pub fn max_audio_chunk_samples(architecture: &str, max_audio_ms: i64) -> Option<usize> {
@@ -767,15 +777,17 @@ pub fn download_with_stage_progress(
         bail!("{} is installed and managed by macOS", model.name);
     };
     let path = download_artifact(artifact, model.name, canceled, downloaded_bytes, stage)?;
-    // Best effort: without the speech detector, dictation and meetings keep
-    // their level-only silence handling.
-    if let Err(error) = download_speech_detector(canceled) {
-        tracing::warn!(%error, "could not download the speech detector");
+    // In the background, so an installed model activates at once even
+    // offline. Until the detector lands, dictation and meetings keep their
+    // level-only silence handling.
+    if !speech_detector_installed() {
+        crate::speech_detector::start_download();
     }
     Ok(path)
 }
 
 /// Downloads the speech detector unless a verified copy is installed.
+#[cfg_attr(test, allow(dead_code))]
 pub fn download_speech_detector(canceled: &AtomicBool) -> Result<PathBuf> {
     download_artifact(
         &SPEECH_DETECTOR_ARTIFACT,
@@ -1417,6 +1429,37 @@ mod tests {
         assert!(!verification_receipt_matches(&path, &model));
         let _ = fs::remove_file(verification_receipt_path(&path));
         let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn an_installed_model_does_not_wait_for_the_speech_detector() {
+        let directory = std::env::temp_dir().join(format!(
+            "hex-installed-download-{}-{}",
+            std::process::id(),
+            NEXT_TEMP_FILE.fetch_add(1, Ordering::Relaxed),
+        ));
+        fs::create_dir(&directory).unwrap();
+        fs::write(directory.join("fixture.gguf"), b"hello").unwrap();
+        TEST_MODELS_DIR.with(|models| *models.borrow_mut() = Some(directory.clone()));
+        let requests = crate::speech_detector::download_requests_for_test();
+        let downloaded = download_with_progress(
+            &fixture_model(),
+            &AtomicBool::new(false),
+            &AtomicU64::new(0),
+        );
+        TEST_MODELS_DIR.with(|models| *models.borrow_mut() = None);
+        let detector_touched = directory.join(SPEECH_DETECTOR_ARTIFACT.filename).exists()
+            || directory
+                .join(SPEECH_DETECTOR_ARTIFACT.filename)
+                .with_extension("gguf.partial")
+                .exists();
+        fs::remove_dir_all(&directory).unwrap();
+        assert_eq!(downloaded.unwrap(), directory.join("fixture.gguf"));
+        assert_eq!(
+            crate::speech_detector::download_requests_for_test(),
+            requests + 1
+        );
+        assert!(!detector_touched);
     }
 
     #[test]

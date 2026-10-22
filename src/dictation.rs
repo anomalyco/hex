@@ -413,16 +413,26 @@ impl DictationClip {
         }
         let released = self.samples.len().saturating_sub(self.tail_samples);
         let started = std::time::Instant::now();
-        if crate::speech_detector::contains_speech(&self.samples[..released]) == Some(false) {
-            tracing::info!(
-                level_dbfs,
-                audio_ms = self.duration_ms(),
-                vad_ms = started.elapsed().as_millis() as u64,
-                "discarded dictation without detected speech"
-            );
-            return true;
+        match crate::speech_detector::contains_speech(&self.samples[..released]) {
+            Some(false) => {
+                tracing::info!(
+                    level_dbfs,
+                    audio_ms = self.duration_ms(),
+                    vad_ms = started.elapsed().as_millis() as u64,
+                    "discarded dictation without detected speech"
+                );
+                true
+            }
+            Some(true) => {
+                tracing::debug!(
+                    audio_ms = self.duration_ms(),
+                    vad_ms = started.elapsed().as_millis() as u64,
+                    "speech detected in dictation"
+                );
+                false
+            }
+            None => false,
         }
-        false
     }
 
     #[cfg(test)]
@@ -1088,6 +1098,38 @@ mod tests {
         // The level gate runs first: a silent capture never reaches the
         // detector.
         assert!(clip(vec![0.0; 16_000]).is_near_silent());
+    }
+
+    #[test]
+    fn speech_detector_cost_is_logged_when_speech_passes() {
+        #[derive(Clone, Default)]
+        struct Log(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
+        impl std::io::Write for Log {
+            fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+                self.0.lock().unwrap().extend_from_slice(bytes);
+                Ok(bytes.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        let log = Log::default();
+        let writer = log.clone();
+        let subscriber = tracing_subscriber::fmt()
+            .with_max_level(tracing::Level::DEBUG)
+            .with_ansi(false)
+            .with_writer(move || writer.clone())
+            .finish();
+        let _detector = crate::speech_detector::override_for_test(Some(true));
+        tracing::subscriber::with_default(subscriber, || {
+            // Parallel tests may have cached this callsite as disabled while
+            // no subscriber was set on their thread.
+            tracing::callsite::rebuild_interest_cache();
+            assert!(!DictationClip::for_test(tone(0.1, 16_000).collect()).is_near_silent());
+        });
+        let output = String::from_utf8(log.0.lock().unwrap().clone()).unwrap();
+        assert!(output.contains("audio_ms=1000"), "{output}");
+        assert!(output.contains("vad_ms="), "{output}");
     }
 
     fn capture_time() -> CaptureInstant {

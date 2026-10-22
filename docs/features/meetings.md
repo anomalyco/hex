@@ -226,10 +226,11 @@ Speechless chunks: models invent text for silence and noise ("Thank you",
 the Silero speech detector used by dictation (see
 [dictation](dictation.md#ongoing-jobs-and-output)). A chunk with no speech of at
 least 160 ms becomes an empty transcript without inference, in rolling
-transcription, the Stop & Transcribe fallback, and `meeting echo`. On a 63-minute
-Italian call the detector found speech in none of 152 invented microphone
-entries and in 32 of 33 real ones (the miss: a 40 ms "Certo." at a chunk
-boundary), and scanned the call in 1.6 s on the CPU. Invented text inside a
+transcription, the Stop & Transcribe fallback, and `meeting echo`. In a probe
+outside the tree, run on each microphone entry of one 63-minute Italian call,
+the detector found speech in 1 of 152 invented entries (a "Grazie a tutti.")
+and in 32 of 33 real ones (the miss: a 40 ms "Certo." at a chunk boundary), and
+scanned the call in 1.6 s on the CPU. Invented text inside a
 chunk that also holds speech is not addressed. Without the detector every chunk
 is transcribed, as before. A Whisper chunk that returns only the recognition
 hints is emptied too ([models](README.md#get-ready)).
