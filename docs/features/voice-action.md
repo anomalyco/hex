@@ -5,8 +5,9 @@ HEX transcribes locally, asks Voice Action's OpenCode model for paste-ready text
 and pastes at the current focus. This is not
 [Voice Commands](commands.md) or ordinary [Dictation](dictation.md).
 
-This map covers macOS. Linked checks are locators, not passing runs; no tests,
-previews, providers, or native actions were run for this split.
+This map covers macOS; [Linux](#linux) differs only in how the instruction is
+captured. Linked checks are locators, not passing runs; no tests, previews,
+providers, or native actions were run for this split.
 
 ## How To Get To It
 
@@ -214,3 +215,27 @@ establish equivalent audio onset.
 - **Native proof:** permissions, shortcut ordering, microphone mode, selection
   support, provider response, and target paste still need an explicit controlled
   end-to-end check. This map does not authorize operating the installed app.
+
+## Linux
+
+```ts
+Settings > Voice Action > Enable                      // voice-action.linux; off by default
+├── X11 -> Hold the saved shortcut (Ctrl+Alt+I by default) -> Release -> Run
+├── Wayland + GlobalShortcuts portal -> Hold the granted trigger -> Release -> Run
+├── Wayland without the portal -> Desktop keybinding runs
+│   `hex voice-action start` on press, `hex voice-action stop` on release,
+│   or `hex voice-action toggle`
+├── Escape or `hex dictation cancel` -> Cancel the instruction
+└── Selected text -> Primary selection (X11 clipboard, `wl-paste --primary`)
+```
+
+The shortcut and commands feed the same state machine as dictation in
+[linux_input.rs](../../src/linux_input.rs), so Voice Action and dictation never
+record at once, and a command while Voice Action is off fails with an error
+from the service (`commands_reach_only_a_started_listener` in
+[linux_app.rs](../../src/linux_app.rs)). `run_voice_action` in
+[linux_dictation.rs](../../src/linux_dictation.rs) sends the instruction and
+selection through the same OpenCode Voice Action processing and pastes the
+reply. `voice_action_records_while_its_shortcut_is_held` and
+`voice_action_commands_are_idempotent` cover the gestures; no OpenCode request
+or paste has been observed on a Linux desktop.

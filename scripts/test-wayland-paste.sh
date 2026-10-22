@@ -19,8 +19,10 @@ if [[ "${1:-}" == --inside ]]; then
   }
   trap finish EXIT
 
-  # Seed the isolated compositor's keyboard state before any window exists.
-  wtype -k v -p VoidSymbol -s 60000 &
+  # Seed the isolated compositor's keyboard state before any window exists,
+  # and keep Ctrl and Alt held on it as a user still holding a shortcut would:
+  # wtype's own keyboard must paste plain Ctrl+V without waiting for them.
+  wtype -k v -M ctrl -M alt -p VoidSymbol -s 60000 &
   keyboard=$!
   for ((attempt = 0; attempt < 100; attempt++)); do
     if swaymsg -t get_inputs -r | grep -q wlr_virtual_keyboard; then break; fi

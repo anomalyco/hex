@@ -219,6 +219,10 @@ fn open_new(
 ) -> gpui::Result<WindowHandle<AppWindow>> {
     let preview_mode = preview.is_some();
     let bounds = Bounds::centered(None, size(px(WINDOW_WIDTH), px(WINDOW_HEIGHT)), cx);
+    // Activate first: opening a window while Hex is inactive (after a click on
+    // a non-activating capsule or the menu bar) makes AppKit report a spurious
+    // key change that GPUI answers by resigning key status.
+    cx.activate(true);
     let handle = cx.open_window(
         platform::window_options(WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(bounds)),
@@ -235,7 +239,9 @@ fn open_new(
         }),
         |window, cx| cx.new(|cx| AppWindow::new(event_path, history, preview, args, window, cx)),
     )?;
-    cx.activate(true);
+    // Activation can land after the window opens; key it again on the next turn.
+    #[cfg(target_os = "macos")]
+    let _ = handle.update(cx, |_, window, _| window.activate_window());
     Ok(handle)
 }
 
@@ -254,10 +260,12 @@ pub enum PreviewModelState {
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub enum OnboardingPreview {
     Welcome,
-    HowItWorks,
     Setup,
     SetupProgress,
+    SetupDenied,
     SetupReady,
+    SetupDownloadFailed,
+    TryItDownloading,
     TryIt,
     TryItListening,
     TryItShort,
@@ -275,15 +283,24 @@ impl OnboardingPreview {
             accessibility: PermissionState::Ready,
             transcription_model: true,
         };
+        let fresh = SetupStatus {
+            microphone: PermissionState::NeedsRequest,
+            input_monitoring: PermissionState::NeedsSettings,
+            accessibility: PermissionState::NeedsSettings,
+            transcription_model: false,
+        };
         match self {
-            Self::Welcome | Self::HowItWorks | Self::Setup => SetupStatus {
-                microphone: PermissionState::NeedsRequest,
-                input_monitoring: PermissionState::NeedsSettings,
-                accessibility: PermissionState::NeedsSettings,
-                transcription_model: false,
-            },
+            Self::Welcome | Self::Setup | Self::SetupDownloadFailed => fresh,
             Self::SetupProgress => SetupStatus {
                 accessibility: PermissionState::NeedsSettings,
+                transcription_model: false,
+                ..ready
+            },
+            Self::SetupDenied => SetupStatus {
+                microphone: PermissionState::NeedsSettings,
+                ..fresh
+            },
+            Self::SetupReady | Self::TryItDownloading => SetupStatus {
                 transcription_model: false,
                 ..ready
             },
@@ -291,46 +308,70 @@ impl OnboardingPreview {
         }
     }
 
+    /// How far the background download has come by this state.
+    fn model(self) -> crate::onboarding::ModelProgress {
+        use crate::onboarding::ModelProgress;
+        let downloading = |progress| ModelProgress {
+            downloading: Some(progress),
+            ..ModelProgress::default()
+        };
+        match self {
+            Self::Welcome => downloading(0.08),
+            Self::Setup | Self::SetupDenied => downloading(0.31),
+            Self::SetupProgress => downloading(0.64),
+            Self::SetupReady => downloading(0.82),
+            Self::TryItDownloading => downloading(0.94),
+            Self::SetupDownloadFailed => ModelProgress {
+                failed: true,
+                ..ModelProgress::default()
+            },
+            _ => ModelProgress {
+                installed: true,
+                ..ModelProgress::default()
+            },
+        }
+    }
+
+    /// Walks a fresh first run to this state, as a person would, so the
+    /// page dots and the download match what they see.
     fn flow(self, permissions: bool, practice: bool) -> crate::onboarding::Flow {
-        use crate::onboarding::{Flow, Input, ModelProgress, Observation, SetupItem, Step};
+        use crate::onboarding::{Flow, Input, ModelProgress, Observation, SetupItem};
         let fresh = Self::Setup.status();
-        let start = match self {
-            Self::Welcome => Step::Welcome,
-            Self::HowItWorks => Step::HowItWorks,
-            _ => Step::Setup,
-        };
-        let initial = if self == Self::SetupProgress {
-            self.status()
-        } else {
-            fresh
-        };
-        // Later steps walk through setup, as a first run does, so the page
-        // dots match what a person sees.
-        let mut flow = Flow::new(start, initial, permissions, practice);
-        let status = self.status();
-        if self == Self::SetupProgress {
-            flow.on(Input::Grant(SetupItem::Accessibility));
-            flow.on(Input::Status(
-                status,
-                ModelProgress {
-                    downloading: Some(0.42),
-                    ..ModelProgress::default()
-                },
-            ));
-        } else if start == Step::Setup && self != Self::Setup {
-            flow.on(Input::Status(
-                status,
-                ModelProgress {
-                    installed: true,
-                    ..ModelProgress::default()
-                },
-            ));
-            if self != Self::SetupReady {
-                flow.on(Input::Continue);
+        let mut flow = Flow::new(
+            crate::onboarding::Step::Welcome,
+            fresh,
+            permissions,
+            practice,
+        );
+        flow.on(Input::Status(fresh, ModelProgress::default()));
+        if self != Self::Welcome {
+            flow.on(Input::Continue);
+        }
+        match self {
+            Self::SetupProgress => {
+                flow.on(Input::Grant(SetupItem::Microphone));
+                flow.on(Input::Grant(SetupItem::InputMonitoring));
+                flow.on(Input::Grant(SetupItem::Accessibility));
             }
-            if self == Self::Done {
-                flow.on(Input::Skip);
+            Self::SetupDenied => {
+                flow.on(Input::Status(self.status(), self.model()));
             }
+            _ => {}
+        }
+        flow.on(Input::Status(self.status(), self.model()));
+        if !matches!(
+            self,
+            Self::Welcome
+                | Self::Setup
+                | Self::SetupProgress
+                | Self::SetupDenied
+                | Self::SetupReady
+                | Self::SetupDownloadFailed
+        ) {
+            flow.on(Input::Continue);
+        }
+        if self == Self::Done {
+            flow.on(Input::Skip);
         }
         let observations: &[Observation] = match self {
             Self::TryItListening => &[Observation::Started],
@@ -386,6 +427,38 @@ pub struct AppWindowPreview {
     pub experimental_mic: bool,
     pub fun_mode: Option<crate::voice_filter::VoiceFilterMode>,
     pub fun_driver_missing: bool,
+}
+
+impl AppWindowPreview {
+    #[cfg(target_os = "macos")]
+    pub fn pane(pane: DeveloperPane) -> Self {
+        AppWindowPreview {
+            pane,
+            transcription_picker: None,
+            onboarding: None,
+            confirm_model_deletion: false,
+            collapse_mode_processing: false,
+            open_transformation_picker: false,
+            select_global_mode: false,
+            voice_action_enabled: false,
+            opencode_unavailable: false,
+            permissions_missing: false,
+            model_missing: false,
+            command_model_missing: false,
+            open_history_retention: false,
+            confirm_release_microphone: false,
+            update_available: false,
+            meetings_enabled: true,
+            screen_recording_missing: false,
+            meeting_recording: false,
+            confirm_meeting_delete: false,
+            open_meeting_actions: false,
+            meetings_empty: false,
+            experimental_mic: false,
+            fun_mode: None,
+            fun_driver_missing: false,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -881,7 +954,10 @@ impl Render for NavigationSidebar {
             navigation_item(pane.icon(), selected)
                 .id(("app-nav", index))
                 .child(pane.label())
-                .on_click(move |_, _, cx| {
+                // Like an AppKit source list, a row selects on press, not
+                // release, so the pane is already showing as the button lifts.
+                .on_mouse_down(MouseButton::Left, move |_, _, cx| {
+                    crate::motion::mark_pane_input();
                     let _ = window_entity.update(cx, |this, cx| {
                         this.select_pane(pane, cx);
                     });
@@ -1279,7 +1355,7 @@ impl AppWindow {
                         let history_changed = window.poll_history(cx);
                         let platform_changed = window.poll_platform(cx);
                         let hex_mic_changed = window.poll_hex_microphone(cx);
-                        let tour_changed = window.poll_tour();
+                        let tour_changed = window.poll_tour(cx);
                         if window.tour_quit_requested {
                             cx.quit();
                             return;
@@ -1933,6 +2009,7 @@ impl AppWindow {
     fn select_pane(&mut self, pane: Pane, cx: &mut Context<Self>) {
         if self.pane != pane {
             crate::motion::log_pane_summary(self.pane.label(), "pane_switched");
+            crate::motion::mark_pane_switch(pane.label());
         }
         if self.pane == Pane::Fun && pane != Pane::Fun {
             crate::hex_microphone::stop_demo_playback();
@@ -3454,6 +3531,9 @@ impl AppWindow {
         let running = listener.running;
         let shortcut = self.settings.dictation_hotkey.keycaps().join("+");
         let hint = match (running, self.settings.shortcut_mode) {
+            _ if !self.platform_shortcut_rows() => {
+                tr("Ready anywhere · Use your desktop's shortcuts to dictate").into()
+            }
             (true, crate::dictation::ShortcutMode::Toggle) => tr_fill(
                 "Ready anywhere · Press {} to start and stop dictating",
                 &shortcut,
@@ -3653,6 +3733,8 @@ impl AppWindow {
             .listener_control
             .then(|| self.render_listener_card(cx))
             .flatten();
+        let shortcut_rows = self.platform_shortcut_rows();
+        let paste_last_row = capabilities.paste_last && shortcut_rows;
         let hotkey_control = self.render_hotkey_setting_control(HotkeyKind::Dictation, window, cx);
         let paste_last_control = self.render_hotkey_control(HotkeyKind::PasteLast, window, cx);
         let transcription_model = definition(self.settings.transcription.model);
@@ -3967,24 +4049,29 @@ impl AppWindow {
                                 ))
                             },
                         )
-                        .child(settings_row(
-                            tr("Shortcut mode"),
-                            if toggle_mode {
-                                tr("Press to start dictating, press again to transcribe")
-                            } else {
-                                tr("Hold to dictate, release to transcribe")
-                            },
-                            shortcut_mode,
-                        ))
                         .child(
                             settings_row(
-                                tr("Dictation shortcut"),
-                                tr("Click to record a new shortcut"),
-                                hotkey_control,
+                                tr("Shortcut mode"),
+                                if toggle_mode {
+                                    tr("Press to start dictating, press again to transcribe")
+                                } else {
+                                    tr("Hold to dictate, release to transcribe")
+                                },
+                                shortcut_mode,
                             )
-                            .border_b_0()
-                            .id("dictation-hotkey-setting"),
-                        ),
+                            .when(!shortcut_rows, |row| row.border_b_0()),
+                        )
+                        .when(shortcut_rows, |panel| {
+                            panel.child(
+                                settings_row(
+                                    tr("Dictation shortcut"),
+                                    tr("Click to record a new shortcut"),
+                                    hotkey_control,
+                                )
+                                .border_b_0()
+                                .id("dictation-hotkey-setting"),
+                            )
+                        }),
                 )
                 .child(settings_section_label(tr("Behavior")))
                 .child(
@@ -4051,7 +4138,7 @@ impl AppWindow {
                                     tr("Show the dictation pill at the top or bottom of the screen"),
                                     indicator_control,
                                 )
-                                .when(!capabilities.terminal_paste && !capabilities.paste_last, |row| {
+                                .when(!capabilities.terminal_paste && !paste_last_row, |row| {
                                     row.border_b_0()
                                 })
                                 .id("indicator-position-setting"),
@@ -4064,7 +4151,7 @@ impl AppWindow {
                                     tr("Paste with Ctrl+Shift+V so terminals accept it"),
                                     toggle(terminal_paste_position),
                                 )
-                                .when(!capabilities.paste_last, |row| row.border_b_0())
+                                .when(!paste_last_row, |row| row.border_b_0())
                                 .id("terminal-paste-setting")
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     let enabled = !this.settings.paste_with_shift;
@@ -4076,7 +4163,7 @@ impl AppWindow {
                                 })),
                             )
                         })
-                        .when(capabilities.paste_last, |panel| panel.child(
+                        .when(paste_last_row, |panel| panel.child(
                             settings_row(
                                 tr("Paste last dictation"),
                                 tr("Re-paste the most recent dictation"),
@@ -5277,22 +5364,23 @@ impl AppWindow {
                 .when_some(self.voice_action_inputs.error.clone(), |column, error| {
                     column.child(error_message(tr("Could not update Voice Action:"), error))
                 })
-                .child(settings_section_label(tr("Capture")))
-                .child(
-                    panel().child(
-                        settings_row(
-                            tr("Shortcut"),
-                            if enabled {
-                                tr("Hold to speak; selected text is included automatically")
-                            } else {
-                                tr("Saved for when Voice Action is enabled")
-                            },
-                            hotkey,
-                        )
-                        .border_b_0()
-                        .id("voice-action-hotkey-setting"),
-                    ),
-                )
+                .when(self.platform_shortcut_rows(), |column| {
+                    column.child(settings_section_label(tr("Capture"))).child(
+                        panel().child(
+                            settings_row(
+                                tr("Shortcut"),
+                                if enabled {
+                                    tr("Hold to speak; selected text is included automatically")
+                                } else {
+                                    tr("Saved for when Voice Action is enabled")
+                                },
+                                hotkey,
+                            )
+                            .border_b_0()
+                            .id("voice-action-hotkey-setting"),
+                        ),
+                    )
+                })
                 .when_some(processing, |column, processing| {
                     column
                         .child(settings_section_label(tr("Processing")))
@@ -7382,6 +7470,7 @@ impl TranscriptionPickerDelegate for AppWindow {
 impl Render for AppWindow {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let _frame_guard = crate::motion::begin_frame(self.pane.label());
+        crate::motion::pane_switch_rendered(self.pane.label(), window);
         let model_notice = self.render_model_notice(cx);
         let content = match self.pane {
             Pane::HudLab | Pane::Meetings | Pane::Commands => {
@@ -8344,32 +8433,7 @@ mod tests {
     }
 
     fn pane_preview(pane: DeveloperPane) -> AppWindowPreview {
-        AppWindowPreview {
-            pane,
-            transcription_picker: None,
-            onboarding: None,
-            confirm_model_deletion: false,
-            collapse_mode_processing: false,
-            open_transformation_picker: false,
-            select_global_mode: false,
-            voice_action_enabled: false,
-            opencode_unavailable: false,
-            permissions_missing: false,
-            model_missing: false,
-            command_model_missing: false,
-            open_history_retention: false,
-            confirm_release_microphone: false,
-            update_available: false,
-            meetings_enabled: true,
-            screen_recording_missing: false,
-            meeting_recording: false,
-            confirm_meeting_delete: false,
-            open_meeting_actions: false,
-            meetings_empty: false,
-            experimental_mic: false,
-            fun_mode: None,
-            fun_driver_missing: false,
-        }
+        AppWindowPreview::pane(pane)
     }
 
     fn editor_fixture(window: &mut Window, cx: &mut Context<AppWindow>) -> AppWindow {

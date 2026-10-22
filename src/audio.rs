@@ -709,6 +709,13 @@ fn open_configured_input(
     )
 }
 
+/// Opens the microphone a meeting records: the saved selection while it is
+/// available, otherwise the automatic preference order.
+#[cfg(target_os = "macos")]
+pub fn open_meeting_input(selected_device: Option<&str>) -> Result<AudioInput> {
+    open_configured_input(None, selected_device, SelectedFallback::Immediate)
+}
+
 fn open_selected<T>(
     device: &str,
     fallback: SelectedFallback,

@@ -1,11 +1,15 @@
 #import <AppKit/AppKit.h>
+#import <AVFoundation/AVFoundation.h>
 #import <ApplicationServices/ApplicationServices.h>
 #import <CoreGraphics/CoreGraphics.h>
 #import <QuartzCore/QuartzCore.h>
+#import <dlfcn.h>
 
 typedef NS_ENUM(NSInteger, HexPermission) {
     HexPermissionInputMonitoring = 0,
     HexPermissionAccessibility = 1,
+    HexPermissionMicrophone = 2,
+    HexPermissionSystemAudio = 3,
 };
 
 static NSPanel *guidePanel;
@@ -16,8 +20,39 @@ static HexPermission activePermission;
 @interface HexDragView : NSView <NSDraggingSource>
 @property(nonatomic, strong) NSURL *bundleURL;
 @property(nonatomic, strong) NSImage *appIcon;
+@property(nonatomic, copy) NSString *appName;
 @property(nonatomic, strong) NSEvent *mouseDownEvent;
 @end
+
+/// The name System Settings lists the app under.
+static NSString *hexAppName(NSURL *bundleURL) {
+    NSString *name = [[NSFileManager defaultManager] displayNameAtPath:bundleURL.path];
+    if ([name.pathExtension.lowercaseString isEqualToString:@"app"]) {
+        name = name.stringByDeletingPathExtension;
+    }
+    return name.length > 0 ? name : @"Hex";
+}
+
+/// macOS 27 renamed the Accessibility list.
+static BOOL accessibilityRenamed(void) {
+    NSOperatingSystemVersion version = {27, 0, 0};
+    return [NSProcessInfo.processInfo isOperatingSystemAtLeastVersion:version];
+}
+
+/// The name of the Privacy & Security list each permission lives in.
+const char *hex_permission_list_name(int permission) {
+    switch ((HexPermission)permission) {
+        case HexPermissionInputMonitoring:
+            return "Input Monitoring";
+        case HexPermissionAccessibility:
+            return accessibilityRenamed() ? "Device Control and Data Access" : "Accessibility";
+        case HexPermissionMicrophone:
+            return "Microphone";
+        case HexPermissionSystemAudio:
+            return "System Audio Recording Only";
+    }
+    return "Privacy & Security";
+}
 
 @implementation HexDragView
 
@@ -27,6 +62,7 @@ static HexPermission activePermission;
         _bundleURL = bundleURL;
         _appIcon = [[NSWorkspace sharedWorkspace] iconForFile:bundleURL.path];
         _appIcon.size = NSMakeSize(32, 32);
+        _appName = hexAppName(bundleURL);
     }
     return self;
 }
@@ -60,7 +96,7 @@ static HexPermission activePermission;
         NSFontAttributeName: [NSFont systemFontOfSize:13 weight:NSFontWeightSemibold],
         NSForegroundColorAttributeName: [NSColor colorWithWhite:(dark ? 0.94 : 0.12) alpha:1],
     };
-    [@"HEX" drawAtPoint:NSMakePoint(52, 14) withAttributes:attributes];
+    [self.appName drawAtPoint:NSMakePoint(52, 14) withAttributes:attributes];
 }
 
 - (void)mouseDown:(NSEvent *)event {
@@ -144,13 +180,34 @@ static NSRect appKitFrame(CGRect frame) {
     );
 }
 
+/// System Audio Recording has no public query; TCC's preflight answers it
+/// (0 is granted). Without it, the guide waits for System Settings to close.
+static BOOL systemAudioGranted(void) {
+    static int (*preflight)(CFStringRef, CFDictionaryRef);
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        void *handle = dlopen(
+            "/System/Library/PrivateFrameworks/TCC.framework/Versions/A/TCC", RTLD_NOW);
+        if (handle != NULL) {
+            preflight = dlsym(handle, "TCCAccessPreflight");
+        }
+    });
+    return preflight != NULL && preflight(CFSTR("kTCCServiceAudioCapture"), NULL) == 0;
+}
+
 static BOOL permissionGranted(void) {
     switch (activePermission) {
         case HexPermissionInputMonitoring:
             return CGPreflightListenEventAccess();
         case HexPermissionAccessibility:
             return CGPreflightPostEventAccess();
+        case HexPermissionMicrophone:
+            return [AVCaptureDevice authorizationStatusForMediaType:AVMediaTypeAudio] ==
+                   AVAuthorizationStatusAuthorized;
+        case HexPermissionSystemAudio:
+            return systemAudioGranted();
     }
+    return NO;
 }
 
 static void closeGuide(void) {
@@ -196,18 +253,35 @@ void hex_show_permission_guide(int permission) {
     activePermission = (HexPermission)permission;
 
     NSURL *bundleURL = NSBundle.mainBundle.bundleURL.standardizedURL;
+    NSString *listName = [NSString stringWithUTF8String:hex_permission_list_name(permission)];
+    NSString *appName = hexAppName(bundleURL);
+    NSString *pane;
+    switch (activePermission) {
+        case HexPermissionInputMonitoring:
+            pane = @"Privacy_ListenEvent";
+            break;
+        case HexPermissionAccessibility:
+            pane = @"Privacy_Accessibility";
+            break;
+        case HexPermissionMicrophone:
+            pane = @"Privacy_Microphone";
+            break;
+        case HexPermissionSystemAudio:
+            pane = @"Privacy_AudioCapture";
+            break;
+    }
+    // The Microphone list only holds apps that asked, so a refused
+    // microphone is switched on rather than dragged in.
+    BOOL draggable = activePermission != HexPermissionMicrophone;
+    NSURL *settingsURL = [NSURL URLWithString:[NSString stringWithFormat:
+        @"x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?%@", pane]];
+    [[NSWorkspace sharedWorkspace] openURL:settingsURL];
+    // A development binary has no bundle to list, so it gets the pane alone.
     if (![bundleURL.pathExtension.lowercaseString isEqualToString:@"app"]) {
         return;
     }
 
-    NSString *permissionName = activePermission == HexPermissionInputMonitoring
-        ? @"Input Monitoring"
-        : @"Accessibility";
-    NSString *pane = activePermission == HexPermissionInputMonitoring
-        ? @"Privacy_ListenEvent"
-        : @"Privacy_Accessibility";
-
-    NSSize panelSize = NSMakeSize(480, 116);
+    NSSize panelSize = NSMakeSize(480, draggable ? 116 : 60);
     guidePanel = [[NSPanel alloc]
         initWithContentRect:NSMakeRect(0, 0, panelSize.width, panelSize.height)
                   styleMask:NSWindowStyleMaskBorderless |
@@ -232,22 +306,23 @@ void hex_show_permission_guide(int permission) {
     content.layer.borderWidth = 1;
     content.layer.borderColor = [NSColor colorWithWhite:0 alpha:0.10].CGColor;
 
-    NSTextField *instruction = [NSTextField labelWithString:[NSString stringWithFormat:
-        @"↑  Drag HEX into the %@ list above", permissionName]];
-    instruction.frame = NSMakeRect(18, 73, panelSize.width - 36, 24);
+    NSString *text = draggable
+        ? [NSString stringWithFormat:@"↑  Drag %@ into the %@ list above", appName, listName]
+        : [NSString stringWithFormat:@"↑  Switch on %@ in the %@ list above", appName, listName];
+    NSTextField *instruction = [NSTextField labelWithString:text];
+    instruction.frame = NSMakeRect(18, draggable ? 73 : 18, panelSize.width - 36, 24);
     instruction.font = [NSFont systemFontOfSize:13 weight:NSFontWeightMedium];
     instruction.textColor = NSColor.labelColor;
     [content addSubview:instruction];
 
-    HexDragView *dragView = [[HexDragView alloc]
-        initWithFrame:NSMakeRect(18, 17, panelSize.width - 36, 44)
-             bundleURL:bundleURL];
-    [content addSubview:dragView];
+    if (draggable) {
+        HexDragView *dragView = [[HexDragView alloc]
+            initWithFrame:NSMakeRect(18, 17, panelSize.width - 36, 44)
+                 bundleURL:bundleURL];
+        [content addSubview:dragView];
+    }
     guidePanel.contentView = content;
 
-    NSURL *settingsURL = [NSURL URLWithString:[NSString stringWithFormat:
-        @"x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?%@", pane]];
-    [[NSWorkspace sharedWorkspace] openURL:settingsURL];
     guideTimer = [NSTimer scheduledTimerWithTimeInterval:0.12
                                                  repeats:YES
                                                    block:^(NSTimer *timer) {

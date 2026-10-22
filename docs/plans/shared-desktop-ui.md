@@ -44,8 +44,9 @@ such as moving English dictation to the streaming model, record their ID in
 ## Shared Dictation Behavior
 
 The Windows and Linux listeners share `dictation_modes::ModeRuntime` for mode
-selection and processing, and both record History. Linux's service records
-shortcuts (evdev on Wayland), prepares models, and applies saved settings live;
+selection and processing, and both record History. Linux's service registers
+the shortcuts Settings records (X11 grabs or the Wayland shortcuts portal),
+prepares models, and applies saved settings live;
 History rereads its file when the other process wrote it.
 
 ## Interface Language

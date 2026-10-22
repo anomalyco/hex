@@ -21,8 +21,9 @@ The Linux beta keeps its contracts explicit:
 | UI | On-demand GPUI service client; no tray; service-owned Wayland layer-shell HUD |
 
 The beta does not claim voice commands, application or browser context,
-meetings, or universal Wayland support. Wayland needs explicit read access to
-all event devices, `wl-copy`, `wtype`, and compatible compositor protocols.
+meetings, or universal Wayland support. Wayland needs `wl-copy`, `wtype`, and
+compatible compositor protocols; shortcuts come from the GlobalShortcuts portal
+or from the user's compositor keybindings running `hex` commands.
 There is no hidden XWayland or privileged injection fallback. See
 [`../linux.md`](../linux.md) and [`../nix.md`](../nix.md).
 
@@ -36,8 +37,10 @@ There is no hidden XWayland or privileged injection fallback. See
 - CLI microphone override.
 - Per-user systemd service, independent GPUI Settings client, CLI controls,
   owner-only Unix IPC, desktop launcher, and service-only autostart entry.
-- Native Wayland evdev input with explicit key mapping, cancellation, and
-  device rediscovery; persistent click-through recording/processing overlay.
+- One shortcut state machine fed by X11 grabs, the Wayland GlobalShortcuts
+  portal, or idempotent `hex dictation`, `hex voice-action`, and
+  `hex paste-last` commands for desktops without the portal; persistent
+  click-through recording/processing overlay.
 - Visible listener controls, transactional shortcut edits, and explicit service
   shutdown; closing Settings leaves the managed runtime running.
 - Nix package and matching development shell, NixOS installation, optional
@@ -111,10 +114,10 @@ recording automatically.
 
 ### 5. Expand Wayland Only With Explicit Capabilities
 
-The implemented beta uses read-only evdev observation plus compositor-provided
-clipboard and virtual-keyboard protocols. It does not suppress the shortcut;
-users may need a compositor no-op binding. It does not grant input permissions.
-Broader or less-privileged support requires a separate capability decision:
+The implemented beta takes shortcuts from the GlobalShortcuts portal, or from
+`hex` commands the user binds in the compositor, plus compositor-provided
+clipboard and virtual-keyboard protocols. It reads no input devices and grants
+no permissions. Broader support requires a separate capability decision:
 
 | Contract | Input and insertion behavior |
 | --- | --- |
@@ -125,10 +128,10 @@ Unprivileged Wayland does not guarantee arbitrary foreground insertion, global
 activity observation, foreground application identity, or bare-modifier
 shortcuts. Do not hide those limitations behind XWayland.
 
-If appliance parity is required, design a minimal versioned evdev/uinput helper
-that handles keyboard hotplug, crash-safe key release, access policy, and exact
-re-injection of non-suppressed events. Do not build a general-purpose root
-daemon.
+Do not add compositor-specific shortcut paths or raw input-device readers;
+the portal and the `hex` commands are the one general contract. If appliance
+parity is ever required, decide on an approved helper separately and do not
+build a general-purpose root daemon.
 
 ### 6. Validate Distribution Channels Deliberately
 
@@ -210,8 +213,9 @@ implementation assumptions.
 - Target x86_64 Arch Linux rolling on i3/X11.
 - Ship through a signed user-local direct-install channel.
 - Require automatic insertion and a key-containing shortcut.
-- Exclude meetings; scope native Wayland to compatible wlroots protocols and
-  explicit raw-input permissions rather than claiming every compositor.
+- Exclude meetings; scope native Wayland to compatible wlroots protocols rather
+  than claiming every compositor. Shortcuts use the GlobalShortcuts portal or
+  user-bound `hex` commands, never raw input devices.
 - Keep package-manager and app-managed update ownership separate.
 - Do not install a privileged helper for the X11 contract.
 - Rebuild the proposals in [#28](https://github.com/anomalyco/hex/pull/28) and

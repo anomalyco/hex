@@ -3,7 +3,7 @@
 //! registration, the HUD, and updates, to reload it over the service socket.
 
 use super::*;
-use crate::desktop_host::{DesktopAction, DesktopShortcut, DesktopUpdateStatus};
+use crate::desktop_host::{DesktopAction, DesktopShortcut, DesktopShortcuts, DesktopUpdateStatus};
 use crate::linux_input::LinuxHotkey;
 use crate::linux_service::{Client, Request, ShortcutTarget};
 
@@ -31,11 +31,10 @@ pub(super) const CAPABILITIES: Capabilities = Capabilities {
     practice_dictation: false,
 };
 
-/// On X11 the window records the chord from its key events and the service
-/// registers it. On Wayland only the service sees physical keys, so it
-/// records the chord itself.
+/// The window records the chord from its key events; the service registers
+/// it on X11 or asks the desktop's shortcuts portal for it on Wayland.
 pub(super) fn records_key_events() -> bool {
-    !crate::linux_session::LinuxSession::detect().is_wayland()
+    true
 }
 
 /// The service checks for updates on its own schedule.
@@ -132,6 +131,11 @@ pub(super) fn sidebar(sidebar: Div) -> Div {
 }
 
 /// Empty sidebar space moves the window.
+/// Only macOS asks for Accessibility; the tour names it there.
+pub(super) fn accessibility_title() -> &'static str {
+    tr("Accessibility")
+}
+
 pub(super) fn window_drag_region(region: Div) -> Div {
     region.on_mouse_down(MouseButton::Left, |_, window, _| window.start_window_move())
 }
@@ -228,8 +232,98 @@ impl AppWindow {
 
     pub(super) fn platform_closed(&mut self) {}
 
+    /// Wayland desktops grant the shortcuts, or leave them to `hex` commands.
     pub(super) fn platform_settings_notice(&mut self, _: &mut Context<Self>) -> Option<AnyElement> {
-        None
+        let state = self.platform.client.state.as_ref()?;
+        let rows: Vec<AnyElement> = match &state.desktop.listener.shortcuts {
+            DesktopShortcuts::Registered => return None,
+            DesktopShortcuts::Portal(granted) => {
+                let refused = granted.iter().any(|shortcut| shortcut.trigger.is_none());
+                let mut rows = granted
+                    .iter()
+                    .map(|shortcut| {
+                        let title = match shortcut.name.as_str() {
+                            "Paste last dictation" => tr("Paste last dictation"),
+                            "Voice Action" => tr("Voice Action"),
+                            _ => tr("Dictation"),
+                        };
+                        let value = match &shortcut.trigger {
+                            Some(trigger) => div()
+                                .text_body()
+                                .text_color(rgb(TEXT_SECONDARY))
+                                .child(trigger.clone()),
+                            None => div()
+                                .text_body()
+                                .text_color(rgb(DANGER))
+                                .child(tr("Not granted")),
+                        };
+                        settings_row(title, tr("Granted by your desktop"), value).into_any_element()
+                    })
+                    .collect::<Vec<_>>();
+                if refused {
+                    rows.push(
+                        shortcut_note(tr(
+                            "Your desktop did not grant every shortcut. Record another one, or free it in your desktop's keyboard settings.",
+                        ))
+                        .text_color(rgb(DANGER))
+                        .into_any_element(),
+                    );
+                }
+                rows
+            }
+            DesktopShortcuts::Commands => {
+                let mut rows = vec![
+                    shortcut_note(tr(
+                        "Your desktop has no shortcuts portal. Bind these commands in its keyboard settings.",
+                    ))
+                    .into_any_element(),
+                    command_row(
+                        tr("Hold to dictate"),
+                        tr("Bind start to the key press and stop to its release"),
+                        &["hex dictation start", "hex dictation stop"],
+                    ),
+                    command_row(
+                        tr("Toggle dictation"),
+                        tr("Press to start dictating, press again to transcribe"),
+                        &["hex dictation toggle"],
+                    ),
+                    command_row(
+                        tr("Cancel dictation"),
+                        tr("Discard the current recording"),
+                        &["hex dictation cancel"],
+                    ),
+                    command_row(
+                        tr("Paste last dictation"),
+                        tr("Re-paste the most recent dictation"),
+                        &["hex paste-last"],
+                    ),
+                ];
+                if self.settings.voice_action.enabled {
+                    rows.push(command_row(
+                        tr("Voice Action"),
+                        tr("Hold to speak; selected text is included automatically"),
+                        &["hex voice-action start", "hex voice-action stop"],
+                    ));
+                }
+                rows
+            }
+        };
+        Some(
+            div()
+                .child(settings_section_label(tr("Desktop shortcuts")))
+                .child(panel().children(rows))
+                .into_any_element(),
+        )
+    }
+
+    /// Without a shortcuts portal the desktop's keybindings own every
+    /// shortcut, so Settings has none to record.
+    pub(super) fn platform_shortcut_rows(&self) -> bool {
+        self.platform
+            .client
+            .state
+            .as_ref()
+            .is_none_or(|state| state.desktop.listener.shortcuts != DesktopShortcuts::Commands)
     }
 
     pub(super) fn platform_settings_section(
@@ -503,4 +597,38 @@ impl AppWindow {
             self.platform.client.error = Some(format!("{error:#}"));
         }
     }
+}
+
+fn shortcut_note(text: &'static str) -> Div {
+    div()
+        .px_4()
+        .py_3()
+        .border_b_1()
+        .border_color(rgb(LINE))
+        .text_footnote()
+        .text_color(rgb(TEXT_TERTIARY))
+        .child(text)
+}
+
+fn command_row(
+    title: &'static str,
+    description: &'static str,
+    commands: &[&'static str],
+) -> AnyElement {
+    settings_row(
+        title,
+        description,
+        div()
+            .flex()
+            .flex_col()
+            .items_end()
+            .children(commands.iter().map(|command| {
+                div()
+                    .text_footnote()
+                    .text_monospace()
+                    .text_color(rgb(TEXT_SECONDARY))
+                    .child(*command)
+            })),
+    )
+    .into_any_element()
 }

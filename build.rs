@@ -115,6 +115,7 @@ fn compile_permission_guide() {
     println!("cargo:rerun-if-changed=native/permission_guide.m");
     println!("cargo:rustc-link-lib=framework=AppKit");
     println!("cargo:rustc-link-lib=framework=ApplicationServices");
+    println!("cargo:rustc-link-lib=framework=AVFoundation");
     println!("cargo:rustc-link-lib=framework=CoreGraphics");
 
     cc::Build::new()

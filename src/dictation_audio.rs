@@ -10,7 +10,7 @@ use color_eyre::eyre::{Result, eyre};
 
 use crate::audio::{CaptureInstant, RecoveringAudioInput, RecoveringAudioInputEvent};
 use crate::dictation::{DictationCapture, Finish};
-use crate::recording_environment::RecordingEnvironmentController;
+use crate::recording_environment::{CaptureMarker, RecordingEnvironmentController};
 use crate::suppression::PendingInputEvents;
 use crate::transcription_engine::TranscriptionEngine;
 
@@ -150,11 +150,13 @@ struct Owner {
     stream_capture: bool,
 }
 
-#[derive(Clone, Copy)]
 struct PendingCapture {
     at: CaptureInstant,
     kind: CaptureKind,
     intentional_at: Option<CaptureInstant>,
+    /// Defers background work while the microphone opens; the recording
+    /// takes over with its own.
+    _capture: CaptureMarker,
 }
 
 impl PendingCapture {
@@ -511,6 +513,7 @@ impl Owner {
                         at,
                         kind,
                         intentional_at: None,
+                        _capture: CaptureMarker::new(),
                     });
                     self.input.request_open();
                 }
@@ -700,12 +703,14 @@ impl Owner {
                     tracing::warn!(
                         "microphone stream failed before the hold threshold; reopening for the same press"
                     );
+                    let capture = CaptureMarker::new();
                     self.capture.cancel();
                     self.close_input();
                     self.pending_capture = Some(PendingCapture {
                         at,
                         kind: CaptureKind::Hotkey,
                         intentional_at: None,
+                        _capture: capture,
                     });
                     self.input.request_open();
                     return;
@@ -1706,6 +1711,7 @@ mod tests {
             at: pressed_at,
             kind: CaptureKind::Hotkey,
             intentional_at: None,
+            _capture: CaptureMarker::new(),
         };
 
         pending.mark_intentional(pressed_at + Duration::from_millis(299));

@@ -88,7 +88,7 @@ fn canonical_bundle_id_for(bundle_id: &str, name: Option<&str>) -> Option<&'stat
     })
 }
 
-fn canonical_application_name(canonical_bundle_id: &str) -> Option<&'static str> {
+pub(crate) fn canonical_application_name(canonical_bundle_id: &str) -> Option<&'static str> {
     match canonical_bundle_id {
         "us.zoom.xos" => Some("zoom.us"),
         "com.microsoft.teams2" => Some("Microsoft Teams"),
@@ -261,7 +261,14 @@ fn parent_pid(pid: i32) -> Option<i32> {
     (ppid > 1 && ppid != pid).then_some(ppid)
 }
 
+/// AppKit returns these lookups autoreleased. The meeting watcher polls from
+/// a plain thread with no pool to drain them, so each poll would otherwise
+/// keep every `NSRunningApplication` it touched for the life of the process.
 pub fn active_microphone_applications() -> Result<Vec<ActiveMicrophoneApplication>> {
+    objc2::rc::autoreleasepool(|_| inspect_microphone_applications())
+}
+
+fn inspect_microphone_applications() -> Result<Vec<ActiveMicrophoneApplication>> {
     let process_objects = property_vec::<AudioObjectID>(
         kAudioObjectSystemObject as AudioObjectID,
         kAudioHardwarePropertyProcessObjectList,
@@ -409,6 +416,41 @@ fn property_cf_string(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn physical_footprint() -> u64 {
+        let mut info: libc::rusage_info_v4 = unsafe { std::mem::zeroed() };
+        let status = unsafe {
+            libc::proc_pid_rusage(
+                std::process::id() as i32,
+                libc::RUSAGE_INFO_V4,
+                (&raw mut info).cast(),
+            )
+        };
+        assert_eq!(status, 0);
+        info.ri_phys_footprint
+    }
+
+    /// Polls like the meeting watcher, from a thread without an autorelease
+    /// pool. Run alone: footprint is process-wide.
+    #[test]
+    #[ignore = "measures process footprint; needs another app using the microphone"]
+    fn polling_microphone_activity_does_not_accumulate_running_applications() {
+        std::thread::spawn(|| {
+            assert!(
+                !active_microphone_applications().unwrap().is_empty(),
+                "an app must be using the microphone"
+            );
+            let before = physical_footprint();
+            for _ in 0..20_000 {
+                active_microphone_applications().unwrap();
+            }
+            let grown = physical_footprint().saturating_sub(before);
+            println!("footprint grew {} KB over 20,000 polls", grown / 1024);
+            assert!(grown < 2 * 1024 * 1024, "grew {grown} bytes");
+        })
+        .join()
+        .unwrap();
+    }
 
     #[test]
     fn resolves_unregistered_chromium_and_electron_audio_helpers_to_their_host_apps() {

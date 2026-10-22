@@ -20,11 +20,10 @@ use crate::desktop_host::{
     DesktopTranscriptionSnapshot, DesktopUpdateStatus,
 };
 use crate::events::EventReader;
-use crate::linux_input::LinuxHotkey;
+use crate::linux_input::{LinuxHotkey, ShortcutCommand};
 use crate::linux_service::{
     self, Event as ServiceEvent, Request, ShortcutTarget, Snapshot as ServiceSnapshot,
 };
-use crate::linux_session::LinuxSession;
 use crate::linux_updater::InstalledUpdate;
 
 const UPDATE_INTERVAL: Duration = Duration::from_secs(24 * 60 * 60);
@@ -65,6 +64,8 @@ struct Listener {
     worker: JoinHandle<ListenerResult>,
     startup: ListenerStartup,
     hotkey_status: crate::linux_input::HotkeyStatus,
+    /// `hex` commands for the listener's shortcut state machine.
+    commands: mpsc::SyncSender<ShortcutCommand>,
 }
 
 enum ListenerStartup {
@@ -240,6 +241,7 @@ pub fn run_service(event_path: PathBuf, shutdown: &'static AtomicBool) -> Result
                         }
                         Request::CancelModel => host.cancel_transcription_preparation(),
                         Request::ReloadSettings => host.reload_settings()?,
+                        Request::Shortcut(command) => host.shortcut(command)?,
                         Request::Shutdown => shutdown.store(true, Ordering::Release),
                     }
                     Ok(())
@@ -408,6 +410,7 @@ impl LinuxDesktopHost {
         let prepared_transcriber = self.prepared_transcriber.take();
         let hotkey_status = crate::linux_input::HotkeyStatus::default();
         let worker_hotkey_status = hotkey_status.clone();
+        let (commands, command_receiver) = mpsc::sync_channel(16);
         let worker = std::thread::spawn(move || {
             let result = crate::instance::acquire("listener").and_then(|_instance| {
                 crate::linux_dictation::run(
@@ -418,6 +421,7 @@ impl LinuxDesktopHost {
                     output,
                     prepared_transcriber,
                     worker_hotkey_status,
+                    command_receiver,
                 )
             });
             result.map_err(|error| format!("{error:#}"))
@@ -429,6 +433,7 @@ impl LinuxDesktopHost {
                 previous_session: self.activity.session_started_at,
             },
             hotkey_status,
+            commands,
         });
         self.status = "Enabling…".into();
     }
@@ -699,9 +704,8 @@ impl LinuxDesktopHost {
                 _ => {}
             }
         } else if !canceled {
-            let wayland = LinuxSession::detect().is_wayland();
-            if !wayland && matches!(edit.change, SettingsChange::Capture(_)) {
-                // X11 uses focused GPUI keystrokes, never raw input-device access.
+            if matches!(edit.change, SettingsChange::Capture(_)) {
+                // Settings records the chord from its own key events.
                 self.status = "Press a shortcut".into();
                 return;
             }
@@ -709,20 +713,23 @@ impl LinuxDesktopHost {
             let canceled = edit.canceled.clone();
             edit.worker = Some(std::thread::spawn(move || {
                 let (target, binding) = match change {
-                    SettingsChange::Capture(target) => (
-                        target,
-                        crate::linux_input::capture_wayland_binding(&canceled)?,
-                    ),
+                    SettingsChange::Capture(_) => unreachable!("Settings records the chord"),
                     SettingsChange::Hotkey(target, binding) => (target, binding),
                     SettingsChange::Reload(settings) => return Ok(*settings),
                 };
                 binding.validate()?;
-                crate::linux_input::LinuxHotkeyMonitor::start(
-                    binding.clone(),
-                    false,
-                    false,
-                    Default::default(),
-                )?;
+                if crate::linux_session::LinuxSession::detect().is_wayland() {
+                    // The listener asks the desktop again and reports what it granted.
+                    binding.portal_trigger()?;
+                } else {
+                    // Fail before saving when another X11 client holds the chord.
+                    crate::linux_input::LinuxHotkeyMonitor::start(
+                        binding.clone(),
+                        Default::default(),
+                        Default::default(),
+                        mpsc::channel().1,
+                    )?;
+                }
                 if canceled.load(Ordering::Acquire) {
                     return Err(color_eyre::eyre::eyre!("Shortcut edit canceled"));
                 }
@@ -901,6 +908,11 @@ impl LinuxDesktopHost {
                     .listener
                     .as_ref()
                     .and_then(|listener| listener.hotkey_status.warning()),
+                shortcuts: self
+                    .listener
+                    .as_ref()
+                    .map(|listener| listener.hotkey_status.shortcuts())
+                    .unwrap_or_default(),
             },
             operation_error: self
                 .error
@@ -932,6 +944,28 @@ impl LinuxDesktopHost {
             },
             update_status,
         }
+    }
+
+    /// Hands a `hex` command to the running listener's shortcut state machine.
+    fn shortcut(&mut self, command: ShortcutCommand) -> Result<()> {
+        let listener = self
+            .listener
+            .as_ref()
+            .filter(|listener| matches!(listener.startup, ListenerStartup::Observed))
+            .ok_or_else(|| {
+                color_eyre::eyre::eyre!(
+                    "Hex is not listening; enable it in Settings or run `hex start`"
+                )
+            })?;
+        if command.is_voice_action() && !self.settings.voice_action.enabled {
+            return Err(color_eyre::eyre::eyre!(
+                "Voice Action is off; turn it on in Settings"
+            ));
+        }
+        listener
+            .commands
+            .try_send(command)
+            .map_err(|_| color_eyre::eyre::eyre!("Hex is busy; try again"))
     }
 
     fn dispatch(&mut self, action: DesktopAction) -> Result<()> {
@@ -985,6 +1019,7 @@ mod tests {
                 stop: Arc::new(AtomicBool::new(false)),
                 startup: ListenerStartup::Observed,
                 hotkey_status: Default::default(),
+                commands: mpsc::sync_channel(1).0,
             });
             host.listen_when_ready = true;
         }
@@ -1034,6 +1069,7 @@ mod tests {
                 worker: std::thread::spawn(|| Ok(())),
                 startup: ListenerStartup::Awaiting { previous_session },
                 hotkey_status: Default::default(),
+                commands: mpsc::sync_channel(1).0,
             };
             listener.observe_session(previous_session);
             assert!(matches!(listener.startup, ListenerStartup::Awaiting { .. }));
@@ -1274,6 +1310,43 @@ mod tests {
         host.refresh_settings_edit();
         assert!(host.listen_when_ready);
         assert!(editor.is_none());
+    }
+
+    #[test]
+    fn commands_reach_only_a_started_listener() {
+        let mut host = host_for_edit(false);
+        let error = host.shortcut(ShortcutCommand::DictationToggle).unwrap_err();
+        assert!(error.to_string().contains("not listening"), "{error}");
+
+        let (commands, received) = mpsc::sync_channel(4);
+        host.listener = Some(Listener {
+            worker: std::thread::spawn(|| Ok(())),
+            stop: Arc::new(AtomicBool::new(false)),
+            startup: ListenerStartup::Awaiting {
+                previous_session: None,
+            },
+            hotkey_status: Default::default(),
+            commands,
+        });
+        // A listener still loading its model would replay the command late.
+        assert!(host.shortcut(ShortcutCommand::DictationStart).is_err());
+        host.listener.as_mut().unwrap().startup = ListenerStartup::Observed;
+        host.shortcut(ShortcutCommand::DictationStart).unwrap();
+        host.shortcut(ShortcutCommand::PasteLast).unwrap();
+        let error = host
+            .shortcut(ShortcutCommand::VoiceActionStart)
+            .unwrap_err();
+        assert!(error.to_string().contains("Voice Action is off"), "{error}");
+        host.settings.voice_action.enabled = true;
+        host.shortcut(ShortcutCommand::VoiceActionToggle).unwrap();
+        assert_eq!(
+            received.try_iter().collect::<Vec<_>>(),
+            [
+                ShortcutCommand::DictationStart,
+                ShortcutCommand::PasteLast,
+                ShortcutCommand::VoiceActionToggle
+            ]
+        );
     }
 
     #[test]

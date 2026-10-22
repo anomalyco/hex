@@ -1317,8 +1317,10 @@ export class GpuRenderer {
   }
 
   resize(w, h, dpr) {
-    this.canvas.width = Math.max(1, Math.round(w * dpr))
-    this.canvas.height = Math.max(1, Math.round(h * dpr))
+    const cw = Math.max(1, Math.round(w * dpr))
+    const ch = Math.max(1, Math.round(h * dpr))
+    if (this.canvas.width !== cw) this.canvas.width = cw
+    if (this.canvas.height !== ch) this.canvas.height = ch
   }
 
   uploadAtlases() {

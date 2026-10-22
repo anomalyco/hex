@@ -3,9 +3,10 @@
 The flake packages HEX for `x86_64-linux`. It supports the Linux X11 beta
 and native Wayland on compatible wlroots compositors. Wayland requires
 layer-shell for the recording overlay, the clipboard protocol used by
-`wl-copy`, the virtual-keyboard protocol used by `wtype`, and read access to
-every `/dev/input/event*` device for global hotkeys. This is not a claim of support
-for every Wayland desktop; GNOME and KDE are not covered by this contract.
+`wl-copy`, and the virtual-keyboard protocol used by `wtype`. Global shortcuts
+come from the desktop's GlobalShortcuts portal, or from your own compositor
+keybindings running the `hex` commands. This is not a claim of support for every
+Wayland desktop; GNOME and KDE are not covered by this contract.
 
 ## Run Or Install
 
@@ -46,8 +47,8 @@ Import `hex.nixosModules.hex` and enable the package:
 }
 ```
 
-This installs HEX system-wide. It does not start a root service, enable
-autostart for every account, or change input-device permissions. Use the
+This installs HEX system-wide. It does not start a root service or enable
+autostart for every account. Use the
 Home Manager module below for per-user autostart. Both modules accept an
 explicit `programs.hex.package` override. The flake also exports
 `hex.overlays.default` for configurations that prefer `pkgs.hex`.
@@ -99,26 +100,24 @@ systemctl --user status hex.service
 journalctl --user -u hex.service
 ```
 
-## Wayland Input Access
+## Wayland Shortcuts
 
-The native Wayland beta requires the intended user to be able to read
-**every `/dev/input/event*` node**, as with deliberate `input`-group access.
-Keyboard-only ACLs are insufficient: HEX cannot rule out held modifiers on
-an unreadable device. Monitoring, shortcut capture, and paste fail with a
-permission error if any event device is unreadable.
+HEX reads no input devices, so neither module adds users to the `input`
+group, installs udev rules, or grants capabilities. With a GlobalShortcuts
+portal, the desktop grants the shortcuts Settings records; the portal
+identifies HEX by the package's `hex.desktop` entry, so keep the package's
+`share/applications` on `XDG_DATA_DIRS` (NixOS and Home Manager profiles do).
+Without the portal, bind the commands in your compositor, for example in Sway:
 
-Neither module adds users to the `input` group, installs permissive udev
-rules, or grants capabilities to HEX. Make this access decision explicitly
-for the intended account; do not make event devices world-readable.
-**Raw input access exposes all keystrokes on those keyboards, not just
-HEX's hotkeys, and can expose other input devices.** Other processes running
-as the same user receive the same broad access.
+```sh
+bindsym F9 exec hex dictation start
+bindsym --release F9 exec hex dictation stop
+```
 
-Wayland shortcuts use physical evdev key positions and US-style key labels,
-not the current layout's characters. HEX observes the keys but does not
-suppress them. The compositor or focused app can still act on the chord;
-use an appropriate compositor binding if you need to reserve it. The paste
-helper is `wtype`; no privileged input-injection fallback is installed.
+`hex dictation toggle`, `hex dictation cancel`, `hex paste-last`, and
+`hex voice-action start|stop|toggle` are also available; see the
+[Linux guide](linux.md#shortcuts). The paste helper is `wtype`; no privileged
+input-injection fallback is installed.
 
 ## Development
 

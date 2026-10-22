@@ -18,7 +18,9 @@ use crate::app_settings::{AppSettings, MeetingIndicatorCorner};
 use crate::app_window::AppWindow;
 use crate::context::ContextSnapshot;
 use crate::design_tokens::*;
-use crate::desktop_ui::{ButtonKind, Tone, button, small_button, status_dot, tag, truncated_line};
+use crate::desktop_ui::{
+    ButtonKind, Icon, Tone, button, icon_button, small_button, status_dot, tag, truncated_line,
+};
 use crate::dictation_indicator::DictationIndicatorEvent;
 use crate::dictation_indicator::{self, DictationIndicatorUi};
 use crate::meeting::{self, MeetingRequest};
@@ -181,6 +183,10 @@ pub enum Launch {
 #[derive(Clone, Copy, Debug)]
 pub enum PanelPreview {
     Offer,
+    /// The offer with its "Never offer" confirmation open.
+    OfferMore,
+    /// The offer, dismissed after three seconds the way "Not now" closes it.
+    OfferDismissed,
     Recording,
     RecordingExpanded,
     RecordingCopied,
@@ -190,13 +196,17 @@ pub enum PanelPreview {
 
 fn run_panel_preview(preview: PanelPreview) -> Result<()> {
     let kind = match preview {
-        PanelPreview::Offer => PanelKind::Offer(MeetingCandidate {
-            key: "preview".into(),
-            title: "Zoom meeting".into(),
-            source: MeetingSource::Zoom,
-            application: None,
-            named: false,
-        }),
+        PanelPreview::Offer | PanelPreview::OfferMore | PanelPreview::OfferDismissed => {
+            PanelKind::Offer(MeetingCandidate {
+                key: "preview".into(),
+                title: "Browser call".into(),
+                source: MeetingSource::BrowserCall,
+                application: Some("com.brave.Browser".into()),
+                named: false,
+                site: Some("meet.jit.si".into()),
+                application_name: Some("Brave Browser".into()),
+            })
+        }
         PanelPreview::Recording
         | PanelPreview::RecordingExpanded
         | PanelPreview::RecordingCopied => {
@@ -240,7 +250,7 @@ fn run_panel_preview(preview: PanelPreview) -> Result<()> {
             PanelKind::Ready(Box::new(manifest))
         }
     };
-    let (commands, _receiver) = mpsc::sync_channel(8);
+    let (commands, receiver) = mpsc::sync_channel(8);
     Application::new().run(move |cx| {
         cx.bind_keys([KeyBinding::new(
             "cmd-q",
@@ -248,10 +258,55 @@ fn run_panel_preview(preview: PanelPreview) -> Result<()> {
             None,
         )]);
         cx.on_action(|_: &crate::app_window::QuitApplication, cx| cx.quit());
-        let deadline = matches!(preview, PanelPreview::Offer).then_some(OFFER_TIMEOUT * 30);
-        if let Err(error) = open_panel(kind, commands, deadline, cx) {
-            tracing::error!(%error, "could not open meeting panel preview");
-            cx.quit();
+        // Open and Reveal take the same cross-thread path to the app window as
+        // the live capsules, so the preview exercises opening it from a panel.
+        cx.spawn(async move |cx| {
+            let app_window = Rc::new(RefCell::new(None));
+            let (meeting_requests, _meeting_receiver) = mpsc::sync_channel(8);
+            let (indicator, _indicator_receiver) = dictation_indicator::channel();
+            loop {
+                while let Ok(command) = receiver.try_recv() {
+                    if !matches!(command, ControllerCommand::Open(_)) {
+                        continue;
+                    }
+                    let result = cx.update(|cx| {
+                        crate::app_window::open_preview(
+                            &app_window,
+                            std::env::temp_dir().join("hex-panel-preview.ndjson"),
+                            config::voice_control(),
+                            meeting_requests.clone(),
+                            indicator.clone(),
+                            crate::app_window::AppWindowPreview::pane(
+                                crate::developer_control::DeveloperPane::Meetings,
+                            ),
+                            cx,
+                        )
+                    });
+                    if let Ok(Err(error)) = result {
+                        tracing::error!(%error, "could not open Hex from the panel preview");
+                    }
+                }
+                Timer::after(Duration::from_millis(16)).await;
+            }
+        })
+        .detach();
+        let deadline = match preview {
+            PanelPreview::Offer | PanelPreview::OfferMore => Some(OFFER_TIMEOUT * 30),
+            PanelPreview::OfferDismissed => Some(Duration::from_secs(3)),
+            _ => None,
+        };
+        match open_panel(kind, commands, deadline, cx) {
+            Ok(handle) if matches!(preview, PanelPreview::OfferMore) => {
+                let _ = handle.update(cx, |panel, _, cx| {
+                    panel.more_open = true;
+                    cx.notify();
+                });
+            }
+            Ok(_) => {}
+            Err(error) => {
+                tracing::error!(%error, "could not open meeting panel preview");
+                cx.quit();
+            }
         }
     });
     Ok(())
@@ -410,6 +465,8 @@ pub fn run(shutdown: &'static AtomicBool, launch: Launch) -> Result<()> {
                     source: MeetingSource::Zoom,
                     application: None,
                     named: true,
+                    site: None,
+                    application_name: None,
                 }));
             }
             if let Err(error) = controller_loop(
@@ -665,7 +722,10 @@ pub fn run(shutdown: &'static AtomicBool, launch: Launch) -> Result<()> {
                 developer_receiver,
                 MeetingUi {
                     commands: command_sender,
-                    app_window: app_window.clone(),
+                    app_window: {
+                        SETTINGS_WINDOW.with(|slot| *slot.borrow_mut() = Some(app_window.clone()));
+                        app_window.clone()
+                    },
                     event_path: shell_event_path.clone(),
                     meeting_requests: meeting_request_sender.clone(),
                     indicator: indicator_sender.clone(),
@@ -1310,8 +1370,10 @@ fn controller_loop(
                 }
                 None => ContextSnapshot::default(),
             };
+            let silenced = crate::app_settings::meeting_never_offer_keys();
             let candidate = application
-                .and_then(|application| candidate_from_microphone(&application, &context));
+                .and_then(|application| candidate_from_microphone(&application, &context))
+                .filter(|candidate| !candidate.is_silenced(&silenced));
             if let Some(candidate) = detector.observe(candidate) {
                 tracing::info!(
                     source = candidate.source.label(),
@@ -1426,25 +1488,37 @@ fn recording_panel_options(corner: MeetingIndicatorCorner, width: f32, cx: &App)
     }
 }
 
-fn bind_recording_ns_window(width: f32) -> Option<objc2::rc::Retained<objc2_app_kit::NSWindow>> {
-    let mtm = objc2::MainThreadMarker::new()?;
-    let app = objc2_app_kit::NSApplication::sharedApplication(mtm);
-    let windows = app.windows();
-    let mut matched = None;
-    for window in windows.iter() {
-        let frame = window.frame();
-        if (frame.size.width - f64::from(width)).abs() < 1.5
-            && (frame.size.height - f64::from(RECORDING_PANEL_HEIGHT)).abs() < 1.5
-        {
-            window.setHidesOnDeactivate(false);
-            window.setCollectionBehavior(
-                objc2_app_kit::NSWindowCollectionBehavior::CanJoinAllSpaces
-                    | objc2_app_kit::NSWindowCollectionBehavior::FullScreenAuxiliary,
-            );
-            matched = Some(window);
-        }
-    }
-    matched
+/// Turns a GPUI pop-up into a borderless, shadowless, fully transparent
+/// non-activating panel. GPUI creates frameless windows as titled panels with
+/// a near-clear background, so AppKit draws a rectangular window shadow around
+/// the full window bounds, beneath the narrower animated capsule.
+fn prepare_capsule_window(window: &Window) -> Option<objc2::rc::Retained<objc2_app_kit::NSWindow>> {
+    use objc2_app_kit::{NSColor, NSView, NSWindowCollectionBehavior, NSWindowStyleMask};
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+
+    let handle = HasWindowHandle::window_handle(window).ok()?;
+    let RawWindowHandle::AppKit(handle) = handle.as_raw() else {
+        return None;
+    };
+    // SAFETY: GPUI's AppKit handle points at the live content view of this
+    // window, and this runs on the main thread inside a window callback.
+    let view: &NSView = unsafe { handle.ns_view.cast::<NSView>().as_ref() };
+    let ns_window = view.window()?;
+    ns_window.setStyleMask(
+        NSWindowStyleMask::Borderless
+            | NSWindowStyleMask::NonactivatingPanel
+            | NSWindowStyleMask::FullSizeContentView,
+    );
+    ns_window.setOpaque(false);
+    ns_window.setBackgroundColor(Some(&NSColor::clearColor()));
+    ns_window.setHasShadow(false);
+    ns_window.setHidesOnDeactivate(false);
+    ns_window.setCollectionBehavior(
+        NSWindowCollectionBehavior::CanJoinAllSpaces
+            | NSWindowCollectionBehavior::FullScreenAuxiliary
+            | NSWindowCollectionBehavior::IgnoresCycle,
+    );
+    Some(ns_window)
 }
 
 fn appkit_corner_origin(
@@ -1476,33 +1550,19 @@ fn open_panel(
     cx: &mut App,
 ) -> gpui::Result<WindowHandle<MeetingPanel>> {
     let options = match &kind {
+        // Previews use the production window: full width, with the pill
+        // inside it, so the transparent margin is visible in captures.
         PanelKind::Recording(state) => {
-            let width = if state.preview && !state.force_expanded {
-                RECORDING_COMPACT_WIDTH
-            } else {
-                RECORDING_PANEL_WIDTH
-            };
-            recording_panel_options(state.corner, width, cx)
+            recording_panel_options(state.corner, RECORDING_PANEL_WIDTH, cx)
         }
         PanelKind::Offer(_) | PanelKind::CallEnded { .. } | PanelKind::Ready(_) => {
             panel_options(cx)
         }
     };
-    let recording_width = match &kind {
-        PanelKind::Recording(state) => Some(if state.preview && !state.force_expanded {
-            RECORDING_COMPACT_WIDTH
-        } else {
-            RECORDING_PANEL_WIDTH
-        }),
-        _ => None,
-    };
-    if let PanelKind::Recording(state) = &mut kind
-        && state.hovered
-    {
-        // Pre-seed the spring in expanded previews so the first frame is settled.
-    }
     let handle = cx.open_window(options, |window, cx| {
-        if let PanelKind::Recording(state) = &kind {
+        let ns_window = prepare_capsule_window(window);
+        if let PanelKind::Recording(state) = &mut kind {
+            state.ns_window = ns_window;
             let target = if state.hovered || state.force_expanded {
                 RECORDING_PANEL_WIDTH
             } else {
@@ -1514,16 +1574,9 @@ fn open_panel(
             kind,
             commands,
             copied: false,
+            more_open: false,
         })
     })?;
-    if let Some(width) = recording_width {
-        let ns_window = bind_recording_ns_window(width);
-        let _ = handle.update(cx, |panel, _, _| {
-            if let PanelKind::Recording(state) = &mut panel.kind {
-                state.ns_window = ns_window;
-            }
-        });
-    }
     if let Some(timeout) = timeout {
         cx.spawn(async move |cx| {
             Timer::after(timeout).await;
@@ -1666,6 +1719,33 @@ struct MeetingPanel {
     kind: PanelKind,
     commands: SyncSender<ControllerCommand>,
     copied: bool,
+    /// The offer shows its "Never offer" confirmation in place of its actions.
+    more_open: bool,
+}
+
+type SharedAppWindow = Rc<RefCell<Option<WindowHandle<AppWindow>>>>;
+
+thread_local! {
+    /// The Settings window, so a "Never offer" choice updates its live copy
+    /// of the settings instead of being overwritten by its next save.
+    static SETTINGS_WINDOW: RefCell<Option<SharedAppWindow>> = const { RefCell::new(None) };
+}
+
+fn never_offer(entry: crate::app_settings::NeverOfferMeeting, cx: &mut App) {
+    let window = SETTINGS_WINDOW.with(|slot| {
+        slot.borrow()
+            .as_ref()
+            .and_then(|window| window.borrow().as_ref().copied())
+    });
+    let routed = window.is_some_and(|window| {
+        let entry = entry.clone();
+        window
+            .update(cx, |window, _, cx| window.never_offer_meeting(entry, cx))
+            .is_ok()
+    });
+    if !routed {
+        crate::app_settings::save_never_offer_meeting(entry);
+    }
 }
 
 impl MeetingPanel {
@@ -1919,7 +1999,7 @@ impl MeetingPanel {
                     .border_1()
                     .border_color(rgb(LINE_STRONG))
                     .rounded_full()
-                    .shadow_lg()
+                    .shadow_sm()
                     .overflow_hidden()
                     .on_mouse_down(
                         gpui::MouseButton::Left,
@@ -2025,24 +2105,74 @@ impl Render for MeetingPanel {
         }
         let (dot, title, subtitle, actions) = match &self.kind {
             PanelKind::Recording(_) => unreachable!("handled above"),
+            PanelKind::Offer(candidate) if self.more_open => {
+                let target = candidate.never_offer_target();
+                let label = target
+                    .as_ref()
+                    .map_or_else(String::new, |target| target.label.clone());
+                let entity = cx.entity();
+                let dismiss = self.commands.clone();
+                (
+                    TEXT_SECONDARY,
+                    format!("Never offer for {label}?"),
+                    "You can undo this in Settings › Meetings.".to_string(),
+                    div()
+                        .flex()
+                        .gap_2()
+                        .child(capsule_button(
+                            ButtonKind::Secondary,
+                            "never-offer-cancel",
+                            "Cancel",
+                            move |_, cx| {
+                                entity.update(cx, |panel, cx| {
+                                    panel.more_open = false;
+                                    cx.notify();
+                                });
+                            },
+                        ))
+                        .child(capsule_button(
+                            ButtonKind::Primary,
+                            "never-offer",
+                            "Never offer",
+                            move |window, cx| {
+                                if let Some(target) = target.clone() {
+                                    tracing::info!(key = %target.key, "meeting offers silenced");
+                                    never_offer(target, cx);
+                                }
+                                let _ = dismiss.try_send(ControllerCommand::Dismiss);
+                                window.remove_window();
+                            },
+                        )),
+                )
+            }
             PanelKind::Offer(candidate) => {
                 let dismiss = self.commands.clone();
                 let record = self.commands.clone();
                 let candidate = candidate.clone();
                 let dismissed_candidate = candidate.clone();
                 let is_preview = candidate.key == "preview";
-                let title = if candidate.named {
-                    candidate.title.clone()
-                } else {
-                    format!("{} call detected", candidate.source.label())
-                };
+                let can_silence = candidate.never_offer_target().is_some();
+                let entity = cx.entity();
                 (
                     TEXT_SECONDARY,
-                    title,
+                    candidate.offer_title(),
                     "Record locally? Tell participants.".to_string(),
                     div()
                         .flex()
                         .gap_2()
+                        .when(can_silence, |actions| {
+                            actions.child(
+                                icon_button(ButtonKind::Ghost, Icon::Ellipsis)
+                                    .id("offer-more")
+                                    .rounded_full()
+                                    .on_click(move |_, _, cx| {
+                                        entity.update(cx, |panel, cx| {
+                                            panel.more_open = true;
+                                            cx.notify();
+                                        });
+                                    }),
+                            )
+                        })
                         .child(capsule_button(
                             ButtonKind::Secondary,
                             "not-now",
@@ -2196,7 +2326,7 @@ impl Render for MeetingPanel {
                     .border_1()
                     .border_color(rgb(LINE_STRONG))
                     .rounded_full()
-                    .shadow_lg()
+                    .shadow_sm()
                     .overflow_hidden()
                     .child(status_dot(dot).size_2())
                     .child(

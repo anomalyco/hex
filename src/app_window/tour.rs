@@ -1,13 +1,13 @@
-//! The first-run tour: welcome, how Hex works, one setup screen with every
-//! requirement, a practice dictation, and a short send-off. The flow itself
-//! is `crate::onboarding::Flow`; this module only draws it and turns its
-//! effects into actions.
+//! The first-run tour: welcome, one screen with every permission, a practice
+//! dictation, and a short send-off, while the speech model downloads behind
+//! them. The flow itself is `crate::onboarding::Flow`; this module only draws
+//! it and turns its effects into actions.
 
 use std::time::Duration;
 
 use gpui::{
-    Animation, AnimationExt, AnyElement, Context, Div, Focusable, FontWeight, IntoElement, Window,
-    div, ease_in_out, ease_out_quint, prelude::*, px, rgb,
+    Animation, AnimationExt, AnyElement, App, ClickEvent, Context, Div, ElementId, Focusable,
+    FontWeight, IntoElement, Timer, Window, div, ease_in_out, ease_out_quint, prelude::*, px, rgb,
 };
 
 use super::{AppWindow, platform};
@@ -19,13 +19,16 @@ use crate::desktop_ui::{
 };
 use crate::events::{DictationPhase, VoiceEvent};
 use crate::onboarding::{
-    Effect, Input, ItemStatus, ModelProgress, Observation, Practice, Row, SetupItem, Step, View,
+    Effect, Input, ItemStatus, ModelProgress, Observation, PermissionState, Practice, Row,
+    SetupItem, Step, View,
 };
 
 const PAGE_DURATION: Duration = Duration::from_millis(360);
 const PAGE_SHIFT: f32 = 20.0;
 const SWAP_DURATION: Duration = Duration::from_millis(220);
 const WELCOME_LOOP: Duration = Duration::from_millis(2600);
+/// How long the last permission's check shows before the tour moves on.
+const ADVANCE_BEAT: Duration = Duration::from_millis(700);
 const LISTENING_LOOP: Duration = Duration::from_millis(1200);
 
 impl AppWindow {
@@ -47,19 +50,33 @@ impl AppWindow {
     fn apply_tour_effect(&mut self, effect: Effect, cx: &mut Context<Self>) {
         match effect {
             Effect::None => {}
-            Effect::RequestMicrophone | Effect::OpenMicrophoneSettings | Effect::ShowGuide(_) => {
+            Effect::RequestMicrophone | Effect::ShowGuide(_) => {
                 if !self.preview {
                     self.platform_tour_permission(effect);
                 }
                 self.permission_refresh_at = std::time::Instant::now();
             }
             Effect::DownloadModel => {
+                if self.preview {
+                    return;
+                }
                 if let Ok(model) =
                     crate::transcription_models::validate(&self.settings.transcription)
                 {
                     let language = self.settings.transcription.language.clone();
                     self.choose_transcription_model(model, language, cx);
                 }
+            }
+            Effect::AdvanceSoon => {
+                cx.spawn(async move |window, cx| {
+                    Timer::after(ADVANCE_BEAT).await;
+                    let _ = window.update(cx, |window, cx| {
+                        if window.tour.step() == Step::Setup {
+                            window.tour_input(Input::Continue, cx);
+                        }
+                    });
+                })
+                .detach();
             }
             Effect::Relaunch => {
                 if self.preview {
@@ -83,13 +100,14 @@ impl AppWindow {
     }
 
     /// Feeds the tour fresh permission, model, and listener state.
-    pub(super) fn poll_tour(&mut self) -> bool {
+    pub(super) fn poll_tour(&mut self, cx: &mut Context<Self>) -> bool {
         if !self.setup_visible || self.preview {
             return false;
         }
         let model = self.tour_model_progress();
         let before = self.tour.view();
-        self.tour.on(Input::Status(self.setup_status, model));
+        let effect = self.tour.on(Input::Status(self.setup_status, model));
+        self.apply_tour_effect(effect, cx);
         if crate::onboarding::take_listener_failure() {
             let relaunch_allowed =
                 crate::onboarding::relaunch_allowed(crate::onboarding::unix_ms());
@@ -175,7 +193,6 @@ impl AppWindow {
         let reduce_motion = crate::onboarding::reduce_motion();
         let page = match view.step {
             Step::Welcome => self.render_welcome(reduce_motion),
-            Step::HowItWorks => self.render_how_it_works(reduce_motion),
             Step::Setup => self.render_setup_step(&view, cx),
             Step::TryIt => self.render_try_it(&view, reduce_motion, window, cx),
             Step::Done => self.render_done(reduce_motion),
@@ -234,7 +251,6 @@ impl AppWindow {
     fn render_tour_footer(&mut self, view: &View, cx: &mut Context<Self>) -> Div {
         let primary: Option<(&'static str, bool)> = match view.step {
             Step::Welcome => Some((tr("Get started"), true)),
-            Step::HowItWorks => Some((tr("Continue"), true)),
             Step::Setup => Some((tr("Continue"), view.ready)),
             Step::TryIt if view.practice == Practice::Landed => Some((tr("Continue"), true)),
             Step::TryIt => None,
@@ -262,6 +278,9 @@ impl AppWindow {
                 .on_click(cx.listener(|this, _, _, cx| this.tour_input(Input::Skip, cx)))
                 .into_any_element(),
         };
+        let download = view
+            .show_download
+            .then(|| self.render_download(view.model, cx));
         let back = view.can_go_back.then(|| {
             button(ButtonKind::Secondary, tr("Back"))
                 .id("tour-back")
@@ -291,7 +310,7 @@ impl AppWindow {
                     .when(view.step != Step::Done, |row| {
                         row.child(step_dots(view.index, view.count))
                     })
-                    .child(div().flex_1()),
+                    .child(div().flex_1().flex().justify_end().children(download)),
             )
     }
 
@@ -338,63 +357,6 @@ impl AppWindow {
         )
     }
 
-    fn render_how_it_works(&self, reduce_motion: bool) -> AnyElement {
-        let shortcut = self.shortcut_label();
-        let parts = self.shortcut_parts();
-        let (first, last) = if self.holds() {
-            (
-                tr_fill("Hold {} in any app where you can type.", &shortcut),
-                tr_fill(
-                    "Let go of {}. Hex pastes your words where your cursor is.",
-                    &shortcut,
-                ),
-            )
-        } else {
-            (
-                tr_fill("Press {} in any app where you can type.", &shortcut),
-                tr_fill(
-                    "Press {} again. Hex pastes your words where your cursor is.",
-                    &shortcut,
-                ),
-            )
-        };
-        let waveform = if reduce_motion {
-            waveform_art(0.3).into_any_element()
-        } else {
-            div()
-                .with_animation(
-                    "tour-how-waveform",
-                    Animation::new(LISTENING_LOOP).repeat(),
-                    |art, phase| art.child(waveform_art(phase)),
-                )
-                .into_any_element()
-        };
-        div()
-            .w_full()
-            .flex()
-            .flex_col()
-            .gap_6()
-            .child(page_title(tr("How Hex works"), None))
-            .child(
-                panel()
-                    .child(how_row(hotkey_keycaps(parts.clone(), 1.0), first, false))
-                    .child(how_row(
-                        waveform,
-                        tr("Speak naturally. A small capsule at the bottom of the screen shows Hex is listening.").into(),
-                        false,
-                    ))
-                    .child(how_row(pasted_art(), last, true)),
-            )
-            .child(
-                div()
-                    .text_footnote()
-                    .text_color(rgb(TEXT_TERTIARY))
-                    .text_center()
-                    .child(tr("Press Esc while speaking to cancel. Nothing is pasted.")),
-            )
-            .into_any_element()
-    }
-
     fn render_setup_step(&mut self, view: &View, cx: &mut Context<Self>) -> AnyElement {
         let permissions = platform::CAPABILITIES.permissions;
         let rows = view
@@ -417,14 +379,9 @@ impl AppWindow {
                 } else {
                     tr("Download a speech model")
                 },
-                Some(
-                    if permissions {
-                        tr("Rows turn green as macOS confirms them. Any order works.")
-                    } else {
-                        tr("Hex transcribes on this computer, so it needs a local model first.")
-                    }
-                    .into(),
-                ),
+                (!permissions).then(|| {
+                    tr("Hex transcribes on this computer, so it needs a local model first.").into()
+                }),
             ))
             .child(panel().children(rows))
             .when(self.tour_relaunch_failed, |page| {
@@ -437,6 +394,7 @@ impl AppWindow {
 
     fn render_setup_row(&mut self, row: Row, last: bool, cx: &mut Context<Self>) -> Div {
         let model = crate::transcription_models::validate(&self.settings.transcription).ok();
+        let waiting = row.status == ItemStatus::Waiting;
         let (glyph, title, description): (Icon, &'static str, String) = match row.item {
             SetupItem::Microphone => (
                 Icon::Microphone,
@@ -445,27 +403,30 @@ impl AppWindow {
                     ItemStatus::Denied => {
                         tr("Turned off earlier. Switch Hex on in System Settings.").into()
                     }
+                    ItemStatus::Waiting
+                        if self.setup_status.microphone == PermissionState::NeedsSettings =>
+                    {
+                        tr("Switch Hex on in the list").into()
+                    }
                     _ => tr("Hears you only while you hold the shortcut").into(),
                 },
             ),
             SetupItem::InputMonitoring => (
                 Icon::Keyboard,
                 tr("Input Monitoring"),
-                match row.status {
-                    ItemStatus::Waiting => {
-                        tr("Drag Hex into the list, or switch it on if it is there").into()
-                    }
-                    _ => tr("Notices the shortcut in every app").into(),
+                if waiting {
+                    tr("Drag Hex into the list, or switch it on if it is there").into()
+                } else {
+                    tr("Notices the shortcut in every app").into()
                 },
             ),
             SetupItem::Accessibility => (
                 Icon::Accessibility,
-                tr("Accessibility"),
-                match row.status {
-                    ItemStatus::Waiting => {
-                        tr("Drag Hex into the list, or switch it on if it is there").into()
-                    }
-                    _ => tr("Pastes your words into the app you are using").into(),
+                platform::accessibility_title(),
+                if waiting {
+                    tr("Drag Hex into the list, or switch it on if it is there").into()
+                } else {
+                    tr("Pastes your words into the app you are using").into()
                 },
             ),
             SetupItem::Model => (
@@ -551,88 +512,82 @@ impl AppWindow {
         } else {
             ButtonKind::Secondary
         };
-        let grant = move |label: &'static str, kind: ButtonKind, cx: &mut Context<Self>| {
-            small_button(kind, label)
-                .id(("setup-grant", setup_item_index(item)))
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    this.tour_input(Input::Grant(item), cx);
-                }))
-                .into_any_element()
+        let grant = cx.listener(move |this, _: &ClickEvent, _, cx| {
+            this.tour_input(Input::Grant(item), cx);
+        });
+        let id = ("setup-grant", setup_item_index(item));
+        if item == SetupItem::Model {
+            return match row.status {
+                ItemStatus::Ready => allowed(tr("Ready")),
+                ItemStatus::Downloading(progress) => download_progress(progress),
+                ItemStatus::Failed => small_button(kind, tr("Retry"))
+                    .id(id)
+                    .on_click(grant)
+                    .into_any_element(),
+                _ => small_button(kind, tr("Download"))
+                    .id(id)
+                    .on_click(grant)
+                    .into_any_element(),
+            };
+        }
+        permission_control(
+            match row.status {
+                ItemStatus::Ready => PermissionControl::Allowed,
+                ItemStatus::Waiting => PermissionControl::Waiting,
+                _ => PermissionControl::Allow,
+            },
+            kind,
+            id,
+            grant,
+        )
+    }
+
+    /// The model's progress beside the tour's step dots, while it downloads
+    /// behind the other steps.
+    fn render_download(&mut self, status: ItemStatus, cx: &mut Context<Self>) -> AnyElement {
+        let label = |text: &'static str, color: u32| {
+            div()
+                .text_caption()
+                .text_color(rgb(color))
+                .whitespace_nowrap()
+                .child(text)
         };
-        match row.status {
+        let content = match status {
             ItemStatus::Ready => div()
                 .flex()
                 .items_center()
                 .gap_1p5()
-                .text_footnote()
-                .text_color(rgb(SUCCESS))
                 .child(icon(Icon::Check, SUCCESS))
-                .child(if item == SetupItem::Model {
-                    tr("Ready")
-                } else {
-                    tr("Allowed")
-                })
-                .into_any_element(),
-            ItemStatus::Todo if item == SetupItem::Model => div()
+                .child(label(tr("Speech model ready"), TEXT_SECONDARY)),
+            ItemStatus::Failed => div()
                 .flex()
                 .items_center()
                 .gap_2()
+                .child(label(tr("Download stopped"), TEXT_SECONDARY))
                 .child(
-                    small_button(ButtonKind::Secondary, tr("Change"))
-                        .id("setup-choose-model")
+                    small_button(ButtonKind::Secondary, tr("Retry"))
+                        .id("tour-download-retry")
                         .on_click(cx.listener(|this, _, _, cx| {
-                            this.transcription_picker_language =
-                                Some(this.settings.transcription.language.clone());
-                            this.clear_transcription_error();
-                            cx.notify();
+                            this.tour_input(Input::Grant(SetupItem::Model), cx);
                         })),
-                )
-                .child(grant(tr("Download"), kind, cx))
-                .into_any_element(),
-            ItemStatus::Todo => grant(tr("Allow"), kind, cx),
-            ItemStatus::Waiting => div()
-                .flex()
-                .items_center()
-                .gap_3()
-                .child(if crate::onboarding::reduce_motion() {
-                    status_dot(ACCENT).into_any_element()
-                } else {
-                    status_dot(ACCENT)
-                        .with_animation(
-                            ("setup-waiting", setup_item_index(item)),
-                            Animation::new(LISTENING_LOOP)
-                                .repeat()
-                                .with_easing(ease_in_out),
-                            |dot, phase| dot.opacity(pulse(phase)),
-                        )
-                        .into_any_element()
-                })
-                .child(grant(
-                    if item == SetupItem::Microphone {
-                        tr("Allow")
-                    } else {
-                        tr("Open settings")
-                    },
-                    ButtonKind::Secondary,
-                    cx,
-                ))
-                .into_any_element(),
-            ItemStatus::Denied => grant(tr("Open settings"), kind, cx),
+                ),
             ItemStatus::Downloading(progress) => div()
-                .w(px(ONBOARDING_PROGRESS_WIDTH))
                 .flex()
                 .items_center()
                 .gap_2()
-                .child(progress_track(div().w(gpui::relative(progress))))
-                .child(
-                    div()
-                        .text_caption()
-                        .text_color(rgb(TEXT_SECONDARY))
-                        .child(format!("{:.0}%", progress * 100.0)),
-                )
-                .into_any_element(),
-            ItemStatus::Failed => grant(tr("Retry"), kind, cx),
-        }
+                .child(label(tr("Speech model"), TEXT_TERTIARY))
+                .child(download_progress(progress)),
+            _ => div(),
+        };
+        div()
+            .id(("tour-download", status_index(status)))
+            .child(content)
+            .with_animation(
+                ("tour-download-motion", status_index(status)),
+                Animation::new(SWAP_DURATION).with_easing(ease_out_quint()),
+                |slot, delta| slot.opacity(delta),
+            )
+            .into_any_element()
     }
 
     fn render_try_it(
@@ -689,6 +644,13 @@ impl AppWindow {
                         .on_click(cx.listener(|this, _, _, cx| this.tour_input(Input::Reopen, cx))),
                 )
                 .into_any_element();
+        }
+        if !view.dictation_ready {
+            return hint_text(
+                tr("Hex starts listening once the speech model has downloaded."),
+                TEXT_TERTIARY,
+            )
+            .into_any_element();
         }
         let (dot, text, color): (Option<u32>, String, u32) = match view.practice {
             Practice::Waiting => {
@@ -925,10 +887,9 @@ fn observation(phase: &DictationPhase) -> Option<Observation> {
 fn step_index(step: Step) -> usize {
     match step {
         Step::Welcome => 0,
-        Step::HowItWorks => 1,
-        Step::Setup => 2,
-        Step::TryIt => 3,
-        Step::Done => 4,
+        Step::Setup => 1,
+        Step::TryIt => 2,
+        Step::Done => 3,
     }
 }
 
@@ -996,31 +957,83 @@ fn centered_page(art: AnyElement, title: &'static str, body: String) -> AnyEleme
         .into_any_element()
 }
 
-fn how_row(art: impl IntoElement, text: String, last: bool) -> Div {
+/// How a permission's control reads, everywhere Hex asks for one.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum PermissionControl {
+    Allow,
+    /// Asked: the prompt or System Settings is up; Allow opens it again.
+    Waiting,
+    Allowed,
+}
+
+/// The one control every permission uses, in the tour and in Settings:
+/// Allow, a pulse while macOS is asked, then a green Allowed.
+pub(super) fn permission_control(
+    control: PermissionControl,
+    kind: ButtonKind,
+    id: impl Into<ElementId>,
+    on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+) -> AnyElement {
+    match control {
+        PermissionControl::Allowed => allowed(tr("Allowed")),
+        PermissionControl::Allow => button(kind, tr("Allow"))
+            .id(id)
+            .on_click(on_click)
+            .into_any_element(),
+        PermissionControl::Waiting => div()
+            .flex()
+            .items_center()
+            .gap_3()
+            .child(if crate::onboarding::reduce_motion() {
+                status_dot(ACCENT).into_any_element()
+            } else {
+                status_dot(ACCENT)
+                    .with_animation(
+                        "permission-waiting",
+                        Animation::new(LISTENING_LOOP)
+                            .repeat()
+                            .with_easing(ease_in_out),
+                        |dot, phase| dot.opacity(pulse(phase)),
+                    )
+                    .into_any_element()
+            })
+            .child(
+                button(ButtonKind::Secondary, tr("Allow"))
+                    .id(id)
+                    .on_click(on_click),
+            )
+            .into_any_element(),
+    }
+}
+
+fn allowed(text: &'static str) -> AnyElement {
     div()
-        .w_full()
-        .px_4()
-        .py_4()
         .flex()
         .items_center()
-        .gap_4()
-        .when(!last, |row| row.border_b_1().border_color(rgb(LINE)))
+        .gap_1p5()
+        .text_footnote()
+        .text_color(rgb(SUCCESS))
+        .child(icon(Icon::Check, SUCCESS))
+        .child(text)
+        .into_any_element()
+}
+
+fn download_progress(progress: f32) -> AnyElement {
+    div()
+        .w(px(ONBOARDING_PROGRESS_WIDTH))
+        .flex()
+        .items_center()
+        .gap_2()
+        // The tour sits on the canvas the track is drawn in, so the track
+        // takes the line colour to stay visible.
+        .child(progress_track(div().w(gpui::relative(progress))).bg(rgb(LINE)))
         .child(
             div()
-                .w(px(ONBOARDING_ART_COLUMN))
-                .flex_none()
-                .flex()
-                .justify_center()
-                .child(art),
-        )
-        .child(
-            div()
-                .flex_1()
-                .min_w(px(0.0))
-                .text_body()
+                .text_caption()
                 .text_color(rgb(TEXT_SECONDARY))
-                .child(text),
+                .child(format!("{:.0}%", progress * 100.0)),
         )
+        .into_any_element()
 }
 
 fn hint_text(text: impl Into<gpui::SharedString>, color: u32) -> Div {
@@ -1076,48 +1089,6 @@ fn listening_art(parts: Vec<String>, phase: f32) -> Div {
         .justify_center()
         .children(rings)
         .child(hero_keycaps(parts, pressed))
-}
-
-/// Five bars rising and falling like a voice.
-fn waveform_art(phase: f32) -> Div {
-    const LEVELS: [f32; 5] = [0.45, 0.8, 1.0, 0.7, 0.5];
-    div()
-        .h(px(CONTROL_HEIGHT_SMALL))
-        .px_3()
-        .flex()
-        .items_center()
-        .gap_1()
-        .rounded_full()
-        .border_1()
-        .border_color(rgb(LINE_STRONG))
-        .bg(rgb(SURFACE_HOVER))
-        .children(LEVELS.iter().enumerate().map(move |(index, level)| {
-            let wave = (std::f32::consts::TAU * (phase + index as f32 * 0.18)).sin() * 0.5 + 0.5;
-            let height = 4.0 + 10.0 * level * (0.35 + 0.65 * wave);
-            div()
-                .w(px(2.0))
-                .h(px(height))
-                .rounded_full()
-                .bg(rgb(TEXT_SECONDARY))
-        }))
-}
-
-/// A line of text with the cursor after it, as if just pasted.
-fn pasted_art() -> Div {
-    div()
-        .h(px(CONTROL_HEIGHT_SMALL))
-        .px_2()
-        .flex()
-        .items_center()
-        .gap_0p5()
-        .rounded(RADIUS_SMALL)
-        .border_1()
-        .border_color(rgb(LINE))
-        .bg(rgb(CANVAS))
-        .text_footnote()
-        .text_color(rgb(TEXT_PRIMARY))
-        .child(tr("Hello"))
-        .child(div().w(px(1.0)).h(px(FOOTNOTE.line_height)).bg(rgb(ACCENT)))
 }
 
 /// Dim, bright, dim over one loop.

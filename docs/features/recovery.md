@@ -15,6 +15,7 @@ platforms, and dependencies.
 - [Fence late capture notifications](#fence-late-capture-notifications).
 - [Degrade only the failing dependency](#degrade-only-the-failing-dependency).
 - [Keep Linux listeners managed](#keep-linux-listeners-managed).
+- [Move the macOS data folder once](#move-the-macos-data-folder-once).
 
 ## How To Get To It
 
@@ -307,7 +308,22 @@ Release the hold shortcut, or press the locked shortcut, to finish when Escape
 is unavailable. With the bare-Escape fallback, release other modifiers before
 pressing Escape. A failed fallback releases any partial grabs.
 
+On Wayland with the GlobalShortcuts portal, Escape follows the same rule
+through a second portal session that exists only while something records:
+
+```ts
+capture starts -> bind Escape, and Escape with the recording shortcut's modifiers
+  ├── granted -> Escape cancels, held shortcut or not
+  └── refused (the desktop or another binding owns Escape)
+        -> keep dictating without Escape-cancel; same listener warning
+capture ends -> close the Escape session -> Escape returns to applications
+desktop closes the main shortcuts session -> cancel active capture
+  -> listener stops with an error -> Retry / hex start binds again
+no portal -> bind `hex dictation cancel` in the desktop
+```
+
 Checks in [linux_input.rs](../../src/linux_input.rs):
+`escape_is_wanted_only_while_something_records`,
 `escape_grab_conflict_is_not_fatal`, `non_conflict_grab_errors_stay_fatal`,
 and `escape_warning_is_logged_once_per_episode_and_clears_on_recovery`.
 `listener_warning_is_nonfatal_and_round_trips_in_service_snapshots` in
@@ -526,3 +542,25 @@ consumer, without using the user's clipboard.
 Do not reset settings or loosen shortcut matching to make a recovery check pass.
 Keep automatic recovery, explicit retry, and defects that prevent recovery
 distinct. Test cleanup must preserve failure evidence.
+
+### Move The macOS Data Folder Once
+
+`recover.data-folder`: an upgrade renames `~/Library/Application Support/voice-control`
+to `hex` before logging, the instance lock, or any file there opens.
+
+```ts
+launch (not `hex mcp`, no HEX_APPLICATION_SUPPORT_DIR)
+  ├── no voice-control (fresh, or already a symlink to hex) -> use hex
+  │   └── hex exists, symlink missing -> re-create voice-control -> hex
+  ├── voice-control only -> renamex_np(RENAME_EXCL) to hex
+  │   ├── ok -> symlink voice-control -> hex; settings `migrations` +macos-data-folder-hex
+  │   └── fails (busy, cross-volume) -> keep voice-control, log, retry next launch
+  ├── both real folders -> touch neither, log, keep voice-control
+  └── concurrent launch renamed first -> use hex
+`hex mcp` -> resolves the folder read-only, never renames
+Windows (%APPDATA%\voice-control) and Linux -> unchanged
+```
+Checks in [app_paths.rs](../../src/app_paths.rs) `data_folder::tests`: fresh,
+legacy only, both, symlink present, symlink missing, rename failure, concurrent rename, and
+no-clobber rename. Proof limit: temp folders; the Studio upgrade is recorded in
+the change that introduced it.

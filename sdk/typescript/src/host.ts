@@ -1,5 +1,5 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process"
-import { readFile } from "node:fs/promises"
+import { readFile, readlink, stat } from "node:fs/promises"
 import { homedir } from "node:os"
 import { join } from "node:path"
 import { HexError } from "./errors.js"
@@ -203,9 +203,19 @@ export async function create(options: CreateOptions | TranscriberOptions = {}): 
   return startHost(options)
 }
 
+/** Matches Hex: an unmigrated `voice-control` folder (not its symlink to `hex`) stays in use. */
+const defaultSupportDirectory = async (): Promise<string> => {
+  const support = join(homedir(), "Library", "Application Support")
+  const legacy = join(support, "voice-control")
+  const target = await readlink(legacy).catch(() => undefined)
+  if (target === "hex" || target === join(support, "hex")) return join(support, "hex")
+  const legacyExists = await stat(legacy).then(() => true, () => false)
+  return legacyExists ? legacy : join(support, "hex")
+}
+
 export const connect = async (options: ConnectOptions = {}): Promise<HexClient> => {
   const discoveryPath = options.discoveryPath
-    ?? join(process.env.HEX_APPLICATION_SUPPORT_DIR ?? join(homedir(), "Library", "Application Support", "voice-control"), "local-api.json")
+    ?? join(process.env.HEX_APPLICATION_SUPPORT_DIR ?? await defaultSupportDirectory(), "local-api.json")
   let value: unknown
   try {
     value = JSON.parse(await readFile(discoveryPath, "utf8"))

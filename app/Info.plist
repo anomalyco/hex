@@ -30,6 +30,8 @@
   <string>HEX uses automation to identify the foreground app and browser and pause supported media while you dictate.</string>
   <key>NSAccessibilityUsageDescription</key>
   <string>HEX uses Accessibility to paste dictation and read selected text for Voice Action.</string>
+  <key>NSAudioCaptureUsageDescription</key>
+  <string>HEX records the other participants' audio only while you record a meeting, and keeps it on this Mac.</string>
   <key>NSInputMonitoringUsageDescription</key>
   <string>HEX uses Input Monitoring to detect your dictation shortcuts in every app.</string>
   <key>NSMicrophoneUsageDescription</key>

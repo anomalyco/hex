@@ -235,6 +235,35 @@ after Ruby syntax, style, strict online audit, checksum fetch, and livecheck
 No installed app was replaced, physical dictation performed, or native GUI
 verification added for this release.
 
+## macOS 2.3.1
+
+**Published October 21, 2026:** [2.3.1](../releases/2.3.1.md), release commit
+`c4b3287` (version bump `985c78e`, driver plist `8531c8d` on top of `7bfb51d`),
+build `20301`. CI (macOS, Linux `test` and `nix`, Windows x64 and ARM64) passed
+on `c4b3287`; the first run on `985c78e` failed because the Hex Microphone
+driver plist still said 2.3.0. Both notarizations were accepted and the DMG
+passed Gatekeeper. The DMG SHA-256 is
+`56de94665da8fefbe0fe6310368fd7b62497dff593b6818475f9c5fa751def7a`; the ZIP
+SHA-256 is
+`a8a813334c92c505c65c4cd2f3e678e2758b197393df62f988264c3e872d4ddd`. The live
+feed leads with build `20301`, and the custom-domain, latest, and GitHub DMGs
+match. No physical dictation check or Sparkle update from an older build was
+run.
+
+## Linux And Windows 2.3.1
+
+Built from `9f8fd71` by [Release desktop run 39654195736](https://github.com/anomalyco/hex/actions/runs/39654195736)
+and published from the Pro with `scripts/publish-desktop-release.sh`. The run
+from `c4b3287` failed the x64 Setup.exe test twice: the build's
+`hex.exe --version` check created `%APPDATA%\voice-control` before parsing the
+CLI, so the installer test saw a dirty machine. `9f8fd71` parses first. The
+three feeds serve 2.3.1 and verify; the Setup.exe SHA-256s are
+`f9c04f6e85db256d43f3539a992e674026aa44935fb59d5fd9d1bf6af1fe3952` (x64) and
+`54785afee4f5e9a5d6f7b75239eb376186771e21237414da708dc7f4822d6d9f` (ARM64).
+The installer workflow step installed, reinstalled, refused a downgrade with,
+and uninstalled both on CI runners. No dictation was performed on Linux or
+Windows hardware.
+
 ## macOS 2.3.0
 
 **Published October 19, 2026:** [2.3.0](../releases/2.3.0.md), release commit

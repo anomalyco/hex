@@ -63,7 +63,10 @@ through its separate capture API.
 Verified model artifacts remain shared per user under Application Support.
 Each embedded helper has its own warm model and inference queue. Multiple hosts
 may reuse the same verified file, but they do not share Metal allocations or
-runtime selection. The current cache is filename-based; immutable revision-safe
+runtime selection. Inside `Hex.app`, a clip of up to 30 seconds for the GGUF
+model dictation has loaded runs on dictation's model between dictations, so
+the app holds one copy; another model, or a longer clip, uses the service's own,
+and a longer clip's copy is released when dictation holds the model. The current cache is filename-based; immutable revision-safe
 storage for independently versioned helpers remains planned.
 
 ## Embedded Startup and Authentication

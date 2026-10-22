@@ -5,7 +5,7 @@ This maps existing behavior. [ROADMAP.md](../../ROADMAP.md) owns future work;
 [AGENTS.md](../../AGENTS.md) owns implementation invariants.
 
 Initial source baseline: September 1, 2026, `9e9da53aa9ed`. Public macOS release:
-[2.3.0](../releases/2.3.0.md), with custom-domain downloads, a GitHub DMG mirror,
+[2.3.1](../releases/2.3.1.md), with custom-domain downloads, a GitHub DMG mirror,
 and model-download recovery guidance. The initial map was source-only. Listed checks are
 locators unless an executed result is explicitly recorded, as in the
 [keyboard-layout verification](recovery.md#keyboard-layout-resolution).
@@ -109,17 +109,23 @@ with 2.1.17; the initial 2.1.16 mirror preserves that release's original bytes.
 
 ```ts
 Launch Hex, setup incomplete              // setup.tour; full-window, own column
+├── Tour opens -> speech model download starts at once      // setup.background-download
+│   ├── Model -> the selection recommended for the system's first preferred
+│   │            language (English -> Parakeet Unified English; e.g. French ->
+│   │            Parakeet v3, Japanese -> Qwen3-ASR); no picker in the tour
+│   ├── Progress sits beside the step dots on every step; failure -> Retry
+│   └── Change or delete the model later in Settings      // setup.delete-model
 ├── Welcome -> Get started                // looping keycap + listening rings
-├── How Hex works -> hold, speak, release // follows the shortcut and Hold/Toggle mode
-├── Setup: one screen, every requirement  // setup.checklist
-│   ├── Microphone -> Allow -> macOS prompt; denied -> Open settings
-│   ├── Input Monitoring / Accessibility -> Allow -> Privacy pane + drag guide
-│   │   └── Asked -> "Waiting for macOS" + drag/switch hint; reopen the pane
-│   ├── Speech model -> Download (progress %) | Change -> picker; failure -> Retry
+├── Setup: one screen, every permission   // setup.checklist; skipped when granted
+│   ├── Every row -> Allow; asked -> pulse + Allow; granted -> Allowed  // setup.permission-control
+│   ├── Microphone -> macOS prompt; refused -> Privacy pane + "switch Hex on" guide
+│   ├── Input Monitoring / Accessibility -> Privacy pane + drag guide
+│   │   └── macOS 27 names the list "Device Control and Data Access"; row and guide follow
 │   ├── Rows re-read every 400 ms and flip to a check as macOS grants
 │   ├── The first unfinished row carries the screen's one accent
-│   └── All ready -> listener starts, completion recorded -> Continue
+│   └── Last grant -> 0.7 s beat -> Give it a try (Continue also works)
 ├── Give it a try                         // setup.practice; macOS only
+│   ├── Model still downloading -> "Hex starts listening once…" + footer progress
 │   ├── Focused practice field; hold the shortcut, speak, release
 │   ├── Started -> "Listening…" ; Transcribing -> "Transcribing…"
 │   ├── Discarded before transcribing -> quick-tap hint
@@ -130,6 +136,7 @@ Launch Hex, setup incomplete              // setup.tour; full-window, own column
 │   ├── First time -> Hex records a marker, reopens itself, resumes at Give it a try
 │   └── Within 2 min of that relaunch -> "Reopen Hex" button; dev binaries ask to reopen
 └── Done -> paste last, Voice Action, Modes tips -> Start using Hex
+    // Windows and Linux: Welcome -> Setup (the model row only) -> Done
 
 Settings > Local transcription
   -> Prepare candidate
@@ -137,7 +144,7 @@ Settings > Local transcription
      └── Failure -> Preserve previous selection and show error
 
 Permissions revoked later
-  -> Settings shows the missing access and repair action
+  -> Settings > Permissions needed: the same rows and Allow control as the tour
 ```
 
 Apple silicon, macOS 15+. Choices come from the compiled model/language catalog;
@@ -198,12 +205,20 @@ Checks start in [onboarding.rs](../../src/onboarding.rs),
 [transcription_models.rs](../../src/transcription_models.rs). Setup/picker previews
 prove rendering, not clean-account permission grants or model preparation.
 
-The tour is the pure `onboarding::Flow` (steps, row states, practice hints,
-one-relaunch guard) drawn by [tour.rs](../../src/app_window/tour.rs). Its unit
-tests (`onboarding::tests`) cover step order, live row flips, denied and failed
-recovery, platforms without permissions or practice, practice hints, resume, and
-the relaunch guard and resume marker. Every step is capturable with
-`voice-control preview onboarding --step <welcome|how-it-works|setup|setup-progress|setup-ready|try-it|try-it-listening|try-it-short|try-it-silent|try-it-landed|try-it-reopen|done>`.
+The tour is the pure `onboarding::Flow` (steps, row states, background
+download, practice hints, one-relaunch guard) drawn by
+[tour.rs](../../src/app_window/tour.rs), which also owns `permission_control`,
+the one Allow / pulse / Allowed control Settings and Meetings reuse. The guide
+beside System Settings is [permission_guide.m](../../native/permission_guide.m).
+Unit tests (`onboarding::tests`) cover step order, the download starting on the
+welcome screen and retrying from any step, permissions-only setup with the
+model waiting for practice, the auto-advance beat, live row flips, a refused
+microphone, platforms without permissions or practice, practice hints, resume,
+and the relaunch guard and resume marker. Every step is capturable with
+`voice-control preview onboarding --step <welcome|setup|setup-progress|setup-denied|setup-ready|setup-download-failed|try-it-downloading|try-it|try-it-listening|try-it-short|try-it-silent|try-it-landed|try-it-reopen|done>`.
+The default model comes from `desktop_i18n::preferred_language` (macOS:
+`NSLocale.preferredLanguages`) through `recommended_selection`; existing
+settings keep their saved model.
 Not yet observed: a clean-account run with real grants, a real practice paste
 into the field, or a real self-relaunch after an event-tap refusal. Windows and
 Linux show the model row only and skip the practice step.
@@ -707,11 +722,23 @@ Linux beta                               // not macOS feature parity
 │   └── CPU or a model that cannot stream -> Transcribe the whole clip after release
 ├── hex app -> Settings client; closing it leaves the runtime running
 ├── Recording sounds -> Shortcut press / capture stop / active cancellation
-├── X11 -> No tray or recording HUD; service status and sounds remain available
-├── Wayland -> evdev + compositor protocols; keys observed, not suppressed
-│   └── Mouse-classified nodes excluded; live modifiers reused for paste
+├── Shortcuts -> One state machine, three sources        // linux.shortcuts
+│   ├── X11 -> Root-window key grabs; Settings records the chord
+│   ├── Wayland + GlobalShortcuts portal -> Desktop grants the triggers
+│   │   ├── Settings shows the granted trigger (GNOME/KDE may assign another)
+│   │   └── Refused shortcut -> "Not granted" + error; the rest keep working
+│   └── Wayland without the portal -> Bind `hex` commands in the desktop
+│       └── Settings hides shortcut rows and lists the commands
+├── hex dictation start|stop|toggle|cancel, hex voice-action start|stop|toggle,
+│   hex paste-last -> Same events as a shortcut       // linux.commands
+│   ├── Idempotent: start while recording / stop while idle -> Nothing
+│   └── Service missing or not listening -> Clear error, non-zero exit
 ├── Escape -> Cancel active capture, not newest accepted job
-│   └── X11 grab conflict -> Try plain Escape; otherwise warn without stopping dictation
+│   ├── Bound only while recording (portal: own session, also with held modifiers)
+│   └── X11 grab conflict / portal refusal -> Warn without stopping dictation
+├── Voice Action (opt-in) -> Hold its shortcut or `hex voice-action` -> Instruction
+│   └── Selected text from the primary selection -> OpenCode -> Paste the reply
+├── X11 -> No tray or recording HUD; service status and sounds remain available
 ├── Microphone failure -> Listener exits, not macOS automatic recovery
 │   └── Overload (Xrun) glitch -> Logged; not a failure
 └── Paste -> Retain transcript clipboard, not restore previous contents
@@ -721,6 +748,7 @@ Linux beta                               // not macOS feature parity
 Windows beta                             // x64 (Vulkan GPU) and ARM64 (CPU)
 ├── Install -> install-windows.ps1 -> per-architecture signed feed -> hex.exe
 ├── HEX app -> Settings, tray, HUD; Enabled = shortcut works in every app
+├── Launch again -> Running app shows its window; hidden (login) launch -> no-op
 ├── Ctrl+Space -> Hold or Toggle -> Capture -> Stream (GPU) -> Paste
 ├── Escape -> Cancel; a held modifier alone never ends or cancels a capture
 ├── Paste -> Waits for Shift, Alt, and Win; a held Ctrl is kept and harmless
@@ -733,24 +761,28 @@ release flow; [check-windows](../../.github/workflows/check-windows.yml) builds,
 lints, and tests x64 and builds and tests ARM64 on every pull request. Physical
 smoke tests on Windows 10 and on ARM64 hardware have not been run.
 
-No Linux Commands, Voice Action, Modes processing, retained History, or meetings.
-`hex listen` instead prints Moonshine transcripts. Wayland needs explicit broad
-input-device access; physical reconnect and click-through still need native
-evidence. Its [smoke](../../scripts/test-wayland-paste.sh) explicitly isolates
-`HEX_APPLICATION_SUPPORT_DIR` and checks that Settings can exit without stopping
-the service.
+No Linux voice Commands or meetings. `hex listen` instead prints Moonshine
+transcripts. Wayland shortcuts need either the desktop's GlobalShortcuts portal
+or the user's own keybindings for the `hex` commands; Hex reads no input
+devices. Click-through and a physical portal or keybinding press still need
+native evidence. Its [smoke](../../scripts/test-wayland-paste.sh) explicitly
+isolates `HEX_APPLICATION_SUPPORT_DIR`, pastes while another keyboard holds
+Ctrl and Alt, and checks that Settings can exit without stopping the service.
 
-Wayland discovery checks every event node for the required broad read access,
-then excludes udev mouse-classified nodes even when Logitech-style receivers
-advertise synthetic keyboard keys. Stable rejected nodes are cached until their
-device identity changes. The active keyboard monitor publishes aggregate
-modifier state to paste, avoiding two full device scans after every dictation.
-`mouse_nodes_are_not_monitored_even_when_the_receiver_advertises_keyboard_keys`
-and `live_modifier_snapshot_tracks_edges_and_device_loss` cover those policies;
-the nested-compositor smoke remains the native insertion check.
+Shortcut rules are pure and tested once for every source in
+[linux_input.rs](../../src/linux_input.rs): hold, double-tap lock, toggle,
+double-tap only, Escape, Paste Last, Voice Action, and command idempotence,
+plus X11 auto-repeat filtering. The X11 grab tests run on an isolated display in
+CI; `commands_and_grabs_share_the_x11_listener` drives grabs and commands
+through one listener. [scripts/test-linux-service.py](../../scripts/test-linux-service.py)
+checks that commands fail without a listening service.
+On 2026-10-22 the portal path was observed on niri with xdg-desktop-portal-gnome
+using synthetic uinput keys against an isolated service: granted triggers,
+hold and Escape while held, double-tap lock, Paste Last, and commands. A
+physical keyboard press has not been recorded.
 
 See the [Linux guide](../linux.md), [linux_app.rs](../../src/linux_app.rs),
-[linux_wayland_input.rs](../../src/linux_wayland_input.rs), and
+[linux_portal.rs](../../src/linux_portal.rs), and
 [Linux CI](../../.github/workflows/check-linux.yml) for existing checks.
 The [direct installer/updater](../../src/linux_updater.rs) and
 [installer tests](../../scripts/test-install-linux-release.sh) do not establish
@@ -811,7 +843,9 @@ Linux Settings > Sound volume             // dictate.feedback.linux; X11 + Wayla
 
 Capture                                  // hex app and hex dictate
 ├── Shortcut starts capture -> Queue start sound immediately, before audio arrives
-├── Finish retained recording -> Stop sound, before transcription/paste
+├── Finish retained recording -> Stop sound at the release, while the 200 ms
+│   tail is still captured; a muted output unmutes first   // dictate.stop-tone
+│   └── Clip turns out near-silent -> Stop sound already played, nothing pasted
 ├── Brief discarded tap -> Start sound, but no stop sound or transcription
 └── Cancel active capture -> Cancel sound; idle Escape stays silent
 ```

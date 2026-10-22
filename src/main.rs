@@ -80,13 +80,13 @@ mod linux_migration;
 #[cfg(target_os = "linux")]
 mod linux_paste;
 #[cfg(target_os = "linux")]
+mod linux_portal;
+#[cfg(target_os = "linux")]
 mod linux_service;
 #[cfg(target_os = "linux")]
 mod linux_session;
 #[cfg(target_os = "linux")]
 mod linux_updater;
-#[cfg(target_os = "linux")]
-mod linux_wayland_input;
 #[cfg(target_os = "macos")]
 mod local_api;
 #[cfg(any(target_os = "linux", target_os = "windows"))]
@@ -483,6 +483,8 @@ enum AppPreviewTarget {
 #[derive(Clone, Copy, ValueEnum)]
 enum MeetingPanelPreview {
     Offer,
+    OfferMore,
+    OfferDismissed,
     Recording,
     RecordingExpanded,
     RecordingCopied,
@@ -494,10 +496,12 @@ enum MeetingPanelPreview {
 #[derive(Clone, Copy, ValueEnum)]
 enum OnboardingPreviewStep {
     Welcome,
-    HowItWorks,
     Setup,
     SetupProgress,
+    SetupDenied,
     SetupReady,
+    SetupDownloadFailed,
+    TryItDownloading,
     TryIt,
     TryItListening,
     TryItShort,
@@ -599,7 +603,11 @@ fn main() -> Result<()> {
         );
     }
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let data_folder = app_paths::migrate_data_folder();
     let log_dir = app_paths::init_process_logging(&SHUTDOWN)?;
+    if let Some(outcome) = &data_folder {
+        app_paths::log_data_folder_migration(outcome);
+    }
 
     let event_path = log_dir.join("live.ndjson");
     let executable_name = std::env::current_exe()
@@ -625,7 +633,7 @@ fn main() -> Result<()> {
             preview_dictation,
         } => {
             let _instance = instance::acquire("listener")?;
-            hex_microphone::ensure_service_started();
+            hex_microphone::host_service();
             let launch = if preview_dictation {
                 meeting_watcher::Launch::DictationHudPreview
             } else {
@@ -670,6 +678,10 @@ fn main() -> Result<()> {
                     &SHUTDOWN,
                     meeting_watcher::Launch::MeetingPanelPreview(match meeting_panel {
                         MeetingPanelPreview::Offer => meeting_watcher::PanelPreview::Offer,
+                        MeetingPanelPreview::OfferMore => meeting_watcher::PanelPreview::OfferMore,
+                        MeetingPanelPreview::OfferDismissed => {
+                            meeting_watcher::PanelPreview::OfferDismissed
+                        }
                         MeetingPanelPreview::Recording => meeting_watcher::PanelPreview::Recording,
                         MeetingPanelPreview::RecordingExpanded => {
                             meeting_watcher::PanelPreview::RecordingExpanded
@@ -735,15 +747,21 @@ fn main() -> Result<()> {
                             OnboardingPreviewStep::Welcome => {
                                 app_window::OnboardingPreview::Welcome
                             }
-                            OnboardingPreviewStep::HowItWorks => {
-                                app_window::OnboardingPreview::HowItWorks
-                            }
                             OnboardingPreviewStep::Setup => app_window::OnboardingPreview::Setup,
                             OnboardingPreviewStep::SetupProgress => {
                                 app_window::OnboardingPreview::SetupProgress
                             }
+                            OnboardingPreviewStep::SetupDenied => {
+                                app_window::OnboardingPreview::SetupDenied
+                            }
                             OnboardingPreviewStep::SetupReady => {
                                 app_window::OnboardingPreview::SetupReady
+                            }
+                            OnboardingPreviewStep::SetupDownloadFailed => {
+                                app_window::OnboardingPreview::SetupDownloadFailed
+                            }
+                            OnboardingPreviewStep::TryItDownloading => {
+                                app_window::OnboardingPreview::TryItDownloading
                             }
                             OnboardingPreviewStep::TryIt => app_window::OnboardingPreview::TryIt,
                             OnboardingPreviewStep::TryItListening => {
@@ -791,7 +809,7 @@ fn main() -> Result<()> {
         Command::Listen { device } => {
             let _instance = instance::acquire("listener")?;
             let settings = app_settings::AppSettings::load()?;
-            hex_microphone::ensure_service_started();
+            hex_microphone::host_service();
             let events = events::EventLog::create(&event_path)?;
             let history = match history::History::open_default(settings.history_retention) {
                 Ok(history) => Some(history),

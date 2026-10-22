@@ -134,6 +134,10 @@ impl SelectionArgs {
 
 pub fn run(shutdown: &'static AtomicBool) -> Result<()> {
     color_eyre::install()?;
+    // Parse first so `--version` and `--help` exit without creating app data.
+    let command = Cli::parse()
+        .command
+        .unwrap_or(Command::App { hidden: false });
     let log_dir = crate::app_paths::logs_dir()?;
     fs::create_dir_all(&log_dir)?;
     let process_log = OpenOptions::new()
@@ -149,10 +153,7 @@ pub fn run(shutdown: &'static AtomicBool) -> Result<()> {
     ctrlc::set_handler(|| shutdown.store(true, Ordering::Relaxed))?;
 
     let event_path = log_dir.join("live.ndjson");
-    match Cli::parse()
-        .command
-        .unwrap_or(Command::App { hidden: false })
-    {
+    match command {
         Command::App { hidden } => {
             detach_from_console();
             crate::windows_app::open(event_path, shutdown, hidden)

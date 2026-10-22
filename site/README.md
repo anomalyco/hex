@@ -49,3 +49,12 @@ the name, and one line. `scripts/og/hex-icon.png` is the 1024 px icon exported
 from the built app (`iconutil -c iconset Hex.app/Contents/Resources/AppIcon.icns`).
 Regenerate with `bun run generate:og`, bump the `?v=` on both image tags in
 `index.html`, rebuild, deploy, and fetch the published PNG.
+
+Messages also plays `public/og.mp4` (`og:video`) inline on a loop in place of the
+image; other apps keep the PNG. It's a 4.5 s, 1200 × 630, 60 fps silent H.264
+loop: the icon speaks and the words pile up under it
+(`scripts/og-video/hex-pour.js`, matter.js physics, deterministic per frame so
+the last frame meets the first). `bun run generate:og-video [hex-line|hex-key]`
+renders it through Chromium and ffmpeg; bump the `?v=` on both `og:video` tags
+after changing it. The Worker answers Range requests for `.mp4`, which Safari
+and AVFoundation need.

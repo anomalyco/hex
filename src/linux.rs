@@ -8,6 +8,7 @@ use color_eyre::Result;
 
 use crate::audio::{AudioInput, AudioInputEvent};
 use crate::events::{EventLog, TranscriptPhase, VoiceEvent, VoiceState, now_ms};
+use crate::linux_input::ShortcutCommand;
 use crate::moonshine::Moonshine;
 
 #[derive(Parser)]
@@ -39,6 +40,19 @@ enum Command {
         #[arg(long)]
         device: Option<String>,
     },
+    /// Start, stop, or cancel a dictation in the running service. Bind these
+    /// in your desktop's keyboard shortcuts when it has no shortcuts portal.
+    Dictation {
+        #[command(subcommand)]
+        action: DictationAction,
+    },
+    /// Start or stop a Voice Action instruction in the running service.
+    VoiceAction {
+        #[command(subcommand)]
+        action: VoiceActionAction,
+    },
+    /// Paste the last dictation again through the running service.
+    PasteLast,
     /// Run X11 or Wayland hotkey dictation and automatic paste until interrupted.
     Dictate {
         /// Select an input device by a case-insensitive name fragment.
@@ -58,6 +72,28 @@ enum Command {
         #[command(subcommand)]
         command: ModelCommand,
     },
+}
+
+#[derive(Subcommand)]
+enum DictationAction {
+    /// Start recording; does nothing while recording. Bind to a key press.
+    Start,
+    /// Stop and transcribe; does nothing while idle. Bind to the key's release.
+    Stop,
+    /// Start when idle, stop and transcribe while recording.
+    Toggle,
+    /// Discard the recording.
+    Cancel,
+}
+
+#[derive(Subcommand)]
+enum VoiceActionAction {
+    /// Start recording an instruction. Bind to a key press.
+    Start,
+    /// Stop and run the instruction. Bind to the key's release.
+    Stop,
+    /// Start when idle, stop and run the instruction while recording.
+    Toggle,
 }
 
 #[derive(Subcommand)]
@@ -101,6 +137,18 @@ pub fn run(shutdown: &'static AtomicBool) -> Result<()> {
             let _instance = crate::instance::acquire("listener")?;
             listen(&root, &event_path, device.as_deref(), shutdown)
         }
+        Command::Dictation { action } => shortcut(match action {
+            DictationAction::Start => ShortcutCommand::DictationStart,
+            DictationAction::Stop => ShortcutCommand::DictationStop,
+            DictationAction::Toggle => ShortcutCommand::DictationToggle,
+            DictationAction::Cancel => ShortcutCommand::DictationCancel,
+        }),
+        Command::VoiceAction { action } => shortcut(match action {
+            VoiceActionAction::Start => ShortcutCommand::VoiceActionStart,
+            VoiceActionAction::Stop => ShortcutCommand::VoiceActionStop,
+            VoiceActionAction::Toggle => ShortcutCommand::VoiceActionToggle,
+        }),
+        Command::PasteLast => shortcut(ShortcutCommand::PasteLast),
         Command::Dictate { device } => {
             let _instance = crate::instance::acquire("listener")?;
             let settings = crate::app_settings::AppSettings::load()?;
@@ -116,6 +164,8 @@ pub fn run(shutdown: &'static AtomicBool) -> Result<()> {
                 ),
                 None,
                 Default::default(),
+                // Only shortcuts drive a foreground listener.
+                std::sync::mpsc::channel().1,
             )
         }
         Command::Devices => {
@@ -168,6 +218,12 @@ pub fn run(shutdown: &'static AtomicBool) -> Result<()> {
     })();
     crate::linux_desktop::shutdown();
     result
+}
+
+/// Asks the running service; never starts one, so a keybinding fails fast.
+fn shortcut(command: ShortcutCommand) -> Result<()> {
+    crate::linux_service::request(crate::linux_service::Request::Shortcut(command))?;
+    Ok(())
 }
 
 pub(crate) fn listen(

@@ -62,15 +62,73 @@ impl NavigationIcon {
 
 #[cfg(target_os = "macos")]
 fn navigation_icon(icon: NavigationIcon, selected: bool) -> AnyElement {
-    gpui_symbols::Icon::new(icon.sf_symbol())
-        .size(px(ICON_SIZE))
-        .color(rgb(if selected {
+    sf_symbol(
+        icon.sf_symbol(),
+        ICON_SIZE,
+        if selected {
             TEXT_PRIMARY
         } else {
-            TEXT_TERTIARY
-        }))
-        .weight(gpui_symbols::SymbolWeight::Medium)
-        .rendering_mode(gpui_symbols::RenderingMode::Monochrome)
+            TEXT_SECONDARY
+        },
+    )
+}
+
+/// An SF Symbol rasterized by AppKit at medium weight.
+///
+/// AppKit draws into a premultiplied bitmap while GPUI's sprite pipeline
+/// expects straight alpha, so the coverage is divided back out here; without
+/// it antialiased strokes are multiplied by their alpha twice and thin glyphs
+/// all but vanish over translucent materials.
+#[cfg(target_os = "macos")]
+fn sf_symbol(name: &'static str, size: f32, color: u32) -> AnyElement {
+    use std::collections::HashMap;
+    use std::sync::{Arc, Mutex, OnceLock};
+
+    type Rendered = Option<(Arc<gpui::RenderImage>, u32, u32)>;
+    type Cache = Mutex<HashMap<(&'static str, u32, u32), Rendered>>;
+    static CACHE: OnceLock<Cache> = OnceLock::new();
+
+    let key = (name, size.to_bits(), color);
+    let mut cache = CACHE
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let rendered = cache
+        .entry(key)
+        .or_insert_with(|| {
+            let (width, height, mut data) = gpui_symbols::SfSymbol::new(name)
+                .size(size)
+                .color(color)
+                .weight(gpui_symbols::SymbolWeight::Medium)
+                .rendering_mode(gpui_symbols::RenderingMode::Monochrome)
+                .render_rgba()?;
+            for pixel in data.as_chunks_mut::<4>().0 {
+                let alpha = pixel[3] as u32;
+                if alpha > 0 && alpha < 255 {
+                    for channel in &mut pixel[..3] {
+                        *channel = ((*channel as u32 * 255 + alpha / 2) / alpha).min(255) as u8;
+                    }
+                }
+                pixel.swap(0, 2);
+            }
+            let frame = image::Frame::new(image::RgbaImage::from_raw(width, height, data)?);
+            Some((Arc::new(gpui::RenderImage::new(vec![frame])), width, height))
+        })
+        .clone();
+    drop(cache);
+
+    let Some((image, width, height)) = rendered else {
+        return gpui::Empty.into_any_element();
+    };
+    let aspect = width as f32 / height as f32;
+    let (display_width, display_height) = if aspect >= 1.0 {
+        (size, size / aspect)
+    } else {
+        (size * aspect, size)
+    };
+    gpui::img(gpui::ImageSource::Render(image))
+        .w(px(display_width))
+        .h(px(display_height))
         .into_any_element()
 }
 
@@ -195,13 +253,7 @@ pub(crate) fn icon_at(icon: Icon, size: f32, color: u32) -> AnyElement {
         .flex()
         .items_center()
         .justify_center()
-        .child(
-            gpui_symbols::Icon::new(icon.sf_symbol())
-                .size(px(size))
-                .color(rgb(color))
-                .weight(gpui_symbols::SymbolWeight::Medium)
-                .rendering_mode(gpui_symbols::RenderingMode::Monochrome),
-        )
+        .child(sf_symbol(icon.sf_symbol(), size, color))
         .into_any_element()
 }
 

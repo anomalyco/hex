@@ -119,11 +119,18 @@ with tempfile.TemporaryDirectory(prefix="hex-service-", dir=os.environ.get("TMPD
         status_state = json.loads(status.stdout)
         assert status_state["pid"] == service.pid
         assert status_state["desktop"]["listener"]["warning"] is None
+        assert status_state["desktop"]["listener"]["shortcuts"] == "Registered"
+
+        # Keybinding commands need a listening service; they fail fast without one.
+        refused = subprocess.run([binary, "dictation", "toggle"], env=env, capture_output=True, text=True)
+        assert refused.returncode != 0 and "not listening" in refused.stderr, refused.stderr
 
         # Crash leaves a socket, not a permanent instance lock. No stale state is reported.
         service.kill()
         service.wait(timeout=5)
         assert subprocess.run([binary, "status"], env=env, capture_output=True).returncode != 0
+        missing = subprocess.run([binary, "paste-last"], env=env, capture_output=True, text=True)
+        assert missing.returncode != 0 and "not running" in missing.stderr, missing.stderr
         service = launch()
         state = wait_for(snapshot)
         assert state["pid"] == service.pid
@@ -140,8 +147,8 @@ with tempfile.TemporaryDirectory(prefix="hex-service-", dir=os.environ.get("TMPD
         fake.write_text(f'#!/bin/sh\ntouch "{marker}"\nexit 0\n')
         fake.chmod(0o755)
         isolated_env = env | {"DISPLAY": ":invalid", "PATH": f'{fakebin}:{env["PATH"]}'}
-        for command in ("start", "restart"):
-            assert subprocess.run([binary, command], env=isolated_env, capture_output=True).returncode != 0
+        for command in (["start"], ["restart"], ["dictation", "start"], ["voice-action", "toggle"]):
+            assert subprocess.run([binary, *command], env=isolated_env, capture_output=True).returncode != 0
         assert not marker.exists()
     finally:
         for child in children:

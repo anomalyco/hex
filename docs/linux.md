@@ -5,13 +5,15 @@ compositors such as Hyprland or Sway. Audio uses ALSA, including PipeWire system
 with ALSA compatibility. Inference uses Vulkan when available and can fall back
 to the CPU. The GPUI Settings window still needs a Vulkan driver, even with CPU
 inference; `vulkan-icd-loader` alone is not a driver. Install a driver for your GPU
-or a software Vulkan driver. See the Wayland requirements below before enabling
-native input.
+or a software Vulkan driver. See the Wayland requirements below.
 
 Linux opens the same window as macOS and Windows: Settings, Modes, Voice Action,
 and History. Voice commands, website mode rules, and meetings are macOS-only.
 This is not universal Wayland support: GNOME and KDE are not covered by the
-current clipboard, virtual-keyboard, and overlay protocol contract.
+current clipboard, virtual-keyboard, and overlay protocol contract. Shortcuts
+are general: the desktop's GlobalShortcuts portal when it has one, otherwise
+your desktop's own keybindings running `hex` commands (see
+[Shortcuts](#shortcuts)).
 
 For Nix/NixOS, use the [Nix guide](nix.md). Nix owns updates to that installation;
 HEX's signed updater owns only the direct-install layout below.
@@ -21,8 +23,9 @@ HEX's signed updater owns only the direct-install layout below.
 The dictation runtime is a **per-user systemd service**, `hex.service`, not a
 system-wide/root daemon. It owns the microphone, hotkeys, model downloads and
 workers, sounds, paste, and History recording. Settings is a separate client:
-it saves `settings.json` and asks the service to reload it, asks the service to
-record shortcuts and prepare models, and reads History from the same file.
+it saves `settings.json` and asks the service to reload it, records shortcuts
+for the service to register, asks it to prepare models, and reads History from
+the same file.
 Closing Settings stops neither dictation nor a model download. There is no
 Linux tray icon.
 
@@ -164,6 +167,61 @@ MPRIS media players over D-Bus; HEX restores only what it changed.
 Cancelling shortcut capture preserves the old binding unless the new binding
 has already been saved; listening resumes only if it was previously running.
 
+## Shortcuts
+
+Hex gets its shortcuts one of three ways, and all of them drive the same
+dictation rules:
+
+- **X11:** Hex grabs the shortcuts Settings records.
+- **Wayland with the GlobalShortcuts portal** (for example niri with
+  `xdg-desktop-portal-gnome`, GNOME, or KDE): Hex asks the desktop for the
+  shortcuts Settings records. The desktop decides: it may grant them, assign
+  another key, or refuse one that it or another binding already uses. Settings
+  lists what the desktop granted under **Desktop shortcuts**, with an error for
+  any it refused. The portal identifies Hex by its installed `hex.desktop`
+  entry and by inspecting the service process, so run `hex service` directly:
+  a setgid wrapper such as `newgrp`, once used to grant input-device access,
+  makes the portal refuse Hex. The desktop delivers the keys to Hex, not to the
+  focused application.
+- **Wayland without the portal** (for example Sway): nothing registers global
+  shortcuts. Settings lists these commands; bind them in your desktop's own
+  keyboard configuration:
+
+```sh
+hex dictation start     # bind to a key's press: start recording
+hex dictation stop      # bind to the same key's release: stop and transcribe
+hex dictation toggle    # one key: start, then stop and transcribe
+hex dictation cancel    # discard the recording
+hex paste-last          # paste the last dictation again
+hex voice-action start  # Voice Action, when enabled: press
+hex voice-action stop   #   and release
+hex voice-action toggle
+```
+
+For example, hold-to-dictate on F9 in Sway, and a toggle in any desktop that
+runs commands on key presses only:
+
+```sh
+bindsym F9 exec hex dictation start
+bindsym --release F9 exec hex dictation stop
+bindsym Ctrl+Alt+d exec hex dictation toggle
+```
+
+The commands are safe to bind anywhere, including X11 beside the grabs. They
+talk to the running service and never start it: without one, or while Hex is
+not listening, they exit non-zero with an error. Starting while recording,
+stopping while idle, and cancelling while idle do nothing, so key repeat is
+harmless. Start and stop bypass Hold, Toggle, and double-tap: start records,
+stop finishes. A shortcut press also finishes a recording a command started.
+
+Escape cancels only while something records. On Wayland with the portal, Hex
+binds Escape, and Escape with the recording shortcut's modifiers, only for the
+length of the recording; the desktop then keeps that Escape from the focused
+application. Without the portal, bind `hex dictation cancel` instead.
+
+Shortcuts need a non-modifier key. Modifier-only shortcuts, such as Super
+alone, are not supported on Linux.
+
 On X11, HEX first grabs Escape with any modifiers. If another application owns
 a modified Escape shortcut, HEX falls back to plain Escape with Caps/Num Lock
 variants; release other modifiers before cancelling. If plain Escape also
@@ -209,24 +267,13 @@ application (see [#24](https://github.com/anomalyco/hex/issues/24)).
   command-line arguments.
 - The overlay requires layer-shell. Settings reports when the HUD is unavailable
   rather than presenting a normal focus-taking window as an overlay.
-- The evdev backend requires read access to **every `/dev/input/event*` node**
-  so it can inspect which devices may hold modifier keys. An unreadable node
-  causes an explicit startup error, not a listener that reports ready but cannot
-  paste. Configure this deliberately using your distribution's input-group or
-  equivalent policy; HEX does not grant permissions or run as root.
-- **This access exposes all keyboard input to processes running as your user,
-  not only HEX's shortcut.** Do not make event devices world-readable. X11 does
-  not require this additional access.
-- Shortcut labels use physical evdev keys with US-layout names. The backend
-  observes keys without suppressing delivery to other applications. Reserve the
-  chosen chord with a no-op compositor binding if it would otherwise reach the
-  focused client. Modifier-only shortcuts are not supported.
-- Devices are rescanned once per second. Unchanged non-keyboard nodes are cached,
-  and udev mouse-classified nodes are excluded even when a receiver advertises
-  synthetic keyboard capabilities. Device loss or an input-stream gap cancels
-  an active recording rather than fabricating a release; a reconnected keyboard
-  can be used after the next scan. Paste reuses the monitor's live aggregate
-  modifier state instead of reopening every event node.
+- Shortcuts come from the GlobalShortcuts portal or from your own keybindings
+  for the `hex` commands ([Shortcuts](#shortcuts)). HEX reads no input devices
+  and needs no `input` group membership or other device permission. If the
+  desktop closes the portal session, the listener stops with an error and an
+  active recording is cancelled; enable it again from Settings or `hex start`.
+- Paste does not wait for held keys: `wtype`'s virtual keyboard sends its own
+  modifiers, so Ctrl+V stays Ctrl+V while you still hold a shortcut.
 
 ## Updates And Validation
 
@@ -244,6 +291,7 @@ input-state, lifecycle, and paste regression coverage. Physical device,
 compositor, and target-application smoke tests remain necessary before a release.
 `scripts/test-wayland-paste.sh /path/to/compiled-test-executable /path/to/voice-control` runs the real
 paste helpers against a GTK target under an isolated headless Sway compositor.
+Its first paste runs while another virtual keyboard holds Ctrl and Alt.
 It also launches an isolated service and Settings client, repeats paste while
 Settings remains open, and verifies that closing Settings leaves the service
 reachable. It requires the GTK development

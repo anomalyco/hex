@@ -64,6 +64,21 @@ function segmentIntersection(ax, ay, bx, by, cx, cy, dx, dy) {
   return null
 }
 
+// When every part of a crack has finished revealing.
+function crackSettle(c) {
+  if (c.settle == null) {
+    let t = 0.03
+    for (const seg of c.segments) t = Math.max(t, seg.t1)
+    for (const ring of c.rings) t = Math.max(t, ring.t1)
+    for (const mc of c.microCracks) t = Math.max(t, mc.t0 + 0.018)
+    for (const w of c.wedges) t = Math.max(t, w.revealDur || 0.09)
+    for (const f of c.craterFacets) t = Math.max(t, f.revealAt || 0)
+    for (const sp of c.specks) t = Math.max(t, sp.revealAt || 0)
+    c.settle = t + 0.02
+  }
+  return c.settle
+}
+
 export class ScreenBreak {
   constructor(root, stageCanvas, rnd = Math.random) {
     this.root = root
@@ -108,6 +123,9 @@ export class ScreenBreak {
     this.W = Math.max(1, W)
     this.H = Math.max(1, H)
     this.dpr = Math.min(dpr, W < 640 ? 1.25 : 1.5)
+    // Phones skip the chromatic and motion-blur copies, cache each pane's face and bake settled
+    // cracks: redrawing every pane from the full page each frame held the finale near 20 fps.
+    this.lite = W < 640 || matchMedia("(pointer: coarse)").matches
     const pw = Math.max(1, Math.round(this.W * this.dpr))
     const ph = Math.max(1, Math.round(this.H * this.dpr))
     if (this.canvas.width !== pw || this.canvas.height !== ph) {
@@ -119,6 +137,8 @@ export class ScreenBreak {
       this.pageCanvas.height = ph
       this.cleanCanvas.width = pw
       this.cleanCanvas.height = ph
+      this.crackLayer = null
+      for (const c of this.cracks) c.baked = false
     }
   }
 
@@ -136,6 +156,7 @@ export class ScreenBreak {
     this.state = "idle"
     this.zWords.length = 0
     this.cracks.length = 0
+    this.crackLayer = null
     this.dust.length = 0
     this.shards.length = 0
     this.flash = 0
@@ -1049,13 +1070,13 @@ export class ScreenBreak {
   // Draws the propagating ballistic fractures: mostly crystalline white/silver with refraction,
   // thinner hairline secondaries, dense fine micro-cracking near craters, bright powdered-white
   // impact cores, and localized golden glints from the head's light.
-  drawCracksOnto(ctx, alpha = 1) {
+  drawCracksOnto(ctx, alpha = 1, cracks = this.cracks) {
     const { W, H } = this
     const hx = this.headX || W * 0.5
     const hy = this.headY || H * 0.38
     const headGlowRange = (this.headR || 95) * 3.1
 
-    for (const c of this.cracks) {
+    for (const c of cracks) {
       const age = c.age
 
       // 1. Optical refraction across angular glass facets + RGB chromatic dispersion (grows with c.age)
@@ -1072,6 +1093,10 @@ export class ScreenBreak {
         ctx.clip()
         ctx.globalAlpha = 0.96 * alpha
         ctx.drawImage(this.basePageCanvas, 0, 0, this.basePageCanvas.width, this.basePageCanvas.height, ox, oy, W, H)
+        if (this.lite) {
+          ctx.restore()
+          continue
+        }
         // Chromatic dispersion shift across fracture boundary
         ctx.globalCompositeOperation = "lighter"
         ctx.globalAlpha = 0.16 * wProg * alpha
@@ -1297,6 +1322,29 @@ export class ScreenBreak {
     }
   }
 
+  // Phones: a crack stops changing once its fronts finish growing, so bake it into one layer and
+  // redraw only the cracks still propagating.
+  drawCracksLite(ctx) {
+    const { W, H, dpr } = this
+    const growing = []
+    for (const c of this.cracks) {
+      if (!c.baked && c.age >= crackSettle(c)) {
+        if (!this.crackLayer) {
+          this.crackLayer = document.createElement("canvas")
+          this.crackLayer.width = this.canvas.width
+          this.crackLayer.height = this.canvas.height
+        }
+        const g = this.crackLayer.getContext("2d")
+        g.setTransform(dpr, 0, 0, dpr, 0, 0)
+        this.drawCracksOnto(g, 1, [c])
+        c.baked = true
+      }
+      if (!c.baked) growing.push(c)
+    }
+    if (this.crackLayer) ctx.drawImage(this.crackLayer, 0, 0, W, H)
+    if (growing.length) this.drawCracksOnto(ctx, 1, growing)
+  }
+
   // Draws one 3D extruded glass slab matching target-shatter.png:
   // - Dark crystal slab thickness with green borosilicate inner rim + sharp white/gold specular streaks
   // - Strong per-shard optical refraction + RGB chromatic dispersion of the page behind it
@@ -1415,7 +1463,15 @@ export class ScreenBreak {
     ctx.save()
     ctx.clip()
 
-    if (!s.isSplinter) {
+    if (!s.isSplinter && this.lite) {
+      // One cached sprite per pane: the refracted page with its fracture lines baked in, then the
+      // clean page faded over it while the glass heals.
+      if (healMix < 0.99) this.drawPaneSprite(ctx, s, false)
+      if (healMix > 0.01) {
+        ctx.globalAlpha = healMix * healFade
+        this.drawPaneSprite(ctx, s, true)
+      }
+    } else if (!s.isSplinter) {
       const refX = Math.sin(s.yaw) * (s.refractShift ?? 13) * (1 - healMix)
       const refY = Math.sin(s.pitch) * (s.refractShift ?? 13) * (1 - healMix)
 
@@ -1558,6 +1614,76 @@ export class ScreenBreak {
     ctx.restore()
   }
 
+  // Bakes a pane's face (page under it, fracture hairlines and caustic) into its own small canvas
+  // the first time it is drawn, so later frames cost one drawImage instead of a clipped full-page copy.
+  drawPaneSprite(ctx, s, clean) {
+    const key = clean ? "cleanSprite" : "sprite"
+    let sp = s[key]
+    if (!sp) {
+      const { W, H, dpr } = this
+      let x0 = Infinity
+      let y0 = Infinity
+      let x1 = -Infinity
+      let y1 = -Infinity
+      for (const [x, y] of s.poly) {
+        x0 = Math.min(x0, x)
+        y0 = Math.min(y0, y)
+        x1 = Math.max(x1, x)
+        y1 = Math.max(y1, y)
+      }
+      x0 = Math.floor(x0 - 1)
+      y0 = Math.floor(y0 - 1)
+      const w = Math.ceil(x1 + 1) - x0
+      const h = Math.ceil(y1 + 1) - y0
+      const canvas = document.createElement("canvas")
+      canvas.width = Math.max(1, Math.round(w * dpr))
+      canvas.height = Math.max(1, Math.round(h * dpr))
+      const g = canvas.getContext("2d")
+      g.setTransform(dpr, 0, 0, dpr, -x0 * dpr, -y0 * dpr)
+      g.beginPath()
+      g.moveTo(s.poly[0][0], s.poly[0][1])
+      for (let k = 1; k < s.poly.length; k++) g.lineTo(s.poly[k][0], s.poly[k][1])
+      g.closePath()
+      g.clip()
+      const src = clean ? this.cleanCanvas : this.pageCanvas
+      g.drawImage(src, 0, 0, src.width, src.height, -s.homeX, -s.homeY, W, H)
+      if (!clean && s.innerCracks) {
+        g.lineCap = "round"
+        for (let idx = 0; idx < s.innerCracks.length; idx++) {
+          const ic = s.innerCracks[idx]
+          const primary = idx % 2 === 0
+          g.strokeStyle = "rgba(0, 5, 12, 0.5)"
+          g.lineWidth = primary ? 1.2 : 0.65
+          g.beginPath()
+          g.moveTo(ic[0] + 0.8, ic[1] + 0.8)
+          g.lineTo(ic[2] + 0.8, ic[3] + 0.8)
+          g.lineTo(ic[4] + 0.8, ic[5] + 0.8)
+          g.stroke()
+          g.strokeStyle = primary ? "rgba(248, 252, 255, 0.8)" : "rgba(205, 238, 248, 0.6)"
+          g.lineWidth = primary ? 0.85 : 0.45
+          g.beginPath()
+          g.moveTo(ic[0], ic[1])
+          g.lineTo(ic[2], ic[3])
+          g.lineTo(ic[4], ic[5])
+          g.stroke()
+        }
+        const gv = s.innerCracks[0]
+        if (gv && s.hasCausticStar) {
+          const sg = g.createRadialGradient(gv[0], gv[1], 0.5, gv[0], gv[1], 22)
+          sg.addColorStop(0, "rgba(255, 255, 252, 0.85)")
+          sg.addColorStop(0.32, "rgba(255, 218, 118, 0.45)")
+          sg.addColorStop(1, "rgba(255, 190, 60, 0)")
+          g.fillStyle = sg
+          g.beginPath()
+          g.arc(gv[0], gv[1], 22, 0, Math.PI * 2)
+          g.fill()
+        }
+      }
+      sp = s[key] = { canvas, x: x0, y: y0, w, h }
+    }
+    ctx.drawImage(sp.canvas, sp.x, sp.y, sp.w, sp.h)
+  }
+
   // Draws bold comic/cinema word-synced captions with smooth continuous word swell (zero 1-frame pops at 0.25x).
   drawCaption(ctx, rtime) {
     const cap = this.caption
@@ -1650,7 +1776,8 @@ export class ScreenBreak {
 
     // 1. If in "cracking" state, draw the outward-propagating ballistic fractures & page refraction
     if (this.state === "cracking" && this.cracks.length > 0) {
-      this.drawCracksOnto(ctx, 1)
+      if (this.lite) this.drawCracksLite(ctx)
+      else this.drawCracksOnto(ctx, 1)
     }
 
     // 2. If in "shattered" or "rebuilding" state, simulate & draw the 3D tempered glass slabs + Download button
@@ -1701,7 +1828,7 @@ export class ScreenBreak {
         if (s.y - 220 > H && this.state === "shattered") continue
 
         // Foreground depth-of-field / motion-blur ghost pass on outer panes
-        if (this.state === "shattered" && !s.isDownload && !s.isSplinter && (s.normD > 0.56 || s.z > 1.12)) {
+        if (this.state === "shattered" && !this.lite && !s.isDownload && !s.isSplinter && (s.normD > 0.56 || s.z > 1.12)) {
           const mbX = clamp(s.vx * 0.025 + (s.x - W * 0.5) * 0.012, -10, 10)
           const mbY = clamp(s.vy * 0.025 + (s.y - H * 0.5) * 0.012, -10, 10)
           ctx.save()

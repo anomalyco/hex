@@ -13,7 +13,7 @@ use crate::dictation::{DictationCapture, Finish, POST_RELEASE_TAIL};
 use crate::events::{DictationPhase, EventLog, TranscriptPhase, VoiceEvent, VoiceState, now_ms};
 use crate::feedback::{self, Tone};
 use crate::linux_desktop::LinuxIndicator;
-use crate::linux_input::{HotkeyEvent, HotkeyStatus, LinuxHotkeyMonitor};
+use crate::linux_input::{HotkeyEvent, HotkeyStatus, LinuxHotkeyMonitor, ShortcutCommand};
 use crate::linux_paste::LinuxPaster;
 use crate::local_transcriber::LocalTranscriber;
 use crate::transcription_engine::{PendingTranscript, TranscriptionEngine};
@@ -46,6 +46,7 @@ struct Finishing {
     ended_at: CaptureInstant,
     /// The recording is a Voice Action instruction.
     voice: bool,
+    released: Instant,
     deadline: Instant,
 }
 
@@ -126,6 +127,7 @@ impl DictationOutput {
 
 /// Runs hotkey dictation until `shutdown`. A prepared transcriber skips the
 /// model load; otherwise the supplied transcription selection is loaded here.
+#[allow(clippy::too_many_arguments)]
 pub fn run(
     event_path: &Path,
     device: Option<&str>,
@@ -134,6 +136,7 @@ pub fn run(
     output_settings: DictationOutput,
     transcriber: Option<LocalTranscriber>,
     hotkey_status: HotkeyStatus,
+    commands: mpsc::Receiver<ShortcutCommand>,
 ) -> Result<()> {
     let transcriber =
         transcriber.map_or_else(|| LocalTranscriber::load(&settings.transcription), Ok)?;
@@ -174,8 +177,7 @@ pub fn run(
             .enabled
             .then(|| crate::linux_input::LinuxHotkey::from(&settings.edit_hotkey)),
     };
-    let hotkey = LinuxHotkeyMonitor::start_with(binding, options, hotkey_status)?;
-    let wayland_modifiers = hotkey.wayland_modifiers();
+    let hotkey = LinuxHotkeyMonitor::start(binding, options, hotkey_status, commands)?;
     let indicator = LinuxIndicator::new(settings.indicator_position);
     let suppressor =
         crate::linux_audio_control::AudioSuppressor::new(settings.recording_audio_behavior);
@@ -183,7 +185,7 @@ pub fn run(
     let (result_sender, results) = mpsc::channel();
     let worker_stop = output.stop.clone();
     output.worker = Some(thread::spawn(move || {
-        let mut paster = LinuxPaster::new(worker_stop.clone(), paste_with_shift, wayland_modifiers);
+        let mut paster = LinuxPaster::new(worker_stop.clone(), paste_with_shift);
         let mut last_dictation: Option<String> = None;
         while let Ok(job) = job_receiver.recv() {
             if worker_stop.load(Ordering::Acquire) {
@@ -289,6 +291,10 @@ pub fn run(
         {
             let ended_at = release.ended_at;
             let voice = release.voice;
+            tracing::debug!(
+                tail_ms = release.released.elapsed().as_millis(),
+                "post-release tail captured"
+            );
             finishing = None;
             recording_voice = false;
             submit_capture(
@@ -359,10 +365,14 @@ pub fn run(
                     emit_state(&mut events, active_state(false, pending), &device_label)?;
                 }
                 HotkeyEvent::Finish if capture.is_recording() && !recording_voice => {
-                    finishing = Some(begin_finishing(&capture, captured_through, false));
+                    finishing = Some(begin_finishing(&capture, captured_through, false, || {
+                        announce_release(&suppressor)
+                    }));
                 }
                 HotkeyEvent::VoiceFinish if capture.is_recording() && recording_voice => {
-                    finishing = Some(begin_finishing(&capture, captured_through, true));
+                    finishing = Some(begin_finishing(&capture, captured_through, true, || {
+                        announce_release(&suppressor)
+                    }));
                 }
                 HotkeyEvent::PasteLast if !capture.is_recording() => {
                     match jobs.try_send(OutputJob::PasteLast) {
@@ -563,18 +573,39 @@ fn stream_when_due(capture: &mut DictationCapture, engine: &TranscriptionEngine,
     }
 }
 
-fn begin_finishing(capture: &DictationCapture, ended_at: CaptureInstant, voice: bool) -> Finishing {
+/// Starts collecting a release's tail. A release that will be transcribed
+/// is announced at once rather than after its tail; a short tap is discarded
+/// on its release alone, needs no tail, and stays silent.
+fn begin_finishing(
+    capture: &DictationCapture,
+    ended_at: CaptureInstant,
+    voice: bool,
+    announce: impl FnOnce(),
+) -> Finishing {
     let now = Instant::now();
+    let transcribes = capture.would_transcribe(ended_at);
+    if transcribes {
+        announce();
+    }
     Finishing {
         ended_at,
         voice,
-        // A short tap is discarded on its release alone and needs no tail.
-        deadline: if capture.would_transcribe(ended_at) {
+        released: now,
+        deadline: if transcribes {
             now + POST_RELEASE_TAIL + TAIL_STALL_GRACE
         } else {
             now
         },
     }
+}
+
+/// Ends recording's audio behavior at the release and plays the stop tone
+/// after a muted output is restored, so the tone is heard while the tail is
+/// still captured. A clip later found near-silent keeps the tone it already
+/// played, as on Windows; the silence gate ignores the tail, so the tone
+/// itself never makes a silent clip transcribe.
+fn announce_release(suppressor: &crate::linux_audio_control::AudioSuppressor) {
+    suppressor.restore_then(|| feedback::play(Tone::DictationStop));
 }
 
 fn submit_capture(
@@ -596,7 +627,6 @@ fn submit_capture(
             events.dictation(DictationPhase::Discarded, "")?
         }
         Finish::Transcribe(mut clip) => {
-            feedback::play(Tone::DictationStop);
             let audio_ms = clip.duration_ms();
             let job = Job {
                 transcript: engine.finish(clip.take_stream(), clip.into_transcription_samples())?,
@@ -738,12 +768,16 @@ mod tests {
         let mut capture = DictationCapture::new(16_000);
         let released = record(&mut capture, &engine, false, 2);
         let mut pending = 0;
-        // The release waits for its tail before it is submitted.
+        // The release is announced at once, then waits for its tail before
+        // it is submitted.
+        let mut sounds = Vec::new();
         let finishing = begin_finishing(
             &capture,
             released.checked_sub(POST_RELEASE_TAIL).unwrap(),
             false,
+            || sounds.push(Tone::DictationStop),
         );
+        assert_eq!(sounds, [Tone::DictationStop]);
         assert!(finishing.deadline > Instant::now());
         submit_capture(
             &mut capture,
@@ -802,7 +836,9 @@ mod tests {
         start_capture(&mut short, start, |_| {});
         stream_when_due(&mut short, &engine, true);
         short.ingest(&[0.1; 1_600], start + Duration::from_millis(100));
-        let finishing = begin_finishing(&short, start + Duration::from_millis(100), false);
+        let finishing = begin_finishing(&short, start + Duration::from_millis(100), false, || {
+            panic!("a short tap plays no stop tone")
+        });
         assert!(
             finishing.deadline <= Instant::now(),
             "a short tap needs no tail"

@@ -16,7 +16,9 @@ if [[ ! -d "$CORPUS_DIR" ]]; then
 fi
 
 if [[ ! -f "$MODEL_PATH" ]]; then
+  # voice-control is either Hex's unmigrated folder or its symlink to hex.
   DEFAULT_MODEL="$HOME/Library/Application Support/voice-control/models/parakeet-unified-en-0.6b-Q8_0.gguf"
+  [[ -f "$DEFAULT_MODEL" ]] || DEFAULT_MODEL="$HOME/Library/Application Support/hex/models/parakeet-unified-en-0.6b-Q8_0.gguf"
   if [[ -f "$DEFAULT_MODEL" ]]; then
     MODEL_PATH="$DEFAULT_MODEL"
   else

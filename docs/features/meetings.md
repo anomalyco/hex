@@ -12,7 +12,11 @@ Linked checks are locators unless an executed result is recorded below.
 ```ts
 Settings > Meetings > Meetings (beta)               // meetings.opt-in; off by default
 ├── On -> Meetings pane, menu-bar items, call detection, Option-Control-V
-│   ├── Screen & System Audio Recording missing -> "Open settings" row
+│   ├── System Audio Recording                  // meetings.permission; asked only now
+│   │   ├── Allow -> macOS prompt the first time (tour's permission_control)
+│   │   ├── Decided before -> Privacy pane + drag guide ("System Audio Recording Only")
+│   │   ├── Asked -> pulse; TCC preflight re-read on each poll, no reopen needed
+│   │   └── Granted -> Allowed
 │   ├── Show recording indicator -> on by default; corner-snapping floating capsule
 │   ├── Transcript folder -> ~/Documents/Hex Meetings by default; Reveal / choose
 │   └── Summarize with Apple Intelligence -> on by default; one-line availability
@@ -22,12 +26,14 @@ Debug builds -> Always available (DEVELOPER_FEATURES_ENABLED)
 Agents -> hex mcp (read-only MCP server; works whether or not Meetings is on)
 ```
 
-Requires the selected local dictation model, Microphone, and Screen & System
-Audio Recording. The opt-in is `meetings.enabled` in `settings.json`, alongside
+Requires the selected local dictation model, Microphone, and System Audio
+Recording (the "System Audio Recording Only" list under Privacy & Security ›
+Screen & System Audio Recording; `NSAudioCaptureUsageDescription`). Screen
+Recording alone still works through the ScreenCaptureKit fallback. The opt-in is `meetings.enabled` in `settings.json`, alongside
 `meetings.show_recording_indicator` (default `true`) and
 `meetings.recording_indicator_corner` (default `top_right`)
 ([app_settings.rs](../../src/app_settings.rs) `MeetingSettings`). Recording
-refuses to start without Screen Recording and asks macOS to list HEX.
+refuses to start without either grant and asks macOS for System Audio Recording.
 
 ## Sub-features
 
@@ -37,9 +43,17 @@ refuses to start without Screen Recording and asks macOS to list HEX.
 Zoom / Teams / Slack huddle / FaceTime / browser call uses the microphone
   -> CoreAudio input process -> canonical host app   // parent PID + bundle ID
   -> 4 stable observations (about 2 s)              // meetings.detect
+     └── Browser on a page that is not a known call site -> 40 (about 20 s),
+         so voice notes and dictation fields are not offered
+  -> Site or app in Settings › Meetings › Never offer -> no offer
   -> Capsule below the menu bar, focus-free          // meetings.offer
+     ├── Title: "Google Meet call detected", "Call on meet.jit.si",
+     │   "Call in Brave Browser" (site unknown), or the meeting's name
      ├── Record -> Start recording
      ├── Not now -> Close
+     ├── … -> "Never offer for <site or app>?" -> Never offer / Cancel
+     │   └── site from the Brave tab adapter, else the app; saved in
+     │       settings.json meetings.never_offer; Remove in Settings › Meetings
      └── 20 s timeout -> Close                       // never records on timeout
   -> Same call is snoozed by key and app until off the microphone for about 60 s
 ```
@@ -55,6 +69,14 @@ process to its canonical host app via parent PID lineage, CoreAudio's
 microphone and is not snoozed, `ContextSnapshot::capture_for_meeting` in
 [context.rs](../../src/context.rs) inspects Brave's active and open tabs for a
 `meet.google.com` call even if Brave is behind another window or tab.
+
+On 2026-10-21 Brave opened the microphone for 3-6 s at a time on
+problems.kitlangton.com (board voice notes) and each burst got a "Browser call
+call detected" offer; that is what the 20 s browser threshold prevents.
+Checks: `a_browser_voice_note_is_not_offered_but_a_sustained_browser_call_is`,
+`offer_titles_name_the_service_site_or_browser_without_repeating_call`, and
+`never_offer_silences_the_site_when_known_and_the_app_otherwise` in
+[meeting_detection.rs](../../src/meeting_detection.rs).
 
 Sources: [meeting_detection.rs](../../src/meeting_detection.rs),
 [microphone_activity.rs](../../src/microphone_activity.rs),
@@ -78,7 +100,11 @@ Brave WebRTC `getUserMedia({audio: true})` reproduction on Pro confirmed
 `NSRunningApplication == nil` before parent/bundle resolution and resolved to
 `com.brave.Browser` and `com.tinyspeck.slackmacgap` afterward.
 
-Preview: `scripts/capture-preview.sh OUT meeting-offer [--meeting-panel recording|recording-expanded|recording-copied|call-ended|ready]` (alias `meeting-capsule`).
+Preview: `scripts/capture-preview.sh OUT meeting-offer [--meeting-panel offer-more|offer-dismissed|recording|recording-expanded|recording-copied|call-ended|ready]` (alias `meeting-capsule`).
+In the live preview, the recording capsule's Open opens a Meetings preview
+window through the app's open path; on Pro, clicking it with cua-driver while
+the preview is inactive reproduced the deadlock before the fix and opens the
+window after it.
 
 ### Record
 
@@ -93,14 +119,15 @@ Record (offer, menu bar "Record Meeting", Meetings pane, or voice command)
      └── Stop & Transcribe
      (Idle menu bar: "Record Meeting" + "Copy Last Meeting Transcript")
   -> Floating recording indicator (when Show recording indicator is on) // meetings.indicator
-     ├── Focus-free GPUI capsule; click-through outside the visible pill
+     ├── Focus-free GPUI capsule that never becomes key; click-through outside the visible pill
      ├── Drag anywhere -> snaps to nearest corner and saves recording_indicator_corner
      ├── Compact pill: pulsing red dot (static under Reduce Motion) · tabular mm:ss · title
      └── Hover expands actions (fixed-width inline "Copied" feedback):
          ├── Copy new (N) -> copies turns since last Copy new or Option-Control-V;
          │                   disabled when 0; advances shared cursor only on success
          ├── Copy all -> echo-filtered live transcript as You/Them Markdown turns
-         ├── Open -> opens the active meeting in the Meetings pane
+         ├── Open -> activates Hex, then opens the active meeting in the Meetings pane
+         │           (opening while inactive deadlocked GPUI before gpui 2e52b98)
          └── Stop -> Stop & Transcribe
   -> Settings window may stay closed
 
@@ -108,11 +135,19 @@ Detected app leaves the microphone for about 3 s     // meetings.call-ended
   -> "Zoom left the call" capsule: Keep recording / Stop & transcribe
   -> No timeout; nothing stops automatically
 
-SCStream loses its display mid-recording (monitor unplug / display sleep)
-  -> Audio delivered before error -> restart SCStream on current display once
-     ├── Display available -> keep recording into the same tracks
-     └── No display (e.g. display sleep) -> stop capture and transcribe recorded audio
-```
+Capture sources (meeting_capture.rs)                // meetings.capture
+├── Microphone -> selected input via cpal, resampled to 16 kHz
+└── System audio -> Core Audio process tap (global, excluding Hex) on a private
+    aggregate device; no display dependency
+    └── Tap not authorized + Screen Recording granted -> ScreenCaptureKit fallback
+
+A source fails (display sleep ends SCStream, device unplugged, tap stalls 3 s)
+  -> Only that source stops; the other keeps recording
+  -> Retried every 0.5-5 s until it reopens or the meeting stops
+  -> Resumes into the same track; silence fills the gap (>= 1 s) on the
+     shared capture clock, recorded in the manifest as track `gaps`
+  -> Rolling transcription drops that source; the final pass rebuilds it from WAV
+``````
 
 Starting a recording no longer opens the Settings window; failures still do.
 Checks: `call_end_is_reported_once_per_sustained_absence`,
@@ -122,9 +157,16 @@ Checks: `call_end_is_reported_once_per_sustained_absence`,
 [parakeet.rs](../../src/parakeet.rs), and
 `meeting_menu_offers_one_action_per_state` in
 [status_item.rs](../../src/status_item.rs), and
-`mid_meeting_capture_loss_proceeds_to_transcription_when_audio_was_recorded` in
+`mid_meeting_capture_loss_proceeds_to_transcription_when_audio_was_recorded`,
+`writer_fills_a_capture_gap_with_silence_and_records_it`, and
+`a_source_that_resumes_after_an_outage_is_padded_back_onto_the_timeline` in
 [meeting_tests.rs](../../src/meeting_tests.rs). Native menu-bar and capsule clicks
 are unverified.
+
+Capsule windows are borderless, shadowless, clear NSPanels (GPUI creates
+frameless pop-ups as titled panels whose window shadow outlined the full
+548 px window beneath the compact pill); only the pill draws a small shadow
+that fits its 4 px inset.
 
 ### Transcribe
 
@@ -154,7 +196,8 @@ While recording                                      // meetings.rolling
   -> 16 kHz streaming resampler -> chunker + echo envelope
      ├── First pause after 20 s (pause segmenter) -> chunk boundary
      └── No pause by 30 s -> hard cut; next chunk overlaps 2 s
-  -> Utility-QoS worker transcribes a chunk only while dictation is idle
+  -> Each chunk runs on dictation's loaded model, only while dictation is idle
+     └── A dictation request or live stream came first -> retried once idle
   -> Timed words -> sentences (punctuation or a 600 ms pause)
   -> transcript.rolling.ndjson: per-track coverage line, then entries
      ├── You entries publish only once the system track is transcribed past them
@@ -168,16 +211,29 @@ Stop & Transcribe
   -> Join on one timeline -> Echo suppression -> Final publication
 ```
 
-Design choice: a separate session of the selected model at utility QoS, loaded
-lazily on the first completed chunk, rather than a job class inside the dictation
-inference worker. Before each chunk it waits (up to 20 s per chunk) while
-`parakeet::dictation_busy()` reports an intentional capture or dictation
-inference. A chunk already running can still delay a dictation job by roughly
-one chunk's inference time, and the second model stays resident while recording.
-For any other selected language that same session drafts the uncommitted tail
-while no committed chunk is waiting and dictation is idle. It does not wait out
-the 20 s dictation pause for a draft. English and Auto keep the Moonshine draft
-and do not run this pass. Checks:
+Design choice: chunks are background jobs on the dictation transcription engine
+(`TranscriptionEngine::background`), using whatever model dictation has loaded,
+rather than a second copy of the model (about 0.7 GB). Before each chunk the
+meeting waits (up to 20 s per chunk) while `parakeet::dictation_busy()` reports
+a capture, counted from the shortcut press until its clip is submitted, or
+dictation inference; the engine thread checks again before running the job. A
+job never interrupts a live stream: one that arrives during a stream, or after
+a newer dictation request was sent, is turned away and retried 250 ms later,
+once dictation is idle. A chunk already running cannot be aborted
+(transcribe.cpp ignores its cancel callback on Metal), but it can only have
+started before the press, so it finishes during the 300 ms hold threshold and
+200 ms release tail (a 30 s chunk takes 0.25 to 0.45 s on the Pro). Gating at
+the intentional hold instead let a chunk start just before the threshold; with
+the shortest hold that added about 85 ms at p95 on the Pro. The job runs at utility QoS on
+the engine thread, which returns to user-interactive afterwards. Apple Speech runs outside the process, so with
+Apple Speech selected, and in a process without the engine (the CLI), the
+meeting loads its own transcriber as before.
+For any other selected language the same model drafts the uncommitted tail,
+through the same background job, while no committed chunk is waiting and
+dictation is idle. A preempted draft is skipped, not retried; a draft does not
+wait out the 20 s dictation pause. A pass that had to load its own transcriber
+is not judged slow by the load. English and Auto keep the Moonshine draft and
+do not run this pass. Checks:
 `draft_waits_until_two_seconds_then_every_three_seconds_of_new_audio` and
 `a_slow_pass_stops_or_waits_for_enough_new_audio` in
 [meeting_provisional.rs](../../src/meeting_provisional.rs). The tail check
@@ -200,6 +256,28 @@ Command recognizer             115% of a core -> 22%
   └── update p50 21 -> 41 ms, p95 67 -> 127 ms (200 ms update interval)
 Rolling Parakeet               well under 1 s of compute per minute of audio
 ```
+
+Memory: observed 2026-10-22 on the Pro with an opt-in harness that runs the
+production writer, live draft, rolling, and final transcription against a
+recorded call replayed in real time (10 min), beside the warm dictation engine
+and the command recognizer, with a dictation every 30 s. It feeds packets
+directly, not through capture.
+
+```ts
+                        separate model    shared engine
+Idle app                   1531 MB           1506 MB
+Meeting peak               2808 MB           2072 MB
+After the meeting          1902 MB           1960 MB   // the draft's Moonshine
+Dictation finish, median     92 ms             94 ms
+Final transcript           202 entries, word for word identical
+```
+
+The live draft keeps its own Moonshine (about 0.4 GB). Two streams added to the
+command recognizer's transcriber dropped 553–631 draft packets per run, against
+none alone: Moonshine 0.0.71 keeps one streaming state per transcriber, so every
+switch between streams re-decodes the current segment. Its memory stays resident
+after the meeting until the last Moonshine unloads; `malloc_zone_pressure_relief`
+returned nothing.
 
 ### Echo Suppression
 
@@ -456,7 +534,7 @@ hex mcp [--meetings-dir <path>]                     // meetings.mcp; release bui
 ├── MCP over stdio; independent of the Meetings opt-in (read-only)
 ├── Dispatches before process logging, the instance lock, GUI, and permissions
 │   └── Safe beside the running app; logs only to stderr (HEX_MCP_LOG)
-├── Default folder: Application Support/voice-control/meetings
+├── Default folder: Application Support/hex/meetings (voice-control on older builds)
 │   └── --meetings-dir -> any mirrored copy (rsync of that folder)
 ├── A copy named hex-meetings-mcp -> always `hex mcp` with the same flags
 │   (no subcommand never falls back to listening)
@@ -536,7 +614,7 @@ Do: one periodic pull, then local servers               // meetings.mcp.mirror
 scripts/sync-meetings-mirror.sh (LaunchAgent template, every 120 s,
   ProcessType Background, Nice 10, LowPriorityIO)
 ├── ONE rsync over ssh (BatchMode, ConnectTimeout 5, --timeout 60)
-│   pro:Library/Application Support/voice-control/meetings/
+│   pro:Library/Application Support/voice-control/meetings/ (symlink to hex/ once migrated)
 │   -> ~/Library/Caches/hex-meetings-mirror/ (0700)
 ├── Skips *.wav, *.lock, *.tmp; --delay-updates (files land together at the
 │   end); --delete-delay (meetings trashed on the Pro disappear)
@@ -566,6 +644,12 @@ Granola import: see [granola-import.md](../plans/granola-import.md).
 
 - No executed end-to-end recording with a real call, Screen Recording grant, or
   speakers echo in this change; see the test script in the handoff.
+- The process tap, its System Audio Recording prompt, and display-sleep
+  recovery have not run in a recorded meeting. TCC status comes from the
+  private `TCCAccessPreflight`; a denied tap would otherwise record silence.
+- Microphone and system audio now run on separate device clocks aligned by
+  arrival time; drift below the 1 s gap threshold is uncorrected and echo
+  thresholds were tuned on ScreenCaptureKit's shared clock.
 - Calendar titles (EventKit) are not implemented.
 - The live Moonshine draft needs the command model when the selected language
   is English or Auto. Without that model, an English meeting shows rolling
@@ -586,6 +670,12 @@ Granola import: see [granola-import.md](../plans/granola-import.md).
 - The live draft judges a Moonshine line whole: a line that mixes bleed with
   the user's own sentence stays hidden until rolling covers it.
 - The CPU change was measured on the Studio, not on the Pro during a call.
+- The shared-engine memory numbers come from the harness, not a recording in
+  the app with real capture and hotkey dictations.
+- The live draft's Moonshine (about 0.4 GB) is not shared or released while the
+  command recognizer stays loaded. Moonshine 0.1.5 changes the ORT session
+  setup but still keeps one streaming state per transcriber and breaks the C
+  API (header 30000); unmeasured.
 - Apple SpeechTranscriber for the live draft is evaluated, not implemented:
   [meeting-live-transcription.md](../plans/meeting-live-transcription.md).
 - Why the rolling worker stalled for over a minute on the Pro is unknown; slow

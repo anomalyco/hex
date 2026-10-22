@@ -173,6 +173,11 @@ impl WarmTranscriber {
         }
     }
 
+    /// The loaded model, without switching or loading one.
+    pub(crate) fn active(&mut self) -> Option<&mut Transcriber> {
+        self.active.as_mut()
+    }
+
     pub fn activate(&mut self, selection: &TranscriptionSelection) -> Result<&mut Transcriber> {
         if !self
             .active

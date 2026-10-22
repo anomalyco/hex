@@ -48,7 +48,8 @@ with a website-only informational item to install the new app manually, with no
 data import or automatic replacement.
 Follow [`docs/plans/swift-app-handoff.md`](docs/plans/swift-app-handoff.md).
 The new app uses identity `com.kitlangton.hex2`, display name `Hex`, and filename
-`Hex.app`, while retaining the Rust `voice-control` data root. Use Kit's approved
+`Hex.app`, while retaining the Rust data root (renamed on macOS from `voice-control` to
+`hex`, with a compatibility symlink). Use Kit's approved
 Developer ID signing team and validate the new identity before release. The legacy
 S3 feed must never install a Rust payload. Publish
 the updated Rust artifact first, then the separately validated legacy feed notice.
@@ -63,17 +64,12 @@ microphone override, hotkey rebinding, locked capture, cancellation, automatic
 paste, service autostart, client reconnect, and Settings closing without stopping
 accepted work. Linux no longer uses a tray.
 
-Before consolidating X11 gesture flags into a state enum, capture deterministic
-traces for Escape during held/locked capture, trigger-before-Escape release,
-autorepeat inside the 50 ms release grace, and second-tap boundaries. Preserve
-Escape ungrabbing and dirty-release suppression, then run the isolated Xvfb
-grab tests on Linux.
-
 Keep app-managed updates limited to the user-local direct-install layout. A
 future Arch package must leave updates to the package manager. Nix owns its
 packaged installation and optional Home Manager service. Validate the Wayland
-beta on a compatible compositor with physical keyboard reconnect, microphone,
-foreground paste, click-through HUD, and independent service/client shutdown. See
+beta on a compatible compositor with physical portal shortcuts, the `hex`
+commands bound in a desktop without the portal, microphone, foreground paste,
+click-through HUD, and independent service/client shutdown. See
 [`docs/plans/linux.md`](docs/plans/linux.md). Add commands, context, meetings, or
 broader Wayland support only as explicit later capability slices.
 
@@ -94,6 +90,12 @@ thread; Moonshine receives a duration-bounded, generation-safe projection that
 may reset without affecting active capture. Physically smoke-test delayed
 shortcut boundaries, custom modifier and key chords, lock behavior,
 cancellation, foreground insertion, and both reserved paste shortcuts.
+
+macOS still plays the stop tone after the 200 ms post-release tail because the
+coordinator blocks in `DictationAudio::finish_with_tail`; Linux and Windows
+play it at the release. Announce a release that will transcribe from the audio
+owner before it drains the tail, ending the recording environment there so a
+muted output is restored before the tone, and verify it on a Mac.
 
 The first installed timestamped-timeline build regressed physical dictation:
 shortcut input arrived, but long captures discarded and one accepted job reached

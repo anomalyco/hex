@@ -146,6 +146,7 @@ impl HexMicRingBuffer {
 static CAPTURE_RING: HexMicRingBuffer = HexMicRingBuffer::new();
 static SINK_STREAMING: AtomicBool = AtomicBool::new(false);
 static SUPERVISOR_STARTED: AtomicBool = AtomicBool::new(false);
+static SERVICE_HOSTED: AtomicBool = AtomicBool::new(false);
 static PENDING_ENGINE_SWAP: AtomicBool = AtomicBool::new(false);
 static PENDING_ENGINE: OnceLock<Mutex<Option<HexMicEngine>>> = OnceLock::new();
 
@@ -668,10 +669,19 @@ pub fn status() -> HexMicrophoneStatus {
     }
 }
 
-pub fn ensure_service_started() {
+/// Makes this process the Hex Microphone host, starting the sink whenever
+/// the setting is on. Only the listener hosts it, so CLI commands that load
+/// settings never start the pipeline.
+pub fn host_service() {
+    SERVICE_HOSTED.store(true, Ordering::Release);
+    ensure_service_started();
+}
+
+fn ensure_service_started() {
     #[cfg(target_os = "macos")]
     {
-        if !crate::app_settings::hex_microphone_enabled() {
+        if !SERVICE_HOSTED.load(Ordering::Acquire) || !crate::app_settings::hex_microphone_enabled()
+        {
             return;
         }
         if SUPERVISOR_STARTED.swap(true, Ordering::AcqRel) {

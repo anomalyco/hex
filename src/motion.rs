@@ -880,6 +880,59 @@ fn record_window_frames(wid: u32, dir: std::path::PathBuf, duration: Duration) {
     let _ = std::fs::write(dir.join("DONE"), b"ok\n");
 }
 
+fn frame_profiling() -> bool {
+    cfg!(debug_assertions) || std::env::var_os("HEX_PROFILE_FRAMES").is_some()
+}
+
+thread_local! {
+    /// The input that started a pane switch, and the pane it asked for.
+    static PANE_SWITCH: std::cell::Cell<Option<(Instant, Option<&'static str>)>> =
+        const { std::cell::Cell::new(None) };
+}
+
+/// A pointer press or key that may switch panes: the latency clock starts here.
+pub fn mark_pane_input() {
+    if frame_profiling() {
+        PANE_SWITCH.with(|cell| cell.set(Some((Instant::now(), None))));
+    }
+}
+
+/// The pane switch itself. Keeps an input mark from the last half second.
+pub fn mark_pane_switch(pane: &'static str) {
+    if !frame_profiling() {
+        return;
+    }
+    PANE_SWITCH.with(|cell| {
+        let started = cell
+            .get()
+            .map(|(at, _)| at)
+            .filter(|at| at.elapsed() < Duration::from_millis(500))
+            .unwrap_or_else(Instant::now);
+        cell.set(Some((started, Some(pane))));
+    });
+}
+
+/// Called as `pane` starts rendering. The first render after a switch logs
+/// input → that render, and input → the next frame (the new pane on screen).
+pub fn pane_switch_rendered(pane: &'static str, window: &gpui::Window) {
+    let Some((started, Some(target))) = PANE_SWITCH.with(std::cell::Cell::get) else {
+        return;
+    };
+    if target != pane {
+        return;
+    }
+    PANE_SWITCH.with(|cell| cell.set(None));
+    let rendered = started.elapsed();
+    window.on_next_frame(move |_, _| {
+        tracing::info!(
+            pane,
+            render_start_ms = rendered.as_secs_f64() * 1000.0,
+            on_screen_ms = started.elapsed().as_secs_f64() * 1000.0,
+            "pane switch latency"
+        );
+    });
+}
+
 /// Logs the current `p50`/`p95`/`max` frame-time ring buffer for `pane` (when non-empty)
 /// in debug builds or when `HEX_PROFILE_FRAMES` is set.
 pub fn log_pane_summary(pane: &'static str, reason: &'static str) {

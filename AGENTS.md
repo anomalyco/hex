@@ -89,14 +89,17 @@ substitute for source inspection or a second roadmap.
   whole-clip runs, and (macOS) model loads and switches. The capture owns its
   `LiveStream` and hands it to the finished clip; finishing returns a
   `PendingTranscript` whose wait enforces the stream deadline and falls back to
-  the whole clip.
+  the whole clip. On macOS it also runs background work (meeting chunks) that
+  yields to any dictation request sent before it starts.
 - `transcription_preparation`: application-owned model preparation shared by
   Settings and the menu bar, with one worker, latest-choice pending admission,
   cancellation fences, and an installed-only path that never downloads a model.
 - `transcription_models`: the compiled model catalog, language recommendations,
   pinned artifact verification, and lazy installation.
 - `transcription_service`: bounded host-audio admission, hostile WAV validation,
-  normalization, cancellation, and warm inference ownership.
+  normalization, cancellation, and inference. In the app, clips up to 30 s run
+  on the dictation engine's model when it is the one requested; otherwise the
+  service loads its own, released after a long clip when the engine holds it.
 - `local_api`: authenticated loopback discovery or direct-child endpoint
   handoff, bounded HTTP parsing, model preparation progress, and raw
   transcription routes.
@@ -139,22 +142,31 @@ substitute for source inspection or a second roadmap.
   `migrations` and migrates the Windows and Linux beta files once.
 - `login_item`: the native `SMAppService.mainAppService` adapter. macOS owns
   registration state; it is deliberately not duplicated in `settings.json`.
-- `app_paths`: the Application Support owner for runtime logs and shared state.
+- `app_paths`: the Application Support owner for runtime logs and shared state,
+  including the one-time macOS `voice-control` to `hex` folder rename, which runs
+  in `main` before logging, the instance lock, or any file in the folder opens.
 - `onboarding`: required permission health, selected dictation-model
   installation, the release startup gate, and opt-in command-model setup.
 - `sparkle`: packaged-app-only Sparkle lifecycle and manual update checks.
-- `linux`, `linux_app`, `linux_dictation`, `linux_input`, `linux_paste`,
-  `linux_migration`: the Linux beta CLI, the service host and Settings process,
-  the hotkey capture-transcribe-paste loop with Paste Last and Voice Action, the
-  X11 grabs and shortcut options, paste and primary-selection reads, and the
-  one-time `linux-settings.json` migration.
+- `linux`, `linux_app`, `linux_dictation`, `linux_paste`, `linux_migration`:
+  the Linux beta CLI (including the `hex dictation`, `hex voice-action`, and
+  `hex paste-last` keybinding commands), the service host and Settings process,
+  the hotkey capture-transcribe-paste loop with Paste Last and Voice Action,
+  paste and primary-selection reads, and the one-time `linux-settings.json`
+  migration.
+- `linux_input`: the one shortcut state machine (hold, double-tap lock, toggle,
+  double-tap only, Escape, Paste Last, Voice Action, and `hex` commands) and the
+  monitor that feeds it from X11 key grabs, the Wayland GlobalShortcuts portal,
+  or, without the portal, the `hex` commands alone.
+- `linux_portal`: the GlobalShortcuts portal client on a private bus
+  connection: `Register("hex")`, one session for Hex's shortcuts, a second
+  session binding Escape only while recording, granted-trigger descriptions,
+  and session-closed reporting.
 - `linux_context`: the frontmost X11 application for modes; Wayland has none.
 - `linux_audio_control`: While-dictating mute through `wpctl`/`pactl` and
   MPRIS pause over D-Bus, restoring only what it changed.
 - `linux_session`: display-backend selection matching GPUI's nonempty
   `WAYLAND_DISPLAY` rule, independent of persisted preferences.
-- `linux_wayland_input`: read-only evdev input, explicit physical key mappings,
-  cancellable shortcut capture, exact chord state, and bounded device rediscovery.
 - `linux_service`: owner-only, same-user Unix IPC, bounded service/client transport,
   and per-user systemd lifecycle. Settings and CLI are clients of one runtime.
 - `linux_desktop`: the service-owned GTK thread for the focus-free, click-through
@@ -214,11 +226,15 @@ substitute for source inspection or a second roadmap.
   Dictation, meeting recording state and Stop & Transcribe, update checks, and
   orderly application shutdown.
 - `dictation_indicator`: the click-through Metal/GPUI capture and processing HUD.
-- `meeting`: explicit ScreenCaptureKit capture, owner-only WAV and transcript
+- `meeting`: explicit capture through `meeting_capture`, owner-only WAV and transcript
   artifacts, Screen Recording permission checks, final local-model publication,
   the user-facing Markdown copy, and recovery.
+- `meeting_capture`: independent self-healing microphone (cpal) and system
+  audio (Core Audio process tap, ScreenCaptureKit fallback) sources; one
+  failing never stops the other, and resumed audio is padded onto the timeline.
 - `meeting_transcript`: streaming 16 kHz resampling, pause-aware overlapping
-  chunks, the utility-QoS rolling transcriber that yields to dictation, seam
+  chunks transcribed as background work on the dictation engine's loaded model
+  (a process without the engine, such as the CLI, loads its own), seam
   deduplication, echo suppression, and Markdown rendering.
 - `meeting_live`: bounded dual-stream Moonshine draft transcription,
   byte-offset transcript tailing, and the echo-filtered live view.
@@ -424,11 +440,21 @@ CoreAudio formats, AppleScript details, or event serialization.
   detected call app leaves the microphone, offer `Keep Recording` or
   `Stop & Transcribe`; never stop automatically. An active recording stays
   visible and stoppable from the menu bar without the Settings window.
-- Meeting transcription never blocks dictation: it runs on its own model session
-  at utility QoS, waits while an intentional dictation capture or dictation
-  inference is active, and keeps its queue (one-second audio blocks) and chunk
-  backlog bounded; a source that falls behind keeps what it transcribed and is
-  rebuilt from its WAV after Stop.
+- Meeting transcription defers to dictation and never loads a second copy of
+  the model: each chunk runs on the dictation engine's loaded model at utility
+  QoS, starts only while no dictation capture (from the shortcut press) or
+  dictation inference is active, never interrupts a live stream, and is retried
+  when a dictation request was sent first. A chunk already running cannot be
+  aborted on Metal; it finishes during the hold threshold and release tail. It uses whatever model
+  dictation has loaded, so a model switch applies from the next chunk; Apple
+  Speech and a process without the engine use their own transcriber. Its queue
+  (one-second audio blocks) and chunk backlog stay bounded; a source that falls
+  behind keeps what it transcribed and is rebuilt from its WAV after Stop.
+- Meeting system audio uses a Core Audio process tap (System Audio Recording
+  consent), never requiring a display; ScreenCaptureKit is only the fallback.
+  Losing either source never stops the other or the meeting: it retries until
+  Stop, and resumed audio is padded with silence so WAV positions stay on the
+  shared capture clock.
 - Meeting recording prevents idle sleep but does not apply dictation mute or
   pause-media behavior.
 - Apple Intelligence meeting notes run only after final publication, on a
@@ -487,26 +513,37 @@ CoreAudio formats, AppleScript details, or event serialization.
   artifact, and atomically switch the user-local `current` version. Never
   overwrite development, root, or package-manager-owned binaries.
 - The Wayland beta requires compatible clipboard, virtual-keyboard, and
-  layer-shell protocols plus explicit read access to all `/dev/input/event*`
-  nodes. Do not silently fall back to XWayland or privileged input injection.
-  Raw input observes, but does not suppress, physical US-labeled keys. Explain
-  the broad keystroke access; never grant device permissions automatically.
+  layer-shell protocols. Shortcuts come from the GlobalShortcuts portal when the
+  desktop offers it; otherwise the user binds the `hex dictation`,
+  `hex voice-action`, and `hex paste-last` commands in the desktop's own
+  keybindings. One general path: no compositor-specific code, no raw input
+  devices, no input-group requirement, and no silent fallback to XWayland or
+  privileged input injection. The desktop may grant a different trigger or
+  refuse one; Settings shows what it granted. Escape is bound only while
+  something records. Modifier-only shortcuts stay unsupported on Linux.
+- Every Linux shortcut source (X11 grabs, portal presses, `hex` commands) feeds
+  the same `linux_input` state machine and emits the same events. Commands are
+  idempotent: starting while recording or stopping while idle does nothing.
+  They talk only to a running, listening service and fail with a clear error
+  otherwise; they never start one.
 - Linux Settings owns no microphone, model workers, saved settings, or tray. The
   per-user `hex.service` owns these independently of GUI lifetime. Closing or
   crashing Settings must not stop capture or accepted work. Socket access is
   owner-only and peer-UID checked; framing, queues, and I/O remain bounded.
   Client disconnect cancels only its uncommitted shortcut capture, with a bounded
   lease fallback. Never replay uncertain mutation requests after reconnecting.
-- X11 shortcut capture uses focused GPUI input, not evdev permissions. Editing
+- Linux shortcut capture uses focused GPUI input in Settings. Editing
   shortcut/double-tap settings stops and restores only a previously running
   listener; cancellation restores the old binding unless its save already
   committed. Settings and the CLI must expose service state, recovery, and errors.
   Explicit service shutdown drains workers; closing Settings only disconnects its
   client. HUD teardown only hides that listener's HUD.
-- Linux paste keeps transcripts off helper argv, bounds helper I/O, and waits
-  for physical modifiers without discarding accepted output. Shutdown cancels
-  that wait. New installs use Ctrl-V; the terminal-paste preference selects
-  Ctrl-Shift-V and defaults on for persisted legacy X11 settings. The beta retains
+- Linux paste keeps transcripts off helper argv and bounds helper I/O. X11 waits
+  for physical modifiers without discarding accepted output, and shutdown
+  cancels that wait; on Wayland, `wtype`'s virtual keyboard carries its own
+  modifiers, so held keys never change its Ctrl+V. New installs use Ctrl-V;
+  the terminal-paste preference selects Ctrl-Shift-V and defaults on for
+  persisted legacy X11 settings. The beta retains
   the transcript clipboard; arbitrary MIME restoration and consumption
   acknowledgments remain unimplemented.
 
@@ -616,7 +653,8 @@ entry; only that managed layout participates in automatic updates.
 `nix flake check` checks modules, shell configuration, session readiness, and
 the display-free Rust suite. See `docs/nix.md`. Nix owns package updates and
 optional Home Manager autostart. Native Linux PR checks do not replace real
-X11/Wayland, keyboard hotplug, microphone, and target-application smoke tests.
+X11/Wayland, portal or keybinding shortcuts, microphone, and target-application
+smoke tests.
 
 Automatic microphone selection follows the compiled preference order in
 `src/config.rs`, then falls back to the macOS default. A saved microphone takes
@@ -739,12 +777,17 @@ Tab to cycle, and `q`/Escape to quit.
 
 ## Diagnostics
 
-- `~/Library/Application Support/voice-control/logs/live.ndjson`: state,
+- `~/Library/Application Support/hex/logs/live.ndjson`: state,
   transcript, command decision, outcome, processing, and context.
-- `~/Library/Application Support/voice-control/logs/process.log`: Rust,
+- `~/Library/Application Support/hex/logs/process.log`: Rust,
   CoreAudio, Moonshine, and context-adapter diagnostics.
-- `~/Library/Application Support/voice-control/meetings/`: manifests, separate
+- `~/Library/Application Support/hex/meetings/`: manifests, separate
   tracks, recoverable live drafts, and atomically published final transcripts.
+
+Older macOS builds used `voice-control`; the first launch of a newer build
+renames it to `hex` and leaves a `voice-control -> hex` symlink. If the rename
+fails, Hex keeps using `voice-control` and logs why. Windows and Linux keep
+`voice-control`.
 
 When diagnosing a missed command, inspect both logs and distinguish microphone
 capture, transcription, command mode/dictation, context matching, command resolution,
@@ -762,7 +805,8 @@ seam once there are two real adapters or a current test requires substitution.
 - Validate public onboarding from a clean macOS account and signed Linux updates
   on the supported Arch/i3 host.
 - Validate native Wayland on a real compatible compositor, including physical
-  device reconnect, focus/click-through, target paste, and tray-less shutdown.
+  portal shortcuts, the `hex` commands from a desktop keybinding,
+  focus/click-through, target paste, and tray-less shutdown.
 - Add a second real browser adapter before generalizing browser context.
 - Do not turn concrete macOS, Linux X11, or command modules into hypothetical
   platform or plugin frameworks.

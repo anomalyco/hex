@@ -163,10 +163,35 @@ impl Drop for RecordingEnvironmentSession {
 static INTENTIONAL_RECORDINGS: std::sync::atomic::AtomicUsize =
     std::sync::atomic::AtomicUsize::new(0);
 
-/// Whether an intentional dictation capture is in progress. Background work
-/// such as meeting transcription defers to it.
+/// Whether an intentional dictation capture is in progress.
 pub fn intentional_recording_active() -> bool {
     INTENTIONAL_RECORDINGS.load(std::sync::atomic::Ordering::Acquire) > 0
+}
+
+static CAPTURES: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// Marks a dictation capture from its press until its clip is submitted, so
+/// background work such as meeting transcription stops starting new jobs
+/// before the capture can need the model.
+pub struct CaptureMarker(());
+
+impl CaptureMarker {
+    pub fn new() -> Self {
+        CAPTURES.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+        Self(())
+    }
+}
+
+impl Drop for CaptureMarker {
+    fn drop(&mut self) {
+        CAPTURES.fetch_sub(1, std::sync::atomic::Ordering::AcqRel);
+    }
+}
+
+/// Whether a dictation capture has started, intentional or not, and its clip
+/// is not yet submitted.
+pub fn capture_active() -> bool {
+    CAPTURES.load(std::sync::atomic::Ordering::Acquire) > 0
 }
 
 pub fn prevent_sleep() -> Option<PreventSleep> {

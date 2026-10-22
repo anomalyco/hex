@@ -241,8 +241,6 @@ pub(crate) const HERO_ICON_SIZE: f32 = 28.0;
 pub(crate) const HERO_KEYCAP_DEPTH: f32 = 3.0;
 /// The measure of a page's centred body copy.
 pub(crate) const ONBOARDING_BODY_WIDTH: f32 = 400.0;
-/// The illustration column of a "How Hex works" row.
-pub(crate) const ONBOARDING_ART_COLUMN: f32 = 112.0;
 /// A setup row's download progress, track and percentage together.
 pub(crate) const ONBOARDING_PROGRESS_WIDTH: f32 = 140.0;
 /// The tour's main button, centred under each page.

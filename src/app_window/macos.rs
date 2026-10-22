@@ -9,6 +9,7 @@ use std::sync::mpsc::{SyncSender, TrySendError};
 
 use gpui::{MouseMoveEvent, ScrollHandle, relative};
 
+use super::tour::{PermissionControl, permission_control};
 use super::*;
 use crate::commands::{CommandConfig, CommandInfo, CommandScope};
 use crate::desktop_ui::{disabled_menu_item, empty_state, list_section_label, menu_separator};
@@ -90,6 +91,8 @@ pub(super) struct Platform {
     pub(super) meeting_indicator_toggle: ToggleSpring,
     pub(super) meeting_notes_toggle: ToggleSpring,
     pub(super) screen_recording_permitted: bool,
+    /// Permissions whose Allow was pressed since they were last granted.
+    pub(super) permissions_asked: Vec<PermissionKind>,
     pub(super) meeting_folder_error: Option<String>,
     pub(super) meetings: Vec<MeetingManifest>,
     pub(super) meetings_error: Option<String>,
@@ -179,8 +182,9 @@ impl Platform {
             ),
             screen_recording_permitted: match preview {
                 Some(preview) => !preview.screen_recording_missing,
-                None => crate::meeting::screen_recording_permitted(),
+                None => crate::meeting::system_audio_ready(),
             },
+            permissions_asked: Vec::new(),
             meeting_folder_error: None,
             meetings: Vec::new(),
             meetings_error: None,
@@ -379,6 +383,11 @@ impl AppWindow {
         self.render_permission_warnings(cx)
     }
 
+    /// Settings records every shortcut this platform registers.
+    pub(super) fn platform_shortcut_rows(&self) -> bool {
+        true
+    }
+
     pub(super) fn platform_settings_section(
         &mut self,
         window: &mut Window,
@@ -402,11 +411,21 @@ impl AppWindow {
     }
 
     pub(super) fn platform_poll_setup(&mut self) -> bool {
-        if !self.settings.meetings.available() {
-            return false;
+        let meetings = self.settings.meetings.available();
+        let permitted = meetings && crate::meeting::system_audio_ready();
+        let status = self.setup_status;
+        let before = self.platform.permissions_asked.len();
+        self.platform.permissions_asked.retain(|kind| match kind {
+            PermissionKind::Microphone => status.microphone != PermissionState::Ready,
+            PermissionKind::InputMonitoring => status.input_monitoring != PermissionState::Ready,
+            PermissionKind::Accessibility => status.accessibility != PermissionState::Ready,
+            PermissionKind::SystemAudio => !permitted,
+        });
+        let mut changed = before != self.platform.permissions_asked.len();
+        if !meetings {
+            return changed;
         }
-        let permitted = crate::meeting::screen_recording_permitted();
-        let changed = permitted != self.platform.screen_recording_permitted;
+        changed |= permitted != self.platform.screen_recording_permitted;
         self.platform.screen_recording_permitted = permitted;
         changed
     }
@@ -1093,29 +1112,35 @@ pub(super) fn command_model_notice(
     }
 }
 
+/// A permission's name as System Settings lists it, and what Hex cannot do
+/// without it.
 pub(super) fn permission_warning_copy(kind: PermissionKind) -> (&'static str, &'static str) {
     match kind {
         PermissionKind::Microphone => (
-            tr("Microphone access is off"),
+            tr("Microphone"),
             tr("Hex cannot record dictation until microphone access is restored."),
         ),
         PermissionKind::InputMonitoring => (
-            tr("Input Monitoring is off"),
+            tr("Input Monitoring"),
             tr("Hex cannot recognize the dictation shortcut in other apps."),
         ),
         PermissionKind::Accessibility => (
-            tr("Accessibility is off"),
+            accessibility_title(),
             tr("Hex cannot paste completed dictation into the foreground app."),
+        ),
+        PermissionKind::SystemAudio => (
+            tr("Screen & System Audio Recording"),
+            tr("Required to hear the other participants."),
         ),
     }
 }
 
-pub(super) fn permission_action_label(action: PermissionAction) -> &'static str {
-    match action {
-        PermissionAction::RequestMicrophone => tr("Allow"),
-        PermissionAction::OpenMicrophoneSettings => tr("Open settings"),
-        PermissionAction::OpenInputMonitoringSettings
-        | PermissionAction::OpenAccessibilitySettings => tr("Grant access"),
+/// What System Settings calls the Accessibility list; macOS 27 renamed it.
+pub(super) fn accessibility_title() -> &'static str {
+    if crate::permission_guide::list_name(PermissionKind::Accessibility) == "Accessibility" {
+        tr("Accessibility")
+    } else {
+        tr("Device Control and Data Access")
     }
 }
 
@@ -1124,6 +1149,7 @@ pub(super) const fn permission_warning_id(kind: PermissionKind) -> &'static str 
         PermissionKind::Microphone => "permission-warning-microphone",
         PermissionKind::InputMonitoring => "permission-warning-input-monitoring",
         PermissionKind::Accessibility => "permission-warning-accessibility",
+        PermissionKind::SystemAudio => "permission-warning-system-audio",
     }
 }
 
@@ -1194,15 +1220,7 @@ impl AppWindow {
         use crate::onboarding::Effect;
         match effect {
             Effect::RequestMicrophone => crate::onboarding::request_microphone(),
-            Effect::OpenMicrophoneSettings => {
-                crate::onboarding::open_permission_settings("microphone");
-            }
-            Effect::ShowGuide(PermissionKind::InputMonitoring) => {
-                crate::permission_guide::show_input_monitoring();
-            }
-            Effect::ShowGuide(PermissionKind::Accessibility) => {
-                crate::permission_guide::show_accessibility();
-            }
+            Effect::ShowGuide(kind) => crate::permission_guide::show(kind),
             _ => {}
         }
     }
@@ -1272,6 +1290,25 @@ impl AppWindow {
             cx.notify();
         } else {
             self.show_settings(cx);
+        }
+    }
+
+    /// Records a "Never offer" choice from the offer capsule.
+    pub fn never_offer_meeting(
+        &mut self,
+        entry: crate::app_settings::NeverOfferMeeting,
+        cx: &mut Context<Self>,
+    ) {
+        if !self
+            .settings
+            .meetings
+            .never_offer
+            .iter()
+            .any(|known| known.key == entry.key)
+        {
+            self.update_settings(cx, |settings| {
+                crate::app_settings::insert_never_offer(&mut settings.meetings, entry);
+            });
         }
     }
 
@@ -1690,20 +1727,39 @@ impl AppWindow {
             .strip_prefix(dirs::home_dir().unwrap_or_default())
             .map(|relative| format!("~/{}", relative.display()))
             .unwrap_or_else(|_| folder.display().to_string());
-        let permission_control = if self.platform.screen_recording_permitted {
-            tag(Tone::Success, tr("Ready")).into_any_element()
-        } else {
-            button(ButtonKind::Secondary, tr("Open settings"))
-                .id("meeting-screen-recording")
-                .on_click(cx.listener(|this, _, _, cx| {
-                    if !crate::meeting::request_screen_recording() {
-                        crate::meeting::open_screen_recording_settings();
-                    }
-                    this.permission_refresh_at = Instant::now();
-                    cx.notify();
-                }))
-                .into_any_element()
-        };
+        let system_audio = permission_control(
+            if self.platform.screen_recording_permitted {
+                PermissionControl::Allowed
+            } else if self
+                .platform
+                .permissions_asked
+                .contains(&PermissionKind::SystemAudio)
+            {
+                PermissionControl::Waiting
+            } else {
+                PermissionControl::Allow
+            },
+            ButtonKind::Secondary,
+            "meeting-system-audio",
+            cx.listener(|this, _, _, cx| {
+                // macOS prompts once; after that the switch is in
+                // System Settings, with the guide beside it.
+                if !this.preview && !crate::meeting::request_system_audio_access() {
+                    crate::permission_guide::show(PermissionKind::SystemAudio);
+                }
+                if !this
+                    .platform
+                    .permissions_asked
+                    .contains(&PermissionKind::SystemAudio)
+                {
+                    this.platform
+                        .permissions_asked
+                        .push(PermissionKind::SystemAudio);
+                }
+                this.permission_refresh_at = Instant::now();
+                cx.notify();
+            }),
+        );
         panel()
             .child(
                 settings_row(
@@ -1719,7 +1775,7 @@ impl AppWindow {
                         this.platform.meetings_toggle.set_enabled(enabled);
                         if enabled {
                             this.platform.screen_recording_permitted =
-                                this.preview || crate::meeting::screen_recording_permitted();
+                                this.preview || crate::meeting::system_audio_ready();
                             if !this.preview {
                                 this.reload_meetings();
                             }
@@ -1736,9 +1792,9 @@ impl AppWindow {
                         if self.platform.screen_recording_permitted {
                             tr("Captures the other participants' audio")
                         } else {
-                            tr("Required to hear the other participants. Allow Hex, then reopen it.")
+                            tr("Required to hear the other participants.")
                         },
-                        permission_control,
+                        system_audio,
                     ))
                     .child(
                         settings_row(
@@ -1787,6 +1843,46 @@ impl AppWindow {
                                     })),
                             ),
                     ))
+                    .when(!self.settings.meetings.never_offer.is_empty(), |panel| {
+                        panel.child(settings_row(
+                            tr("Never offer"),
+                            tr("No recording offers for these sites and apps"),
+                            div().flex().flex_col().items_end().gap_1().children(
+                                self.settings.meetings.never_offer.iter().enumerate().map(
+                                    |(index, entry)| {
+                                        let key = entry.key.clone();
+                                        div()
+                                            .flex()
+                                            .items_center()
+                                            .gap_2()
+                                            .child(
+                                                div()
+                                                    .text_footnote()
+                                                    .text_color(rgb(TEXT_SECONDARY))
+                                                    .child(entry.label.clone()),
+                                            )
+                                            .child(
+                                                small_button(ButtonKind::Secondary, tr("Remove"))
+                                                    .id(("never-offer-remove", index))
+                                                    .on_click(cx.listener(
+                                                        move |this, _, _, cx| {
+                                                            let key = key.clone();
+                                                            this.update_settings(cx, |settings| {
+                                                                settings
+                                                                    .meetings
+                                                                    .never_offer
+                                                                    .retain(|entry| {
+                                                                        entry.key != key
+                                                                    })
+                                                            });
+                                                        },
+                                                    )),
+                                            )
+                                    },
+                                ),
+                            ),
+                        ))
+                    })
                     .child(
                         settings_row(
                             tr("Summarize with Apple Intelligence"),
@@ -3254,15 +3350,19 @@ impl AppWindow {
                 .child(panel().children(warnings.into_iter().enumerate().map(
                     |(index, warning)| {
                         let (name, description) = permission_warning_copy(warning.kind);
-                        let action = button(
+                        let action = permission_control(
+                            if self.platform.permissions_asked.contains(&warning.kind) {
+                                PermissionControl::Waiting
+                            } else {
+                                PermissionControl::Allow
+                            },
                             ButtonKind::Secondary,
-                            permission_action_label(warning.action),
-                        )
-                        .id(permission_warning_id(warning.kind))
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.perform_permission_action(warning);
-                            cx.notify();
-                        }));
+                            permission_warning_id(warning.kind),
+                            cx.listener(move |this, _, _, cx| {
+                                this.perform_permission_action(warning);
+                                cx.notify();
+                            }),
+                        );
                         settings_row(name, description, action)
                             .when(index + 1 == warning_count, |row| row.border_b_0())
                     },
@@ -3274,15 +3374,10 @@ impl AppWindow {
     pub(super) fn perform_permission_action(&mut self, warning: PermissionWarning) {
         match warning.action {
             PermissionAction::RequestMicrophone => crate::onboarding::request_microphone(),
-            PermissionAction::OpenMicrophoneSettings => {
-                crate::onboarding::open_permission_settings("microphone");
-            }
-            PermissionAction::OpenInputMonitoringSettings => {
-                crate::permission_guide::show_input_monitoring();
-            }
-            PermissionAction::OpenAccessibilitySettings => {
-                crate::permission_guide::show_accessibility();
-            }
+            PermissionAction::ShowGuide(kind) => crate::permission_guide::show(kind),
+        }
+        if !self.platform.permissions_asked.contains(&warning.kind) {
+            self.platform.permissions_asked.push(warning.kind);
         }
         self.permission_refresh_at = Instant::now() + PERMISSION_REFRESH_INTERVAL;
     }

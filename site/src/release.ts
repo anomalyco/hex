@@ -1,8 +1,8 @@
 // The published release every download link names. After a release, bump the
 // versions here; `bun run check:downloads` (also run by CI) fails until every
 // URL below serves a file.
-export const MAC_VERSION = "2.3.0"
-export const DESKTOP_VERSION = "2.3.0"
+export const MAC_VERSION = "2.3.1"
+export const DESKTOP_VERSION = "2.3.1"
 
 const DOWNLOADS = "https://downloads.hex.kitlangton.com"
 

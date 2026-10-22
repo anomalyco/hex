@@ -61,6 +61,38 @@ pub(crate) fn system_language() -> String {
     }
 }
 
+/// The person's first preferred language, for choosing a speech model. On
+/// macOS this is the system's language list, which apps opened from Finder
+/// see without `LANG`.
+pub(crate) fn preferred_language() -> String {
+    #[cfg(target_os = "macos")]
+    if let Some(language) = macos_preferred_language() {
+        return language;
+    }
+    system_language()
+}
+
+#[cfg(target_os = "macos")]
+fn macos_preferred_language() -> Option<String> {
+    use objc2::msg_send;
+    use objc2::rc::Retained;
+    use objc2::runtime::AnyClass;
+    use objc2_foundation::{NSArray, NSString};
+
+    let class = AnyClass::get(c"NSLocale")?;
+    let languages: Option<Retained<NSArray<NSString>>> =
+        unsafe { msg_send![class, preferredLanguages] };
+    let first = languages?.firstObject()?.to_string();
+    primary_subtag(&first)
+}
+
+/// `pt-BR` and `zh-Hans-CN` yield `pt` and `zh`.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn primary_subtag(tag: &str) -> Option<String> {
+    let subtag = tag.split(['-', '_']).next()?.trim().to_ascii_lowercase();
+    (!subtag.is_empty()).then_some(subtag)
+}
+
 /// The primary subtag of the Windows user locale: `pl-PL` yields `pl`.
 #[cfg(target_os = "windows")]
 fn windows_user_language() -> String {
@@ -167,6 +199,17 @@ fn tables() -> &'static [HashMap<&'static str, &'static str>; 5] {
 /// Columns: Polish, Chinese (Simplified), Japanese, German, Spanish.
 #[rustfmt::skip]
 const TRANSLATIONS: &[(&str, [&str; 5])] = &[
+    ("Desktop shortcuts", ["Skróty pulpitu", "桌面快捷键", "デスクトップのショートカット", "Desktop-Tastenkürzel", "Atajos del escritorio"]),
+    ("Granted by your desktop", ["Przyznany przez pulpit", "由桌面授予", "デスクトップが割り当て", "Vom Desktop vergeben", "Concedido por tu escritorio"]),
+    ("Not granted", ["Nie przyznano", "未授予", "未割り当て", "Nicht vergeben", "No concedido"]),
+    ("Your desktop did not grant every shortcut. Record another one, or free it in your desktop's keyboard settings.", ["Pulpit nie przyznał wszystkich skrótów. Nagraj inny albo zwolnij go w ustawieniach klawiatury pulpitu.", "桌面未授予所有快捷键。请录制其他快捷键，或在桌面的键盘设置中释放它。", "デスクトップがすべてのショートカットを割り当てませんでした。別のショートカットを記録するか、デスクトップのキーボード設定で空けてください。", "Der Desktop hat nicht jedes Tastenkürzel vergeben. Nimm ein anderes auf oder gib es in den Tastatureinstellungen des Desktops frei.", "Tu escritorio no concedió todos los atajos. Graba otro o libéralo en los ajustes de teclado del escritorio."]),
+    ("Your desktop has no shortcuts portal. Bind these commands in its keyboard settings.", ["Pulpit nie ma portalu skrótów. Przypisz te polecenia w jego ustawieniach klawiatury.", "你的桌面没有快捷键门户。请在其键盘设置中绑定这些命令。", "デスクトップにショートカットポータルがありません。キーボード設定でこれらのコマンドを割り当ててください。", "Dein Desktop hat kein Tastenkürzel-Portal. Weise diese Befehle in seinen Tastatureinstellungen zu.", "Tu escritorio no tiene portal de atajos. Asigna estos comandos en sus ajustes de teclado."]),
+    ("Hold to dictate", ["Przytrzymaj, aby dyktować", "按住听写", "押している間音声入力", "Halten zum Diktieren", "Mantén pulsado para dictar"]),
+    ("Bind start to the key press and stop to its release", ["Przypisz start do naciśnięcia klawisza, a stop do jego zwolnienia", "将 start 绑定到按下按键，将 stop 绑定到松开按键", "start をキーを押したとき、stop を離したときに割り当て", "start an das Drücken und stop an das Loslassen der Taste binden", "Asigna start al pulsar la tecla y stop al soltarla"]),
+    ("Toggle dictation", ["Przełącz dyktowanie", "切换听写", "音声入力を切り替え", "Diktat umschalten", "Alternar dictado"]),
+    ("Cancel dictation", ["Anuluj dyktowanie", "取消听写", "音声入力をキャンセル", "Diktat abbrechen", "Cancelar dictado"]),
+    ("Discard the current recording", ["Odrzuć bieżące nagranie", "丢弃当前录音", "現在の録音を破棄", "Aktuelle Aufnahme verwerfen", "Descartar la grabación actual"]),
+    ("Ready anywhere · Use your desktop's shortcuts to dictate", ["Gotowe wszędzie · Dyktuj skrótami pulpitu", "随处可用 · 使用桌面快捷键听写", "どこでも利用可能 · デスクトップのショートカットで音声入力", "Überall bereit · Diktiere mit den Tastenkürzeln des Desktops", "Listo en cualquier lugar · Dicta con los atajos del escritorio"]),
     ("Language", ["Język", "语言", "言語", "Sprache", "Idioma"]),
     ("The language you dictate in; Auto detects it", ["Język dyktowania; Auto wykrywa automatycznie", "听写语言；Auto 自动检测", "音声入力の言語。Auto は自動検出", "Diktatsprache; Auto erkennt automatisch", "Idioma del dictado; Auto lo detecta"]),
     ("Interface language", ["Język interfejsu", "界面语言", "表示言語", "Sprache der Oberfläche", "Idioma de la interfaz"]),
@@ -491,16 +534,12 @@ const TRANSLATIONS: &[(&str, [&str; 5])] = &[
     ("Wayland doesn't report the frontmost app; these apply under X11", ["Wayland nie podaje aktywnej aplikacji; te reguły działają w X11", "Wayland 不报告前台应用；这些规则仅在 X11 下生效", "Wayland は最前面のアプリを通知しないため、これは X11 でのみ有効です", "Wayland meldet die aktive App nicht; diese Regeln gelten unter X11", "Wayland no informa de la app en primer plano; esto se aplica en X11"]),
     ("Sound effects", ["Efekty dźwiękowe", "音效", "効果音", "Soundeffekte", "Efectos de sonido"]),
     ("Accessibility", ["Dostępność", "辅助功能", "アクセシビリティ", "Bedienungshilfen", "Accesibilidad"]),
-    ("Accessibility is off", ["Dostępność jest wyłączona", "辅助功能已关闭", "アクセシビリティがオフです", "Bedienungshilfen sind aus", "La accesibilidad está desactivada"]),
     ("Allow", ["Zezwól", "允许", "許可", "Erlauben", "Permitir"]),
-    ("Grant access", ["Przyznaj dostęp", "授予访问权限", "アクセスを許可", "Zugriff erlauben", "Conceder acceso"]),
     ("Hex cannot paste completed dictation into the foreground app.", ["Hex nie może wkleić gotowego dyktowania do aktywnej aplikacji.", "Hex 无法将完成的听写粘贴到前台应用。", "Hex は完了した音声入力を最前面のアプリに貼り付けられません。", "Hex kann fertige Diktate nicht in die aktive App einfügen.", "Hex no puede pegar el dictado terminado en la app en primer plano."]),
     ("Hex cannot recognize the dictation shortcut in other apps.", ["Hex nie rozpozna skrótu dyktowania w innych aplikacjach.", "Hex 无法在其他应用中识别听写快捷键。", "Hex はほかのアプリで音声入力ショートカットを認識できません。", "Hex erkennt das Diktierkürzel in anderen Apps nicht.", "Hex no puede reconocer el atajo de dictado en otras apps."]),
     ("Hex cannot record dictation until microphone access is restored.", ["Hex nie może nagrywać dyktowania, dopóki dostęp do mikrofonu nie zostanie przywrócony.", "在恢复麦克风访问权限之前，Hex 无法录制听写。", "マイクへのアクセスが戻るまで、Hex は音声入力を録音できません。", "Hex kann keine Diktate aufnehmen, bis der Mikrofonzugriff wiederhergestellt ist.", "Hex no puede grabar dictados hasta que se restablezca el acceso al micrófono."]),
     ("Hear commands and dictation.", ["Słysz polecenia i dyktowanie.", "收听命令和听写。", "コマンドと音声入力を聞き取ります。", "Befehle und Diktate hören.", "Escucha comandos y dictado."]),
     ("Input Monitoring", ["Monitorowanie wejścia", "输入监控", "入力監視", "Eingabeüberwachung", "Monitorización de entrada"]),
-    ("Input Monitoring is off", ["Monitorowanie wejścia jest wyłączone", "输入监控已关闭", "入力監視がオフです", "Eingabeüberwachung ist aus", "La monitorización de entrada está desactivada"]),
-    ("Microphone access is off", ["Dostęp do mikrofonu jest wyłączony", "麦克风访问已关闭", "マイクへのアクセスがオフです", "Mikrofonzugriff ist aus", "El acceso al micrófono está desactivado"]),
     ("Paste completed dictation into the foreground app", ["Wklejaj gotowe dyktowanie do aktywnej aplikacji", "将完成的听写粘贴到前台应用", "完了した音声入力を最前面のアプリに貼り付け", "Fertige Diktate in die aktive App einfügen", "Pegar el dictado terminado en la app en primer plano"]),
     ("Paste text and run keyboard commands.", ["Wklejaj tekst i wykonuj polecenia klawiatury.", "粘贴文本并执行键盘命令。", "テキストを貼り付け、キーボードコマンドを実行します。", "Text einfügen und Tastaturbefehle ausführen.", "Pega texto y ejecuta comandos de teclado."]),
     ("Recognize the dictation shortcut anywhere", ["Rozpoznawaj skrót dyktowania wszędzie", "在任何地方识别听写快捷键", "どこでも音声入力ショートカットを認識", "Das Diktierkürzel überall erkennen", "Reconocer el atajo de dictado en cualquier lugar"]),
@@ -535,7 +574,9 @@ const TRANSLATIONS: &[(&str, [&str; 5])] = &[
     ("Offer to record calls and save local transcripts", ["Proponuj nagrywanie rozmów i zapisuj lokalne transkrypcje", "提供通话录音并保存本地转写", "通話の録音を提案し、ローカルに文字起こしを保存", "Aufnahme von Anrufen anbieten und lokale Transkripte speichern", "Ofrecer grabar llamadas y guardar transcripciones locales"]),
     ("Screen & System Audio Recording", ["Nagrywanie ekranu i dźwięku systemu", "屏幕与系统音频录制", "画面とシステムオーディオの収録", "Bildschirm- und Systemaudioaufnahme", "Grabación de pantalla y audio del sistema"]),
     ("Captures the other participants' audio", ["Nagrywa dźwięk pozostałych uczestników", "录制其他参与者的音频", "ほかの参加者の音声を収録します", "Nimmt den Ton der anderen Teilnehmenden auf", "Graba el audio de los demás participantes"]),
-    ("Required to hear the other participants. Allow Hex, then reopen it.", ["Wymagane, aby słyszeć pozostałych uczestników. Zezwól Hex, a potem otwórz go ponownie.", "需要此权限才能听到其他参与者。允许 Hex，然后重新打开它。", "ほかの参加者の声を聞くために必要です。Hex を許可してから開き直してください。", "Nötig, um die anderen Teilnehmenden zu hören. Erlaube Hex und öffne es dann erneut.", "Necesario para oír a los demás participantes. Permite Hex y vuelve a abrirlo."]),
+    ("Never offer", ["Nigdy nie proponuj", "永不提示", "提案しない", "Nie anbieten", "No ofrecer nunca"]),
+    ("No recording offers for these sites and apps", ["Bez propozycji nagrywania dla tych stron i aplikacji", "这些网站和应用不再提示录制", "これらのサイトとアプリでは録音を提案しません", "Keine Aufnahmeangebote für diese Websites und Apps", "Sin ofertas de grabación para estos sitios y apps"]),
+    ("Required to hear the other participants.", ["Wymagane, aby słyszeć pozostałych uczestników.", "需要此权限才能听到其他参与者。", "ほかの参加者の声を聞くために必要です。", "Nötig, um die anderen Teilnehmenden zu hören.", "Necesario para oír a los demás participantes."]),
     ("Transcript folder", ["Folder transkrypcji", "转写文件夹", "文字起こしフォルダー", "Transkriptordner", "Carpeta de transcripciones"]),
     ("Finished meetings are saved here as Markdown", ["Zakończone spotkania są zapisywane tu jako Markdown", "已结束的会议以 Markdown 格式保存在此处", "終了した会議はここに Markdown で保存されます", "Beendete Besprechungen werden hier als Markdown gespeichert", "Las reuniones terminadas se guardan aquí en Markdown"]),
     ("Reveal", ["Pokaż", "显示", "表示", "Anzeigen", "Mostrar"]),
@@ -650,6 +691,11 @@ const TRANSLATIONS: &[(&str, [&str; 5])] = &[
     ("{} ms total", ["łącznie {} ms", "总计 {} 毫秒", "合計 {} ms", "{} ms gesamt", "{} ms en total"]),
     ("fell back: {}", ["użyto oryginału: {}", "已回退为原文：{}", "元のテキストを使用: {}", "Rohtext verwendet: {}", "se usó el texto original: {}"]),
     ("Other", ["Inne", "其他", "その他", "Sonstige", "Otros"]),
+    ("Switch Hex on in the list", ["Włącz Hex na liście", "在列表中打开 Hex", "リストで Hex をオンにしてください", "Hex in der Liste einschalten", "Activa Hex en la lista"]),
+    ("Speech model ready", ["Model mowy gotowy", "语音模型已就绪", "音声モデルの準備完了", "Sprachmodell bereit", "Modelo de voz listo"]),
+    ("Download stopped", ["Pobieranie przerwane", "下载已停止", "ダウンロードが停止しました", "Download angehalten", "Descarga detenida"]),
+    ("Hex starts listening once the speech model has downloaded.", ["Hex zacznie słuchać, gdy model mowy się pobierze.", "语音模型下载完成后，Hex 就会开始聆听。", "音声モデルのダウンロードが終わると、Hex が聞き取りを始めます。", "Hex hört zu, sobald das Sprachmodell geladen ist.", "Hex empezará a escuchar cuando termine de descargarse el modelo de voz."]),
+    ("Device Control and Data Access", ["Sterowanie urządzeniem i dostęp do danych", "设备控制与数据访问", "デバイス制御とデータアクセス", "Gerätesteuerung und Datenzugriff", "Control del dispositivo y acceso a datos"]),
     ("Allowed", ["Dozwolone", "已允许", "許可済み", "Erlaubt", "Permitido"]),
     ("Ask OpenCode to write or rewrite. Turn it on in Voice Action.", ["Poproś OpenCode o napisanie lub przeredagowanie. Włącz w Voice Action.", "让 OpenCode 帮你撰写或改写。在 Voice Action 中开启。", "OpenCode に書いてもらう、書き直してもらう。Voice Action でオンにします。", "Lass OpenCode schreiben oder umschreiben. Aktiviere es unter Voice Action.", "Pide a OpenCode que escriba o reescriba. Actívalo en Voice Action."]),
     ("Back", ["Wstecz", "返回", "戻る", "Zurück", "Atrás"]),
@@ -657,12 +703,10 @@ const TRANSLATIONS: &[(&str, [&str; 5])] = &[
     ("Continue", ["Dalej", "继续", "続ける", "Weiter", "Continuar"]),
     ("Download a speech model", ["Pobierz model mowy", "下载语音模型", "音声モデルをダウンロード", "Sprachmodell herunterladen", "Descarga un modelo de voz"]),
     ("Drag Hex into the list, or switch it on if it is there", ["Przeciągnij Hex na listę albo włącz go, jeśli już tam jest", "把 Hex 拖进列表；如果已在列表中，请打开开关", "Hex をリストにドラッグするか、すでにあればオンにします", "Zieh Hex in die Liste oder schalte es ein, falls es schon dort ist", "Arrastra Hex a la lista o actívalo si ya está"]),
-    ("Rows turn green as macOS confirms them. Any order works.", ["Wiersze zmieniają kolor na zielony, gdy macOS je potwierdzi. Kolejność dowolna.", "macOS 确认后，各行会变绿。顺序不限。", "macOS が確認すると行が緑に変わります。順番は自由です。", "Zeilen werden grün, sobald macOS sie bestätigt. Reihenfolge egal.", "Las filas se ponen verdes cuando macOS las confirma. En cualquier orden."]),
     ("Fix names, tone, and formatting per app.", ["Poprawiaj nazwy, ton i formatowanie dla każdej aplikacji.", "按应用修正名称、语气和格式。", "アプリごとに名前、口調、書式を整えます。", "Korrigiere Namen, Ton und Formatierung pro App.", "Corrige nombres, tono y formato por app."]),
     ("Get started", ["Zaczynamy", "开始", "はじめる", "Los geht's", "Empezar"]),
     ("Give it a try", ["Wypróbuj", "试一试", "試してみましょう", "Probier es aus", "Pruébalo"]),
     ("Hears you only while you hold the shortcut", ["Słyszy cię tylko, gdy trzymasz skrót", "仅在按住快捷键时收听", "ショートカットを押している間だけ聞き取ります", "Hört nur zu, während du das Kürzel hältst", "Solo te escucha mientras mantienes el atajo"]),
-    ("Hello", ["Cześć", "你好", "こんにちは", "Hallo", "Hola"]),
     ("Hex did not catch any words. Speak a little closer, or pick another microphone in Settings.", ["Hex nie usłyszał żadnych słów. Mów bliżej albo wybierz inny mikrofon w Ustawieniach.", "Hex 没有听到任何文字。请靠近一点说话，或在设置中选择其他麦克风。", "Hex は言葉を聞き取れませんでした。もう少し近くで話すか、設定で別のマイクを選んでください。", "Hex hat keine Wörter erkannt. Sprich etwas näher oder wähle in den Einstellungen ein anderes Mikrofon.", "Hex no captó ninguna palabra. Habla un poco más cerca o elige otro micrófono en Ajustes."]),
     ("Hex needs to reopen before it can hear the shortcut.", ["Hex musi zostać ponownie otwarty, aby usłyszeć skrót.", "Hex 需要重新打开才能识别快捷键。", "ショートカットを認識するには Hex を開き直す必要があります。", "Hex muss neu geöffnet werden, um das Kürzel zu erkennen.", "Hex necesita reabrirse para detectar el atajo."]),
     ("Hex transcribes on this computer, so it needs a local model first.", ["Hex transkrybuje na tym komputerze, więc najpierw potrzebuje lokalnego modelu.", "Hex 在这台电脑上转写，因此需要先下载本地模型。", "Hex はこのコンピュータ上で文字起こしするため、まずローカルモデルが必要です。", "Hex transkribiert auf diesem Computer und braucht dafür zuerst ein lokales Modell.", "Hex transcribe en este ordenador, así que primero necesita un modelo local."]),
@@ -673,28 +717,21 @@ const TRANSLATIONS: &[(&str, [&str; 5])] = &[
     ("Hold a key, say what you mean, and Hex types it wherever your cursor is. Your voice is transcribed on this Mac.", ["Przytrzymaj klawisz, powiedz, co chcesz, a Hex wpisze to tam, gdzie jest kursor. Głos jest transkrybowany na tym Macu.", "按住一个键，说出你想说的，Hex 会把它输入到光标所在的位置。语音在这台 Mac 上转写。", "キーを押したまま話すと、Hex がカーソルの位置に入力します。音声はこの Mac 上で文字起こしされます。", "Halte eine Taste, sag, was du meinst, und Hex tippt es dort, wo dein Cursor steht. Deine Stimme wird auf diesem Mac transkribiert.", "Mantén una tecla, di lo que quieres y Hex lo escribe donde esté el cursor. Tu voz se transcribe en este Mac."]),
     ("Hold a key, say what you mean, and Hex types it wherever your cursor is. Your voice is transcribed on this computer.", ["Przytrzymaj klawisz, powiedz, co chcesz, a Hex wpisze to tam, gdzie jest kursor. Głos jest transkrybowany na tym komputerze.", "按住一个键，说出你想说的，Hex 会把它输入到光标所在的位置。语音在这台电脑上转写。", "キーを押したまま話すと、Hex がカーソルの位置に入力します。音声はこのコンピュータ上で文字起こしされます。", "Halte eine Taste, sag, was du meinst, und Hex tippt es dort, wo dein Cursor steht. Deine Stimme wird auf diesem Computer transkribiert.", "Mantén una tecla, di lo que quieres y Hex lo escribe donde esté el cursor. Tu voz se transcribe en este ordenador."]),
     ("Hold to talk", ["Przytrzymaj, aby mówić", "按住说话", "押したまま話す", "Halten zum Sprechen", "Mantén para hablar"]),
-    ("Hold {} in any app where you can type.", ["Przytrzymaj {} w dowolnej aplikacji, w której możesz pisać.", "在任何可以输入文字的应用中按住 {}。", "文字を入力できるアプリで {} を押し続けます。", "Halte {} in jeder App, in der du tippen kannst.", "Mantén {} en cualquier app donde puedas escribir."]),
     ("Hold {}, say a sentence, then let go.", ["Przytrzymaj {}, powiedz zdanie i puść.", "按住 {}，说一句话，然后松开。", "{} を押したまま一文話して、離します。", "Halte {}, sag einen Satz und lass dann los.", "Mantén {}, di una frase y suelta."]),
-    ("How Hex works", ["Jak działa Hex", "Hex 如何工作", "Hex のしくみ", "So funktioniert Hex", "Cómo funciona Hex"]),
     ("Let Hex hear you and type for you", ["Pozwól Hex słyszeć cię i pisać za ciebie", "让 Hex 听见你并替你输入", "Hex が聞き取り、入力できるようにする", "Lass Hex zuhören und für dich tippen", "Deja que Hex te escuche y escriba por ti"]),
-    ("Let go of {}. Hex pastes your words where your cursor is.", ["Puść {}. Hex wklei słowa tam, gdzie jest kursor.", "松开 {}。Hex 会把文字粘贴到光标处。", "{} を離すと、Hex がカーソルの位置に貼り付けます。", "Lass {} los. Hex fügt deine Worte am Cursor ein.", "Suelta {}. Hex pega tus palabras donde esté el cursor."]),
     ("Listening… let go of {} when you are done.", ["Słucham… puść {}, gdy skończysz.", "正在聆听… 说完后松开 {}。", "聞き取り中… 話し終えたら {} を離してください。", "Hört zu … lass {} los, wenn du fertig bist.", "Escuchando… suelta {} cuando termines."]),
     ("Listening… press {} again when you are done.", ["Słucham… naciśnij {} ponownie, gdy skończysz.", "正在聆听… 说完后再按一次 {}。", "聞き取り中… 話し終えたらもう一度 {} を押してください。", "Hört zu … drück {} erneut, wenn du fertig bist.", "Escuchando… pulsa {} otra vez cuando termines."]),
     ("Missed the text field? Paste it again anywhere.", ["Nie trafiło w pole tekstowe? Wklej ponownie w dowolnym miejscu.", "没粘贴到文本框？可以在任意位置再次粘贴。", "テキスト欄から外れましたか？どこにでももう一度貼り付けられます。", "Textfeld verpasst? Füge es überall erneut ein.", "¿No cayó en el campo de texto? Pégalo de nuevo donde quieras."]),
     ("Notices the shortcut in every app", ["Rozpoznaje skrót w każdej aplikacji", "在所有应用中识别快捷键", "どのアプリでもショートカットを認識します", "Erkennt das Kürzel in jeder App", "Detecta el atajo en cualquier app"]),
     ("Paste your last dictation", ["Wklej ostatnie dyktowanie", "粘贴上一次听写", "直前の音声入力を貼り付け", "Letztes Diktat einfügen", "Pega tu último dictado"]),
     ("Pastes your words into the app you are using", ["Wkleja słowa do aplikacji, której używasz", "把文字粘贴到你正在使用的应用", "使っているアプリに言葉を貼り付けます", "Fügt deine Worte in die App ein, die du gerade nutzt", "Pega tus palabras en la app que estás usando"]),
-    ("Press Esc while speaking to cancel. Nothing is pasted.", ["Naciśnij Esc podczas mówienia, aby anulować. Nic nie zostanie wklejone.", "说话时按 Esc 可取消，不会粘贴任何内容。", "話している途中で Esc を押すとキャンセルされ、何も貼り付けられません。", "Drück beim Sprechen Esc, um abzubrechen. Dann wird nichts eingefügt.", "Pulsa Esc mientras hablas para cancelar. No se pega nada."]),
     ("Press to talk", ["Naciśnij, aby mówić", "按下说话", "押して話す", "Drücken zum Sprechen", "Pulsa para hablar"]),
-    ("Press {} again. Hex pastes your words where your cursor is.", ["Naciśnij {} ponownie. Hex wklei słowa tam, gdzie jest kursor.", "再按一次 {}。Hex 会把文字粘贴到光标处。", "もう一度 {} を押すと、Hex がカーソルの位置に貼り付けます。", "Drück {} erneut. Hex fügt deine Worte am Cursor ein.", "Pulsa {} otra vez. Hex pega tus palabras donde esté el cursor."]),
-    ("Press {} in any app where you can type.", ["Naciśnij {} w dowolnej aplikacji, w której możesz pisać.", "在任何可以输入文字的应用中按下 {}。", "文字を入力できるアプリで {} を押します。", "Drück {} in jeder App, in der du tippen kannst.", "Pulsa {} en cualquier app donde puedas escribir."]),
     ("Press {}, say a sentence, then press it again.", ["Naciśnij {}, powiedz zdanie i naciśnij ponownie.", "按下 {}，说一句话，再按一次。", "{} を押して一文話し、もう一度押します。", "Drück {}, sag einen Satz und drück dann erneut.", "Pulsa {}, di una frase y vuelve a pulsar."]),
     ("Quit and reopen Hex to finish setup. macOS applies some permissions only after a restart.", ["Zamknij i ponownie otwórz Hex, aby dokończyć konfigurację. macOS stosuje niektóre uprawnienia dopiero po ponownym uruchomieniu.", "请退出并重新打开 Hex 以完成设置。macOS 的部分权限需要重启后才会生效。", "設定を完了するには Hex を終了して開き直してください。macOS の一部の許可は再起動後に有効になります。", "Beende Hex und öffne es erneut, um die Einrichtung abzuschließen. macOS übernimmt manche Berechtigungen erst nach einem Neustart.", "Cierra y vuelve a abrir Hex para terminar la configuración. macOS aplica algunos permisos solo tras reiniciar."]),
     ("Reopen Hex", ["Otwórz Hex ponownie", "重新打开 Hex", "Hex を開き直す", "Hex neu öffnen", "Reabrir Hex"]),
     ("Runs entirely on this computer", ["Działa w całości na tym komputerze", "完全在这台电脑上运行", "すべてこのコンピュータ上で動作します", "Läuft vollständig auf diesem Computer", "Funciona por completo en este ordenador"]),
     ("Skip", ["Pomiń", "跳过", "スキップ", "Überspringen", "Omitir"]),
     ("Something went wrong while transcribing. Try once more.", ["Coś poszło nie tak podczas transkrypcji. Spróbuj jeszcze raz.", "转写时出错了。请再试一次。", "文字起こし中に問題が発生しました。もう一度お試しください。", "Beim Transkribieren ist etwas schiefgegangen. Versuch es noch einmal.", "Algo salió mal al transcribir. Inténtalo otra vez."]),
-    ("Speak naturally. A small capsule at the bottom of the screen shows Hex is listening.", ["Mów naturalnie. Mała kapsułka na dole ekranu pokazuje, że Hex słucha.", "自然地说话。屏幕底部的小胶囊表示 Hex 正在聆听。", "自然に話してください。画面下の小さなカプセルが聞き取り中を示します。", "Sprich ganz natürlich. Eine kleine Kapsel unten auf dem Bildschirm zeigt, dass Hex zuhört.", "Habla con naturalidad. Una pequeña cápsula en la parte inferior de la pantalla indica que Hex escucha."]),
     ("Speech model", ["Model mowy", "语音模型", "音声モデル", "Sprachmodell", "Modelo de voz"]),
     ("Start using Hex", ["Zacznij używać Hex", "开始使用 Hex", "Hex を使い始める", "Hex verwenden", "Empezar a usar Hex"]),
     ("That was a quick tap. Keep holding {} while you speak.", ["To było krótkie stuknięcie. Trzymaj {} podczas mówienia.", "这只是轻点了一下。说话时请一直按住 {}。", "短いタップでした。話している間は {} を押し続けてください。", "Das war nur ein kurzes Tippen. Halte {} gedrückt, während du sprichst.", "Fue un toque rápido. Mantén {} mientras hablas."]),
@@ -788,7 +825,15 @@ const TRANSLATIONS: &[(&str, [&str; 5])] = &[
 #[cfg(test)]
 mod tests {
     use super::TRANSLATIONS;
-    use super::language_from_env;
+    use super::{language_from_env, primary_subtag};
+
+    #[test]
+    fn preferred_language_tags_reduce_to_their_primary_subtag() {
+        assert_eq!(primary_subtag("pt-BR").as_deref(), Some("pt"));
+        assert_eq!(primary_subtag("zh-Hans-CN").as_deref(), Some("zh"));
+        assert_eq!(primary_subtag("en").as_deref(), Some("en"));
+        assert_eq!(primary_subtag(""), None);
+    }
 
     #[test]
     fn posix_locale_variables_resolve_in_precedence_order() {

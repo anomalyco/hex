@@ -7,9 +7,9 @@
 //! that cannot stream always takes the offline path. Commands are handled in
 //! order on one thread, because a live stream holds the model's compute lease.
 
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
+use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
@@ -25,6 +25,10 @@ pub(crate) type Model = crate::local_transcriber::LocalTranscriber;
 
 /// Transcribes a complete 16 kHz clip offline on the engine thread.
 pub(crate) type Offline = Box<dyn FnOnce(&mut Model, Vec<f32>) -> Result<String, String> + Send>;
+
+/// Low-priority work on the model, such as a meeting chunk. It receives
+/// `None` instead of the model when dictation claimed the engine first.
+pub(crate) type Background = Box<dyn FnOnce(Option<&mut Model>) + Send>;
 
 /// A healthy finish decodes at most a couple of seconds of buffered audio.
 /// Past this the stream is aborted and the clip is transcribed offline.
@@ -53,6 +57,12 @@ pub(crate) enum Command {
     /// Work that needs the model itself, such as loading or switching it.
     #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     Run(Box<dyn FnOnce(&mut Model) + Send>),
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    Background {
+        /// The dictation generation when the work was submitted.
+        generation: u64,
+        work: Background,
+    },
     Shutdown,
 }
 
@@ -85,6 +95,9 @@ impl Source {
 pub struct TranscriptionEngine {
     commands: Sender<Command>,
     cancel: CancelToken,
+    /// Dictation requests sent so far. Background work submitted before a
+    /// newer request yields to it.
+    requests: Arc<AtomicU64>,
     /// Whether the loaded model can stream on its device.
     streams: Arc<AtomicBool>,
     next_stream: AtomicU64,
@@ -159,10 +172,12 @@ impl TranscriptionEngine {
         let cancel = CancelToken::new();
         let streams = Arc::new(AtomicBool::new(model.stream_options().is_some()));
         let (commands, receiver) = mpsc::channel();
+        let requests = Arc::new(AtomicU64::new(0));
         let worker = Worker {
             model,
             cancel: cancel.clone(),
             streams: streams.clone(),
+            requests: requests.clone(),
         };
         let thread = thread::Builder::new()
             .name("transcription-engine".into())
@@ -170,6 +185,7 @@ impl TranscriptionEngine {
         Ok(Self {
             commands,
             cancel,
+            requests,
             streams,
             next_stream: AtomicU64::new(0),
             thread: Some(thread),
@@ -184,6 +200,7 @@ impl TranscriptionEngine {
         let engine = Self {
             commands,
             cancel: CancelToken::new(),
+            requests: Arc::default(),
             streams: Arc::new(AtomicBool::new(true)),
             next_stream: AtomicU64::new(0),
             thread: None,
@@ -205,6 +222,7 @@ impl TranscriptionEngine {
             return None;
         }
         let id = self.next_stream.fetch_add(1, Ordering::Relaxed) + 1;
+        self.requests.fetch_add(1, Ordering::AcqRel);
         self.commands.send(Command::Begin { stream: id }).ok()?;
         Some(LiveStream {
             id,
@@ -239,6 +257,7 @@ impl TranscriptionEngine {
     ) -> Result<PendingTranscript> {
         let (reply, receiver) = mpsc::channel();
         let streamed = stream.is_some();
+        self.requests.fetch_add(1, Ordering::AcqRel);
         let stream = stream.map(|mut stream| {
             stream.finished = true;
             stream.id
@@ -266,7 +285,48 @@ impl TranscriptionEngine {
             .send(Command::Run(Box::new(work)))
             .map_err(|_| eyre!("transcription engine stopped"))
     }
+
+    /// Runs `work` with the model unless a dictation request was sent first or
+    /// a live stream is open, and returns `None` when one was. A request sent
+    /// while `work` runs waits for it: transcribe.cpp cannot abort a Metal run.
+    #[cfg(target_os = "macos")]
+    pub fn background<R: Send + 'static>(
+        &self,
+        work: impl FnOnce(&mut Model) -> R + Send + 'static,
+    ) -> Result<Option<R>> {
+        let (reply, receiver) = mpsc::channel();
+        let generation = self.requests.load(Ordering::Acquire);
+        self.commands
+            .send(Command::Background {
+                generation,
+                work: Box::new(move |model| {
+                    let _ = reply.send(model.map(work));
+                }),
+            })
+            .map_err(|_| eyre!("transcription engine stopped"))?;
+        receiver
+            .recv()
+            .map_err(|_| eyre!("transcription engine stopped"))
+    }
+
+    /// Makes this the engine that meeting transcription and the local API share.
+    #[cfg(target_os = "macos")]
+    pub fn share(self: &Arc<Self>) {
+        *SHARED.lock().unwrap_or_else(|error| error.into_inner()) = Arc::downgrade(self);
+    }
+
+    /// The running app's engine, when one is shared.
+    #[cfg(target_os = "macos")]
+    pub fn shared() -> Option<Arc<Self>> {
+        SHARED
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .upgrade()
+    }
 }
+
+#[cfg(target_os = "macos")]
+static SHARED: Mutex<std::sync::Weak<TranscriptionEngine>> = Mutex::new(std::sync::Weak::new());
 
 impl Drop for TranscriptionEngine {
     fn drop(&mut self) {
@@ -283,6 +343,7 @@ struct Worker {
     model: Model,
     cancel: CancelToken,
     streams: Arc<AtomicBool>,
+    requests: Arc<AtomicU64>,
 }
 
 /// How a live stream ended inside the worker.
@@ -333,6 +394,10 @@ impl Worker {
                     self.streams
                         .store(self.model.stream_options().is_some(), Ordering::Release);
                 }
+                Command::Background { generation, work } => {
+                    let current = self.requests.load(Ordering::Acquire) == generation;
+                    work(current.then_some(&mut self.model));
+                }
                 Command::Shutdown => return,
                 // Stale input for a stream that already ended.
                 Command::Feed { .. } | Command::Cancel { .. } => {}
@@ -368,6 +433,8 @@ impl Worker {
                         }
                     }
                     Command::Feed { .. } => {}
+                    // Background work never interrupts a capture.
+                    Command::Background { work, .. } => work(None),
                     Command::Cancel { stream: s } if s == id => return StreamEnd::Cancelled,
                     Command::Cancel { .. } => {}
                     Command::Finish {
@@ -584,6 +651,23 @@ mod tests {
                 .unwrap();
             assert_eq!(failed.wait().unwrap_err(), "dictation was cancelled");
             assert_eq!(ran.try_iter().collect::<Vec<_>>(), ["run", "finish"]);
+        }
+
+        #[test]
+        fn background_work_yields_to_dictation_sent_before_it_runs() {
+            let engine = TranscriptionEngine::start(Model::default()).unwrap();
+            assert_eq!(engine.background(|_| 7).unwrap(), Some(7));
+
+            let generation = engine.requests.fetch_add(1, Ordering::AcqRel);
+            let (reply, ran) = mpsc::channel();
+            engine
+                .commands
+                .send(Command::Background {
+                    generation,
+                    work: Box::new(move |model| reply.send(model.is_some()).unwrap()),
+                })
+                .unwrap();
+            assert!(!ran.recv().unwrap(), "stale background work must not run");
         }
 
         #[test]

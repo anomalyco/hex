@@ -27,8 +27,8 @@ app and **Disabled** when it does nothing.
 
 Download and run the installer for your PC:
 
-- x64: [`HEX-Setup-2.3.0-x64.exe`](https://downloads.hex.kitlangton.com/releases/HEX-Setup-2.3.0-x64.exe)
-- ARM64: [`HEX-Setup-2.3.0-arm64.exe`](https://downloads.hex.kitlangton.com/releases/HEX-Setup-2.3.0-arm64.exe)
+- x64: [`HEX-Setup-2.3.1-x64.exe`](https://downloads.hex.kitlangton.com/releases/HEX-Setup-2.3.1-x64.exe)
+- ARM64: [`HEX-Setup-2.3.1-arm64.exe`](https://downloads.hex.kitlangton.com/releases/HEX-Setup-2.3.1-arm64.exe)
 
 [hex.kitlangton.com](https://hex.kitlangton.com/) picks the right one. The
 installer needs no administrator rights: it installs for the current user,

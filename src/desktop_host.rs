@@ -27,6 +27,27 @@ pub(crate) struct DesktopListenerSnapshot {
     pub(crate) status: String,
     #[serde(default)]
     pub(crate) warning: Option<String>,
+    #[serde(default)]
+    pub(crate) shortcuts: DesktopShortcuts,
+}
+
+/// How the running listener receives its shortcuts.
+#[derive(Clone, Debug, Default, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+pub(crate) enum DesktopShortcuts {
+    /// Hex registers the shortcuts Settings records (X11).
+    #[default]
+    Registered,
+    /// The desktop's shortcuts portal bound these, in request order.
+    Portal(Vec<DesktopGrantedShortcut>),
+    /// Nothing registers shortcuts: the desktop's keybindings run `hex` commands.
+    Commands,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+pub(crate) struct DesktopGrantedShortcut {
+    pub(crate) name: String,
+    /// The trigger the desktop granted; `None` when it refused.
+    pub(crate) trigger: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -68,5 +89,6 @@ mod tests {
         assert!(snapshot.running);
         assert_eq!(snapshot.status, "Listening");
         assert!(snapshot.warning.is_none());
+        assert_eq!(snapshot.shortcuts, DesktopShortcuts::Registered);
     }
 }

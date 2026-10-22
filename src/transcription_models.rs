@@ -926,8 +926,8 @@ pub fn language_for_model(model: TranscriptionModelId, preferred: &str) -> Optio
 }
 
 /// The best starting selection for a dictation language: its first
-/// recommended runtime model. Unknown languages fall back to English.
-#[cfg(target_os = "windows")]
+/// recommended runtime model. Unknown languages fall back to English, so an
+/// English system starts with Parakeet Unified English.
 pub fn recommended_selection(language: &str) -> TranscriptionSelection {
     let language = LANGUAGES
         .iter()

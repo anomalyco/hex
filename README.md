@@ -69,7 +69,7 @@ including manual checks, with the `DisableUpdates` Boolean in the
 single Mac run `defaults write com.kitlangton.hex2 DisableUpdates -bool true`.
 Relaunch HEX to apply it. Model downloads still work.
 
-**Download blocked?** [Alternative download: GitHub — Hex 2.3.0](https://github.com/anomalyco/hex/releases/download/app-v2.3.0/HEX-2.3.0-arm64.dmg)
+**Download blocked?** [Alternative download: GitHub — Hex 2.3.1](https://github.com/anomalyco/hex/releases/download/app-v2.3.1/HEX-2.3.1-arm64.dmg)
 contains the identical signed DMG for Apple silicon and macOS 15+. App releases
 use `app-v…` tags; the repository also publishes separate TypeScript SDK releases.
 If an older installation cannot check for updates on your network, install the
@@ -191,7 +191,8 @@ redact any attachments; do not upload private dictation, recordings, or full log
 
 Diagnostics are stored at:
 
-- macOS: `~/Library/Application Support/voice-control/logs/`
+- macOS: `~/Library/Application Support/hex/logs/` (older versions used
+  `voice-control`; Hex moves it once and leaves a `voice-control` symlink)
 - Windows: `%APPDATA%\voice-control\logs\`
 - Linux: `~/.local/share/voice-control/logs/`, or under `XDG_DATA_HOME`
 
@@ -204,8 +205,8 @@ driver, Parakeet Unified English streams while you speak, so text arrives within
 about 100 ms of release even after minutes of talking; ARM64 transcribes on the
 CPU. Voice commands, meetings, and the local transcription API are not included.
 Download the installer for
-[x64](https://downloads.hex.kitlangton.com/releases/HEX-Setup-2.3.0-x64.exe) or
-[ARM64](https://downloads.hex.kitlangton.com/releases/HEX-Setup-2.3.0-arm64.exe)
+[x64](https://downloads.hex.kitlangton.com/releases/HEX-Setup-2.3.1-x64.exe) or
+[ARM64](https://downloads.hex.kitlangton.com/releases/HEX-Setup-2.3.1-arm64.exe)
 and run it; it installs for your user without administrator rights. It is not
 code-signed yet, so SmartScreen may warn: choose **More info**, then **Run
 anyway**. See the [Windows guide](docs/windows.md) for details or to build from
@@ -216,9 +217,12 @@ source.
 The Linux beta targets x86_64 Linux on i3/X11 and compatible wlroots Wayland
 compositors. It supports local hotkey dictation, a GPUI settings shell, and
 signed updates for direct installs. With a Vulkan graphics driver, dictation
-streams while you speak, as on macOS and Windows. Native Wayland requires explicit input-device
-access and compositor support for clipboard, virtual-keyboard, and layer-shell
-protocols. Voice commands and meetings are not included.
+streams while you speak, as on macOS and Windows. Native Wayland requires
+compositor support for clipboard, virtual-keyboard, and layer-shell protocols.
+Shortcuts come from the desktop's GlobalShortcuts portal, or you bind
+`hex dictation start` / `stop` / `toggle` in your compositor; see the
+[Linux guide](docs/linux.md#shortcuts). Voice commands and meetings are not
+included.
 
 Install the signed release on x86_64 Arch Linux (glibc 2.44 or later) with:
 

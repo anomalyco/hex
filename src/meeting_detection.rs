@@ -8,6 +8,10 @@ use crate::context::ContextSnapshot;
 use crate::microphone_activity::ActiveMicrophoneApplication;
 
 const STABLE_OBSERVATIONS: u8 = 4;
+/// A browser using the microphone on a page that is not a known call site
+/// must keep it for about 20 s: voice notes and dictation fields open the
+/// microphone for a few seconds, calls hold it for minutes.
+const BROWSER_STABLE_OBSERVATIONS: u8 = 40;
 /// An offered call stays snoozed until its app has been off the microphone
 /// for about a minute of 500 ms observations, so one call is offered once.
 const ABSENT_OBSERVATIONS_TO_RESET: u8 = 120;
@@ -25,6 +29,12 @@ pub struct MeetingCandidate {
     /// Whether `title` names this meeting rather than its app.
     #[serde(default)]
     pub named: bool,
+    /// Website host of the browser tab, when the browser adapter knows it.
+    #[serde(default)]
+    pub site: Option<String>,
+    /// Display name of the application using the microphone.
+    #[serde(default)]
+    pub application_name: Option<String>,
 }
 
 impl MeetingCandidate {
@@ -35,13 +45,75 @@ impl MeetingCandidate {
             source: MeetingSource::Manual,
             application: None,
             named: false,
+            site: None,
+            application_name: None,
         }
     }
 
     pub fn recording_start(&self) -> crate::meeting::MeetingStart {
         crate::meeting::MeetingStart {
             title: self.named.then(|| self.title.clone()),
-            app: (self.source != MeetingSource::Manual).then(|| self.source.label().into()),
+            app: self.app_label(),
+        }
+    }
+
+    /// What the call is in: the service, else the website, else the browser.
+    fn app_label(&self) -> Option<String> {
+        match self.source {
+            MeetingSource::Manual => None,
+            MeetingSource::BrowserCall => {
+                self.site.clone().or_else(|| self.application_name.clone())
+            }
+            source => Some(source.label().into()),
+        }
+    }
+
+    /// The offer capsule's headline.
+    pub fn offer_title(&self) -> String {
+        if self.named {
+            return self.title.clone();
+        }
+        match self.source {
+            MeetingSource::BrowserCall => match (&self.site, &self.application_name) {
+                (Some(site), _) => format!("Call on {site}"),
+                (None, Some(application)) => format!("Call in {application}"),
+                (None, None) => "Call detected".into(),
+            },
+            MeetingSource::SlackHuddle => "Slack huddle detected".into(),
+            source => format!("{} call detected", source.label()),
+        }
+    }
+
+    /// What "Never offer" silences: the website when known, else the app.
+    pub fn never_offer_target(&self) -> Option<crate::app_settings::NeverOfferMeeting> {
+        if let Some(site) = &self.site {
+            return Some(crate::app_settings::NeverOfferMeeting {
+                key: site.clone(),
+                label: site.clone(),
+            });
+        }
+        let application = self.application.clone()?;
+        Some(crate::app_settings::NeverOfferMeeting {
+            label: self
+                .application_name
+                .clone()
+                .unwrap_or_else(|| application.clone()),
+            key: application,
+        })
+    }
+
+    /// Whether the user asked never to be offered this site or app.
+    pub fn is_silenced(&self, keys: &[String]) -> bool {
+        keys.iter().any(|key| {
+            self.site.as_deref() == Some(key.as_str())
+                || self.application.as_deref() == Some(key.as_str())
+        })
+    }
+
+    fn required_observations(&self) -> u8 {
+        match self.source {
+            MeetingSource::BrowserCall => BROWSER_STABLE_OBSERVATIONS,
+            _ => STABLE_OBSERVATIONS,
         }
     }
 }
@@ -138,7 +210,7 @@ impl MeetingDetector {
                 1
             }
         };
-        if observations < STABLE_OBSERVATIONS {
+        if observations < candidate.required_observations() {
             return None;
         }
         self.pending = None;
@@ -193,15 +265,29 @@ pub fn candidate_from_microphone(
     context: &ContextSnapshot,
 ) -> Option<MeetingCandidate> {
     let canonical_bundle = application.canonical_bundle_id()?;
+    let application_name = crate::microphone_activity::canonical_application_name(canonical_bundle)
+        .map(str::to_string)
+        .unwrap_or_else(|| application.name.clone());
     if application.is_browser() {
-        if context_matches_browser(canonical_bundle, &application.name, context)
-            && let Some(mut candidate) = candidate_from_context(context)
-        {
+        let matches = context_matches_browser(canonical_bundle, &application.name, context);
+        let site = matches
+            .then(|| context.browser_host())
+            .flatten()
+            .map(|host| {
+                host.strip_prefix("www.")
+                    .unwrap_or(host)
+                    .to_ascii_lowercase()
+            });
+        if matches && let Some(mut candidate) = candidate_from_context(context) {
             candidate.application = Some(canonical_bundle.into());
+            candidate.application_name = Some(application_name);
+            candidate.site = site;
             return Some(candidate);
         }
-        let mut candidate = candidate(MeetingSource::BrowserCall, canonical_bundle, "Browser call");
+        let mut candidate = candidate(MeetingSource::BrowserCall, canonical_bundle, "");
         candidate.application = Some(canonical_bundle.into());
+        candidate.application_name = Some(application_name);
+        candidate.site = site;
         return Some(candidate);
     }
     let (source, title) = match canonical_bundle {
@@ -213,6 +299,7 @@ pub fn candidate_from_microphone(
     };
     let mut candidate = candidate(source, canonical_bundle, title);
     candidate.application = Some(canonical_bundle.into());
+    candidate.application_name = Some(application_name);
     Some(candidate)
 }
 
@@ -255,6 +342,8 @@ fn candidate(source: MeetingSource, identity: &str, title: &str) -> MeetingCandi
         source,
         application: None,
         named: false,
+        site: None,
+        application_name: None,
     }
 }
 
@@ -533,5 +622,90 @@ mod tests {
         for _ in 0..STABLE_OBSERVATIONS + 2 {
             assert!(detector.observe(Some(fallback.clone())).is_none());
         }
+    }
+
+    fn brave() -> ActiveMicrophoneApplication {
+        ActiveMicrophoneApplication {
+            pid: 49686,
+            bundle_id: "com.brave.Browser".into(),
+            name: "Brave Browser".into(),
+        }
+    }
+
+    #[test]
+    fn offer_titles_name_the_service_site_or_browser_without_repeating_call() {
+        let problems = context(
+            "Brave Browser",
+            Some("https://www.problems.kitlangton.com/board"),
+            "Problems",
+        );
+        let site = candidate_from_microphone(&brave(), &problems).unwrap();
+        assert_eq!(site.source, MeetingSource::BrowserCall);
+        assert_eq!(site.offer_title(), "Call on problems.kitlangton.com");
+        assert_eq!(
+            site.recording_start().app.as_deref(),
+            Some("problems.kitlangton.com")
+        );
+
+        let unknown = candidate_from_microphone(&brave(), &ContextSnapshot::default()).unwrap();
+        assert_eq!(unknown.offer_title(), "Call in Brave Browser");
+
+        let meet = candidate_from_microphone(
+            &brave(),
+            &context(
+                "Brave Browser",
+                Some("https://meet.google.com/abc-defg-hij"),
+                "Meet - abc-defg-hij - Brave",
+            ),
+        )
+        .unwrap();
+        assert_eq!(meet.offer_title(), "Google Meet call detected");
+        assert_eq!(
+            candidate(MeetingSource::SlackHuddle, "slack", "Slack huddle").offer_title(),
+            "Slack huddle detected"
+        );
+    }
+
+    #[test]
+    fn never_offer_silences_the_site_when_known_and_the_app_otherwise() {
+        let problems = context(
+            "Brave Browser",
+            Some("https://problems.kitlangton.com/"),
+            "Problems",
+        );
+        let site = candidate_from_microphone(&brave(), &problems).unwrap();
+        let target = site.never_offer_target().unwrap();
+        assert_eq!(target.key, "problems.kitlangton.com");
+        assert!(site.is_silenced(&[target.key]));
+
+        let unknown = candidate_from_microphone(&brave(), &ContextSnapshot::default()).unwrap();
+        let app = unknown.never_offer_target().unwrap();
+        assert_eq!(
+            (app.key.as_str(), app.label.as_str()),
+            ("com.brave.Browser", "Brave Browser")
+        );
+        assert!(!unknown.is_silenced(&["problems.kitlangton.com".into()]));
+        // An app-level entry silences every site in that browser.
+        assert!(site.is_silenced(&["com.brave.Browser".into()]));
+    }
+
+    #[test]
+    fn a_browser_voice_note_is_not_offered_but_a_sustained_browser_call_is() {
+        let problems = context(
+            "Brave Browser",
+            Some("https://problems.kitlangton.com/"),
+            "Problems",
+        );
+        let candidate = candidate_from_microphone(&brave(), &problems).unwrap();
+        let mut detector = MeetingDetector::default();
+        // A six-second voice note: 12 observations, then the mic closes.
+        for _ in 0..12 {
+            assert!(detector.observe(Some(candidate.clone())).is_none());
+        }
+        assert!(detector.observe(None).is_none());
+        for _ in 0..BROWSER_STABLE_OBSERVATIONS - 1 {
+            assert!(detector.observe(Some(candidate.clone())).is_none());
+        }
+        assert!(detector.observe(Some(candidate)).is_some());
     }
 }

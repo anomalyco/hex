@@ -32,7 +32,7 @@ pub enum Request {
     CaptureShortcut,
     CaptureShortcutFor(ShortcutTarget),
     CancelShortcut,
-    /// The chord Settings recorded on X11, for the service to register.
+    /// The chord Settings recorded, for the service to register.
     SetShortcut {
         target: ShortcutTarget,
         shortcut: crate::desktop_host::DesktopShortcut,
@@ -44,6 +44,8 @@ pub enum Request {
     CancelModel,
     /// Settings saved `settings.json`; adopt it.
     ReloadSettings,
+    /// A `hex dictation`, `hex voice-action`, or `hex paste-last` command.
+    Shortcut(crate::linux_input::ShortcutCommand),
     Shutdown,
 }
 
@@ -207,7 +209,9 @@ fn connect() -> Result<UnixStream> {
     {
         bail!("Refusing an insecure HEX service socket");
     }
-    let stream = UnixStream::connect(path)?;
+    // A crashed service leaves its socket behind.
+    let stream =
+        UnixStream::connect(path).wrap_err("HEX service is not running; run `hex start`")?;
     check_peer(&stream)?;
     Ok(stream)
 }

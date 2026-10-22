@@ -1302,7 +1302,7 @@ fn stream_model_prepare(
         }
         crate::transcription_models::ModelPreparationStage::Loading.store(&stage);
         transcription
-            .prepare(selection)
+            .prepare(selection, canceled)
             .map_err(|error| eyre!("model preparation failed: {error:?}"))
     });
     stream_model_prepare_with(stream, model, preparing, shutdown, preparer);
