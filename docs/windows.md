@@ -207,8 +207,7 @@ hex app
   type-checked.
 - The window gets the executable's icon from Rune's `App::on_window` hook
   (its HWND through `WindowHandle::with_raw_handle`).
-- Not yet: the custom caption (native title bar for now) and app icons in
-  Modes.
+- Not yet: the custom caption (native title bar for now).
 - Without a tray (creation failed) closing the window quits Hex.
   See the [single-process plan](plans/single-process.md#windows-under-rune).
 
@@ -264,7 +263,7 @@ current-user startup registry, UI Automation, and Windows capture APIs.
 | Recording tones and click-through recording/processing HUD | Implemented; a CPU port of the macOS Metal shader drawn in a Rune overlay, never run on Windows |
 | History retention, list, detail, search, copy, delete, and clear | Implemented |
 | Text replacements | Implemented in the Windows Modes pane using the shared phrase-boundary replacement engine |
-| Application picker in Modes | Implemented; lists Start menu shortcuts, App Paths, and apps with an open window. No icons and no file dialog yet |
+| Application picker in Modes | Implemented; lists Start menu shortcuts, App Paths, and apps with an open window, with each executable's icon; "Choose a file…" opens `IFileOpenDialog` |
 | Interface language | Implemented on every OS; English, Polish, Chinese, Japanese, German, and Spanish |
 | Resident tray and Launch at login | Implemented |
 | Application modes with per-mode corrections, OpenCode rewriting, and transformations | Implemented on the shared ordered processing policy; global and contextual profiles persist their own corrections, model, reasoning variant, deadline, and ordered built-in/TypeScript transformations, while modes match by application name — physical end-to-end paste/UI validation remains |

@@ -1032,8 +1032,10 @@ Linux `hex` -> the Linux window on Rune, in the Hex process // dev.rune-ui
 ├── Transcription picker -> ChooseModel / CancelModel; progress from the snapshot
 ├── First-run setup -> onboarding::Flow without permissions or practice
 ├── Modes: "Choose a file…" through file_dialog (FileChooser portal); drag to reorder
+├── Modes: app icons (hicolor theme or pixmaps, PNG or SVG) in the picker,
+│   chips, and mode rows; monogram while loading or without an icon
 ├── Model and application searches: Up/Down highlight, Enter picks it
-├── Not yet: app icons, right-click delete
+├── Not yet: right-click delete
 └── macOS/Windows surfaces as scenes too (Capabilities + preview data):
     Commands, Meetings, Fun, HUD Lab, Activity, permission rows, Launch at
     login, Dock icon, shortcut sides, Meetings and Hex microphone sections,
@@ -1052,9 +1054,10 @@ macOS `hex app` -> one menu-bar process, Rune window // dev.rune-ui-macos
 ├── Sidebar and pane header move the window (Rune El::window_drag; the title bar is transparent)
 ├── While the window shows, its poll re-checks timed state every 250 ms (Rune Tx::wake_after); close hides it (Dock policy restored)
 ├── ⌘Q / menu-bar Quit / Ctrl-C quit and join
-└── Meeting capsules: Rune interactive overlays (offer, call ended, ready, recording
-    with Copy new (N) / Copy all of the in-call transcript; compact until hovered,
-    dragged to any corner)
+├── Meeting capsules: Rune interactive overlays (offer, call ended, ready, recording
+│   with Copy new (N) / Copy all of the in-call transcript; compact until hovered,
+│   dragged to any corner)
+└── Modes app icons: Finder's icon (NSWorkspace) in the picker, chips, and mode rows
 Windows `hex app` -> one tray process, Rune window // dev.rune-ui-windows
 ├── Runtime thread owns WindowsDesktopHost (listener, model preparation, OpenCode, transformations, updater)
 ├── Named event: a second launch shows the window; tray Show / Enable-Disable / Quit
@@ -1062,7 +1065,8 @@ Windows `hex app` -> one tray process, Rune window // dev.rune-ui-windows
 ├── Settings adds Launch at login and Check now; no terminal paste; chord capture polls
 ├── HUD: shared indicator model + CPU shader in a Rune overlay
 ├── Modes: "Choose a file…" opens IFileOpenDialog (file_dialog) on its own STA thread, no owner window
-└── Not yet: custom caption, app icons
+├── Modes app icons: the executable's first icon (PrivateExtractIconsW)
+└── Not yet: custom caption
 iOS prototype -> Record/transcribe/copy and keyboard handoff
 Unmerged Windows / deferred features -> Not part of this map
 ```
