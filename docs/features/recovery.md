@@ -122,6 +122,12 @@ and re-enabling a real tap.
 The [2.1.11 release notes](../releases/2.1.11.md) describe the shipped navigation
 and missed-release fix; they are historical context, not a current-tree test.
 
+`recover.windows-lock`: Win+L can hide the Windows-key release and block shortcuts
+after unlock. The hook refreshes modifiers on delivered input, then applies the
+event; it does not generate capture actions. Regression tests in
+[windows_input.rs](../../src/windows_input.rs) cover missed releases, held keys,
+and pre-event snapshots. All four passed; native post-fix lock/unlock is unverified.
+
 ### Reopen With Fresh Audio
 
 `recover.microphone`: missing input at startup and an interrupted stream use

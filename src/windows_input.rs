@@ -553,7 +553,11 @@ unsafe extern "system" fn keyboard_hook(code: i32, wparam: WPARAM, lparam: LPARA
             .lock()
             .unwrap_or_else(|error| error.into_inner());
         if let Some(state) = guard.as_mut() {
-            let modifier_event = state.modifiers.update(event.vkCode, is_down);
+            let modifier_event = state.modifiers.update_with_snapshot(
+                event.vkCode,
+                is_down,
+                ModifierState::current(),
+            );
             // During a chord capture the hook only tracks modifier state;
             // it neither triggers actions nor suppresses keys, so the
             // capture can observe every key through GetAsyncKeyState.
@@ -739,6 +743,13 @@ fn send_event(state: &mut CallbackState, action: HotkeyAction, timestamp_ms: u32
 }
 
 impl ModifierState {
+    fn update_with_snapshot(&mut self, key: u32, is_down: bool, before_event: Self) -> bool {
+        // Recover modifier releases missed during Win+L.
+        // GetAsyncKeyState does not include the current hook event yet.
+        *self = before_event;
+        self.update(key, is_down)
+    }
+
     fn current() -> Self {
         Self {
             left_control: key_down(VK_LCONTROL),
@@ -971,6 +982,70 @@ pub(crate) fn virtual_key(key: &str) -> Result<u32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fresh_shortcut_recovers_after_lock_hides_windows_key_release() {
+        for windows_key in [VK_LWIN, VK_RWIN] {
+            let mut modifiers = ModifierState::default();
+            modifiers.update(u32::from(windows_key), true);
+            modifiers.update(u32::from(b'L'), true);
+            // Win+L switches desktops before the hook receives the Win release.
+            // The next Ctrl press sees a neutral snapshot before its own update.
+            modifiers.update_with_snapshot(u32::from(VK_LCONTROL), true, ModifierState::default());
+            assert!(modifiers.matches(&WindowsHotkey::default()));
+        }
+    }
+
+    #[test]
+    fn shortcut_snapshot_keeps_a_physically_held_windows_key() {
+        let mut modifiers = ModifierState::default();
+        modifiers.update_with_snapshot(
+            u32::from(VK_LCONTROL),
+            true,
+            ModifierState {
+                left_windows: true,
+                ..ModifierState::default()
+            },
+        );
+        assert!(!modifiers.matches(&WindowsHotkey::default()));
+    }
+
+    #[test]
+    fn modifier_event_overrides_the_pre_event_snapshot() {
+        let mut modifiers = ModifierState::default();
+        assert!(modifiers.update_with_snapshot(
+            u32::from(VK_LCONTROL),
+            true,
+            ModifierState::default(),
+        ));
+        assert!(modifiers.matches(&WindowsHotkey::default()));
+        assert!(modifiers.update_with_snapshot(
+            u32::from(VK_LCONTROL),
+            false,
+            ModifierState {
+                left_control: true,
+                ..ModifierState::default()
+            },
+        ));
+        assert!(!modifiers.any_required_down(&WindowsHotkey::default()));
+    }
+
+    #[test]
+    fn non_modifier_event_refreshes_modifiers_without_becoming_a_modifier_event() {
+        let mut modifiers = ModifierState {
+            right_windows: true,
+            ..ModifierState::default()
+        };
+        assert!(!modifiers.update_with_snapshot(
+            u32::from(VK_SPACE),
+            true,
+            ModifierState {
+                right_control: true,
+                ..ModifierState::default()
+            },
+        ));
+        assert!(modifiers.matches(&WindowsHotkey::default()));
+    }
 
     #[test]
     fn default_binding_is_ctrl_space() {
