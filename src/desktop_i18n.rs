@@ -734,6 +734,15 @@ const TRANSLATIONS: &[(&str, [&str; 5])] = &[
     ("Turn on Apple Intelligence in System Settings to use this", ["Włącz Apple Intelligence w Ustawieniach systemowych, aby z tego korzystać", "在“系统设置”中打开 Apple 智能以使用此功能", "使用するにはシステム設定で Apple Intelligence をオンにしてください", "Aktiviere Apple Intelligence in den Systemeinstellungen, um dies zu nutzen", "Activa Apple Intelligence en Ajustes del Sistema para usar esto"]),
     ("The Apple Intelligence model is still downloading", ["Model Apple Intelligence wciąż się pobiera", "Apple 智能模型仍在下载", "Apple Intelligence のモデルをダウンロード中です", "Das Apple-Intelligence-Modell wird noch geladen", "El modelo de Apple Intelligence aún se está descargando"]),
     ("Requires macOS 26 or later", ["Wymaga macOS 26 lub nowszego", "需要 macOS 26 或更高版本", "macOS 26 以降が必要です", "Erfordert macOS 26 oder neuer", "Requiere macOS 26 o posterior"]),
+    // Live meeting notes.
+    ("Notes", ["Notatki", "笔记", "メモ", "Notizen", "Notas"]),
+    ("Now", ["Teraz", "当前", "現在", "Jetzt", "Ahora"]),
+    ("Decision", ["Decyzja", "决定", "決定", "Entscheidung", "Decisión"]),
+    ("To do", ["Do zrobienia", "待办", "やること", "To-do", "Pendiente"]),
+    ("Question", ["Pytanie", "问题", "質問", "Frage", "Pregunta"]),
+    ("Show notes", ["Pokaż notatki", "显示笔记", "メモを表示", "Notizen anzeigen", "Mostrar notas"]),
+    ("Hide notes", ["Ukryj notatki", "隐藏笔记", "メモを隠す", "Notizen ausblenden", "Ocultar notas"]),
+    ("Notes appear as the call goes on.", ["Notatki pojawią się w trakcie rozmowy.", "通话进行时会出现笔记。", "通話が進むとメモが表示されます。", "Notizen erscheinen im Laufe des Gesprächs.", "Las notas aparecen a medida que avanza la llamada."]),
     ("Apple Intelligence is unavailable", ["Apple Intelligence jest niedostępne", "Apple 智能不可用", "Apple Intelligence は利用できません", "Apple Intelligence ist nicht verfügbar", "Apple Intelligence no está disponible"]),
 ];
 
@@ -791,6 +800,7 @@ mod tests {
         include_str!("rune_ui/lists.rs"),
         include_str!("rune_ui/macos_host.rs"),
         include_str!("rune_ui/meeting_capsules.rs"),
+        include_str!("rune_ui/meeting_outline.rs"),
         include_str!("rune_ui/meetings.rs"),
         include_str!("rune_ui/models.rs"),
         include_str!("rune_ui/modes.rs"),

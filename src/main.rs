@@ -411,6 +411,54 @@ enum MeetingCommand {
         #[arg(long)]
         transcribe: bool,
     },
+    /// Run live notes over a `transcript.ndjson` or transcript Markdown as a
+    /// recording would, and report each pass's latency and prompt size.
+    LiveNotes {
+        path: PathBuf,
+        /// Only the first minutes of the transcript.
+        #[arg(long)]
+        minutes: Option<u64>,
+        /// Use the deterministic stand-in instead of Apple Intelligence.
+        #[arg(long)]
+        canned: bool,
+        /// Save Apple Intelligence's raw output for each pass.
+        #[arg(long, conflicts_with_all = ["canned", "recorded"])]
+        record: Option<PathBuf>,
+        /// Replay raw output saved by `--record` instead of running a model.
+        #[arg(long, conflicts_with = "canned")]
+        recorded: Option<PathBuf>,
+        /// Save the outline after each pass, for `meeting capsule-lab`.
+        #[arg(long)]
+        snapshots: Option<PathBuf>,
+    },
+    /// Render the recording capsule headless over outline snapshots saved by
+    /// `meeting live-notes --snapshots`. Rune arguments follow `--`
+    /// (`--scene`, `--snap`, `--frames`, `--script`).
+    CapsuleLab {
+        snapshots: PathBuf,
+        /// Meeting time per second of the scene.
+        #[arg(long, default_value_t = 30.0)]
+        speed: f32,
+        #[arg(last = true)]
+        rune_args: Vec<String>,
+    },
+    /// Replay a transcript as a recording meeting, with the recording capsule
+    /// and the Meetings window. Needs an empty `HEX_APPLICATION_SUPPORT_DIR`.
+    Replay {
+        path: PathBuf,
+        /// Meeting time per wall-clock second.
+        #[arg(long, default_value_t = 30.0)]
+        speed: f32,
+        #[arg(long)]
+        minutes: Option<u64>,
+        #[arg(long)]
+        canned: bool,
+        /// Open the capsule's notes panel.
+        #[arg(long)]
+        notes_open: bool,
+        #[arg(long, default_value = "Design sync")]
+        title: String,
+    },
 }
 
 #[cfg(target_os = "macos")]
@@ -708,6 +756,58 @@ fn main() -> Result<()> {
             );
             Ok(())
         }
+        #[cfg(debug_assertions)]
+        Command::Meeting {
+            command:
+                MeetingCommand::LiveNotes {
+                    path,
+                    minutes,
+                    canned,
+                    record,
+                    recorded,
+                    snapshots,
+                },
+        } => {
+            use meeting::SimulatedModel;
+            let entries = meeting::replay_entries(&path, minutes.map(|minutes| minutes * 60_000))?;
+            let model = match (&recorded, canned) {
+                (Some(recorded), _) => SimulatedModel::Recorded(recorded),
+                (None, true) => SimulatedModel::Canned,
+                (None, false) => SimulatedModel::AppleIntelligence {
+                    record: record.as_deref(),
+                },
+            };
+            print!(
+                "{}",
+                meeting::simulate_live_notes(&entries, model, snapshots.as_deref())?
+            );
+            Ok(())
+        }
+        #[cfg(debug_assertions)]
+        Command::Meeting {
+            command:
+                MeetingCommand::Replay {
+                    path,
+                    speed,
+                    minutes,
+                    canned,
+                    notes_open,
+                    title,
+                },
+        } => {
+            let entries = meeting::replay_entries(&path, minutes.map(|minutes| minutes * 60_000))?;
+            keyboard::initialize_layout()?;
+            rune_ui::meeting_capsules::replay(entries, speed, &title, canned, notes_open)
+        }
+        #[cfg(debug_assertions)]
+        Command::Meeting {
+            command:
+                MeetingCommand::CapsuleLab {
+                    snapshots,
+                    speed,
+                    rune_args,
+                },
+        } => rune_ui::meeting_capsules::lab(&snapshots, speed, rune_args),
         Command::BenchmarkTranscription {
             manifest,
             backend,

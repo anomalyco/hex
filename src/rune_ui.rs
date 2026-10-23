@@ -22,6 +22,7 @@ mod hud_lab;
 mod lists;
 #[cfg(target_os = "macos")]
 pub(crate) mod meeting_capsules;
+mod meeting_outline;
 mod meetings;
 mod models;
 mod modes;
@@ -1143,6 +1144,19 @@ const SCENES: &[Scene] = &[
     ("meetings-recording", |ui| {
         *ui = mac_fixture();
         ui.meetings.select("preview-live".into());
+        ui.pane = Pane::Meetings;
+    }),
+    ("meetings-notes-open", |ui| {
+        *ui = mac_fixture();
+        ui.meetings.select("preview-live".into());
+        ui.meetings.open_note = ui
+            .meetings
+            .meetings
+            .first()
+            .and_then(|meeting| meeting.outline.as_ref())
+            .and_then(|outline| outline.sections.get(1))
+            .and_then(|section| section.notes.first())
+            .map(|note| note.id());
         ui.pane = Pane::Meetings;
     }),
     ("meetings-actions", |ui| {

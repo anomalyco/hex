@@ -18,11 +18,18 @@ unsafe extern "C" {
         timeout_ms: u64,
         error: *mut *mut c_char,
     ) -> *mut c_char;
+    fn hex_apple_intelligence_live_notes(
+        instructions: *const c_char,
+        prompt: *const c_char,
+        timeout_ms: u64,
+        error: *mut *mut c_char,
+    ) -> *mut c_char;
     fn hex_apple_intelligence_free_string(string: *mut c_char);
 }
 
 const AVAILABILITY_TTL: Duration = Duration::from_secs(10);
 const CONTEXT_WINDOW_MARKER: &str = "context-window:";
+const REFUSAL_MARKER: &str = "refused:";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Availability {
@@ -52,7 +59,7 @@ impl Availability {
 
     pub fn description(self) -> &'static str {
         match self {
-            Self::Available => "Meeting titles and short summaries, written on this Mac",
+            Self::Available => "Live notes, titles, and short summaries, written on this Mac",
             Self::DeviceNotEligible => "This Mac does not support Apple Intelligence",
             Self::AppleIntelligenceNotEnabled => {
                 "Turn on Apple Intelligence in System Settings to use this"
@@ -93,10 +100,30 @@ pub struct GeneratedNotes {
     pub summary: String,
 }
 
+/// One pass of live meeting notes: the current topic and at most three notes.
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, serde::Serialize)]
+pub struct GeneratedLiveNotes {
+    pub topic: String,
+    #[serde(default)]
+    pub notes: Vec<GeneratedLiveNote>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, serde::Serialize)]
+pub struct GeneratedLiveNote {
+    pub kind: String,
+    pub text: String,
+    #[serde(default)]
+    pub owner: String,
+    #[serde(default)]
+    pub time: String,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum GenerationError {
     /// The prompt exceeded the model's context window.
     ContextWindow,
+    /// The model refused the prompt or its guardrails blocked it.
+    Refused,
     Failed(String),
 }
 
@@ -104,6 +131,7 @@ impl std::fmt::Display for GenerationError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::ContextWindow => formatter.write_str("the transcript exceeded the model context"),
+            Self::Refused => formatter.write_str("the model refused the transcript"),
             Self::Failed(message) => formatter.write_str(message),
         }
     }
@@ -129,27 +157,57 @@ pub fn generate_title(
     generate(instructions, prompt, true, timeout).map(|notes| notes.title)
 }
 
+/// Generates one pass of live meeting notes over new transcript lines.
+pub fn generate_live_notes(
+    instructions: &str,
+    prompt: &str,
+    timeout: Duration,
+) -> Result<GeneratedLiveNotes, GenerationError> {
+    call(instructions, prompt, |instructions, prompt, error| {
+        // SAFETY: Both strings outlive the call and the bridge writes only `error`.
+        unsafe {
+            hex_apple_intelligence_live_notes(
+                instructions,
+                prompt,
+                timeout.as_millis().min(u64::MAX as u128) as u64,
+                error,
+            )
+        }
+    })
+}
+
 fn generate(
     instructions: &str,
     prompt: &str,
     title_only: bool,
     timeout: Duration,
 ) -> Result<GeneratedNotes, GenerationError> {
+    call(instructions, prompt, |instructions, prompt, error| {
+        // SAFETY: Both strings outlive the call and the bridge writes only `error`.
+        unsafe {
+            hex_apple_intelligence_notes(
+                instructions,
+                prompt,
+                title_only,
+                timeout.as_millis().min(u64::MAX as u128) as u64,
+                error,
+            )
+        }
+    })
+}
+
+/// Runs one bridge call and decodes its JSON result.
+fn call<T: for<'de> Deserialize<'de>>(
+    instructions: &str,
+    prompt: &str,
+    bridge: impl FnOnce(*const c_char, *const c_char, *mut *mut c_char) -> *mut c_char,
+) -> Result<T, GenerationError> {
     let instructions =
         CString::new(instructions).map_err(|error| GenerationError::Failed(error.to_string()))?;
     let prompt = CString::new(prompt.replace('\0', ""))
         .map_err(|e| GenerationError::Failed(e.to_string()))?;
     let mut error = ptr::null_mut();
-    // SAFETY: Both strings outlive the call and the bridge writes only `error`.
-    let json = unsafe {
-        hex_apple_intelligence_notes(
-            instructions.as_ptr(),
-            prompt.as_ptr(),
-            title_only,
-            timeout.as_millis().min(u64::MAX as u128) as u64,
-            &mut error,
-        )
-    };
+    let json = bridge(instructions.as_ptr(), prompt.as_ptr(), &mut error);
     if json.is_null() {
         let message = take_string(error).unwrap_or_else(|| "Apple Intelligence failed".into());
         return Err(classify_error(message));
@@ -158,9 +216,14 @@ fn generate(
     serde_json::from_str(&text).map_err(|error| GenerationError::Failed(error.to_string()))
 }
 
-fn classify_error(message: String) -> GenerationError {
+pub(crate) fn classify_error(message: String) -> GenerationError {
     if message.starts_with(CONTEXT_WINDOW_MARKER) || message.contains("context window") {
         GenerationError::ContextWindow
+    } else if message.starts_with(REFUSAL_MARKER)
+        || message.contains("refused to answer")
+        || message.contains("guardrails were triggered")
+    {
+        GenerationError::Refused
     } else {
         GenerationError::Failed(message)
     }

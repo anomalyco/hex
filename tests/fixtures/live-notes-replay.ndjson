@@ -1,0 +1,79 @@
+{"source": "system", "start_ms": 4000, "end_ms": 9384, "text": "Okay, I think everyone's here. Should we start with the first-run flow for Lantern?"}
+{"source": "microphone", "start_ms": 10784, "end_ms": 18091, "text": "Yeah, let's do onboarding first. Right now new players land in the hub with no idea what to do."}
+{"source": "system", "start_ms": 19491, "end_ms": 25644, "text": "The playtest numbers back that up. About forty percent quit before they finish the first puzzle."}
+{"source": "microphone", "start_ms": 27044, "end_ms": 34351, "text": "That's rough. I think the tutorial room is too long. It explains every mechanic before you can touch anything."}
+{"source": "system", "start_ms": 35751, "end_ms": 42674, "text": "What if the first puzzle teaches the lantern itself, and we hold back the mirrors until room three?"}
+{"source": "microphone", "start_ms": 44074, "end_ms": 49458, "text": "I like that. Light first, mirrors later. Players learn by doing instead of reading."}
+{"source": "system", "start_ms": 50858, "end_ms": 57396, "text": "We'd need to cut the narrator lines in the tutorial, though. Most of them assume mirrors already."}
+{"source": "microphone", "start_ms": 58796, "end_ms": 65334, "text": "That's fine. The narrator is the weakest part anyway. Let's keep two lines and drop the rest."}
+{"source": "system", "start_ms": 66734, "end_ms": 70580, "text": "Do we still want the skip button for returning players?"}
+{"source": "microphone", "start_ms": 71980, "end_ms": 76980, "text": "Yes, definitely keep skip. Returning players hated replaying it in the last build."}
+{"source": "system", "start_ms": 78380, "end_ms": 84533, "text": "Okay, so we agreed: lantern-only first room, mirrors in room three, two narrator lines, keep skip."}
+{"source": "microphone", "start_ms": 85933, "end_ms": 92856, "text": "Agreed. I'll rebuild the first room this week and send a build to the playtest group on Friday."}
+{"source": "system", "start_ms": 94256, "end_ms": 101179, "text": "Great. One open question is whether co-op players share a lantern in the tutorial or each get one."}
+{"source": "microphone", "start_ms": 102579, "end_ms": 109117, "text": "Good question. Sharing forces them to talk, but it might be frustrating if one person hogs it."}
+{"source": "system", "start_ms": 110517, "end_ms": 115132, "text": "Let's test both in the Friday build and look at the recordings."}
+{"source": "microphone", "start_ms": 116532, "end_ms": 119608, "text": "Sounds good. Two variants, shared and separate lanterns."}
+{"source": "system", "start_ms": 121008, "end_ms": 126008, "text": "And we should measure time to first puzzle solved, not just quit rate."}
+{"source": "microphone", "start_ms": 127408, "end_ms": 133561, "text": "Yeah, time to first solve is the real number. I'll add that event to the analytics."}
+{"source": "system", "start_ms": 134961, "end_ms": 138037, "text": "Perfect. I think that covers onboarding for now."}
+{"source": "microphone", "start_ms": 139437, "end_ms": 144437, "text": "Cool. Should we move on to the multiplayer stuff? That's the scary part."}
+{"source": "system", "start_ms": 149837, "end_ms": 156760, "text": "So the lobby is still dropping players when the host migrates. It happened six times in yesterday's session."}
+{"source": "microphone", "start_ms": 158160, "end_ms": 162390, "text": "Is that the relay server or our own host migration code?"}
+{"source": "system", "start_ms": 163790, "end_ms": 171482, "text": "Mostly ours. When the host leaves, the new host doesn't get the puzzle state fast enough and clients time out."}
+{"source": "microphone", "start_ms": 172882, "end_ms": 175574, "text": "What's the timeout right now? Five seconds?"}
+{"source": "system", "start_ms": 176974, "end_ms": 183127, "text": "Three seconds, and the state snapshot is almost two megabytes because it includes every light ray."}
+{"source": "microphone", "start_ms": 184527, "end_ms": 189527, "text": "We don't need the rays. Clients can recompute them from the mirror positions."}
+{"source": "system", "start_ms": 190927, "end_ms": 197850, "text": "True, the rays are deterministic. If we only send mirror angles and lantern positions, the snapshot is tiny."}
+{"source": "microphone", "start_ms": 199250, "end_ms": 203096, "text": "Let's do that. Send the inputs, recompute the light locally."}
+{"source": "system", "start_ms": 204496, "end_ms": 208726, "text": "There's a risk of drift if floating point differs across platforms."}
+{"source": "microphone", "start_ms": 210126, "end_ms": 216664, "text": "We could quantize the mirror angles to whole degrees. Puzzles only use forty five degree steps anyway."}
+{"source": "system", "start_ms": 218064, "end_ms": 222294, "text": "That works. Quantized angles, snapshot of inputs only. We decided, then?"}
+{"source": "microphone", "start_ms": 223694, "end_ms": 228694, "text": "Yes, decided. And bump the timeout to ten seconds as a safety net."}
+{"source": "system", "start_ms": 230094, "end_ms": 234324, "text": "I can take the snapshot rewrite. Maybe three days of work."}
+{"source": "microphone", "start_ms": 235724, "end_ms": 242647, "text": "Great, you own the snapshot change. I'll write a soak test that kills the host every two minutes."}
+{"source": "system", "start_ms": 244047, "end_ms": 249047, "text": "Do we keep the relay server, or move to direct connections for friends?"}
+{"source": "microphone", "start_ms": 250447, "end_ms": 255062, "text": "Keep the relay for launch. Direct connections are a post launch question."}
+{"source": "system", "start_ms": 256462, "end_ms": 260308, "text": "What about voice chat in the lobby? Players keep asking."}
+{"source": "microphone", "start_ms": 261708, "end_ms": 265938, "text": "Out of scope for launch. Platform voice chat covers most people."}
+{"source": "system", "start_ms": 267338, "end_ms": 269645, "text": "Fine by me. Less to break."}
+{"source": "microphone", "start_ms": 271045, "end_ms": 275660, "text": "Exactly. Okay, the art pass next? I saw the new lighting shots."}
+{"source": "system", "start_ms": 281060, "end_ms": 286829, "text": "Yeah, Maya sent the new lighting pass for the caves this morning. It looks gorgeous."}
+{"source": "microphone", "start_ms": 288229, "end_ms": 295152, "text": "It does, but the frame rate on the Steam Deck dropped to twenty two in the big cave."}
+{"source": "system", "start_ms": 296552, "end_ms": 301936, "text": "That's the volumetric fog. Every lantern adds a fog volume and they stack up."}
+{"source": "microphone", "start_ms": 303336, "end_ms": 309874, "text": "Can we cap the number of fog volumes, like four at a time, and fade the rest?"}
+{"source": "system", "start_ms": 311274, "end_ms": 317043, "text": "We could, but four player co-op means at least four lanterns plus the world lights."}
+{"source": "microphone", "start_ms": 318443, "end_ms": 324596, "text": "Then make world lights skip fog on low settings. Players care about their own lantern most."}
+{"source": "system", "start_ms": 325996, "end_ms": 330996, "text": "That's a good trade. Player lanterns keep fog, world lights don't on low."}
+{"source": "microphone", "start_ms": 332396, "end_ms": 337396, "text": "And can we bake the cave bounce lighting instead of computing it live?"}
+{"source": "system", "start_ms": 338796, "end_ms": 344180, "text": "Most of it, yes. The moving mirrors are the problem since they redirect light."}
+{"source": "microphone", "start_ms": 345580, "end_ms": 351733, "text": "Bake everything static and keep only mirror light dynamic. That should get us back to forty."}
+{"source": "system", "start_ms": 353133, "end_ms": 358517, "text": "I'll ask Maya to split the static and dynamic lights in the cave scenes."}
+{"source": "microphone", "start_ms": 359917, "end_ms": 363763, "text": "Thanks. Do we have a performance budget written down anywhere?"}
+{"source": "system", "start_ms": 365163, "end_ms": 369778, "text": "Not really. It's in people's heads, which is how we got here."}
+{"source": "microphone", "start_ms": 371178, "end_ms": 378101, "text": "Let's write one. Forty frames on Deck, sixty on mid range PCs, measured in the three heaviest scenes."}
+{"source": "system", "start_ms": 379501, "end_ms": 384116, "text": "I can draft that doc today and put it in the wiki."}
+{"source": "microphone", "start_ms": 385516, "end_ms": 388592, "text": "Perfect. Who checks it on each build though?"}
+{"source": "system", "start_ms": 389992, "end_ms": 396145, "text": "Maybe the nightly build can run the three scenes and post the numbers in the channel."}
+{"source": "microphone", "start_ms": 397545, "end_ms": 402545, "text": "Love it. Automated perf capture on nightly. I'll set up the capture script."}
+{"source": "system", "start_ms": 403945, "end_ms": 408945, "text": "Should the art style change at all for performance, or just the tech?"}
+{"source": "microphone", "start_ms": 410345, "end_ms": 416498, "text": "Just the tech. The look is what sells the game. Okay, last thing, the launch date."}
+{"source": "system", "start_ms": 421898, "end_ms": 427282, "text": "So the publisher wants a date by next Wednesday. They're pushing for early March."}
+{"source": "microphone", "start_ms": 428682, "end_ms": 434835, "text": "Early March is tight with the netcode work and the perf pass. Late March feels honest."}
+{"source": "system", "start_ms": 436235, "end_ms": 442388, "text": "If we say March twenty sixth, that gives us three weeks of polish after content lock."}
+{"source": "microphone", "start_ms": 443788, "end_ms": 447634, "text": "And content lock would be the first week of March?"}
+{"source": "system", "start_ms": 449034, "end_ms": 454034, "text": "March fifth for content lock, March twenty sixth for launch. That's my proposal."}
+{"source": "microphone", "start_ms": 455434, "end_ms": 461203, "text": "I'm okay with that if the soak test passes by content lock. Otherwise we slip."}
+{"source": "system", "start_ms": 462603, "end_ms": 468372, "text": "Agreed. Launch on March twenty sixth, conditional on the soak test passing by March fifth."}
+{"source": "microphone", "start_ms": 469772, "end_ms": 471310, "text": "Who tells the publisher?"}
+{"source": "system", "start_ms": 472710, "end_ms": 476556, "text": "I'll email them tomorrow with the date and the condition."}
+{"source": "microphone", "start_ms": 477956, "end_ms": 482956, "text": "Good. We also need the store page trailer. Is that still on Maya?"}
+{"source": "system", "start_ms": 484356, "end_ms": 488586, "text": "Maya's busy with lighting now. Maybe we hire the trailer out?"}
+{"source": "microphone", "start_ms": 489986, "end_ms": 493447, "text": "Let's get two quotes this week and decide Monday."}
+{"source": "system", "start_ms": 494847, "end_ms": 500231, "text": "I'll reach out to the studio that did the reveal trailer and one more."}
+{"source": "microphone", "start_ms": 501631, "end_ms": 505477, "text": "What about the demo for the festival? Is that happening?"}
+{"source": "system", "start_ms": 506877, "end_ms": 511107, "text": "Still open. It depends on whether onboarding is fixed in time."}
+{"source": "microphone", "start_ms": 512507, "end_ms": 519814, "text": "Then the Friday playtest decides the demo too. If time to first solve looks good, we ship the demo."}
+{"source": "system", "start_ms": 521214, "end_ms": 526598, "text": "Makes sense. So the open questions are the trailer vendor and the festival demo."}
+{"source": "microphone", "start_ms": 527998, "end_ms": 531459, "text": "Yep. I think that's everything. Thanks everyone, good meeting."}
+{"source": "system", "start_ms": 532859, "end_ms": 534012, "text": "Thanks, talk Friday."}

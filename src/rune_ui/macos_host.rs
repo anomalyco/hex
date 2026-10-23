@@ -734,6 +734,8 @@ struct MeetingFeed {
     library: Option<crate::meeting::query::Library>,
     scan_at: Option<Instant>,
     shown: Option<Result<Vec<Meeting>, String>>,
+    /// Each meeting's live notes, re-read only when the file changes.
+    notes: std::collections::HashMap<String, crate::meeting::LiveNotesReader>,
 }
 
 impl MeetingFeed {
@@ -762,15 +764,23 @@ impl MeetingFeed {
         };
         let scan = library.scan().map_err(|error| format!("{error:#}"))?;
         let now_ms = crate::events::now_ms();
+        self.notes
+            .retain(|id, _| scan.meetings.iter().any(|meeting| &meeting.id == id));
         Ok(scan
             .meetings
             .iter()
-            .map(|meeting| pane_meeting(meeting, now_ms))
+            .map(|meeting| {
+                let reader = self.notes.entry(meeting.id.clone()).or_default();
+                reader.refresh(&meeting.id);
+                let mut shown = pane_meeting(meeting, now_ms);
+                shown.outline = reader.notes().map(Into::into);
+                shown
+            })
             .collect())
     }
 }
 
-/// A stored meeting as the pane shows it.
+/// A stored meeting as the pane shows it, without its live notes.
 fn pane_meeting(meeting: &crate::meeting::query::Meeting, now_ms: u64) -> Meeting {
     use crate::meeting::MeetingStatus;
     let manifest = &meeting.manifest;
@@ -809,6 +819,7 @@ fn pane_meeting(meeting: &crate::meeting::query::Meeting, now_ms: u64) -> Meetin
         notes_error: manifest.notes_error.clone(),
         live_error: manifest.live_transcription_error.clone(),
         transcript,
+        outline: None,
     }
 }
 

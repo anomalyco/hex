@@ -332,6 +332,29 @@ fn the_overflow_menu_copies_the_summary_and_asks_for_new_notes() {
 }
 
 #[test]
+fn live_notes_mark_the_current_topic_and_open_their_transcript_lines() {
+    let mut rt = runtime("meetings-recording", false, PANE_SIZE);
+    let excerpt = "The build screen still feels unfinished.";
+    let shown = texts(&rt);
+    assert!(shown.iter().any(|text| text == "Notes"));
+    assert!(shown.iter().any(|text| text == "Now"));
+    assert!(!shown.iter().any(|text| text == excerpt));
+    tap(&mut rt, "section1/note0");
+    assert!(rt.state.meetings.open_note.is_some());
+    assert!(texts(&rt).iter().any(|text| text == excerpt));
+    tap(&mut rt, "section1/note0");
+    assert_eq!(rt.state.meetings.open_note, None);
+
+    let rt = runtime("meetings", false, PANE_SIZE);
+    let shown = texts(&rt);
+    assert!(shown.iter().any(|text| text == "Notes"));
+    assert!(
+        !shown.iter().any(|text| text == "Now"),
+        "a finished meeting has no current topic"
+    );
+}
+
+#[test]
 fn active_and_failed_meetings_show_their_state() {
     let rt = runtime("meetings-recording", true, PANE_SIZE);
     let shown = texts(&rt);
@@ -442,6 +465,7 @@ fn platform_goldens() {
     check_golden("meetings-delete", false, PANE_SIZE);
     check_golden("meetings-rename", true, PANE_SIZE);
     check_golden("meetings-empty", false, PANE_SIZE);
+    check_golden("meetings-notes-open", false, PANE_SIZE);
     check_golden("mac-onboarding", true, PANE_SIZE);
     check_golden("mac-onboarding-progress", false, PANE_SIZE);
     check_golden("mac-onboarding-denied", true, PANE_SIZE);

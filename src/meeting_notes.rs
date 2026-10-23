@@ -14,6 +14,7 @@ use std::time::{Duration, Instant};
 use color_eyre::eyre::{Result, WrapErr, eyre};
 use serde::{Deserialize, Deserializer, Serialize};
 
+use super::live_notes::LiveNotes;
 use super::{
     MeetingManifest, MeetingStatus, TranscriptEntry, TranscriptReader, coalesce_transcript,
     format_duration, read_manifest, root, sync_directory, write_manifest,
@@ -31,6 +32,9 @@ const FALLBACK_CONTEXT_TOKENS: usize = 4_096;
 /// tokens of transcript keeps one call near four seconds on an M2 Max.
 const FINAL_EXCERPT_CHARS: usize = 12_000;
 const TITLE_EXCERPT_CHARS: usize = 5_000;
+/// The live outline's topics, prepended to the final prompt so a long,
+/// excerpted meeting still names what its skipped middle covered.
+const TOPIC_LINES_CHARS: usize = 600;
 /// Long turns are split so a monologue can still be sampled.
 const LINE_CHARS: usize = 600;
 const GAP_MARKER: &str = "[…]";
@@ -242,6 +246,7 @@ pub(super) struct Summary {
 /// before `deadline`.
 pub(super) fn summarize_entries(
     entries: &[TranscriptEntry],
+    topics: &str,
     max_chars: usize,
     deadline: Instant,
     mut generate: impl FnMut(&str, &str, Duration) -> Result<GeneratedNotes, GenerationError>,
@@ -258,7 +263,14 @@ pub(super) fn summarize_entries(
             return Err(eyre!("Apple Intelligence did not finish in time"));
         }
         calls += 1;
-        let prompt = format!("Meeting transcript:\n\n{}", excerpt.text);
+        let prompt = if topics.is_empty() {
+            format!("Meeting transcript:\n\n{}", excerpt.text)
+        } else {
+            format!(
+                "Topics noted during the meeting:\n{topics}\nMeeting transcript:\n\n{}",
+                excerpt.text
+            )
+        };
         match generate(NOTES_INSTRUCTIONS, &prompt, remaining.min(CALL_TIMEOUT)) {
             Ok(notes) => {
                 return Ok(Summary {
@@ -359,10 +371,19 @@ pub fn display_title(manifest: &MeetingManifest) -> String {
         .map_or_else(|| manifest.title.clone(), str::to_owned)
 }
 
-pub(super) fn render_notes_block(notes: &MeetingNotes) -> String {
+pub(super) fn render_notes_block(notes: &MeetingNotes, live: Option<&LiveNotes>) -> String {
     let summary = notes.summary.trim();
+    let outline = live
+        .filter(|live| !live.sections.is_empty())
+        .map(|live| {
+            format!(
+                "### Notes\n\n{}\n",
+                super::live_notes::outline_markdown(live)
+            )
+        })
+        .unwrap_or_default();
     format!(
-        "{NOTES_START}\n## Summary\n\n{}\n\n_Written on this Mac by Apple Intelligence; the transcript below has the details._\n{NOTES_END}\n",
+        "{NOTES_START}\n## Summary\n\n{}\n\n{outline}_Written on this Mac by Apple Intelligence; the transcript below has the details._\n{NOTES_END}\n",
         if summary.is_empty() {
             "_Nothing to summarize._"
         } else {
@@ -696,7 +717,7 @@ pub fn notes_wanted() -> bool {
 
 /// Yields to dictation for at most `DICTATION_WAIT`. Returns false when
 /// `stop` was set meanwhile.
-fn wait_for_dictation(stop: &AtomicBool) -> bool {
+pub(super) fn wait_for_dictation(stop: &AtomicBool) -> bool {
     let started = Instant::now();
     while crate::parakeet::dictation_busy() && started.elapsed() < DICTATION_WAIT {
         if stop.load(Ordering::Relaxed) {
@@ -728,10 +749,16 @@ fn summarize_claimed(id: &str, _claim: InProgress) -> Result<MeetingManifest> {
         return Err(eyre!("only completed meetings can be summarized"));
     }
     let entries = super::read_ndjson(&directory.join("transcript.ndjson"))?;
+    let live = super::live_notes::read(id).ok().flatten();
+    let topics = live
+        .as_ref()
+        .map(|live| super::live_notes::topic_lines(live, TOPIC_LINES_CHARS))
+        .unwrap_or_default();
     let started = Instant::now();
     let never = AtomicBool::new(false);
     let result = summarize_entries(
         &entries,
+        &topics,
         excerpt_budget(apple_intelligence::context_tokens(), FINAL_EXCERPT_CHARS),
         started + TOTAL_DEADLINE,
         |instructions, prompt, timeout| {
@@ -756,7 +783,10 @@ fn summarize_claimed(id: &str, _claim: InProgress) -> Result<MeetingManifest> {
             manifest.notes_error = None;
             let title = display_title(&manifest);
             if let Some(path) = manifest.export_path.clone().filter(|path| path.exists()) {
-                let block = render_notes_block(manifest.notes.as_ref().expect("notes were set"));
+                let block = render_notes_block(
+                    manifest.notes.as_ref().expect("notes were set"),
+                    live.as_ref(),
+                );
                 if let Err(error) = update_markdown_file(&path, &previous_title, &title, &block) {
                     tracing::warn!(%error, meeting = id, "could not add notes to meeting Markdown");
                     manifest.notes_error = Some(format!("Notes not added to Markdown: {error}"));
@@ -776,7 +806,6 @@ fn summarize_claimed(id: &str, _claim: InProgress) -> Result<MeetingManifest> {
 
 /// Parses the turns of an exported meeting Markdown file (`**You** · 01:02`
 /// followed by the turn's text).
-#[cfg(any(debug_assertions, test))]
 pub(super) fn entries_from_markdown(markdown: &str) -> Vec<TranscriptEntry> {
     let mut entries: Vec<TranscriptEntry> = Vec::new();
     let mut in_turn = false;
@@ -875,6 +904,7 @@ pub fn summarize_file(path: &Path, excerpt_chars: Option<usize>) -> Result<Strin
     let started = Instant::now();
     let summary = summarize_entries(
         &entries,
+        "",
         max_chars,
         started + TOTAL_DEADLINE,
         apple_intelligence::generate_notes,
@@ -885,7 +915,7 @@ pub fn summarize_file(path: &Path, excerpt_chars: Option<usize>) -> Result<Strin
     report.push_str(&format!(
         "\n# {}\n\n{}\ncontext {context} tokens · transcript {} turns, {} chars · excerpt {} chars (budget {max_chars}) · calls {calls}\nfinal title + summary {:.1}s\n",
         notes.title,
-        render_notes_block(&notes),
+        render_notes_block(&notes, None),
         entries.len(),
         notes.transcript_chars,
         notes.excerpt_chars,
@@ -969,6 +999,7 @@ mod tests {
         let mut prompts = Vec::new();
         let summary = summarize_entries(
             &conversation(4),
+            "",
             FINAL_EXCERPT_CHARS,
             Instant::now() + Duration::from_secs(60),
             |instructions, prompt, _| {
@@ -1057,6 +1088,7 @@ mod tests {
         let mut sizes = Vec::new();
         let summary = summarize_entries(
             &conversation(400),
+            "",
             8_000,
             Instant::now() + Duration::from_secs(60),
             |_, prompt, _| {
@@ -1075,6 +1107,7 @@ mod tests {
         let mut calls = 0;
         let error = summarize_entries(
             &conversation(4),
+            "",
             8_000,
             Instant::now() + Duration::from_secs(60),
             |_, _, _| {
@@ -1089,6 +1122,7 @@ mod tests {
 
         let error = summarize_entries(
             &conversation(4),
+            "",
             8_000,
             Instant::now() + Duration::from_secs(60),
             |_, _, _| Err(GenerationError::Failed("model busy".into())),
@@ -1098,7 +1132,7 @@ mod tests {
         assert_eq!(error.to_string(), "model busy");
 
         let mut called = false;
-        let error = summarize_entries(&conversation(4), 8_000, Instant::now(), |_, _, _| {
+        let error = summarize_entries(&conversation(4), "", 8_000, Instant::now(), |_, _, _| {
             called = true;
             Ok(GeneratedNotes::default())
         })
@@ -1106,7 +1140,9 @@ mod tests {
         .unwrap();
         assert!(!called);
         assert!(error.to_string().contains("in time"));
-        assert!(summarize_entries(&[], 8_000, Instant::now(), |_, _, _| unreachable!()).is_err());
+        assert!(
+            summarize_entries(&[], "", 8_000, Instant::now(), |_, _, _| unreachable!()).is_err()
+        );
     }
 
     #[test]
@@ -1205,7 +1241,7 @@ mod tests {
 
     #[test]
     fn notes_are_inserted_above_the_transcript_and_regenerate_idempotently() {
-        let block = render_notes_block(&meeting_notes());
+        let block = render_notes_block(&meeting_notes(), None);
         assert!(block.contains("## Summary\n\nThey agreed to ship v2 on Friday.\n"));
         assert!(!block.contains("Action items") && !block.contains("Decisions"));
 
@@ -1225,7 +1261,7 @@ mod tests {
             &first,
             "Launch plan review",
             "Release sync",
-            &render_notes_block(&changed),
+            &render_notes_block(&changed, None),
         );
         assert!(regenerated.starts_with("# Release sync\n"));
         assert!(regenerated.contains("They moved v2 to next week.\n"));
@@ -1236,7 +1272,7 @@ mod tests {
 
     #[test]
     fn user_edits_outside_the_notes_block_are_preserved() {
-        let block = render_notes_block(&meeting_notes());
+        let block = render_notes_block(&meeting_notes(), None);
         let edited = EXPORT
             .replace("# Zoom call — 2:30 PM", "# My own title")
             .replace("Hello.", "Hello, edited.");
@@ -1315,7 +1351,7 @@ mod tests {
 
     #[test]
     fn exported_markdown_parses_back_into_turns() {
-        let block = render_notes_block(&meeting_notes());
+        let block = render_notes_block(&meeting_notes(), None);
         let markdown = apply_notes(EXPORT, "Zoom call — 2:30 PM", "Launch", &block);
         let entries = entries_from_markdown(&markdown);
         assert_eq!(
@@ -1347,7 +1383,7 @@ mod tests {
         fs::create_dir_all(&folder).unwrap();
         let path = folder.join("2026-10-15 1430 Zoom call — 2-30 PM.md");
         fs::write(&path, EXPORT).unwrap();
-        let block = render_notes_block(&meeting_notes());
+        let block = render_notes_block(&meeting_notes(), None);
         update_markdown_file(&path, "Zoom call — 2:30 PM", "Launch plan review", &block).unwrap();
         let written = fs::read_to_string(&path).unwrap();
         assert!(written.starts_with("# Launch plan review\n"));

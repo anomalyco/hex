@@ -24,6 +24,11 @@ pub use capture::{
 };
 #[path = "meeting_echo.rs"]
 mod echo;
+#[path = "meeting_live_notes.rs"]
+mod live_notes;
+pub use live_notes::{LiveNotes, LiveNotesReader, NoteKind as LiveNoteKind};
+#[cfg(debug_assertions)]
+pub use live_notes::{SimulatedModel, replay, replay_entries, simulate as simulate_live_notes};
 #[path = "meeting_notes.rs"]
 mod notes;
 #[path = "meeting_query.rs"]
@@ -417,6 +422,9 @@ pub fn record(
 
         let started = Instant::now();
         let titles = notes::ProvisionalTitles::start(manifest.id.clone());
+        let live_notes = live_notes::LiveNotesWorker::start(manifest.id.clone())
+            .map_err(|error| tracing::warn!(%error, "live meeting notes are unavailable"))
+            .ok();
         println!("Recording '{}' (Ctrl-C to stop)", manifest.title);
         while !shutdown.load(Ordering::Relaxed) && !writer.is_finished() {
             if let Some(title) = titles.take() {
@@ -428,6 +436,7 @@ pub fn record(
             record_provisional_title(&meeting_dir, &mut manifest, title, updates.as_ref());
         }
         drop(titles);
+        drop(live_notes);
         drop(system_capture);
         drop(microphone_capture);
         drop(sender);
@@ -940,7 +949,7 @@ pub fn day_label(milliseconds: u64, now_ms: u64) -> String {
 
 /// The notes as Markdown, for copying.
 pub fn notes_markdown(notes: &MeetingNotes) -> String {
-    notes::render_notes_block(notes)
+    notes::render_notes_block(notes, None)
         .lines()
         .filter(|line| !line.starts_with("<!--") && !line.starts_with("_Written on this Mac"))
         .collect::<Vec<_>>()

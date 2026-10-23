@@ -572,6 +572,91 @@ Final title + summary, one call, 11,151-char excerpt     3.4–3.5 s (3 runs)
 Before: map-reduce over 8 chunks, 9 calls, 51-minute call  96 s
 ```
 
+### Live Notes (Apple Intelligence, prototype)
+
+```ts
+While recording, setting on, model available            // meetings.notes.live
+  -> meeting-live-notes thread, utility QoS; checks the transcript every 5 s
+  -> First pass at ≥ 45 s of meeting time, then every ≥ 75 s, each needing
+     ≥ 40 new words; waits (≤30 s) while dictation is busy
+  -> ONE call over only the transcript after the last pass
+     ├── "[mm:ss] You|Them: text", newest ≤ 3,600 chars (~1,200 tokens);
+     │   older backlog skipped as "[…]"
+     ├── No current topic in the prompt (the model just repeats it)
+     └── 20 s timeout, ≤ 240 response tokens, temperature 0.2
+  -> Model returns a topic for this stretch and ≤ 3 notes
+     (decision · action with owner · question · point, each with its [mm:ss])
+  -> Topic rule (Rust, not the model)
+     ├── Same topic: ≥ half its words were heard in the current section
+     ├── Different on one pass: remembered as pending
+     └── Different on the next pass too, and the current topic had 90 s
+         -> new section named and dated by the first pass away; notes made
+            since move with it (≤ 40 sections)
+  -> Notes: ≤ 3 per section, in meeting order; a decision, action, or question
+     replaces the oldest plain point; repeats of the last two sections dropped
+  -> Each note stores its transcript lines (the line before when ≤ 10 s)
+  -> live-notes.json in the meeting folder, owner-only, atomic replace
+  -> Refused / guardrail-blocked passage -> counted as read, nothing noted
+  -> Other failure -> last good notes kept; retried after 1, 2 … 5 min
+Unavailable or setting off -> no file, no new UI, nothing logged
+Recording capsule (Rune overlay)
+  ├── Title = current topic, crossfading when it changes; subtitle
+  │   "mm:ss · <meeting title>"
+  └── Chevron (only when notes can run or exist) -> overlay grows into a
+      scrolling notes panel under the pill (above it in a bottom corner);
+      current topic marked "Now"; a note opens its transcript lines
+Meetings pane -> "Notes" above the transcript, live or finished, same rows
+After Stop -> the final notes call reads "Topics noted during the meeting:"
+  (≤ 600 chars) before its excerpt; the Markdown notes block adds a
+  "### Notes" outline below the summary
+```
+
+Why feed and not replace: the final call reads an excerpt of a long meeting
+(opening, six middle passages, ending), so the live outline is the only part
+that saw every stretch. The final pass stays one call and keeps its budget.
+
+Sources: [meeting_live_notes.rs](../../src/meeting_live_notes.rs), the
+`GeneratedLiveNotes` bridge in
+[apple_intelligence.swift](../../src/apple_intelligence.swift),
+[rune_ui/meeting_outline.rs](../../src/rune_ui/meeting_outline.rs),
+[rune_ui/meeting_capsules.rs](../../src/rune_ui/meeting_capsules.rs), and the
+Meetings pane. Checks in `meeting::live_notes::tests` (fake model):
+`passes_wait_for_the_opening_then_new_time_and_words_and_back_off`,
+`a_pass_reads_only_new_transcript_and_keeps_the_newest_within_budget`,
+`topics_change_after_two_passes_away_and_their_dwell`,
+`full_sections_keep_decisions_actions_and_questions_over_points`,
+`notes_anchor_to_their_line_carry_an_excerpt_and_skip_repeats`,
+`outlines_are_bounded`, `notes_files_are_owner_only_and_survive_a_bad_write`,
+and `the_outline_feeds_the_final_prompt_and_markdown`; pane in
+`live_notes_mark_the_current_topic_and_open_their_transcript_lines` and the
+`meetings-notes-open` golden; capsule in
+`the_recording_pill_names_the_topic_and_opens_its_notes`, with
+`capsule_snapshots` (`HEX_CAPSULE_SNAPS=<dir>`) rendering the pill and notes
+panel headless.
+
+Debug CLI: `hex meeting live-notes <transcript> [--minutes N] [--canned]
+[--record raw.ndjson | --recorded raw.ndjson] [--snapshots out.ndjson]` runs
+the passes a recording would and reports latency and prompt size; prompts don't
+depend on earlier passes, so `--recorded` replays a real run to tune the rules.
+`hex meeting capsule-lab <snapshots> -- --scene replay|pill|notes|notes-excerpt
+--snap …|--frames …` renders the capsule headless over those snapshots.
+`hex meeting replay <transcript> --speed 30 [--canned]` (with an empty
+`HEX_APPLICATION_SUPPORT_DIR`) writes a fake recording and opens the real
+capsule and window over it. Synthetic fixture:
+[live-notes-replay.ndjson](../../tests/fixtures/live-notes-replay.ndjson) from
+`scripts/fixtures/make-live-notes-replay.py`.
+
+Observed (2026-10-22, the Pro, macOS 27.0.1, debug build, utility QoS):
+
+```ts
+Private 114-minute design call    75 passes · p50 4.0 s (2.9–6.5 s)
+                                   prompt mean 1,370 chars (~340 tokens)
+                                   10 refused/guardrail, 1 timeout
+                                   34 sections · 43 KB notes file
+Synthetic 9-minute, 4-topic call  7 passes · p50 3.2 s (3.0–4.3 s) · 3 sections
+Before the topic rule (model's own "shift" flag): one topic for 114 minutes
+```
+
 ### Agent Access (MCP)
 
 The release CLI also supports `hex meetings list`, `show <id|latest>`, and
@@ -720,3 +805,9 @@ Granola import: see [granola-import.md](../plans/granola-import.md).
 - Titles and summaries have not run after a real recording in the app; the CLI
   path exercised the real model, and the provisional-title thread, its manifest
   write, and the menu/pane refresh are unexercised in a live recording.
+- Live notes ran against the real model only through the CLI over saved
+  transcripts. The worker thread in a real recording, the native capsule
+  panel's resize, scrolling, and click handling as a non-activating panel,
+  and `hex meeting replay` on a screen are unexercised; capsule stills and the
+  clip come from the headless lab. The model labels many casual remarks
+  "Decision", and a two-minute topic can fold into its neighbour.

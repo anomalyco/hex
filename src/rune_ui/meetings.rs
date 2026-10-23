@@ -17,6 +17,7 @@ use super::lists::{
     Tone, detail_header, detail_title, error_panel, group_label, list_row, message, placeholder,
     section_label, small_button, split, tone_tag,
 };
+use super::meeting_outline::{OpenNote, Outline, outline, toggle};
 use super::platform::{MeetingRequest, PlatformRequest};
 use super::{Menu, Ui};
 use crate::desktop_i18n::{tr, tr_fill, tr_named};
@@ -83,6 +84,8 @@ pub(super) struct Meeting {
     pub(super) notes_error: Option<String>,
     pub(super) live_error: Option<String>,
     pub(super) transcript: Transcript,
+    /// The live notes taken while it recorded.
+    pub(super) outline: Option<Outline>,
 }
 
 impl Meeting {
@@ -125,6 +128,8 @@ pub(super) struct MeetingsPane {
     copied: Option<(String, &'static str)>,
     pub(super) start_pending: bool,
     pub(super) stop_pending: bool,
+    /// The note whose transcript lines are open, in the selected meeting.
+    pub(super) open_note: OpenNote,
 }
 
 /// `42 min`, `1 h 05 min`, or `< 1 min`.
@@ -219,6 +224,7 @@ impl MeetingsPane {
             self.renaming = None;
             self.delete_armed = None;
             self.action_error = None;
+            self.open_note = None;
         }
         self.selected = Some(id);
     }
@@ -285,6 +291,7 @@ impl MeetingsPane {
                 notes_error: None,
                 live_error: None,
                 transcript: Transcript::Loaded(Vec::new()),
+                outline: None,
             };
         let mut live = meeting(
             "preview-live",
@@ -296,6 +303,7 @@ impl MeetingsPane {
         );
         live.app = Some("Zoom".into());
         live.transcript = Transcript::Loaded(conversation[..6].to_vec());
+        live.outline = Some(Outline::fixture());
         let mut notes = meeting(
             "preview-notes",
             "Arcade launch plan",
@@ -311,6 +319,7 @@ impl MeetingsPane {
                 .into(),
         );
         notes.transcript = Transcript::Loaded(conversation.clone());
+        notes.outline = Some(Outline::fixture());
         let mut design = meeting(
             "preview-design",
             "Design review",
@@ -755,6 +764,22 @@ fn detail(ui: &Ui, p: Paint, meeting: &Meeting, layer: &mut Vec<El>) -> El {
                 .key("notes-running")
                 .font(DESCRIPTION)
                 .color(p.faint()),
+        );
+    }
+    if let Some(notes) = meeting.outline.as_ref().filter(|notes| !notes.is_empty()) {
+        body = body.child(
+            col()
+                .key("live-notes")
+                .gap(6.0)
+                .pb(16.0)
+                .child(section_label(p, "live-notes-label", tr("Notes")))
+                .child(outline(
+                    p,
+                    notes,
+                    &pane.open_note,
+                    recording,
+                    |ui: &mut Ui, note| toggle(&mut ui.meetings.open_note, note),
+                )),
         );
     }
     let transcript_label = match meeting.status {
