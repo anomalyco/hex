@@ -265,7 +265,7 @@ current-user startup registry, UI Automation, and Windows capture APIs.
 | History retention, list, detail, search, copy, delete, and clear | Implemented |
 | Text replacements | Implemented in the Windows Modes pane using the shared phrase-boundary replacement engine |
 | Application picker in Modes | Implemented; lists Start menu shortcuts, App Paths, and apps with an open window. No icons and no file dialog yet |
-| Interface language | Implemented on every OS; English, Polish, Chinese, Japanese, German, and Spanish |
+| Interface language | Implemented on every OS; English, Polish, Chinese, Japanese, German, Spanish, and Ukrainian |
 | Resident tray and Launch at login | Implemented |
 | Application modes with per-mode corrections, OpenCode rewriting, and transformations | Implemented on the shared ordered processing policy; global and contextual profiles persist their own corrections, model, reasoning variant, deadline, and ordered built-in/TypeScript transformations, while modes match by application name — physical end-to-end paste/UI validation remains |
 | Voice Action with selected-text capture and in-app OpenCode model selection | Implemented; selection is read through a clipboard round trip rather than UI Automation |
