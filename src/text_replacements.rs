@@ -56,15 +56,27 @@ impl ReplacementSet {
             .iter()
             .enumerate()
             .flat_map(|(rule, replacement)| {
-                replacement
-                    .matcher
-                    .find_iter(text)
-                    .filter(|matched| phrase_boundary(text, matched.start(), matched.end()))
-                    .map(move |matched| Candidate {
-                        start: matched.start(),
-                        end: matched.end(),
-                        rule,
-                    })
+                let mut found = Vec::new();
+                let mut from = 0;
+                while let Some(matched) = replacement.matcher.find_at(text, from) {
+                    if phrase_boundary(text, matched.start(), matched.end()) {
+                        found.push(Candidate {
+                            start: matched.start(),
+                            end: matched.end(),
+                            rule,
+                        });
+                        from = matched.end();
+                    } else {
+                        // A match inside a word can overlap a whole-phrase match
+                        // that starts later, so resume one character after it.
+                        from = matched.start()
+                            + text[matched.start()..]
+                                .chars()
+                                .next()
+                                .map_or(1, char::len_utf8);
+                    }
+                }
+                found
             })
             .collect::<Vec<_>>();
         candidates.sort_by(|left, right| {
@@ -264,6 +276,24 @@ mod tests {
         let corrected = replacements.replace("OPEN CODE alpha");
         assert_eq!(corrected, "OpenCode beta release");
         assert_eq!(replacements.replace("beta release"), "gamma release");
+    }
+
+    #[test]
+    fn a_match_inside_a_word_does_not_hide_an_overlapping_whole_phrase() {
+        let replacements = ReplacementSet::new(&[rule("I I", "I"), rule("the the", "the")]);
+
+        assert_eq!(replacements.replace("Hi I I think so."), "Hi I think so.");
+        assert_eq!(
+            replacements.replace("Breathe the the air."),
+            "Breathe the air."
+        );
+    }
+
+    #[test]
+    fn a_rejected_match_ending_in_a_multibyte_character_resumes_on_a_character_boundary() {
+        let replacements = ReplacementSet::new(&[rule("é é", "é")]);
+
+        assert_eq!(replacements.replace("Café é é."), "Café é.");
     }
 
     #[test]
