@@ -309,6 +309,25 @@ fn the_sidebar_switches_on_press_not_release() {
 }
 
 #[test]
+fn sidebar_rows_have_no_hover_or_press_tint() {
+    let mut rt = runtime("portal", true, PANE_SIZE);
+    let tinted = |rt: &Runtime<Ui>| {
+        rt.elements()
+            .into_iter()
+            .filter(|e| e.path.contains("nav-modes"))
+            .any(|e| e.hover > 0.0 || e.press > 0.0)
+    };
+    let (x, y) = rt.find("nav-modes").expect("the Modes item");
+    rt.pointer_move(x, y);
+    settle(&mut rt);
+    assert!(!tinted(&rt), "hovering a sidebar row paints nothing");
+    rt.pointer_down(x, y);
+    rt.frame(1.0 / 60.0);
+    assert!(!tinted(&rt), "pressing a sidebar row only selects it");
+    rt.pointer_up(x, y);
+}
+
+#[test]
 fn switching_panes_is_instant() {
     let mut rt = runtime("portal", true, PANE_SIZE);
     let (x, y) = rt.find("nav-modes").expect("the Modes item");

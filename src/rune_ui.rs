@@ -917,7 +917,6 @@ fn title_bar(element: El) -> El {
 }
 
 fn sidebar(ui: &Ui, p: Paint) -> El {
-    // Rows touch, so the pointer is always over one, as in a native source list.
     let mut nav = lists::source_list(col().key("nav"));
     for pane in Pane::ALL.into_iter().filter(|pane| pane.shown(ui)) {
         nav = nav.child(nav_item(p, pane, ui.pane == pane));
@@ -943,8 +942,7 @@ fn sidebar(ui: &Ui, p: Paint) -> El {
         .h_full()
         .pt(SIDEBAR_TOP)
         .pb(12.0)
-        .pl(10.0)
-        .pr(6.0)
+        .px(10.0)
         .child(nav)
         .child(el().key("spacer").grow(1.0))
         .children(update)
@@ -954,7 +952,7 @@ fn sidebar(ui: &Ui, p: Paint) -> El {
                 .key("version")
                 .font(p.k.ty.small)
                 .color(p.faint())
-                .pl(6.0)
+                .pl(9.0)
                 .pt(8.0),
         )
 }
@@ -969,28 +967,22 @@ fn version_label() -> String {
     }
 }
 
+/// A row of the sidebar, measured from a medium (default) AppKit source list
+/// and System Settings: a 32 pt pitch, a 31 pt selection inset 10 pt from the
+/// sidebar's edges, a 20 pt icon column 9 pt inside it, and the label 46 pt
+/// from the sidebar's edge. Like a native source list it has no hover or
+/// press tint: the row selects on pointer down.
 fn nav_item(p: Paint, pane: Pane, on: bool) -> El {
     let c = &p.k.c;
-    let mut item = row()
-        .key(pane.key())
-        .role("button")
-        .label(pane.title())
-        .h(28.0)
-        .px(6.0)
-        .gap(8.0)
+    let mut pill = row()
+        .key("pill")
+        .grow(1.0)
+        .h_full()
+        .px(9.0)
+        .gap(7.0)
         .center_y()
         .radius(p.k.radius.md)
-        .hover(c.hover)
-        .press(c.pressed)
-        // Switch on pointer down, like a native sidebar; the press keeps
-        // keyboard activation.
-        .on_drag(move |ui: &mut Ui, d: &mut rune::Drag, tx: &mut Tx| {
-            if d.phase == rune::Phase::Down {
-                ui.select_pane(pane, tx);
-            }
-        })
-        .on_press_tx(move |ui: &mut Ui, tx: &mut Tx| ui.select_pane(pane, tx))
-        .child(icon(pane.icon(), 16.0).key("icon").color(if on {
+        .child(icon(pane.icon(), 20.0).key("icon").color(if on {
             c.icon_base
         } else {
             c.icon_muted
@@ -998,13 +990,29 @@ fn nav_item(p: Paint, pane: Pane, on: bool) -> El {
         .child(
             text(pane.title())
                 .key("label")
-                .font(p.k.ty.ui)
+                .font(if on { p.k.ty.ui_medium } else { p.k.ty.ui })
                 .color(if on { c.text_base } else { c.text_muted })
                 .truncate(),
         );
     if on {
-        item = item.fill(c.layer_02);
+        pill = pill.fill(c.layer_02);
     }
+    // The row stays 32 pt tall so rows touch and every point selects one.
+    let item = row()
+        .key(pane.key())
+        .role("button")
+        .label(pane.title())
+        .h(32.0)
+        .py(0.5)
+        .radius(p.k.radius.md)
+        .on_drag(move |ui: &mut Ui, d: &mut rune::Drag, tx: &mut Tx| {
+            if d.phase == rune::Phase::Down {
+                ui.select_pane(pane, tx);
+            }
+        })
+        // Keyboard activation.
+        .on_press_tx(move |ui: &mut Ui, tx: &mut Tx| ui.select_pane(pane, tx))
+        .child(pill);
     lists::source_item(p, item, on)
 }
 
@@ -1016,8 +1024,8 @@ fn quit_item(p: Paint) -> El {
         .key("quit")
         .role("button")
         .label(tr("Quit Hex"))
-        .h(28.0)
-        .px(6.0)
+        .h(32.0)
+        .px(9.0)
         .mt(4.0)
         .center_y()
         .radius(p.k.radius.md)
