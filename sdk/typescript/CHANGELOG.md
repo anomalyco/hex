@@ -1,5 +1,11 @@
 # @kitlangton/hex
 
+## 0.3.2
+
+### Patch Changes
+
+- e76afaa: `connect()` reads the macOS discovery file from `~/Library/Application Support/hex`, where Hex now keeps its data, falling back to the previous `voice-control` folder.
+
 ## 0.3.1
 
 ### Patch Changes
