@@ -91,6 +91,7 @@ rustPlatform.buildRustPackage (finalAttrs: {
     outputHashes = {
       "transcribe-rs-0.3.11" = "sha256-MJJiug3LfbKsuHcL2+LJk95+j5kk/MWzb5ihdBlHLmE=";
       "rune-0.0.1" = "sha256-tSs4tXHrx8xd6WdV2+ZKuaIY0Np2wNqoqNPtmEIDGrc=";
+      "procwatch-0.1.0" = "sha256-5Mlb+1hzntff/vhaNBzMIk+CkInlG++7hYqG5kQCgV8=";
     };
   };
 

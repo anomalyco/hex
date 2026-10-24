@@ -213,6 +213,11 @@ struct Cli {
     command: Option<Command>,
 }
 
+// Debug builds count the heap so `/profile/vitals` can split the footprint.
+#[cfg(all(debug_assertions, target_os = "macos"))]
+#[global_allocator]
+static ALLOC: procwatch::alloc::Counting = procwatch::alloc::Counting::system();
+
 static SHUTDOWN: AtomicBool = AtomicBool::new(false);
 pub(crate) const DEVELOPER_FEATURES_ENABLED: bool = cfg!(debug_assertions);
 
