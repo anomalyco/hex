@@ -256,11 +256,23 @@ fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(|error| error.into_inner())
 }
 
+/// Samples footprint and CPU for the life of the app (every 10 s in release, 2 s in debug
+/// builds) and logs a warning on a large footprint, steady growth, or a busy core.
+fn watch_process() {
+    let config = if cfg!(debug_assertions) {
+        procwatch::Config::dev("hex")
+    } else {
+        procwatch::Config::release("hex")
+    };
+    procwatch::watch_with(config, |event, _| tracing::warn!(%event, "process watch"));
+}
+
 pub fn run(shutdown: &'static AtomicBool, listener: ListenerConfig) -> Result<()> {
     let Some(mtm) = MainThreadMarker::new() else {
         return Err(eyre!("desktop startup requires the main thread"));
     };
     shutdown.store(false, Ordering::Relaxed);
+    watch_process();
     crate::keyboard::initialize_layout()?;
     crate::updater::finish_on_launch();
     let _ = UPDATER.set(crate::updater::Updater::start());
