@@ -143,6 +143,30 @@ Checks in [audio.rs](../../src/audio.rs):
 Proof limit: retry policy and channel-backed replacement audio, not a physical
 device reconnect or full native mic-to-target result.
 
+`recover.device-change`: on macOS, a working warm stream follows input device
+changes between captures. It does not stay on a fallback or stale device until
+restart.
+
+```ts
+CoreAudio device list OR default input changes -> wait 250 ms to settle
+  -> capture idle, no CLI override, no recovery pending
+  -> preferred device = selected microphone if present, else automatic selection
+  ├── preferred differs from the open device -> reopen it (selection-change path)
+  └── same device, or selected microphone still missing -> keep the stream
+```
+Checks in [audio.rs](../../src/audio.rs):
+`returning_selected_microphone_replaces_the_fallback_when_idle`,
+`device_changes_keep_the_stream_when_nothing_better_is_present`.
+Proof limit: injected device resolution and channel-backed replacement audio,
+not the CoreAudio notifications or a physical headset reconnect.
+
+**Fixed after 2.3.1 ([#169](https://github.com/anomalyco/hex/issues/169)):**
+the warm microphone only reopened after a stream error or a settings change.
+Hex started while the selected Bluetooth headset was off, fell back to the
+built-in microphone, and stayed there after the headset connected. With the lid
+closed, that microphone delivered silence (-120 dBFS), and every dictation was
+discarded as near-silent until Hex restarted.
+
 `recover.cold-open`: "Release when idle" opens for a gesture, not an idle retry
 loop. Each attempt must own its opening result.
 

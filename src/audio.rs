@@ -15,8 +15,16 @@ pub fn audio_service_restart_generation() -> u64 {
     AUDIO_SERVICE_RESTART_GENERATION.load(Ordering::Acquire)
 }
 
+static INPUT_DEVICES_GENERATION: AtomicU64 = AtomicU64::new(0);
+
+/// Advances when a microphone appears or disappears, or the system default
+/// input moves.
+fn input_devices_generation() -> u64 {
+    INPUT_DEVICES_GENERATION.load(Ordering::Acquire)
+}
+
 #[cfg(target_os = "macos")]
-fn ensure_coreaudio_restart_listener() {
+fn ensure_coreaudio_listeners() {
     use std::ffi::c_void;
     use std::sync::Once;
 
@@ -50,24 +58,38 @@ fn ensure_coreaudio_restart_listener() {
         0
     }
 
+    unsafe extern "C" fn on_input_devices_changed(
+        _in_object_id: u32,
+        _in_number_addresses: u32,
+        _in_addresses: *const AudioObjectPropertyAddress,
+        _in_client_data: *mut c_void,
+    ) -> i32 {
+        INPUT_DEVICES_GENERATION.fetch_add(1, Ordering::AcqRel);
+        0
+    }
+
     static REGISTER: Once = Once::new();
     REGISTER.call_once(|| {
         const SYSTEM_OBJECT: u32 = 1;
         const SERVICE_RESTARTED_SELECTOR: u32 = u32::from_be_bytes(*b"srst");
+        const DEVICES_SELECTOR: u32 = u32::from_be_bytes(*b"dev#");
+        const DEFAULT_INPUT_DEVICE_SELECTOR: u32 = u32::from_be_bytes(*b"dIn ");
         const GLOBAL_SCOPE: u32 = u32::from_be_bytes(*b"glob");
-        let addr = AudioObjectPropertyAddress {
-            m_selector: SERVICE_RESTARTED_SELECTOR,
-            m_scope: GLOBAL_SCOPE,
-            m_element: 0,
-        };
-        let _ = unsafe {
-            AudioObjectAddPropertyListener(
-                SYSTEM_OBJECT,
-                &addr,
-                on_service_restarted,
-                std::ptr::null_mut(),
-            )
-        };
+        let listeners: [(u32, PropertyListenerProc); 3] = [
+            (SERVICE_RESTARTED_SELECTOR, on_service_restarted),
+            (DEVICES_SELECTOR, on_input_devices_changed),
+            (DEFAULT_INPUT_DEVICE_SELECTOR, on_input_devices_changed),
+        ];
+        for (selector, listener) in listeners {
+            let addr = AudioObjectPropertyAddress {
+                m_selector: selector,
+                m_scope: GLOBAL_SCOPE,
+                m_element: 0,
+            };
+            let _ = unsafe {
+                AudioObjectAddPropertyListener(SYSTEM_OBJECT, &addr, listener, std::ptr::null_mut())
+            };
+        }
     });
 }
 
@@ -207,6 +229,8 @@ pub struct RecoveringAudioInput {
     active_revision: u64,
     recovery: MicrophoneRecovery,
     replacement: Option<Receiver<InputOpenResult>>,
+    devices_generation: u64,
+    device_check_at: Option<Instant>,
 }
 
 pub enum RecoveringAudioInputEvent {
@@ -226,6 +250,9 @@ const MICROPHONE_RETRY_MAX: Duration = Duration::from_secs(5);
 /// back, because a device that has idled for minutes can fail its first open.
 const SELECTED_MICROPHONE_ATTEMPTS: usize = 3;
 const SELECTED_MICROPHONE_RETRY_DELAY: Duration = Duration::from_millis(100);
+/// Device notifications arrive in bursts while a headset connects, so the warm
+/// microphone waits for them to settle before choosing a device.
+const INPUT_DEVICE_CHANGE_SETTLE: Duration = Duration::from_millis(250);
 
 /// How an open treats a selected microphone that cannot be opened.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -362,7 +389,7 @@ impl AudioInput {
 
     fn open_device(device: Device) -> Result<Self> {
         #[cfg(target_os = "macos")]
-        ensure_coreaudio_restart_listener();
+        ensure_coreaudio_listeners();
         let restart_generation = audio_service_restart_generation();
         let device_name = device.to_string();
         let supported = device
@@ -489,6 +516,8 @@ impl RecoveringAudioInput {
             active_revision: selection_revision,
             recovery: MicrophoneRecovery::default(),
             replacement: None,
+            devices_generation: input_devices_generation(),
+            device_check_at: None,
         }
     }
 
@@ -612,6 +641,7 @@ impl RecoveringAudioInput {
                 }
             }
         }
+        self.follow_device_changes(now, capture_idle, preferred_input_device);
         if (capture_idle || self.input.is_none())
             && self.recovery.should_attempt(now)
             && self.replacement.is_none()
@@ -656,6 +686,42 @@ impl RecoveringAudioInput {
             .as_ref()
             .expect("microphone name requested while closed")
             .device_name
+    }
+
+    /// A warm stream only fails when its own device does, so a microphone that
+    /// appears later, or a selected one returning after a fallback, needs this
+    /// check to take over between captures.
+    fn follow_device_changes(
+        &mut self,
+        now: Instant,
+        capture_idle: bool,
+        preferred: impl FnOnce(Option<&str>) -> Option<String>,
+    ) {
+        let generation = input_devices_generation();
+        if generation != self.devices_generation {
+            self.devices_generation = generation;
+            self.device_check_at = Some(now + INPUT_DEVICE_CHANGE_SETTLE);
+        }
+        if !self.device_check_at.is_some_and(|check_at| now >= check_at)
+            || !capture_idle
+            || self.device_override.is_some()
+            || self.replacement.is_some()
+            || self.recovery.next_attempt.is_some()
+        {
+            return;
+        }
+        self.device_check_at = None;
+        let Some(input) = self.input.as_ref() else {
+            return;
+        };
+        let Some(device) = preferred(self.selected_device.as_deref()) else {
+            return;
+        };
+        if device != input.device_name {
+            tracing::info!(from = %input.device_name, to = %device, "input devices changed; switching dictation microphone");
+            self.recovery
+                .request_selection_change(self.active_revision, now);
+        }
     }
 
     fn start_replacement(&mut self) {
@@ -753,6 +819,20 @@ fn open_selected<T>(
     }
     tracing::warn!(%error, device, "selected microphone is unavailable; using automatic selection");
     open_automatic()
+}
+
+/// The device a fresh open would use: the selected microphone while it is
+/// present, otherwise automatic selection. `None` keeps the current stream.
+fn preferred_input_device(selected_device: Option<&str>) -> Option<String> {
+    match selected_device {
+        Some(device) => input_device_names()
+            .ok()?
+            .into_iter()
+            .find(|name| name == device),
+        None => find_device(&cpal::default_host(), AUTOMATIC_INPUT_DEVICE_PREFERENCES)
+            .ok()
+            .map(|device| device.to_string()),
+    }
 }
 
 pub fn input_device_names() -> Result<Vec<String>> {
@@ -1219,6 +1299,72 @@ mod tests {
         recovery.request_selection_change(2, now + Duration::from_millis(100));
         assert!(recovery.blocks_audio());
         assert!(recovery.should_attempt(now + Duration::from_millis(100)));
+    }
+
+    fn warm_input_after_device_change(selected_device: Option<&str>) -> RecoveringAudioInput {
+        let mut input = RecoveringAudioInput::closed(None, 1, selected_device);
+        let (opened, _samples) = AudioInput::channel_for_test();
+        input.finish_initial_open(Ok(opened), Instant::now());
+        input.devices_generation = input_devices_generation().wrapping_sub(1);
+        input
+    }
+
+    #[test]
+    fn returning_selected_microphone_replaces_the_fallback_when_idle() {
+        let mut input = warm_input_after_device_change(Some("USB microphone"));
+        let changed = Instant::now();
+        let settled = changed + INPUT_DEVICE_CHANGE_SETTLE;
+
+        input.follow_device_changes(changed, true, |_| unreachable!());
+        input.follow_device_changes(settled, false, |_| unreachable!());
+        assert!(!input.recovery.should_attempt(settled));
+
+        input.follow_device_changes(settled, true, |selected| {
+            assert_eq!(selected, Some("USB microphone"));
+            Some("USB microphone".into())
+        });
+        assert!(input.recovery.should_attempt(settled));
+        assert!(!input.is_recovering());
+        assert_eq!(input.recovery.target_revision, Some(1));
+
+        let (sender, receiver) = mpsc::channel();
+        input.replacement = Some(receiver);
+        let (mut reopened, _samples) = AudioInput::channel_for_test();
+        reopened.device_name = "USB microphone".into();
+        sender.send((1, Ok(reopened))).unwrap();
+        assert!(matches!(
+            input.recv_timeout(Duration::ZERO, true),
+            RecoveringAudioInputEvent::Reopened
+        ));
+        assert_eq!(input.device_name(), "USB microphone");
+        assert!(input.recovery.next_attempt.is_none());
+    }
+
+    #[test]
+    fn device_changes_keep_the_stream_when_nothing_better_is_present() {
+        let mut absent = warm_input_after_device_change(Some("USB microphone"));
+        let changed = Instant::now();
+        let settled = changed + INPUT_DEVICE_CHANGE_SETTLE;
+        absent.follow_device_changes(changed, true, |_| unreachable!());
+        absent.follow_device_changes(settled, true, |_| None);
+        assert!(absent.recovery.next_attempt.is_none());
+        assert!(absent.device_check_at.is_none());
+
+        let mut current = warm_input_after_device_change(None);
+        current.follow_device_changes(changed, true, |_| unreachable!());
+        current.follow_device_changes(settled, true, |selected| {
+            assert_eq!(selected, None);
+            Some("Test microphone".into())
+        });
+        assert!(current.recovery.next_attempt.is_none());
+
+        let mut overridden = RecoveringAudioInput::closed(Some("CLI microphone"), 1, None);
+        let (opened, _samples) = AudioInput::channel_for_test();
+        overridden.finish_initial_open(Ok(opened), Instant::now());
+        overridden.devices_generation = input_devices_generation().wrapping_sub(1);
+        overridden.follow_device_changes(changed, true, |_| unreachable!());
+        overridden.follow_device_changes(settled, true, |_| unreachable!());
+        assert!(overridden.recovery.next_attempt.is_none());
     }
 
     #[test]
