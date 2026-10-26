@@ -367,6 +367,7 @@ pub(super) fn set_binding(
         ShortcutTarget::PasteLast => settings.paste_last_hotkey = Some(binding),
         ShortcutTarget::VoiceAction => settings.edit_hotkey = binding,
     }
+    settings.merge_dictation_modifier_sides();
 }
 
 fn sound_volume_index(settings: &AppSettings) -> usize {
@@ -1182,6 +1183,8 @@ pub(super) fn hotkey_control(ui: &Ui, p: Paint, target: ShortcutTarget) -> El {
     frame.child(
         col()
             .key("faces")
+            .grow(1.0)
+            .shrink()
             .equal_columns(1)
             .clip_rounded(p.k.radius.md)
             .children(sizes.into_iter().enumerate().map(|(index, size)| {

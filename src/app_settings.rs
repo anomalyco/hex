@@ -1268,6 +1268,7 @@ impl AppSettings {
                 settings.normalize_microphone_policy();
                 settings.dictation_processing.default_mode.name = "Global".into();
                 settings.normalize_double_tap_settings();
+                settings.merge_dictation_modifier_sides();
                 settings.migrate_legacy_replacements();
                 settings.normalize_mode_application_names();
                 settings.migrate_disabled_transcription_model();
@@ -1560,6 +1561,46 @@ impl AppSettings {
 
     pub fn dictation_hotkeys(&self) -> impl Iterator<Item = &HotkeyBinding> {
         std::iter::once(&self.dictation_hotkey).chain(self.alternate_dictation_hotkeys.iter())
+    }
+
+    /// Opposite sides of a single modifier are one Either binding. Do not
+    /// merge multi-modifier chords: doing so would also admit mixed sides.
+    pub fn merge_dictation_modifier_sides(&mut self) {
+        let mut bindings = vec![self.dictation_hotkey.clone()];
+        for candidate in std::mem::take(&mut self.alternate_dictation_hotkeys) {
+            let modifiers = candidate.modifiers;
+            let single = candidate.key.is_none()
+                && !modifiers.function
+                && [
+                    modifiers.control,
+                    modifiers.option,
+                    modifiers.shift,
+                    modifiers.command,
+                ]
+                .into_iter()
+                .flatten()
+                .count()
+                    == 1;
+            let existing = single
+                .then(|| {
+                    bindings.iter_mut().find(|existing| {
+                        existing.key.is_none()
+                            && existing.modifiers.without_side_constraints()
+                                == modifiers.without_side_constraints()
+                    })
+                })
+                .flatten();
+            if let Some(existing) = existing {
+                if existing.standalone_side() != candidate.standalone_side() {
+                    existing.set_standalone_side(ModifierSide::Either);
+                }
+            } else {
+                bindings.push(candidate);
+            }
+        }
+        let mut bindings = bindings.into_iter();
+        self.dictation_hotkey = bindings.next().expect("primary shortcut is retained");
+        self.alternate_dictation_hotkeys = bindings.collect();
     }
 }
 
@@ -2733,6 +2774,34 @@ mod tests {
                 .map(|binding| binding.runtime())
                 .collect::<Vec<_>>()
         );
+    }
+
+    #[test]
+    fn opposite_modifier_rows_merge_into_either_and_keep_other_shortcuts() {
+        let option = |side| HotkeyBinding {
+            modifiers: HotkeyModifiers {
+                option: Some(side),
+                ..Default::default()
+            },
+            key: None,
+        };
+        let command = HotkeyBinding {
+            modifiers: HotkeyModifiers {
+                command: Some(ModifierSide::Left),
+                ..Default::default()
+            },
+            key: None,
+        };
+        let mut settings = AppSettings {
+            dictation_hotkey: option(ModifierSide::Right),
+            alternate_dictation_hotkeys: vec![command.clone(), option(ModifierSide::Left)],
+            ..Default::default()
+        };
+        settings.merge_dictation_modifier_sides();
+        assert_eq!(settings.dictation_hotkey, option(ModifierSide::Either));
+        assert_eq!(settings.alternate_dictation_hotkeys, vec![command]);
+        settings.merge_dictation_modifier_sides();
+        assert_eq!(settings.alternate_dictation_hotkeys.len(), 1);
     }
 
     #[test]

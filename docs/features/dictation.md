@@ -26,6 +26,9 @@ shortcut; each alternate has a remove button. Cancelling an addition saves nothi
 All rows share aligned side, key-badge, recorder, and action columns. All bindings
 drive one capture/hold/toggle/lock state. Existing single-alternate settings migrate
 to the list. Capturing a replacement suspends global matching.
+Opposite sides of the same single modifier merge into the existing **Either**
+row, including when loading older settings containing both sides. Other shortcut
+rows remain in order; multi-modifier chords are not broadened this way.
 The shortcut's keys sit in a recessed tray as tall as the recorder, between
 the macOS side picker and the recorder; with no shortcut the tray reads Off.
 On macOS and Windows the recorder shows the modifiers held so far as pressed
