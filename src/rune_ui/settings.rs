@@ -385,6 +385,37 @@ fn sound_volume_index(settings: &AppSettings) -> usize {
         .map_or(0, |(index, _)| index + 1)
 }
 
+fn bluetooth_microphone_option(ui: &Ui, p: Paint) -> Option<El> {
+    if !cfg!(target_os = "macos") {
+        return None;
+    }
+    Some(
+        row()
+            .key("avoid-bluetooth")
+            .gap(6.0)
+            .center_y()
+            .role("toggle")
+            .label(tr("Avoid Bluetooth microphone"))
+            .focusable(true)
+            .focus_ring(2.0, 2.0, p.k.c.border_focus)
+            .on_press(|ui: &mut Ui| {
+                ui.update(|settings| {
+                    settings.avoid_bluetooth_microphone = !settings.avoid_bluetooth_microphone
+                });
+            })
+            .child(
+                rune_kit::Checkbox::new(ui.settings.avoid_bluetooth_microphone)
+                    .build(p.k)
+                    .focusable(false),
+            )
+            .child(
+                text(tr("Avoid Bluetooth microphone"))
+                    .font(DESCRIPTION)
+                    .color(p.muted()),
+            ),
+    )
+}
+
 #[cfg(all(test, target_os = "macos"))]
 #[test]
 fn alternate_rows_validate_and_edit_their_own_binding() {
@@ -989,25 +1020,22 @@ fn dictation_section(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
             "microphone",
             tr("Microphone"),
             None,
-            select(
-                p,
-                "microphone-control",
-                &microphone,
-                ui.open == Some(Menu::Microphone),
-                devices,
-                |ui: &mut Ui| toggle_menu(ui, Menu::Microphone),
-                layer,
-            ),
+            col()
+                .key("microphone-options")
+                .gap(8.0)
+                .child(select(
+                    p,
+                    "microphone-control",
+                    &microphone,
+                    ui.open == Some(Menu::Microphone),
+                    devices,
+                    |ui: &mut Ui| toggle_menu(ui, Menu::Microphone),
+                    layer,
+                ))
+                .children(bluetooth_microphone_option(ui, p)),
         )
         .into(),
     );
-    #[cfg(target_os = "macos")]
-    rows.push(toggle_row(
-        p, "avoid-bluetooth", tr("Avoid Bluetooth microphone"),
-        Some(tr("In Automatic mode, prefer the built-in microphone to preserve headphone audio quality")),
-        settings.avoid_bluetooth_microphone,
-        |ui| { ui.update(|settings| settings.avoid_bluetooth_microphone = !settings.avoid_bluetooth_microphone); },
-    ).into());
     rows.push(folding(
         "devices-error-fold",
         match (ui.open, &ui.microphones) {

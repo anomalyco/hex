@@ -51,7 +51,8 @@ the CLI listener, not Settings. Do not run it beside an existing listener.
 
 **Automatic microphone:** Hex prefers an available built-in microphone over a
 Bluetooth headset, so dictation does not switch headphones into a low-quality
-call profile. **Avoid Bluetooth microphone** defaults on, including for older
+call profile. The compact **Avoid Bluetooth microphone** checkbox beneath the
+microphone picker defaults on, including for older
 settings files; turning it off allows the default Bluetooth input. Explicitly
 selected microphones bypass this policy. While idle, it reopens its input when the resolved automatic route
 changes after a device connection or removal. Each successful open records
