@@ -1423,6 +1423,21 @@ const SCENES: &[Scene] = &[
     }),
     // macOS and Windows surfaces, from preview data (see `platform`).
     ("mac-settings", |ui| *ui = mac_fixture()),
+    ("mac-shortcuts-chord", |ui| {
+        *ui = mac_fixture();
+        ui.settings.alternate_dictation_hotkeys = vec![HotkeyBinding {
+            modifiers: HotkeyModifiers {
+                option: Some(ModifierSide::Either),
+                shift: Some(ModifierSide::Either),
+                command: Some(ModifierSide::Either),
+                ..Default::default()
+            },
+            key: Some(crate::app_settings::HotkeyKey {
+                code: 46,
+                label: "M".into(),
+            }),
+        }];
+    }),
     ("mac-shortcuts", |ui| {
         *ui = mac_fixture();
         ui.settings.alternate_dictation_hotkeys = vec![

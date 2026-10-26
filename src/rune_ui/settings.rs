@@ -801,7 +801,7 @@ fn dictation_shortcuts(ui: &Ui, p: Paint) -> El {
                         .center()
                         .children(badge),
                 )
-                .child(hotkey_control(ui, p, target).w(160.0))
+                .child(hotkey_control(ui, p, target).w(132.0))
                 .child(action.w(28.0).h(28.0))
         }),
     );
