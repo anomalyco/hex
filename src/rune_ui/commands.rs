@@ -8,7 +8,9 @@ use rune::{El, TextEdit, Tx, col, row, text};
 use rune_kit::TextInput;
 
 use super::Ui;
-use super::controls::{ButtonKind, DESCRIPTION, Paint, button, card, setting_row, toggle_row};
+use super::controls::{
+    ButtonKind, DESCRIPTION, InstantHover, Paint, button, card, setting_row, toggle_row,
+};
 use super::lists::{
     detail_header, detail_title, error_panel, fact, group_label, list_row, message, placeholder,
     source_list, split,
@@ -202,6 +204,7 @@ pub(super) fn pane(ui: &Ui, p: Paint) -> (Vec<El>, El) {
         .leading_icon(p.k.glyph.search)
         .on_edit(|ui: &mut Ui| &mut ui.commands.search)
         .build(p.k)
+        .instant_hover()
         .key("commands-search");
     let column = col()
         .key("commands-column")

@@ -8,18 +8,18 @@
 //! permissions, and this window cannot observe a practice dictation there,
 //! so their steps are Welcome, the speech model download, and Done.
 //!
-//! The welcome and done art is static.
+//! The welcome art is the GPU hero ([`hero`](super::hero)); the done art is static.
 
 use std::time::{Duration, Instant};
 
 use rune::{El, TextEdit, TextStyle, col, el, row, text};
-use rune_kit::{ButtonVariant, Progress, TextInput};
+use rune_kit::{Button, ButtonVariant, Progress, TextInput, glyphs};
 
 use super::Request;
 use super::Ui;
 use super::controls::{
-    ButtonKind, DESCRIPTION, KeySize, Paint, PushSize, TRAY_PADDING, button, card, key_tray,
-    keycap, keycaps, setting_row,
+    ButtonKind, DESCRIPTION, InstantHover, KeySize, Paint, PushSize, TRAY_PADDING, button, card,
+    icon_row, key_tray, keycap, keycaps, setting_row,
 };
 use super::lists::{PermissionControl, allowed, permission_control};
 use super::platform::{Os, PlatformRequest, PlatformState};
@@ -49,6 +49,8 @@ pub(super) struct Tour {
     completed: bool,
     /// The practice dictation pastes here.
     practice: TextEdit,
+    /// The welcome hero's settled frame, as Reduce Motion shows it (fixtures).
+    pub(super) hero_still: bool,
 }
 
 impl Tour {
@@ -58,6 +60,7 @@ impl Tour {
             advance_at: None,
             completed,
             practice: TextEdit::default(),
+            hero_still: false,
         }
     }
 
@@ -229,17 +232,33 @@ pub(super) fn overlay(ui: &Ui, p: Paint) -> Option<El> {
     };
     // Until setup is ready the next setup row carries the accent, so
     // Continue waits, dimmed, in the accent's own shape.
+    // Forward actions point onward; Restart and the last step don't.
+    let onward = |label: &'static str, forward: bool| {
+        let button = Button::new(label).variant(ButtonVariant::Contrast);
+        if !forward {
+            return button;
+        }
+        button.label_with(move |font, ink| {
+            row()
+                .gap(6.0)
+                .center_y()
+                .child(text(label).key("label").font(font).color(ink))
+                .child(
+                    rune::icon(&glyphs::ARROW_RIGHT, 16.0)
+                        .key("arrow")
+                        .color(ink),
+                )
+        })
+    };
+    let forward = matches!(view.step, Step::Welcome | Step::TryIt)
+        || (view.step == Step::Setup && !view.restart);
     let primary = match primary {
-        Some((label, true, action)) => button(
-            p,
-            "tour-continue",
-            label,
-            ButtonKind::Primary,
-            move |ui: &mut Ui, _| input(ui, action),
-        )
-        .default_button(),
-        Some((label, false, _)) => rune_kit::Button::new(label)
-            .variant(ButtonVariant::Contrast)
+        Some((label, true, action)) => onward(label, forward)
+            .on_press_tx(move |ui: &mut Ui, _| input(ui, action))
+            .build_push(p.k)
+            .key("tour-continue")
+            .default_button(),
+        Some((label, false, _)) => onward(label, forward)
             .disabled(true)
             .build_push(p.k)
             // Dark's light-grey accent still reads as live at Rune's 0.4.
@@ -395,60 +414,11 @@ fn title(p: Paint, title: &str, body: Option<&str>) -> El {
         }))
 }
 
-/// The shortcut as one large keycap (or a row of them) at the centre of
-/// rings that fade outward, like sound.
-fn hero(p: Paint, parts: &[String]) -> El {
-    const CAP: f32 = 88.0;
-    const RINGS: [(f32, f32); 3] = [(20.0, 0.5), (22.0, 0.3), (24.0, 0.14)];
-    let c = &p.k.c;
-    let shadow = p.k.dark_a(if p.k.dark { 0.5 } else { 0.12 });
-    let caps = row()
-        .key("hero-keys")
-        .gap(10.0)
-        .children(parts.iter().enumerate().map(|(index, part)| {
-            row()
-                .key(format!("cap{index}"))
-                .min_w(CAP)
-                .h(CAP)
-                .px(24.0)
-                .center()
-                .radius(22.0)
-                .fill(c.layer_03)
-                .gradient(p.k.light(if p.k.dark { 0.06 } else { 0.5 }), p.k.light(0.0))
-                .border(p.hair.max(0.5), c.border_base)
-                .shadow(2.0, 0.0, c.border_base)
-                .shadow(12.0, 28.0, shadow)
-                .child(
-                    text(part.clone())
-                        .key("label")
-                        .font(TextStyle::new(34.0, 500.0).lh(40.0))
-                        .color(c.text_base),
-                )
-        }));
-    let mut art = caps;
-    let mut height = CAP;
-    for (index, (padding, strength)) in RINGS.into_iter().enumerate() {
-        height += padding * 2.0;
-        let ring = row()
-            .key(format!("ring{index}"))
-            .padding(padding)
-            .radius(height / 2.0)
-            .border(1.0, c.border_base.alpha(strength));
-        art = if index == 0 {
-            ring.fill(c.layer_01)
-        } else {
-            ring
-        }
-        .child(art);
-    }
-    row().key("art").h(height).w_full().center().child(art)
-}
-
 fn welcome(ui: &Ui, p: Paint) -> El {
     col()
         .key("welcome")
         .gap(36.0)
-        .child(hero(p, &ui.settings.dictation_hotkey.keycaps()))
+        .child(super::hero::stage())
         .child(title(
             p,
             tr("Welcome to Hex"),
@@ -497,9 +467,11 @@ fn setup(ui: &Ui, p: Paint, view: &View) -> El {
 fn setup_row(ui: &Ui, p: Paint, row: Row) -> El {
     let waiting = row.status == ItemStatus::Waiting;
     let model = crate::transcription_models::validate(&ui.settings.transcription).ok();
-    let (key, title, description): (&str, &str, String) = match row.item {
+    let (key, glyph, title, description): (&str, &'static rune::Icon, &str, String) = match row.item
+    {
         SetupItem::Microphone => (
             "setup-microphone",
+            &glyphs::MIC,
             tr("Microphone"),
             match row.status {
                 ItemStatus::Denied => {
@@ -515,6 +487,7 @@ fn setup_row(ui: &Ui, p: Paint, row: Row) -> El {
         ),
         SetupItem::InputMonitoring => (
             "setup-input-monitoring",
+            &glyphs::KEYBOARD,
             tr("Input Monitoring"),
             if row.status == ItemStatus::Restart {
                 tr("Turns on when Hex restarts").into()
@@ -526,6 +499,7 @@ fn setup_row(ui: &Ui, p: Paint, row: Row) -> El {
         ),
         SetupItem::Accessibility => (
             "setup-accessibility",
+            &glyphs::CURSOR_TEXT,
             super::platform_settings::accessibility_name(ui.platform.accessibility_renamed),
             if row.status == ItemStatus::Restart {
                 tr("Turns on when Hex restarts").into()
@@ -537,6 +511,7 @@ fn setup_row(ui: &Ui, p: Paint, row: Row) -> El {
         ),
         SetupItem::Model => (
             "setup-model",
+            &glyphs::SPARKLE,
             tr("Speech model"),
             match (row.status, model) {
                 (ItemStatus::Failed, _) => {
@@ -582,7 +557,7 @@ fn setup_row(ui: &Ui, p: Paint, row: Row) -> El {
             grant,
         )
     };
-    setting_row(p, key, title, Some(&description), control)
+    icon_row(p, key, glyph, title, Some(&description), control)
 }
 
 fn holds(ui: &Ui) -> bool {
@@ -603,6 +578,7 @@ fn try_it(ui: &Ui, p: Paint, tour: &Tour, view: &View) -> El {
                 .practice
         })
         .build(p.k)
+        .instant_hover()
         .key("practice-field");
     let body = if holds(ui) {
         tr_fill("Hold {}, say a sentence, then let go.", &shortcut)

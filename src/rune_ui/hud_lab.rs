@@ -7,7 +7,7 @@
 use rune::{El, Tx, col, row, text};
 
 use super::Ui;
-use super::controls::{ButtonKind, DESCRIPTION, Paint, button, segmented};
+use super::controls::{ButtonKind, DESCRIPTION, InstantHover, Paint, button, segmented};
 use super::lists::slider;
 use super::platform::{HudDemo, HudLab, HudTuning, PlatformRequest};
 use crate::desktop_i18n::tr;
@@ -242,6 +242,7 @@ pub(super) fn pane(ui: &Ui, p: Paint) -> (Vec<El>, El) {
                 )
                 .fill(if selected { c.info.bg } else { c.bg_base })
                 .hover(c.hover)
+                .instant_hover()
                 .press(c.pressed)
                 .on_press(move |ui: &mut Ui| configure(ui, |lab| lab.tuning = style(index)))
                 .child(

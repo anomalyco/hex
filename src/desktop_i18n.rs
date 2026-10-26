@@ -228,6 +228,62 @@ fn tables() -> &'static [HashMap<&'static str, &'static str>; 5] {
 /// Columns: Polish, Chinese (Simplified), Japanese, German, Spanish.
 #[rustfmt::skip]
 const TRANSLATIONS: &[(&str, [&str; 5])] = &[
+    #[cfg(hex_capture)]
+    ("Capture with Hex", ["Nagrywaj w Hex", "用 Hex 捕获", "Hex でキャプチャ", "Mit Hex aufnehmen", "Capturar con Hex"]),
+    #[cfg(hex_capture)]
+    ("Record your screen and voice with the shortcut below", ["Nagrywaj ekran i głos skrótem poniżej", "使用下方快捷键录制屏幕和语音", "下のショートカットで画面と声を記録します", "Bildschirm und Stimme mit dem Kürzel unten aufnehmen", "Graba tu pantalla y tu voz con el atajo de abajo"]),
+    #[cfg(hex_capture)]
+    ("Off by default. Hex records nothing and keeps no shortcut until you turn this on.", ["Domyślnie wyłączone. Hex niczego nie nagrywa i nie zajmuje skrótu, dopóki tego nie włączysz.", "默认关闭。开启前，Hex 不会录制任何内容，也不会占用快捷键。", "初期設定ではオフです。オンにするまで、Hex は何も記録せず、ショートカットも使いません。", "Standardmäßig aus. Bis du es einschaltest, nimmt Hex nichts auf und belegt kein Kürzel.", "Desactivado por defecto. Hex no graba nada ni reserva ningún atajo hasta que lo actives."]),
+    #[cfg(hex_capture)]
+    ("The capture shortcut is already in use. Change it below before turning captures on.", ["Skrót nagrywania jest już używany. Zmień go poniżej, zanim włączysz nagrywanie.", "捕获快捷键已被占用。请先在下方更改，再开启捕获。", "キャプチャのショートカットはすでに使われています。オンにする前に下で変更してください。", "Das Aufnahmekürzel wird bereits verwendet. Ändere es unten, bevor du Aufnahmen einschaltest.", "El atajo de captura ya está en uso. Cámbialo abajo antes de activar las capturas."]),
+    #[cfg(hex_capture)]
+    ("Could not update captures:", ["Nie udało się zmienić nagrywania:", "无法更新捕获设置：", "キャプチャを更新できませんでした:", "Aufnahmen konnten nicht geändert werden:", "No se pudieron actualizar las capturas:"]),
+    #[cfg(hex_capture)]
+    ("The model Hex dictates with, with a time for every word", ["Model, którym Hex dyktuje, z czasem każdego słowa", "Hex 听写所用的模型，并标注每个词的时间", "Hex が音声入力に使うモデル。単語ごとの時刻付き", "Das Modell, mit dem Hex diktiert, mit einer Zeit für jedes Wort", "El modelo con el que Hex dicta, con el tiempo de cada palabra"]),
+    #[cfg(hex_capture)]
+    ("Apple's speech recognizer, as Scrawl uses", ["Rozpoznawanie mowy Apple, jak w Scrawl", "Apple 语音识别，与 Scrawl 相同", "Scrawl と同じ Apple の音声認識", "Apples Spracherkennung, wie Scrawl sie nutzt", "El reconocimiento de voz de Apple, como en Scrawl"]),
+    #[cfg(hex_capture)]
+    ("Video for 7 days", ["Wideo przez 7 dni", "视频保留 7 天", "ビデオは 7 日間", "Video 7 Tage", "Vídeo durante 7 días"]),
+    #[cfg(hex_capture)]
+    ("Video for 30 days", ["Wideo przez 30 dni", "视频保留 30 天", "ビデオは 30 日間", "Video 30 Tage", "Vídeo durante 30 días"]),
+    #[cfg(hex_capture)]
+    ("Video for {} days", ["Wideo przez {} dni", "视频保留 {} 天", "ビデオは {} 日間", "Video {} Tage", "Vídeo durante {} días"]),
+    #[cfg(hex_capture)]
+    ("Video and audio go first; captures are removed after {} days", ["Najpierw znika wideo i dźwięk; nagrania są usuwane po {} dniach", "先删除视频和音频；捕获在 {} 天后删除", "ビデオと音声を先に削除し、キャプチャは {} 日後に削除します", "Video und Audio zuerst; Aufnahmen werden nach {} Tagen entfernt", "Primero se borran el vídeo y el audio; las capturas se eliminan a los {} días"]),
+    #[cfg(hex_capture)]
+    ("Video and audio go first; captures stay until you remove them", ["Najpierw znika wideo i dźwięk; nagrania zostają, dopóki ich nie usuniesz", "先删除视频和音频；捕获会保留到你删除为止", "ビデオと音声を先に削除し、キャプチャは削除するまで残ります", "Video und Audio zuerst; Aufnahmen bleiben, bis du sie entfernst", "Primero se borran el vídeo y el audio; las capturas se quedan hasta que las elimines"]),
+    #[cfg(hex_capture)]
+    ("Captures stay until you remove them", ["Nagrania zostają, dopóki ich nie usuniesz", "捕获会保留到你删除为止", "キャプチャは削除するまで残ります", "Aufnahmen bleiben, bis du sie entfernst", "Las capturas se quedan hasta que las elimines"]),
+    #[cfg(hex_capture)]
+    ("Hex leaves the capture shortcut to Scrawl until you switch", ["Hex zostawia skrót nagrywania aplikacji Scrawl, dopóki nie przełączysz", "在你切换之前，Hex 会把捕获快捷键留给 Scrawl", "切り替えるまで、Hex はキャプチャのショートカットを Scrawl に任せます", "Hex überlässt Scrawl das Aufnahmekürzel, bis du wechselst", "Hex deja el atajo de captura a Scrawl hasta que cambies"]),
+    #[cfg(hex_capture)]
+    ("Waiting for Scrawl to quit…", ["Czekam na zamknięcie Scrawl…", "正在等待 Scrawl 退出…", "Scrawl の終了を待っています…", "Warten, bis Scrawl beendet ist…", "Esperando a que Scrawl se cierre…"]),
+    #[cfg(hex_capture)]
+    ("Scrawl is running", ["Scrawl jest uruchomiony", "Scrawl 正在运行", "Scrawl が実行中です", "Scrawl läuft", "Scrawl está abierto"]),
+    #[cfg(hex_capture)]
+    ("Use Hex for captures", ["Nagrywaj w Hex", "改用 Hex 捕获", "キャプチャに Hex を使う", "Hex für Aufnahmen nutzen", "Usar Hex para capturas"]),
+    #[cfg(hex_capture)]
+    ("Press to start and again to stop; Esc cancels", ["Naciśnij, aby zacząć, i ponownie, aby zakończyć; Esc anuluje", "按一次开始，再按一次停止；Esc 取消", "押すと開始、もう一度押すと停止。Esc でキャンセル", "Drücken zum Starten, erneut zum Beenden; Esc bricht ab", "Pulsa para empezar y otra vez para parar; Esc cancela"]),
+    #[cfg(hex_capture)]
+    ("Saved for when captures are on", ["Zapisany na czas, gdy nagrywanie będzie włączone", "保存，供开启捕获后使用", "キャプチャをオンにしたときのために保存されます", "Gespeichert für eingeschaltete Aufnahmen", "Guardado para cuando actives las capturas"]),
+    #[cfg(hex_capture)]
+    ("Screen Recording", ["Nagrywanie ekranu", "屏幕录制", "画面収録", "Bildschirmaufnahme", "Grabación de pantalla"]),
+    #[cfg(hex_capture)]
+    ("Lets a capture record your screen", ["Pozwala nagrywać ekran", "允许捕获录制你的屏幕", "キャプチャで画面を記録できます", "Erlaubt Aufnahmen deines Bildschirms", "Permite que una captura grabe tu pantalla"]),
+    #[cfg(hex_capture)]
+    ("Required to record your screen. macOS asks at your first capture, or allow it here.", ["Wymagane do nagrywania ekranu. macOS zapyta przy pierwszym nagraniu albo zezwól tutaj.", "录制屏幕所必需。macOS 会在首次捕获时询问，也可以在这里允许。", "画面の記録に必要です。最初のキャプチャ時に macOS が確認します。ここで許可することもできます。", "Nötig, um deinen Bildschirm aufzunehmen. macOS fragt bei der ersten Aufnahme, oder erlaube es hier.", "Necesario para grabar tu pantalla. macOS lo pide en la primera captura, o permítelo aquí."]),
+    #[cfg(hex_capture)]
+    ("Transcriber", ["Transkrypcja", "转写引擎", "文字起こし", "Transkription", "Transcriptor"]),
+    #[cfg(hex_capture)]
+    ("Transcription", ["Transkrypcja", "转写", "文字起こし", "Transkription", "Transcripción"]),
+    #[cfg(hex_capture)]
+    ("Storage", ["Przechowywanie", "存储", "保存", "Speicher", "Almacenamiento"]),
+    ("Captures folder", ["Folder nagrań", "捕获文件夹", "キャプチャフォルダ", "Aufnahmeordner", "Carpeta de capturas"]),
+    #[cfg(hex_capture)]
+    ("Shared with Scrawl, so both list the same captures", ["Wspólny ze Scrawl, więc obie aplikacje widzą te same nagrania", "与 Scrawl 共用，两者列出相同的捕获", "Scrawl と共有するので、どちらにも同じキャプチャが並びます", "Mit Scrawl geteilt, beide zeigen dieselben Aufnahmen", "Compartida con Scrawl, así ambos muestran las mismas capturas"]),
+    #[cfg(hex_capture)]
+    ("Keep", ["Przechowuj", "保留", "保持期間", "Behalten", "Conservar"]),
+    #[cfg(hex_capture)]
     ("Add application", ["Dodaj aplikację", "添加应用", "アプリを追加", "App hinzufügen", "Añadir aplicación"]),
     ("Add transformation", ["Dodaj transformację", "添加转换", "変換を追加", "Transformation hinzufügen", "Añadir transformación"]),
     ("Close", ["Zamknij", "关闭", "閉じる", "Schließen", "Cerrar"]),
@@ -883,6 +939,8 @@ mod tests {
         include_str!("rune_ui/onboarding.rs"),
         include_str!("rune_ui/picker.rs"),
         include_str!("rune_ui/platform_settings.rs"),
+        #[cfg(hex_capture)]
+        include_str!("rune_ui/scrawl.rs"),
         include_str!("rune_ui/settings.rs"),
         include_str!("rune_ui/vocabulary.rs"),
         include_str!("rune_ui/voice_action.rs"),

@@ -10,7 +10,9 @@ use rune_kit::{Badge, ControlSize, IconButton, IconButtonVariant, Progress};
 
 use super::Request;
 use super::Ui;
-use super::controls::{ButtonKind, Paint, button, modal_scrim_transition, modal_transition};
+use super::controls::{
+    ButtonKind, InstantHover, Paint, button, modal_scrim_transition, modal_transition,
+};
 use super::lists::{error_panel, source_item, source_list};
 use crate::app_settings::AppSettings;
 use crate::desktop_i18n::{tr, tr_fill};
@@ -137,6 +139,7 @@ pub(super) fn modal(ui: &Ui, p: Paint) -> Option<[El; 2]> {
             .center_y()
             .radius(p.k.radius.md)
             .hover(c.hover)
+            .instant_hover()
             .press(c.pressed)
             .on_press(move |ui: &mut Ui| select_language(ui, code.clone()))
             .child(
@@ -201,6 +204,7 @@ pub(super) fn modal(ui: &Ui, p: Paint) -> Option<[El; 2]> {
                 .label(tr("Close"))
                 .on_press(close)
                 .build(p.k)
+                .instant_hover()
                 .key("close-picker"),
         );
     let mut panel = col()
@@ -503,6 +507,7 @@ fn model_card(
         card = card
             .role("button")
             .hover(c.hover)
+            .instant_hover()
             .press(c.pressed)
             .on_press(move |ui: &mut Ui| choose(ui, model, lang.clone()));
     }

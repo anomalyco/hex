@@ -135,6 +135,20 @@ fn resolve_key_code(character: char, command: bool) -> Result<u16> {
         .ok_or_else(|| eyre!("current keyboard layout has no key for {character:?}"))
 }
 
+/// The character `code` types with Command held on the active layout, read
+/// from the startup snapshot only (never TIS): a capture's key log names keys
+/// with it.
+#[cfg(hex_capture)]
+pub fn command_character(code: u16) -> Option<char> {
+    let codes = KEY_CODES.get()?;
+    codes
+        .command
+        .iter()
+        .chain(&codes.plain)
+        .find(|(_, key_code)| **key_code == code)
+        .map(|(character, _)| *character)
+}
+
 /// GUI startup must build this snapshot on the main thread before starting workers.
 /// Later lookups, including misses, never re-enter TIS/TSM from a worker thread.
 pub fn initialize_layout() -> Result<()> {

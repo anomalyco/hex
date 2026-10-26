@@ -49,7 +49,14 @@ either appearance.
    Make one the confirming action of a dialog, a tour step, or a recoverable
    confirmation once it shows, never a pane's standing action, and never an
    irreversible one (Clear all history, Confirm delete of a mode).
-5. **Verify by looking.** Render every view you touched with a `--snap` scene
+5. **Hover is instant, and only on one target.** A settings row never paints
+   a hover or press fill; only the controls inside it react (a row that
+   toggles is a `pressable_row`). Hover fills belong to things that are one
+   clickable target: list rows, picker rows, sidebar items. Every `.hover(…)`
+   is followed by `.instant_hover()`, and so is a kit control's root, so hover
+   switches with no fade either way. Press and selection motion stay as the
+   kit draws them.
+6. **Verify by looking.** Render every view you touched with a `--snap` scene
    in light and dark (see [Verification](#verification)).
 
 ## Hex pieces
@@ -60,7 +67,7 @@ These live in [`rune_ui/controls.rs`](../src/rune_ui/controls.rs) and
 | Job | Piece |
 |---|---|
 | Settings card, titled card | `card`, `section` |
-| Settings row (title, description, control) | `setting_row`, `described_row`, `link_row` (a one-line link under the title, at the plain row height), `toggle_row`; a row that toggles shows `row_switch` |
+| Settings row (title, description, control) | `setting_row`, `described_row`, `link_row` (a one-line link under the title, at the plain row height), `toggle_row`; a row that toggles shows `row_switch`; any other row pressed as a whole: `pressable_row` |
 | A few exclusive choices / a dropdown | `segmented`, `select` |
 | A value whose choices open in a sheet, not a menu | `sheet_button` (the value and a trailing chevron) |
 | Main, other, and destructive actions | `button(…, ButtonKind::{Primary, Secondary, Danger}, …)`; inside a row: `small_button`; icon only (with an accessible label): `icon_button` |

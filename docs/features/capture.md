@@ -1,12 +1,13 @@
 # Captures (experimental, a build option)
 
-Scrawl's capture engine hosted inside Hex, step 3 of
-[the plan](../plans/capture-in-hex.md). It runs the real `scrawl-capture`
+Scrawl's capture engine hosted inside Hex, steps 3 and the first half of 4
+of [the plan](../plans/capture-in-hex.md). It runs the real `scrawl-capture`
 crate, imported into `crates/capture`: it records the active display with
-ScreenCaptureKit and narration from Hex's microphone, transcribes the
-narration with word timestamps on Hex's loaded model, and writes a Scrawl
-bundle. No shortcut, input, overlay, or
-routing yet.
+ScreenCaptureKit and narration from Hex's microphone, takes Shift ink and
+clicks from Hex's event tap, transcribes the narration with word timestamps on
+Hex's loaded model, and writes a Scrawl bundle into Scrawl's captures folder.
+Settings › Experiments › Scrawl turns it on and holds its settings. No
+capsule, ink or laser overlay, or routing yet.
 
 ```ts
 Turn it on                               // capture.gate
@@ -20,15 +21,56 @@ Turn it on                               // capture.gate
 │   -> unsupported. The crate is not compiled at all
 ├── Release path -> release-app.sh refuses HEX_CAPTURE; validate-app.sh refuses a
 │   bundle with scrawl-helper or the capture engine in `hex`
+├── Experiment on -> Settings › Experiments › Scrawl appears
 └── Off -> no capture host, engine, sink, thread, or folder; `hex capture` -> feature-off
 
+Settings › Experiments › Scrawl          // capture.pane
+├── Capture with Hex (capture.enabled, default off) -> off: no host, shortcut,
+│   input, retention, or folder, as with the experiment off
+│   └── On while the shortcut collides -> refused, the shortcut row says why
+├── Shortcut (capture.hotkey, default ⌥⇧S) -> same keycap and recorder as dictation;
+│   a key is required; refused when it overlaps dictation, Voice Action, or paste
+├── Screen Recording -> Allow asks macOS once, then opens its System Settings list;
+│   never part of onboarding (macOS also asks at the first capture)
+├── Transcriber (capture.transcriber) -> Parakeet (default) | Apple
+├── Captures folder (capture.folder, default Scrawl's) -> Reveal | choose another
+├── Keep (capture.media_days / bundle_days) -> Scrawl's presets, or imported days
+├── Scrawl.app running -> "Scrawl is running" card + Use Hex for captures
+│   └── Click -> asks Scrawl to quit (nothing else quits it); Hex takes the
+│       shortcut within 2 s of Scrawl leaving
+└── No iPhone row: pairing needs the ingest server, which Hex doesn't run yet
+
+First launch with the experiment on      // capture.import
+├── ~/.config/scrawl/config.json -> transcriber (apple; else Parakeet), capturesDir,
+│   retention, read once (migration `scrawl-capture-settings`); token not used
+├── Scrawl's Application Support config.json -> its shortcut, unless it collides
+└── Scrawl's files are never written
+
+⌥⇧S (capture.shortcut; captures on, Scrawl not running)
+├── Press -> start, as `hex capture start`        // a fresh press only, no repeats
+├── Press again -> stop, as `hex capture stop`    // ignored within 400 ms of the start
+├── Esc while a capture records -> cancel it, before any dictation job
+├── The binding is swallowed, never chord evidence for dictation
+└── Hold the dictation shortcut mid-capture -> dictation pastes as usual
+
+While a capture records                  // capture.input
+├── The existing session tap adds mouse down/up/drag/scroll and Shift (no second tap)
+├── -> Capture::input() through a bounded queue; full -> events dropped and counted
+├── Keys pressed in the app -> logged; keys Hex consumes (its shortcuts, Esc) and
+│   anything while a shortcut is being recorded -> not logged
+├── Scrawl's rules in the engine (hosted_input): Shift drag inks, a click pins,
+│   clicks on Hex's own windows ignored
+└── Shift still held from ⌥⇧S -> must come up once before it can ink; Shift up
+    at the start -> the first Shift drag inks
+
 hex capture start                        // capture.start; needs a listening Hex
-├── Creates <support>/captures/<unix ms>.scrawl (owner-only) -> reply: recording + bundle path
+├── Creates <captures folder>/<unix ms>.scrawl (owner-only) -> reply: recording + bundle path
 ├── Two stopped captures still writing -> refused `busy`
 ├── Copies the dictation timeline from now into a bounded sink (no second stream)
 ├── In the background: Scrawl's engine starts on the active display
 │   ├── Needs Screen Recording for Hex (or the terminal running it)
-│   └── Fails to start -> sink closed, bundle removed, last outcome `failed`
+│   └── Fails to start -> sink closed, bundle removed, last outcome `failed`;
+│       Esc and the next ⌥⇧S see nothing recording
 ├── Release microphone while idle -> the capture keeps the microphone open
 └── Already recording -> unchanged, same bundle
 
@@ -39,11 +81,16 @@ While it records                         // capture.audio
 
 Never on Hex's path                      // capture.isolation
 ├── No microphone, event tap, global shortcut, or model of its own
-├── No ingest server (47777), delivery retries, retention or recovery workers
-├── No ingest token read or written; nothing read or written under ~/.config/scrawl
-│   or Scrawl's Application Support or logs (its log goes to Hex's tracing)
-└── Settings from Hex, not ~/.config/scrawl/config.json: auto-crop on (display
-    captures), the agentContext summary format off; no Hex settings for them yet
+├── No ingest server (47777), delivery retries, or recovery workers
+├── No ingest token used; Scrawl's two config files read once by the import, never
+│   written; nothing else of Scrawl's touched (its log goes to Hex's tracing)
+└── Settings from Hex (capture.*), not Scrawl's config: auto-crop on (display
+    captures), the agentContext summary format off
+
+Retention                                // capture.retention
+└── Hex's own thread: Scrawl's retention pass with capture.*'s policy, 90 s after
+    captures turn on, then hourly; skipped while a capture records or writes,
+    or while Scrawl.app runs (it cleans the shared folder then)
 
 hex capture stop                         // capture.stop
 ├── Closes the sink (≤ 100 ms wait) -> reply: idle + the bundle path, at once
@@ -53,6 +100,9 @@ hex capture stop                         // capture.stop
     ├── Words: 30 s chunks, each a foreground job on the dictation engine's model,
     │   after queued dictation, before meeting chunks; waits while dictation records
     │   or transcribes; never interrupts a live stream
+    ├── Word times moved earlier by the model's measured lag (Parakeet Unified
+    │   English: starts −280 ms, −520 ms after a ≥ 250 ms pause; ends −195 ms);
+    │   other models and Apple keep their own times
     ├── Past 20 min -> audio kept to 20 min, the rest one gap
     ├── recording.mp4, audio.wav, frames/, scrawl.json, summary.md; then every
     │   file 0600 and folder 0700
@@ -79,7 +129,12 @@ capture host on a fresh transcription engine with the selected model, feeding
 WAV files instead of the microphone, and prints the bundle path. It needs the
 experiment on too, and records the screen meanwhile.
 
-Sources: [capture_host.rs](../../src/capture_host.rs), the sink in
+Sources: [capture_host.rs](../../src/capture_host.rs), the tap in
+[suppression.rs](../../src/suppression.rs), the shortcut and Escape in
+[recognition.rs](../../src/recognition.rs), `CaptureSettings` and the import in
+[app_settings.rs](../../src/app_settings.rs), the pane in
+[rune_ui/scrawl.rs](../../src/rune_ui/scrawl.rs), the input rules in
+[hosted_input.rs](../../crates/capture/src/hosted_input.rs), the sink in
 [dictation_audio.rs](../../src/dictation_audio.rs),
 `transcribe_with_words` in [parakeet.rs](../../src/parakeet.rs), and the
 `scrawl-capture` control command in [control.rs](../../src/control.rs).
@@ -114,6 +169,23 @@ Checks:
   `a_failed_start_raced_by_stop_never_wedges_later_starts`,
   `the_engine_config_comes_from_hex`, and
   `shutdown_cancels_the_recording_capture_and_waits_for_its_cleanup`.
+- Shortcut and input, in capture_host.rs: `the_host_is_absent_while_captures_are_off`,
+  `the_shortcut_starts_and_a_later_press_stops`,
+  `input_reaches_only_the_capture_that_is_recording`, `tap_flags_become_modifiers`,
+  `only_a_fresh_press_of_the_shortcut_counts`,
+  `a_failed_start_ends_before_escape_or_the_shortcut_sees_it`;
+  `the_capture_shortcut_is_suppressed_and_never_chord_evidence` and
+  `a_capture_logs_only_keys_that_reach_the_app` in suppression.rs;
+  the ink and click rules in hosted_input.rs, including
+  `a_capture_started_by_its_shortcut_waits_for_shift_to_come_up`,
+  `a_capture_started_without_shift_held_inks_from_the_first_stroke`, and
+  `a_click_with_the_chords_shift_still_held_is_no_pin`.
+- Pane: `captures_default_off_and_refuse_a_shortcut_in_use` and
+  `retention_names_presets_and_imported_days` in rune_ui/scrawl.rs; scenes
+  `mac-scrawl-off`, `mac-scrawl`, `mac-scrawl-running`, `mac-scrawl-permission`
+  (feature builds only, so no goldens: those run on Linux).
+- Settings: every `capture.*` key in `hex settings`
+  (`every_persisted_setting_has_a_cli_key`).
 
 Observed 2026-10-25 on pro (M2 Max), before the real engine, with the
 stand-in: `HEX_EXPERIMENTS=capture hex dev capture-replay` over three
@@ -122,3 +194,5 @@ wrote 18 words with plausible times. The real engine has not run end to end:
 the unit tests use a fake engine over Scrawl's real bundle writer, and the
 mini (the test Mac) has no Screen Recording grant for a dev build, so neither
 `hex capture` against a live app nor `capture-replay` has recorded a screen.
+The shortcut, tap input, Escape, Scrawl coexistence, and import are covered by
+unit tests only; none has run against a live Hex.

@@ -4,8 +4,8 @@
 //! type, radii, elevation, and motion come from the kit's tokens.
 
 use rune::{
-    Color, Edge, El, LoopSpec, Shadow, Spring, SpringPair, TextEdit, TextStyle, Transition, Tx,
-    col, el, row, text,
+    Anim, Color, Edge, El, LoopSpec, Shadow, Spring, SpringPair, TextEdit, TextStyle, Transition,
+    Tx, col, el, row, text,
 };
 use rune_kit::{
     Button, ButtonVariant, ControlSize, IconButton, IconButtonVariant, Kit, Menu, MenuItem,
@@ -23,6 +23,8 @@ const SELECT_WIDTH: f32 = 220.0;
 /// squeezing the description to a word per line (tiling desktops ignore
 /// the window's 860 px minimum width).
 const COPY_MIN_WIDTH: f32 = 100.0;
+/// An [`icon_row`]'s icon and the gap after it.
+const ICON_LEAD: f32 = 28.0;
 
 /// Everything a control needs to paint itself.
 #[derive(Clone, Copy)]
@@ -55,6 +57,19 @@ impl Paint {
     }
     pub(super) fn accent(self) -> Color {
         self.k.c.text_accent
+    }
+}
+
+/// Hover in Hex lands and leaves with the pointer, with no fade either
+/// way. Put it on every element that paints a hover fill, including a kit
+/// control whose root paints one.
+pub(super) trait InstantHover {
+    fn instant_hover(self) -> El;
+}
+
+impl InstantHover for El {
+    fn instant_hover(self) -> El {
+        self.hover_motion(Anim::INSTANT, Anim::INSTANT)
     }
 }
 
@@ -195,18 +210,38 @@ pub(super) fn described_row(
             .color(color)
             .wrap()
     });
-    copy_row(p, key, title, description, control, false)
+    copy_row(p, key, None, title, description, control, false)
+}
+
+/// A [`setting_row`] led by an icon in the icon colour.
+pub(super) fn icon_row(
+    p: Paint,
+    key: &str,
+    glyph: &'static rune::Icon,
+    title: &str,
+    description: Option<&str>,
+    control: El,
+) -> El {
+    let description = description.map(|copy| {
+        text(copy)
+            .key("description")
+            .font(DESCRIPTION)
+            .color(p.muted())
+            .wrap()
+    });
+    copy_row(p, key, Some(glyph), title, description, control, false)
 }
 
 /// A [`setting_row`] with a one-line link under its title, as tight as a
 /// row without one so General still fits the window.
 pub(super) fn link_row(p: Paint, key: &str, title: &str, link: El, control: El) -> El {
-    copy_row(p, key, title, Some(link), control, true)
+    copy_row(p, key, None, title, Some(link), control, true)
 }
 
 fn copy_row(
     p: Paint,
     key: &str,
+    glyph: Option<&'static rune::Icon>,
     title: &str,
     description: Option<El>,
     control: El,
@@ -217,6 +252,14 @@ fn copy_row(
     } else {
         ROW_HEIGHT
     };
+    let copy = col()
+        .key("copy")
+        .w(COPY_MIN_WIDTH)
+        .min_w(COPY_MIN_WIDTH)
+        .grow(1.0)
+        .gap(if compact { 0.0 } else { 2.0 })
+        .child(text(title).key("label").font(p.k.ty.ui).color(p.text()))
+        .children(description);
     row()
         .key(key)
         .min_h(height)
@@ -228,16 +271,18 @@ fn copy_row(
         .flex_wrap()
         .radius(p.k.radius.md)
         .label(title)
-        .child(
-            col()
-                .key("copy")
-                .w(COPY_MIN_WIDTH)
-                .min_w(COPY_MIN_WIDTH)
+        .child(match glyph {
+            None => copy,
+            Some(glyph) => row()
+                .key("lead")
+                .w(COPY_MIN_WIDTH + ICON_LEAD)
+                .min_w(COPY_MIN_WIDTH + ICON_LEAD)
                 .grow(1.0)
-                .gap(if compact { 0.0 } else { 2.0 })
-                .child(text(title).key("label").font(p.k.ty.ui).color(p.text()))
-                .children(description),
-        )
+                .gap(ICON_LEAD - 16.0)
+                .center_y()
+                .child(rune::icon(glyph, 16.0).key("icon").color(p.k.c.icon_base))
+                .child(copy),
+        })
         .child(control)
 }
 
@@ -256,12 +301,21 @@ pub(super) fn toggle_row<'a>(
     on: bool,
     flip: impl Fn(&mut Ui) + 'static,
 ) -> El {
-    setting_row(p, key, title, description.into(), row_switch(p, on))
-        .role("toggle")
-        .focusable(true)
-        .hover(p.k.c.hover)
-        .press(p.k.c.pressed)
-        .on_press(flip)
+    pressable_row(setting_row(
+        p,
+        key,
+        title,
+        description.into(),
+        row_switch(p, on),
+    ))
+    .on_press(flip)
+}
+
+/// A settings row that toggles when pressed anywhere. Only its switch
+/// reacts to the pointer; the row itself never paints a hover or press
+/// fill.
+pub(super) fn pressable_row(row: El) -> El {
+    row.role("toggle").focusable(true)
 }
 
 /// A few exclusive choices: equal segments sized for the longest label.
@@ -317,7 +371,8 @@ pub(super) fn select(
         .current(Some(label))
         .open(open)
         .on_toggle(toggle)
-        .trigger(p.k);
+        .trigger(p.k)
+        .instant_hover();
     let mut menu = Menu::new(key)
         .trigger(trigger)
         .placement(Placement::BottomEnd)
@@ -357,6 +412,7 @@ impl PushSize for Button {
     fn build_push(self, k: &Kit) -> El {
         self.control_size(ControlSize::Large)
             .build(k)
+            .instant_hover()
             .px(11.0)
             .radius(k.radius.md)
     }
@@ -364,6 +420,7 @@ impl PushSize for Button {
     fn build_small_push(self, k: &Kit) -> El {
         self.control_size(ControlSize::Regular)
             .build(k)
+            .instant_hover()
             .px(9.0)
             .radius(k.radius.sm)
     }
@@ -423,6 +480,7 @@ pub(super) fn icon_button(
         .label(label)
         .on_press(press)
         .build(p.k)
+        .instant_hover()
         .key(key)
 }
 
@@ -715,6 +773,7 @@ pub(super) fn text_field(
         .on_edit(access)
         .on_submit(submit)
         .build(p.k)
+        .instant_hover()
         .key(key)
 }
 

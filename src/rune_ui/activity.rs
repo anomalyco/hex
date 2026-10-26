@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use rune::{El, col, row, text};
 
 use super::Ui;
-use super::controls::{ButtonKind, DESCRIPTION, Paint, button, status_dot};
+use super::controls::{ButtonKind, DESCRIPTION, InstantHover, Paint, button, status_dot};
 use super::lists::{
     detail_header, detail_title, fact, message, placeholder, section_label, source_item,
     source_list, split,
@@ -192,6 +192,7 @@ pub(super) fn pane(ui: &Ui, p: Paint) -> (Vec<El>, El) {
             .gap(12.0)
             .radius(p.k.radius.md)
             .hover(c.hover)
+            .instant_hover()
             .press(c.pressed)
             .on_press(move |ui: &mut Ui| ui.activity.selected = Some(index))
             .child(

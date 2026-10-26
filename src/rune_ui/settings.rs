@@ -7,9 +7,10 @@ use std::time::{Duration, Instant};
 use rune::{Edge, El, Key, KeyEvent, Transition, Tx, col, row, spacer, text};
 
 use super::controls::{
-    ButtonKind, CardRow, Choice, DESCRIPTION, KEY_GAP, KeySize, Paint, button, described_row,
-    folding, icon_button, key_tray, keycap, keycaps, link_row, note, pulsing_dot, section,
-    segmented, select, setting_row, sheet_button, status_dot, text_field, toggle_row, tray_roll,
+    ButtonKind, CardRow, Choice, DESCRIPTION, InstantHover, KEY_GAP, KeySize, Paint, button,
+    described_row, folding, icon_button, key_tray, keycap, keycaps, link_row, note, pulsing_dot,
+    section, segmented, select, setting_row, sheet_button, status_dot, text_field, toggle_row,
+    tray_roll,
 };
 use super::{Menu, Request, Service, ShortcutTarget, Ui};
 use super::{explainer, host};
@@ -301,6 +302,8 @@ pub(super) fn conflicts(
         ShortcutTarget::DictationAlternate(_) => HotkeySlot::Dictation,
         ShortcutTarget::VoiceAction => HotkeySlot::VoiceAction,
         ShortcutTarget::PasteLast => HotkeySlot::PasteLast,
+        #[cfg(hex_capture)]
+        ShortcutTarget::Capture => HotkeySlot::Capture,
     };
     settings.hotkey_in_use(slot, binding)
         || match target {
@@ -346,6 +349,8 @@ pub(super) fn binding(settings: &AppSettings, target: ShortcutTarget) -> Option<
         }
         ShortcutTarget::PasteLast => settings.paste_last_hotkey.as_ref(),
         ShortcutTarget::VoiceAction => Some(&settings.edit_hotkey),
+        #[cfg(hex_capture)]
+        ShortcutTarget::Capture => Some(&settings.capture.hotkey),
     }
 }
 
@@ -366,6 +371,8 @@ pub(super) fn set_binding(
         }
         ShortcutTarget::PasteLast => settings.paste_last_hotkey = Some(binding),
         ShortcutTarget::VoiceAction => settings.edit_hotkey = binding,
+        #[cfg(hex_capture)]
+        ShortcutTarget::Capture => settings.capture.hotkey = binding,
     }
     settings.merge_dictation_modifier_sides();
 }
@@ -632,6 +639,8 @@ fn portal_grant(ui: &Ui, target: ShortcutTarget) -> Option<&DesktopGrantedShortc
         ShortcutTarget::DictationAlternate(_) => "Dictation alternate",
         ShortcutTarget::PasteLast => "Paste last dictation",
         ShortcutTarget::VoiceAction => "Voice Action",
+        #[cfg(hex_capture)]
+        ShortcutTarget::Capture => "Capture",
     };
     granted.iter().find(|shortcut| shortcut.name == name)
 }
@@ -660,6 +669,8 @@ fn shortcut_row(ui: &Ui, p: Paint, target: ShortcutTarget) -> El {
         }
         ShortcutTarget::PasteLast => ("paste-last", tr("Paste last dictation")),
         ShortcutTarget::VoiceAction => ("voice-action-shortcut", tr("Voice Action")),
+        #[cfg(hex_capture)]
+        ShortcutTarget::Capture => ("capture-shortcut", tr("Shortcut")),
     };
     described_row(
         p,
@@ -686,6 +697,8 @@ pub(super) fn shortcut_control(ui: &Ui, p: Paint, target: ShortcutTarget) -> El 
         ShortcutTarget::DictationAlternate(_) => "dictation-shortcut-alternate-control",
         ShortcutTarget::PasteLast => "paste-last-control",
         ShortcutTarget::VoiceAction => "voice-action-shortcut-control",
+        #[cfg(hex_capture)]
+        ShortcutTarget::Capture => "capture-shortcut-control",
     };
     let picker = super::platform_settings::side_selector(ui, p, target);
     // The picker hangs off the keys' left edge in the room its margin
@@ -1154,6 +1167,8 @@ pub(super) fn hotkey_control(ui: &Ui, p: Paint, target: ShortcutTarget) -> El {
         ShortcutTarget::DictationAlternate(_) => "dictation-hotkey-alternate",
         ShortcutTarget::PasteLast => "paste-last-hotkey",
         ShortcutTarget::VoiceAction => "voice-action-hotkey",
+        #[cfg(hex_capture)]
+        ShortcutTarget::Capture => "capture-hotkey",
     };
     let face = match ui.capture {
         Capture::Listening {
@@ -1203,7 +1218,7 @@ pub(super) fn hotkey_control(ui: &Ui, p: Paint, target: ShortcutTarget) -> El {
         frame = frame.box_shadow(*shadow);
     }
     if face == (Face::Shortcut { saved: false }) {
-        frame = frame.hover(c.hover).press(c.pressed);
+        frame = frame.hover(c.hover).instant_hover().press(c.pressed);
     }
     frame.child(
         col()
@@ -1469,6 +1484,7 @@ fn advanced_toggle(ui: &Ui, p: Paint, pinned: bool) -> El {
     toggle
         .role("button")
         .hover(c.hover)
+        .instant_hover()
         .press(c.pressed)
         .focusable(true)
         .focus_ring(2.0, 0.0, c.border_focus)

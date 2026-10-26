@@ -1738,30 +1738,21 @@ unsafe extern "C" fn key_tap_callback(
     }
 
     let t_ms = telemetry.elapsed_ms();
-    if cmd && !ctrl && !alt && !shift && (keycode == layout_z_keycode() || keycode == KEY_Z) {
-        let _ = telemetry.ui_sender.try_send(Event::UndoStroke);
-    } else if cmd || ctrl {
-        // Only log modifier-chord shortcuts, never ordinary typing or secrets.
-        if let Some(key_name) = shortcut_key_name(keycode) {
-            let mut chord = String::new();
-            if ctrl {
-                chord.push('⌃');
-            }
-            if alt {
-                chord.push('⌥');
-            }
-            if shift {
-                chord.push('⇧');
-            }
-            if cmd {
-                chord.push('⌘');
-            }
-            chord.push_str(&key_name);
-            telemetry.handle_input(InputEvent::KeyChord {
-                t_ms,
-                shortcut: chord,
-            });
+    let modifiers = crate::hosted_input::Modifiers {
+        command: cmd,
+        control: ctrl,
+        option: alt,
+        shift,
+    };
+    let z = keycode == layout_z_keycode() || keycode == KEY_Z;
+    // Only modifier-chord shortcuts are logged, never ordinary typing or secrets.
+    let name = (cmd || ctrl).then(|| shortcut_key_name(keycode)).flatten();
+    match crate::hosted_input::key_input(t_ms, name.as_deref(), z, modifiers) {
+        Some(InputEvent::UndoStroke) => {
+            let _ = telemetry.ui_sender.try_send(Event::UndoStroke);
         }
+        Some(chord) => telemetry.handle_input(chord),
+        None => {}
     }
     event
 }
@@ -1905,92 +1896,13 @@ fn run_global_hid_poller(telemetry: Arc<SharedCaptureTelemetry>) {
 fn shortcut_key_name(keycode: u16) -> Option<String> {
     let _ = init_keyboard_layout_map();
     let chars = LAYOUT_KEY_CHARS.get();
-    key_name(keycode, |code| chars.and_then(|c| c.get(&code).copied()))
-}
-
-/// Keys that type no character are named the same on every layout; the rest come from
-/// `layout_char` (what ⌘ + the key types), else from the ANSI QWERTY positions.
-fn key_name(keycode: u16, layout_char: impl Fn(u16) -> Option<char>) -> Option<String> {
-    let fixed = match keycode {
-        36 | 76 => "↩",
-        48 => "⇥",
-        49 => "Space",
-        51 => "⌫",
-        53 => "Esc",
-        117 => "⌦",
-        123 => "←",
-        124 => "→",
-        125 => "↓",
-        126 => "↑",
-        115 => "Home",
-        119 => "End",
-        116 => "PgUp",
-        121 => "PgDn",
-        122 => "F1",
-        120 => "F2",
-        99 => "F3",
-        118 => "F4",
-        96 => "F5",
-        97 => "F6",
-        98 => "F7",
-        100 => "F8",
-        101 => "F9",
-        109 => "F10",
-        103 => "F11",
-        111 => "F12",
-        _ => "",
-    };
-    if !fixed.is_empty() {
-        return Some(fixed.to_string());
-    }
-    layout_char(keycode)
-        .or_else(|| ansi_key_char(keycode))
-        .map(|c| c.to_uppercase().collect())
-}
-
-fn ansi_key_char(keycode: u16) -> Option<char> {
-    const ANSI: &str = "asdfhgzxcv\0bqweryt123465=97-80]ou[ip\0lj'k;\\,/nm.";
-    ANSI.chars()
-        .nth(usize::from(keycode))
-        .filter(|&c| c != '\0')
+    crate::hosted_input::key_name(keycode, |code| chars.and_then(|c| c.get(&code).copied()))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::model::{InteractionEvent, TargetFrame};
-
-    #[test]
-    fn shortcut_keys_are_named_by_the_layout_not_their_qwerty_position() {
-        // Dvorak puts B where QWERTY has N (45) and T where QWERTY has K (40).
-        let dvorak = |code: u16| match code {
-            45 => Some('b'),
-            40 => Some('t'),
-            13 => Some(','),
-            _ => None,
-        };
-        assert_eq!(key_name(45, dvorak).as_deref(), Some("B"));
-        assert_eq!(key_name(40, dvorak).as_deref(), Some("T"));
-        assert_eq!(key_name(13, dvorak).as_deref(), Some(","));
-        // Keys that type nothing keep fixed names whatever the layout says.
-        let odd = |_| Some('x');
-        assert_eq!(key_name(36, odd).as_deref(), Some("↩"));
-        assert_eq!(key_name(123, odd).as_deref(), Some("←"));
-        assert_eq!(key_name(122, odd).as_deref(), Some("F1"));
-        assert_eq!(key_name(53, odd).as_deref(), Some("Esc"));
-    }
-
-    #[test]
-    fn shortcut_keys_fall_back_to_ansi_positions_without_a_layout() {
-        let none = |_| None;
-        assert_eq!(key_name(45, none).as_deref(), Some("N"));
-        assert_eq!(key_name(17, none).as_deref(), Some("T"));
-        assert_eq!(key_name(0, none).as_deref(), Some("A"));
-        assert_eq!(key_name(47, none).as_deref(), Some("."));
-        assert_eq!(key_name(29, none).as_deref(), Some("0"));
-        assert_eq!(key_name(10, none), None);
-        assert_eq!(key_name(200, none), None);
-    }
 
     /// The mouse monitor's AppKit calls pass objc2's encoding checks (which debug builds, the
     /// installed app included, run on every message), and a monitored click is recorded.

@@ -335,9 +335,14 @@ substitute for source inspection or a second roadmap.
   macOS build with the `capture` Cargo feature, a build option off in every
   public build (`HEX_CAPTURE=1 scripts/build-app.sh` bundles and signs
   `scrawl-helper` beside `hex`). Hex's `Host`,
-  `ConfigSource`, and Parakeet `Transcriber` for the engine, the
-  listener-owned `CaptureHost` behind `hex capture`, and its 16 kHz
-  gap-padded timeline handed to the engine as `AudioIn::External`.
+  `ConfigSource`, and Parakeet or Apple `Transcriber` for the engine, the
+  listener-owned `CaptureHost` behind `hex capture` and the capture shortcut,
+  its 16 kHz gap-padded timeline handed to the engine as `AudioIn::External`,
+  the tap's pointer input forwarded to `Capture::input()`, Scrawl.app
+  coexistence, the retention thread, and the `CaptureSnapshot` every view
+  reads (`capture_host::snapshot`/`watch`, published on each change, so a
+  capsule never reaches into the host). `rune_ui/scrawl.rs` is its pane
+  (Experiments › Scrawl) and `CaptureSettings` its `capture.*` settings.
 - `instance`: the exclusive Application Support lock that prevents concurrent
   command listeners.
 - `process_exit`: how the macOS app ends. Every quit path (menu, `hex quit`
@@ -604,12 +609,23 @@ CoreAudio formats, AppleScript details, or event serialization.
   `release-app.sh` refuses `HEX_CAPTURE` and `validate-app.sh` refuses a
   bundle with `scrawl-helper` or the capture engine. With the experiment
   off, the listener builds no capture host: no engine, sink, thread, bundle
-  folder, or work. Scrawl's engine
+  folder, or work, and the same holds with the experiment on while
+  `capture.enabled` (the Scrawl pane's opt-in, default off) is off. Scrawl's engine
   records the screen, runs with `SharedResources::none()` (Hex never calls
   `install_shared_resources`: no ingest server, ingest token, delivery
-  retries, or global shortcuts), logs to tracing, and writes only to Hex's
-  captures folder. A capture never opens a
-  microphone, installs a tap, or loads a model: it copies the dictation
+  retries, or global shortcuts), logs to tracing, and writes only to the
+  captures folder (`capture.folder`, Scrawl's own by default). Hex's capture
+  shortcut (default ⌥⇧S, a key required, never overlapping another binding)
+  is a fresh press that starts or stops; while Scrawl.app
+  (`dev.kitlangton.scrawl`) runs, Hex registers no capture shortcut and runs
+  no retention, and only the pane's "Use Hex for captures" quits Scrawl.
+  Escape cancels a recording capture before any dictation job. Pointer
+  events and Shift reach the engine from the one session tap, only while a
+  capture records, through a bounded queue that drops rather than block; they
+  never reach the listener. Scrawl's settings are imported once, read-only;
+  Screen Recording is asked at the first capture or from the pane, never in
+  onboarding. A capture never opens a
+  microphone, installs a tap of its own, or loads a model: it copies the dictation
   timeline through a bounded sink that records a gap rather than block, so a
   stalled capture never stalls dictation, and while a sink is open the
   release-while-idle close waits for it. One capture engine per process, one
@@ -622,7 +638,7 @@ CoreAudio formats, AppleScript details, or event serialization.
   when the capture is written; one thread writes stopped captures one at a
   time, at most two wait, and a start beyond that is refused `busy`. The
   engine's log goes to tracing from before it is built, and its settings come
-  from Hex (`ConfigSource`), never `~/.config/scrawl`. Bundles are
+  from Hex (`ConfigSource`), never `~/.config/scrawl` after the import. Bundles are
   owner-only. Quitting
   cancels a recording capture, stops transcription between chunks, and waits
   at most 2 s for capture threads.

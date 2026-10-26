@@ -14,6 +14,7 @@ mod commands;
 mod controls;
 mod explainer;
 mod fun;
+mod hero;
 mod history;
 #[cfg_attr(target_os = "linux", path = "rune_ui/linux_host.rs")]
 #[cfg_attr(target_os = "windows", path = "rune_ui/windows_host.rs")]
@@ -30,6 +31,8 @@ mod onboarding;
 mod picker;
 mod platform;
 mod platform_settings;
+#[cfg(hex_capture)]
+mod scrawl;
 mod settings;
 mod vocabulary;
 mod voice_action;
@@ -46,7 +49,7 @@ use crate::desktop_host::{
 };
 use crate::desktop_i18n::{tr, tr_fill};
 use crate::transcription_models::TranscriptionModelId;
-use controls::Paint;
+use controls::{InstantHover, Paint};
 use host::{Backend, Request, ShortcutTarget};
 use settings::Capture;
 
@@ -101,6 +104,12 @@ static MEETINGS_ICON: Icon = Icon {
     view: 16.0,
     body: include_str!("../assets/icons/meetings.svg"),
 };
+#[cfg(hex_capture)]
+static SCRAWL_ICON: Icon = Icon {
+    name: "hex-scrawl",
+    view: 16.0,
+    body: include_str!("../assets/icons/scrawl.svg"),
+};
 
 /// Runs the Linux window's app on the main thread until Hex quits: the
 /// window side of `linux_app`'s seam. It starts without a window; each
@@ -154,7 +163,8 @@ pub(crate) fn run_app(
 pub(crate) fn app(connect: host::Connect) -> rune::App<Ui> {
     let app = rune::App::new(spec())
         .init(move || Ui::load_with(connect))
-        .on_close(on_close);
+        .on_close(on_close)
+        .compositor(hero::HeroCompositor::default());
     let window = app.handle();
     window.update({
         let window = window.clone();
@@ -244,6 +254,8 @@ pub(crate) fn shortcut_rule(
         HotkeySlot::Dictation => ShortcutTarget::Dictation,
         HotkeySlot::VoiceAction => ShortcutTarget::VoiceAction,
         HotkeySlot::PasteLast => ShortcutTarget::PasteLast,
+        #[cfg(hex_capture)]
+        HotkeySlot::Capture => ShortcutTarget::Capture,
     };
     host::validate_hotkey(target, binding)
 }
@@ -286,7 +298,7 @@ pub(crate) fn meeting_failed(ui: &mut Ui, error: String) {
 /// scene, or `live` for the running Hex's `hex status`.
 #[cfg(target_os = "linux")]
 pub(crate) fn render() {
-    rune::run(spec());
+    rune::run_with(spec(), hero::HeroCompositor::default());
 }
 
 /// The window's logical size, which every pane and the picker fit.
@@ -364,6 +376,11 @@ enum Pane {
     /// Recorded calls and their settings, or the opt-in (macOS beta).
     Meetings,
     History,
+    /// Scrawl captures inside Hex: the opt-in, shortcut, permission,
+    /// transcriber, folder, retention, and Scrawl's own app (the `capture`
+    /// experiment, under Experiments, in builds with the build option).
+    #[cfg(hex_capture)]
+    Scrawl,
     /// The Hex Microphone's driver, tuning, and try-it demo (macOS, under
     /// Experiments).
     VoiceFilter,
@@ -374,13 +391,15 @@ enum Pane {
 }
 
 impl Pane {
-    const ALL: [Pane; 9] = [
+    const ALL: &[Pane] = &[
         Pane::General,
         Pane::Modes,
         Pane::VoiceAction,
         Pane::Commands,
         Pane::Meetings,
         Pane::History,
+        #[cfg(hex_capture)]
+        Pane::Scrawl,
         Pane::VoiceFilter,
         Pane::HudLab,
         Pane::Activity,
@@ -403,12 +422,18 @@ impl Pane {
             }
             Pane::HudLab => caps.hud_lab && ui.platform.developer,
             Pane::Activity => ui.platform.developer,
+            #[cfg(hex_capture)]
+            Pane::Scrawl => ui.platform.scrawl.is_some(),
             _ => true,
         }
     }
 
     /// Listed under the sidebar's Experiments heading.
     fn experimental(self) -> bool {
+        #[cfg(hex_capture)]
+        if self == Pane::Scrawl {
+            return true;
+        }
         matches!(self, Pane::VoiceFilter | Pane::HudLab | Pane::Activity)
     }
 
@@ -420,6 +445,8 @@ impl Pane {
             Pane::VoiceAction => tr("Voice Action"),
             Pane::History => tr("History"),
             Pane::Meetings => tr("Meetings"),
+            #[cfg(hex_capture)]
+            Pane::Scrawl => "Scrawl",
             Pane::VoiceFilter => tr("Voice Filter"),
             Pane::HudLab => "HUD Lab",
             Pane::Activity => tr("Activity"),
@@ -434,6 +461,8 @@ impl Pane {
             Pane::VoiceAction => "nav-voice-action",
             Pane::History => "nav-history",
             Pane::Meetings => "nav-meetings",
+            #[cfg(hex_capture)]
+            Pane::Scrawl => "nav-scrawl",
             Pane::VoiceFilter => "nav-voice-filter",
             Pane::HudLab => "nav-hud-lab",
             Pane::Activity => "nav-activity",
@@ -448,6 +477,8 @@ impl Pane {
             Pane::VoiceAction => &VOICE_ACTION_ICON,
             Pane::History => &HISTORY_ICON,
             Pane::Meetings => &MEETINGS_ICON,
+            #[cfg(hex_capture)]
+            Pane::Scrawl => &SCRAWL_ICON,
             Pane::VoiceFilter => &VOICE_FILTER_ICON,
             Pane::HudLab => &HUD_LAB_ICON,
             Pane::Activity => &ACTIVITY_ICON,
@@ -469,6 +500,9 @@ enum Menu {
     MeetingActions,
     /// The calendars meeting reminders read.
     Calendars,
+    /// How long captures are kept (the Scrawl pane).
+    #[cfg(hex_capture)]
+    CaptureRetention,
 }
 
 pub(crate) struct Ui {
@@ -695,6 +729,29 @@ impl Ui {
                 }
                 self.platform.note_asked(kind);
             }
+            #[cfg(hex_capture)]
+            platform::PlatformRequest::Scrawl(request) => {
+                let fixture = self.host.is_fixture();
+                if let Some(view) = self.platform.scrawl.as_mut() {
+                    match request {
+                        platform::ScrawlRequest::ScreenRecording => {
+                            // Previews grant on the second ask, as for
+                            // system audio.
+                            if fixture && view.screen_recording_asked {
+                                view.screen_recording = true;
+                            }
+                            view.screen_recording_asked = true;
+                        }
+                        platform::ScrawlRequest::QuitScrawl => {
+                            view.quitting_scrawl = true;
+                            if fixture {
+                                view.scrawl_running = false;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
             platform::PlatformRequest::SetLaunchAtLogin(enabled) => match &self.host {
                 // Windows writes its Run key from the window's own process.
                 platform::PlatformHost::None => {
@@ -818,7 +875,8 @@ fn on_key(ui: &mut Ui, event: &rune::KeyEvent, tx: &mut Tx) -> bool {
     {
         let index = digit as usize - '1' as usize;
         let pane = Pane::ALL
-            .into_iter()
+            .iter()
+            .copied()
             .filter(|pane| pane.shown(ui))
             .nth(index);
         if let Some(pane) = pane {
@@ -951,6 +1009,8 @@ fn view(ui: &Ui, cx: &mut Cx<Ui>) -> El {
         Pane::VoiceAction => (Vec::new(), voice_action::pane(ui, p, &mut layer)),
         Pane::History => history::pane(ui, p, &mut layer),
         Pane::Meetings => meetings::pane(ui, p, &mut layer),
+        #[cfg(hex_capture)]
+        Pane::Scrawl => (Vec::new(), scrawl::pane(ui, p, &mut layer)),
         Pane::VoiceFilter => (Vec::new(), fun::pane(ui, p)),
         Pane::HudLab => hud_lab::pane(ui, p),
         Pane::Activity => activity::pane(ui, p),
@@ -1019,15 +1079,41 @@ fn title_bar(element: El) -> El {
 }
 
 fn sidebar(ui: &Ui, p: Paint) -> El {
-    let mut nav = lists::source_list(col().key("nav").gap(NAV_ROW_GAP));
-    let mut experiments = false;
-    for pane in Pane::ALL.into_iter().filter(|pane| pane.shown(ui)) {
-        if pane.experimental() && !experiments {
-            experiments = true;
-            nav = nav
-                .child(lists::group_label(p, "nav-experiments", tr("Experiments"), false).px(6.0));
+    let panes: Vec<Pane> = Pane::ALL
+        .iter()
+        .copied()
+        .filter(|pane| pane.shown(ui))
+        .collect();
+    // The Experiments heading opens a wider gap before the first
+    // experimental pane, shared by the items on either side of it.
+    let heading = lists::group_label_height(p, false);
+    let starts_group =
+        |index: usize| index > 0 && panes[index].experimental() && !panes[index - 1].experimental();
+    let half_gap = |wide: bool| {
+        if wide {
+            (heading + 2.0 * NAV_ROW_GAP) / 2.0
+        } else {
+            NAV_ROW_GAP / 2.0
         }
-        nav = nav.child(nav_item(p, pane, ui.pane == pane));
+    };
+    let mut nav = lists::source_list(col().key("nav"));
+    for (index, &pane) in panes.iter().enumerate() {
+        let group = starts_group(index);
+        let mut slot = nav_slot(
+            p,
+            pane,
+            ui.pane == pane,
+            half_gap(group),
+            half_gap(index + 1 < panes.len() && starts_group(index + 1)),
+        );
+        if group {
+            slot = slot.child(
+                lists::group_label(p, "nav-experiments", tr("Experiments"), false)
+                    .px(6.0)
+                    .absolute(0.0, -heading / 2.0),
+            );
+        }
+        nav = nav.child(slot);
     }
     let action = match ui.view.as_ref().map(|view| &view.update_status) {
         Some(DesktopUpdateStatus::ReadyToRestart) => {
@@ -1059,7 +1145,7 @@ fn sidebar(ui: &Ui, p: Paint) -> El {
         .role("navigation")
         .w(220.0)
         .h_full()
-        .pt(SIDEBAR_TOP)
+        .pt(SIDEBAR_TOP - NAV_ROW_GAP / 2.0)
         .pb(12.0)
         .pl(10.0)
         .pr(6.0)
@@ -1107,6 +1193,7 @@ fn update_status(ui: &Ui, p: Paint) -> Option<El> {
                 .center_y()
                 .radius(p.k.radius.sm)
                 .hover(c.hover)
+                .instant_hover()
                 .press(c.pressed)
                 .focusable(true)
                 .focus_ring(2.0, -2.0, c.border_focus)
@@ -1141,6 +1228,32 @@ fn version_label() -> String {
     }
 }
 
+/// A sidebar item inside its slot. Slots tile the item column, each
+/// reaching halfway into the gaps around its item, so wherever the pointer
+/// is in the column, the nearest item shows its hover, and a press there
+/// selects it.
+fn nav_slot(p: Paint, pane: Pane, on: bool, above: f32, below: f32) -> El {
+    col()
+        .key(format!("{}-slot", pane.key()))
+        .pt(above)
+        .pb(below)
+        .hover_group()
+        .instant_hover()
+        .on_drag(move |ui: &mut Ui, d: &mut rune::Drag, tx: &mut Tx| {
+            select_on_down(ui, d, tx, pane)
+        })
+        .on_press_tx(move |ui: &mut Ui, tx: &mut Tx| ui.select_pane(pane, tx))
+        .child(nav_item(p, pane, on))
+}
+
+/// Switch on pointer down, like a native sidebar; the press keeps keyboard
+/// activation.
+fn select_on_down(ui: &mut Ui, d: &mut rune::Drag, tx: &mut Tx, pane: Pane) {
+    if d.phase == rune::Phase::Down {
+        ui.select_pane(pane, tx);
+    }
+}
+
 fn nav_item(p: Paint, pane: Pane, on: bool) -> El {
     let c = &p.k.c;
     let mut item = row()
@@ -1152,16 +1265,19 @@ fn nav_item(p: Paint, pane: Pane, on: bool) -> El {
         .gap(8.0)
         .center_y()
         .radius(p.k.radius.sm)
-        .hover(c.hover)
         .press(c.pressed)
-        // Switch on pointer down, like a native sidebar; the press keeps
-        // keyboard activation.
         .on_drag(move |ui: &mut Ui, d: &mut rune::Drag, tx: &mut Tx| {
-            if d.phase == rune::Phase::Down {
-                ui.select_pane(pane, tx);
-            }
+            select_on_down(ui, d, tx, pane)
         })
         .on_press_tx(move |ui: &mut Ui, tx: &mut Tx| ui.select_pane(pane, tx))
+        // The slot's hover, drawn on the item.
+        .child(
+            el().key("hover")
+                .pin(Some(0.0), Some(0.0), Some(0.0), Some(0.0))
+                .radius(p.k.radius.sm)
+                .fill(c.hover)
+                .group_opacity(0.0, 1.0),
+        )
         .child(icon(pane.icon(), 16.0).key("icon").color(if on {
             c.icon_base
         } else {
@@ -1194,6 +1310,7 @@ fn quit_item(p: Paint) -> El {
         .center_y()
         .radius(p.k.radius.sm)
         .hover(c.hover)
+        .instant_hover()
         .press(c.pressed)
         .on_press(|ui: &mut Ui| ui.quit())
         .focusable(true)
@@ -1595,6 +1712,18 @@ const SCENES: &[Scene] = &[
         ui.meetings = meetings::MeetingsPane::default();
         ui.pane = Pane::Meetings;
     }),
+    #[cfg(hex_capture)]
+    ("mac-scrawl-off", |ui| scrawl_fixture(ui, false, |_| {})),
+    #[cfg(hex_capture)]
+    ("mac-scrawl", |ui| scrawl_fixture(ui, true, |_| {})),
+    #[cfg(hex_capture)]
+    ("mac-scrawl-running", |ui| {
+        scrawl_fixture(ui, true, |view| view.scrawl_running = true)
+    }),
+    #[cfg(hex_capture)]
+    ("mac-scrawl-permission", |ui| {
+        scrawl_fixture(ui, true, |view| view.screen_recording = false)
+    }),
     ("mac-voice-filter", |ui| {
         *ui = mac_fixture();
         ui.pane = Pane::VoiceFilter;
@@ -1674,10 +1803,34 @@ const SCENES: &[Scene] = &[
     ("mac-onboarding-done", |ui| {
         mac_tour(ui, onboarding::MacStep::Done)
     }),
+    // The welcome hero animating (`--video`, or a live window), and settled as
+    // Reduce Motion shows it.
+    ("onboarding-hero", |ui| hero_tour(ui, false)),
+    ("onboarding-hero-still", |ui| hero_tour(ui, true)),
 ];
+
+fn hero_tour(ui: &mut Ui, still: bool) {
+    mac_tour(ui, onboarding::MacStep::Welcome);
+    if let Some(tour) = &mut ui.tour {
+        tour.hero_still = still;
+    }
+}
 
 /// The macOS window with every permission granted, meetings on, the Hex
 /// Microphone experiment on, and sample meetings and commands.
+/// The Scrawl pane with captures `enabled`, a 3-day video retention, and
+/// `adjust` applied to what the host shows.
+#[cfg(hex_capture)]
+fn scrawl_fixture(ui: &mut Ui, enabled: bool, adjust: fn(&mut platform::ScrawlView)) {
+    *ui = mac_fixture();
+    ui.settings.capture.enabled = enabled;
+    ui.settings.capture.media_days = Some(3);
+    let mut view = platform::ScrawlView::preview();
+    adjust(&mut view);
+    ui.platform.scrawl = Some(view);
+    ui.pane = Pane::Scrawl;
+}
+
 fn mac_fixture() -> Ui {
     let mut ui = fixture(DesktopShortcuts::Registered);
     ui.platform = platform::PlatformState::preview(platform::Capabilities::MACOS);

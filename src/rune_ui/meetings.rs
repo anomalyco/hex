@@ -14,7 +14,9 @@
 use rune::{El, TextEdit, Tx, col, el, row, text};
 use rune_kit::{IconButton, IconButtonVariant, Menu as KitMenu, MenuItem, Placement, TextInput};
 
-use super::controls::{ButtonKind, DESCRIPTION, Paint, button, card, pulsing_dot, segmented_tx};
+use super::controls::{
+    ButtonKind, DESCRIPTION, InstantHover, Paint, button, card, pulsing_dot, segmented_tx,
+};
 use super::lists::{
     Tone, detail_header, detail_title, error_panel, group_label, list_row, message, placeholder,
     section_label, small_button, source_list, split, tone_tag,
@@ -570,6 +572,7 @@ fn search(ui: &Ui, p: Paint) -> El {
         .leading_icon(p.k.glyph.search)
         .on_edit(|ui: &mut Ui| &mut ui.meetings.search)
         .build(p.k)
+        .instant_hover()
         .key("meetings-search")
 }
 
@@ -819,6 +822,7 @@ fn detail(ui: &Ui, p: Paint, meeting: &Meeting, layer: &mut Vec<El>) -> El {
                     .on_edit(|ui: &mut Ui| &mut ui.meetings.rename)
                     .on_submit(|ui: &mut Ui, _| finish_rename(ui))
                     .build(p.k)
+                    .instant_hover()
                     .key("rename-field"),
             )
             .child(button(
@@ -1090,6 +1094,7 @@ fn overflow(ui: &Ui, p: Paint, meeting: &Meeting, layer: &mut Vec<El>) -> Option
             ui.open = (ui.open != Some(Menu::MeetingActions)).then_some(Menu::MeetingActions);
         })
         .build(p.k)
+        .instant_hover()
         .key("meeting-more");
     Some(menu.trigger(trigger).build(p.k, layer))
 }

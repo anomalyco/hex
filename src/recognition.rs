@@ -383,6 +383,8 @@ pub fn listen(
     )?;
     #[cfg(hex_capture)]
     let mut capture_host = crate::capture_host::CaptureHost::start(dictation_worker.engine());
+    #[cfg(hex_capture)]
+    let mut capture_shortcut = crate::capture_host::CaptureShortcut::default();
     let (mut transcription_revision, _) = crate::app_settings::transcription_selection();
     let mut smart_turn = crate::smart_turn::SmartTurn::start(project_root);
     let mut action_executor: Option<ActionExecutor> = None;
@@ -450,6 +452,12 @@ pub fn listen(
     }
 
     while !shutdown.load(Ordering::Relaxed) {
+        #[cfg(hex_capture)]
+        crate::capture_host::CaptureHost::reconcile(
+            &mut capture_host,
+            dictation_worker.engine().as_ref(),
+            &input,
+        );
         if let Some(controls) = &controls {
             while let Ok(control) = controls.try_recv() {
                 match control {
@@ -486,10 +494,17 @@ pub fn listen(
                     RecognitionControl::ScrawlCapture { action, reply } => {
                         let answer = match capture_host.as_mut() {
                             Some(host) => host.control(action, &input),
+                            None if !crate::app_settings::capture_available() => {
+                                ControlReply::error(
+                                    "feature-off",
+                                    "captures need the `capture` experiment; \
+                                     run `hex experiments enable capture` and restart Hex",
+                                )
+                            }
                             None => ControlReply::error(
                                 "feature-off",
-                                "captures need the `capture` experiment; \
-                                 run `hex experiments enable capture` and restart Hex",
+                                "captures are off; turn them on in Settings › Scrawl or \
+                                 run `hex settings set capture.enabled true`",
                             ),
                         };
                         let _ = reply.send(answer);
@@ -956,6 +971,12 @@ pub fn listen(
                 )?;
             }
         }
+        // The capture shortcut ignores keys while shortcuts are suspended or
+        // a programmatic dictation holds them, so their releases go unseen.
+        #[cfg(hex_capture)]
+        if hotkey_capture_suspended || programmatic.is_some() {
+            capture_shortcut.reset();
+        }
         while let Ok(observed) = input_monitor.events.try_recv() {
             let _acknowledge = input_monitor.acknowledge_after(observed);
             let input_event = observed.event;
@@ -981,6 +1002,12 @@ pub fn listen(
             if hotkey_capture_suspended {
                 continue;
             }
+            #[cfg(hex_capture)]
+            if capture_shortcut.pressed(input_event, crate::app_settings::runtime_hotkeys())
+                && let Some(host) = capture_host.as_mut()
+            {
+                host.toggle(capture_at, &input);
+            }
             if voice.is_some() && input_event.is_escape_down() {
                 voice = None;
                 end_capture(
@@ -992,6 +1019,18 @@ pub fn listen(
                     &mut events,
                     indicator.as_ref(),
                 )?;
+                continue;
+            }
+            // Escape ends what records in the foreground first: a dictation
+            // or Voice Action hold, then a capture, then queued dictation.
+            #[cfg(hex_capture)]
+            if !hotkeys.any_recording()
+                && input_event.is_escape_down()
+                && let Some(host) = capture_host.as_mut()
+                && host.recording_since(&input).is_some()
+            {
+                host.control(crate::control::ScrawlCaptureAction::Cancel, &input);
+                feedback::play(Tone::Cancel);
                 continue;
             }
             if !hotkeys.any_recording()
@@ -1208,10 +1247,17 @@ pub fn listen(
                 event => handle_dictation_event(event, &mut events, indicator.as_ref())?,
             }
         }
+        #[cfg(hex_capture)]
+        let capture_recording = capture_host
+            .as_mut()
+            .is_some_and(|host| host.recording_since(&input).is_some());
+        #[cfg(not(hex_capture))]
+        let capture_recording = false;
         input_monitor.set_escape_cancels(
             hotkeys.any_recording()
                 || voice.is_some()
                 || programmatic.is_some()
+                || capture_recording
                 || dictation_worker.pending_count() > 0,
         );
         if received_worker_event {

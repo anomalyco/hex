@@ -443,6 +443,132 @@ fn switching_panes_is_instant() {
     }
 }
 
+fn element(rt: &Runtime<Ui>, key: &str) -> rune::ElementInfo {
+    let suffix = format!("/{key}");
+    rt.elements()
+        .into_iter()
+        .find(|e| !e.exiting && (e.key.as_deref() == Some(key) || e.path.ends_with(&suffix)))
+        .unwrap_or_else(|| panic!("no element {key}"))
+}
+
+/// The sidebar's items, top to bottom, with their drawn rects.
+fn nav_items(rt: &Runtime<Ui>) -> Vec<(Pane, [f32; 4])> {
+    Pane::ALL
+        .iter()
+        .copied()
+        .filter_map(|pane| rt.presented(pane.key()).map(|(rect, _)| (pane, rect)))
+        .collect()
+}
+
+/// The items whose hover shows, after one short frame: hover is instant.
+fn hovered_items(rt: &mut Runtime<Ui>, x: f32, y: f32) -> Vec<Pane> {
+    rt.pointer_move(x, y);
+    rt.frame(1.0 / 120.0);
+    nav_items(rt)
+        .into_iter()
+        .filter(|(pane, _)| {
+            let opacity = element(rt, &format!("{}/hover", pane.key())).opacity;
+            assert!(
+                opacity == 0.0 || opacity == 1.0,
+                "{pane:?}'s hover is fading: {opacity}"
+            );
+            opacity == 1.0
+        })
+        .map(|(pane, _)| pane)
+        .collect()
+}
+
+/// A sidebar with the Experiments group, as a developer sees it.
+fn grouped_sidebar() -> Runtime<Ui> {
+    let mut rt = runtime("mac-settings", true, PANE_SIZE);
+    rt.state.platform.developer = true;
+    rt.invalidate();
+    settle(&mut rt);
+    let items = nav_items(&rt);
+    assert!(items.iter().any(|(pane, _)| pane.experimental()));
+    assert!(items.iter().any(|(pane, _)| !pane.experimental()));
+    rt
+}
+
+#[test]
+fn the_nearest_sidebar_item_hovers_in_every_gap() {
+    let mut rt = grouped_sidebar();
+    let items = nav_items(&rt);
+    let x = items[0].1[0] + 40.0;
+    for pair in items.windows(2) {
+        let ((above, a), (below, b)) = (pair[0], pair[1]);
+        let (gap_top, gap_bottom) = (a[1] + a[3], b[1]);
+        let middle = (gap_top + gap_bottom) / 2.0;
+        assert_eq!(hovered_items(&mut rt, x, a[1] + a[3] / 2.0), [above]);
+        assert_eq!(hovered_items(&mut rt, x, gap_top + 0.5), [above]);
+        assert_eq!(hovered_items(&mut rt, x, middle - 0.5), [above]);
+        assert_eq!(hovered_items(&mut rt, x, middle + 0.5), [below]);
+        assert_eq!(hovered_items(&mut rt, x, gap_bottom - 0.5), [below]);
+    }
+    let (_, last) = items[items.len() - 1];
+    assert!(
+        hovered_items(&mut rt, x, last[1] + last[3] + 200.0).is_empty(),
+        "hover leaves at once"
+    );
+}
+
+#[test]
+fn a_press_in_a_sidebar_gap_selects_the_nearest_item() {
+    let mut rt = grouped_sidebar();
+    let items = nav_items(&rt);
+    let x = items[0].1[0] + 40.0;
+    for pair in items.windows(2) {
+        let ((above, a), (below, b)) = (pair[0], pair[1]);
+        let middle = (a[1] + a[3] + b[1]) / 2.0;
+        for (y, pane) in [(middle - 0.5, above), (middle + 0.5, below)] {
+            rt.pointer_move(x, y);
+            rt.pointer_down(x, y);
+            rt.frame(1.0 / 60.0);
+            assert_eq!(rt.state.pane, pane, "a press at {y} selects {pane:?}");
+            rt.pointer_up(x, y);
+            settle(&mut rt);
+        }
+    }
+}
+
+#[test]
+fn a_settings_row_shows_no_hover_or_press_of_its_own() {
+    let mut rt = runtime("portal", true, PANE_SIZE);
+    let before = rt.state.settings.double_tap_lock;
+    let (x, y) = rt.find("double-tap/copy").expect("the row's title");
+    rt.pointer_move(x, y);
+    rt.frame(1.0 / 120.0);
+    let row = element(&rt, "double-tap");
+    assert_eq!((row.hover, row.fill), (0.0, rune::Color::TRANSPARENT));
+    rt.pointer_down(x, y);
+    rt.frame(1.0 / 120.0);
+    assert_eq!(element(&rt, "double-tap").press, 0.0);
+    rt.pointer_up(x, y);
+    settle(&mut rt);
+    assert_ne!(
+        rt.state.settings.double_tap_lock, before,
+        "pressing the row still flips it"
+    );
+}
+
+#[test]
+fn hover_leaves_at_once() {
+    let mut rt = runtime("mac-settings", true, PANE_SIZE);
+    for key in [
+        "check-for-updates",
+        "dictation-hotkey",
+        "microphone-control-field-trigger",
+    ] {
+        let (x, y) = rt.find(key).unwrap_or_else(|| panic!("no element {key}"));
+        rt.pointer_move(x, y);
+        rt.frame(1.0 / 120.0);
+        assert_eq!(element(&rt, key).hover, 1.0, "{key} hovers at once");
+        rt.pointer_move(x, y + 400.0);
+        rt.frame(1.0 / 120.0);
+        assert_eq!(element(&rt, key).hover, 0.0, "{key} stops hovering at once");
+    }
+}
+
 #[test]
 fn voice_action_saves_its_opt_in_and_refuses_a_taken_shortcut() {
     let mut rt = runtime("voice-action-off", true, PANE_SIZE);
@@ -804,7 +930,8 @@ fn the_sidebar_moves_with_arrows_and_command_numbers() {
         ..Mods::default()
     };
     let shown: Vec<_> = Pane::ALL
-        .into_iter()
+        .iter()
+        .copied()
         .filter(|pane| pane.shown(&rt.state))
         .collect();
     key(&mut rt, Key::Command('3'), command);

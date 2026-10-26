@@ -696,15 +696,16 @@ const WORD_DICTATION_WAIT: std::time::Duration = std::time::Duration::from_secs(
 /// meeting chunks, and never inside a dictation live stream, which finishes
 /// first. No second copy of the model is loaded, and only a weak reference
 /// to the engine is kept between chunks. Quitting stops it between chunks.
+/// Every chunk runs on `selection`.
 #[cfg(hex_capture)]
 pub fn transcribe_with_words(
     engine: &std::sync::Weak<TranscriptionEngine>,
+    selection: &crate::transcription_models::TranscriptionSelection,
     samples: Vec<f32>,
 ) -> Result<crate::transcription::Transcript> {
     if samples.is_empty() {
         return Ok(crate::transcription::Transcript::default());
     }
-    let (_, selection) = crate::app_settings::transcription_selection();
     transcribe_in_chunks(samples, WORD_CHUNK_SAMPLES, |chunk| {
         wait_for_dictation_idle()?;
         let selection = selection.clone();
@@ -2066,7 +2067,7 @@ mod tests {
         let engine = Arc::new(engine);
         let weak = Arc::downgrade(&engine);
         assert!(
-            transcribe_with_words(&weak, Vec::new())
+            transcribe_with_words(&weak, &Default::default(), Vec::new())
                 .unwrap()
                 .words
                 .is_empty()
@@ -2081,7 +2082,11 @@ mod tests {
         let request = {
             let weak = weak.clone();
             thread::spawn(move || {
-                transcribe_with_words(&weak, vec![0.1; WORD_CHUNK_SAMPLES + 1_600])
+                transcribe_with_words(
+                    &weak,
+                    &Default::default(),
+                    vec![0.1; WORD_CHUNK_SAMPLES + 1_600],
+                )
             })
         };
         assert!(
@@ -2111,7 +2116,7 @@ mod tests {
         // Only a weak reference is held: once the engine is gone, a capture
         // fails instead of keeping it alive.
         drop(engine);
-        assert!(transcribe_with_words(&weak, vec![0.1; 16]).is_err());
+        assert!(transcribe_with_words(&weak, &Default::default(), vec![0.1; 16]).is_err());
     }
 
     #[test]

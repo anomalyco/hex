@@ -1641,11 +1641,8 @@ impl SharedCaptureTelemetry {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone();
-        let own = std::process::id() as i32;
         let source = self.capture_source_pid.load(Ordering::Acquire);
-        crate::windows::owned_window_at(windows, x, y, &passthrough, |pid| {
-            pid == own || (pid != source && is_helper(pid))
-        })
+        on_own_window(windows, (x, y), &passthrough, source, is_helper)
     }
 
     pub fn normalize_point(&self, screen_x: f64, screen_y: f64) -> (f32, f32, u32, u32) {
@@ -1978,21 +1975,37 @@ fn poll_clicks(
     }
 }
 
+/// Whether the topmost window under global point `at` (in `windows`, front to back, looking
+/// through `passthrough` ones) is the host's own: this process's, or a helper's other than the
+/// app being captured (`source`). Clicks and scrolls there aren't part of what is being shown.
+pub fn on_own_window(
+    windows: &[crate::windows::RawWindow],
+    (x, y): (f64, f64),
+    passthrough: &[u32],
+    source: i32,
+    is_helper: impl Fn(i32) -> bool,
+) -> bool {
+    let own = std::process::id() as i32;
+    crate::windows::owned_window_at(windows, x, y, passthrough, |pid| {
+        pid == own || (pid != source && is_helper(pid))
+    })
+}
+
 /// A press that moves less than this (points) before it's let go is a click, not a drag.
-const CLICK_SLOP_PT: f32 = 12.0;
+pub const CLICK_SLOP_PT: f32 = 12.0;
 /// A ⇧-press held still for longer than this drops no pin.
-const PIN_MAX_PRESS_MS: u64 = 1_000;
+pub const PIN_MAX_PRESS_MS: u64 = 1_000;
 /// Ink spanning less than this (points) is a stationary ⇧ tap, not a stroke.
-const MIN_INK_SPAN_PT: f32 = 6.0;
+pub const MIN_INK_SPAN_PT: f32 = 6.0;
 
 /// Whether a ⇧-press (`t`, global `x`, `y`) let go at `up` is a ⇧-click, which drops a pin.
-fn is_pin_click(down: (u64, f64, f64), up: (u64, f64, f64)) -> bool {
+pub fn is_pin_click(down: (u64, f64, f64), up: (u64, f64, f64)) -> bool {
     up.0.saturating_sub(down.0) <= PIN_MAX_PRESS_MS
         && ((up.1 - down.1).hypot(up.2 - down.2) as f32) < CLICK_SLOP_PT
 }
 
 /// Whether `stroke`'s points before `before_ms` reach at least `MIN_INK_SPAN_PT` from its start.
-fn drew_before(stroke: &Stroke, before_ms: u64) -> bool {
+pub fn drew_before(stroke: &Stroke, before_ms: u64) -> bool {
     let Some(first) = stroke.pts.get(0..2) else {
         return false;
     };
@@ -2014,7 +2027,7 @@ fn drew_before(stroke: &Stroke, before_ms: u64) -> bool {
 }
 
 /// Whether finished ink is worth keeping as a stroke.
-fn is_real_ink(stroke: &Stroke) -> bool {
+pub fn is_real_ink(stroke: &Stroke) -> bool {
     drew_before(stroke, u64::MAX)
 }
 

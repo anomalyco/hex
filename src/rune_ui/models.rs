@@ -10,7 +10,9 @@ use std::time::Instant;
 use rune::{El, TextEdit, Tx, col, row, text};
 use rune_kit::{Badge, Placement, Popover, Select, SelectAppearance, TextInput};
 
-use super::controls::{ButtonKind, DESCRIPTION, Highlight, Paint, button, setting_row};
+use super::controls::{
+    ButtonKind, DESCRIPTION, Highlight, InstantHover, Paint, button, setting_row,
+};
 use super::modes::Selection;
 use super::{Menu, Ui};
 use crate::app_settings::AppSettings;
@@ -265,6 +267,7 @@ pub(super) fn rows(ui: &Ui, p: Paint, target: Target, layer: &mut Vec<El>) -> Ve
         .radius(p.k.radius.md)
         .fill(c.bg_base)
         .hover(c.hover)
+        .instant_hover()
         .press(c.pressed)
         .on_press(|ui: &mut Ui| open_model_picker(ui));
     for shadow in &p.k.elevation.button_neutral {
@@ -395,6 +398,7 @@ fn model_list(ui: &Ui, p: Paint, target: Target) -> El {
             }
         })
         .build(p.k)
+        .instant_hover()
         .key("model-search");
     let mut list = col().key("model-results").w(280.0).mt(8.0);
     let Some(catalog) = ui.models.catalog() else {
@@ -440,6 +444,7 @@ fn model_list(ui: &Ui, p: Paint, target: Target) -> El {
             .gap(1.0)
             .radius(p.k.radius.sm)
             .hover(c.hover)
+            .instant_hover()
             .press(c.pressed)
             .on_press(move |ui: &mut Ui| choose_model(ui, target, pick.clone()))
             .child(

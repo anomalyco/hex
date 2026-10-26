@@ -17,8 +17,8 @@ use rune::{
 
 use super::Ui;
 use super::controls::{
-    ButtonKind, DESCRIPTION, KEY_GAP, KeySize, Paint, TRAY_PADDING, button, folds, key_tray,
-    keycap, row_switch,
+    ButtonKind, DESCRIPTION, InstantHover, KEY_GAP, KeySize, Paint, TRAY_PADDING, button, folds,
+    key_tray, keycap, pressable_row, row_switch,
 };
 use crate::desktop_i18n::tr;
 use crate::dictation::ShortcutMode;
@@ -414,6 +414,7 @@ fn card(ui: &Ui, p: Paint, mode: ShortcutMode, title: &str, caption: &str, visua
             },
         )
         .hover(c.hover)
+        .instant_hover()
         .press(c.pressed)
         .on_press(move |ui: &mut Ui| pick(ui, mode))
         .child(visual)
@@ -455,18 +456,14 @@ fn lock_row(
 ) -> El {
     let c = &p.k.c;
     // Like General's switch rows, the switch shows focus for the row.
-    col()
+    pressable_row(col())
         .key("double-tap")
-        .role("toggle")
         .label(tr("Double-tap to lock"))
-        .focusable(true)
         .py(10.0)
         .px(CARD_PADDING)
         .gap(8.0)
         .radius(p.k.radius.lg)
         .border(p.hair, c.border_weak)
-        .hover(c.hover)
-        .press(c.pressed)
         .on_press(flip_lock)
         .child(
             row()

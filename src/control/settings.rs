@@ -333,6 +333,50 @@ const KEYS: &[Key] = &[
     ),
 ];
 
+/// Captures exist only in builds with the `capture` build option.
+#[cfg(hex_capture)]
+const CAPTURE_KEYS: &[Key] = &[
+    key(
+        "capture.enabled",
+        Kind::Bool,
+        "Scrawl captures: record the screen with narration (the capture experiment)",
+    ),
+    key(
+        "capture.hotkey",
+        Kind::Shortcut(HotkeySlot::Capture),
+        "The capture shortcut: press to start a capture and again to finish it",
+    ),
+    key(
+        "capture.transcriber",
+        Kind::Choice(&["parakeet", "apple"]),
+        "What transcribes a capture's narration: Hex's loaded model or Apple's",
+    ),
+    optional(
+        "capture.folder",
+        Kind::Path,
+        "Folder for new captures; none uses Scrawl's captures folder",
+    ),
+    optional(
+        "capture.media_days",
+        RETENTION_DAYS,
+        "Days a capture keeps its video and audio; none keeps them",
+    ),
+    optional(
+        "capture.bundle_days",
+        RETENTION_DAYS,
+        "Days a capture is kept; none keeps it",
+    ),
+];
+#[cfg(hex_capture)]
+const RETENTION_DAYS: Kind = Kind::Integer { min: 1, max: 3650 };
+#[cfg(not(hex_capture))]
+const CAPTURE_KEYS: &[Key] = &[];
+
+/// Every key, in registry order.
+fn keys() -> impl Iterator<Item = &'static Key> {
+    KEYS.iter().chain(CAPTURE_KEYS)
+}
+
 /// Settings `hex settings` never shows: Hex's own bookkeeping.
 #[cfg(test)]
 const INTERNAL: &[&str] = &["migrations"];
@@ -372,15 +416,14 @@ impl Change {
 /// Every setting, in registry order.
 pub fn list(settings: &AppSettings) -> Vec<SettingValue> {
     let json = serde_json::to_value(settings).unwrap_or(Value::Null);
-    KEYS.iter().map(|key| value_of(key, &json)).collect()
+    keys().map(|key| value_of(key, &json)).collect()
 }
 
 /// One setting, or every setting under a prefix such as `meetings`.
 pub fn get(settings: &AppSettings, name: &str) -> Result<Vec<SettingValue>, ControlError> {
     let json = serde_json::to_value(settings).unwrap_or(Value::Null);
     let prefix = format!("{name}.");
-    let found: Vec<_> = KEYS
-        .iter()
+    let found: Vec<_> = keys()
         .filter(|key| key.key == name || key.key.starts_with(&prefix))
         .map(|key| value_of(key, &json))
         .collect();
@@ -391,8 +434,7 @@ pub fn get(settings: &AppSettings, name: &str) -> Result<Vec<SettingValue>, Cont
 }
 
 fn unknown(name: &str) -> ControlError {
-    let near = KEYS
-        .iter()
+    let near = keys()
         .map(|key| key.key)
         .find(|key| {
             key.ends_with(name)
@@ -449,8 +491,7 @@ pub fn apply(
     confirm: bool,
     shortcuts: &ShortcutRules,
 ) -> Result<Change, ControlError> {
-    let key = KEYS
-        .iter()
+    let key = keys()
         .find(|key| key.key == name)
         .ok_or_else(|| unknown(name))?;
     if let Some(why) = key.read_only {
@@ -515,7 +556,7 @@ pub fn apply(
                 ));
             }
         }
-        "dictation_hotkey" | "edit_hotkey" | "paste_last_hotkey" => {
+        "dictation_hotkey" | "edit_hotkey" | "paste_last_hotkey" | "capture.hotkey" => {
             let Kind::Shortcut(slot) = key.kind else {
                 unreachable!("shortcut keys have the shortcut kind");
             };
@@ -523,6 +564,8 @@ pub fn apply(
                 HotkeySlot::Dictation => Some(&candidate.dictation_hotkey),
                 HotkeySlot::VoiceAction => Some(&candidate.edit_hotkey),
                 HotkeySlot::PasteLast => candidate.paste_last_hotkey.as_ref(),
+                #[cfg(hex_capture)]
+                HotkeySlot::Capture => Some(&candidate.capture.hotkey),
             };
             if let Some(binding) = binding {
                 (shortcuts.rule)(slot, binding).map_err(|why| invalid(name, &why))?;
@@ -570,6 +613,17 @@ pub fn apply(
                     return Err(invalid(name, "every mode needs a unique, non-empty name"));
                 }
             }
+        }
+        #[cfg(hex_capture)]
+        "capture.enabled"
+            if candidate.capture.enabled
+                && candidate.hotkey_in_use(HotkeySlot::Capture, &candidate.capture.hotkey) =>
+        {
+            return Err(ControlError::new(
+                "shortcut-in-use",
+                "The capture shortcut is already in use; set capture.hotkey to another \
+                 shortcut first",
+            ));
         }
         "history_retention" => effects.push(Effect::HistoryRetention(candidate.history_retention)),
         "show_dock_icon" => effects.push(Effect::DockIcon),
@@ -829,8 +883,7 @@ mod tests {
         let mut paths = Vec::new();
         leaves(&json, String::new(), &mut paths);
         for path in &paths {
-            let covered = KEYS
-                .iter()
+            let covered = keys()
                 .map(|key| key.key)
                 .chain(INTERNAL.iter().copied())
                 .chain(OWN_COMMAND.iter().copied())
@@ -840,24 +893,24 @@ mod tests {
                 "settings.json has `{path}`, which `hex settings` can't name"
             );
         }
-        for key in KEYS {
+        for key in keys() {
             assert!(
                 json.pointer(&pointer(key.key)).is_some(),
                 "`{}` names no setting",
                 key.key
             );
         }
-        let mut names: Vec<_> = KEYS.iter().map(|key| key.key).collect();
+        let mut names: Vec<_> = keys().map(|key| key.key).collect();
         names.sort_unstable();
         names.dedup();
-        assert_eq!(names.len(), KEYS.len(), "a key is listed twice");
+        assert_eq!(names.len(), keys().count(), "a key is listed twice");
     }
 
     #[test]
     fn settings_read_by_key_and_prefix() {
         let settings = AppSettings::default();
         let all = list(&settings);
-        assert_eq!(all.len(), KEYS.len());
+        assert_eq!(all.len(), keys().count());
         let calendar = get(&settings, "meetings.calendar").unwrap();
         assert_eq!(calendar.len(), 4);
         let lead = get(&settings, "meetings.calendar.lead_minutes").unwrap();

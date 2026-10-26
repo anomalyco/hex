@@ -106,6 +106,8 @@ pub(crate) enum ShortcutTarget {
     DictationAlternate(usize),
     PasteLast,
     VoiceAction,
+    #[cfg(hex_capture)]
+    Capture,
 }
 
 /// What the runtime last published for the window and the menu bar.

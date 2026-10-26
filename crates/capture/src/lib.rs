@@ -22,6 +22,7 @@ pub mod handoff;
 pub mod helper;
 #[cfg(feature = "hex-client")]
 pub mod hex;
+pub mod hosted_input;
 pub mod ingest_http;
 pub mod keyframes;
 pub mod live_transcribe;

@@ -5,7 +5,7 @@
 use rune::{El, TextEdit, Tx, col, row, text};
 use rune_kit::{Select, SelectAppearance, TextInput};
 
-use super::controls::{ButtonKind, DESCRIPTION, Paint, button};
+use super::controls::{ButtonKind, DESCRIPTION, InstantHover, Paint, button};
 use super::lists::{message, placeholder, section_label, source_item, source_list, split};
 use super::{Menu, Ui};
 use crate::desktop_i18n::{event_age, tr, tr_fill, tr_named};
@@ -179,6 +179,7 @@ pub(super) fn pane(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> (Vec<El>, El) {
         .leading_icon(p.k.glyph.search)
         .on_edit(|ui: &mut Ui| &mut ui.history.search)
         .build(p.k)
+        .instant_hover()
         .key("history-search");
     let labels: Vec<&str> = HistoryRetention::ALL
         .iter()
@@ -264,6 +265,7 @@ pub(super) fn pane(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> (Vec<El>, El) {
             .gap(2.0)
             .radius(p.k.radius.md)
             .hover(c.hover)
+            .instant_hover()
             .press(c.pressed)
             .on_press(move |ui: &mut Ui| {
                 ui.history.selected = Some(id);

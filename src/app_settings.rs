@@ -35,6 +35,12 @@ static SETTINGS_TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 static TRANSCRIPTION_SELECTION: OnceLock<RwLock<RuntimeTranscriptionSelection>> = OnceLock::new();
 static MICROPHONE_SELECTION: OnceLock<RwLock<RuntimeMicrophoneSelection>> = OnceLock::new();
 static VOICE_ACTION_SETTINGS: OnceLock<RwLock<VoiceActionSettings>> = OnceLock::new();
+#[cfg(hex_capture)]
+static CAPTURE_SETTINGS: OnceLock<RwLock<CaptureSettings>> = OnceLock::new();
+#[cfg(hex_capture)]
+static SCRAWL_APP_RUNNING: AtomicBool = AtomicBool::new(false);
+#[cfg(hex_capture)]
+static CAPTURE_ON: AtomicBool = AtomicBool::new(false);
 
 #[derive(Default)]
 struct RuntimeTranscriptionSelection {
@@ -384,6 +390,22 @@ impl HotkeyBinding {
         binding
     }
 
+    /// Option-Shift-S, Scrawl's capture shortcut.
+    #[cfg(hex_capture)]
+    pub fn capture_default() -> Self {
+        Self {
+            modifiers: HotkeyModifiers {
+                option: Some(ModifierSide::Either),
+                shift: Some(ModifierSide::Either),
+                ..Default::default()
+            },
+            key: Some(HotkeyKey {
+                code: layout_key_code('s').unwrap_or(1),
+                label: "S".into(),
+            }),
+        }
+    }
+
     pub fn paste_meeting_default() -> Self {
         Self {
             modifiers: HotkeyModifiers {
@@ -399,6 +421,43 @@ impl HotkeyBinding {
     }
 }
 
+/// Scrawl's record shortcut from its app's `{key_code, carbon_modifiers,
+/// label}` file; a shortcut without a modifier is not Scrawl's.
+#[cfg(hex_capture)]
+fn scrawl_shortcut(bytes: &[u8]) -> Option<HotkeyBinding> {
+    #[derive(Deserialize)]
+    struct Shortcut {
+        key_code: u16,
+        carbon_modifiers: u32,
+        label: String,
+    }
+    const COMMAND: u32 = 1 << 8;
+    const SHIFT: u32 = 1 << 9;
+    const OPTION: u32 = 1 << 11;
+    const CONTROL: u32 = 1 << 12;
+    let shortcut: Shortcut = serde_json::from_slice(bytes).ok()?;
+    let held = |mask: u32| (shortcut.carbon_modifiers & mask != 0).then_some(ModifierSide::Either);
+    let modifiers = HotkeyModifiers {
+        control: held(CONTROL),
+        option: held(OPTION),
+        shift: held(SHIFT),
+        command: held(COMMAND),
+        function: false,
+    };
+    let label: String = shortcut
+        .label
+        .chars()
+        .filter(|c| !matches!(c, '⌃' | '⌥' | '⇧' | '⌘'))
+        .collect();
+    (!modifiers.is_empty() && !label.is_empty()).then_some(HotkeyBinding {
+        modifiers,
+        key: Some(HotkeyKey {
+            code: shortcut.key_code,
+            label,
+        }),
+    })
+}
+
 #[cfg(target_os = "macos")]
 fn paste_key_code() -> u16 {
     *PASTE_KEY_CODE.get_or_init(|| layout_key_code('v').unwrap_or(9))
@@ -412,6 +471,7 @@ fn layout_key_code(character: char) -> Option<u16> {
     if cfg!(test) {
         return match character {
             'e' => Some(14),
+            's' => Some(1),
             'v' => Some(9),
             _ => None,
         };
@@ -610,6 +670,21 @@ pub struct RuntimeHotkeys {
     pub edit: Option<RuntimeHotkey>,
     pub paste_last: Option<RuntimeHotkey>,
     pub paste_meeting: Option<RuntimeHotkey>,
+    /// The capture shortcut, while captures are on (`cfg(hex_capture)`).
+    pub capture: Option<RuntimeHotkey>,
+}
+
+impl RuntimeHotkeys {
+    /// Every shortcut Hex matches, for suppression and chord evidence.
+    pub fn all(&self) -> [Option<RuntimeHotkey>; 5] {
+        [
+            Some(self.dictation),
+            self.edit,
+            self.paste_last,
+            self.paste_meeting,
+            self.capture,
+        ]
+    }
 }
 
 impl Default for RuntimeHotkeys {
@@ -621,6 +696,7 @@ impl Default for RuntimeHotkeys {
             paste_last: Some(HotkeyBinding::paste_last_default().runtime()),
             paste_meeting: crate::DEVELOPER_FEATURES_ENABLED
                 .then(|| HotkeyBinding::paste_meeting_default().runtime()),
+            capture: None,
         }
     }
 }
@@ -949,6 +1025,80 @@ impl Default for VoiceActionSettings {
     }
 }
 
+/// Scrawl captures inside Hex: the `capture` experiment, in builds with the
+/// `capture` build option (`capture_host`). Off by default; off means no
+/// capture work at all.
+#[cfg(hex_capture)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(default)]
+pub struct CaptureSettings {
+    pub enabled: bool,
+    /// Press once to start a capture and again to finish it.
+    pub hotkey: HotkeyBinding,
+    pub transcriber: CaptureTranscriber,
+    /// Where new captures go; `None` is Scrawl's own captures folder.
+    pub folder: Option<PathBuf>,
+    /// Days a capture keeps its video, audio, and full-size frames; `None`
+    /// keeps them.
+    pub media_days: Option<u32>,
+    /// Days a capture is kept at all; `None` keeps it.
+    pub bundle_days: Option<u32>,
+}
+
+#[cfg(hex_capture)]
+impl Default for CaptureSettings {
+    fn default() -> Self {
+        let week = scrawl_capture::retention::Preset::Week.policy();
+        Self {
+            enabled: false,
+            hotkey: HotkeyBinding::capture_default(),
+            transcriber: CaptureTranscriber::default(),
+            folder: None,
+            media_days: week.media_days,
+            bundle_days: week.bundle_days,
+        }
+    }
+}
+
+#[cfg(hex_capture)]
+impl CaptureSettings {
+    /// The folder new captures go to.
+    pub fn captures_dir(&self) -> PathBuf {
+        self.folder
+            .clone()
+            .unwrap_or_else(scrawl_capture::handoff::builtin_captures_dir)
+    }
+
+    pub fn retention(&self) -> scrawl_capture::retention::Policy {
+        scrawl_capture::retention::Policy {
+            media_days: self.media_days,
+            bundle_days: self.bundle_days,
+        }
+    }
+
+    pub fn set_retention(&mut self, policy: scrawl_capture::retention::Policy) {
+        self.media_days = policy.media_days;
+        self.bundle_days = policy.bundle_days;
+    }
+}
+
+/// What turns a capture's narration into words.
+#[cfg(hex_capture)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CaptureTranscriber {
+    /// The dictation model Hex already has loaded, with word times.
+    #[default]
+    Parakeet,
+    /// Apple's speech recognizer, as Scrawl uses by default.
+    Apple,
+}
+
+#[cfg(hex_capture)]
+impl CaptureTranscriber {
+    pub const ALL: [Self; 2] = [Self::Parakeet, Self::Apple];
+}
+
 pub use crate::text_replacements::TextReplacement;
 
 impl RecordingAudioBehavior {
@@ -1013,6 +1163,12 @@ pub struct AppSettings {
     pub voice_action: VoiceActionSettings,
     pub history_retention: crate::history::HistoryRetention,
     pub meetings: MeetingSettings,
+    #[cfg(hex_capture)]
+    pub capture: CaptureSettings,
+    /// Capture settings from a build with captures, kept as they were.
+    #[cfg(not(hex_capture))]
+    #[serde(rename = "capture", skip_serializing_if = "Option::is_none")]
+    pub capture_from_other_build: Option<serde_json::Value>,
     #[serde(default)]
     pub experimental: ExperimentalSettings,
     /// Start listening when Hex opens (Windows and Linux, where the
@@ -1046,6 +1202,10 @@ const DATA_FOLDER_MIGRATION: &str = "macos-data-folder-hex";
 const MIGRATIONS: &[&str] = &[STREAMING_ENGLISH_MIGRATION, DATA_FOLDER_MIGRATION];
 #[cfg(not(target_os = "macos"))]
 const MIGRATIONS: &[&str] = &[STREAMING_ENGLISH_MIGRATION];
+/// Scrawl's settings were read into `capture` once. Left out of
+/// `MIGRATIONS` so new settings import them too.
+#[cfg(hex_capture)]
+const SCRAWL_IMPORT_MIGRATION: &str = "scrawl-capture-settings";
 
 static AVOID_BLUETOOTH_MICROPHONE: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(true);
@@ -1101,6 +1261,10 @@ impl Default for AppSettings {
             voice_action: VoiceActionSettings::default(),
             history_retention: crate::history::HistoryRetention::default(),
             meetings: MeetingSettings::default(),
+            #[cfg(hex_capture)]
+            capture: CaptureSettings::default(),
+            #[cfg(not(hex_capture))]
+            capture_from_other_build: None,
             experimental: ExperimentalSettings::default(),
             enable_on_launch: true,
             paste_with_shift: false,
@@ -1256,8 +1420,69 @@ impl AppSettings {
                 tracing::warn!(%error, "could not record the data folder migration");
             }
         }
+        #[cfg(hex_capture)]
+        if !settings.has_migration(SCRAWL_IMPORT_MIGRATION) && capture_available() {
+            let read = |path: PathBuf| fs::read(path).ok();
+            settings.import_scrawl_settings(
+                read(scrawl_capture::handoff::default_config_path()).as_deref(),
+                dirs::data_dir()
+                    .and_then(|data| read(data.join("scrawl/config.json")))
+                    .as_deref(),
+            );
+            settings.migrations.push(SCRAWL_IMPORT_MIGRATION.into());
+            if path.exists()
+                && let Err(error) = settings.write_to(&path)
+            {
+                tracing::warn!(%error, "could not record the Scrawl settings import");
+            }
+        }
         settings.apply_runtime();
         Ok(settings)
+    }
+
+    /// Reads Scrawl's settings into `capture`, never writing Scrawl's
+    /// files: `engine` is `~/.config/scrawl/config.json` (transcriber,
+    /// captures folder, retention) and `app` is the app's shortcut file.
+    /// Missing or unreadable values keep Hex's defaults.
+    #[cfg(hex_capture)]
+    fn import_scrawl_settings(&mut self, engine: Option<&[u8]>, app: Option<&[u8]>) {
+        if let Some(config) = engine.and_then(|bytes| {
+            serde_json::from_slice::<serde_json::Value>(bytes)
+                .ok()
+                .filter(serde_json::Value::is_object)
+        }) {
+            if config
+                .get("transcriber")
+                .and_then(serde_json::Value::as_str)
+                == Some("apple")
+            {
+                self.capture.transcriber = CaptureTranscriber::Apple;
+            }
+            let home = dirs::home_dir();
+            if let Some(folder) = config
+                .get("capturesDir")
+                .or_else(|| config.get("captures_dir"))
+                .and_then(serde_json::Value::as_str)
+                .map(|dir| match (dir.strip_prefix("~/"), &home) {
+                    (Some(rest), Some(home)) => home.join(rest),
+                    _ => PathBuf::from(dir),
+                })
+                .filter(|dir| dir.is_absolute())
+            {
+                self.capture.folder = Some(folder);
+            }
+            if let Some(policy) = config
+                .get("retention")
+                .and_then(|value| serde_json::from_value(value.clone()).ok())
+            {
+                self.capture.set_retention(policy);
+            }
+        }
+        if let Some(binding) = app.and_then(scrawl_shortcut)
+            && !self.hotkey_in_use(HotkeySlot::Capture, &binding)
+        {
+            self.capture.hotkey = binding;
+        }
     }
 
     pub(crate) fn load_from(path: &std::path::Path) -> Result<Self> {
@@ -1336,6 +1561,14 @@ impl AppSettings {
             Ordering::Relaxed,
         );
         MEETINGS_ENABLED.store(self.meetings.available(), Ordering::Release);
+        #[cfg(hex_capture)]
+        {
+            *CAPTURE_SETTINGS
+                .get_or_init(Default::default)
+                .write()
+                .unwrap_or_else(|error| error.into_inner()) = self.capture.clone();
+            CAPTURE_ON.store(self.capture_on(), Ordering::Release);
+        }
         HEX_MICROPHONE_ENABLED.store(self.experimental.hex_microphone, Ordering::Release);
         crate::hex_microphone::sync_from_settings(
             self.experimental.hex_microphone_mode,
@@ -1513,7 +1746,18 @@ impl AppSettings {
                 .meetings
                 .available()
                 .then(|| HotkeyBinding::paste_meeting_default().runtime()),
+            #[cfg(hex_capture)]
+            capture: self.capture_on().then(|| self.capture.hotkey.runtime()),
+            #[cfg(not(hex_capture))]
+            capture: None,
         }
+    }
+
+    /// Captures are on: the build has them, the `capture` experiment is on,
+    /// and the person turned them on.
+    #[cfg(hex_capture)]
+    pub fn capture_on(&self) -> bool {
+        self.capture.enabled && capture_available()
     }
 
     fn repair_hotkey_conflict(&mut self) {
@@ -1624,6 +1868,8 @@ pub enum HotkeySlot {
     Dictation,
     VoiceAction,
     PasteLast,
+    #[cfg(hex_capture)]
+    Capture,
 }
 
 impl AppSettings {
@@ -1644,6 +1890,10 @@ impl AppSettings {
         }
         if cfg!(target_os = "macos") && self.meetings.available() {
             others.push(HotkeyBinding::paste_meeting_default());
+        }
+        #[cfg(hex_capture)]
+        if slot != HotkeySlot::Capture && self.capture_on() {
+            others.push(self.capture.hotkey.clone());
         }
         hotkey_conflicts(binding, others)
     }
@@ -1852,11 +2102,17 @@ pub fn meeting_output_folder() -> PathBuf {
 }
 
 pub fn runtime_hotkeys() -> RuntimeHotkeys {
-    HOTKEYS
+    #[cfg_attr(not(hex_capture), allow(unused_mut))]
+    let mut hotkeys = HOTKEYS
         .get_or_init(Default::default)
         .read()
         .unwrap_or_else(|error| error.into_inner())
-        .clone()
+        .clone();
+    #[cfg(hex_capture)]
+    if scrawl_app_running() {
+        hotkeys.capture = None;
+    }
+    hotkeys
 }
 
 pub fn dictation_hotkey() -> RuntimeHotkey {
@@ -1873,6 +2129,41 @@ pub fn voice_action_settings() -> VoiceActionSettings {
         .read()
         .unwrap_or_else(|error| error.into_inner())
         .clone()
+}
+
+/// The saved capture settings (`cfg(hex_capture)` builds).
+#[cfg(hex_capture)]
+pub fn capture_settings() -> CaptureSettings {
+    CAPTURE_SETTINGS
+        .get_or_init(Default::default)
+        .read()
+        .unwrap_or_else(|error| error.into_inner())
+        .clone()
+}
+
+/// Captures are on: [`capture_available`] and `capture.enabled`.
+#[cfg(hex_capture)]
+pub fn capture_on() -> bool {
+    CAPTURE_ON.load(Ordering::Acquire)
+}
+
+/// Whether this build can capture at all: it has the build option and the
+/// `capture` experiment is on.
+#[cfg(hex_capture)]
+pub fn capture_available() -> bool {
+    crate::experiments::enabled(crate::experiments::Experiment::Capture)
+}
+
+/// Scrawl's own app is running, so it owns the capture shortcut and Hex
+/// doesn't match it.
+#[cfg(hex_capture)]
+pub fn scrawl_app_running() -> bool {
+    SCRAWL_APP_RUNNING.load(Ordering::Acquire)
+}
+
+#[cfg(hex_capture)]
+pub fn set_scrawl_app_running(running: bool) {
+    SCRAWL_APP_RUNNING.store(running, Ordering::Release);
 }
 
 pub fn hotkey_capture_active() -> bool {

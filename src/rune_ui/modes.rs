@@ -15,7 +15,9 @@ use rune::{Drag, El, Phase, TextEdit, Tx, Waker, col, edit_access, el, row, spac
 use rune_kit::{ControlSize, IconButton, IconButtonVariant, Switch, TextArea, TextInput};
 
 use super::Ui;
-use super::controls::{ButtonKind, DESCRIPTION, Highlight, Paint, button, card, note, setting_row};
+use super::controls::{
+    ButtonKind, DESCRIPTION, Highlight, InstantHover, Paint, button, card, note, setting_row,
+};
 use super::lists::{list_row, remove_button, source_list};
 use super::models::{self, Target};
 use crate::app_settings::{AppSettings, DictationMode};
@@ -618,6 +620,7 @@ pub(super) fn pane(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> (Vec<El>, El) {
         .label(tr("Add mode"))
         .on_press(add_mode)
         .build(p.k)
+        .instant_hover()
         .key("add-mode");
     let c = &p.k.c;
     let mut list = col().key("modes-list");
@@ -763,6 +766,7 @@ fn basics(ui: &Ui, p: Paint, selection: Selection, current: &DictationMode) -> E
         .width(Some(FIELD_WIDTH))
         .on_edit(|ui: &mut Ui| &mut ui.modes.editor.name)
         .build(p.k)
+        .instant_hover()
         .key("mode-name");
     let mut chips = row()
         .key("applications")
@@ -811,6 +815,7 @@ fn basics(ui: &Ui, p: Paint, selection: Selection, current: &DictationMode) -> E
                 ui.modes.application_search.focused = ui.modes.application_picker_open;
             })
             .build(p.k)
+            .instant_hover()
             .key("open-application-picker"),
     );
     let mut rows = vec![
@@ -861,6 +866,7 @@ fn application_picker(ui: &Ui, p: Paint, current: &DictationMode) -> El {
             }
         })
         .build(p.k)
+        .instant_hover()
         .key("application-search");
     let choices = ui.modes.application_choices(&current.applications);
     let query = ui.modes.application_query();
@@ -901,6 +907,7 @@ fn application_picker(ui: &Ui, p: Paint, current: &DictationMode) -> El {
                 .center_y()
                 .radius(p.k.radius.sm)
                 .hover(c.hover)
+                .instant_hover()
                 .press(c.pressed)
                 .on_press(move |ui: &mut Ui| add_application(ui, name.clone()))
                 .child(match ui.modes.icon(&application.path) {
@@ -1029,6 +1036,7 @@ fn corrections(ui: &Ui, p: Paint) -> El {
         .label(tr("Add correction"))
         .on_press(add_replacement)
         .build(p.k)
+        .instant_hover()
         .key("add-correction");
     let mut rows = vec![card_header(
         p,
@@ -1059,6 +1067,7 @@ fn corrections(ui: &Ui, p: Paint) -> El {
                             &mut ui.modes.editor.replacements[index].0
                         }))
                         .build(p.k)
+                        .instant_hover()
                         .key("phrase")
                         .grow(1.0)
                         .shrink(),
@@ -1072,6 +1081,7 @@ fn corrections(ui: &Ui, p: Paint) -> El {
                             &mut ui.modes.editor.replacements[index].1
                         }))
                         .build(p.k)
+                        .instant_hover()
                         .key("output")
                         .grow(1.0)
                         .shrink(),
@@ -1123,6 +1133,7 @@ fn processing(
                 .width(Some(96.0))
                 .on_edit(|ui: &mut Ui| &mut ui.modes.editor.deadline)
                 .build(p.k)
+                .instant_hover()
                 .key("deadline-field"),
         ));
         rows.push(
@@ -1181,6 +1192,7 @@ fn transformations(ui: &Ui, p: Paint, current: &DictationMode) -> El {
                 .label(tr("Add transformation"))
                 .on_press(|ui: &mut Ui| ui.modes.transformation_picker_open = true)
                 .build(p.k)
+                .instant_hover()
                 .key("toggle-transformation-picker")
         }
     });

@@ -250,6 +250,49 @@ pub(super) enum Workspace {
     Error,
 }
 
+/// What the Scrawl pane shows (the `capture` experiment, in builds with the
+/// `capture` build option).
+#[cfg(hex_capture)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(super) struct ScrawlView {
+    /// Screen Recording, which a capture needs to record the screen.
+    pub(super) screen_recording: bool,
+    /// Allow was pressed since Screen Recording was last granted.
+    pub(super) screen_recording_asked: bool,
+    /// Scrawl's own app runs, so it owns the capture shortcut.
+    pub(super) scrawl_running: bool,
+    /// Use Hex for captures was pressed and Scrawl has not quit yet.
+    pub(super) quitting_scrawl: bool,
+    /// A captures folder that could not be revealed or chosen.
+    pub(super) folder_error: Option<String>,
+    /// Turning captures on or off failed (the pane sets it).
+    pub(super) enable_error: Option<String>,
+}
+
+#[cfg(hex_capture)]
+impl ScrawlView {
+    /// Screen Recording allowed and Scrawl not running.
+    pub(super) fn preview() -> Self {
+        Self {
+            screen_recording: true,
+            ..Self::default()
+        }
+    }
+}
+
+/// What the Scrawl pane asks the host for.
+#[cfg(hex_capture)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum ScrawlRequest {
+    /// Ask macOS for Screen Recording, or open its System Settings list.
+    ScreenRecording,
+    /// Use Hex for captures: ask Scrawl's own app to quit. Nothing else
+    /// ever quits it.
+    QuitScrawl,
+    RevealFolder,
+    ChooseFolder,
+}
+
 /// The OS-only state the panes show; the host keeps it current.
 #[derive(Clone, Debug)]
 pub(super) struct PlatformState {
@@ -310,6 +353,10 @@ pub(super) struct PlatformState {
     /// The dictation event log the Activity pane reads (`live.ndjson`);
     /// `None` where the host keeps none.
     pub(super) activity_log: Option<std::path::PathBuf>,
+    /// The Scrawl pane, while the `capture` experiment is on; `None` hides
+    /// it.
+    #[cfg(hex_capture)]
+    pub(super) scrawl: Option<ScrawlView>,
 }
 
 /// The dictation indicator's look, as `dictation_indicator::HudTuning`
@@ -404,6 +451,8 @@ impl PlatformState {
             demo: None,
             hud: HudLab::default(),
             activity_log: None,
+            #[cfg(hex_capture)]
+            scrawl: None,
         }
     }
 
@@ -629,6 +678,8 @@ pub(super) enum PlatformRequest {
     /// Configure` with the tuning, then `Reset` and the demonstrated state
     /// with `queued` jobs behind it.
     ConfigureHud(HudLab),
+    #[cfg(hex_capture)]
+    Scrawl(ScrawlRequest),
 }
 
 /// The host that performs [`PlatformRequest`]s and refreshes

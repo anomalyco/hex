@@ -37,7 +37,9 @@ The known experiments are compiled into
   scripts/build-app.sh` for an app) knows the name. Any other build's `list`
   omits it, `enable` rejects it, and a source naming it is ignored. The
   gate is where the work starts: the listener builds no capture host, so there
-  is no sink, thread, or bundle folder while it is off. Check:
+  is no sink, thread, or bundle folder while it is off. On, it adds
+  Settings › Experiments › Scrawl, whose own opt-in (`capture.enabled`,
+  default off) is the second gate. Check:
   `capture_exists_only_with_its_build_option` in
   [experiments.rs](../../src/experiments.rs).
 - `live-chapters`: chapter a meeting's transcript live while it records
