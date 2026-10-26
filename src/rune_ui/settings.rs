@@ -394,6 +394,7 @@ fn bluetooth_microphone_option(ui: &Ui, p: Paint) -> Option<El> {
             .key("avoid-bluetooth")
             .gap(6.0)
             .center_y()
+            .justify_end()
             .role("toggle")
             .label(tr("Avoid Bluetooth microphone"))
             .focusable(true)
@@ -411,7 +412,7 @@ fn bluetooth_microphone_option(ui: &Ui, p: Paint) -> Option<El> {
             .child(
                 text(tr("Avoid Bluetooth microphone"))
                     .font(DESCRIPTION)
-                    .color(p.muted()),
+                    .color(p.faint()),
             ),
     )
 }
