@@ -658,6 +658,7 @@ impl Owner {
                 continue;
             }
             let capture_idle = self.input_idle();
+            self.input.refresh_automatic_route(capture_idle);
             let event = self
                 .input
                 .recv_timeout(Duration::from_millis(10), capture_idle);

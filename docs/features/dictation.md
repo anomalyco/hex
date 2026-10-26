@@ -45,11 +45,11 @@ Checks: `a_recorder_shows_the_modifiers_held_so_far` in `rune_ui/tests.rs`,
 **CLI:** `hex listen` uses saved settings; `--device` is authoritative. This is
 the CLI listener, not Settings. Do not run it beside an existing listener.
 
-**Closed-lid troubleshooting:** Automatic preserves macOS's default input device,
-including a Bluetooth headset, rather than substituting the built-in microphone.
-Each successful open records `opened dictation microphone` and its device name in
-`process.log`; an empty transcript alone cannot distinguish a silent input from
-silence in the source.
+**Automatic microphone:** Hex prefers an available built-in microphone over a
+Bluetooth headset, so dictation does not switch headphones into a low-quality
+call profile. While idle, it reopens its input when the resolved automatic route
+changes after a device connection or removal. Each successful open records
+`opened dictation microphone` and its device name in `process.log`.
 
 **Separate targets:** [Voice Action](voice-action.md) has its own opt-in and
 capture target, with no double-tap lock. Host-owned API capture has its own
