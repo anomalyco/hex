@@ -45,11 +45,11 @@ Checks: `a_recorder_shows_the_modifiers_held_so_far` in `rune_ui/tests.rs`,
 **CLI:** `hex listen` uses saved settings; `--device` is authoritative. This is
 the CLI listener, not Settings. Do not run it beside an existing listener.
 
-**Closed-lid troubleshooting:** Automatic uses macOS's default input device.
-Choose the external microphone explicitly in General > Dictation > Microphone
-before closing a laptop lid. Each successful open records `opened dictation
-microphone` and its device name in `process.log`; an empty transcript alone
-cannot distinguish a silent built-in microphone from silence in the source.
+**Closed-lid troubleshooting:** Automatic preserves macOS's default input device,
+including a Bluetooth headset, rather than substituting the built-in microphone.
+Each successful open records `opened dictation microphone` and its device name in
+`process.log`; an empty transcript alone cannot distinguish a silent input from
+silence in the source.
 
 **Separate targets:** [Voice Action](voice-action.md) has its own opt-in and
 capture target, with no double-tap lock. Host-owned API capture has its own
