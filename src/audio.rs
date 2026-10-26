@@ -422,6 +422,12 @@ impl AudioInput {
         stream
             .play()
             .wrap_err("could not start microphone capture")?;
+        tracing::info!(
+            device = %device_name,
+            sample_rate = sample_rate.0,
+            channels,
+            "opened dictation microphone"
+        );
 
         Ok(Self {
             _stream: Some(stream),

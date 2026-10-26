@@ -20,7 +20,11 @@ injects a failed shortcut save yet.
 **Shortcut:** Option by default, after macOS permissions and the selected local
 model are ready. Commands and OpenCode are not required. General > Dictation >
 Shortcut accepts modifier-only, modifier-plus-key, standalone Fn/Globe, and
-standalone function-key bindings. Capturing a replacement suspends global matching.
+standalone function-key bindings. macOS also offers one optional **Alternate
+shortcut** for a second physical keyboard; either binding drives the same capture,
+hold/toggle, and lock state. This lets, for example, Right Option on a MacBook and
+Right Control on an external keyboard both dictate. Capturing a replacement suspends
+global matching.
 The shortcut's keys sit in a recessed tray as tall as the recorder, between
 the macOS side picker and the recorder; with no shortcut the tray reads Off.
 On macOS and Windows the recorder shows the modifiers held so far as pressed
@@ -30,14 +34,22 @@ shortcut. The recorder keeps one width in every state, so it, the tray, and the
 side picker never move while it records; with the picker showing, keycaps leave
 the side to it, and otherwise they name it (`Left ⌥`).
 Checks: `a_recorder_shows_the_modifiers_held_so_far` in `rune_ui/tests.rs`,
-`the_shortcut_row_holds_still_through_every_face_and_side`,
-`a_new_shortcut_s_keys_stay_inside_their_tray`, and
-`esc_stays_on_the_recorder_however_many_keys_are_held` in
-`rune_ui/tests/panes.rs`, the `shortcut-row*` scenes, and the `ChordCapture`
-tests in `rune_ui/macos_host.rs` (no native end-to-end run).
+ `the_shortcut_row_holds_still_through_every_face_and_side`,
+ `a_new_shortcut_s_keys_stay_inside_their_tray`, and
+ `esc_stays_on_the_recorder_however_many_keys_are_held` in
+ `rune_ui/tests/panes.rs`, the `shortcut-row*` scenes, and the `ChordCapture`
+ tests in `rune_ui/macos_host.rs`. `alternate_modifier_shortcut_starts_and_finishes_dictation`
+ in `suppression.rs` checks that two sided modifier bindings enter the same dictation machine
+ (no native end-to-end run).
 
 **CLI:** `hex listen` uses saved settings; `--device` is authoritative. This is
 the CLI listener, not Settings. Do not run it beside an existing listener.
+
+**Closed-lid troubleshooting:** Automatic uses macOS's default input device.
+Choose the external microphone explicitly in General > Dictation > Microphone
+before closing a laptop lid. Each successful open records `opened dictation
+microphone` and its device name in `process.log`; an empty transcript alone
+cannot distinguish a silent built-in microphone from silence in the source.
 
 **Separate targets:** [Voice Action](voice-action.md) has its own opt-in and
 capture target, with no double-tap lock. Host-owned API capture has its own

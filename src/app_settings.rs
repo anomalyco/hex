@@ -604,6 +604,9 @@ fn side_from_flags(flags: u64, general: u64, left: u64, right: u64) -> Option<Mo
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct RuntimeHotkeys {
     pub dictation: RuntimeHotkey,
+    /// A second physical shortcut for the same dictation state machine. This
+    /// lets a laptop and an external keyboard use their natural modifier keys.
+    pub alternate_dictation: Option<RuntimeHotkey>,
     pub edit: Option<RuntimeHotkey>,
     pub paste_last: Option<RuntimeHotkey>,
     pub paste_meeting: Option<RuntimeHotkey>,
@@ -613,6 +616,7 @@ impl Default for RuntimeHotkeys {
     fn default() -> Self {
         Self {
             dictation: HotkeyBinding::default().runtime(),
+            alternate_dictation: None,
             edit: None,
             paste_last: Some(HotkeyBinding::paste_last_default().runtime()),
             paste_meeting: crate::DEVELOPER_FEATURES_ENABLED
@@ -988,6 +992,10 @@ pub struct AppSettings {
     pub double_tap_only: bool,
     pub shortcut_mode: crate::dictation::ShortcutMode,
     pub dictation_hotkey: HotkeyBinding,
+    /// An optional second dictation trigger. It shares the primary shortcut's
+    /// hold/toggle and double-tap behavior rather than creating another mode.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub alternate_dictation_hotkey: Option<HotkeyBinding>,
     #[serde(
         default = "HotkeyBinding::edit_default",
         deserialize_with = "deserialize_edit_hotkey"
@@ -1056,6 +1064,7 @@ impl Default for AppSettings {
             double_tap_only: false,
             shortcut_mode: crate::dictation::ShortcutMode::Hold,
             dictation_hotkey: HotkeyBinding::default(),
+            alternate_dictation_hotkey: None,
             edit_hotkey: HotkeyBinding::edit_default(),
             paste_last_hotkey: Some(HotkeyBinding::paste_last_default()),
             show_dock_icon: true,
@@ -1461,6 +1470,10 @@ impl AppSettings {
     pub fn runtime_hotkeys(&self) -> RuntimeHotkeys {
         RuntimeHotkeys {
             dictation: self.dictation_hotkey.runtime(),
+            alternate_dictation: self
+                .alternate_dictation_hotkey
+                .as_ref()
+                .map(HotkeyBinding::runtime),
             edit: self
                 .voice_action
                 .enabled
@@ -1474,7 +1487,11 @@ impl AppSettings {
     }
 
     fn repair_hotkey_conflict(&mut self) {
-        if !self.voice_action.enabled || !self.dictation_hotkey.overlaps(&self.edit_hotkey) {
+        if !self.voice_action.enabled
+            || !self
+                .dictation_hotkeys()
+                .any(|binding| binding.overlaps(&self.edit_hotkey))
+        {
             return;
         }
         #[cfg(target_os = "macos")]
@@ -1502,11 +1519,18 @@ impl AppSettings {
         ]
         .into_iter()
         .flatten()
-        .find(|binding| !self.dictation_hotkey.overlaps(binding))
-        {
+        .find(|binding| {
+            !self
+                .dictation_hotkeys()
+                .any(|dictation| dictation.overlaps(binding))
+        }) {
             tracing::warn!("replaced a conflicting Voice Action shortcut");
             self.edit_hotkey = binding;
         }
+    }
+
+    pub fn dictation_hotkeys(&self) -> impl Iterator<Item = &HotkeyBinding> {
+        std::iter::once(&self.dictation_hotkey).chain(self.alternate_dictation_hotkey.iter())
     }
 }
 
@@ -1538,7 +1562,7 @@ impl AppSettings {
     pub fn hotkey_in_use(&self, slot: HotkeySlot, binding: &HotkeyBinding) -> bool {
         let mut others = Vec::new();
         if slot != HotkeySlot::Dictation {
-            others.push(self.dictation_hotkey.clone());
+            others.extend(self.dictation_hotkeys().cloned());
         }
         if slot != HotkeySlot::VoiceAction && self.voice_action.enabled {
             others.push(self.edit_hotkey.clone());
@@ -2643,6 +2667,33 @@ mod tests {
         assert_eq!(
             decoded.shortcut_mode,
             crate::dictation::ShortcutMode::Toggle
+        );
+    }
+
+    #[test]
+    fn alternate_dictation_shortcut_is_optional_and_round_trips() {
+        let legacy: AppSettings = serde_json::from_str("{}").unwrap();
+        assert_eq!(legacy.alternate_dictation_hotkey, None);
+
+        let alternate = HotkeyBinding {
+            modifiers: HotkeyModifiers {
+                control: Some(ModifierSide::Right),
+                ..Default::default()
+            },
+            key: None,
+        };
+        let settings = AppSettings {
+            alternate_dictation_hotkey: Some(alternate.clone()),
+            ..Default::default()
+        };
+        let decoded: AppSettings =
+            serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
+        assert_eq!(decoded.alternate_dictation_hotkey, Some(alternate));
+        assert_eq!(
+            decoded.runtime_hotkeys().alternate_dictation,
+            decoded
+                .alternate_dictation_hotkey
+                .map(|binding| binding.runtime())
         );
     }
 

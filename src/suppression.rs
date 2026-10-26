@@ -544,6 +544,7 @@ fn is_chord_evidence(code: u16, flags: u64, hotkeys: RuntimeHotkeys) -> bool {
     code != ESCAPE_KEY_CODE
         && ![
             Some(hotkeys.dictation),
+            hotkeys.alternate_dictation,
             hotkeys.edit,
             hotkeys.paste_last,
             hotkeys.paste_meeting,
@@ -691,6 +692,7 @@ impl ShortcutSuppression {
     ) -> bool {
         let bindings = [
             Some(hotkeys.dictation),
+            hotkeys.alternate_dictation,
             hotkeys.edit,
             hotkeys.paste_last,
             hotkeys.paste_meeting,
@@ -731,6 +733,7 @@ impl ShortcutSuppression {
             input,
             RuntimeHotkeys {
                 dictation: hotkey,
+                alternate_dictation: None,
                 edit: None,
                 paste_last: Some(paste_last),
                 paste_meeting: Some(paste_meeting),
@@ -842,7 +845,11 @@ pub struct DictationHotkey {
     double_tap_only: bool,
     /// Press to start, press again to finish: releasing locks the capture.
     toggle: bool,
+    /// The configured primary trigger. `binding` below is the trigger that
+    /// owns an in-flight hold gesture.
+    primary_binding: RuntimeHotkey,
     binding: RuntimeHotkey,
+    alternate_binding: Option<RuntimeHotkey>,
     paste_actions_enabled: bool,
     ignore_before: Option<CaptureInstant>,
     stale_keys_neutral_since: Option<CaptureInstant>,
@@ -863,6 +870,17 @@ impl DictationHotkey {
             double_tap_enabled,
             binding,
         )
+    }
+
+    pub fn new_with_alternate(
+        now: CaptureInstant,
+        double_tap_enabled: bool,
+        binding: RuntimeHotkey,
+        alternate_binding: Option<RuntimeHotkey>,
+    ) -> Self {
+        let mut hotkey = Self::new(now, double_tap_enabled, binding);
+        hotkey.alternate_binding = alternate_binding.filter(|alternate| *alternate != binding);
+        hotkey
     }
 
     pub fn new_without_paste(now: CaptureInstant, binding: RuntimeHotkey) -> Self {
@@ -891,7 +909,9 @@ impl DictationHotkey {
             double_tap_enabled,
             double_tap_only: false,
             toggle: false,
+            primary_binding: binding,
             binding,
+            alternate_binding: None,
             paste_actions_enabled: true,
             ignore_before: None,
             stale_keys_neutral_since: None,
@@ -930,8 +950,9 @@ impl DictationHotkey {
     }
 
     pub fn set_double_tap_only(&mut self, enabled: bool) {
-        self.double_tap_only =
-            enabled && self.binding.key_code.is_some() && self.double_tap_enabled;
+        self.double_tap_only = enabled
+            && self.bindings().any(|binding| binding.key_code.is_some())
+            && self.double_tap_enabled;
         // Active captures still need their release or Escape to reach the audio owner.
         if !self.double_tap_only && self.state.is_pending_gesture() {
             self.state = State::IDLE;
@@ -944,8 +965,21 @@ impl DictationHotkey {
     }
 
     pub fn set_binding(&mut self, binding: RuntimeHotkey) {
-        if matches!(self.state, State::Idle { .. }) && self.binding != binding {
+        self.set_bindings(binding, None);
+    }
+
+    pub fn set_bindings(
+        &mut self,
+        binding: RuntimeHotkey,
+        alternate_binding: Option<RuntimeHotkey>,
+    ) {
+        let alternate_binding = alternate_binding.filter(|alternate| *alternate != binding);
+        if matches!(self.state, State::Idle { .. })
+            && (self.primary_binding != binding || self.alternate_binding != alternate_binding)
+        {
+            self.primary_binding = binding;
             self.binding = binding;
+            self.alternate_binding = alternate_binding;
             self.state = State::IDLE;
         }
     }
@@ -1199,7 +1233,9 @@ impl DictationHotkey {
 
         let trigger_pressed = self.trigger_pressed(event, fresh_key_down);
         if let InputEvent::PhysicalKeyDown { code, timing } = event
-            && self.binding.key_code != Some(code)
+            && !self
+                .bindings()
+                .any(|binding| binding.key_code == Some(code))
         {
             if self.physical_key_downs.len() == PHYSICAL_KEY_DOWN_HISTORY {
                 self.physical_key_downs.pop_front();
@@ -1396,24 +1432,69 @@ impl DictationHotkey {
         }
     }
 
-    fn trigger_pressed(&self, event: InputEvent, fresh_key_down: bool) -> bool {
-        match self.binding.key_code {
-            Some(key_code) => {
-                fresh_key_down
-                    && matches!(
-                        event,
-                        InputEvent::Key {
-                            code,
-                            down: true,
-                            flags,
-                        } if code == key_code && self.binding.exact_modifiers(flags)
-                    )
+    fn bindings(&self) -> impl Iterator<Item = RuntimeHotkey> {
+        std::iter::once(self.primary_binding).chain(self.alternate_binding)
+    }
+
+    fn trigger_pressed(&mut self, event: InputEvent, fresh_key_down: bool) -> bool {
+        if matches!(
+            self.state,
+            State::Idle { .. } | State::AwaitingSecondTap { .. }
+        ) {
+            if let Some(binding) = self.bindings().find(|binding| {
+                binding_trigger_pressed(
+                    *binding,
+                    event,
+                    fresh_key_down,
+                    self.pressed_keys.is_empty(),
+                )
+            }) {
+                self.binding = binding;
+                return true;
             }
-            None => {
-                matches!(event, InputEvent::Flags(flags) if self.binding.exact_modifiers(flags))
-                    && !self.binding.modifiers.is_empty()
-                    && self.pressed_keys.is_empty()
-            }
+            return false;
+        }
+        if matches!(self.state, State::Locked) {
+            return self.bindings().any(|binding| {
+                binding_trigger_pressed(
+                    binding,
+                    event,
+                    fresh_key_down,
+                    self.pressed_keys.is_empty(),
+                )
+            });
+        }
+        binding_trigger_pressed(
+            self.binding,
+            event,
+            fresh_key_down,
+            self.pressed_keys.is_empty(),
+        )
+    }
+}
+
+fn binding_trigger_pressed(
+    binding: RuntimeHotkey,
+    event: InputEvent,
+    fresh_key_down: bool,
+    pressed_keys_empty: bool,
+) -> bool {
+    match binding.key_code {
+        Some(key_code) => {
+            fresh_key_down
+                && matches!(
+                    event,
+                    InputEvent::Key {
+                        code,
+                        down: true,
+                        flags,
+                    } if code == key_code && binding.exact_modifiers(flags)
+                )
+        }
+        None => {
+            matches!(event, InputEvent::Flags(flags) if binding.exact_modifiers(flags))
+                && !binding.modifiers.is_empty()
+                && pressed_keys_empty
         }
     }
 }
@@ -2994,6 +3075,49 @@ mod tests {
         assert_eq!(
             either.process(InputEvent::Flags(0), now + Duration::from_secs(1)),
             Some(HotkeyAction::Finish)
+        );
+    }
+
+    #[test]
+    fn alternate_modifier_shortcut_starts_and_finishes_dictation() {
+        use crate::app_settings::{
+            HotkeyModifiers, ModifierSide, OPTION_KEY_MASK, RIGHT_CONTROL_MASK, RIGHT_OPTION_MASK,
+        };
+
+        let now = capture_time();
+        let option = RuntimeHotkey {
+            modifiers: HotkeyModifiers {
+                option: Some(ModifierSide::Right),
+                ..Default::default()
+            },
+            key_code: None,
+        };
+        let control = RuntimeHotkey {
+            modifiers: HotkeyModifiers {
+                control: Some(ModifierSide::Right),
+                ..Default::default()
+            },
+            key_code: None,
+        };
+        let mut hotkey = DictationHotkey::new_with_alternate(now, false, option, Some(control));
+
+        assert_eq!(
+            hotkey.process(
+                InputEvent::Flags(CONTROL_KEY_MASK | RIGHT_CONTROL_MASK),
+                now,
+            ),
+            Some(HotkeyAction::Start)
+        );
+        assert_eq!(
+            hotkey.process(InputEvent::Flags(0), now + Duration::from_secs(1)),
+            Some(HotkeyAction::Finish)
+        );
+        assert_eq!(
+            hotkey.process(
+                InputEvent::Flags(OPTION_KEY_MASK | RIGHT_OPTION_MASK),
+                now + Duration::from_secs(2),
+            ),
+            Some(HotkeyAction::Start)
         );
     }
 

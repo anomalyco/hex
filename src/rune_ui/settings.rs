@@ -297,10 +297,21 @@ pub(super) fn conflicts(
     use crate::app_settings::HotkeySlot;
     let slot = match target {
         ShortcutTarget::Dictation => HotkeySlot::Dictation,
+        #[cfg(target_os = "macos")]
+        ShortcutTarget::DictationAlternate => HotkeySlot::Dictation,
         ShortcutTarget::VoiceAction => HotkeySlot::VoiceAction,
         ShortcutTarget::PasteLast => HotkeySlot::PasteLast,
     };
     settings.hotkey_in_use(slot, binding)
+        || match target {
+            ShortcutTarget::Dictation => settings
+                .alternate_dictation_hotkey
+                .as_ref()
+                .is_some_and(|alternate| alternate.overlaps(binding)),
+            #[cfg(target_os = "macos")]
+            ShortcutTarget::DictationAlternate => settings.dictation_hotkey.overlaps(binding),
+            _ => false,
+        }
 }
 
 pub(super) fn desktop_shortcut(binding: &HotkeyBinding) -> DesktopShortcut {
@@ -322,6 +333,8 @@ pub(super) fn desktop_shortcut(binding: &HotkeyBinding) -> DesktopShortcut {
 pub(super) fn binding(settings: &AppSettings, target: ShortcutTarget) -> Option<&HotkeyBinding> {
     match target {
         ShortcutTarget::Dictation => Some(&settings.dictation_hotkey),
+        #[cfg(target_os = "macos")]
+        ShortcutTarget::DictationAlternate => settings.alternate_dictation_hotkey.as_ref(),
         ShortcutTarget::PasteLast => settings.paste_last_hotkey.as_ref(),
         ShortcutTarget::VoiceAction => Some(&settings.edit_hotkey),
     }
@@ -334,6 +347,8 @@ pub(super) fn set_binding(
 ) {
     match target {
         ShortcutTarget::Dictation => settings.dictation_hotkey = binding,
+        #[cfg(target_os = "macos")]
+        ShortcutTarget::DictationAlternate => settings.alternate_dictation_hotkey = Some(binding),
         ShortcutTarget::PasteLast => settings.paste_last_hotkey = Some(binding),
         ShortcutTarget::VoiceAction => settings.edit_hotkey = binding,
     }
@@ -518,6 +533,8 @@ fn portal_grant(ui: &Ui, target: ShortcutTarget) -> Option<&DesktopGrantedShortc
     };
     let name = match target {
         ShortcutTarget::Dictation => "Dictation",
+        #[cfg(target_os = "macos")]
+        ShortcutTarget::DictationAlternate => "Dictation alternate",
         ShortcutTarget::PasteLast => "Paste last dictation",
         ShortcutTarget::VoiceAction => "Voice Action",
     };
@@ -542,6 +559,10 @@ pub(super) fn refused_note(ui: &Ui, p: Paint, target: ShortcutTarget) -> Option<
 fn shortcut_row(ui: &Ui, p: Paint, target: ShortcutTarget) -> El {
     let (key, title) = match target {
         ShortcutTarget::Dictation => ("dictation-shortcut", tr("Shortcut")),
+        #[cfg(target_os = "macos")]
+        ShortcutTarget::DictationAlternate => {
+            ("dictation-shortcut-alternate", tr("Alternate shortcut"))
+        }
         ShortcutTarget::PasteLast => ("paste-last", tr("Paste last dictation")),
         ShortcutTarget::VoiceAction => ("voice-action-shortcut", tr("Voice Action")),
     };
@@ -566,6 +587,8 @@ const TRAY_GAP: f32 = CONTROL_GAP + 4.0;
 pub(super) fn shortcut_control(ui: &Ui, p: Paint, target: ShortcutTarget) -> El {
     let key = match target {
         ShortcutTarget::Dictation => "dictation-shortcut-control",
+        #[cfg(target_os = "macos")]
+        ShortcutTarget::DictationAlternate => "dictation-shortcut-alternate-control",
         ShortcutTarget::PasteLast => "paste-last-control",
         ShortcutTarget::VoiceAction => "voice-action-shortcut-control",
     };
@@ -620,14 +643,37 @@ pub(super) fn shortcut_control(ui: &Ui, p: Paint, target: ShortcutTarget) -> El 
                 .child(keys)
                 .child(hotkey_control(ui, p, target)),
         );
-    if target == ShortcutTarget::PasteLast && ui.settings.paste_last_hotkey.is_some() {
+    let can_clear =
+        (target == ShortcutTarget::PasteLast && ui.settings.paste_last_hotkey.is_some()) || {
+            #[cfg(target_os = "macos")]
+            {
+                target == ShortcutTarget::DictationAlternate
+                    && ui.settings.alternate_dictation_hotkey.is_some()
+            }
+            #[cfg(not(target_os = "macos"))]
+            {
+                false
+            }
+        };
+    if can_clear {
         control = control.child(icon_button(
             p,
-            "clear-paste-last",
+            if target == ShortcutTarget::PasteLast {
+                "clear-paste-last"
+            } else {
+                "clear-dictation-alternate"
+            },
             &rune_theme_opencode::icons::TRASH,
             tr("Clear shortcut"),
             |ui: &mut Ui| {
-                ui.update(|settings| settings.paste_last_hotkey = None);
+                ui.update(move |settings| match target {
+                    ShortcutTarget::PasteLast => settings.paste_last_hotkey = None,
+                    #[cfg(target_os = "macos")]
+                    ShortcutTarget::DictationAlternate => {
+                        settings.alternate_dictation_hotkey = None
+                    }
+                    _ => {}
+                });
             },
         ));
     }
@@ -707,6 +753,10 @@ fn dictation_section(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
     if ui.records_shortcuts() {
         rows.push(shortcut_row(ui, p, ShortcutTarget::Dictation).into());
         rows.extend(refused_note(ui, p, ShortcutTarget::Dictation).map(CardRow::from));
+        #[cfg(target_os = "macos")]
+        {
+            rows.push(shortcut_row(ui, p, ShortcutTarget::DictationAlternate).into());
+        }
     }
     let toggle_mode = settings.shortcut_mode == ShortcutMode::Toggle;
     rows.push(
@@ -924,6 +974,8 @@ const HELD_SHADOW_ROOM: f32 = (RECORDER_HEIGHT - KeySize::Small.height()) / 2.0;
 pub(super) fn hotkey_control(ui: &Ui, p: Paint, target: ShortcutTarget) -> El {
     let key = match target {
         ShortcutTarget::Dictation => "dictation-hotkey",
+        #[cfg(target_os = "macos")]
+        ShortcutTarget::DictationAlternate => "dictation-hotkey-alternate",
         ShortcutTarget::PasteLast => "paste-last-hotkey",
         ShortcutTarget::VoiceAction => "voice-action-hotkey",
     };

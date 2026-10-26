@@ -102,6 +102,8 @@ pub(crate) enum Request {
 pub(crate) enum ShortcutTarget {
     #[default]
     Dictation,
+    /// The optional second physical trigger for dictation.
+    DictationAlternate,
     PasteLast,
     VoiceAction,
 }

@@ -343,10 +343,11 @@ pub fn listen(
     let context_monitor = ContextMonitor::start();
     let mut context = ContextSnapshot::default();
     let mut hotkeys = Hotkeys {
-        dictation: DictationHotkey::new(
+        dictation: DictationHotkey::new_with_alternate(
             CaptureInstant::now(),
             crate::app_settings::double_tap_lock(),
             crate::app_settings::dictation_hotkey(),
+            crate::app_settings::runtime_hotkeys().alternate_dictation,
         ),
         edit: crate::app_settings::edit_hotkey()
             .map(|binding| DictationHotkey::new_without_paste(CaptureInstant::now(), binding)),
@@ -887,9 +888,11 @@ pub fn listen(
         hotkeys
             .dictation
             .set_toggle(crate::app_settings::shortcut_toggle());
-        hotkeys
-            .dictation
-            .set_binding(crate::app_settings::dictation_hotkey());
+        let configured_hotkeys = crate::app_settings::runtime_hotkeys();
+        hotkeys.dictation.set_bindings(
+            configured_hotkeys.dictation,
+            configured_hotkeys.alternate_dictation,
+        );
         match crate::app_settings::edit_hotkey() {
             Some(binding) => match &mut hotkeys.edit {
                 Some(edit) => edit.set_binding(binding),

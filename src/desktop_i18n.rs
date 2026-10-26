@@ -336,6 +336,7 @@ const TRANSLATIONS: &[(&str, [&str; 5])] = &[
     ("Capture", ["Nagrywanie", "采集", "キャプチャ", "Aufnahme", "Captura"]),
     ("Processing", ["Przetwarzanie", "处理", "処理", "Verarbeitung", "Procesamiento"]),
     ("Shortcut", ["Skrót", "快捷键", "ショートカット", "Kürzel", "Atajo"]),
+    ("Alternate shortcut", ["Alternatywny skrót", "备用快捷键", "代替ショートカット", "Alternatives Kürzel", "Atajo alternativo"]),
     ("Hold to speak; selected text is included automatically", ["Przytrzymaj i mów; zaznaczony tekst dołącza się automatycznie", "按住说话；选中的文本会自动附带", "押しながら話す。選択中のテキストは自動で含まれます", "Halten und sprechen; ausgewählter Text wird automatisch mitgesendet", "Mantén pulsado y habla; el texto seleccionado se incluye automáticamente"]),
     ("OpenCode", ["OpenCode", "OpenCode", "OpenCode", "OpenCode", "OpenCode"]),
     ("Default", ["Domyślny", "默认", "既定", "Standard", "Predeterminado"]),
