@@ -1423,6 +1423,25 @@ const SCENES: &[Scene] = &[
     }),
     // macOS and Windows surfaces, from preview data (see `platform`).
     ("mac-settings", |ui| *ui = mac_fixture()),
+    ("mac-shortcuts", |ui| {
+        *ui = mac_fixture();
+        ui.settings.alternate_dictation_hotkeys = vec![
+            HotkeyBinding {
+                modifiers: HotkeyModifiers {
+                    control: Some(ModifierSide::Right),
+                    ..Default::default()
+                },
+                key: None,
+            },
+            HotkeyBinding {
+                modifiers: HotkeyModifiers {
+                    command: Some(ModifierSide::Either),
+                    ..Default::default()
+                },
+                key: None,
+            },
+        ];
+    }),
     ("mac-settings-vocabulary", |ui| {
         *ui = mac_fixture();
         vocabulary::fixture(ui, true);

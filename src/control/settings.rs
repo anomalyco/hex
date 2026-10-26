@@ -127,6 +127,11 @@ const KEYS: &[Key] = &[
         "What other audio does while you dictate",
     ),
     key(
+        "avoid_bluetooth_microphone",
+        Kind::Bool,
+        "Prefer the built-in microphone over Bluetooth in Automatic mode (macOS)",
+    ),
+    key(
         "double_tap_lock",
         Kind::Bool,
         "Double-tap the dictation shortcut to keep recording hands-free",
@@ -145,6 +150,12 @@ const KEYS: &[Key] = &[
         "dictation_hotkey",
         Kind::Shortcut(HotkeySlot::Dictation),
         "The dictation shortcut",
+    ),
+    read_only(
+        "alternate_dictation_hotkeys",
+        Kind::Json,
+        "Additional dictation shortcuts (macOS)",
+        "record additional shortcuts in Settings",
     ),
     key(
         "edit_hotkey",

@@ -20,11 +20,12 @@ injects a failed shortcut save yet.
 **Shortcut:** Option by default, after macOS permissions and the selected local
 model are ready. Commands and OpenCode are not required. General > Dictation >
 Shortcut accepts modifier-only, modifier-plus-key, standalone Fn/Globe, and
-standalone function-key bindings. macOS also offers one optional **Alternate
-shortcut** for a second physical keyboard; either binding drives the same capture,
-hold/toggle, and lock state. This lets, for example, Right Option on a MacBook and
-Right Control on an external keyboard both dictate. Capturing a replacement suspends
-global matching.
+standalone function-key bindings. macOS groups the primary and any number of
+alternate bindings under **Shortcut**. The primary row's **+** records another
+shortcut; each alternate has a remove button. Cancelling an addition saves nothing.
+All rows share aligned side, key-badge, recorder, and action columns. All bindings
+drive one capture/hold/toggle/lock state. Existing single-alternate settings migrate
+to the list. Capturing a replacement suspends global matching.
 The shortcut's keys sit in a recessed tray as tall as the recorder, between
 the macOS side picker and the recorder; with no shortcut the tray reads Off.
 On macOS and Windows the recorder shows the modifiers held so far as pressed
@@ -47,9 +48,16 @@ the CLI listener, not Settings. Do not run it beside an existing listener.
 
 **Automatic microphone:** Hex prefers an available built-in microphone over a
 Bluetooth headset, so dictation does not switch headphones into a low-quality
-call profile. While idle, it reopens its input when the resolved automatic route
+call profile. **Avoid Bluetooth microphone** defaults on, including for older
+settings files; turning it off allows the default Bluetooth input. Explicitly
+selected microphones bypass this policy. While idle, it reopens its input when the resolved automatic route
 changes after a device connection or removal. Each successful open records
 `opened dictation microphone` and its device name in `process.log`.
+
+Checks: `alternate_dictation_shortcut_is_optional_and_round_trips` covers migration
+and defaults; `alternate_rows_validate_and_edit_their_own_binding` checks indexed
+editing and duplicate conflicts. `mac-shortcuts` renders the three-row fixture in
+light and dark. These checks do not prove native shortcut events or Bluetooth routing.
 
 **Separate targets:** [Voice Action](voice-action.md) has its own opt-in and
 capture target, with no double-tap lock. Host-owned API capture has its own

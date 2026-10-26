@@ -103,7 +103,7 @@ pub(crate) enum ShortcutTarget {
     #[default]
     Dictation,
     /// The optional second physical trigger for dictation.
-    DictationAlternate,
+    DictationAlternate(usize),
     PasteLast,
     VoiceAction,
 }

@@ -920,6 +920,9 @@ fn automatic_input_index(default: usize, transports: &[InputTransport]) -> usize
 
 #[cfg(target_os = "macos")]
 fn avoid_bluetooth_input(default: Device, devices: &[Device]) -> Device {
+    if !crate::app_settings::avoid_bluetooth_microphone() {
+        return default;
+    }
     let default_id = default.id().ok();
     let Some(default_index) = devices
         .iter()

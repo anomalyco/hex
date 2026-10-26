@@ -298,18 +298,25 @@ pub(super) fn conflicts(
     let slot = match target {
         ShortcutTarget::Dictation => HotkeySlot::Dictation,
         #[cfg(target_os = "macos")]
-        ShortcutTarget::DictationAlternate => HotkeySlot::Dictation,
+        ShortcutTarget::DictationAlternate(_) => HotkeySlot::Dictation,
         ShortcutTarget::VoiceAction => HotkeySlot::VoiceAction,
         ShortcutTarget::PasteLast => HotkeySlot::PasteLast,
     };
     settings.hotkey_in_use(slot, binding)
         || match target {
             ShortcutTarget::Dictation => settings
-                .alternate_dictation_hotkey
-                .as_ref()
-                .is_some_and(|alternate| alternate.overlaps(binding)),
+                .alternate_dictation_hotkeys
+                .iter()
+                .any(|alternate| alternate.overlaps(binding)),
             #[cfg(target_os = "macos")]
-            ShortcutTarget::DictationAlternate => settings.dictation_hotkey.overlaps(binding),
+            ShortcutTarget::DictationAlternate(index) => {
+                settings.dictation_hotkey.overlaps(binding)
+                    || settings
+                        .alternate_dictation_hotkeys
+                        .iter()
+                        .enumerate()
+                        .any(|(other, existing)| other != index && existing.overlaps(binding))
+            }
             _ => false,
         }
 }
@@ -334,7 +341,9 @@ pub(super) fn binding(settings: &AppSettings, target: ShortcutTarget) -> Option<
     match target {
         ShortcutTarget::Dictation => Some(&settings.dictation_hotkey),
         #[cfg(target_os = "macos")]
-        ShortcutTarget::DictationAlternate => settings.alternate_dictation_hotkey.as_ref(),
+        ShortcutTarget::DictationAlternate(index) => {
+            settings.alternate_dictation_hotkeys.get(index)
+        }
         ShortcutTarget::PasteLast => settings.paste_last_hotkey.as_ref(),
         ShortcutTarget::VoiceAction => Some(&settings.edit_hotkey),
     }
@@ -348,7 +357,13 @@ pub(super) fn set_binding(
     match target {
         ShortcutTarget::Dictation => settings.dictation_hotkey = binding,
         #[cfg(target_os = "macos")]
-        ShortcutTarget::DictationAlternate => settings.alternate_dictation_hotkey = Some(binding),
+        ShortcutTarget::DictationAlternate(index) => {
+            if index == settings.alternate_dictation_hotkeys.len() {
+                settings.alternate_dictation_hotkeys.push(binding);
+            } else if let Some(existing) = settings.alternate_dictation_hotkeys.get_mut(index) {
+                *existing = binding;
+            }
+        }
         ShortcutTarget::PasteLast => settings.paste_last_hotkey = Some(binding),
         ShortcutTarget::VoiceAction => settings.edit_hotkey = binding,
     }
@@ -367,6 +382,53 @@ fn sound_volume_index(settings: &AppSettings) -> usize {
                 .total_cmp(&(settings.sound_effect_volume - right).abs())
         })
         .map_or(0, |(index, _)| index + 1)
+}
+
+#[cfg(all(test, target_os = "macos"))]
+#[test]
+fn alternate_rows_validate_and_edit_their_own_binding() {
+    let mut settings = AppSettings::default();
+    let primary = settings.dictation_hotkey.clone();
+    let control = HotkeyBinding {
+        modifiers: HotkeyModifiers {
+            control: Some(ModifierSide::Right),
+            ..Default::default()
+        },
+        key: None,
+    };
+    let command = HotkeyBinding {
+        modifiers: HotkeyModifiers {
+            command: Some(ModifierSide::Right),
+            ..Default::default()
+        },
+        key: None,
+    };
+    set_binding(
+        &mut settings,
+        ShortcutTarget::DictationAlternate(0),
+        control.clone(),
+    );
+    assert!(conflicts(
+        &settings,
+        ShortcutTarget::DictationAlternate(1),
+        &control
+    ));
+    assert!(!conflicts(
+        &settings,
+        ShortcutTarget::DictationAlternate(0),
+        &control
+    ));
+    set_binding(
+        &mut settings,
+        ShortcutTarget::DictationAlternate(1),
+        command.clone(),
+    );
+    assert_eq!(
+        binding(&settings, ShortcutTarget::DictationAlternate(1)),
+        Some(&command)
+    );
+    assert_eq!(settings.dictation_hotkey, primary);
+    assert_eq!(settings.alternate_dictation_hotkeys.len(), 2);
 }
 
 pub(super) fn toggle_menu(ui: &mut Ui, menu: Menu) {
@@ -534,7 +596,7 @@ fn portal_grant(ui: &Ui, target: ShortcutTarget) -> Option<&DesktopGrantedShortc
     let name = match target {
         ShortcutTarget::Dictation => "Dictation",
         #[cfg(target_os = "macos")]
-        ShortcutTarget::DictationAlternate => "Dictation alternate",
+        ShortcutTarget::DictationAlternate(_) => "Dictation alternate",
         ShortcutTarget::PasteLast => "Paste last dictation",
         ShortcutTarget::VoiceAction => "Voice Action",
     };
@@ -560,7 +622,7 @@ fn shortcut_row(ui: &Ui, p: Paint, target: ShortcutTarget) -> El {
     let (key, title) = match target {
         ShortcutTarget::Dictation => ("dictation-shortcut", tr("Shortcut")),
         #[cfg(target_os = "macos")]
-        ShortcutTarget::DictationAlternate => {
+        ShortcutTarget::DictationAlternate(_) => {
             ("dictation-shortcut-alternate", tr("Alternate shortcut"))
         }
         ShortcutTarget::PasteLast => ("paste-last", tr("Paste last dictation")),
@@ -588,7 +650,7 @@ pub(super) fn shortcut_control(ui: &Ui, p: Paint, target: ShortcutTarget) -> El 
     let key = match target {
         ShortcutTarget::Dictation => "dictation-shortcut-control",
         #[cfg(target_os = "macos")]
-        ShortcutTarget::DictationAlternate => "dictation-shortcut-alternate-control",
+        ShortcutTarget::DictationAlternate(_) => "dictation-shortcut-alternate-control",
         ShortcutTarget::PasteLast => "paste-last-control",
         ShortcutTarget::VoiceAction => "voice-action-shortcut-control",
     };
@@ -643,18 +705,7 @@ pub(super) fn shortcut_control(ui: &Ui, p: Paint, target: ShortcutTarget) -> El 
                 .child(keys)
                 .child(hotkey_control(ui, p, target)),
         );
-    let can_clear =
-        (target == ShortcutTarget::PasteLast && ui.settings.paste_last_hotkey.is_some()) || {
-            #[cfg(target_os = "macos")]
-            {
-                target == ShortcutTarget::DictationAlternate
-                    && ui.settings.alternate_dictation_hotkey.is_some()
-            }
-            #[cfg(not(target_os = "macos"))]
-            {
-                false
-            }
-        };
+    let can_clear = target == ShortcutTarget::PasteLast && ui.settings.paste_last_hotkey.is_some();
     if can_clear {
         control = control.child(icon_button(
             p,
@@ -669,9 +720,7 @@ pub(super) fn shortcut_control(ui: &Ui, p: Paint, target: ShortcutTarget) -> El 
                 ui.update(move |settings| match target {
                     ShortcutTarget::PasteLast => settings.paste_last_hotkey = None,
                     #[cfg(target_os = "macos")]
-                    ShortcutTarget::DictationAlternate => {
-                        settings.alternate_dictation_hotkey = None
-                    }
+                    ShortcutTarget::DictationAlternate(_) => {}
                     _ => {}
                 });
             },
@@ -682,6 +731,99 @@ pub(super) fn shortcut_control(ui: &Ui, p: Paint, target: ShortcutTarget) -> El 
 
 /// Without a shortcuts portal the desktop's keybindings own every shortcut:
 /// the commands to bind there.
+#[cfg(target_os = "macos")]
+fn dictation_shortcuts(ui: &Ui, p: Paint) -> El {
+    let count = ui.settings.alternate_dictation_hotkeys.len();
+    // One shared badge column, sized for the widest saved chord. A multi-key
+    // binding must not overlap the recorder beside it.
+    let badge_width = ui
+        .settings
+        .dictation_hotkeys()
+        .map(|binding| {
+            let caps = shortcut_caps(binding, binding.standalone_side().is_some());
+            caps.iter()
+                .map(|cap| (14.0 + cap.chars().count() as f32 * 7.5).max(24.0))
+                .sum::<f32>()
+                + KEY_GAP * caps.len().saturating_sub(1) as f32
+                + 6.0
+        })
+        .fold(36.0_f32, f32::max);
+    let adding = matches!(ui.capture, Capture::Listening { target: ShortcutTarget::DictationAlternate(index), .. } if index == count);
+    let mut targets = vec![ShortcutTarget::Dictation];
+    targets.extend((0..count + usize::from(adding)).map(ShortcutTarget::DictationAlternate));
+    let group = col()
+        .key("shortcut-group")
+        .padding(6.0)
+        .gap(6.0)
+        .fill(p.k.c.bg_base.mix(p.k.c.bg_deep, 0.45))
+        .radius(p.k.radius.md)
+        .children(targets.into_iter().enumerate().map(|(row_index, target)| {
+            let picker = super::platform_settings::side_selector(ui, p, target);
+            let badge = binding(&ui.settings, target)
+                .map(|binding| keycaps(p, "keys", &shortcut_caps(binding, picker.is_some())));
+            let action = if row_index == 0 {
+                icon_button(
+                    p,
+                    "add-shortcut",
+                    &rune_theme_opencode::icons::PLUS,
+                    tr("Add shortcut"),
+                    |ui| {
+                        let index = ui.settings.alternate_dictation_hotkeys.len();
+                        begin_capture(ui, ShortcutTarget::DictationAlternate(index));
+                    },
+                )
+            } else {
+                icon_button(
+                    p,
+                    "remove-shortcut",
+                    &rune_theme_opencode::icons::TRASH,
+                    tr("Clear shortcut"),
+                    move |ui| {
+                        cancel_capture(ui);
+                        ui.update(|settings| {
+                            if row_index - 1 < settings.alternate_dictation_hotkeys.len() {
+                                settings.alternate_dictation_hotkeys.remove(row_index - 1);
+                            }
+                        });
+                    },
+                )
+            };
+            row()
+                .key(format!("shortcut-row-{row_index}"))
+                .gap(8.0)
+                .center_y()
+                .child(
+                    row()
+                        .key("side-column")
+                        .w(super::platform_settings::SIDE_PICKER_WIDTH)
+                        .children(picker),
+                )
+                .child(
+                    row()
+                        .key("key-column")
+                        .w(badge_width)
+                        .center()
+                        .children(badge),
+                )
+                .child(hotkey_control(ui, p, target).w(160.0))
+                .child(action.w(28.0).h(28.0))
+        }));
+    row()
+        .key("dictation-shortcut")
+        .px(12.0)
+        .py(8.0)
+        .gap(12.0)
+        .child(
+            text(tr("Shortcut"))
+                .key("title")
+                .font(p.k.ty.ui)
+                .color(p.text())
+                .grow(1.0)
+                .pt(12.0),
+        )
+        .child(group)
+}
+
 fn desktop_commands(ui: &Ui, p: Paint) -> El {
     let mut rows = vec![
         note(
@@ -751,11 +893,12 @@ fn dictation_section(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
     let settings = &ui.settings;
     let mut rows: Vec<CardRow> = Vec::new();
     if ui.records_shortcuts() {
+        #[cfg(not(target_os = "macos"))]
         rows.push(shortcut_row(ui, p, ShortcutTarget::Dictation).into());
         rows.extend(refused_note(ui, p, ShortcutTarget::Dictation).map(CardRow::from));
         #[cfg(target_os = "macos")]
         {
-            rows.push(shortcut_row(ui, p, ShortcutTarget::DictationAlternate).into());
+            rows.push(dictation_shortcuts(ui, p).into());
         }
     }
     let toggle_mode = settings.shortcut_mode == ShortcutMode::Toggle;
@@ -861,6 +1004,13 @@ fn dictation_section(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
         )
         .into(),
     );
+    #[cfg(target_os = "macos")]
+    rows.push(toggle_row(
+        p, "avoid-bluetooth", tr("Avoid Bluetooth microphone"),
+        Some(tr("In Automatic mode, prefer the built-in microphone to preserve headphone audio quality")),
+        settings.avoid_bluetooth_microphone,
+        |ui| { ui.update(|settings| settings.avoid_bluetooth_microphone = !settings.avoid_bluetooth_microphone); },
+    ).into());
     rows.push(folding(
         "devices-error-fold",
         match (ui.open, &ui.microphones) {
@@ -975,7 +1125,7 @@ pub(super) fn hotkey_control(ui: &Ui, p: Paint, target: ShortcutTarget) -> El {
     let key = match target {
         ShortcutTarget::Dictation => "dictation-hotkey",
         #[cfg(target_os = "macos")]
-        ShortcutTarget::DictationAlternate => "dictation-hotkey-alternate",
+        ShortcutTarget::DictationAlternate(_) => "dictation-hotkey-alternate",
         ShortcutTarget::PasteLast => "paste-last-hotkey",
         ShortcutTarget::VoiceAction => "voice-action-hotkey",
     };

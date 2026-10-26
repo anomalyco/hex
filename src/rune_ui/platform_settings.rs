@@ -777,7 +777,7 @@ pub(super) fn side_selector(ui: &Ui, p: Paint, target: ShortcutTarget) -> Option
     let key = match target {
         ShortcutTarget::Dictation => "dictation-side",
         #[cfg(target_os = "macos")]
-        ShortcutTarget::DictationAlternate => "dictation-alternate-side",
+        ShortcutTarget::DictationAlternate(_) => "dictation-alternate-side",
         ShortcutTarget::PasteLast => "paste-last-side",
         ShortcutTarget::VoiceAction => "voice-action-side",
     };
