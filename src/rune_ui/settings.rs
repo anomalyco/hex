@@ -386,7 +386,7 @@ fn sound_volume_index(settings: &AppSettings) -> usize {
 }
 
 fn bluetooth_microphone_option(ui: &Ui, p: Paint) -> Option<El> {
-    if !cfg!(target_os = "macos") {
+    if !cfg!(target_os = "macos") || !(ui.advanced || advanced_in_use(&ui.settings)) {
         return None;
     }
     Some(
