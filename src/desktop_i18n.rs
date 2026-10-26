@@ -283,7 +283,6 @@ const TRANSLATIONS: &[(&str, [&str; 5])] = &[
     ("Shared with Scrawl, so both list the same captures", ["Wspólny ze Scrawl, więc obie aplikacje widzą te same nagrania", "与 Scrawl 共用，两者列出相同的捕获", "Scrawl と共有するので、どちらにも同じキャプチャが並びます", "Mit Scrawl geteilt, beide zeigen dieselben Aufnahmen", "Compartida con Scrawl, así ambos muestran las mismas capturas"]),
     #[cfg(hex_capture)]
     ("Keep", ["Przechowuj", "保留", "保持期間", "Behalten", "Conservar"]),
-    #[cfg(hex_capture)]
     ("Add application", ["Dodaj aplikację", "添加应用", "アプリを追加", "App hinzufügen", "Añadir aplicación"]),
     ("Add transformation", ["Dodaj transformację", "添加转换", "変換を追加", "Transformation hinzufügen", "Añadir transformación"]),
     ("Close", ["Zamknij", "关闭", "閉じる", "Schließen", "Cerrar"]),
