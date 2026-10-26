@@ -752,13 +752,8 @@ fn dictation_shortcuts(ui: &Ui, p: Paint) -> El {
     let adding = matches!(ui.capture, Capture::Listening { target: ShortcutTarget::DictationAlternate(index), .. } if index == count);
     let mut targets = vec![ShortcutTarget::Dictation];
     targets.extend((0..count + usize::from(adding)).map(ShortcutTarget::DictationAlternate));
-    let group = col()
-        .key("shortcut-group")
-        .padding(6.0)
-        .gap(6.0)
-        .fill(p.k.c.bg_base.mix(p.k.c.bg_deep, 0.45))
-        .radius(p.k.radius.md)
-        .children(targets.into_iter().enumerate().map(|(row_index, target)| {
+    let group = col().key("shortcut-group").padding(6.0).gap(6.0).children(
+        targets.into_iter().enumerate().map(|(row_index, target)| {
             let picker = super::platform_settings::side_selector(ui, p, target);
             let badge = binding(&ui.settings, target)
                 .map(|binding| keycaps(p, "keys", &shortcut_caps(binding, picker.is_some())));
@@ -808,7 +803,8 @@ fn dictation_shortcuts(ui: &Ui, p: Paint) -> El {
                 )
                 .child(hotkey_control(ui, p, target).w(160.0))
                 .child(action.w(28.0).h(28.0))
-        }));
+        }),
+    );
     row()
         .key("dictation-shortcut")
         .px(12.0)
