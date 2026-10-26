@@ -424,7 +424,7 @@ impl AudioInput {
             .wrap_err("could not start microphone capture")?;
         tracing::info!(
             device = %device_name,
-            sample_rate = sample_rate.0,
+            sample_rate,
             channels,
             "opened dictation microphone"
         );

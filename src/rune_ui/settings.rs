@@ -665,7 +665,7 @@ pub(super) fn shortcut_control(ui: &Ui, p: Paint, target: ShortcutTarget) -> El 
             },
             &rune_theme_opencode::icons::TRASH,
             tr("Clear shortcut"),
-            |ui: &mut Ui| {
+            move |ui: &mut Ui| {
                 ui.update(move |settings| match target {
                     ShortcutTarget::PasteLast => settings.paste_last_hotkey = None,
                     #[cfg(target_os = "macos")]

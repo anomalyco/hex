@@ -951,7 +951,10 @@ impl DictationHotkey {
 
     pub fn set_double_tap_only(&mut self, enabled: bool) {
         self.double_tap_only = enabled
-            && self.bindings().any(|binding| binding.key_code.is_some())
+            && self
+                .bindings()
+                .into_iter()
+                .any(|binding| binding.key_code.is_some())
             && self.double_tap_enabled;
         // Active captures still need their release or Escape to reach the audio owner.
         if !self.double_tap_only && self.state.is_pending_gesture() {
@@ -1235,6 +1238,7 @@ impl DictationHotkey {
         if let InputEvent::PhysicalKeyDown { code, timing } = event
             && !self
                 .bindings()
+                .into_iter()
                 .any(|binding| binding.key_code == Some(code))
         {
             if self.physical_key_downs.len() == PHYSICAL_KEY_DOWN_HISTORY {
@@ -1432,8 +1436,11 @@ impl DictationHotkey {
         }
     }
 
-    fn bindings(&self) -> impl Iterator<Item = RuntimeHotkey> {
-        std::iter::once(self.primary_binding).chain(self.alternate_binding)
+    fn bindings(&self) -> [RuntimeHotkey; 2] {
+        [
+            self.primary_binding,
+            self.alternate_binding.unwrap_or_default(),
+        ]
     }
 
     fn trigger_pressed(&mut self, event: InputEvent, fresh_key_down: bool) -> bool {
@@ -1441,7 +1448,7 @@ impl DictationHotkey {
             self.state,
             State::Idle { .. } | State::AwaitingSecondTap { .. }
         ) {
-            if let Some(binding) = self.bindings().find(|binding| {
+            if let Some(binding) = self.bindings().into_iter().find(|binding| {
                 binding_trigger_pressed(
                     *binding,
                     event,
@@ -1455,7 +1462,7 @@ impl DictationHotkey {
             return false;
         }
         if matches!(self.state, State::Locked) {
-            return self.bindings().any(|binding| {
+            return self.bindings().into_iter().any(|binding| {
                 binding_trigger_pressed(
                     binding,
                     event,
