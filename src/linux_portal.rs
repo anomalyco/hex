@@ -12,19 +12,38 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use color_eyre::eyre::{Result, WrapErr, eyre};
-use gtk::gio;
-use gtk::glib::{self, ToVariant, Variant, variant::ObjectPath};
+use glib::{ToVariant, Variant, variant::ObjectPath};
 
-const DESKTOP: &str = "org.freedesktop.portal.Desktop";
-const DESKTOP_PATH: &str = "/org/freedesktop/portal/desktop";
+pub(crate) const DESKTOP: &str = "org.freedesktop.portal.Desktop";
+pub(crate) const DESKTOP_PATH: &str = "/org/freedesktop/portal/desktop";
 const SHORTCUTS: &str = "org.freedesktop.portal.GlobalShortcuts";
 /// The portal names host apps by their desktop entry, which Hex installs as `hex.desktop`.
 const APP_ID: &str = "hex";
-const CALL_TIMEOUT_MS: i32 = 5_000;
+pub(crate) const CALL_TIMEOUT_MS: i32 = 5_000;
 /// Binding can wait for the user to approve a desktop dialog.
 const RESPONSE_TIMEOUT: Duration = Duration::from_secs(60);
 const ESCAPE_ID: &str = "cancel";
 const HELD_ESCAPE_ID: &str = "cancel-held";
+
+/// Opens a private session-bus connection and returns its portal sender token.
+pub(crate) fn connect_bus() -> Result<(gio::DBusConnection, String)> {
+    let address = gio::dbus_address_get_for_bus_sync(gio::BusType::Session, gio::Cancellable::NONE)
+        .map_err(|error| eyre!("no session bus: {error}"))?;
+    let connection = gio::DBusConnection::for_address_sync(
+        &address,
+        gio::DBusConnectionFlags::AUTHENTICATION_CLIENT
+            | gio::DBusConnectionFlags::MESSAGE_BUS_CONNECTION,
+        None,
+        gio::Cancellable::NONE,
+    )
+    .map_err(|error| eyre!("could not reach the session bus: {error}"))?;
+    let sender = connection
+        .unique_name()
+        .ok_or_else(|| eyre!("the session bus gave Hex no name"))?
+        .trim_start_matches(':')
+        .replace('.', "_");
+    Ok((connection, sender))
+}
 
 /// Whether a pressed id is one of the Escape session's.
 pub(crate) fn is_escape(id: &str) -> bool {
@@ -64,18 +83,7 @@ pub(crate) struct Portal {
 impl Portal {
     /// `None` when the session has no shortcuts portal.
     pub(crate) fn connect(stop: &AtomicBool) -> Result<Option<Self>> {
-        let Ok(address) =
-            gio::dbus_address_get_for_bus_sync(gio::BusType::Session, gio::Cancellable::NONE)
-        else {
-            return Ok(None);
-        };
-        let Ok(connection) = gio::DBusConnection::for_address_sync(
-            &address,
-            gio::DBusConnectionFlags::AUTHENTICATION_CLIENT
-                | gio::DBusConnectionFlags::MESSAGE_BUS_CONNECTION,
-            None,
-            gio::Cancellable::NONE,
-        ) else {
+        let Ok((connection, sender)) = connect_bus() else {
             return Ok(None);
         };
         let version = connection.call_sync(
@@ -115,11 +123,6 @@ impl Portal {
                 "the shortcuts portal could not identify Hex ({error}); install Hex with its hex.desktop entry and run it without setuid or setgid wrappers such as newgrp"
             ));
         }
-        let sender = connection
-            .unique_name()
-            .ok_or_else(|| eyre!("the session bus gave Hex no name"))?
-            .trim_start_matches(':')
-            .replace('.', "_");
         let portal = Self {
             connection,
             context: glib::MainContext::new(),
@@ -211,7 +214,7 @@ impl Portal {
         callback: impl Fn(&Variant) + 'static,
     ) -> Result<gio::SignalSubscriptionId> {
         // Callbacks run in the thread-default context at subscription,
-        // which `events` iterates; never the GTK thread's default context.
+        // which `events` iterates; never the main thread's default context.
         self.context
             .with_thread_default(|| {
                 self.connection.signal_subscribe(

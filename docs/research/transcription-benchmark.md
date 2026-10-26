@@ -28,6 +28,12 @@ per-clip latency, peak memory measured externally, and aggregate word error rate
 
 ## Corpus
 
+The [vocabulary corpus](../../tests/fixtures/vocabulary/README.md) adds a committed
+synthetic term/distractor set, a public ordinary-speech guard fetcher, and private
+manifest composition. Optional manifest `vocabulary`, per-clip `expected_terms`
+and `group` fields enable recall and false-insertion scoring. `vocabulary` is a
+scoring list only; it does not change recognition or imply Parakeet hint support.
+
 The corpus is local and ignored by Git because HEX does not retain dictation
 audio by default. Create `perf/transcription-corpus/manifest.json` and keep the
 WAV files beside it:

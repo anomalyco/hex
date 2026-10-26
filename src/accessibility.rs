@@ -1,7 +1,5 @@
-use std::ffi::{c_char, c_void};
+use std::ffi::{CStr, c_char, c_void};
 use std::ptr;
-
-use color_eyre::eyre::{Result, eyre};
 
 type CfTypeRef = *const c_void;
 type CfStringRef = *const c_void;
@@ -9,6 +7,7 @@ type AxUiElementRef = *const c_void;
 
 const CF_STRING_ENCODING_UTF8: u32 = 0x0800_0100;
 const MAX_SELECTED_TEXT_BYTES: usize = 64 * 1024;
+const MESSAGING_TIMEOUT_SECS: f32 = 0.25;
 
 #[link(name = "ApplicationServices", kind = "framework")]
 unsafe extern "C" {
@@ -43,15 +42,18 @@ unsafe extern "C" {
 }
 
 pub fn capture_optional() -> Option<String> {
-    capture_accessibility()
-        .ok()
+    // SAFETY: AXUIElementCreateSystemWide returns a retained Core Foundation object.
+    let system = bounded_element(unsafe { AXUIElementCreateSystemWide() })?;
+    let focused = copy_element(&system, c"AXFocusedUIElement")?;
+    copy_string(&focused, c"AXSelectedText")
         .filter(|text| !text.is_empty() && text.len() <= MAX_SELECTED_TEXT_BYTES)
 }
 
 pub fn focused_window_title(pid: i32) -> Option<String> {
-    capture_focused_window_title(pid)
-        .ok()
-        .filter(|title| !title.is_empty())
+    // SAFETY: AXUIElementCreateApplication returns a retained Core Foundation object.
+    let application = bounded_element(unsafe { AXUIElementCreateApplication(pid) })?;
+    let window = copy_element(&application, c"AXFocusedWindow")?;
+    copy_string(&window, c"AXTitle").filter(|title| !title.is_empty())
 }
 
 struct CfObject(CfTypeRef);
@@ -62,101 +64,43 @@ impl Drop for CfObject {
     }
 }
 
-fn bounded_element(
-    element: AxUiElementRef,
-    null_error: &'static str,
-    timeout_error: &'static str,
-) -> Result<CfObject> {
+fn bounded_element(element: AxUiElementRef) -> Option<CfObject> {
     if element.is_null() {
-        return Err(eyre!(null_error));
+        return None;
     }
     let element = CfObject(element);
-    if unsafe { AXUIElementSetMessagingTimeout(element.0, 0.25) } != 0 {
-        return Err(eyre!(timeout_error));
-    }
-    Ok(element)
+    (unsafe { AXUIElementSetMessagingTimeout(element.0, MESSAGING_TIMEOUT_SECS) } == 0)
+        .then_some(element)
 }
 
-fn copy_attribute(
-    element: &CfObject,
-    name: &std::ffi::CStr,
-    missing_error: &'static str,
-) -> Result<CfObject> {
+fn copy_attribute(element: &CfObject, name: &CStr) -> Option<CfObject> {
     let attribute = CfObject(cf_string_literal(name)?);
     let mut value = ptr::null();
     let status = unsafe { AXUIElementCopyAttributeValue(element.0, attribute.0, &mut value) };
-    if status != 0 || value.is_null() {
-        return Err(eyre!(missing_error));
-    }
-    Ok(CfObject(value))
+    // `then`, not `then_some`: dropping a `CfObject(null)` would CFRelease(NULL).
+    (status == 0 && !value.is_null()).then(|| CfObject(value))
 }
 
-fn capture_focused_window_title(pid: i32) -> Result<String> {
-    // SAFETY: The create/copy APIs return retained Core Foundation objects.
-    let application = bounded_element(
-        unsafe { AXUIElementCreateApplication(pid) },
-        "could not inspect the foreground application",
-        "could not bound communication with the foreground application",
-    )?;
-    let window = copy_attribute(
-        &application,
-        c"AXFocusedWindow",
-        "the foreground application has no focused window",
-    )?;
-    if unsafe { AXUIElementSetMessagingTimeout(window.0, 0.25) } != 0 {
-        return Err(eyre!(
-            "could not bound communication with the foreground window"
-        ));
-    }
-    let title = copy_attribute(
-        &window,
-        c"AXTitle",
-        "the foreground window does not expose a title",
-    )?;
-    cf_string(title.0)
+fn copy_element(element: &CfObject, name: &CStr) -> Option<CfObject> {
+    let child = copy_attribute(element, name)?;
+    (unsafe { AXUIElementSetMessagingTimeout(child.0, MESSAGING_TIMEOUT_SECS) } == 0)
+        .then_some(child)
 }
 
-fn capture_accessibility() -> Result<String> {
-    let focused = focused_element()?;
-    let selected = copy_attribute(
-        &focused,
-        c"AXSelectedText",
-        "the focused control does not expose selected text",
-    )?;
-    cf_string(selected.0)
+fn copy_string(element: &CfObject, name: &CStr) -> Option<String> {
+    let value = copy_attribute(element, name)?;
+    cf_string(value.0)
 }
 
-fn focused_element() -> Result<CfObject> {
-    // SAFETY: The create/copy APIs return retained Core Foundation objects.
-    let system = bounded_element(
-        unsafe { AXUIElementCreateSystemWide() },
-        "could not inspect the focused control",
-        "could not bound communication with the Accessibility server",
-    )?;
-    let focused = copy_attribute(
-        &system,
-        c"AXFocusedUIElement",
-        "the foreground application has no focused text control",
-    )?;
-    if unsafe { AXUIElementSetMessagingTimeout(focused.0, 0.25) } != 0 {
-        return Err(eyre!(
-            "could not bound communication with the focused text control"
-        ));
-    }
-    Ok(focused)
-}
-
-fn cf_string_literal(value: &std::ffi::CStr) -> Result<CfStringRef> {
+fn cf_string_literal(value: &CStr) -> Option<CfStringRef> {
     let string =
         unsafe { CFStringCreateWithCString(ptr::null(), value.as_ptr(), CF_STRING_ENCODING_UTF8) };
-    (!string.is_null())
-        .then_some(string)
-        .ok_or_else(|| eyre!("could not create an Accessibility attribute name"))
+    (!string.is_null()).then_some(string)
 }
 
-fn cf_string(value: CfTypeRef) -> Result<String> {
+fn cf_string(value: CfTypeRef) -> Option<String> {
     if unsafe { CFGetTypeID(value) } != unsafe { CFStringGetTypeID() } {
-        return Err(eyre!("the selected text has an unsupported value type"));
+        return None;
     }
     let value = value.cast();
     let length = unsafe { CFStringGetLength(value) };
@@ -171,19 +115,24 @@ fn cf_string(value: CfTypeRef) -> Result<String> {
             CF_STRING_ENCODING_UTF8,
         )
     } {
-        return Err(eyre!("could not decode the selected text"));
+        return None;
     }
     let length = bytes
         .iter()
         .position(|byte| *byte == 0)
         .unwrap_or(bytes.len());
     bytes.truncate(length);
-    String::from_utf8(bytes).map_err(Into::into)
+    String::from_utf8(bytes).ok()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_missing_attribute_is_none() {
+        assert_eq!(focused_window_title(i32::MAX), None);
+    }
 
     #[test]
     #[ignore = "requires a trusted signed process and a focused selected text fixture"]

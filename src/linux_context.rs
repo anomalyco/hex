@@ -7,7 +7,7 @@ use x11rb::protocol::xproto::{AtomEnum, ConnectionExt};
 
 use crate::context::ContextSnapshot;
 
-pub fn capture() -> ContextSnapshot {
+pub(crate) fn capture() -> ContextSnapshot {
     ContextSnapshot {
         application: frontmost_application(),
         ..ContextSnapshot::default()

@@ -43,7 +43,7 @@ These are planning defaults, not commitments made by the consumer:
 | --- | --- | --- |
 | Platform | Apple Silicon macOS | Are Windows, Linux, or Intel Mac required for their initial launch? |
 | Distribution | Directly distributed, signed desktop app | Does their distribution require App Sandbox or an app store? |
-| Integration | Electron pilot validated locally | Confirm the consumer's packaged application. Other hosts need an adapter estimate covering launch, HTTP/SSE, cancellation, errors, and shutdown. |
+| Integration | Electron pilot validated locally | Confirm the consumer's packaged application. Other hosts need a host adapter covering launch, HTTP/SSE, cancellation, errors, and shutdown. |
 | Transcription | Final text after recording stops | Are live partial transcripts essential? |
 | Models | A small tested subset of the existing GGUF catalog | Which languages, hardware, and quality/latency requirements must the pilot meet? |
 | Audio workload | Consumer-provided representative recordings | What encoding, sample rate, and maximum recording length must work? |
@@ -84,7 +84,7 @@ artifacts or public integration commitments.
 | Build | `scripts/build-service-app.sh` copies `target/release/voice-control` into a service bundle. | A transcription-only executable, not a renamed full desktop executable. |
 | Coupling | `local_api` references recognition/developer control; `transcription` and `parakeet` also contain desktop paths; `build.rs` compiles UI/permission resources. | Make the helper build independent of desktop-only code without duplicating inference. |
 | Platform | `local_api` and `transcription_service` are macOS-gated in `src/main.rs`. | Linux desktop support does not provide embedded service parity. |
-| Validation | Both service smoke scripts expect API `1`; service and SDK use API `2`. | Repair stale validation before treating a smoke result as evidence. |
+| Validation | `scripts/smoke-embedded-service.sh` and `scripts/smoke-service-app.sh` check API `2`. | Exercise consumer packaging and clean-machine distribution. |
 | Release | `.github/workflows/release-typescript.yml` publishes through Changesets on Ubuntu. | A macOS artifact build/validation path; the present workflow does not supply a native binary. |
 
 The companion [service spec](../specs/local-transcription-service.md) records the
@@ -185,8 +185,7 @@ malicious process already running as the same user.
 ## Establish viability before committing to extraction
 
 Before slice 1, name the Hex and consumer integration owners and agree a go/no-go
-date no later than the consumer's dependency decision deadline. Keep the date and
-effort budget unset until agreed; do not translate this plan into an ETA.
+decision gate before the consumer's dependency decision deadline.
 
 Run the existing explicit-command path on consumer-approved representative audio
 before extracting a new binary. Record transcription quality against their
@@ -201,13 +200,13 @@ required clip. If the workload does not fit, explicitly scope normalization or
 admission changes; do not promise unlimited recordings or add streaming silently.
 
 Select the integration branch at this gate: Node-compatible hosts use the SDK
-and npm path below; other hosts need an estimated adapter and native-artifact
+and npm path below; other hosts need a host adapter and native-artifact
 delivery path before implementation is authorized. A launcher alone is not that
-adapter. Include an early packaging/signing feasibility probe in the estimate.
+adapter. Include an early packaging/signing feasibility probe.
 
-**Exit:** agreed scope, owners, measured quality/workload fit, effort estimate,
+**Exit:** agreed scope, owners, measured quality/workload fit,
 and a dated go/no-go decision. Stop or renegotiate if viability cannot be shown
-within the agreed budget/deadline, rather than keeping the consumer waiting.
+at the gate, rather than keeping the consumer waiting.
 
 ## Deliver in four acceptance-gated slices
 
@@ -217,7 +216,7 @@ Use the confirmed framework and packaging pipeline, not an assumed Electron demo
 Carry the viability gate's audio fixtures and acceptance criteria into this slice.
 
 Build a dedicated helper executable from the existing transcription code. Make
-only the internal separations needed to exclude GPUI, Sparkle, Moonshine,
+only the internal separations needed to exclude Rune, Sparkle, Moonshine,
 recording, hotkeys, and desktop action execution. Keep protocol and inference
 implementation shared; do not copy modules into a second engine or create a
 public Rust/plugin framework. Gate unrelated native build steps too.

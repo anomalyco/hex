@@ -1,22 +1,13 @@
 //! macOS applications: `.app` bundles named as Finder shows them, with
-//! their bundle identifiers and icons.
+//! their bundle identifiers.
 
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::ptr;
-use std::sync::Arc;
 
 use color_eyre::eyre::{Result, eyre};
-use gpui::{Image, ImageFormat};
-use objc2::AnyThread;
 use objc2::rc::autoreleasepool;
-use objc2::runtime::AnyObject;
-use objc2_app_kit::{
-    NSBitmapImageFileType, NSBitmapImageRep, NSBitmapImageRepPropertyKey, NSCompositingOperation,
-    NSDeviceRGBColorSpace, NSGraphicsContext, NSImage, NSImageInterpolation, NSWorkspace,
-};
-use objc2_foundation::{NSBundle, NSDictionary, NSFileManager, NSPoint, NSRect, NSSize, NSString};
+use objc2_foundation::{NSBundle, NSFileManager, NSString};
 
 use super::InstalledApplication;
 
@@ -47,13 +38,10 @@ pub(super) fn metadata(path: &Path) -> Result<InstalledApplication> {
         let bundle_id = bundle
             .bundleIdentifier()
             .map(|identifier| identifier.to_string());
-        let native_icon = NSWorkspace::sharedWorkspace().iconForFile(&path_string);
-        let icon = rasterize_icon(&native_icon).map(Arc::new);
         Ok(InstalledApplication {
             name,
             bundle_id,
             path: path.to_owned(),
-            icon,
         })
     })
 }
@@ -99,54 +87,15 @@ fn collect_applications(directory: &Path, output: &mut Vec<PathBuf>, seen: &mut 
     }
 }
 
-fn rasterize_icon(icon: &NSImage) -> Option<Image> {
-    const ICON_SIZE: isize = 128;
-    let bitmap = unsafe {
-        NSBitmapImageRep::initWithBitmapDataPlanes_pixelsWide_pixelsHigh_bitsPerSample_samplesPerPixel_hasAlpha_isPlanar_colorSpaceName_bytesPerRow_bitsPerPixel(
-            NSBitmapImageRep::alloc(),
-            ptr::null_mut(),
-            ICON_SIZE,
-            ICON_SIZE,
-            8,
-            4,
-            true,
-            false,
-            NSDeviceRGBColorSpace,
-            0,
-            0,
-        )?
-    };
-    let context = NSGraphicsContext::graphicsContextWithBitmapImageRep(&bitmap)?;
-    let previous = NSGraphicsContext::currentContext();
-    NSGraphicsContext::setCurrentContext(Some(&context));
-    context.setImageInterpolation(NSImageInterpolation::High);
-    icon.drawInRect_fromRect_operation_fraction(
-        NSRect::new(
-            NSPoint::new(0.0, 0.0),
-            NSSize::new(ICON_SIZE as f64, ICON_SIZE as f64),
-        ),
-        NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(0.0, 0.0)),
-        NSCompositingOperation::Copy,
-        1.0,
-    );
-    NSGraphicsContext::setCurrentContext(previous.as_deref());
-    let properties = NSDictionary::<NSBitmapImageRepPropertyKey, AnyObject>::new();
-    let png = unsafe {
-        bitmap.representationUsingType_properties(NSBitmapImageFileType::PNG, &properties)?
-    };
-    Some(Image::from_bytes(ImageFormat::Png, png.to_vec()))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn finder_has_native_picker_metadata_and_an_icon() {
+    fn finder_has_native_picker_metadata() {
         let finder = metadata(Path::new("/System/Library/CoreServices/Finder.app")).unwrap();
 
         assert_eq!(finder.name, "Finder");
         assert_eq!(finder.bundle_id.as_deref(), Some("com.apple.finder"));
-        assert!(finder.icon.is_some());
     }
 }

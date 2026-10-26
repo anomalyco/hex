@@ -1,8 +1,8 @@
 //! Read-only queries over recorded meetings, for agents (`hex mcp`).
 //!
 //! Nothing here writes to the meetings folder. A meeting whose recorder holds
-//! `active.lock` is in progress: its rolling transcript and live draft are
-//! read and labeled. Otherwise only the published `transcript.ndjson` is
+//! `active.lock` is in progress: its rolling transcript is read and
+//! labeled. Otherwise only the published `transcript.ndjson` is
 //! trusted, and an unfinished draft is shown as interrupted, as the app does.
 //! Unreadable folders and lines are skipped and reported, never repaired.
 
@@ -18,12 +18,13 @@ use serde::de::DeserializeOwned;
 use unicode_normalization::UnicodeNormalization;
 use unicode_normalization::char::is_combining_mark;
 
-use super::live::{Event, live_view};
 use super::transcript::{RollingLine, RollingView};
 use super::{
-    MeetingManifest, MeetingSource, MeetingStatus, TranscriptEntry, coalesce_transcript,
-    display_title, format_duration, notes_markdown, recovered_status, transcript_markdown,
+    Chapter, MeetingManifest, MeetingSource, MeetingStatus, TranscriptEntry, chapter_entries,
+    coalesce_transcript, display_title, format_duration, notes_markdown, recovered_status,
+    section_markdown, transcript_markdown,
 };
+use crate::vocabulary::VocabularyEntry;
 
 const TURN_GAP_MS: u64 = 3_000;
 const PASSAGE_WORDS: usize = 60;
@@ -37,10 +38,8 @@ const BM25_B: f32 = 0.75;
 pub enum TranscriptSource {
     /// The published final transcript.
     Final,
-    /// Rolling final-model chunks, then the live draft (in progress or interrupted).
+    /// The rolling in-call transcript (in progress or interrupted).
     Rolling,
-    /// Only the live Moonshine draft.
-    Draft,
     Missing,
 }
 
@@ -48,8 +47,7 @@ impl TranscriptSource {
     pub fn label(self) -> &'static str {
         match self {
             Self::Final => "final transcript",
-            Self::Rolling => "rolling transcript + live draft",
-            Self::Draft => "live draft",
+            Self::Rolling => "rolling transcript",
             Self::Missing => "no transcript",
         }
     }
@@ -91,6 +89,50 @@ impl Meeting {
         })
     }
 
+    /// Entries overlapping `range`, or an error when it starts after the meeting.
+    pub fn entries_in(&self, range: OffsetRange, now_ms: u64) -> Result<Vec<&TranscriptEntry>> {
+        range.check(self, now_ms)?;
+        Ok(self
+            .entries
+            .iter()
+            .filter(|entry| range.overlaps(entry))
+            .collect())
+    }
+
+    /// Chapter `number` (counting from 1), where it ends, and its entries.
+    pub fn chapter(&self, number: usize, now_ms: u64) -> Result<ChapterView<'_>> {
+        let chapters = &self.manifest.chapters;
+        if chapters.is_empty() {
+            return Err(eyre!("Meeting {} has no chapters.", self.id));
+        }
+        let index = number
+            .checked_sub(1)
+            .filter(|index| *index < chapters.len())
+            .ok_or_else(|| {
+                eyre!(
+                    "Meeting {} has chapters 1 to {}; there is no chapter {number}.",
+                    self.id,
+                    chapters.len()
+                )
+            })?;
+        Ok(ChapterView {
+            number,
+            chapter: &chapters[index],
+            end_ms: chapters
+                .get(index + 1)
+                .map_or_else(|| self.duration_ms(now_ms), |next| next.start_ms)
+                .max(chapters[index].start_ms),
+            entries: chapter_entries(&self.entries, chapters, index),
+        })
+    }
+
+    /// Every chapter, in order.
+    pub fn chapter_views(&self, now_ms: u64) -> Vec<ChapterView<'_>> {
+        (1..=self.manifest.chapters.len())
+            .filter_map(|number| self.chapter(number, now_ms).ok())
+            .collect()
+    }
+
     fn status_label(&self) -> String {
         let status = status_name(self.status);
         if self.in_progress {
@@ -114,6 +156,30 @@ impl Meeting {
             self.title(),
             iso_local(self.start_ms())
         )
+    }
+}
+
+/// One chapter of a meeting with the entries that start inside it.
+pub struct ChapterView<'a> {
+    /// Counting from 1.
+    pub number: usize,
+    pub chapter: &'a Chapter,
+    pub end_ms: u64,
+    pub entries: Vec<TranscriptEntry>,
+}
+
+impl ChapterView<'_> {
+    fn span(&self) -> String {
+        format!(
+            "{}–{}",
+            format_duration(self.chapter.start_ms),
+            format_duration(self.end_ms)
+        )
+    }
+
+    /// `## title`, its one line, and its turns, for copying one section.
+    pub fn markdown(&self) -> String {
+        section_markdown(self.chapter, &self.entries)
     }
 }
 
@@ -180,10 +246,10 @@ struct Fingerprint {
 
 const FINGERPRINT_FILES: [&str; 5] = [
     "manifest.json",
+    super::transcript::ERROR_FILE,
     "transcript.ndjson",
     "transcript.md",
-    "transcript.rolling.ndjson",
-    "transcript.live.ndjson",
+    super::transcript::ROLLING_FILE,
 ];
 
 /// The meetings folder plus an in-memory cache keyed by file sizes and times.
@@ -294,52 +360,18 @@ impl Library {
     }
 
     pub fn list(&self, query: &ListQuery, now_ms: u64) -> Result<String> {
-        let scan = self.scan()?;
-        let range = TimeRange::parse(query.since.as_deref(), query.until.as_deref(), now_ms)?;
-        let words = query
-            .query
-            .as_deref()
-            .map(|query| query.split_whitespace().map(fold).collect::<Vec<_>>())
-            .unwrap_or_default();
-        let matching = scan
-            .meetings
-            .iter()
-            .filter(|meeting| query.include_in_progress || !meeting.in_progress)
-            .filter(|meeting| range.overlaps(meeting, now_ms))
-            .filter(|meeting| {
-                if words.is_empty() {
-                    return true;
-                }
-                let haystack = fold(&format!(
-                    "{} {} {} {}",
-                    meeting.title(),
-                    meeting.manifest.title,
-                    meeting.manifest.app.as_deref().unwrap_or_default(),
-                    meeting.id
-                ));
-                words.iter().all(|word| haystack.contains(word.as_str()))
-            })
-            .collect::<Vec<_>>();
+        let scan = self.list_matches(query, now_ms)?;
+        let matching = &scan.meetings;
         let limit = query.limit.clamp(1, 200);
         let mut output = String::new();
         if matching.is_empty() {
-            let _ = writeln!(
-                output,
-                "No meetings match (searched {} meetings in {}).",
-                scan.meetings.len(),
-                self.root.display()
-            );
+            let _ = writeln!(output, "No meetings match.");
         } else {
             let _ = writeln!(
                 output,
-                "{} of {} meetings, newest first{}:",
+                "{} of {} meetings, newest first:",
                 matching.len().min(limit),
-                matching.len(),
-                if matching.len() > limit {
-                    " (raise limit or narrow since/until for more)"
-                } else {
-                    ""
-                }
+                matching.len()
             );
         }
         for meeting in matching.iter().take(limit) {
@@ -358,7 +390,7 @@ impl Library {
                     "yes"
                 } else {
                     "no"
-                },
+                }
             );
             for warning in &meeting.warnings {
                 let _ = writeln!(output, "  warning: {warning}");
@@ -366,6 +398,37 @@ impl Library {
         }
         write_skipped(&mut output, &scan.skipped);
         Ok(output)
+    }
+
+    /// Shared selection for CLI JSON and MCP text; limit is applied by the renderer.
+    pub fn list_matches(&self, query: &ListQuery, now_ms: u64) -> Result<Scan> {
+        let mut scan = self.scan()?;
+        let range = TimeRange::parse(query.since.as_deref(), query.until.as_deref(), now_ms)?;
+        let words = query
+            .query
+            .as_deref()
+            .map(|query| query.split_whitespace().map(fold).collect::<Vec<_>>())
+            .unwrap_or_default();
+        scan.meetings = scan
+            .meetings
+            .into_iter()
+            .filter(|meeting| query.include_in_progress || !meeting.in_progress)
+            .filter(|meeting| range.overlaps(meeting, now_ms))
+            .filter(|meeting| {
+                if words.is_empty() {
+                    return true;
+                }
+                let haystack = fold(&format!(
+                    "{} {} {} {}",
+                    meeting.title(),
+                    meeting.manifest.title,
+                    meeting.manifest.app.as_deref().unwrap_or_default(),
+                    meeting.id
+                ));
+                words.iter().all(|word| haystack.contains(word.as_str()))
+            })
+            .collect::<Vec<_>>();
+        Ok(scan)
     }
 
     pub fn search(&self, query: &SearchQuery, now_ms: u64) -> Result<String> {
@@ -385,21 +448,20 @@ impl Library {
                 .cloned()
                 .collect(),
         };
-        let hits = rank(&scope, &parsed, query.fuzzy);
+        let hits = rank(&scope, &parsed, query.fuzzy, &query.vocabulary);
         Ok(render_search(query, &parsed, &scope, &hits, &scan.skipped))
     }
 
     pub fn transcript(&self, query: &TranscriptQuery, now_ms: u64) -> Result<String> {
         let meeting = self.meeting(&query.meeting_id)?;
-        let start = query.start.as_deref().map(parse_offset).transpose()?;
-        let end = query.end.as_deref().map(parse_offset).transpose()?;
+        let range = OffsetRange::parse(query.start.as_deref(), query.end.as_deref())?;
+        range.check(&meeting, now_ms)?;
         let speaker = query.speaker.as_deref().map(parse_speaker).transpose()?;
         let cursor = query.cursor.as_deref().map(Cursor::parse).transpose()?;
         Ok(render_transcript(
             &meeting,
             TranscriptWindow {
-                start,
-                end,
+                range,
                 speaker: speaker.flatten(),
                 cursor,
                 max_chars: query.max_chars.clamp(500, 200_000),
@@ -465,36 +527,138 @@ with get_transcript or search_transcripts for details, decisions, and action ite
         Ok(output)
     }
 
-    /// The meeting as Markdown: metadata, stored notes, and labeled turns.
-    pub fn markdown(&self, id: &str, now_ms: u64) -> Result<String> {
+    /// The meeting as Markdown: metadata, stored notes, and labeled turns,
+    /// limited to the entries overlapping `range`.
+    pub fn markdown(&self, id: &str, range: OffsetRange, now_ms: u64) -> Result<String> {
         let meeting = self.meeting(id)?;
-        let mut output = format!("# {}\n\n", meeting.title());
-        let _ = writeln!(output, "- Meeting: {}", meeting.id);
-        let _ = writeln!(output, "- Started: {}", iso_local(meeting.start_ms()));
-        let _ = writeln!(
-            output,
-            "- Duration: {}",
-            format_duration(meeting.duration_ms(now_ms))
-        );
-        if let Some(app) = &meeting.manifest.app {
-            let _ = writeln!(output, "- App: {app}");
+        let entries = meeting
+            .entries_in(range, now_ms)?
+            .into_iter()
+            .cloned()
+            .collect::<Vec<_>>();
+        let mut output = markdown_header(&meeting, now_ms);
+        if range.is_bounded() {
+            let _ = writeln!(output, "- Range: {}", range.describe());
         }
-        let _ = writeln!(
-            output,
-            "- Status: {} · {}",
-            meeting.status_label(),
-            meeting.source.label()
-        );
         if let Some(notes) = &meeting.manifest.notes {
             let _ = write!(output, "\n{}\n", notes_markdown(notes));
         }
-        let _ = write!(
+        let chapters = meeting.chapter_views(now_ms);
+        if !chapters.is_empty() {
+            output.push_str("\n## Chapters\n\n");
+            for view in &chapters {
+                let _ = write!(
+                    output,
+                    "{}. {} · {}",
+                    view.number,
+                    format_duration(view.chapter.start_ms),
+                    view.chapter.title
+                );
+                if !view.chapter.summary.is_empty() {
+                    let _ = write!(output, " — {}", view.chapter.summary);
+                }
+                output.push('\n');
+            }
+        }
+        let transcript = if entries.is_empty() && range.is_bounded() {
+            "No transcript entries in this range.".into()
+        } else {
+            transcript_markdown(&entries)
+        };
+        let _ = write!(output, "\n## Transcript\n\n{transcript}\n");
+        Ok(output)
+    }
+
+    /// One chapter as Markdown: the meeting's metadata, then the chapter's
+    /// name, line, and turns.
+    pub fn chapter_markdown(&self, id: &str, number: usize, now_ms: u64) -> Result<String> {
+        let meeting = self.meeting(id)?;
+        let view = meeting.chapter(number, now_ms)?;
+        let mut output = markdown_header(&meeting, now_ms);
+        let _ = writeln!(
             output,
-            "\n## Transcript\n\n{}\n",
-            transcript_markdown(&meeting.entries)
+            "- Chapter: {} of {} · {}",
+            view.number,
+            meeting.manifest.chapters.len(),
+            view.span()
+        );
+        let _ = write!(output, "\n{}\n", view.markdown());
+        Ok(output)
+    }
+
+    /// A meeting's chapters with their spans and lines.
+    pub fn chapters(&self, id: &str, now_ms: u64) -> Result<String> {
+        let meeting = self.meeting(id)?;
+        let mut output = String::new();
+        let _ = writeln!(output, "{}", meeting.heading());
+        let chapters = meeting.chapter_views(now_ms);
+        if chapters.is_empty() {
+            let _ = writeln!(
+                output,
+                "{}",
+                if meeting.in_progress {
+                    "No chapters yet. Chapters appear every few minutes while a meeting records \
+with live chapters on."
+                } else {
+                    "No chapters are stored for this meeting. This read-only reader never \
+generates them; read the meeting with get_transcript or `hex meetings show`."
+                }
+            );
+            return Ok(output);
+        }
+        let _ = writeln!(
+            output,
+            "{} chapters, {}:",
+            chapters.len(),
+            if meeting.manifest.chapters_refined {
+                "boundaries corrected over the whole transcript"
+            } else if meeting.in_progress {
+                "named live while recording"
+            } else {
+                "named live while recording; boundaries not corrected"
+            }
+        );
+        for view in &chapters {
+            let _ = writeln!(
+                output,
+                "{}. {} · {}",
+                view.number,
+                view.span(),
+                view.chapter.title
+            );
+            if !view.chapter.summary.is_empty() {
+                let _ = writeln!(output, "   {}", view.chapter.summary);
+            }
+        }
+        let _ = writeln!(
+            output,
+            "\nModel-written names that may be wrong. Read a chapter with get_transcript (start \
+and end as shown) or `hex meetings show {} --chapter N`.",
+            meeting.id
         );
         Ok(output)
     }
+}
+
+fn markdown_header(meeting: &Meeting, now_ms: u64) -> String {
+    let mut output = format!("# {}\n\n", meeting.title());
+    let _ = writeln!(output, "- Meeting: {}", meeting.id);
+    let _ = writeln!(output, "- Started: {}", iso_local(meeting.start_ms()));
+    let _ = writeln!(
+        output,
+        "- Duration: {}",
+        format_duration(meeting.duration_ms(now_ms))
+    );
+    if let Some(app) = &meeting.manifest.app {
+        let _ = writeln!(output, "- App: {app}");
+    }
+    let _ = writeln!(
+        output,
+        "- Status: {} · {}",
+        meeting.status_label(),
+        meeting.source.label()
+    );
+    output
 }
 
 fn write_skipped(output: &mut String, skipped: &[Skipped]) {
@@ -543,8 +707,12 @@ fn load(directory: &Path, id: &str, in_progress: bool) -> Result<Meeting> {
         std::io::ErrorKind::NotFound => eyre!("no manifest.json"),
         _ => eyre!("could not read manifest.json: {error}"),
     })?;
-    let manifest: MeetingManifest = serde_json::from_slice(&data)
+    let mut manifest: MeetingManifest = serde_json::from_slice(&data)
         .map_err(|error| eyre!("could not decode manifest.json: {error}"))?;
+    manifest.live_transcription_error =
+        fs::read_to_string(directory.join(super::transcript::ERROR_FILE))
+            .ok()
+            .map(|error| error.trim().to_string());
     let final_path = directory.join("transcript.ndjson");
     // A recorder publishes the final NDJSON before the Markdown; without one,
     // the NDJSON alone is the finished publication.
@@ -571,18 +739,12 @@ fn load(directory: &Path, id: &str, in_progress: bool) -> Result<Meeting> {
         )
         .into_iter()
         .collect();
-        let mut latest = HashMap::new();
-        for event in read_lines::<Event>(&directory.join("transcript.live.ndjson"), &mut warnings) {
-            latest.insert((event.source, event.line_id), event);
-        }
-        let source = if !rolling.entries.is_empty() {
-            TranscriptSource::Rolling
-        } else if !latest.is_empty() {
-            TranscriptSource::Draft
-        } else {
+        let source = if rolling.entries.is_empty() {
             TranscriptSource::Missing
+        } else {
+            TranscriptSource::Rolling
         };
-        (source, live_view(&rolling, latest.values()))
+        (source, rolling.entries)
     };
     entries.retain(|entry| !entry.text.trim().is_empty());
     entries.sort_by_key(|entry| entry.start_ms);
@@ -775,6 +937,17 @@ const STOPWORDS: &[&str] = &[
 ];
 
 fn soundex(word: &str) -> Option<String> {
+    let mut key = sound_key(word)?;
+    key.truncate(4);
+    while key.len() < 4 {
+        key.push('0');
+    }
+    Some(key)
+}
+
+/// Soundex without its four-character cap or padding: the first letter, then
+/// every consonant sound (`abattoir` and `avatar` are both `a136`).
+fn sound_key(word: &str) -> Option<String> {
     let mut characters = word.chars().filter(char::is_ascii_alphabetic);
     let first = characters.next()?;
     let code = |character: char| match character {
@@ -794,16 +967,10 @@ fn soundex(word: &str) -> Option<String> {
             && current != previous
         {
             key.push(digit);
-            if key.len() == 4 {
-                break;
-            }
         }
         if !matches!(character, 'h' | 'w') {
             previous = current;
         }
-    }
-    while key.len() < 4 {
-        key.push('0');
     }
     Some(key)
 }
@@ -859,6 +1026,8 @@ pub struct SearchQuery {
     pub limit: usize,
     pub fuzzy: bool,
     pub include_in_progress: bool,
+    /// Fuzzy search also finds these terms' likely mis-transcriptions.
+    pub vocabulary: Vec<VocabularyEntry>,
 }
 
 #[derive(Debug, Default)]
@@ -920,17 +1089,50 @@ impl ParsedQuery {
 enum MatchKind {
     Exact,
     Prefix,
-    Edit,
+    /// A spelling variant this many edits away.
+    Edit(usize),
     Sound,
+    /// A vocabulary term's "sounds like" spelling, or the term as two words.
+    Alias,
+    /// A word that sounds like a vocabulary term ([`sounds_alike`]).
+    Phonetic,
 }
 
 impl MatchKind {
     fn weight(self) -> f32 {
         match self {
             Self::Exact => 1.0,
-            Self::Prefix => 0.8,
-            Self::Edit => 0.7,
-            Self::Sound => 0.45,
+            Self::Prefix | Self::Alias => 0.5,
+            Self::Edit(_) => 0.35,
+            Self::Phonetic => 0.3,
+            Self::Sound => 0.2,
+        }
+    }
+}
+
+/// Spelling fallbacks (edit distance and Soundex) apply only to a term found
+/// exactly in fewer passages than this: with more, the transcripts already
+/// spell the word that way and its near neighbours are other words.
+const RARE_EXACT_PASSAGES: u32 = 3;
+/// A spelling fallback is skipped when it is a common word: in more than this
+/// share of the passages searched, and at least `COMMON_MIN_PASSAGES`.
+const COMMON_SHARE: f32 = 0.005;
+const COMMON_MIN_PASSAGES: f32 = 5.0;
+
+/// Whether an expansion found by [`expand`] is used. Prefixes are kept like
+/// stems. Spelling fallbacks need a term whose exact hits are rare and a
+/// candidate that is not a common word, except that a term with no exact hit
+/// at all still reaches a common word one edit away (a plain typo). A
+/// vocabulary alias the person wrote is always used; a phonetic one only when
+/// it is not a common word, however often the term itself appears.
+fn admits(kind: MatchKind, exact_passages: u32, passages: u32, common: f32) -> bool {
+    match kind {
+        MatchKind::Exact | MatchKind::Prefix | MatchKind::Alias => true,
+        MatchKind::Phonetic => passages as f32 <= common,
+        MatchKind::Edit(_) | MatchKind::Sound => {
+            exact_passages < RARE_EXACT_PASSAGES
+                && (passages as f32 <= common
+                    || (kind == MatchKind::Edit(1) && exact_passages == 0))
         }
     }
 }
@@ -956,10 +1158,11 @@ fn expand<'a>(
                     && length - candidate_length <= 3)
             {
                 Some(MatchKind::Prefix)
-            } else if length >= 4
-                && edit_distance(term, candidate, if length >= 8 { 2 } else { 1 }).is_some()
+            } else if let Some(distance) = (length >= 4)
+                .then(|| edit_distance(term, candidate, if length >= 8 { 2 } else { 1 }))
+                .flatten()
             {
-                Some(MatchKind::Edit)
+                Some(MatchKind::Edit(distance))
             } else if (3..=5).contains(&length)
                 && (3..=6).contains(&candidate_length)
                 && length.abs_diff(candidate_length) <= 2
@@ -975,7 +1178,102 @@ fn expand<'a>(
             expansions.push((candidate.clone(), kind));
         }
     }
+    expansions.sort_unstable_by(|left, right| left.0.cmp(&right.0));
     expansions
+}
+
+/// Transcript stems, one word or an adjacent phrase, that stand for a
+/// vocabulary term.
+struct Alias {
+    stems: Vec<String>,
+    kind: MatchKind,
+}
+
+/// The aliases a query `term` gets when it names a one-word vocabulary term:
+/// the term's "sounds like" spellings, the term split into two adjacent words
+/// found in `corpus` (`open code` for OpenCode), and words in `corpus` that
+/// sound like it ([`sounds_alike`]) and pass [`admits`]. Multi-word terms get
+/// none; their words are searched like any other.
+fn vocabulary_aliases(
+    term: &str,
+    vocabulary: &[VocabularyEntry],
+    corpus: &HashMap<&String, u32>,
+    common: f32,
+) -> Vec<Alias> {
+    let mut aliases: Vec<Alias> = Vec::new();
+    let mut add = |stems: Vec<String>, kind: MatchKind| {
+        if stems.is_empty() || stems == [term] {
+            return;
+        }
+        match aliases.iter_mut().find(|alias| alias.stems == stems) {
+            Some(alias) if alias.kind.weight() < kind.weight() => alias.kind = kind,
+            Some(_) => {}
+            None => aliases.push(Alias { stems, kind }),
+        }
+    };
+    for entry in vocabulary {
+        let tokens = tokenize(&entry.term);
+        let [token] = tokens.as_slice() else {
+            continue;
+        };
+        if token.stem != term {
+            continue;
+        }
+        for spelling in &entry.sounds_like {
+            add(
+                tokenize(spelling)
+                    .into_iter()
+                    .map(|token| token.stem)
+                    .collect(),
+                MatchKind::Alias,
+            );
+        }
+        let word = fold(&entry.term[token.start..token.end])
+            .chars()
+            .filter(|character| character.is_alphanumeric())
+            .collect::<String>();
+        let boundaries = word
+            .char_indices()
+            .map(|(index, _)| index)
+            .collect::<Vec<_>>();
+        for &split in boundaries.iter().skip(3) {
+            if word[split..].chars().count() < 3 {
+                break;
+            }
+            let (left, right) = (stem(&word[..split]), stem(&word[split..]));
+            if corpus.contains_key(&left) && corpus.contains_key(&right) {
+                add(vec![left, right], MatchKind::Alias);
+            }
+        }
+        for (candidate, passages) in corpus {
+            if sounds_alike(term, candidate) && admits(MatchKind::Phonetic, 0, *passages, common) {
+                add(vec![(*candidate).clone()], MatchKind::Phonetic);
+            }
+        }
+    }
+    aliases.sort_unstable_by(|left, right| left.stems.cmp(&right.stems));
+    aliases
+}
+
+/// Consonant sounds a vocabulary term needs before words that merely sound
+/// like it count as hits. Names with fewer (Rune, Dax) match too many words
+/// this way and rely on "sounds like" spellings.
+const SOUND_ALIKE_MIN_CONSONANTS: usize = 2;
+
+/// Whether the corpus stem `candidate` is a likely mis-transcription of the
+/// vocabulary stem `term` (`avatar` for `abattoir`): the same uncapped
+/// Soundex key with at least [`SOUND_ALIKE_MIN_CONSONANTS`] consonant sounds,
+/// at most half the letters changed, and not a stopword.
+fn sounds_alike(term: &str, candidate: &str) -> bool {
+    let length = term.chars().count().max(candidate.chars().count());
+    candidate != term
+        && candidate.chars().count() >= 4
+        && !STOPWORDS.contains(&candidate)
+        // The key is the first letter, then one digit per consonant sound.
+        && sound_key(term).is_some_and(|key| {
+            key.len() > SOUND_ALIKE_MIN_CONSONANTS && sound_key(candidate) == Some(key)
+        })
+        && edit_distance(term, candidate, length / 2).is_some()
 }
 
 struct Hit {
@@ -986,23 +1284,114 @@ struct Hit {
     labels: Vec<String>,
 }
 
-fn rank(meetings: &[Arc<Meeting>], query: &ParsedQuery, fuzzy: bool) -> Vec<Hit> {
-    let mut document_frequency: HashMap<&String, u32> = HashMap::new();
-    let mut documents = 0_u32;
+fn rank(
+    meetings: &[Arc<Meeting>],
+    query: &ParsedQuery,
+    fuzzy: bool,
+    vocabulary: &[VocabularyEntry],
+) -> Vec<Hit> {
+    let owners = meetings
+        .iter()
+        .flat_map(|meeting| (0..meeting.passages.len()).map(move |index| (meeting, index)))
+        .collect::<Vec<_>>();
+    let passages = owners
+        .iter()
+        .map(|(meeting, index)| &meeting.passages[*index])
+        .collect::<Vec<_>>();
+    let documents = (0..passages.len()).collect::<Vec<_>>();
+    let mut scored = score(&passages, &documents, query, fuzzy, vocabulary);
+    scored.sort_by(|left, right| {
+        let (left_meeting, left_passage) = owners[left.passage];
+        let (right_meeting, right_passage) = owners[right.passage];
+        relevance(left, right)
+            .then_with(|| right_meeting.start_ms().cmp(&left_meeting.start_ms()))
+            .then_with(|| left_passage.cmp(&right_passage))
+    });
+    scored
+        .into_iter()
+        .map(|scored| {
+            let (meeting, passage) = owners[scored.passage];
+            Hit {
+                meeting: meeting.clone(),
+                passage,
+                score: scored.score,
+                matched: scored.matched,
+                labels: scored.labels,
+            }
+        })
+        .collect()
+}
+
+struct Scored {
+    passage: usize,
+    score: f32,
+    /// Every query term matched an exact stem.
+    exact: bool,
+    matched: Vec<usize>,
+    labels: Vec<String>,
+}
+
+/// Best first: a passage matching every term exactly outranks one that needs
+/// a fuzzy match, whatever their scores; then by score.
+fn relevance(left: &Scored, right: &Scored) -> std::cmp::Ordering {
+    right
+        .exact
+        .cmp(&left.exact)
+        .then_with(|| right.score.total_cmp(&left.score))
+}
+
+/// Which of two matches in a passage stands for a query term: the exact stem
+/// whenever present, then the higher score, the more trusted kind, and the
+/// alphabetically first stem, so equal matches resolve the same way every run.
+fn stands_for_term(
+    (score, stem, kind): (f32, &str, MatchKind),
+    (other_score, other_stem, other_kind): (f32, &str, MatchKind),
+) -> std::cmp::Ordering {
+    (kind == MatchKind::Exact)
+        .cmp(&(other_kind == MatchKind::Exact))
+        .then(score.total_cmp(&other_score))
+        .then(kind.weight().total_cmp(&other_kind.weight()))
+        .then(other_stem.cmp(stem))
+}
+
+/// BM25 over `passages` as one corpus, with stemmed, optionally fuzzy terms.
+/// `owners[i]` is passage `i`'s document: alternative texts of one document
+/// (contiguous, such as a raw and a corrected transcript) count once in
+/// document frequencies. Fuzzy search adds `vocabulary` aliases, which never
+/// count as exact. Unsorted; passages that match nothing are omitted.
+fn score(
+    passages: &[&Passage],
+    owners: &[usize],
+    query: &ParsedQuery,
+    fuzzy: bool,
+    vocabulary: &[VocabularyEntry],
+) -> Vec<Scored> {
+    debug_assert_eq!(passages.len(), owners.len());
+    // Per stem: documents containing it, and the last document counted.
+    let mut counted: HashMap<&String, (u32, usize)> = HashMap::new();
     let mut total_length = 0_usize;
-    for meeting in meetings {
-        for passage in &meeting.passages {
+    let mut documents = 0_u32;
+    for (index, (passage, owner)) in passages.iter().zip(owners).enumerate() {
+        total_length += passage.tokens.len();
+        if index == 0 || owners[index - 1] != *owner {
             documents += 1;
-            total_length += passage.tokens.len();
-            for stem in passage.frequencies.keys() {
-                *document_frequency.entry(stem).or_insert(0) += 1;
+        }
+        for stem in passage.frequencies.keys() {
+            let (count, last) = counted.entry(stem).or_insert((0, usize::MAX));
+            if *last != *owner {
+                *count += 1;
+                *last = *owner;
             }
         }
     }
-    if documents == 0 {
+    if passages.is_empty() {
         return Vec::new();
     }
-    let average_length = total_length as f32 / documents as f32;
+    let document_frequency = counted
+        .into_iter()
+        .map(|(stem, (count, _))| (stem, count))
+        .collect::<HashMap<_, _>>();
+    let average_length = total_length as f32 / passages.len() as f32;
     let idf = |stem: &str| {
         let frequency = document_frequency
             .get(&stem.to_string())
@@ -1010,120 +1399,207 @@ fn rank(meetings: &[Arc<Meeting>], query: &ParsedQuery, fuzzy: bool) -> Vec<Hit>
             .unwrap_or(0) as f32;
         (1.0 + (documents as f32 - frequency + 0.5) / (frequency + 0.5)).ln()
     };
+    let passages_with = |stem: &String| document_frequency.get(stem).copied().unwrap_or(0);
+    let common = (documents as f32 * COMMON_SHARE).max(COMMON_MIN_PASSAGES);
     let expansions = query
         .terms
         .iter()
         .map(|term| {
-            expand(term, document_frequency.keys().copied(), fuzzy)
+            let exact_passages = passages_with(term);
+            let mut stems = expand(term, document_frequency.keys().copied(), fuzzy)
+                .into_iter()
+                .filter(|(stem, kind)| admits(*kind, exact_passages, passages_with(stem), common))
+                .collect::<Vec<_>>();
+            let mut phrases = Vec::new();
+            if fuzzy {
+                for alias in vocabulary_aliases(term, vocabulary, &document_frequency, common) {
+                    let [stem] = alias.stems.as_slice() else {
+                        phrases.push(alias);
+                        continue;
+                    };
+                    stems.retain(|(other, kind)| {
+                        other != stem || kind.weight() >= alias.kind.weight()
+                    });
+                    if !stems.iter().any(|(other, _)| other == stem) {
+                        stems.push((stem.clone(), alias.kind));
+                    }
+                }
+            }
+            let stems = stems
                 .into_iter()
                 .map(|(stem, kind)| {
                     let weight = kind.weight() * idf(&stem);
                     (stem, kind, weight)
                 })
-                .collect::<Vec<_>>()
+                .collect::<Vec<_>>();
+            let phrases = phrases
+                .into_iter()
+                .map(|alias| {
+                    let weight =
+                        alias.kind.weight() * alias.stems.iter().map(|stem| idf(stem)).sum::<f32>();
+                    let label = alias.stems.join(" ");
+                    (alias, label, weight)
+                })
+                .collect::<Vec<_>>();
+            (stems, phrases)
         })
         .collect::<Vec<_>>();
     let mut hits = Vec::new();
-    for meeting in meetings {
-        for (index, passage) in meeting.passages.iter().enumerate() {
-            let length_norm =
-                1.0 - BM25_B + BM25_B * passage.tokens.len() as f32 / average_length.max(1.0);
-            let saturate = |frequency: u32| {
-                let frequency = frequency as f32;
-                frequency * (BM25_K1 + 1.0) / (frequency + BM25_K1 * length_norm)
-            };
-            let mut matched_stems: HashSet<&str> = HashSet::new();
-            let mut matched_positions = Vec::new();
-            let mut labels = Vec::new();
-            let mut phrase_score = 0.0;
-            let mut missing_phrase = false;
-            for phrase in &query.phrases {
-                let starts = phrase_starts(passage, phrase);
-                if starts.is_empty() {
-                    missing_phrase = true;
-                    break;
-                }
-                let phrase_idf = phrase.iter().map(|stem| idf(stem)).sum::<f32>();
-                phrase_score += 1.5 * phrase_idf * saturate(starts.len() as u32);
-                for start in starts {
-                    matched_positions.extend(start..start + phrase.len());
-                }
-                labels.push(format!("\"{}\"", phrase.join(" ")));
+    for (index, passage) in passages.iter().enumerate() {
+        let length_norm =
+            1.0 - BM25_B + BM25_B * passage.tokens.len() as f32 / average_length.max(1.0);
+        let saturate = |frequency: u32| {
+            let frequency = frequency as f32;
+            frequency * (BM25_K1 + 1.0) / (frequency + BM25_K1 * length_norm)
+        };
+        let mut matched_stems: HashSet<&str> = HashSet::new();
+        let mut matched_positions = Vec::new();
+        let mut labels = Vec::new();
+        let mut phrase_score = 0.0;
+        let mut missing_phrase = false;
+        for phrase in &query.phrases {
+            let starts = phrase_starts(passage, phrase);
+            if starts.is_empty() {
+                missing_phrase = true;
+                break;
             }
-            if missing_phrase {
-                continue;
+            let phrase_idf = phrase.iter().map(|stem| idf(stem)).sum::<f32>();
+            phrase_score += 1.5 * phrase_idf * saturate(starts.len() as u32);
+            for start in starts {
+                matched_positions.extend(start..start + phrase.len());
             }
-            let mut term_score = 0.0;
-            let mut matched_terms = 0;
-            let mut exact_terms = Vec::with_capacity(query.terms.len());
-            for (term, candidates) in query.terms.iter().zip(&expansions) {
-                let mut best: Option<(f32, &str, MatchKind)> = None;
-                for (stem, kind, weight) in candidates {
-                    if let Some(frequency) = passage.frequencies.get(stem) {
-                        matched_stems.insert(stem);
-                        let score = weight * saturate(*frequency);
-                        if best.is_none_or(|(best, _, _)| score > best) {
-                            best = Some((score, stem, *kind));
-                        }
+            labels.push(format!("\"{}\"", phrase.join(" ")));
+        }
+        if missing_phrase {
+            continue;
+        }
+        let mut term_score = 0.0;
+        let mut matched_weight = 0.0;
+        let mut exact_terms = Vec::with_capacity(query.terms.len());
+        for (term, (candidates, phrases)) in query.terms.iter().zip(&expansions) {
+            let mut best: Option<(f32, &str, MatchKind)> = None;
+            for (stem, kind, weight) in candidates {
+                if let Some(frequency) = passage.frequencies.get(stem) {
+                    matched_stems.insert(stem);
+                    let candidate = (weight * saturate(*frequency), stem.as_str(), *kind);
+                    if best.is_none_or(|best| stands_for_term(candidate, best).is_gt()) {
+                        best = Some(candidate);
                     }
                 }
-                exact_terms.push(matches!(best, Some((_, _, MatchKind::Exact))));
-                if let Some((score, stem, kind)) = best {
-                    term_score += score;
-                    matched_terms += 1;
-                    labels.push(if kind == MatchKind::Exact {
-                        term.clone()
-                    } else {
-                        format!("{stem}~{term}")
-                    });
-                }
             }
-            if term_score == 0.0 && phrase_score == 0.0 {
-                continue;
-            }
-            let coverage = if query.terms.is_empty() {
-                1.0
-            } else {
-                0.5 + 0.5 * matched_terms as f32 / query.terms.len() as f32
-            };
-            let mut adjacency = 0.0;
-            for pair in 0..query.terms.len().saturating_sub(1) {
-                if !(exact_terms[pair] && exact_terms[pair + 1]) {
+            for (alias, label, weight) in phrases {
+                let starts = phrase_starts(passage, &alias.stems);
+                if starts.is_empty() {
                     continue;
                 }
-                let (first, second) = (&query.terms[pair], &query.terms[pair + 1]);
-                if passage
-                    .tokens
-                    .windows(2)
-                    .any(|window| window[0].stem == *first && window[1].stem == *second)
-                {
-                    adjacency += 0.5 * (idf(first) + idf(second));
+                for start in &starts {
+                    matched_positions.extend(*start..*start + alias.stems.len());
+                }
+                let candidate = (
+                    weight * saturate(starts.len() as u32),
+                    label.as_str(),
+                    alias.kind,
+                );
+                if best.is_none_or(|best| stands_for_term(candidate, best).is_gt()) {
+                    best = Some(candidate);
                 }
             }
-            for (position, token) in passage.tokens.iter().enumerate() {
-                if matched_stems.contains(token.stem.as_str()) {
-                    matched_positions.push(position);
-                }
+            exact_terms.push(matches!(best, Some((_, _, MatchKind::Exact))));
+            if let Some((score, stem, kind)) = best {
+                term_score += score;
+                matched_weight += kind.weight();
+                labels.push(if kind == MatchKind::Exact {
+                    term.clone()
+                } else {
+                    format!("{stem}~{term}")
+                });
             }
-            matched_positions.sort_unstable();
-            matched_positions.dedup();
-            hits.push(Hit {
-                meeting: meeting.clone(),
-                passage: index,
-                score: term_score * coverage + phrase_score + adjacency,
-                matched: matched_positions,
-                labels,
-            });
+        }
+        if term_score == 0.0 && phrase_score == 0.0 {
+            continue;
+        }
+        // Fuzzy matches cover a term only as far as they are trusted.
+        let coverage = if query.terms.is_empty() {
+            1.0
+        } else {
+            0.5 + 0.5 * matched_weight / query.terms.len() as f32
+        };
+        let mut adjacency = 0.0;
+        for pair in 0..query.terms.len().saturating_sub(1) {
+            if !(exact_terms[pair] && exact_terms[pair + 1]) {
+                continue;
+            }
+            let (first, second) = (&query.terms[pair], &query.terms[pair + 1]);
+            if passage
+                .tokens
+                .windows(2)
+                .any(|window| window[0].stem == *first && window[1].stem == *second)
+            {
+                adjacency += 0.5 * (idf(first) + idf(second));
+            }
+        }
+        for (position, token) in passage.tokens.iter().enumerate() {
+            if matched_stems.contains(token.stem.as_str()) {
+                matched_positions.push(position);
+            }
+        }
+        matched_positions.sort_unstable();
+        matched_positions.dedup();
+        hits.push(Scored {
+            passage: index,
+            score: term_score * coverage + phrase_score + adjacency,
+            exact: exact_terms.iter().all(|exact| *exact),
+            matched: matched_positions,
+            labels,
+        });
+    }
+    hits
+}
+
+/// One ranked document from [`search_texts`], through its best text.
+#[derive(Debug)]
+pub struct TextHit {
+    /// The document's index.
+    pub index: usize,
+    pub score: f32,
+    /// A window of the best text around the matches, which are wrapped in `**`.
+    pub snippet: String,
+}
+
+/// Rank documents of plain text with the meeting search's stemmed, fuzzy BM25
+/// and quoted-phrase rules. A document's texts are alternatives, such as a raw
+/// and a corrected transcript: they count as one document for term statistics,
+/// and the best of them is its hit. Best first; ties keep input order.
+pub fn search_texts(
+    documents: &[Vec<&str>],
+    query: &str,
+    vocabulary: &[VocabularyEntry],
+) -> Result<Vec<TextHit>> {
+    let parsed = ParsedQuery::parse(query);
+    if parsed.is_empty() {
+        return Err(eyre!("The search query has no words."));
+    }
+    let mut owners = Vec::new();
+    let mut passages = Vec::new();
+    for (document, texts) in documents.iter().enumerate() {
+        for text in texts {
+            owners.push(document);
+            passages.push(Passage::new(PassageKind::Notes, 0, (*text).to_owned()));
         }
     }
-    hits.sort_by(|left, right| {
-        right
-            .score
-            .total_cmp(&left.score)
-            .then_with(|| right.meeting.start_ms().cmp(&left.meeting.start_ms()))
-            .then_with(|| left.passage.cmp(&right.passage))
-    });
-    hits
+    let texts = passages.iter().collect::<Vec<_>>();
+    let mut scored = score(&texts, &owners, &parsed, true, vocabulary);
+    scored.sort_by(|left, right| relevance(left, right).then(left.passage.cmp(&right.passage)));
+    let mut seen = HashSet::new();
+    Ok(scored
+        .into_iter()
+        .filter(|scored| seen.insert(owners[scored.passage]))
+        .map(|scored| TextHit {
+            index: owners[scored.passage],
+            score: scored.score,
+            snippet: snippet(&passages[scored.passage], &scored.matched),
+        })
+        .collect())
 }
 
 fn phrase_starts(passage: &Passage, phrase: &[String]) -> Vec<usize> {
@@ -1359,8 +1835,7 @@ pub struct TranscriptQuery {
 }
 
 struct TranscriptWindow {
-    start: Option<u64>,
-    end: Option<u64>,
+    range: OffsetRange,
     speaker: Option<MeetingSource>,
     cursor: Option<Cursor>,
     max_chars: usize,
@@ -1407,14 +1882,12 @@ fn parse_speaker(speaker: &str) -> Result<Option<MeetingSource>> {
 }
 
 fn render_transcript(meeting: &Meeting, window: TranscriptWindow, now_ms: u64) -> String {
-    let start = window.start.unwrap_or(0);
-    let end = window.end.unwrap_or(u64::MAX);
     let mut ordinals: HashMap<u64, usize> = HashMap::new();
     let selected = meeting
         .entries
         .iter()
         .filter(|entry| window.speaker.is_none_or(|speaker| entry.source == speaker))
-        .filter(|entry| entry.end_ms > start && entry.start_ms < end)
+        .filter(|entry| window.range.overlaps(entry))
         .map(|entry| {
             let ordinal = ordinals.entry(entry.start_ms).or_insert(0);
             let cursor = Cursor {
@@ -1643,11 +2116,11 @@ pub fn parse_time(input: &str, now_ms: u64, end_of_day: bool) -> Result<u64> {
         };
         if let Some(unit_ms) = unit_ms {
             let amount: u64 = amount.parse().map_err(|_| invalid())?;
-            return Ok(now_ms.saturating_sub(amount * unit_ms));
+            return Ok(now_ms.saturating_sub(amount.checked_mul(unit_ms).ok_or_else(invalid)?));
         }
     }
     let pattern = regex::Regex::new(
-        r"^(\d{4})-(\d{2})-(\d{2})(?:[t ](\d{2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?)?\s*(z|[+-]\d{2}:?\d{2})?$",
+        r"^(\d{4})-(\d{2})-(\d{2})(?:[t ](\d{2}):(\d{2})(?::(\d{2})(?:\.(?P<fraction>\d+))?)?)?\s*(?P<zone>z|[+-]\d{2}:?\d{2})?$",
     )
     .expect("valid time pattern");
     let captures = pattern.captures(&text).ok_or_else(invalid)?;
@@ -1660,7 +2133,20 @@ pub fn parse_time(input: &str, now_ms: u64, end_of_day: bool) -> Result<u64> {
     let (year, month, day) = (number(1)?, number(2)?, number(3)?);
     let has_time = captures.get(4).is_some();
     let (hour, minute, second) = (number(4)?, number(5)?, number(6)?);
-    if !(1..=12).contains(&month) || !(1..=31).contains(&day) || hour > 23 || minute > 59 {
+    let leap = year.is_multiple_of(4) && (!year.is_multiple_of(100) || year.is_multiple_of(400));
+    let days = match month {
+        2 => {
+            if leap {
+                29
+            } else {
+                28
+            }
+        }
+        4 | 6 | 9 | 11 => 30,
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        _ => 0,
+    };
+    if day == 0 || day > days || hour > 23 || minute > 59 || second > 59 {
         return Err(invalid());
     }
     let day = if !has_time && end_of_day {
@@ -1668,7 +2154,7 @@ pub fn parse_time(input: &str, now_ms: u64, end_of_day: bool) -> Result<u64> {
     } else {
         day
     };
-    match captures.get(7).map(|zone| zone.as_str()) {
+    let milliseconds = match captures.name("zone").map(|zone| zone.as_str()) {
         Some(zone) => {
             let offset_seconds = if zone == "z" {
                 0
@@ -1677,6 +2163,9 @@ pub fn parse_time(input: &str, now_ms: u64, end_of_day: bool) -> Result<u64> {
                 let digits = zone[1..].replace(':', "");
                 let hours: i64 = digits[..2].parse().map_err(|_| invalid())?;
                 let minutes: i64 = digits[2..].parse().map_err(|_| invalid())?;
+                if hours > 23 || minutes > 59 {
+                    return Err(invalid());
+                }
                 sign * (hours * 3_600 + minutes * 60)
             };
             let seconds = days_from_civil(year.into(), month.into(), day.into()) * 86_400
@@ -1689,16 +2178,26 @@ pub fn parse_time(input: &str, now_ms: u64, end_of_day: bool) -> Result<u64> {
                 .map_err(|_| invalid())
         }
         None => local_to_ms(year as i32, month, day, hour, minute, second).ok_or_else(invalid),
-    }
+    }?;
+    let fraction = captures.name("fraction").map_or(0, |digits| {
+        digits
+            .as_str()
+            .bytes()
+            .take(3)
+            .zip([100, 10, 1])
+            .map(|(digit, scale)| u64::from(digit - b'0') * scale)
+            .sum::<u64>()
+    });
+    Ok(milliseconds + fraction)
 }
 
-struct TimeRange {
+pub struct TimeRange {
     since: Option<u64>,
     until: Option<u64>,
 }
 
 impl TimeRange {
-    fn parse(since: Option<&str>, until: Option<&str>, now_ms: u64) -> Result<Self> {
+    pub fn parse(since: Option<&str>, until: Option<&str>, now_ms: u64) -> Result<Self> {
         let since = since
             .filter(|value| !value.trim().is_empty())
             .map(|value| parse_time(value, now_ms, false))
@@ -1707,7 +2206,18 @@ impl TimeRange {
             .filter(|value| !value.trim().is_empty())
             .map(|value| parse_time(value, now_ms, true))
             .transpose()?;
+        if since
+            .zip(until)
+            .is_some_and(|(since, until)| since >= until)
+        {
+            return Err(eyre!("since must be earlier than until"));
+        }
         Ok(Self { since, until })
+    }
+
+    pub fn contains(&self, timestamp_ms: u64) -> bool {
+        self.since.is_none_or(|since| timestamp_ms >= since)
+            && self.until.is_none_or(|until| timestamp_ms < until)
     }
 
     /// Whether the meeting overlaps `[since, until)`.
@@ -1718,40 +2228,139 @@ impl TimeRange {
     }
 }
 
+/// A window of offsets into a meeting. Entries overlapping it are kept whole.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct OffsetRange {
+    pub from_ms: Option<u64>,
+    pub to_ms: Option<u64>,
+}
+
+impl OffsetRange {
+    /// Offsets as [`parse_offset`] reads them; a blank bound is open.
+    pub fn parse(from: Option<&str>, to: Option<&str>) -> Result<Self> {
+        let offset = |value: Option<&str>| {
+            value
+                .filter(|value| !value.trim().is_empty())
+                .map(parse_offset)
+                .transpose()
+        };
+        let range = Self {
+            from_ms: offset(from)?,
+            to_ms: offset(to)?,
+        };
+        let from = range.from_ms.unwrap_or_default();
+        if let Some(to) = range.to_ms
+            && from >= to
+        {
+            return Err(eyre!(
+                "The range start {} must be earlier than its end {}.",
+                format_duration(from),
+                format_duration(to)
+            ));
+        }
+        Ok(range)
+    }
+
+    pub fn is_bounded(self) -> bool {
+        self.from_ms.is_some() || self.to_ms.is_some()
+    }
+
+    fn overlaps(self, entry: &TranscriptEntry) -> bool {
+        self.from_ms.is_none_or(|from| entry.end_ms > from)
+            && self.to_ms.is_none_or(|to| entry.start_ms < to)
+    }
+
+    /// A range that starts at or after the meeting's end selects nothing and
+    /// is an error rather than an empty answer.
+    fn check(self, meeting: &Meeting, now_ms: u64) -> Result<()> {
+        let Some(from) = self.from_ms.filter(|from| *from > 0) else {
+            return Ok(());
+        };
+        let end = meeting.duration_ms(now_ms).max(
+            meeting
+                .entries
+                .iter()
+                .map(|entry| entry.end_ms)
+                .max()
+                .unwrap_or_default(),
+        );
+        if from >= end {
+            return Err(eyre!(
+                "The range starts at {}, after the meeting's end at {}{}.",
+                format_duration(from),
+                format_duration(end),
+                if meeting.in_progress { " so far" } else { "" }
+            ));
+        }
+        Ok(())
+    }
+
+    fn describe(self) -> String {
+        format!(
+            "{}–{}",
+            format_duration(self.from_ms.unwrap_or_default()),
+            self.to_ms.map_or_else(|| "end".into(), format_duration)
+        )
+    }
+}
+
 /// `mm:ss`, `h:mm:ss`, plain seconds (`90`, `90.5`), or `90s`/`12m`/`1h`.
+/// Fields before the seconds are whole numbers, and seconds stay below 60, as
+/// do `h:mm:ss` minutes; `mm:ss` minutes may pass 59 (`113:03`).
 pub fn parse_offset(input: &str) -> Result<u64> {
     let text = input.trim().to_ascii_lowercase();
     let invalid = || eyre!("Could not read the offset {input:?}; use mm:ss, h:mm:ss, or seconds.");
-    if text.contains(':') {
-        let parts = text
-            .split(':')
-            .map(|part| part.parse::<f64>().map_err(|_| invalid()))
-            .collect::<Result<Vec<_>>>()?;
-        let seconds = match parts.as_slice() {
-            [minutes, seconds] => minutes * 60.0 + seconds,
-            [hours, minutes, seconds] => hours * 3_600.0 + minutes * 60.0 + seconds,
-            _ => return Err(invalid()),
-        };
-        return if seconds >= 0.0 {
-            Ok((seconds * 1_000.0) as u64)
+    let number = |part: &str| {
+        let part = part.trim();
+        let value = part.parse::<f64>().map_err(|_| invalid())?;
+        if part.starts_with(['-', '+']) || !value.is_finite() || value < 0.0 {
+            return Err(invalid());
+        }
+        Ok(value)
+    };
+    let whole = |value: f64, limit: Option<f64>| {
+        if value.fract() == 0.0 && limit.is_none_or(|limit| value < limit) {
+            Ok(value)
         } else {
             Err(invalid())
-        };
-    }
-    let (number, scale) = if let Some(number) = text.strip_suffix('h') {
-        (number, 3_600.0)
-    } else if let Some(number) = text.strip_suffix('m') {
-        (number, 60.0)
-    } else if let Some(number) = text.strip_suffix('s') {
-        (number, 1.0)
-    } else {
-        (text.as_str(), 1.0)
+        }
     };
-    let value: f64 = number.trim().parse().map_err(|_| invalid())?;
-    if value < 0.0 || !value.is_finite() {
+    let seconds = if text.contains(':') {
+        let parts = text.split(':').map(number).collect::<Result<Vec<_>>>()?;
+        let seconds = |value: f64| {
+            if value < 60.0 {
+                Ok(value)
+            } else {
+                Err(invalid())
+            }
+        };
+        match parts.as_slice() {
+            [minutes, rest] => whole(*minutes, None)? * 60.0 + seconds(*rest)?,
+            [hours, minutes, rest] => {
+                whole(*hours, None)? * 3_600.0
+                    + whole(*minutes, Some(60.0))? * 60.0
+                    + seconds(*rest)?
+            }
+            _ => return Err(invalid()),
+        }
+    } else {
+        let (value, scale) = if let Some(value) = text.strip_suffix('h') {
+            (value, 3_600.0)
+        } else if let Some(value) = text.strip_suffix('m') {
+            (value, 60.0)
+        } else if let Some(value) = text.strip_suffix('s') {
+            (value, 1.0)
+        } else {
+            (text.as_str(), 1.0)
+        };
+        number(value)? * scale
+    };
+    let milliseconds = (seconds * 1_000.0).round();
+    // `u64::MAX as f64` rounds up to 2^64, the first value that does not fit.
+    if !milliseconds.is_finite() || milliseconds >= u64::MAX as f64 {
         return Err(invalid());
     }
-    Ok((value * scale * 1_000.0) as u64)
+    Ok(milliseconds as u64)
 }
 
 #[cfg(test)]

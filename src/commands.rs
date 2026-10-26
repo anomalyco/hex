@@ -534,7 +534,7 @@ pub fn execute(action: Action) -> Result<()> {
 }
 
 #[cfg(target_os = "windows")]
-fn shell_open(target: &str) -> Result<()> {
+pub(crate) fn shell_open(target: &str) -> Result<()> {
     use windows_sys::Win32::UI::Shell::ShellExecuteW;
     use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
 

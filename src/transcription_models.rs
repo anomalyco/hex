@@ -73,6 +73,7 @@ impl ModelPreparationStage {
         stage.store(self as u8, Ordering::Release);
     }
 
+    #[cfg(not(target_os = "windows"))]
     pub fn load(stage: &AtomicU8) -> Self {
         match stage.load(Ordering::Acquire) {
             value if value == Self::Downloading as u8 => Self::Downloading,
@@ -203,6 +204,7 @@ impl ModelDefinition {
             .then(|| self.runtime_language(language))
     }
 
+    #[cfg(target_os = "macos")]
     pub fn presentation_languages(&self) -> Vec<&'static str> {
         self.languages
             .iter()
@@ -503,78 +505,83 @@ pub fn language_name(code: &str) -> &str {
 }
 
 pub(crate) fn choices_for_runtime(language: &str) -> Vec<ModelChoice> {
-    let choice = |id, recommendation| ModelChoice {
-        model: definition(id),
-        recommendation,
+    use Recommendation::{Fastest, MostAccurate, RecognitionHints, Recommended};
+    use TranscriptionModelId::{
+        CohereTranscribe, ParakeetUnifiedEnglish, ParakeetV3, Qwen3Asr06B, SenseVoiceSmall,
+        WhisperLargeV3Turbo,
     };
-    match language {
-        AUTO_LANGUAGE => vec![
-            choice(
-                TranscriptionModelId::WhisperLargeV3Turbo,
-                Recommendation::Recommended,
-            ),
-            choice(
-                TranscriptionModelId::SenseVoiceSmall,
-                Recommendation::Fastest,
-            ),
-            choice(
-                TranscriptionModelId::Qwen3Asr06B,
-                Recommendation::Recommended,
-            ),
+    let choices: &[(TranscriptionModelId, Recommendation)] = match language {
+        AUTO_LANGUAGE => &[(WhisperLargeV3Turbo, Recommended), (Qwen3Asr06B, Fastest)],
+        "en" => &[
+            (ParakeetUnifiedEnglish, Recommended),
+            (CohereTranscribe, MostAccurate),
+            (WhisperLargeV3Turbo, RecognitionHints),
         ],
-        "en" => vec![
-            choice(
-                TranscriptionModelId::ParakeetUnifiedEnglish,
-                Recommendation::Recommended,
-            ),
-            choice(
-                TranscriptionModelId::CohereTranscribe,
-                Recommendation::MostAccurate,
-            ),
-            choice(
-                TranscriptionModelId::WhisperLargeV3Turbo,
-                Recommendation::RecognitionHints,
-            ),
+        "zh" => &[
+            (Qwen3Asr06B, Recommended),
+            (SenseVoiceSmall, Fastest),
+            (WhisperLargeV3Turbo, RecognitionHints),
         ],
-        "zh" | "yue" | "ja" | "ko" => vec![
-            choice(
-                TranscriptionModelId::Qwen3Asr06B,
-                Recommendation::Recommended,
-            ),
-            choice(
-                TranscriptionModelId::SenseVoiceSmall,
-                Recommendation::Fastest,
-            ),
-            choice(
-                TranscriptionModelId::WhisperLargeV3Turbo,
-                Recommendation::RecognitionHints,
-            ),
+        "yue" | "ko" => &[
+            (Qwen3Asr06B, Recommended),
+            (WhisperLargeV3Turbo, RecognitionHints),
         ],
-        language if PARAKEET_V3_LANGUAGES.contains(&language) => vec![
-            choice(
-                TranscriptionModelId::ParakeetV3,
-                Recommendation::Recommended,
-            ),
-            choice(
-                TranscriptionModelId::WhisperLargeV3Turbo,
-                Recommendation::RecognitionHints,
-            ),
+        "ja" => &[
+            (WhisperLargeV3Turbo, Recommended),
+            (SenseVoiceSmall, Fastest),
         ],
-        language if QWEN_LANGUAGES.contains(&language) => vec![
-            choice(
-                TranscriptionModelId::Qwen3Asr06B,
-                Recommendation::Recommended,
-            ),
-            choice(
-                TranscriptionModelId::WhisperLargeV3Turbo,
-                Recommendation::RecognitionHints,
-            ),
+        "el" => &[
+            (CohereTranscribe, Recommended),
+            (WhisperLargeV3Turbo, RecognitionHints),
         ],
-        _ => vec![choice(
-            TranscriptionModelId::WhisperLargeV3Turbo,
-            Recommendation::Recommended,
-        )],
-    }
+        "fi" | "sv" | "da" => &[(WhisperLargeV3Turbo, Recommended), (ParakeetV3, Fastest)],
+        "mt" => &[(ParakeetV3, Recommended)],
+        "ar" => &[
+            (WhisperLargeV3Turbo, Recommended),
+            (CohereTranscribe, MostAccurate),
+        ],
+        "tr" | "ms" | "fil" | "fa" | "mk" => &[(WhisperLargeV3Turbo, Recommended)],
+        "vi" => &[
+            (Qwen3Asr06B, Recommended),
+            (CohereTranscribe, MostAccurate),
+            (WhisperLargeV3Turbo, RecognitionHints),
+        ],
+        language if PARAKEET_V3_LANGUAGES.contains(&language) => &[
+            (ParakeetV3, Recommended),
+            (WhisperLargeV3Turbo, RecognitionHints),
+        ],
+        language if QWEN_LANGUAGES.contains(&language) => &[
+            (Qwen3Asr06B, Recommended),
+            (WhisperLargeV3Turbo, RecognitionHints),
+        ],
+        _ => &[(WhisperLargeV3Turbo, Recommended)],
+    };
+    choices
+        .iter()
+        .map(|&(id, recommendation)| ModelChoice {
+            model: definition(id),
+            recommendation,
+        })
+        .collect()
+}
+
+/// Models that are no longer recommended for `language` but that the user
+/// still has: the saved selection or an installed download. The picker keeps
+/// them selectable and deletable, without a recommendation badge.
+pub(crate) fn retained_models(
+    language: &str,
+    selection: &TranscriptionSelection,
+    installed: impl Fn(&ModelDefinition) -> bool,
+) -> Vec<&'static ModelDefinition> {
+    let recommended = choices_for_runtime(language);
+    MODELS
+        .iter()
+        .filter(|model| model.available() && model.supports_language(language))
+        .filter(|model| recommended.iter().all(|choice| choice.model.id != model.id))
+        .filter(|model| {
+            installed(model) || (selection.model == model.id && selection.language == language)
+        })
+        .collect()
 }
 
 pub fn validate(selection: &TranscriptionSelection) -> Result<&'static ModelDefinition> {
@@ -656,6 +663,7 @@ pub fn is_verified(model: &ModelDefinition) -> bool {
     verification_receipt_matches(&path, model)
 }
 
+#[cfg(any(target_os = "macos", target_os = "windows", test))]
 pub fn verify_installed(model: &ModelDefinition, canceled: &AtomicBool) -> Result<PathBuf> {
     check_canceled(canceled)?;
     let path = model_path(model)?;
@@ -663,6 +671,7 @@ pub fn verify_installed(model: &ModelDefinition, canceled: &AtomicBool) -> Resul
     Ok(path)
 }
 
+#[cfg(any(target_os = "macos", target_os = "windows", test))]
 fn verify_installed_at(path: &Path, model: &ModelDefinition, canceled: &AtomicBool) -> Result<()> {
     check_canceled(canceled)?;
     if !path.is_file() {
@@ -966,30 +975,6 @@ fn verification_receipt_path(model_path: &Path) -> PathBuf {
     model_path.with_extension("gguf.verified.json")
 }
 
-/// Every model offered on desktop platforms.
-#[cfg(target_os = "windows")]
-pub fn available_models() -> Vec<&'static ModelDefinition> {
-    MODELS.iter().filter(|model| model.available()).collect()
-}
-
-/// The language a newly chosen model dictates in: the current preference
-/// when supported, otherwise automatic detection, otherwise the model's
-/// first supported language.
-#[cfg(target_os = "windows")]
-pub fn language_for_model(model: TranscriptionModelId, preferred: &str) -> Option<String> {
-    let definition = definition(model);
-    if definition.supports_language(preferred) {
-        return Some(preferred.to_string());
-    }
-    if definition.supports_language(AUTO_LANGUAGE) {
-        return Some(AUTO_LANGUAGE.to_string());
-    }
-    LANGUAGES
-        .iter()
-        .find(|(code, _)| definition.supports_language(code))
-        .map(|(code, _)| (*code).to_string())
-}
-
 /// The best starting selection for a dictation language: its first
 /// recommended runtime model. Unknown languages fall back to English, so an
 /// English system starts with Parakeet Unified English.
@@ -1013,30 +998,6 @@ pub fn recommended_selection(language: &str) -> TranscriptionSelection {
     }
 }
 
-/// Removes a downloaded model and its verification receipt. A model still
-/// held open by the runtime surfaces the sharing violation as the error.
-#[cfg(target_os = "windows")]
-pub fn uninstall(model: &ModelDefinition) -> Result<()> {
-    let path = model_path(model)?;
-    let _ = fs::remove_file(verification_receipt_path(&path));
-    match fs::remove_file(&path) {
-        Ok(()) => Ok(()),
-        Err(error) if error.kind() == ErrorKind::NotFound => Ok(()),
-        Err(error) => {
-            Err(error).wrap_err_with(|| format!("could not remove {} from disk", model.name))
-        }
-    }
-}
-
-/// Replaces `destination` with `source`. On Windows `fs::rename` already
-/// uses `MoveFileExW` with `MOVEFILE_REPLACE_EXISTING`; on Linux it is
-/// `rename(2)`.
-#[cfg(not(target_os = "macos"))]
-pub(crate) fn atomic_replace(source: &Path, destination: &Path) -> Result<()> {
-    fs::rename(source, destination)?;
-    Ok(())
-}
-
 pub(crate) fn modified_ns(metadata: &fs::Metadata) -> Option<u64> {
     metadata
         .modified()
@@ -1057,7 +1018,7 @@ fn sync_file(path: &Path) -> std::io::Result<()> {
 
 /// Persists a rename or removal in `directory`. Windows cannot open a
 /// directory as a file, and NTFS journals the entry change itself.
-fn sync_directory(directory: &Path) -> std::io::Result<()> {
+pub(crate) fn sync_directory(directory: &Path) -> std::io::Result<()> {
     #[cfg(unix)]
     File::open(directory)?.sync_all()?;
     #[cfg(windows)]
@@ -1313,8 +1274,125 @@ mod tests {
         assert!(
             choices
                 .iter()
-                .any(|choice| choice.model.id == TranscriptionModelId::SenseVoiceSmall)
+                .all(|choice| choice.model.id != TranscriptionModelId::SenseVoiceSmall)
         );
+    }
+
+    fn routing(language: &str) -> Vec<(TranscriptionModelId, Recommendation)> {
+        choices_for_runtime(language)
+            .into_iter()
+            .map(|choice| (choice.model.id, choice.recommendation))
+            .collect()
+    }
+
+    #[test]
+    fn weak_qwen_and_parakeet_languages_route_to_stronger_shipped_models() {
+        use Recommendation::{Fastest, MostAccurate, RecognitionHints, Recommended};
+        use TranscriptionModelId::{
+            CohereTranscribe, ParakeetV3, Qwen3Asr06B, SenseVoiceSmall, WhisperLargeV3Turbo,
+        };
+        assert_eq!(
+            routing("el"),
+            [
+                (CohereTranscribe, Recommended),
+                (WhisperLargeV3Turbo, RecognitionHints)
+            ]
+        );
+        for language in ["tr", "ms", "fil", "fa", "mk"] {
+            assert_eq!(routing(language), [(WhisperLargeV3Turbo, Recommended)]);
+        }
+        assert_eq!(
+            routing("ar"),
+            [
+                (WhisperLargeV3Turbo, Recommended),
+                (CohereTranscribe, MostAccurate)
+            ]
+        );
+        for language in ["fi", "sv", "da"] {
+            assert_eq!(
+                routing(language),
+                [(WhisperLargeV3Turbo, Recommended), (ParakeetV3, Fastest)]
+            );
+        }
+        assert_eq!(
+            routing("ja"),
+            [
+                (WhisperLargeV3Turbo, Recommended),
+                (SenseVoiceSmall, Fastest)
+            ]
+        );
+        assert_eq!(
+            routing(AUTO_LANGUAGE),
+            [(WhisperLargeV3Turbo, Recommended), (Qwen3Asr06B, Fastest)]
+        );
+        for language in ["yue", "ko"] {
+            assert_eq!(
+                routing(language),
+                [
+                    (Qwen3Asr06B, Recommended),
+                    (WhisperLargeV3Turbo, RecognitionHints)
+                ]
+            );
+        }
+        assert_eq!(
+            routing("vi"),
+            [
+                (Qwen3Asr06B, Recommended),
+                (CohereTranscribe, MostAccurate),
+                (WhisperLargeV3Turbo, RecognitionHints)
+            ]
+        );
+        assert_eq!(routing("mt"), [(ParakeetV3, Recommended)]);
+        for language in ["hi", "th", "id", "zh"] {
+            assert_eq!(routing(language)[0], (Qwen3Asr06B, Recommended));
+        }
+        assert_eq!(routing("de")[0], (ParakeetV3, Recommended));
+    }
+
+    #[test]
+    fn every_language_choice_supports_its_language_and_first_run_picks_it() {
+        for (language, _) in LANGUAGES {
+            let choices = choices_for_runtime(language);
+            assert!(!choices.is_empty(), "{language}");
+            for choice in &choices {
+                assert!(choice.model.available(), "{language}");
+                assert!(choice.model.supports_language(language), "{language}");
+            }
+            let selection = recommended_selection(language);
+            assert!(validate(&selection).is_ok(), "{language}");
+        }
+        assert_eq!(
+            recommended_selection("el").model,
+            TranscriptionModelId::CohereTranscribe
+        );
+        assert_eq!(
+            recommended_selection("tr").model,
+            TranscriptionModelId::WhisperLargeV3Turbo
+        );
+    }
+
+    #[test]
+    fn saved_models_no_longer_recommended_stay_valid_and_visible() {
+        let saved = TranscriptionSelection {
+            model: TranscriptionModelId::ParakeetV3,
+            language: "el".into(),
+            recognition_hints: String::new(),
+        };
+        assert!(validate(&saved).is_ok());
+        assert!(
+            retained_models("el", &saved, |_| false)
+                .iter()
+                .any(|model| model.id == TranscriptionModelId::ParakeetV3)
+        );
+        assert!(retained_models("de", &saved, |_| false).is_empty());
+        let installed = retained_models("tr", &TranscriptionSelection::default(), |model| {
+            model.id == TranscriptionModelId::Qwen3Asr06B
+        });
+        assert_eq!(
+            installed.iter().map(|model| model.id).collect::<Vec<_>>(),
+            [TranscriptionModelId::Qwen3Asr06B]
+        );
+        assert!(retained_models("tr", &TranscriptionSelection::default(), |_| false).is_empty());
     }
 
     #[test]
@@ -1468,7 +1546,6 @@ mod tests {
         assert!(check_canceled(&canceled).is_err());
     }
 
-    #[cfg(target_os = "macos")]
     #[test]
     fn installed_only_verification_never_downloads_or_replaces_an_invalid_model() {
         let model = fixture_model();
@@ -1525,7 +1602,13 @@ mod tests {
         assert!(artifacts.iter().all(|artifact| artifact.exists()));
         drop(download);
 
-        remove_installed_at(&path).unwrap();
+        // A child another test thread forks before it execs holds a copy of the
+        // download lock's descriptor for a moment, so the release can take a few tries.
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while let Err(error) = remove_installed_at(&path) {
+            assert!(std::time::Instant::now() < deadline, "{error:#}");
+            std::thread::sleep(Duration::from_millis(10));
+        }
         assert!(artifacts.iter().all(|artifact| !artifact.exists()));
         remove_installed_at(&path).unwrap();
         remove_installed_at(&directory.join("missing").join("fixture.gguf")).unwrap();

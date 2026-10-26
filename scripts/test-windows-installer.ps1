@@ -1,10 +1,10 @@
 # Silently installs, reinstalls, refuses a downgrade with, and uninstalls a
-# HEX-Setup-*.exe on a disposable Windows machine (CI), checking the managed
+# Hex-Setup-*.exe on a disposable Windows machine (CI), checking the managed
 # layout that src/windows_updater.rs expects at every step. It uses the real
 # %APPDATA%, so never run it on a machine with Hex installed.
 #
-#   scripts/test-windows-installer.ps1 -Installer dist\HEX-Setup-2.3.0-x64.exe `
-#     -Executable dist\HEX-2.3.0-...-x86_64-windows.exe -Version 2.3.0
+#   scripts/test-windows-installer.ps1 -Installer dist\Hex-Setup-2.4.0-windows-x64.exe `
+#     -Executable dist\Hex-2.4.0-windows-x64.exe -Version 2.4.0
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)] [string]$Installer,
@@ -16,6 +16,7 @@ $ErrorActionPreference = 'Stop'
 $support = Join-Path $env:APPDATA 'voice-control'
 $installed = Join-Path $support "versions\$Version\hex.exe"
 $pointer = Join-Path $support 'current-version'
+$receipt = Join-Path $support 'install.json'
 $shortcut = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Hex.lnk'
 $uninstallKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\{8FCF0256-C55C-40C3-865D-5FADB32D13B3}_is1'
 $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
@@ -41,6 +42,9 @@ Check ((Run-Setup 'install') -eq 0) 'silent install exits 0'
 Check (Test-Path $installed) "hex.exe is at versions\$Version"
 Check ((Get-FileHash -Algorithm SHA256 $installed).Hash -eq $expected) 'installed hex.exe matches the release bytes'
 Check ((Get-Content $pointer -Raw).Trim() -eq $Version) "current-version names $Version"
+$installReceipt = Get-Content $receipt -Raw | ConvertFrom-Json
+Check ($installReceipt.app -eq 'hex' -and $installReceipt.artifact -eq 'desktop' -and $installReceipt.channel -eq 'stable' -and $installReceipt.method -eq 'direct') 'install.json marks a direct install of hex desktop stable'
+Check ($installReceipt.root -eq $support) 'install.json names the install root'
 $link = (New-Object -ComObject WScript.Shell).CreateShortcut($shortcut)
 Check ($link.TargetPath -eq $installed) 'Start Menu shortcut targets the managed executable'
 Check ($link.Arguments -eq 'app') 'Start Menu shortcut launches the app'
@@ -85,6 +89,7 @@ Check (-not (Test-Path $uninstallKey)) 'Apps & Features entry is removed'
 Check (-not (Test-Path (Join-Path $support 'versions'))) 'every version, including self-updated ones, is removed'
 Check (-not (Test-Path (Join-Path $support 'updates'))) 'staged updates are removed'
 Check (-not (Test-Path $pointer)) 'current-version is removed'
+Check (-not (Test-Path $receipt)) 'install.json is removed'
 Check (-not (Test-Path $shortcut)) 'Start Menu shortcut is removed'
 Check ($null -eq (Get-ItemProperty -Path $runKey -Name 'HEX' -ErrorAction SilentlyContinue)) 'Launch at login is removed'
 Check (Test-Path (Join-Path $support 'settings.json')) 'settings are kept'

@@ -25,15 +25,11 @@ pub fn is_enabled() -> Result<bool> {
 
 /// Register or unregister the current executable for the current Windows user.
 pub fn set_enabled(enabled: bool) -> Result<()> {
-    let current_user = RegKey::predef(HKEY_CURRENT_USER);
     if enabled {
-        let (key, _) = current_user
-            .create_subkey(RUN_KEY)
-            .wrap_err("could not open Windows startup applications")?;
         let executable = std::env::current_exe().wrap_err("could not locate the HEX executable")?;
-        key.set_value(VALUE_NAME, &startup_command(&executable))
-            .wrap_err("could not register HEX to launch at login")?;
+        write_startup_command(&executable, "could not register HEX to launch at login")?;
     } else {
+        let current_user = RegKey::predef(HKEY_CURRENT_USER);
         let key = match current_user.open_subkey_with_flags(RUN_KEY, KEY_WRITE) {
             Ok(key) => key,
             Err(error) if error.kind() == ErrorKind::NotFound => return Ok(()),
@@ -57,12 +53,15 @@ pub fn repoint(executable: &Path) -> Result<()> {
     if !is_enabled()? {
         return Ok(());
     }
-    let current_user = RegKey::predef(HKEY_CURRENT_USER);
-    let (key, _) = current_user
+    write_startup_command(executable, "could not repoint the HEX startup registration")
+}
+
+fn write_startup_command(executable: &Path, context: &'static str) -> Result<()> {
+    let (key, _) = RegKey::predef(HKEY_CURRENT_USER)
         .create_subkey(RUN_KEY)
         .wrap_err("could not open Windows startup applications")?;
     key.set_value(VALUE_NAME, &startup_command(executable))
-        .wrap_err("could not repoint the HEX startup registration")?;
+        .wrap_err(context)?;
     Ok(())
 }
 

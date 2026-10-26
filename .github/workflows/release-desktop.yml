@@ -1,16 +1,39 @@
-name: Release desktop
+name: Release
 
-# Builds the Linux and Windows releases from one exact commit and signs their
-# update feeds in a job that never compiles code. The signed artifacts are
-# published from the release Mac with scripts/publish-desktop-release.sh, as
-# macOS is released with scripts/release-app.sh.
+# Builds, signs, and publishes Hex for macOS, Windows, and Linux from one
+# exact commit to the Anomaly release service (docs/releasing.md,
+# docs/plans/release-service.md). The service authorizes this workflow file
+# by its GitHub OIDC token: repository anomalyco/hex, ref dev, production or
+# app-v*, environment release (anomalyco/release registry/hex.json).
+#
+# production holds what was released and only moves by a fast-forward from
+# dev. Run staging from dev; run stable from production or push an app-v tag.
+#
+# channel=staging (the default) is the dry run: every platform is built as
+# <version>-dev.<run number> and published on the dev service's dev channel,
+# https://dev.anoma.ly/release (the service refuses publishing a channel's
+# current version again), with a draft GitHub release, and the AUR package is
+# built and installed but not pushed. channel=stable (or an
+# app-v<version> tag) publishes to https://anoma.ly/release, the GitHub
+# release, the AUR, and the production site.
+#
+# brew-version records that the Homebrew cask (anomalyco/tap/hex, bumped by
+# hand) now serves that version, and does nothing else.
 on:
   workflow_dispatch:
     inputs:
       ref:
         description: Commit, tag, or branch to release
         required: true
-        default: main
+        default: production
+      channel:
+        description: staging (dry run on dev.anoma.ly/release) or stable (public)
+        type: choice
+        options: [staging, stable]
+        default: staging
+      brew-version:
+        description: Only record that the Homebrew cask serves this version (leave empty to release)
+        default: ""
   push:
     tags: ["app-v*"]
 
@@ -18,7 +41,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: release-desktop
+  group: release-${{ github.event_name == 'workflow_dispatch' && inputs.channel || 'stable' }}
   cancel-in-progress: false
 
 jobs:
@@ -27,6 +50,13 @@ jobs:
     outputs:
       sha: ${{ steps.resolve.outputs.sha }}
       version: ${{ steps.resolve.outputs.version }}
+      channel: ${{ steps.resolve.outputs.channel }}
+      service: ${{ steps.resolve.outputs.service }}
+      tag: ${{ steps.resolve.outputs.tag }}
+      notes-url: ${{ steps.resolve.outputs.notes-url }}
+      release: ${{ steps.resolve.outputs.release }}
+      release-channel: ${{ steps.resolve.outputs.release-channel }}
+      release-version: ${{ steps.resolve.outputs.release-version }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -37,215 +67,288 @@ jobs:
           EVENT: ${{ github.event_name }}
           REF_NAME: ${{ github.ref_name }}
           REF_TYPE: ${{ github.ref_type }}
+          CHANNEL: ${{ github.event_name == 'workflow_dispatch' && inputs.channel || 'stable' }}
+          BREW_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.brew-version || '' }}
         run: |
           sha=$(git rev-parse HEAD)
           version=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')
           if ! printf '%s\n' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
-            echo "::error::Stable releases need a non-prerelease version, not $version."
+            echo "::error::Stable releases need an X.Y.Z version, not $version."
+            exit 1
+          fi
+          if [ "$CHANNEL" = stable ] && [ "$REF_TYPE" != tag ] && [ "$REF_NAME" != production ]; then
+            echo "::error::Stable releases run from production or an app-v tag, not $REF_NAME."
             exit 1
           fi
           if [ "$EVENT:$REF_TYPE" = push:tag ] && [ "$REF_NAME" != "app-v$version" ]; then
             echo "::error::Tag $REF_NAME does not match version $version."
             exit 1
           fi
+          case "$CHANNEL" in
+            stable)
+              service=https://anoma.ly/release tag="app-v$version"
+              notes="https://github.com/$GITHUB_REPOSITORY/releases/tag/$tag"
+              release_channel=stable release_version=$version
+              ;;
+            staging)
+              service=https://dev.anoma.ly/release tag="staging-$GITHUB_RUN_ID"
+              notes="https://github.com/$GITHUB_REPOSITORY/commit/$sha"
+              release_channel=dev release_version="$version-dev.$GITHUB_RUN_NUMBER"
+              ;;
+            *) echo "::error::Unknown channel $CHANNEL."; exit 1 ;;
+          esac
           {
             echo "sha=$sha"
             echo "version=$version"
+            echo "channel=$CHANNEL"
+            echo "service=$service"
+            echo "tag=$tag"
+            echo "notes-url=$notes"
+            echo "release-channel=$release_channel"
+            echo "release-version=$release_version"
+            echo "release=$([ -z "$BREW_VERSION" ] && echo true || echo false)"
           } >> "$GITHUB_OUTPUT"
-          echo "Building $version from $sha." >> "$GITHUB_STEP_SUMMARY"
+          if [ -n "$BREW_VERSION" ]; then
+            echo "Recording that Homebrew serves $BREW_VERSION on $service." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Releasing $version ($CHANNEL) from $sha to $service as $release_channel $release_version." >> "$GITHUB_STEP_SUMMARY"
+          fi
 
-  linux:
-    name: Linux x86_64
+  build:
     needs: resolve
+    if: needs.resolve.outputs.release == 'true'
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/build-desktop.yml
+    with:
+      sha: ${{ needs.resolve.outputs.sha }}
+      version: ${{ needs.resolve.outputs.release-version }}
+      sign-windows: true
+    # Azure Artifact Signing (OIDC); the values live in the release environment.
+    secrets:
+      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      AZURE_TRUSTED_SIGNING_ENDPOINT: ${{ secrets.AZURE_TRUSTED_SIGNING_ENDPOINT }}
+      AZURE_TRUSTED_SIGNING_ACCOUNT_NAME: ${{ secrets.AZURE_TRUSTED_SIGNING_ACCOUNT_NAME }}
+      AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE: ${{ secrets.AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE }}
+
+  macos:
+    needs: resolve
+    if: needs.resolve.outputs.release == 'true'
+    uses: ./.github/workflows/build-macos.yml
+    with:
+      sha: ${{ needs.resolve.outputs.sha }}
+      version: ${{ needs.resolve.outputs.release-version }}
+    # Its job runs in the release environment, which holds the Apple secrets.
+
+  # Collects every platform's files into one artifact and checks them; a
+  # staging run without the macOS build (no Apple secrets yet) goes on
+  # without it, a stable one may not.
+  collect:
+    needs: [resolve, build, macos]
+    if: >-
+      !cancelled() && needs.resolve.outputs.release == 'true' && needs.build.result == 'success' &&
+      (needs.macos.result == 'success' || needs.resolve.outputs.channel == 'staging')
     runs-on: ubuntu-24.04
-    timeout-minutes: 90
-    # The supported Linux host is x86_64 Arch, so the release links against
-    # current Arch libraries; the glibc floor is reported in the summary.
-    container: archlinux:base-devel
     env:
-      HEX_VERSION: ${{ needs.resolve.outputs.version }}
+      HEX_VERSION: ${{ needs.resolve.outputs.release-version }}
+      CHANNEL: ${{ needs.resolve.outputs.channel }}
     steps:
-      - name: Install build dependencies
-        run: |
-          pacman -Syu --noconfirm --needed git rustup python alsa-lib curl jq openssl \
-            xxd file binutils util-linux gtk3 gtk-layer-shell libappindicator-gtk3 \
-            libxkbcommon libxkbcommon-x11 libx11 libxcb libxcursor libxi libxrandr \
-            fontconfig freetype2 wayland systemd-libs openblas vulkan-headers \
-            vulkan-icd-loader shaderc spirv-headers clang cmake pkgconf
-          useradd --create-home builder
-      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          ref: ${{ needs.resolve.outputs.sha }}
-          path: source
-          persist-credentials: false
-      - uses: actions/checkout@v7
-        with:
-          path: tools
-          persist-credentials: false
-      - name: Build
+          pattern: hex-*-*
+          path: dist
+          merge-multiple: true
+      - name: Check the release files
         run: |
-          mkdir -p dist
-          chown -R builder: "$GITHUB_WORKSPACE"
-          runuser -u builder -- env HOME=/home/builder \
-            HEX_RELEASE_SOURCE="$GITHUB_WORKSPACE/source" \
-            HEX_RELEASE_DIST="$GITHUB_WORKSPACE/dist" \
-            CARGO_BUILD_JOBS=4 BLA_VENDOR=OpenBLAS OPENSSL_NO_VENDOR=1 \
-            CC=clang CXX=clang++ \
-            sh -c 'rustup default stable && tools/scripts/release-linux.sh build'
-      - name: Report the glibc floor
+          for name in hex-$HEX_VERSION-linux-x64 \
+            Hex-$HEX_VERSION-windows-x64.exe Hex-Setup-$HEX_VERSION-windows-x64.exe \
+            Hex-$HEX_VERSION-windows-arm64.exe Hex-Setup-$HEX_VERSION-windows-arm64.exe; do
+            test -s "dist/$name" || { echo "::error::dist/$name is missing."; exit 1; }
+          done
+          test "$(head -c 4 "dist/hex-$HEX_VERSION-linux-x64" | od -An -tx1 | tr -d ' ')" = 7f454c46
+          for exe in dist/*.exe; do
+            test "$(head -c 2 "$exe")" = MZ
+          done
+          if [ ! -f "dist/Hex-$HEX_VERSION-macos-arm64.zip" ]; then
+            echo "::warning::No macOS build in this run; staging publishes Windows and Linux only."
+          fi
+          (cd dist && ls -l && sha256sum *) | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Require Authenticode signatures for stable
         run: |
-          artifact=$(jq -r .artifact dist/linux-update.json.payload.json)
-          floor=$(objdump -T "dist/$artifact" | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -1)
-          ldd --version | head -1
-          echo "Linux artifact requires $floor." | tee -a "$GITHUB_STEP_SUMMARY"
+          sudo apt-get install -y -qq osslsigncode >/dev/null
+          unsigned=
+          for exe in dist/*.exe; do
+            if osslsigncode extract-signature -in "$exe" -out "$RUNNER_TEMP/signature" >/dev/null 2>&1; then
+              echo "Signed: $(basename "$exe")" >> "$GITHUB_STEP_SUMMARY"
+            else
+              unsigned="$unsigned $(basename "$exe")"
+            fi
+            rm -f "$RUNNER_TEMP/signature"
+          done
+          if [ -n "$unsigned" ]; then
+            if [ "$CHANNEL" = stable ]; then
+              echo "::error::Stable releases need Authenticode-signed Windows executables:$unsigned"
+              exit 1
+            fi
+            echo "::warning::Unsigned Windows executables:$unsigned"
+          fi
       - uses: actions/upload-artifact@v7
         with:
-          name: hex-linux-x86_64
+          name: release-files
           path: dist/
           if-no-files-found: error
 
-  windows:
-    name: Windows ${{ matrix.arch }}
-    needs: resolve
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 120
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - arch: x86_64
-            runner: windows-latest
-            dumpbin_host: Hostx64\\x64
-          - arch: aarch64
-            runner: windows-11-arm
-            dumpbin_host: Hostarm64\\arm64
-    env:
-      HEX_VERSION: ${{ needs.resolve.outputs.version }}
-      HEX_WINDOWS_ARCH: ${{ matrix.arch }}
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ needs.resolve.outputs.sha }}
-          path: source
-          persist-credentials: false
-      - uses: actions/checkout@v7
-        with:
-          path: tools
-          persist-credentials: false
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.arch }}-pc-windows-msvc
-      - name: Install the Vulkan SDK
-        if: matrix.arch == 'x86_64'
-        uses: humbletim/install-vulkan-sdk@v1.2
-        with:
-          version: 1.4.309.0
-          cache: true
-      - name: Install SPIRV-Headers for the Vulkan backend
-        if: matrix.arch == 'x86_64'
-        shell: pwsh
-        run: |
-          vcpkg install spirv-headers:x64-windows
-          if ($LASTEXITCODE -ne 0) { throw "vcpkg install spirv-headers failed" }
-          $prefix = "$env:VCPKG_INSTALLATION_ROOT/installed/x64-windows" -replace '\\','/'
-          $combined = if ($env:CMAKE_PREFIX_PATH) { "$prefix;$env:CMAKE_PREFIX_PATH" } else { $prefix }
-          Add-Content $env:GITHUB_ENV "CMAKE_PREFIX_PATH=$combined"
-      - name: Configure clang-cl for ARM64
-        if: matrix.arch == 'aarch64'
-        shell: pwsh
-        run: |
-          @(
-            "CMAKE_C_COMPILER=clang-cl",
-            "CMAKE_CXX_COMPILER=clang-cl",
-            "CMAKE_C_COMPILER_TARGET=aarch64-pc-windows-msvc",
-            "CMAKE_CXX_COMPILER_TARGET=aarch64-pc-windows-msvc",
-            "CL=/EHsc"
-          ) | Out-File -FilePath $env:GITHUB_ENV -Append
-      - name: Locate the GPUI shader compiler
-        shell: pwsh
-        run: |
-          $fxc = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Recurse -Filter fxc.exe -ErrorAction SilentlyContinue |
-            Where-Object { $_.FullName -match '\\(x64|arm64)\\' } |
-            Sort-Object FullName -Descending |
-            Select-Object -First 1
-          if (-not $fxc) { throw "fxc.exe was not found in the Windows SDK" }
-          "GPUI_FXC_PATH=$($fxc.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append
-      - name: Build
-        shell: bash
-        run: |
-          # Git Bash would rewrite CL=/EHsc into a path that clang-cl reads as
-          # a second source file.
-          export MSYS2_ENV_CONV_EXCL=CL
-          export HEX_RELEASE_SOURCE="$(cygpath -u "$GITHUB_WORKSPACE")/source"
-          export HEX_RELEASE_DIST="$(cygpath -u "$GITHUB_WORKSPACE")/dist"
-          tools/scripts/release-windows.sh build
-      - name: Check the executable needs no Visual C++ Redistributable
-        shell: pwsh
-        run: |
-          $payload = Get-Content "dist/$(if ($env:HEX_WINDOWS_ARCH -eq 'x86_64') { 'windows-update.json' } else { 'windows-aarch64-update.json' }).payload.json" | ConvertFrom-Json
-          $dumpbin = Get-ChildItem "${env:ProgramFiles}\Microsoft Visual Studio" -Recurse -Filter dumpbin.exe -ErrorAction SilentlyContinue |
-            Where-Object { $_.FullName -match '${{ matrix.dumpbin_host }}' } | Select-Object -First 1
-          if (-not $dumpbin) { throw "dumpbin.exe was not found" }
-          $imports = & $dumpbin.FullName /dependents "dist/$($payload.artifact)"
-          $imports
-          $redist = $imports | Select-String -Pattern 'VCRUNTIME|MSVCP|vcomp'
-          if ($redist) { throw "hex.exe imports Visual C++ runtime DLLs: $redist" }
-      - name: Build and silently test the Setup.exe installer
-        shell: pwsh
-        run: |
-          $feed = if ($env:HEX_WINDOWS_ARCH -eq 'x86_64') { 'windows-update.json' } else { 'windows-aarch64-update.json' }
-          $label = if ($env:HEX_WINDOWS_ARCH -eq 'x86_64') { 'x64' } else { 'arm64' }
-          $payload = Get-Content "dist/$feed.payload.json" | ConvertFrom-Json
-          $exe = "dist/$($payload.artifact)"
-          tools/scripts/build-windows-installer.ps1 -Executable $exe -Version $env:HEX_VERSION -Arch $env:HEX_WINDOWS_ARCH -OutDir dist
-          tools/scripts/test-windows-installer.ps1 -Installer "dist/HEX-Setup-$env:HEX_VERSION-$label.exe" -Executable $exe -Version $env:HEX_VERSION
-      - uses: actions/upload-artifact@v7
-        with:
-          name: hex-windows-${{ matrix.arch }}
-          path: dist/
-          if-no-files-found: error
-
-  sign:
-    name: Sign and validate
-    needs: [resolve, linux, windows]
+  # The only job that can publish: its OIDC token carries the release
+  # environment the service requires. No other credentials reach it.
+  publish:
+    needs: [resolve, collect]
+    if: ${{ !cancelled() && needs.collect.result == 'success' }}
     runs-on: ubuntu-24.04
     environment: release
+    permissions:
+      contents: read
+      id-token: write
     env:
-      HEX_VERSION: ${{ needs.resolve.outputs.version }}
-      FEEDS: linux-update.json windows-update.json windows-aarch64-update.json
+      RELEASE: ${{ needs.resolve.outputs.service }}
+      HEX_VERSION: ${{ needs.resolve.outputs.release-version }}
+      HEX_RELEASE_CHANNEL: ${{ needs.resolve.outputs.release-channel }}
+    outputs:
+      linux-url: ${{ steps.publish.outputs.linux-url }}
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-files
+          path: dist
+      - id: publish
+        env:
+          NOTES_URL: ${{ needs.resolve.outputs.notes-url }}
+        run: |
+          scripts/release-service.sh publish dist "$NOTES_URL"
+          echo "linux-url=${RELEASE%/release}$(jq -r '.release.targets["linux-x64"].url' dist/manifest.json)" >> "$GITHUB_OUTPUT"
+          { echo '### Manifest'; echo '```json'; cat dist/manifest.json; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+      - name: Record the Nix flake
+        # The flake builds this commit from source, so it serves the version now.
+        run: scripts/release-service.sh distribution nix "$HEX_VERSION"
+
+  github:
+    name: GitHub release
+    needs: [resolve, publish]
+    if: ${{ !cancelled() && needs.publish.result == 'success' }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    env:
+      HEX_VERSION: ${{ needs.resolve.outputs.release-version }}
+      HEX_RELEASE_COMMIT: ${{ needs.resolve.outputs.sha }}
+      HEX_RELEASE_CHANNEL: ${{ needs.resolve.outputs.channel }}
+      HEX_RELEASE_TAG: ${{ needs.resolve.outputs.tag }}
+      HEX_RELEASE_NOTES_URL: ${{ needs.resolve.outputs.service }}/hex/desktop/${{ needs.resolve.outputs.release-channel }}.json
+      HEX_RELEASE_SOURCE: ${{ github.workspace }}/source
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: tools
+          persist-credentials: false
+      # Credentials stay so a stable release can push its tag.
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.resolve.outputs.sha }}
+          path: source
+      - uses: actions/download-artifact@v8
+        with:
+          name: release-files
+          path: dist
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: tools/scripts/publish-github-release.sh dist
+
+  aur:
+    name: AUR
+    needs: [resolve, publish]
+    if: ${{ !cancelled() && needs.publish.result == 'success' }}
+    runs-on: ubuntu-24.04
+    container: archlinux:base-devel
+    environment: release
+    env:
+      HEX_VERSION: ${{ needs.resolve.outputs.release-version }}
+      LINUX_URL: ${{ needs.publish.outputs.linux-url }}
+    steps:
+      - name: Install tools
+        run: |
+          pacman -Syu --noconfirm --needed git openssh
+          useradd --create-home builder
       - uses: actions/checkout@v7
         with:
           path: tools
           persist-credentials: false
       - uses: actions/download-artifact@v8
         with:
-          pattern: hex-*-*
+          name: release-files
           path: dist
-          merge-multiple: true
-      - name: Sign the update feeds
-        env:
-          HEX_RELEASE_SIGNING_KEY: ${{ secrets.HEX_RELEASE_SIGNING_KEY }}
-        run: tools/scripts/release-feed.sh sign dist $FEEDS
-      - name: Verify signatures, artifacts, and version order
-        env:
-          SHA: ${{ needs.resolve.outputs.sha }}
+      - name: Stage and test hex-bin
         run: |
-          tools/scripts/release-feed.sh verify dist $FEEDS
-          jq -n --arg commit "$SHA" --arg version "$HEX_VERSION" '{commit:$commit,version:$version}' > dist/release.json
-          for feed in $FEEDS; do
-            jq -r .payload "dist/$feed" | base64 -d | jq -c . | tee -a "$GITHUB_STEP_SUMMARY"
-          done
-          for label in x64 arm64; do
-            test -s "dist/HEX-Setup-$HEX_VERSION-$label.exe"
-            test "$(head -c 2 "dist/HEX-Setup-$HEX_VERSION-$label.exe")" = MZ
-          done
-          (cd dist && sha256sum HEX-Setup-*.exe) | tee -a "$GITHUB_STEP_SUMMARY"
-      - uses: actions/upload-artifact@v7
+          chown -R builder: "$GITHUB_WORKSPACE"
+          runuser -u builder -- tools/scripts/release-aur.sh stage "$HEX_VERSION" "dist/hex-$HEX_VERSION-linux-x64" "$LINUX_URL" aur
+          runuser -u builder -- tools/scripts/release-aur.sh test aur
+          pacman -U --noconfirm aur/hex-bin-*.pkg.tar.zst
+          test "$(hex --version | awk 'NF { value=$NF } END { print value }')" = "$HEX_VERSION"
+          # The PKGBUILD's source is the published file.
+          curl -fsS "$LINUX_URL" | cmp - "dist/hex-$HEX_VERSION-linux-x64"
+          { echo '### AUR PKGBUILD'; echo '```'; cat aur/PKGBUILD; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+      - name: Push to the AUR
+        if: needs.resolve.outputs.channel == 'stable'
+        env:
+          AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+        run: tools/scripts/release-aur.sh publish aur
+
+  # Tells AUR installs about the version only once the AUR serves it. A
+  # staging run records it on the dev service to rehearse the call.
+  record-aur:
+    needs: [resolve, aur]
+    if: ${{ !cancelled() && needs.aur.result == 'success' }}
+    runs-on: ubuntu-24.04
+    environment: release
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      RELEASE: ${{ needs.resolve.outputs.service }}
+      HEX_VERSION: ${{ needs.resolve.outputs.release-version }}
+      HEX_RELEASE_CHANNEL: ${{ needs.resolve.outputs.release-channel }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          name: signed-release
-          path: |
-            dist/HEX-*
-            dist/*-update.json
-            dist/release.json
-          if-no-files-found: error
+          persist-credentials: false
+      - run: scripts/release-service.sh distribution aur "$HEX_VERSION"
+
+  record-brew:
+    needs: resolve
+    if: needs.resolve.outputs.release == 'false'
+    runs-on: ubuntu-24.04
+    environment: release
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      RELEASE: ${{ needs.resolve.outputs.service }}
+      HEX_VERSION: ${{ inputs.brew-version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: scripts/release-service.sh distribution brew "$HEX_VERSION"
+
+  site:
+    name: Deploy the production site
+    needs: [resolve, publish]
+    if: ${{ !cancelled() && needs.publish.result == 'success' && needs.resolve.outputs.channel == 'stable' }}
+    uses: ./.github/workflows/site-deploy.yml
+    with:
+      mode: production
+    secrets: inherit

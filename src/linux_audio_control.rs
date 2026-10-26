@@ -7,8 +7,7 @@
 use std::process::Command;
 use std::sync::mpsc::{self, Sender};
 
-use gtk::gio;
-use gtk::glib::{self, ToVariant};
+use glib::ToVariant;
 
 use crate::app_settings::RecordingAudioBehavior;
 

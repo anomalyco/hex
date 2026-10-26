@@ -1,4 +1,5 @@
 use std::ops::Add;
+use std::sync::Mutex;
 #[cfg(target_os = "macos")]
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -6,6 +7,16 @@ use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, SyncSender, TryR
 use std::time::{Duration, Instant};
 
 static AUDIO_SERVICE_RESTART_GENERATION: AtomicU64 = AtomicU64::new(0);
+static STREAM_GLITCHED_AT: Mutex<Option<Instant>> = Mutex::new(None);
+
+/// How long ago a microphone stream last reported an overload it continued
+/// through, for diagnosing captures.
+pub fn since_last_stream_glitch() -> Option<Duration> {
+    STREAM_GLITCHED_AT
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .map(|at| at.elapsed())
+}
 
 pub fn notify_audio_service_restarted() {
     AUDIO_SERVICE_RESTART_GENERATION.fetch_add(1, Ordering::AcqRel);
@@ -187,6 +198,7 @@ pub struct AudioInput {
     stream_errors: Receiver<String>,
     watch_service_restarts: bool,
     restart_generation: u64,
+    hex_microphone: crate::hex_microphone::CaptureFeedSwitch,
 }
 
 pub enum AudioInputEvent {
@@ -317,6 +329,7 @@ impl AudioInput {
                 device_name: "Test microphone".into(),
                 watch_service_restarts: false,
                 restart_generation: audio_service_restart_generation(),
+                hex_microphone: crate::hex_microphone::capture_feed(48_000).1,
             },
             sender,
         )
@@ -374,6 +387,7 @@ impl AudioInput {
         let channels = usize::from(config.channels);
         let (sender, chunks) = mpsc::channel();
         let (error_sender, stream_errors) = mpsc::sync_channel(1);
+        let (feed, hex_microphone) = crate::hex_microphone::capture_feed(sample_rate);
 
         let stream = match sample_format {
             SampleFormat::F32 => build_stream(
@@ -382,6 +396,7 @@ impl AudioInput {
                 channels,
                 sender,
                 error_sender,
+                feed,
                 |sample: f32| sample,
             )?,
             SampleFormat::I16 => build_stream(
@@ -390,6 +405,7 @@ impl AudioInput {
                 channels,
                 sender,
                 error_sender,
+                feed,
                 |sample: i16| sample as f32 / i16::MAX as f32,
             )?,
             SampleFormat::U16 => build_stream(
@@ -398,6 +414,7 @@ impl AudioInput {
                 channels,
                 sender,
                 error_sender,
+                feed,
                 |sample: u16| sample as f32 / 32768.0 - 1.0,
             )?,
             format => return Err(eyre!("unsupported microphone sample format: {format:?}")),
@@ -414,7 +431,15 @@ impl AudioInput {
             stream_errors,
             watch_service_restarts: true,
             restart_generation,
+            hex_microphone,
         })
+    }
+
+    /// Whether this stream's audio feeds Hex Microphone. Only the dictation
+    /// listener's current input does; a meeting's second stream on the same
+    /// microphone must not.
+    pub fn feed_hex_microphone(&self, on: bool) {
+        self.hex_microphone.set(on);
     }
 
     pub fn recv_timeout(&self, timeout: Duration) -> AudioInputEvent {
@@ -468,7 +493,7 @@ impl RecoveringAudioInput {
 
     fn finish_initial_open(&mut self, opened: Result<AudioInput>, now: Instant) {
         match opened {
-            Ok(opened) => self.input = Some(opened),
+            Ok(opened) => self.install(opened),
             Err(error) => {
                 tracing::warn!(%error, "could not open dictation microphone at startup; retrying");
                 self.recovery.request_stream_recovery(now);
@@ -490,6 +515,14 @@ impl RecoveringAudioInput {
             recovery: MicrophoneRecovery::default(),
             replacement: None,
         }
+    }
+
+    /// An input whose startup open failed, without touching CoreAudio.
+    #[cfg(test)]
+    pub fn failed_for_test(device_override: &str) -> Self {
+        let mut input = Self::closed(Some(device_override), 0, None);
+        input.finish_initial_open(Err(eyre!("{device_override} not found")), Instant::now());
+        input
     }
 
     #[cfg(test)]
@@ -518,8 +551,21 @@ impl RecoveringAudioInput {
         self.recovery.blocks_audio()
     }
 
+    /// Makes `input` the listener's microphone and the only stream feeding
+    /// Hex Microphone, stopping the previous stream first.
+    fn install(&mut self, input: AudioInput) {
+        if let Some(previous) = self.input.take() {
+            previous.feed_hex_microphone(false);
+            drop(previous);
+        }
+        input.feed_hex_microphone(true);
+        self.input = Some(input);
+    }
+
     pub fn close(&mut self) {
-        self.input = None;
+        if let Some(previous) = self.input.take() {
+            previous.feed_hex_microphone(false);
+        }
         self.replacement = None;
         self.recovery.recovered();
     }
@@ -582,7 +628,7 @@ impl RecoveringAudioInput {
             }
             match result {
                 Ok(replacement) if capture_idle || self.input.is_none() => {
-                    self.input = Some(replacement);
+                    self.install(replacement);
                     self.active_revision = opened_revision;
                     self.recovery.recovered();
                     tracing::info!(device = %self.device_name(), "dictation microphone reopened");
@@ -920,6 +966,9 @@ fn report_stream_error(sender: &SyncSender<String>, error: cpal::Error) {
         // starts, without stopping the stream. Real sample gaps still surface as
         // capture discontinuities.
         tracing::warn!(%error, "microphone stream glitched; continuing");
+        *STREAM_GLITCHED_AT
+            .lock()
+            .unwrap_or_else(|error| error.into_inner()) = Some(Instant::now());
         return;
     }
     tracing::error!(%error, "microphone stream failed");
@@ -932,6 +981,7 @@ fn build_stream<T: SizedSample>(
     channels: usize,
     sender: Sender<(Vec<f32>, CaptureInstant)>,
     error_sender: SyncSender<String>,
+    mut feed: crate::hex_microphone::CaptureFeed,
     convert: impl Fn(T) -> f32 + Send + 'static,
 ) -> Result<Stream> {
     let sample_rate = config.sample_rate;
@@ -941,7 +991,7 @@ fn build_stream<T: SizedSample>(
             move |data: &[T], info| {
                 let captured_through = captured_through(info, data.len() / channels, sample_rate);
                 let mono_samples = mono(data, channels, |sample| convert(*sample));
-                crate::hex_microphone::push_capture_samples(&mono_samples, sample_rate);
+                feed.push(&mono_samples);
                 let _ = sender.send((mono_samples, captured_through));
             },
             move |error| report_stream_error(&error_sender, error),
@@ -1109,6 +1159,33 @@ mod tests {
         assert_eq!(input.active_revision, 3);
         assert_eq!(input.selected_device.as_deref(), Some("Next microphone"));
         assert!(input.recovery.should_attempt(Instant::now()));
+    }
+
+    #[test]
+    fn only_the_listeners_current_input_feeds_hex_microphone() {
+        let (meeting, _) = AudioInput::channel_for_test();
+        let (first, _) = AudioInput::channel_for_test();
+        let (replacement, _) = AudioInput::channel_for_test();
+        let first_feed = first.hex_microphone.clone();
+        let replacement_feed = replacement.hex_microphone.clone();
+
+        let mut input = RecoveringAudioInput::closed(None, 3, Some("Test microphone"));
+        input.finish_initial_open(Ok(first), Instant::now());
+        assert!(first_feed.is_on());
+        assert!(!meeting.hex_microphone.is_on());
+
+        let (sender, receiver) = mpsc::channel();
+        input.replacement = Some(receiver);
+        sender.send((3, Ok(replacement))).unwrap();
+        assert!(matches!(
+            input.recv_timeout(Duration::ZERO, true),
+            RecoveringAudioInputEvent::Reopened
+        ));
+        assert!(!first_feed.is_on());
+        assert!(replacement_feed.is_on());
+
+        input.close();
+        assert!(!replacement_feed.is_on());
     }
 
     #[test]

@@ -1,0 +1,310 @@
+# `hex` control CLI
+
+The control commands drive the one running Hex: start or stop a dictation or a
+meeting, change any setting, switch models, open the window, quit, or read its
+status. They are meant for agents and scripts as much as people, so every
+command takes `--json`, is idempotent, and exits with a stable code.
+
+macOS is the only supported host today. On Linux and Windows `hex settings`
+reports `unsupported` ("not supported on this OS yet; use the Hex window"); the
+Linux CLI keeps its own `dictation`, `voice-action`, `paste-last`, `status`,
+`quit`, and `restart` over the Linux service socket (see `docs/linux.md`).
+
+The read-only `hex history` and `hex meetings list|show|chapters|search` commands, and
+`hex mcp`, are separate and unchanged; see `docs/transcript-cli.md`.
+
+## Commands
+
+```ts
+hex
+├── status                         what Hex is doing (see Status below)
+├── start                          open Hex.app if it isn't running; wait until it answers
+├── quit [--force]                 refused while a meeting or dictation is active, or unconfirmed
+├── restart [--force]              quit and reopen (opens Hex when it isn't running)
+├── dictation start|stop|cancel|toggle
+├── voice-action start|stop|cancel|toggle   needs voice_action.enabled
+├── paste-last                     paste the last dictation (Option-Shift-V); refused while recording
+├── meetings
+│   ├── record [--title T]         as the menu bar's Record Meeting; needs meetings.enabled
+│   ├── stop                       Stop & Transcribe
+│   ├── copy-last                  copy the last meeting transcript to the clipboard
+│   └── list | show | search       read-only (docs/transcript-cli.md)
+├── settings
+│   ├── list                       every setting: key, value, kind, choices, writable, about
+│   ├── get <key|prefix>           one setting, or every key under a prefix (`meetings`)
+│   └── set <key> <value> [--yes]
+├── model
+│   ├── list                       every model, its languages and size, installed or not
+│   ├── use <id> [--language L]    installed models only; never downloads or repairs
+│   ├── install <id> [--language L] download, then switch to it
+│   └── cancel                     stop a download or load in progress
+├── commands
+│   ├── enable [--yes]             = settings set commands_enabled on
+│   ├── disable                    = settings set commands_enabled off
+│   ├── retry                      load the command model again after it failed
+│   └── init                       create ~/.config/hex (local, no running Hex needed)
+├── window
+│   ├── show [settings|models|modes|voice-action|history|commands|meetings]
+│   └── hide                       close the window; Hex stays in the menu bar
+├── history clear --yes            delete every retained dictation
+├── vocabulary                     needs the `vocabulary` experiment (marked so in --help)
+│   ├── list [--json]              every term and its "sounds like" spellings
+│   ├── add <term> [--sounds-like a,b]  add a term, or new spellings to an existing one
+│   └── remove <term>              any case
+├── capture start|stop|cancel|status  the `capture` build option + experiment (features/capture.md)
+├── experiments list|enable|disable  edit ~/.config/hex/experiments; no running Hex (features/experiments.md)
+├── check-for-updates              check for an update now
+├── launch-at-login [on|off]       report or change Launch at Login (installed Hex.app only)
+└── logs [--process] [-n N] [-f]   tail live.ndjson (or process.log); no running Hex needed
+```
+
+`dictation start` locks the recording, as a double tap would: `dictation stop`
+or the next shortcut press finishes it, and `dictation cancel` or Escape
+discards it. A CLI start has no press to judge, so its recording counts as
+intentional at once: the start tone plays once the microphone is open, and the
+recording behavior (mute or pause media, idle-sleep prevention) and the live
+stream start as they do after a held shortcut. `voice-action start` behaves
+the same way. A `stop` replies `done` only when the clip went to
+transcription; a clip with no audio yet (the microphone was still opening) or
+a silent one is dropped with `discarded`, and nothing shows as transcribing.
+
+`dictation cancel` with nothing recording cancels the newest unfinished
+dictation, like Escape. Escape cancels an active recording before any job, so
+while the other capture records (a Voice Action, say), an idle `cancel` is
+refused with `busy` rather than reach past it; cancel that recording first.
+`voice-action cancel` follows the same rule. `meetings cancel` doesn't exist
+because Hex has no way to discard a meeting recording.
+
+`paste-last` needs a listening Hex (`not-ready` during setup) and is refused
+with `busy` while anything records or a shortcut gesture is in progress. The
+menu bar's Paste Last Dictation does nothing in that case.
+
+`model use` switches only to a downloaded model and checks it on disk; it never
+downloads or repairs one (`model install` does). It keeps that model's own
+remembered language and recognition hints, as the menu bar does; `--language`
+overrides only the language, and must be one the model supports.
+
+`vocabulary` edits the [shared vocabulary](features/vocabulary.md) through the
+running Hex, which saves settings and reloads them as a window edit would.
+Terms match in any case; `add` of a term already listed only merges new
+spellings, and replies `changed: false` when there are none. While the
+`vocabulary` experiment is off in the running Hex, every `vocabulary` command
+is refused with `feature-off`.
+
+`quit` and `restart` without `--force` are refused with `busy` when the
+listener doesn't answer whether it's recording; no listener, or one waiting for
+setup, counts as idle.
+
+`start` and `restart` keep the `HEX_*` environment (`HEX_RETAIN_DICTATION_AUDIO`,
+`HEX_ENABLE_LLM`, and so on): macOS opens apps without the caller's
+environment, so Hex passes each `HEX_*` variable to `open --env`. `start`
+takes them from the shell that runs it, `restart` from the running Hex. The
+values are never logged.
+
+`capture` drives the [Captures](features/capture.md) experiment, a build
+option off in every public build; the command exists in debug builds and in
+builds with `--features capture`. A Hex built without the feature refuses
+`scrawl-capture` with `unsupported`; one with it but the experiment off
+refuses it with `feature-off`. `capture stop` replies at once with the bundle
+path while the words and files are written in the background; `capture status`
+lists bundles still writing and the last outcome (`last`: `bundle`, `stage`
+of `done`, `failed`, or `cancelled`, and for a written bundle `words`, `gaps`,
+and `missing_transcript`, why it has no words). A start while two captures
+are still writing is refused with `busy`. Every action is idempotent.
+
+A CLI-started meeting is the same recording the menu bar starts: the menu-bar
+state, the recording capsule, and Stop & Transcribe all apply to it.
+`meetings record` replies once the recording has started (or after 8 s);
+`meetings stop` replies once transcription has begun.
+
+## Exit codes
+
+```ts
+0  the command ran, or there was nothing to change (`changed: false`)
+1  Hex refused or failed it (an error reply), or the transport failed
+2  usage error (clap)
+3  Hex isn't running (code `not-running`); control commands never launch it
+```
+
+## Transport
+
+The CLI reads the owner-only discovery file
+`~/Library/Application Support/hex/local-api.json` (`HEX_APPLICATION_SUPPORT_DIR`
+overrides the folder), checks that its pid is alive, and sends one
+`POST /control` to `127.0.0.1:<port>` with `Authorization: Bearer <token>`.
+The route is always on in the desktop app; the headless `hex service` doesn't
+offer it.
+
+- Request bodies are JSON up to 64 KiB; replies are at most 1 MiB.
+- The app answers within 10 s (`504 control-timeout` otherwise); the CLI waits
+  15 s.
+- Every answer the app gives is `200` with a `ControlResponse`, refusals
+  included. Transport-level failures use HTTP status codes:
+  `400 invalid-control-command` (malformed or unknown command),
+  `404 control-unavailable` (no control host), `413 control-too-large`,
+  `503 control-busy` (too many in flight) or `control-unavailable`, and
+  `504 control-timeout`. Bad or missing tokens get `401` like every other
+  route.
+
+## Wire format (version 1)
+
+Requests are flat objects tagged by `command` (kebab-case):
+
+```json
+{"version": 1, "command": "meeting-record", "title": "Design sync"}
+{"version": 1, "command": "settings-set", "key": "sound_effects", "value": "off", "confirm": false}
+{"version": 1, "command": "dictation", "action": "start"}
+```
+
+```ts
+status | quit {force} | restart {force}
+dictation {action} | voice-action {action}       action: start | stop | cancel | toggle
+paste-last
+meeting-record {title?} | meeting-stop | meeting-copy-last
+settings-get {key?} | settings-set {key, value, confirm}
+commands-retry
+model-list | model-use {model, language?} | model-install {model, language?} | model-cancel
+window-show {pane?} | window-hide
+history-clear | check-for-updates | launch-at-login {enabled?}
+vocabulary-list | vocabulary-add {term, sounds_like} | vocabulary-remove {term}
+scrawl-capture {action}                          action: start | stop | cancel | status; `capture` build option
+```
+
+Optional fields may be left out. `hex start` and `hex logs` are local and have
+no wire form. `history-clear` has no confirmation field: the CLI asks for
+`--yes` before it sends it.
+
+Replies are tagged by `status`:
+
+```json
+{"version": 1, "status": "done", "message": "Recording “Design sync”; …", "changed": true}
+{"version": 1, "status": "error", "code": "feature-off", "message": "Meetings are off; …"}
+{"version": 1, "status": "settings", "settings": [{"key": "sound_effects", "value": true,
+  "kind": "bool", "writable": true, "about": "Play recording, cancellation, and error tones"}]}
+{"version": 1, "status": "models", "models": [{"id": "parakeet_v3", "name": "…",
+  "languages": ["en", "…"], "size": "…", "installed": true, "selected": true,
+  "streams": true, "supports_recognition_hints": false}]}
+{"version": 1, "status": "vocabulary", "entries": [{"term": "OpenCode",
+  "sounds_like": ["open code"]}, {"term": "Rune"}]}
+{"version": 1, "status": "scrawl-capture", "changed": true, "state": "idle",
+  "bundle": "…/captures/1792933491953.scrawl", "elapsed_ms": null,
+  "finishing": ["…/captures/1792933491953.scrawl"], "last": null}
+```
+
+`done.changed` is `false` when the command found things already so ("Already
+recording", "The window isn't open"). Setting `kind` is one of `bool`,
+`number`, `integer`, `choice` (with `choices`), `text`, `shortcut`, `path`, or
+`json`; `value` is `null` for an unset optional setting.
+
+### Status
+
+```json
+{
+  "version": 1, "status": "status",
+  "app_version": "2.3.1", "pid": 31708, "memory_footprint_bytes": 412000000,
+  "listener": {"running": true, "status": "Listening"},
+  "capture": {"state": "idle", "recording": null, "pending_jobs": 0},
+  "meeting": {"state": "recording", "title": "Design sync", "elapsed_seconds": 723},
+  "model": {"id": "parakeet_v3", "name": "…", "language": "en", "installed": true,
+            "preparing": null, "downloaded_bytes": 0, "error": null},
+  "features": {"commands": false, "command_model": "disabled", "voice_action": true,
+               "meetings": true, "release_microphone_while_idle": false,
+               "history_retention": "week"},
+  "permissions": {"ready": true, "microphone": "ready", "input_monitoring": "ready",
+                  "accessibility": "ready", "transcription_model": true},
+  "window": {"open": false, "pane": null},
+  "update": "current",
+  "experiments": []
+}
+```
+
+```ts
+capture.state       idle | recording | transcribing | unknown (the listener didn't answer)
+capture.recording   dictation | voice-action | service | voice | null
+meeting.state       idle | starting | recording | transcribing
+command_model       disabled | loading | ready | failed
+permissions.*       ready | needs-request | needs-settings | needs-restart
+window.pane         settings | modes | voice-action | history | commands | meetings | …
+update              current | checking | available | unavailable
+```
+
+`memory_footprint_bytes` is the physical footprint Activity Monitor shows.
+`experiments` lists the [experiments](features/experiments.md) Hex read at its
+launch; older Hex omits it.
+
+### Error codes
+
+```ts
+not-running            Hex isn't running (CLI only; exit 3)
+transport              the request couldn't reach Hex or its reply was unreadable (CLI only)
+version-mismatch       this hex speaks another control version; use the running app's hex
+unknown-setting        no such key (the message suggests a near match)
+read-only              the key can't be set here (the message says where)
+invalid-value          the value doesn't parse or is out of range
+confirmation-required  the change also turns another setting off, or clears history; pass --yes
+shortcut-in-use        another Hex shortcut already uses that binding
+unknown-model          no such model id (`hex model list`)
+not-installed          `model use` on a model that isn't downloaded (`hex model install`)
+feature-off            the command needs an opt-in that is off (Meetings, Voice Action, commands)
+                       or an experiment the running Hex didn't read (vocabulary)
+not-ready              Hex is waiting for setup (permissions or the dictation model)
+meeting-active         quit/restart while a meeting records (pass --force)
+busy                   something is in progress (recording, transcribing, a full queue),
+                       or the listener couldn't confirm it's idle
+discarded              `stop` dropped the clip: no audio yet, or silent; nothing transcribes
+unavailable            a part of Hex the command needs isn't available
+unsupported            this build or OS can't do it (e.g. restart from a development binary)
+failed                 Hex tried and failed (the message has the cause)
+internal               reading or saving settings failed
+```
+
+## Settings
+
+Keys are dotted paths into `settings.json`. `hex settings list` prints every
+key with its kind and description; `hex settings list --json` adds `choices`.
+Changes go through the same rules as the window and are saved by the app,
+which then reloads them live; an open window adopts the change unless it has
+an unsaved edit.
+
+- Booleans take `on`/`off`, `true`/`false`, `yes`/`no`, or `1`/`0`.
+- Optional settings take `none` to clear them.
+- Shortcuts take text such as `option`, `right-command`, `option+shift+v`,
+  `control+space`, `fn`, or `f5`. Key names resolve on the active keyboard
+  layout, the OS's rules for Settings' recorder apply, and a binding another
+  Hex shortcut uses is refused with `shortcut-in-use`. `double_tap_only`
+  needs a key chord, as in Settings.
+- `json` settings (modes, meeting providers, excluded calendars) take the JSON
+  value the file stores.
+- `commands_enabled on` while `release_microphone_while_idle` is on, and the
+  reverse, need `--yes`, because each turns the other off.
+- `voice_action.enabled on` needs a free Voice Action shortcut.
+- `transcription.model` and `transcription.language` are read-only here: use
+  `hex model use`. `transcription_recents` and `meetings.calendar.connected`
+  are read-only (connecting a calendar asks macOS for access from Settings).
+
+Writable keys: `commands_enabled`, `release_microphone_while_idle`,
+`sound_effects`, `sound_effect_volume`, `microphone`,
+`recording_audio_behavior`, `double_tap_lock`, `double_tap_only`,
+`shortcut_mode`, `dictation_hotkey`, `edit_hotkey`, `paste_last_hotkey`,
+`show_dock_icon`, `transcription.recognition_hints`,
+`dictation_processing.default_mode`, `dictation_processing.modes`,
+`voice_action.enabled`, `voice_action.model`, `voice_action.variant`,
+`voice_action.deadline_seconds`, `history_retention`, `meetings.enabled`,
+`meetings.output_folder`, `meetings.summarize_with_apple_intelligence`,
+`meetings.show_recording_indicator`, `meetings.recording_indicator_corner`,
+`meetings.providers`, `meetings.calendar.excluded_calendars`,
+`meetings.calendar.remind`, `meetings.calendar.lead_minutes`,
+`experimental.hex_microphone`, `experimental.hex_microphone_mode`,
+`experimental.hex_microphone_comfort_noise`,
+`experimental.hex_microphone_strength`, `enable_on_launch`,
+`paste_with_shift`, `ui_language`, `indicator_position`.
+
+A test (`control::settings::tests::every_persisted_setting_has_a_cli_key`)
+fails when a new persisted setting has no key here.
+
+## Compatibility
+
+`CONTROL_VERSION` is 1. A change that breaks a request or reply shape
+increments it; adding a command, an optional request field, or a reply field
+does not. A `hex` from a different version gets `version-mismatch`; use the
+`hex` inside the running Hex.app, or restart Hex after updating.

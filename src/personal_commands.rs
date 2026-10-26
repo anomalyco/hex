@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
+use std::ffi::OsStr;
 use std::fs;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
@@ -23,6 +24,7 @@ use crate::keys::{Key, Modifiers};
 const MAX_FRAME_BYTES: usize = 256 * 1024;
 const MAX_INPUT_FRAME_BYTES: usize = 64 * 1024;
 const HOST_START_TIMEOUT: Duration = Duration::from_secs(5);
+const CONFIG_FILE: &str = "hex.config.ts";
 const POLL_INTERVAL: Duration = Duration::from_millis(250);
 const RELOAD_DEBOUNCE: Duration = Duration::from_millis(350);
 const MAX_COMMANDS: usize = 512;
@@ -323,29 +325,48 @@ fn validate_transformations(
 pub fn initialize_workspace() -> Result<PathBuf> {
     let workspace = crate::app_paths::personal_commands_workspace()?;
     let sdk = crate::app_paths::personal_commands_sdk()?;
-    let workspace_changed = initialize_workspace_at(&workspace, &sdk)?;
     let bun = find_bun().ok_or_else(|| eyre!("Bun is required to install personal commands"))?;
-    if workspace_changed {
-        remove_installed_managed_sdk(&workspace)?;
-    }
-    install_workspace_dependencies(&workspace, &bun)?;
+    initialize_workspace_at(&workspace, &sdk, |workspace_changed| {
+        if workspace_changed {
+            remove_installed_managed_sdk(&workspace)?;
+        }
+        install_workspace_dependencies(&workspace, &bun)
+    })?;
     Ok(workspace)
 }
 
 /// Whether the personal command workspace has a config to host.
-#[cfg_attr(target_os = "macos", allow(dead_code))]
 pub fn workspace_configured() -> bool {
     crate::app_paths::personal_commands_workspace()
-        .is_ok_and(|workspace| workspace.join("hex.config.ts").is_file())
+        .is_ok_and(|workspace| workspace.join(CONFIG_FILE).is_file())
 }
 
-pub fn initialize_workspace_at(workspace: &Path, sdk: &Path) -> Result<bool> {
+/// Provisions the workspace, runs `install` with whether the managed SDK
+/// changed, and only then publishes a missing `hex.config.ts`. A running Hex
+/// starts its host when the config appears, so it must mean the workspace is
+/// installed.
+pub fn initialize_workspace_at(
+    workspace: &Path,
+    sdk: &Path,
+    install: impl FnOnce(bool) -> Result<()>,
+) -> Result<bool> {
     let template = sdk.join("workspace-template");
     if !template.is_dir() {
         return Err(eyre!("personal command SDK resources are incomplete"));
     }
     let workspace_changed = refresh_managed_sdk_at(workspace, sdk)?;
-    copy_directory(&template, workspace, false)?;
+    copy_directory(&template, workspace, false, Some(OsStr::new(CONFIG_FILE)))?;
+    install(workspace_changed)?;
+    let config = workspace.join(CONFIG_FILE);
+    if !config.exists() {
+        // The staged name ends in .tmp so the workspace watcher ignores it.
+        let staged = workspace.join(format!(".{CONFIG_FILE}.{}.tmp", std::process::id()));
+        fs::copy(template.join(CONFIG_FILE), &staged)?;
+        if let Err(error) = fs::rename(&staged, &config) {
+            let _ = fs::remove_file(&staged);
+            return Err(error.into());
+        }
+    }
     Ok(workspace_changed)
 }
 
@@ -523,7 +544,7 @@ fn refresh_managed_sdk_at(workspace: &Path, sdk: &Path) -> Result<bool> {
     }
     fs::create_dir(&staged_sdk)?;
     fs::copy(sdk.join("package.json"), staged_sdk.join("package.json"))?;
-    copy_directory(&sdk.join(code), &staged_sdk.join(code), true)?;
+    copy_directory(&sdk.join(code), &staged_sdk.join(code), true, None)?;
     if code == "src" {
         write_source_sdk_manifest(&staged_sdk.join("package.json"))?;
     }
@@ -641,7 +662,12 @@ fn remove_installed_managed_sdk(workspace: &Path) -> Result<()> {
     Ok(())
 }
 
-fn copy_directory(source: &Path, destination: &Path, overwrite: bool) -> Result<()> {
+fn copy_directory(
+    source: &Path,
+    destination: &Path,
+    overwrite: bool,
+    skip: Option<&OsStr>,
+) -> Result<()> {
     fs::create_dir_all(destination)?;
     for entry in fs::read_dir(source)? {
         let entry = entry?;
@@ -649,9 +675,12 @@ fn copy_directory(source: &Path, destination: &Path, overwrite: bool) -> Result<
         if file_type.is_symlink() {
             return Err(eyre!("SDK resources must not contain symlinks"));
         }
+        if skip == Some(entry.file_name().as_os_str()) {
+            continue;
+        }
         let target = destination.join(entry.file_name());
         if file_type.is_dir() {
-            copy_directory(&entry.path(), &target, overwrite)?;
+            copy_directory(&entry.path(), &target, overwrite, None)?;
         } else if file_type.is_file() && (overwrite || !target.exists()) {
             fs::copy(entry.path(), target)?;
         }
@@ -1289,66 +1318,146 @@ fn run_worker(
         ..StatusSnapshot::default()
     };
     persist_status(&status);
+    // Generations keep counting across configure/unconfigure cycles so a stale
+    // invocation can never reach a newer host.
+    let mut generation = 0;
+    while !stop.load(Ordering::Acquire) {
+        let paths = match prepare_host() {
+            Ok(Some(paths)) => paths,
+            Ok(None) => {
+                status = StatusSnapshot {
+                    host_state: HostState::NotConfigured,
+                    ..StatusSnapshot::default()
+                };
+                persist_status(&status);
+                let Ok(workspace) = crate::app_paths::personal_commands_workspace() else {
+                    return;
+                };
+                if !wait_for_config(&workspace, &requests, &outcomes, &stop)
+                    || stop.load(Ordering::Acquire)
+                {
+                    return;
+                }
+                tracing::info!("personal command config appeared; starting the host");
+                status.host_state = HostState::Starting;
+                persist_status(&status);
+                continue;
+            }
+            Err(error) => {
+                let error = format!("{error:#}");
+                status.host_state = HostState::Unavailable;
+                status.last_reload_error = Some(bounded_status_error(&error));
+                persist_status(&status);
+                tracing::warn!(error, "personal commands are unavailable");
+                return;
+            }
+        };
+        let exit = run_host(
+            paths,
+            &base,
+            &active,
+            &requests,
+            &request_sender,
+            &outcomes,
+            &stop,
+            &transformations,
+            &mut generation,
+            &mut status,
+        );
+        match exit {
+            HostExit::Stopped => return,
+            HostExit::Unconfigured => {
+                tracing::info!("personal command config was removed; waiting for a new one");
+                deactivate(&mut status, &active, &base, &transformations);
+                persist_status(&status);
+            }
+        }
+    }
+}
+
+/// Forgets everything the last host registered, so neither the registry nor
+/// the persisted status describes a host that no longer runs.
+fn deactivate(
+    status: &mut StatusSnapshot,
+    active: &RwLock<Arc<RuntimeSnapshot>>,
+    base: &CommandConfig,
+    transformations: &TransformationClient,
+) {
+    transformations.clear();
+    *active.write().expect("command registry poisoned") =
+        Arc::new(RuntimeSnapshot::native(base.clone()));
+    *status = StatusSnapshot {
+        host_state: HostState::NotConfigured,
+        ..StatusSnapshot::default()
+    };
+}
+
+enum HostExit {
+    Stopped,
+    Unconfigured,
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_host(
+    paths: HostPaths,
+    base: &CommandConfig,
+    active: &RwLock<Arc<RuntimeSnapshot>>,
+    requests: &Receiver<Request>,
+    request_sender: &SyncSender<Request>,
+    outcomes: &SyncSender<ActionOutcome>,
+    stop: &AtomicBool,
+    transformations: &TransformationClient,
+    generation: &mut u64,
+    status: &mut StatusSnapshot,
+) -> HostExit {
     let HostPaths {
         workspace,
         config,
         bun,
         host_entrypoint,
-    } = match prepare_host() {
-        Ok(Some(paths)) => paths,
-        Ok(None) => {
-            status.host_state = HostState::NotConfigured;
-            persist_status(&status);
-            return;
-        }
-        Err(error) => {
-            let error = format!("{error:#}");
-            status.host_state = HostState::Unavailable;
-            status.last_reload_error = Some(bounded_status_error(&error));
-            persist_status(&status);
-            tracing::warn!(error, "personal commands are unavailable");
-            return;
-        }
-    };
+    } = paths;
     let (event_sender, events) = mpsc::sync_channel(64);
     let (tool_sender, tool_jobs) = mpsc::sync_channel(TOOL_QUEUE);
     spawn_tool_workers(tool_jobs, event_sender.clone());
     let (reload_sender, reload_requests) = mpsc::sync_channel(1);
-    let watcher_stop = stop.clone();
+    let session_stop = Arc::new(AtomicBool::new(false));
+    let watcher_session_stop = session_stop.clone();
     let watcher_workspace = workspace.clone();
     let _ = thread::Builder::new()
         .name("personal-command-watch".into())
-        .spawn(move || watch_workspace(watcher_workspace, reload_sender, watcher_stop));
+        .spawn(move || watch_workspace(watcher_workspace, reload_sender, watcher_session_stop));
     let launch = HostLaunch {
-        base: &base,
+        base,
         workspace: &workspace,
         config: &config,
         bun: &bun,
         host_entrypoint: &host_entrypoint,
         event_sender: &event_sender,
     };
-    let mut generation = 0;
     let mut generations = Generations::default();
     let mut restart_backoff = RestartBackoff::default();
     if let Some(host) = reload(
         &launch,
-        &active,
-        &mut generation,
-        &mut status,
-        &request_sender,
-        &transformations,
+        active,
+        generation,
+        status,
+        request_sender,
+        transformations,
     ) {
         restart_backoff.host_started(Instant::now());
         generations.hosts.insert(host.generation, host);
+    } else {
+        restart_backoff.host_failed(Instant::now());
     }
     let mut next_invocation = 0_u64;
+    let mut exit = HostExit::Stopped;
 
     while !stop.load(Ordering::Acquire) {
         restart_backoff.reset_if_healthy(Instant::now());
         let mut active_host_failed = false;
         while let Ok(event) = events.try_recv() {
             active_host_failed |=
-                handle_host_event(event, &mut generations, &outcomes, &tool_sender);
+                handle_host_event(event, &mut generations, outcomes, &tool_sender);
         }
         if active_host_failed {
             restart_backoff.host_failed(Instant::now());
@@ -1359,15 +1468,22 @@ fn run_worker(
         if config_reload {
             restart_backoff.reset();
         }
+        if config_reload && !stop.load(Ordering::Acquire) && !config.is_file() {
+            if let Ok(request) = request {
+                reject_request(request, outcomes);
+            }
+            exit = HostExit::Unconfigured;
+            break;
+        }
         let automatic_restart = !config_reload && restart_backoff.ready(Instant::now());
         if config_reload || automatic_restart {
             if let Some(candidate) = reload(
                 &launch,
-                &active,
-                &mut generation,
-                &mut status,
-                &request_sender,
-                &transformations,
+                active,
+                generation,
+                status,
+                request_sender,
+                transformations,
             ) {
                 let now = Instant::now();
                 for host in generations.hosts.values_mut() {
@@ -1387,7 +1503,7 @@ fn run_worker(
                 if generations.pending.len() >= MAX_PENDING_INVOCATIONS {
                     emit_failure(
                         invocation,
-                        &outcomes,
+                        outcomes,
                         "too many personal commands are still running",
                     );
                     continue;
@@ -1395,7 +1511,7 @@ fn run_worker(
                 let Some(host) = generations.hosts.get(&invocation.generation) else {
                     emit_failure(
                         invocation,
-                        &outcomes,
+                        outcomes,
                         "personal command generation is no longer available",
                     );
                     continue;
@@ -1427,8 +1543,8 @@ fn run_worker(
                 let host_generation = host.generation;
                 if let Err(error) = host.input.try_send(input) {
                     let reason = writer_queue_error(error);
-                    emit_failure(invocation, &outcomes, reason);
-                    if generations.fail(host_generation, &outcomes, reason) {
+                    emit_failure(invocation, outcomes, reason);
+                    if generations.fail(host_generation, outcomes, reason) {
                         restart_backoff.host_failed(Instant::now());
                     }
                 } else {
@@ -1509,7 +1625,7 @@ fn run_worker(
             })
             .collect::<HashSet<_>>();
         for generation in timed_out_generations {
-            if generations.fail(generation, &outcomes, "custom transformations timed out") {
+            if generations.fail(generation, outcomes, "custom transformations timed out") {
                 restart_backoff.host_failed(now);
             }
         }
@@ -1529,22 +1645,91 @@ fn run_worker(
             })
             .collect::<Vec<_>>();
         for generation in retired {
-            generations.fail(generation, &outcomes, "personal command generation retired");
+            generations.fail(generation, outcomes, "personal command generation retired");
         }
     }
+    session_stop.store(true, Ordering::Release);
     for host in generations.hosts.values() {
         let _ = host.input.try_send(HostInput::Shutdown);
     }
-    status.host_state = HostState::Stopped;
     transformations.clear();
-    persist_status(&status);
+    match exit {
+        HostExit::Stopped => {
+            status.host_state = HostState::Stopped;
+            persist_status(status);
+        }
+        HostExit::Unconfigured => {
+            let hosts = generations.hosts.keys().copied().collect::<Vec<_>>();
+            for host in hosts {
+                generations.fail(host, outcomes, "personal commands are no longer configured");
+            }
+        }
+    }
+    exit
+}
+
+fn reject_request(request: Request, outcomes: &SyncSender<ActionOutcome>) {
+    match request {
+        Request::Invoke(invocation) => {
+            emit_failure(
+                *invocation,
+                outcomes,
+                "personal commands are not configured",
+            );
+        }
+        Request::Transform(request) => {
+            let _ = request
+                .response
+                .send(Err("custom transformations are not configured".into()));
+        }
+        Request::Reload => {}
+    }
+}
+
+/// Waits while personal commands are not configured for `hex.config.ts` to
+/// appear in `workspace`, which may not exist yet. Returns `false` on shutdown.
+/// `hex commands init` publishes the config only after its install finishes,
+/// so the config's appearance means the workspace is ready once it settles.
+fn wait_for_config(
+    workspace: &Path,
+    requests: &Receiver<Request>,
+    outcomes: &SyncSender<ActionOutcome>,
+    stop: &AtomicBool,
+) -> bool {
+    let config = workspace.join(CONFIG_FILE);
+    let mut fingerprint = None;
+    let mut settled_since = Instant::now();
+    while !stop.load(Ordering::Acquire) {
+        match requests.recv_timeout(POLL_INTERVAL) {
+            Ok(request) => reject_request(request, outcomes),
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+            Err(mpsc::RecvTimeoutError::Disconnected) => return false,
+        }
+        if stop.load(Ordering::Acquire) {
+            break;
+        }
+        if !config.is_file() {
+            fingerprint = None;
+            continue;
+        }
+        let next = workspace_fingerprint(workspace);
+        if fingerprint != Some(next) {
+            fingerprint = Some(next);
+            settled_since = Instant::now();
+            continue;
+        }
+        if settled_since.elapsed() >= RELOAD_DEBOUNCE {
+            return true;
+        }
+    }
+    false
 }
 
 /// Resolves the workspace, Bun, and managed SDK a host launch needs. `Ok(None)`
 /// means no `hex.config.ts` exists, so personal commands are not configured.
 fn prepare_host() -> Result<Option<HostPaths>> {
     let workspace = crate::app_paths::personal_commands_workspace()?;
-    let config = workspace.join("hex.config.ts");
+    let config = workspace.join(CONFIG_FILE);
     if !config.is_file() {
         return Ok(None);
     }
@@ -1618,15 +1803,16 @@ fn reload(
 }
 
 fn start_candidate(generation: u64, launch: &HostLaunch<'_>) -> Result<Candidate> {
-    let mut child = Command::new(launch.bun)
-        .arg(launch.host_entrypoint)
-        .arg(launch.config)
-        .current_dir(launch.workspace)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::inherit())
-        .spawn()
-        .wrap_err("could not start personal command host")?;
+    let mut child = spawn_host(
+        Command::new(launch.bun)
+            .arg(launch.host_entrypoint)
+            .arg(launch.config)
+            .current_dir(launch.workspace)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::inherit()),
+    )
+    .wrap_err("could not start personal command host")?;
     let Some(input) = child.stdin.take() else {
         kill_and_wait(&mut child);
         return Err(eyre!("host stdin unavailable"));
@@ -2378,8 +2564,38 @@ fn writer_queue_error(error: TrySendError<HostInput>) -> &'static str {
     }
 }
 
+/// Bun hosts not yet reaped. Quitting ends Hex with `_exit` without waiting
+/// for a host worker that misses its shutdown deadline, so
+/// [`kill_live_hosts`] stops whichever hosts are still running then.
+static LIVE_HOSTS: Mutex<std::collections::BTreeSet<u32>> =
+    Mutex::new(std::collections::BTreeSet::new());
+
+fn live_hosts() -> std::sync::MutexGuard<'static, std::collections::BTreeSet<u32>> {
+    LIVE_HOSTS.lock().unwrap_or_else(|error| error.into_inner())
+}
+
+fn spawn_host(command: &mut Command) -> std::io::Result<Child> {
+    let mut hosts = live_hosts();
+    let child = command.spawn()?;
+    hosts.insert(child.id());
+    Ok(child)
+}
+
+/// Kills every Bun host still running. A registered host is never reaped
+/// before it leaves the set, so its pid cannot have been reused.
+#[cfg(unix)]
+pub fn kill_live_hosts() {
+    for &pid in live_hosts().iter() {
+        if let Ok(pid) = libc::pid_t::try_from(pid) {
+            // SAFETY: `kill` takes plain integers and has no memory effects.
+            unsafe { libc::kill(pid, libc::SIGKILL) };
+        }
+    }
+}
+
 fn kill_and_wait(child: &mut Child) {
     let _ = child.kill();
+    live_hosts().remove(&child.id());
     let _ = child.wait();
 }
 
@@ -3668,6 +3884,138 @@ mod tests {
         assert!(child.try_wait().unwrap().is_some());
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn quitting_kills_hosts_whose_worker_never_stopped_them() {
+        use std::os::unix::process::ExitStatusExt;
+        let mut child = spawn_host(Command::new("/bin/sh").args(["-c", "sleep 30"])).unwrap();
+        kill_live_hosts();
+        let status = child.wait().unwrap();
+        assert_eq!(status.signal(), Some(libc::SIGKILL));
+        kill_and_wait(&mut child);
+        assert!(!live_hosts().contains(&child.id()));
+    }
+
+    fn spawn_config_wait(
+        workspace: PathBuf,
+        stop: Arc<AtomicBool>,
+    ) -> (SyncSender<Request>, thread::JoinHandle<bool>) {
+        let (request_sender, requests) = mpsc::sync_channel(4);
+        let (outcome_sender, _outcomes) = mpsc::sync_channel(4);
+        let handle =
+            thread::spawn(move || wait_for_config(&workspace, &requests, &outcome_sender, &stop));
+        (request_sender, handle)
+    }
+
+    fn finishes_within(handle: &thread::JoinHandle<bool>, timeout: Duration) -> bool {
+        let deadline = Instant::now() + timeout;
+        while !handle.is_finished() && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(20));
+        }
+        handle.is_finished()
+    }
+
+    #[test]
+    fn unconfigured_host_starts_when_config_appears_without_restart() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("hex-config-wait-{unique}"));
+        let workspace = root.join("hex");
+        let (_requests, handle) =
+            spawn_config_wait(workspace.clone(), Arc::new(AtomicBool::new(false)));
+
+        assert!(!finishes_within(&handle, POLL_INTERVAL * 2));
+        let entrypoint = workspace.join("node_modules/@hex/commands/src/bin.ts");
+        fs::create_dir_all(entrypoint.parent().unwrap()).unwrap();
+        fs::write(&entrypoint, "// host\n").unwrap();
+        assert!(!finishes_within(&handle, POLL_INTERVAL * 2));
+        fs::write(workspace.join("hex.config.ts"), "// config\n").unwrap();
+
+        assert!(finishes_within(&handle, Duration::from_secs(5)));
+        assert!(handle.join().unwrap());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn initialization_publishes_config_only_after_install() {
+        let (workspace, sdk) = workspace_upgrade_fixture();
+        let config = workspace.join(CONFIG_FILE);
+        let installed = initialize_workspace_at(&workspace, &sdk, |_| {
+            assert!(workspace.join("package.json").is_file());
+            assert!(!config.exists());
+            Ok(())
+        });
+        assert!(installed.is_ok());
+        assert_eq!(
+            fs::read_to_string(&config).unwrap(),
+            fs::read_to_string(sdk.join("workspace-template").join(CONFIG_FILE)).unwrap()
+        );
+
+        fs::remove_file(&config).unwrap();
+        let failed = initialize_workspace_at(&workspace, &sdk, |_| Err(eyre!("install failed")));
+        assert!(failed.is_err());
+        assert!(!config.exists());
+        assert!(
+            fs::read_dir(&workspace)
+                .unwrap()
+                .flatten()
+                .all(|entry| { !entry.file_name().to_string_lossy().ends_with(".tmp") })
+        );
+        fs::remove_dir_all(workspace.parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn deactivation_forgets_the_removed_host() {
+        let base = CommandConfig::new();
+        let mut runtime = RuntimeSnapshot::native(base.clone());
+        runtime.generation = 3;
+        let active = RwLock::new(Arc::new(runtime));
+        let transformations = TransformationClient::default();
+        let mut status = StatusSnapshot {
+            active_generation: Some(3),
+            catalog: vec![StatusCommand {
+                id: "open-notes".into(),
+                phrases: vec!["open notes".into()],
+                group: "Personal".into(),
+                description: String::new(),
+                context: StatusContext::Global,
+                execution: StatusExecution::Handler,
+            }],
+            host_state: HostState::Active,
+            last_reload_error: Some("old".into()),
+            ..StatusSnapshot::default()
+        };
+
+        deactivate(&mut status, &active, &base, &transformations);
+
+        assert_eq!(
+            status,
+            StatusSnapshot {
+                host_state: HostState::NotConfigured,
+                ..StatusSnapshot::default()
+            }
+        );
+        assert_eq!(active.read().unwrap().generation, 0);
+    }
+
+    #[test]
+    fn unconfigured_host_wait_stops_on_shutdown() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let workspace = std::env::temp_dir().join(format!("hex-config-stop-{unique}"));
+        let stop = Arc::new(AtomicBool::new(false));
+        let (requests, handle) = spawn_config_wait(workspace, stop.clone());
+        stop.store(true, Ordering::Release);
+        let _ = requests.try_send(Request::Reload);
+
+        assert!(finishes_within(&handle, Duration::from_secs(2)));
+        assert!(!handle.join().unwrap());
+    }
+
     #[test]
     fn workspace_effect_migration_preserves_user_fields_and_is_idempotent() {
         let (workspace, sdk) = workspace_upgrade_fixture();
@@ -3689,7 +4037,7 @@ mod tests {
             }
             fs::write(workspace.join("package.json"), manifest.to_string()).unwrap();
             fs::write(workspace.join("hex.config.ts"), "// user config\n").unwrap();
-            assert!(initialize_workspace_at(&workspace, &sdk).unwrap());
+            assert!(initialize_workspace_at(&workspace, &sdk, |_| Ok(())).unwrap());
             manifest["dependencies"]["effect"] = required.into();
             let bytes = fs::read(workspace.join("package.json")).unwrap();
             assert_eq!(
@@ -3700,7 +4048,7 @@ mod tests {
                 fs::read_to_string(workspace.join("hex.config.ts")).unwrap(),
                 "// user config\n"
             );
-            assert!(!initialize_workspace_at(&workspace, &sdk).unwrap());
+            assert!(!initialize_workspace_at(&workspace, &sdk, |_| Ok(())).unwrap());
             assert_eq!(fs::read(workspace.join("package.json")).unwrap(), bytes);
         }
         fs::remove_dir_all(workspace.parent().unwrap()).unwrap();
@@ -3709,7 +4057,7 @@ mod tests {
     #[test]
     fn unchanged_sdk_with_stale_effect_requires_install_on_startup() {
         let (workspace, sdk) = workspace_upgrade_fixture();
-        assert!(initialize_workspace_at(&workspace, &sdk).unwrap());
+        assert!(initialize_workspace_at(&workspace, &sdk, |_| Ok(())).unwrap());
         let sdk_before = directory_manifest(&workspace.join(".hex-sdk")).unwrap();
         fs::write(
             workspace.join("package.json"),
@@ -3765,7 +4113,7 @@ mod tests {
     #[test]
     fn workspace_effect_conflicts_leave_manifest_config_and_sdk_untouched() {
         let (workspace, sdk) = workspace_upgrade_fixture();
-        assert!(initialize_workspace_at(&workspace, &sdk).unwrap());
+        assert!(initialize_workspace_at(&workspace, &sdk, |_| Ok(())).unwrap());
         fs::write(sdk.join("dist/bin.js"), "// new SDK\n").unwrap();
         let before = directory_manifest(&workspace.join(".hex-sdk")).unwrap();
         for invalid in [
@@ -3775,7 +4123,7 @@ mod tests {
             r#"{"devDependencies":[]}"#,
         ] {
             fs::write(workspace.join("package.json"), invalid).unwrap();
-            assert!(initialize_workspace_at(&workspace, &sdk).is_err());
+            assert!(initialize_workspace_at(&workspace, &sdk, |_| Ok(())).is_err());
             assert_eq!(
                 fs::read_to_string(workspace.join("package.json")).unwrap(),
                 invalid
@@ -3829,7 +4177,7 @@ mod tests {
     #[test]
     fn workspace_rejects_indirect_effect_selectors_but_preserves_scoped_packages() {
         let (workspace, sdk) = workspace_upgrade_fixture();
-        assert!(initialize_workspace_at(&workspace, &sdk).unwrap());
+        assert!(initialize_workspace_at(&workspace, &sdk, |_| Ok(())).unwrap());
         fs::write(sdk.join("dist/bin.js"), "// new SDK\n").unwrap();
         let before = directory_manifest(&workspace.join(".hex-sdk")).unwrap();
         for section in ["overrides", "resolutions"] {
@@ -3845,7 +4193,7 @@ mod tests {
                 manifest[section] = selectors;
                 let original = manifest.to_string();
                 fs::write(workspace.join("package.json"), &original).unwrap();
-                let error = initialize_workspace_at(&workspace, &sdk)
+                let error = initialize_workspace_at(&workspace, &sdk, |_| Ok(()))
                     .unwrap_err()
                     .to_string();
                 assert!(
@@ -3874,7 +4222,7 @@ mod tests {
             "overrides": unrelated, "resolutions": unrelated
         });
         fs::write(workspace.join("package.json"), manifest.to_string()).unwrap();
-        assert!(initialize_workspace_at(&workspace, &sdk).unwrap());
+        assert!(initialize_workspace_at(&workspace, &sdk, |_| Ok(())).unwrap());
         manifest["dependencies"]["effect"] = "4.0.0-rc.999".into();
         assert_eq!(
             serde_json::from_slice::<serde_json::Value>(
@@ -3894,7 +4242,7 @@ mod tests {
     #[test]
     fn workspace_only_rejects_manifest_symlinks_that_need_migration() {
         let (workspace, sdk) = workspace_upgrade_fixture();
-        assert!(initialize_workspace_at(&workspace, &sdk).unwrap());
+        assert!(initialize_workspace_at(&workspace, &sdk, |_| Ok(())).unwrap());
         fs::write(sdk.join("dist/bin.js"), "// new SDK\n").unwrap();
         let before = directory_manifest(&workspace.join(".hex-sdk")).unwrap();
         let path = workspace.join("package.json");
@@ -3908,7 +4256,7 @@ mod tests {
                 fs::remove_file(&target).unwrap();
             }
             std::os::unix::fs::symlink(&target, &path).unwrap();
-            let error = initialize_workspace_at(&workspace, &sdk)
+            let error = initialize_workspace_at(&workspace, &sdk, |_| Ok(()))
                 .unwrap_err()
                 .to_string();
             assert!(error.contains("is a symlink"), "{error}");
@@ -3931,8 +4279,8 @@ mod tests {
         let current = r#"{"dependencies":{"effect":"4.0.0-rc.999"}}"#;
         fs::write(&target, current).unwrap();
         std::os::unix::fs::symlink(&target, &path).unwrap();
-        assert!(initialize_workspace_at(&workspace, &sdk).unwrap());
-        assert!(!initialize_workspace_at(&workspace, &sdk).unwrap());
+        assert!(initialize_workspace_at(&workspace, &sdk, |_| Ok(())).unwrap());
+        assert!(!initialize_workspace_at(&workspace, &sdk, |_| Ok(())).unwrap());
         assert_eq!(fs::read_link(&path).unwrap(), target);
         assert_eq!(fs::read_to_string(&target).unwrap(), current);
         assert_eq!(
@@ -3964,7 +4312,7 @@ mod tests {
     #[test]
     fn workspace_effect_write_failure_is_retryable_after_sdk_refresh() {
         let (workspace, sdk) = workspace_upgrade_fixture();
-        assert!(initialize_workspace_at(&workspace, &sdk).unwrap());
+        assert!(initialize_workspace_at(&workspace, &sdk, |_| Ok(())).unwrap());
         fs::write(sdk.join("dist/bin.js"), "// new SDK\n").unwrap();
         let path = workspace.join("package.json");
         let original = r#"{"dependencies":{"effect":"4.0.0-beta.97"}}"#;
@@ -4022,7 +4370,7 @@ mod tests {
     #[test]
     fn invalid_sdk_effect_requirement_does_not_mutate_workspace() {
         let (workspace, sdk) = workspace_upgrade_fixture();
-        assert!(initialize_workspace_at(&workspace, &sdk).unwrap());
+        assert!(initialize_workspace_at(&workspace, &sdk, |_| Ok(())).unwrap());
         let before = directory_manifest(&workspace).unwrap();
         for invalid in [
             "{",
@@ -4085,7 +4433,7 @@ mod tests {
             _ => ("src/bin.ts", "src/index.ts"),
         };
 
-        assert!(initialize_workspace_at(&workspace, &sdk).unwrap());
+        assert!(initialize_workspace_at(&workspace, &sdk, |_| Ok(())).unwrap());
         assert!(workspace.join(".hex-sdk").join(bin).is_file());
         assert!(workspace.join("package.json").is_file());
         assert!(workspace.join("tsconfig.json").is_file());
@@ -4096,13 +4444,13 @@ mod tests {
                 .is_file()
         );
         fs::write(workspace.join("hex.config.ts"), "// user config\n").unwrap();
-        assert!(!initialize_workspace_at(&workspace, &sdk).unwrap());
+        assert!(!initialize_workspace_at(&workspace, &sdk, |_| Ok(())).unwrap());
         assert_eq!(
             fs::read_to_string(workspace.join("hex.config.ts")).unwrap(),
             "// user config\n"
         );
         fs::write(workspace.join(".hex-sdk").join(index), "stale SDK\n").unwrap();
-        assert!(initialize_workspace_at(&workspace, &sdk).unwrap());
+        assert!(initialize_workspace_at(&workspace, &sdk, |_| Ok(())).unwrap());
         assert_eq!(
             fs::read(workspace.join(".hex-sdk").join(index)).unwrap(),
             fs::read(sdk.join(index)).unwrap()

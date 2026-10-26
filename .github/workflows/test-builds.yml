@@ -1,0 +1,125 @@
+name: Test builds
+
+# Downloadable, unsigned builds of dev for teammates to try: Hex Test.app
+# for Apple silicon Macs, Windows x64 and ARM64 executables and installers,
+# and the Linux x86_64 executable. Nothing is published, signed with a
+# release key, or uploaded anywhere but this run's artifacts. See
+# docs/test-builds.md.
+on:
+  push:
+    branches: [dev]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: test-builds-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  resolve:
+    runs-on: ubuntu-24.04
+    outputs:
+      sha: ${{ steps.resolve.outputs.sha }}
+      short: ${{ steps.resolve.outputs.short }}
+      version: ${{ steps.resolve.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - id: resolve
+        run: |
+          {
+            echo "sha=$(git rev-parse HEAD)"
+            echo "short=$(git rev-parse --short=7 HEAD)"
+            echo "version=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')"
+          } >> "$GITHUB_OUTPUT"
+
+  desktop:
+    needs: resolve
+    # Build desktop's Windows packaging job can sign for releases; test
+    # builds never set sign-windows, so this token goes unused.
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/build-desktop.yml
+    with:
+      sha: ${{ needs.resolve.outputs.sha }}
+      version: ${{ needs.resolve.outputs.version }}
+      test-build: true
+      artifact-prefix: hex-test-${{ needs.resolve.outputs.short }}
+      retention-days: 14
+
+  macos:
+    name: macOS arm64
+    needs: resolve
+    runs-on: macos-26
+    timeout-minutes: 90
+    env:
+      HEX_TEST_BUILD: "1"
+      HEX_VERSION: ${{ needs.resolve.outputs.version }}
+      DMG: Hex-Test-${{ needs.resolve.outputs.short }}-arm64.dmg
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.resolve.outputs.sha }}
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: test-build
+          cache-on-failure: true
+      - uses: astral-sh/setup-uv@v6
+      - uses: oven-sh/setup-bun@v2
+      - name: Install the Metal toolchain
+        run: xcrun --sdk macosx metal --version || xcodebuild -downloadComponent MetalToolchain
+      - name: Build Hex Test.app
+        run: |
+          scripts/setup.sh
+          bundle=$(scripts/build-app.sh)
+          "$bundle/Contents/MacOS/hex" --version
+          scripts/smoke-macos-app.sh "$bundle"
+          mkdir -p dist/staging
+          /usr/bin/ditto "$bundle" "dist/staging/$(basename "$bundle")"
+          ln -s /Applications dist/staging/Applications
+          hdiutil create -quiet -fs APFS -format ULFO -volname "Hex Test" -srcfolder dist/staging "dist/$DMG"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: hex-test-${{ needs.resolve.outputs.short }}-macos-arm64
+          path: dist/${{ env.DMG }}
+          retention-days: 14
+          if-no-files-found: error
+
+  summary:
+    needs: [resolve, desktop, macos]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: read
+    steps:
+      - name: List the downloads
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHORT: ${{ needs.resolve.outputs.short }}
+          VERSION: ${{ needs.resolve.outputs.version }}
+          RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          link() {
+            id=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts" \
+              --jq ".artifacts[] | select(.name == \"hex-test-$SHORT-$1\") | .id")
+            if [ -n "$id" ]; then
+              echo "[hex-test-$SHORT-$1]($RUN/artifacts/$id)"
+            else
+              echo "hex-test-$SHORT-$1 (build failed)"
+            fi
+          }
+          cat >> "$GITHUB_STEP_SUMMARY" <<EOF
+          ## Hex test builds of $SHORT (version $VERSION)
+
+          Unsigned builds for testing; they never update themselves. Sign in to GitHub to download. Kept 14 days. Full instructions: [docs/test-builds.md]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/blob/dev/docs/test-builds.md).
+
+          - **macOS (Apple silicon):** $(link macos-arm64). Quit Hex, open the DMG, drag **Hex Test** to Applications, run \`xattr -dr com.apple.quarantine "/Applications/Hex Test.app"\`, then open it and grant the permissions again.
+          - **Windows x64:** $(link windows-x86_64). **Windows ARM64:** $(link windows-aarch64). Quit Hex from the tray, run \`Hex-Setup-$VERSION-windows-<x64|arm64>.exe\`, and choose More info, Run anyway at the SmartScreen warning. The bare \`Hex-*.exe\` also runs without installing.
+          - **Linux x86_64 (Arch):** $(link linux-x86_64). Run \`hex quit\`, \`chmod +x hex-*-linux-x64\`, start it with \`./hex-*-linux-x64 service\`, and open the window with \`./hex-*-linux-x64\` in another terminal.
+          EOF

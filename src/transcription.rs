@@ -2,7 +2,7 @@ use color_eyre::eyre::Result;
 use serde::{Deserialize, Serialize};
 
 use crate::apple_speech::AppleSpeech;
-use crate::dictation::DictationProtocol;
+use crate::dictation::{DictationProtocol, VoiceTranscript};
 use crate::parakeet::Parakeet;
 use crate::transcription_models::{
     ModelRuntime, TranscriptionModelId, TranscriptionSelection, validate,
@@ -60,34 +60,40 @@ impl Transcriber {
         }
     }
 
+    /// Brings an idle GGUF model's weights back before audio arrives (see
+    /// [`Parakeet::prewarm`]). Apple Speech has no weights of Hex's to warm.
+    pub fn prewarm(&mut self) -> Result<()> {
+        match self {
+            Self::Gguf(model) => model.prewarm(),
+            Self::AppleSpeech(_) => Ok(()),
+        }
+    }
+
     /// Transcribe normalized 16 kHz audio. Backend padding is applied once here,
     /// before GGUF chunking or any voice-control retranscription.
-    pub fn transcribe(&mut self, samples: Vec<f32>) -> Result<String> {
-        self.transcribe_with_protocol(samples, None)
+    pub fn transcribe(&mut self, mut samples: Vec<f32>) -> Result<String> {
+        match self {
+            Self::Gguf(model) => {
+                prepare_gguf_samples(&mut samples, model.model_id());
+                model.transcribe(&samples)
+            }
+            Self::AppleSpeech(model) => model.transcribe(&samples).map(|result| result.text),
+        }
     }
 
     pub fn transcribe_voice(
         &mut self,
-        samples: Vec<f32>,
-        protocol: &DictationProtocol,
-    ) -> Result<String> {
-        self.transcribe_with_protocol(samples, Some(protocol))
-    }
-
-    fn transcribe_with_protocol(
-        &mut self,
         mut samples: Vec<f32>,
-        protocol: Option<&DictationProtocol>,
-    ) -> Result<String> {
+        protocol: &DictationProtocol,
+    ) -> Result<VoiceTranscript> {
         match self {
             Self::Gguf(model) => {
                 prepare_gguf_samples(&mut samples, model.model_id());
-                match protocol {
-                    Some(protocol) => model.transcribe_voice(&samples, protocol),
-                    None => model.transcribe(&samples),
-                }
+                model.transcribe_voice(&samples, protocol)
             }
-            Self::AppleSpeech(model) => model.transcribe(&samples).map(|result| result.text),
+            Self::AppleSpeech(model) => model
+                .transcribe(&samples)
+                .map(|result| VoiceTranscript::heard(result.text, protocol)),
         }
     }
 
@@ -149,6 +155,14 @@ impl WarmTranscriber {
         Ok(Self {
             active: Some(Transcriber::load()?),
         })
+    }
+
+    /// The selection of the warm model when it is a GGUF model.
+    pub(crate) fn gguf_selection(&self) -> Option<&TranscriptionSelection> {
+        match &self.active {
+            Some(Transcriber::Gguf(model)) => model.selection(),
+            _ => None,
+        }
     }
 
     /// Stream options of the warm model, when it can stream on its device.

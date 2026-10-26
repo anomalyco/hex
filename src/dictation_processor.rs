@@ -23,6 +23,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::context::{ContextSelector, ContextSnapshot};
 use crate::text_replacements::ReplacementSet;
+use crate::vocabulary::VocabularyEntry;
 
 const PROTOCOL_PROMPT: &str = "You transform dictated speech into replacement text. Return only the text that should be pasted. Do not add an explanation, label, alternative, or Markdown fence.";
 const VOICE_ACTION_PROTOCOL_PROMPT: &str = "You execute a one-off voice instruction. When selected text is provided, transform or use it as instructed. When no text is selected, generate the requested text. Return only the exact paste-ready result without an explanation, label, alternative, or Markdown fence.";
@@ -35,32 +36,6 @@ const SERVICE_INFO_ENDPOINTS: [&str; 3] = ["/api/info", "/api/status", "/api/hea
 const GENERATE_ENDPOINTS: [&str; 2] = ["/api/experimental/generate", "/api/generate"];
 
 pub use crate::app_settings::DictationPostProcessing as PostProcessingSettings;
-
-#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
-impl PostProcessingSettings {
-    /// Applies an edited deadline; text that is not a number keeps the last
-    /// value, and zero clamps to one second.
-    pub fn update_deadline_from_text(&mut self, text: &str) -> bool {
-        let Ok(seconds) = text.trim().parse::<u64>() else {
-            return false;
-        };
-        let seconds = seconds.max(1);
-        if self.deadline_seconds == seconds {
-            return false;
-        }
-        self.deadline_seconds = seconds;
-        true
-    }
-
-    /// A variant needs a concrete model, so choosing one while the profile
-    /// follows the default pins the current default model.
-    pub fn set_variant(&mut self, variant: Option<String>, default_model: Option<&str>) {
-        if variant.is_some() && self.model.is_none() {
-            self.model = default_model.map(str::to_owned);
-        }
-        self.variant = variant;
-    }
-}
 
 #[derive(Clone)]
 pub struct Profile {
@@ -123,9 +98,22 @@ impl Profile {
         self
     }
 
+    pub(crate) fn from_mode(mode: &crate::app_settings::DictationMode) -> Self {
+        let name = if mode.name.trim().is_empty() {
+            "Untitled mode"
+        } else {
+            &mode.name
+        };
+        Self::configured(
+            name,
+            ReplacementSet::new(&mode.replacements),
+            mode.transformations.clone(),
+            &mode.post_processing,
+        )
+    }
+
     /// Builds a runtime profile from persisted settings. A malformed model key
     /// falls back to the default model rather than disabling the mode.
-    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
     pub(crate) fn configured(
         name: impl Into<String>,
         replacements: ReplacementSet,
@@ -308,7 +296,7 @@ impl Profiles {
                 transformations: profile.transformations.clone(),
             };
         }
-        let prompt = prompt(profile, &corrected, context);
+        let prompt = prompt(profile, &corrected, context, &crate::vocabulary::entries());
         let (text, observation) = generate_observed(
             &prompt,
             profile.model.as_ref(),
@@ -460,16 +448,6 @@ impl ModelChoice {
 }
 
 impl ModelCatalog {
-    /// Variants for the explicit selection, or for the default model when the
-    /// profile leaves the model unset.
-    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
-    pub fn variants_for(&self, selected_key: Option<&str>) -> &[String] {
-        selected_key
-            .or(self.default_key.as_deref())
-            .and_then(|key| self.models.iter().find(|choice| choice.key == key))
-            .map_or(&[], |choice| choice.variants.as_slice())
-    }
-
     pub fn recommended_variant_for(&self, key: &str) -> Option<&str> {
         let choice = self.models.iter().find(|choice| choice.key == key)?;
         recommended_variant_for_choice(choice)
@@ -707,6 +685,18 @@ fn is_executable(path: &std::path::Path) -> bool {
         .is_ok_and(|metadata| metadata.is_file() && metadata.permissions().mode() & 0o111 != 0)
 }
 
+fn decode_api_response<T: for<'de> Deserialize<'de>>(path: &str, body: &[u8]) -> Result<T> {
+    let value: serde_json::Value = serde_json::from_slice(body)
+        .wrap_err_with(|| format!("OpenCode {path} returned invalid JSON"))?;
+    if let Some(message) = value.get("message").and_then(|message| message.as_str())
+        && value.get("_tag").is_some()
+    {
+        return Err(eyre!("OpenCode {path} failed: {message}"));
+    }
+    serde_json::from_value(value)
+        .wrap_err_with(|| format!("OpenCode {path} returned an invalid response"))
+}
+
 #[cfg(not(target_os = "windows"))]
 fn opencode_api<T: for<'de> Deserialize<'de>>(
     endpoint: &str,
@@ -724,15 +714,7 @@ fn opencode_api<T: for<'de> Deserialize<'de>>(
         Duration::from_secs(10),
         &AtomicBool::new(false),
     )?;
-    let value: serde_json::Value = serde_json::from_slice(&response.body)
-        .wrap_err_with(|| format!("OpenCode {path} returned invalid JSON"))?;
-    if let Some(message) = value.get("message").and_then(|message| message.as_str())
-        && value.get("_tag").is_some()
-    {
-        return Err(eyre!("OpenCode {path} failed: {message}"));
-    }
-    serde_json::from_value(value)
-        .wrap_err_with(|| format!("OpenCode {path} returned an invalid response"))
+    decode_api_response(path, &response.body)
 }
 
 #[cfg(not(target_os = "windows"))]
@@ -820,13 +802,40 @@ impl Processed {
     }
 }
 
-fn prompt(profile: &Profile, transcript: &str, context: &ContextSnapshot) -> String {
+fn prompt(
+    profile: &Profile,
+    transcript: &str,
+    context: &ContextSnapshot,
+    vocabulary: &[VocabularyEntry],
+) -> String {
     let application = context.application.as_deref().unwrap_or("unknown");
     let host = context.browser_host().unwrap_or("none");
     format!(
-        "{PROTOCOL_PROMPT}\n\nProfile instructions:\n{}\n\nForeground application: {application}\nBrowser host: {host}\n\nRaw transcript:\n<transcript>\n{transcript}\n</transcript>",
-        profile.prompt
+        "{PROTOCOL_PROMPT}\n\nProfile instructions:\n{}\n\n{}Foreground application: {application}\nBrowser host: {host}\n\nRaw transcript:\n<transcript>\n{transcript}\n</transcript>",
+        profile.prompt,
+        vocabulary_lines(vocabulary)
     )
+}
+
+/// The vocabulary as prompt lines, so a rewrite spells its terms right;
+/// nothing when it is empty (or its experiment is off).
+fn vocabulary_lines(vocabulary: &[VocabularyEntry]) -> String {
+    if vocabulary.is_empty() {
+        return String::new();
+    }
+    let terms = vocabulary
+        .iter()
+        .map(|entry| match entry.sounds_like.as_slice() {
+            [] => entry.term.clone(),
+            spellings => format!(
+                "{} (may be transcribed as {})",
+                entry.term,
+                spellings.join(", ")
+            ),
+        })
+        .collect::<Vec<_>>()
+        .join("; ");
+    format!("Vocabulary (spell these exactly when the speaker means them): {terms}\n\n")
 }
 
 fn voice_action_prompt(
@@ -893,49 +902,72 @@ fn generate_cancellable(
     let started = Instant::now();
     let (endpoint, password) =
         discover_opencode_service(deadline.saturating_sub(started.elapsed()), cancelled)?;
+    generate_with_candidates(
+        prompt,
+        model,
+        || ranked_candidates_for_endpoint(&endpoint, &password),
+        started,
+        deadline,
+        cancelled,
+        |data, remaining, cancelled| {
+            post_generation(&endpoint, &password, data, remaining, cancelled)
+        },
+    )
+}
+
+fn generate_with_candidates(
+    prompt: &str,
+    model: Option<&Model>,
+    candidates: impl FnOnce() -> Vec<Model>,
+    started: Instant,
+    deadline: Duration,
+    cancelled: &AtomicBool,
+    post: impl FnMut(&str, Duration, &AtomicBool) -> Result<Response>,
+) -> Result<String> {
     if model.is_none() {
-        let candidates = ranked_candidates_for_endpoint(&endpoint, &password);
+        let candidates = candidates();
         if !candidates.is_empty() {
             return generate_with_ranked_candidates(
                 prompt,
                 &candidates,
-                &endpoint,
-                &password,
                 started,
                 deadline,
                 cancelled,
+                post,
             );
         }
     }
-    generate_single_model(
-        prompt, model, &endpoint, &password, started, deadline, cancelled,
-    )
+    generate_single_model(prompt, model, started, deadline, cancelled, post)
 }
 
-#[cfg(not(target_os = "windows"))]
+fn remaining_generation_deadline(started: Instant, deadline: Duration) -> Result<Duration> {
+    let remaining = deadline.saturating_sub(started.elapsed());
+    if remaining.is_zero() {
+        Err(eyre!(
+            "opencode2 generation exceeded {} seconds",
+            deadline.as_secs()
+        ))
+    } else {
+        Ok(remaining)
+    }
+}
+
 fn generate_with_ranked_candidates(
     prompt: &str,
     candidates: &[Model],
-    endpoint: &str,
-    password: &str,
     started: Instant,
     deadline: Duration,
     cancelled: &AtomicBool,
+    mut post: impl FnMut(&str, Duration, &AtomicBool) -> Result<Response>,
 ) -> Result<String> {
     let mut last_error = None;
     for (index, candidate) in candidates.iter().enumerate() {
-        let remaining = deadline.saturating_sub(started.elapsed());
-        if remaining.is_zero() {
-            return Err(eyre!(
-                "opencode2 generation exceeded {} seconds",
-                deadline.as_secs()
-            ));
-        }
+        let remaining = remaining_generation_deadline(started, deadline)?;
         let data = serde_json::to_string(&Request {
             prompt,
             model: Some(candidate),
         })?;
-        match post_generation(endpoint, password, &data, remaining, cancelled)? {
+        match post(&data, remaining, cancelled)? {
             Response::Success { data } => return Ok(data.text),
             Response::Error { message } => {
                 if index + 1 < candidates.len() {
@@ -953,28 +985,19 @@ fn generate_with_ranked_candidates(
     Err(last_error.unwrap_or_else(|| eyre!("no OpenCode models available")))
 }
 
-#[cfg(not(target_os = "windows"))]
 fn generate_single_model(
     prompt: &str,
     model: Option<&Model>,
-    endpoint: &str,
-    password: &str,
     started: Instant,
     deadline: Duration,
     cancelled: &AtomicBool,
+    mut post: impl FnMut(&str, Duration, &AtomicBool) -> Result<Response>,
 ) -> Result<String> {
     let request = Request { prompt, model };
     let data = serde_json::to_string(&request)?;
     for attempt in 0..2 {
-        let remaining = deadline.saturating_sub(started.elapsed());
-        if remaining.is_zero() {
-            return Err(eyre!(
-                "opencode2 generation exceeded {} seconds",
-                deadline.as_secs()
-            ));
-        }
-        let response = post_generation(endpoint, password, &data, remaining, cancelled)?;
-        match response {
+        let remaining = remaining_generation_deadline(started, deadline)?;
+        match post(&data, remaining, cancelled)? {
             Response::Success { data } => return Ok(data.text),
             Response::Error { message } if attempt == 0 && retryable_generation_error(&message) => {
                 tracing::warn!(%message, "OpenCode model unavailable during startup; retrying");
@@ -1040,15 +1063,34 @@ fn discover_opencode_service(
     discover_opencode_service_with(
         &opencode_executable(),
         &workspace,
+        default_opencode_state_dir().as_deref(),
         deadline.saturating_sub(started.elapsed()),
         cancelled,
     )
 }
 
+/// OpenCode's own state directory for Hex's environment: `$XDG_STATE_HOME`
+/// when absolute, else `~/.local/state`, then `opencode`.
+#[cfg(not(target_os = "windows"))]
+fn default_opencode_state_dir() -> Option<PathBuf> {
+    let root = std::env::var_os("XDG_STATE_HOME")
+        .map(PathBuf::from)
+        .filter(|path| path.is_absolute())
+        .or_else(|| dirs::home_dir().map(|home| home.join(".local/state")))?;
+    Some(root.join("opencode"))
+}
+
+/// Asks the CLI which service it reaches, then reads that service's private
+/// registration for the URL and password. The registration is looked up in
+/// the state directory the CLI reports and in OpenCode's default one: a
+/// wrapper can reject `debug paths` or point the CLI's own state elsewhere
+/// while it still reaches the default service. Only a registration matching
+/// the live server's pid and version counts.
 #[cfg(not(target_os = "windows"))]
 fn discover_opencode_service_with(
     executable: &Path,
     workspace: &Path,
+    default_state: Option<&Path>,
     deadline: Duration,
     cancelled: &AtomicBool,
 ) -> Result<(String, String)> {
@@ -1088,7 +1130,7 @@ fn discover_opencode_service_with(
     let (newest, older) = SERVICE_INFO_ENDPOINTS.split_first().expect("endpoints");
     let mut output = run(&["api", "get", newest])?;
     // Older OpenCode versions expose the service info under an earlier name.
-    // Only an exact CLI 404 diagnostic tries the next name; other failures are final.
+    // Only a CLI 404 diagnostic tries the next name; other failures are final.
     for endpoint in older {
         if !endpoint_is_missing(&output) {
             break;
@@ -1097,21 +1139,39 @@ fn discover_opencode_service_with(
     }
     let info: ServiceInfo = serde_json::from_str(&decode(output)?)
         .map_err(|_| eyre!("OpenCode returned an invalid service info response"))?;
-    let paths = decode(run(&["debug", "paths"])?)?;
-    let state = paths
-        .lines()
-        .find_map(|line| {
+    // A failed `debug paths` is not final: the default state directory remains.
+    let reported_state = decode(run(&["debug", "paths"])?).ok().and_then(|paths| {
+        paths.lines().find_map(|line| {
             let (key, value) = line.split_once(char::is_whitespace)?;
-            (key == "state").then(|| Path::new(value.trim_start()))
+            let path = PathBuf::from(value.trim_start());
+            (key == "state" && path.is_absolute()).then_some(path)
         })
-        .filter(|path| path.is_absolute())
-        .ok_or_else(|| eyre!("OpenCode did not report its state directory"))?;
-    read_service_registration(state, info.pid, &info.version)
+    });
+    let mut states: Vec<&Path> = reported_state.as_deref().into_iter().collect();
+    if let Some(default_state) = default_state
+        && !states.contains(&default_state)
+    {
+        states.push(default_state);
+    }
+    let mut last_error = eyre!("OpenCode did not report its state directory");
+    for state in states {
+        match read_service_registration(state, info.pid, &info.version) {
+            Ok(endpoint) => return Ok(endpoint),
+            Err(error) => last_error = error,
+        }
+    }
+    Err(last_error)
 }
 
+/// The CLI reports a missing route as a final `HTTP 404 Not Found` stderr
+/// line; earlier lines may carry warnings such as a client/server version skew.
 fn endpoint_is_missing(output: &CommandOutput) -> bool {
     !output.status.success()
-        && String::from_utf8_lossy(&output.stderr).trim() == "HTTP 404 Not Found"
+        && String::from_utf8_lossy(&output.stderr)
+            .lines()
+            .map(str::trim)
+            .rfind(|line| !line.is_empty())
+            == Some("HTTP 404 Not Found")
 }
 
 #[cfg(not(target_os = "windows"))]
@@ -1568,9 +1628,8 @@ mod cli {
 
     use super::{
         CommandOutput, DefaultModelResponse, GENERATE_ENDPOINTS, Model, ModelCatalog,
-        ModelsResponse, Request, Response, absolute_path, build_model_catalog,
-        encode_uri_component, endpoint_is_missing, read_output, retryable_generation_error,
-        wait_for_generation_retry,
+        ModelsResponse, Response, absolute_path, build_model_catalog, decode_api_response,
+        encode_uri_component, endpoint_is_missing, generate_with_candidates, read_output,
     };
 
     /// Binary names the CLI ships under, newest first; any `opencode2` beats
@@ -1615,80 +1674,15 @@ mod cli {
         deadline: Duration,
         cancelled: &AtomicBool,
     ) -> Result<String> {
-        let started = Instant::now();
-        if model.is_none() {
-            let candidates = ranked_candidates();
-            if !candidates.is_empty() {
-                return generate_with_ranked_candidates(
-                    prompt,
-                    &candidates,
-                    started,
-                    deadline,
-                    cancelled,
-                );
-            }
-        }
-        let data = serde_json::to_string(&Request { prompt, model })?;
-        for attempt in 0..2 {
-            let remaining = remaining(started, deadline)?;
-            match post_generation(&data, remaining, cancelled)? {
-                Response::Success { data } => return Ok(data.text),
-                Response::Error { message }
-                    if attempt == 0 && retryable_generation_error(&message) =>
-                {
-                    tracing::warn!(%message, "OpenCode model unavailable during startup; retrying");
-                    wait_for_generation_retry(started, deadline, cancelled)?;
-                }
-                Response::Error { message } => {
-                    return Err(eyre!("OpenCode generation failed: {message}"));
-                }
-            }
-        }
-        unreachable!("generation loop returns on its second attempt")
-    }
-
-    fn generate_with_ranked_candidates(
-        prompt: &str,
-        candidates: &[Model],
-        started: Instant,
-        deadline: Duration,
-        cancelled: &AtomicBool,
-    ) -> Result<String> {
-        let mut last_error = None;
-        for (index, candidate) in candidates.iter().enumerate() {
-            let remaining = remaining(started, deadline)?;
-            let data = serde_json::to_string(&Request {
-                prompt,
-                model: Some(candidate),
-            })?;
-            match post_generation(&data, remaining, cancelled)? {
-                Response::Success { data } => return Ok(data.text),
-                Response::Error { message } => {
-                    if index + 1 < candidates.len() {
-                        tracing::warn!(
-                            provider = %candidate.provider,
-                            model = %candidate.id,
-                            %message,
-                            "ranked OpenCode model failed; trying next available candidate"
-                        );
-                    }
-                    last_error = Some(eyre!("OpenCode generation failed: {message}"));
-                }
-            }
-        }
-        Err(last_error.unwrap_or_else(|| eyre!("no OpenCode models available")))
-    }
-
-    fn remaining(started: Instant, deadline: Duration) -> Result<Duration> {
-        let remaining = deadline.saturating_sub(started.elapsed());
-        if remaining.is_zero() {
-            Err(eyre!(
-                "opencode2 generation exceeded {} seconds",
-                deadline.as_secs()
-            ))
-        } else {
-            Ok(remaining)
-        }
+        generate_with_candidates(
+            prompt,
+            model,
+            ranked_candidates,
+            Instant::now(),
+            deadline,
+            cancelled,
+            post_generation,
+        )
     }
 
     /// Posts to the newest generation route, falling back to the older name
@@ -1737,15 +1731,7 @@ mod cli {
                 String::from_utf8_lossy(&output.stderr).trim()
             ));
         }
-        let value: serde_json::Value = serde_json::from_slice(&output.stdout)
-            .wrap_err_with(|| format!("OpenCode {path} returned invalid JSON"))?;
-        if let Some(message) = value.get("message").and_then(|message| message.as_str())
-            && value.get("_tag").is_some()
-        {
-            return Err(eyre!("OpenCode {path} failed: {message}"));
-        }
-        serde_json::from_value(value)
-            .wrap_err_with(|| format!("OpenCode {path} returned an invalid response"))
+        decode_api_response(path, &output.stdout)
     }
 
     fn opencode_command() -> Result<Command> {
@@ -2083,11 +2069,53 @@ mod tests {
             .browser_host("x.com", Profile::new("x", "x prompt"))
     }
 
+    /// Writes an executable fixture script from a child process. Writing it
+    /// here would leave its descriptor open in children other test threads
+    /// fork meanwhile, and running it would then fail with "Text file busy".
+    #[cfg(not(target_os = "windows"))]
+    fn write_script(path: &Path, contents: &str) {
+        use std::io::Write;
+        let mut child = Command::new("/bin/sh")
+            .args(["-c", "cat > \"$1\" && chmod 755 \"$1\"", "sh"])
+            .arg(path)
+            .stdin(Stdio::piped())
+            .spawn()
+            .unwrap();
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(contents.as_bytes())
+            .unwrap();
+        assert!(child.wait().unwrap().success());
+    }
+
     #[cfg(not(target_os = "windows"))]
     fn fake_executable(path: &Path) {
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         fs::write(path, "#!/bin/sh\n").unwrap();
         fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    /// Accepts one connection, failing instead of hanging when the client
+    /// under test never connects.
+    #[cfg(not(target_os = "windows"))]
+    fn accept_within(listener: &std::net::TcpListener) -> std::net::TcpStream {
+        listener.set_nonblocking(true).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            match listener.accept() {
+                Ok((stream, _)) => {
+                    stream.set_nonblocking(false).unwrap();
+                    return stream;
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    assert!(Instant::now() < deadline, "the client never connected");
+                    thread::sleep(Duration::from_millis(5));
+                }
+                Err(error) => panic!("accept failed: {error}"),
+            }
+        }
     }
 
     /// Reads one authenticated request and returns its headers and body.
@@ -2212,7 +2240,7 @@ mod tests {
         assert!(models.len() > 256 * 1024);
         let server = thread::spawn(move || {
             for (path, response) in [("/api/model", models), ("/api/model/default", default)] {
-                let (mut stream, _) = listener.accept().unwrap();
+                let mut stream = accept_within(&listener);
                 stream
                     .set_write_timeout(Some(Duration::from_secs(5)))
                     .unwrap();
@@ -2495,10 +2523,36 @@ mod tests {
             &profile,
             "This is the current transcript.",
             &context("Slack", None),
+            &[],
         );
         assert!(prompt.contains("Rewrite freely."));
         assert!(prompt.contains("Foreground application: Slack"));
         assert!(prompt.contains("This is the current transcript."));
+        assert!(!prompt.contains("Vocabulary"));
+    }
+
+    #[test]
+    fn prompt_names_vocabulary_terms_and_their_mistranscriptions() {
+        let vocabulary = [
+            VocabularyEntry {
+                term: "abattoir".into(),
+                sounds_like: vec!["avatar".into(), "a bat war".into()],
+            },
+            VocabularyEntry {
+                term: "Rune".into(),
+                sounds_like: vec![],
+            },
+        ];
+        let prompt = prompt(
+            &Profile::new("default", "Rewrite freely."),
+            "Ship the avatar change.",
+            &context("Slack", None),
+            &vocabulary,
+        );
+        assert!(prompt.contains(
+            "Vocabulary (spell these exactly when the speaker means them): abattoir (may be \
+             transcribed as avatar, a bat war); Rune\n\nForeground application: Slack"
+        ));
     }
 
     #[test]
@@ -2649,7 +2703,22 @@ mod tests {
         let executable = root.join("opencode2");
         const INFO: &str = "printf '%s\\n' '{\"pid\":42,\"version\":\"fixture-version\"}'";
         const MISSING: &str = "echo 'HTTP 404 Not Found' >&2; exit 1";
+        const SKEWED_MISSING: &str = "echo 'Warning: Server at http://127.0.0.1:4096 has version a; this client is b. Continuing anyway.' >&2; echo 'HTTP 404 Not Found' >&2; echo >&2; exit 1";
         for (info, status, health, succeeds, expected_calls) in [
+            (
+                SKEWED_MISSING,
+                SKEWED_MISSING,
+                INFO,
+                true,
+                "api get /api/info\napi get /api/status\napi get /api/health\ndebug paths\n",
+            ),
+            (
+                "echo 'HTTP 404 Not Found' >&2; echo 'private trailing diagnostic' >&2; exit 1",
+                INFO,
+                INFO,
+                false,
+                "api get /api/info\n",
+            ),
             (
                 INFO,
                 MISSING,
@@ -2714,25 +2783,25 @@ mod tests {
                 "api get /api/info\napi get /api/status\napi get /api/health\n",
             ),
         ] {
-            fs::write(
+            write_script(
                 &executable,
-                format!(
+                &format!(
                     "#!/bin/sh\nprintf '%s\\n' \"$*\" >> calls\ncase \"$*\" in\n'api get /api/info') {info} ;;\n'api get /api/status') {status} ;;\n'api get /api/health') {health} ;;\n'debug paths') printf 'state %s\\n' \"$PWD\" ;;\n*) exit 2 ;;\nesac\n"
                 ),
-            )
-            .unwrap();
-            fs::set_permissions(&executable, fs::Permissions::from_mode(0o755)).unwrap();
+            );
+            // No fixture times out, so a busy machine gets a generous deadline.
             let result = discover_opencode_service_with(
                 &executable,
                 &root,
-                Duration::from_secs(2),
+                None,
+                Duration::from_secs(20),
                 &AtomicBool::new(false),
             );
             assert_eq!(result.is_ok(), succeeds, "{result:?}");
             assert_eq!(
-                fs::read_to_string(root.join("calls")).unwrap(),
+                fs::read_to_string(root.join("calls")).unwrap_or_default(),
                 expected_calls,
-                "fixtures: {info} / {status} / {health}"
+                "fixtures: {info} / {status} / {health}: {result:?}"
             );
             if succeeds {
                 assert_eq!(
@@ -2749,6 +2818,83 @@ mod tests {
         fs::remove_dir_all(root).unwrap();
     }
 
+    /// A wrapper like Kit's Studio guard appends `--server` to every
+    /// subcommand, so `debug paths` prints help and exits 1, and it points the
+    /// CLI's own state elsewhere while the service registers in the default one.
+    #[cfg(not(target_os = "windows"))]
+    #[test]
+    fn service_discovery_finds_the_default_registration_behind_a_wrapper() {
+        let root = std::env::temp_dir().join(format!(
+            "hex-service-wrapper-{}-{:?}",
+            std::process::id(),
+            thread::current().id()
+        ));
+        let reported = root.join("wrapper-state");
+        let default_state = root.join("default-state");
+        fs::create_dir_all(&reported).unwrap();
+        fs::create_dir_all(&default_state).unwrap();
+        let registration = default_state.join("service.json");
+        fs::write(
+            &registration,
+            br#"{"id":"x","version":"fixture-version","url":"http://127.0.0.1:1234","pid":42,"password":"registered-password"}"#,
+        )
+        .unwrap();
+        fs::set_permissions(&registration, fs::Permissions::from_mode(0o600)).unwrap();
+        let executable = root.join("opencode2");
+        const INFO: &str = "echo 'Warning: Server at http://127.0.0.1:4096 has version a; this client is b. Continuing anyway.' >&2; printf '%s\\n' '{\"pid\":42,\"version\":\"fixture-version\",\"urls\":[\"http://127.0.0.1:4096\"]}'";
+        let guard_paths = "printf 'DESCRIPTION\\n  Show global paths (data, config, cache, state)\\n'; printf '\\nERROR\\n  Unrecognized flag: --server in command opencode debug paths\\n' >&2; exit 1";
+        let reporting_paths = format!("printf 'state      %s\\n' '{}'", reported.display());
+        for (paths, default, succeeds) in [
+            (guard_paths, Some(default_state.as_path()), true),
+            (
+                reporting_paths.as_str(),
+                Some(default_state.as_path()),
+                true,
+            ),
+            (guard_paths, None, false),
+            (reporting_paths.as_str(), None, false),
+        ] {
+            write_script(
+                &executable,
+                &format!(
+                    "#!/bin/sh\ncase \"$*\" in\n'api get /api/info') {INFO} ;;\n'debug paths') {paths} ;;\n*) exit 2 ;;\nesac\n"
+                ),
+            );
+            let result = discover_opencode_service_with(
+                &executable,
+                &root,
+                default,
+                Duration::from_secs(20),
+                &AtomicBool::new(false),
+            );
+            if succeeds {
+                assert_eq!(
+                    result.unwrap(),
+                    ("http://127.0.0.1:1234".into(), "registered-password".into())
+                );
+            } else {
+                let error = format!("{:#}", result.unwrap_err());
+                assert!(!error.contains("registered-password"), "{error}");
+            }
+        }
+        // A registration for another server process never counts.
+        fs::write(
+            &registration,
+            br#"{"version":"fixture-version","url":"http://127.0.0.1:1234","pid":43,"password":"stale-password"}"#,
+        )
+        .unwrap();
+        let error = discover_opencode_service_with(
+            &executable,
+            &root,
+            Some(&default_state),
+            Duration::from_secs(20),
+            &AtomicBool::new(false),
+        )
+        .unwrap_err();
+        assert!(!format!("{error:#}").contains("stale-password"));
+        fs::remove_dir_all(root).unwrap();
+    }
+
     #[cfg(not(target_os = "windows"))]
     #[test]
     fn service_discovery_fallback_shares_deadline_and_observes_cancellation() {
@@ -2759,15 +2905,14 @@ mod tests {
         ));
         fs::create_dir_all(&root).unwrap();
         let executable = root.join("opencode2");
-        fs::write(
+        write_script(
             &executable,
             "#!/bin/sh\nprintf '%s\\n' \"$*\" >> calls\ncase \"$*\" in\n'api get /api/info') echo 'HTTP 404 Not Found' >&2; exit 1 ;;\n'api get /api/status') sleep 2; echo 'HTTP 404 Not Found' >&2; exit 1 ;;\n'api get /api/health') sleep 10; echo '{\"pid\":42,\"version\":\"fixture-version\"}' ;;\n*) exit 2 ;;\nesac\n",
-        )
-        .unwrap();
-        fs::set_permissions(&executable, fs::Permissions::from_mode(0o755)).unwrap();
+        );
         let error = discover_opencode_service_with(
             &executable,
             &root,
+            None,
             // Leaves the health probe ~4 s to start on a busy machine.
             Duration::from_secs(6),
             &AtomicBool::new(false),
@@ -2782,6 +2927,7 @@ mod tests {
         let error = discover_opencode_service_with(
             &executable,
             &root,
+            None,
             Duration::from_secs(2),
             &AtomicBool::new(true),
         )
@@ -2852,7 +2998,7 @@ mod tests {
             routes
                 .into_iter()
                 .map(|(path, status, response)| {
-                    let (mut stream, _) = listener.accept().unwrap();
+                    let mut stream = accept_within(&listener);
                     let (_, body) = receive_request(&mut stream, &format!("POST {path}"));
                     write!(
                         stream,
@@ -3028,7 +3174,7 @@ mod tests {
             let cancelled = std::sync::Arc::new(AtomicBool::new(false));
             let flag = cancelled.clone();
             let server = thread::spawn(move || {
-                let (mut stream, _) = listener.accept().unwrap();
+                let mut stream = accept_within(&listener);
                 receive_request(&mut stream, "POST /api/generate");
                 flag.store(cancel, Ordering::Release);
                 let mut byte = [0];
@@ -3202,11 +3348,12 @@ mod tests {
         let output = generate_with_ranked_candidates(
             "Make this concise.",
             &candidates,
-            &endpoint,
-            "fixture-password",
             Instant::now(),
             Duration::from_secs(5),
             &AtomicBool::new(false),
+            |data, remaining, cancelled| {
+                post_generation(&endpoint, "fixture-password", data, remaining, cancelled)
+            },
         )
         .unwrap();
         assert_eq!(output, "resolved from second ranked model");

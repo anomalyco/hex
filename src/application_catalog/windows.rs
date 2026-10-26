@@ -1,23 +1,13 @@
 //! Windows applications, named by executable stem ("chrome", "code") as the
 //! Windows mode matcher compares them: Start menu shortcuts, apps registered
-//! under App Paths, and every application that currently shows a window,
-//! each with its executable's icon.
+//! under App Paths, and every application that currently shows a window.
 
-use std::collections::HashSet;
-use std::io::Cursor;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 
-use color_eyre::eyre::{Result, eyre};
-use gpui::{Image, ImageFormat};
 use windows_sys::Win32::Foundation::{HWND, LPARAM};
-use windows_sys::Win32::Graphics::Gdi::{
-    BI_RGB, BITMAP, BITMAPINFO, BITMAPINFOHEADER, CreateCompatibleDC, DIB_RGB_COLORS, DeleteDC,
-    DeleteObject, GetDIBits, GetObjectW,
-};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    DestroyIcon, EnumWindows, GW_OWNER, GWL_EXSTYLE, GetIconInfo, GetWindow, GetWindowLongPtrW,
-    GetWindowTextLengthW, HICON, ICONINFO, IsWindowVisible, PrivateExtractIconsW, WS_EX_TOOLWINDOW,
+    EnumWindows, GW_OWNER, GWL_EXSTYLE, GetWindow, GetWindowLongPtrW, GetWindowTextLengthW,
+    IsWindowVisible, WS_EX_TOOLWINDOW,
 };
 use winreg::RegKey;
 use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_READ};
@@ -25,46 +15,39 @@ use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_READ};
 use super::InstalledApplication;
 
 const APP_PATHS: &str = r"Software\Microsoft\Windows\CurrentVersion\App Paths";
-const ICON_SIZE: i32 = 48;
 
 pub(super) fn applications() -> Vec<InstalledApplication> {
     let own = std::env::current_exe().ok();
-    let mut paths = start_menu_executables();
-    paths.extend(registered_executables());
-    paths.extend(windowed_executables());
-    // One icon read per executable name; the catalog keeps one entry each.
-    let mut names = HashSet::new();
-    paths
+    start_menu_executables()
         .into_iter()
+        .chain(registered_executables())
+        .chain(windowed_executables())
         .filter(|path| own.as_deref() != Some(path.as_path()))
-        .filter(|path| {
-            path.file_stem()
-                .and_then(|stem| stem.to_str())
-                .is_some_and(|stem| names.insert(stem.to_lowercase()))
-        })
-        .filter_map(|path| metadata(&path).ok())
+        .filter_map(executable_entry)
         .collect()
 }
 
-pub(super) fn metadata(path: &Path) -> Result<InstalledApplication> {
-    let is_executable = path
+pub(super) fn metadata(path: &Path) -> color_eyre::Result<InstalledApplication> {
+    executable_entry(path.to_owned())
+        .ok_or_else(|| color_eyre::eyre::eyre!("select a Windows .exe application"))
+}
+
+fn executable_entry(path: PathBuf) -> Option<InstalledApplication> {
+    if !path
         .extension()
-        .and_then(|extension| extension.to_str())
-        .is_some_and(|extension| extension.eq_ignore_ascii_case("exe"));
-    if !is_executable {
-        return Err(eyre!("select a Windows .exe application"));
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("exe"))
+    {
+        return None;
     }
     let name = path
-        .file_stem()
-        .and_then(|stem| stem.to_str())
-        .filter(|stem| !stem.trim().is_empty())
-        .ok_or_else(|| eyre!("{} has no executable name", path.display()))?
+        .file_stem()?
+        .to_str()
+        .filter(|stem| !stem.trim().is_empty())?
         .to_lowercase();
-    Ok(InstalledApplication {
+    Some(InstalledApplication {
         name,
         bundle_id: None,
-        path: path.to_owned(),
-        icon: executable_icon(path),
+        path,
     })
 }
 
@@ -88,10 +71,6 @@ fn start_menu_executables() -> Vec<PathBuf> {
         .filter_map(|shortcut| std::fs::read(shortcut).ok())
         .filter_map(|bytes| shortcut_target(&bytes))
         .map(PathBuf::from)
-        .filter(|path| {
-            path.extension()
-                .is_some_and(|extension| extension.eq_ignore_ascii_case("exe"))
-        })
         .filter(|path| {
             let stem = path
                 .file_stem()
@@ -211,120 +190,6 @@ fn windowed_executables() -> Vec<PathBuf> {
         .collect()
 }
 
-/// The executable's first icon at 48 pixels, as PNG.
-fn executable_icon(path: &Path) -> Option<Arc<Image>> {
-    let wide = path
-        .as_os_str()
-        .to_string_lossy()
-        .encode_utf16()
-        .chain(std::iter::once(0))
-        .collect::<Vec<_>>();
-    // PrivateExtractIconsW reads a fixed MAX_PATH buffer.
-    if wide.len() > 260 {
-        return None;
-    }
-    let mut buffer = [0_u16; 260];
-    buffer[..wide.len()].copy_from_slice(&wide);
-    let mut icon: HICON = std::ptr::null_mut();
-    let extracted = unsafe {
-        PrivateExtractIconsW(
-            buffer.as_ptr(),
-            0,
-            ICON_SIZE,
-            ICON_SIZE,
-            &mut icon,
-            std::ptr::null_mut(),
-            1,
-            0,
-        )
-    };
-    if extracted == 0 || extracted == u32::MAX || icon.is_null() {
-        return None;
-    }
-    let rgba = unsafe { icon_rgba(icon) };
-    unsafe { DestroyIcon(icon) };
-    let (width, height, pixels) = rgba?;
-    let image = image::RgbaImage::from_raw(width, height, pixels)?;
-    let mut png = Cursor::new(Vec::new());
-    image::DynamicImage::ImageRgba8(image)
-        .write_to(&mut png, image::ImageFormat::Png)
-        .ok()?;
-    Some(Arc::new(Image::from_bytes(
-        ImageFormat::Png,
-        png.into_inner(),
-    )))
-}
-
-/// The icon's color bitmap as straight RGBA. Icons without an alpha channel
-/// are drawn opaque.
-unsafe fn icon_rgba(icon: HICON) -> Option<(u32, u32, Vec<u8>)> {
-    let mut info: ICONINFO = unsafe { std::mem::zeroed() };
-    if unsafe { GetIconInfo(icon, &mut info) } == 0 {
-        return None;
-    }
-    let result = (|| {
-        if info.hbmColor.is_null() {
-            return None;
-        }
-        let mut bitmap: BITMAP = unsafe { std::mem::zeroed() };
-        let size = std::mem::size_of::<BITMAP>() as i32;
-        if unsafe { GetObjectW(info.hbmColor, size, (&raw mut bitmap).cast()) } == 0 {
-            return None;
-        }
-        let (width, height) = (bitmap.bmWidth, bitmap.bmHeight);
-        if width <= 0 || height <= 0 {
-            return None;
-        }
-        let mut header = BITMAPINFO {
-            bmiHeader: BITMAPINFOHEADER {
-                biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
-                biWidth: width,
-                // Negative height reads the rows top-down.
-                biHeight: -height,
-                biPlanes: 1,
-                biBitCount: 32,
-                biCompression: BI_RGB,
-                ..unsafe { std::mem::zeroed() }
-            },
-            ..unsafe { std::mem::zeroed() }
-        };
-        let mut pixels = vec![0_u8; width as usize * height as usize * 4];
-        let context = unsafe { CreateCompatibleDC(std::ptr::null_mut()) };
-        let rows = unsafe {
-            GetDIBits(
-                context,
-                info.hbmColor,
-                0,
-                height as u32,
-                pixels.as_mut_ptr().cast(),
-                &mut header,
-                DIB_RGB_COLORS,
-            )
-        };
-        unsafe { DeleteDC(context) };
-        if rows == 0 {
-            return None;
-        }
-        let opaque = pixels.as_chunks::<4>().0.iter().all(|pixel| pixel[3] == 0);
-        for pixel in pixels.as_chunks_mut::<4>().0 {
-            pixel.swap(0, 2);
-            if opaque {
-                pixel[3] = 255;
-            }
-        }
-        Some((width as u32, height as u32, pixels))
-    })();
-    unsafe {
-        if !info.hbmColor.is_null() {
-            DeleteObject(info.hbmColor);
-        }
-        if !info.hbmMask.is_null() {
-            DeleteObject(info.hbmMask);
-        }
-    }
-    result
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -354,15 +219,5 @@ mod tests {
         );
         link[0x14..0x18].copy_from_slice(&0_u32.to_le_bytes());
         assert_eq!(shortcut_target(&link), None, "no LinkInfo, no target");
-    }
-
-    #[test]
-    fn executables_carry_their_icon() {
-        let notepad = PathBuf::from(r"C:\Windows\System32\notepad.exe");
-        if notepad.is_file() {
-            let application = metadata(&notepad).unwrap();
-            assert_eq!(application.name, "notepad");
-            assert!(application.icon.is_some());
-        }
     }
 }

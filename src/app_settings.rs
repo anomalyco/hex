@@ -22,7 +22,8 @@ static MEETING_NOTES_ENABLED: AtomicBool = AtomicBool::new(true);
 static MEETING_INDICATOR_ENABLED: AtomicBool = AtomicBool::new(true);
 static MEETING_INDICATOR_CORNER: AtomicU8 = AtomicU8::new(0);
 static MEETING_OUTPUT_FOLDER: OnceLock<RwLock<Option<PathBuf>>> = OnceLock::new();
-static MEETING_NEVER_OFFER: OnceLock<RwLock<Vec<String>>> = OnceLock::new();
+static MEETING_PROVIDERS: OnceLock<RwLock<Vec<MeetingProviderChoice>>> = OnceLock::new();
+static CALENDAR_SETTINGS: OnceLock<RwLock<CalendarSettings>> = OnceLock::new();
 static MICROPHONE_POLICY: AtomicU8 = AtomicU8::new(0);
 static CUSTOM_TRANSFORMATIONS_ENABLED: AtomicBool = AtomicBool::new(false);
 static INDICATOR_POSITION: AtomicU8 = AtomicU8::new(0);
@@ -187,15 +188,28 @@ impl HotkeyModifiers {
 
     #[cfg(target_os = "macos")]
     fn keycaps(self) -> impl Iterator<Item = &'static str> {
+        self.sided_keycaps()
+            .map(|(label, side)| side_keycap(side, label))
+    }
+
+    /// Each modifier's keycap and the side it must be pressed on.
+    #[cfg(target_os = "macos")]
+    fn sided_keycaps(self) -> impl Iterator<Item = (&'static str, ModifierSide)> {
         [
-            (self.function, "fn"),
-            (self.control.is_some(), side_keycap(self.control, "⌃")),
-            (self.option.is_some(), side_keycap(self.option, "⌥")),
-            (self.shift.is_some(), side_keycap(self.shift, "⇧")),
-            (self.command.is_some(), side_keycap(self.command, "⌘")),
+            (self.function.then_some(ModifierSide::Either), "fn"),
+            (self.control, "⌃"),
+            (self.option, "⌥"),
+            (self.shift, "⇧"),
+            (self.command, "⌘"),
         ]
         .into_iter()
-        .filter_map(|(enabled, label)| enabled.then_some(label))
+        .filter_map(|(side, label)| Some((label, side?)))
+    }
+
+    /// Windows and Linux keycaps never name a side.
+    #[cfg(not(target_os = "macos"))]
+    fn sided_keycaps(self) -> impl Iterator<Item = (&'static str, ModifierSide)> {
+        self.keycaps().map(|label| (label, ModifierSide::Either))
     }
 
     /// Windows names Command the Windows key and Option Alt.
@@ -242,16 +256,16 @@ fn modifier_contains(candidate: Option<ModifierSide>, required: Option<ModifierS
 }
 
 #[cfg(target_os = "macos")]
-fn side_keycap(side: Option<ModifierSide>, symbol: &'static str) -> &'static str {
+fn side_keycap(side: ModifierSide, symbol: &'static str) -> &'static str {
     match (side, symbol) {
-        (Some(ModifierSide::Left), "⌃") => "L⌃",
-        (Some(ModifierSide::Right), "⌃") => "R⌃",
-        (Some(ModifierSide::Left), "⌥") => "L⌥",
-        (Some(ModifierSide::Right), "⌥") => "R⌥",
-        (Some(ModifierSide::Left), "⇧") => "L⇧",
-        (Some(ModifierSide::Right), "⇧") => "R⇧",
-        (Some(ModifierSide::Left), "⌘") => "L⌘",
-        (Some(ModifierSide::Right), "⌘") => "R⌘",
+        (ModifierSide::Left, "⌃") => "L⌃",
+        (ModifierSide::Right, "⌃") => "R⌃",
+        (ModifierSide::Left, "⌥") => "L⌥",
+        (ModifierSide::Right, "⌥") => "R⌥",
+        (ModifierSide::Left, "⇧") => "L⇧",
+        (ModifierSide::Right, "⇧") => "R⇧",
+        (ModifierSide::Left, "⌘") => "L⌘",
+        (ModifierSide::Right, "⌘") => "R⌘",
         _ => symbol,
     }
 }
@@ -387,7 +401,22 @@ impl HotkeyBinding {
 
 #[cfg(target_os = "macos")]
 fn paste_key_code() -> u16 {
-    *PASTE_KEY_CODE.get_or_init(|| crate::keyboard::key_code_for('v').unwrap_or(9))
+    *PASTE_KEY_CODE.get_or_init(|| layout_key_code('v').unwrap_or(9))
+}
+
+/// The active layout's key for `character`. GUI startup snapshots the layout
+/// on the main thread; unit tests run on worker threads, where reaching TIS is
+/// unsupported, so they resolve against the ANSI layout instead.
+#[cfg(target_os = "macos")]
+fn layout_key_code(character: char) -> Option<u16> {
+    if cfg!(test) {
+        return match character {
+            'e' => Some(14),
+            'v' => Some(9),
+            _ => None,
+        };
+    }
+    crate::keyboard::key_code_for(character).ok()
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -404,8 +433,18 @@ impl HotkeyBinding {
             .collect()
     }
 
-    pub fn is_empty(&self) -> bool {
-        self.modifiers.is_empty() && self.key.is_none()
+    /// Each keycap with the side it must be pressed on: `Either` for the
+    /// key, and for every modifier but on macOS.
+    pub fn sided_keycaps(&self) -> Vec<(String, ModifierSide)> {
+        self.modifiers
+            .sided_keycaps()
+            .map(|(label, side)| (label.to_string(), side))
+            .chain(
+                self.key
+                    .iter()
+                    .map(|key| (key.label.clone(), ModifierSide::Either)),
+            )
+            .collect()
     }
 
     pub fn runtime(&self) -> RuntimeHotkey {
@@ -429,6 +468,41 @@ impl HotkeyBinding {
             _ => false,
         };
         same_key && modifiers_overlap(self.modifiers, other.modifiers)
+    }
+
+    /// The one side every modifier of a modifier-only binding shares, or
+    /// none for key chords and mixed sides.
+    pub fn standalone_side(&self) -> Option<ModifierSide> {
+        if self.key.is_some() {
+            return None;
+        }
+        let mut sides = [
+            self.modifiers.control,
+            self.modifiers.option,
+            self.modifiers.shift,
+            self.modifiers.command,
+        ]
+        .into_iter()
+        .flatten();
+        let first = sides.next()?;
+        sides.all(|side| side == first).then_some(first)
+    }
+
+    /// Moves a modifier-only binding to `side`; key chords are unchanged.
+    pub fn set_standalone_side(&mut self, side: ModifierSide) {
+        if self.standalone_side().is_none() {
+            return;
+        }
+        for current in [
+            &mut self.modifiers.control,
+            &mut self.modifiers.option,
+            &mut self.modifiers.shift,
+            &mut self.modifiers.command,
+        ] {
+            if current.is_some() {
+                *current = Some(side);
+            }
+        }
     }
 }
 
@@ -593,16 +667,108 @@ pub struct MeetingSettings {
     pub show_recording_indicator: bool,
     /// Screen corner the floating recording indicator snaps to after dragging.
     pub recording_indicator_corner: MeetingIndicatorCorner,
-    /// Websites and apps Hex never offers to record.
-    pub never_offer: Vec<NeverOfferMeeting>,
+    /// What to do when a call from each website or app is detected. Older
+    /// files only had a `never_offer` list, whose entries carry no `policy`
+    /// and so read as Never offer.
+    #[serde(alias = "never_offer")]
+    pub providers: Vec<MeetingProviderChoice>,
+    /// Reminders before calendar meetings (macOS). Off until the user
+    /// connects a calendar.
+    pub calendar: CalendarSettings,
 }
 
-/// A website host or an app's canonical bundle ID that never gets a
-/// recording offer, with the name shown in Settings.
+/// The connected calendar and its meeting reminders.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub struct NeverOfferMeeting {
+#[serde(default)]
+pub struct CalendarSettings {
+    /// Set once the user clicks Connect calendar and macOS grants access;
+    /// Hex never asks for calendar access before that.
+    pub connected: bool,
+    /// Calendars left out of reminders, by EventKit identifier. Every
+    /// calendar is included by default, so new ones are too.
+    pub excluded_calendars: Vec<String>,
+    /// Show a reminder capsule before each meeting.
+    pub remind: bool,
+    /// How many minutes before a meeting starts the reminder shows; zero
+    /// shows it at the start.
+    pub lead_minutes: u8,
+}
+
+/// The reminder lead times Settings offers, in minutes.
+pub const CALENDAR_LEAD_MINUTES: [u8; 4] = [0, 1, 2, 5];
+
+impl Default for CalendarSettings {
+    fn default() -> Self {
+        Self {
+            connected: false,
+            excluded_calendars: Vec::new(),
+            remind: true,
+            lead_minutes: 1,
+        }
+    }
+}
+
+impl CalendarSettings {
+    /// Whether reminders should run: connected, and wanted.
+    pub fn reminders_active(&self) -> bool {
+        self.connected && self.remind
+    }
+
+    /// The lead time, snapped to an offered choice.
+    pub fn lead(&self) -> std::time::Duration {
+        let minutes = if CALENDAR_LEAD_MINUTES.contains(&self.lead_minutes) {
+            self.lead_minutes
+        } else {
+            1
+        };
+        std::time::Duration::from_secs(u64::from(minutes) * 60)
+    }
+
+    pub fn includes(&self, calendar: &str) -> bool {
+        !self
+            .excluded_calendars
+            .iter()
+            .any(|excluded| excluded == calendar)
+    }
+}
+
+/// The call services Settings always lists, by provider key (the app's
+/// canonical bundle ID, or the website host for browser services) and
+/// English name.
+pub const KNOWN_MEETING_PROVIDERS: [(&str, &str); 5] = [
+    ("com.tinyspeck.slackmacgap", "Slack huddles"),
+    ("us.zoom.xos", "Zoom"),
+    ("meet.google.com", "Google Meet"),
+    ("com.microsoft.teams2", "Microsoft Teams"),
+    ("com.apple.FaceTime", "FaceTime"),
+];
+
+/// What Hex does when it detects a call from a provider.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MeetingPolicy {
+    /// Offer to record.
+    #[default]
+    Ask,
+    /// Start recording without an offer.
+    AlwaysRecord,
+    /// Neither offer nor record.
+    NeverOffer,
+}
+
+/// A website host or an app's canonical bundle ID, the name shown in
+/// Settings, and the user's choice for its calls. Unlisted providers Ask.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct MeetingProviderChoice {
     pub key: String,
     pub label: String,
+    /// Always written; missing only in a legacy `never_offer` entry.
+    #[serde(default = "legacy_never_offer")]
+    pub policy: MeetingPolicy,
+}
+
+fn legacy_never_offer() -> MeetingPolicy {
+    MeetingPolicy::NeverOffer
 }
 
 impl Default for MeetingSettings {
@@ -613,7 +779,8 @@ impl Default for MeetingSettings {
             summarize_with_apple_intelligence: true,
             show_recording_indicator: true,
             recording_indicator_corner: MeetingIndicatorCorner::TopRight,
-            never_offer: Vec::new(),
+            providers: Vec::new(),
+            calendar: CalendarSettings::default(),
         }
     }
 }
@@ -653,9 +820,18 @@ impl Default for ExperimentalSettings {
 }
 
 impl ExperimentalSettings {
-    pub fn hex_microphone_available(&self) -> bool {
-        self.hex_microphone || env_hex_experimental_mic()
+    /// [`voice_filter_enabled`] with this setting.
+    pub fn voice_filter_enabled(&self, experiment: bool, driver_installed: bool) -> bool {
+        voice_filter_enabled(self.hex_microphone, experiment, driver_installed)
     }
+}
+
+/// Whether the Voice Filter is on: its pane shows and the listener streams
+/// the Hex Microphone. The setting (or `HEX_EXPERIMENTAL_MIC`), the
+/// `voice-filter` experiment, or an installed driver each turn it on, so a
+/// driver apps already use keeps receiving audio.
+pub fn voice_filter_enabled(setting: bool, experiment: bool, driver_installed: bool) -> bool {
+    setting || env_hex_experimental_mic() || experiment || driver_installed
 }
 
 pub fn env_hex_experimental_mic() -> bool {
@@ -668,7 +844,11 @@ pub fn default_meeting_output_folder() -> PathBuf {
     dirs::document_dir()
         .or_else(|| dirs::home_dir().map(|home| home.join("Documents")))
         .unwrap_or_else(|| PathBuf::from("."))
-        .join("Hex Meetings")
+        .join(if crate::app_paths::is_macos_test_build() {
+            "Hex Test Meetings"
+        } else {
+            "Hex Meetings"
+        })
 }
 
 /// Where the recording HUD appears while dictating.
@@ -831,6 +1011,10 @@ pub struct AppSettings {
     /// The interface language code; `None` follows the system language.
     pub ui_language: Option<String>,
     pub indicator_position: IndicatorPosition,
+    /// The shared vocabulary (`crate::vocabulary`). Left out of the file
+    /// while empty, so settings without one stay as they were.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub vocabulary: Vec<crate::vocabulary::VocabularyEntry>,
     /// One-time settings changes already applied. A file that predates a
     /// change lacks its ID, so the change runs once on the next load; new
     /// settings start with every ID because they need none.
@@ -886,6 +1070,7 @@ impl Default for AppSettings {
             paste_with_shift: false,
             ui_language: None,
             indicator_position: IndicatorPosition::default(),
+            vocabulary: Vec::new(),
             migrations: MIGRATIONS.iter().map(|id| id.to_string()).collect(),
             text_replacements: Vec::new(),
         }
@@ -1113,10 +1298,7 @@ impl AppSettings {
             Ordering::Relaxed,
         );
         MEETINGS_ENABLED.store(self.meetings.available(), Ordering::Release);
-        HEX_MICROPHONE_ENABLED.store(
-            self.experimental.hex_microphone_available(),
-            Ordering::Release,
-        );
+        HEX_MICROPHONE_ENABLED.store(self.experimental.hex_microphone, Ordering::Release);
         crate::hex_microphone::sync_from_settings(
             self.experimental.hex_microphone_mode,
             self.experimental.hex_microphone_comfort_noise,
@@ -1136,15 +1318,14 @@ impl AppSettings {
             .write()
             .unwrap_or_else(|error| error.into_inner()) =
             Some(self.meetings.resolved_output_folder());
-        *MEETING_NEVER_OFFER
+        *MEETING_PROVIDERS
             .get_or_init(Default::default)
             .write()
-            .unwrap_or_else(|error| error.into_inner()) = self
-            .meetings
-            .never_offer
-            .iter()
-            .map(|entry| entry.key.clone())
-            .collect();
+            .unwrap_or_else(|error| error.into_inner()) = self.meetings.providers.clone();
+        *CALENDAR_SETTINGS
+            .get_or_init(Default::default)
+            .write()
+            .unwrap_or_else(|error| error.into_inner()) = self.meetings.calendar.clone();
         *HOTKEYS
             .get_or_init(Default::default)
             .write()
@@ -1157,6 +1338,7 @@ impl AppSettings {
             .get_or_init(Default::default)
             .write()
             .unwrap_or_else(|error| error.into_inner()) = self.voice_action.clone();
+        crate::vocabulary::apply(&self.vocabulary);
     }
 
     /// Mode activations saved while Finder showed filename extensions carry a
@@ -1296,15 +1478,13 @@ impl AppSettings {
             return;
         }
         #[cfg(target_os = "macos")]
-        let edit_with_key = crate::keyboard::key_code_for('e')
-            .ok()
-            .map(|code| HotkeyBinding {
-                modifiers: HotkeyModifiers::option_command(),
-                key: Some(HotkeyKey {
-                    code,
-                    label: "E".into(),
-                }),
-            });
+        let edit_with_key = layout_key_code('e').map(|code| HotkeyBinding {
+            modifiers: HotkeyModifiers::option_command(),
+            key: Some(HotkeyKey {
+                code,
+                label: "E".into(),
+            }),
+        });
         #[cfg(not(target_os = "macos"))]
         let edit_with_key = Some(HotkeyBinding::chord(HotkeyModifiers::option_command(), "e"));
         let control_command = HotkeyBinding {
@@ -1342,6 +1522,37 @@ pub fn hotkey_conflicts(
     others
         .into_iter()
         .any(|binding| candidate.overlaps(&binding))
+}
+
+/// A shortcut Settings and `hex settings` record.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum HotkeySlot {
+    Dictation,
+    VoiceAction,
+    PasteLast,
+}
+
+impl AppSettings {
+    /// Whether `binding` overlaps a shortcut `slot` must not share: the other
+    /// active shortcuts and, where meetings exist (macOS), meeting paste.
+    pub fn hotkey_in_use(&self, slot: HotkeySlot, binding: &HotkeyBinding) -> bool {
+        let mut others = Vec::new();
+        if slot != HotkeySlot::Dictation {
+            others.push(self.dictation_hotkey.clone());
+        }
+        if slot != HotkeySlot::VoiceAction && self.voice_action.enabled {
+            others.push(self.edit_hotkey.clone());
+        }
+        if slot != HotkeySlot::PasteLast
+            && let Some(paste) = &self.paste_last_hotkey
+        {
+            others.push(paste.clone());
+        }
+        if cfg!(target_os = "macos") && self.meetings.available() {
+            others.push(HotkeyBinding::paste_meeting_default());
+        }
+        hotkey_conflicts(binding, others)
+    }
 }
 
 fn set_microphone_selection(device: Option<&str>) {
@@ -1441,8 +1652,13 @@ pub fn meetings_enabled() -> bool {
     MEETINGS_ENABLED.load(Ordering::Acquire)
 }
 
+/// [`voice_filter_enabled`] for the running listener.
 pub fn hex_microphone_enabled() -> bool {
-    HEX_MICROPHONE_ENABLED.load(Ordering::Acquire) || env_hex_experimental_mic()
+    voice_filter_enabled(
+        HEX_MICROPHONE_ENABLED.load(Ordering::Acquire),
+        crate::experiments::enabled(crate::experiments::Experiment::VoiceFilter),
+        crate::hex_microphone::driver_bundle_installed(),
+    )
 }
 
 pub fn meeting_notes_enabled() -> bool {
@@ -1459,55 +1675,76 @@ pub fn meeting_indicator_corner() -> MeetingIndicatorCorner {
     MeetingIndicatorCorner::decode(MEETING_INDICATOR_CORNER.load(Ordering::Acquire))
 }
 
+/// The user's choices for detected calls, by website or app.
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-pub fn save_meeting_indicator_corner(corner: MeetingIndicatorCorner) {
-    MEETING_INDICATOR_CORNER.store(corner as u8, Ordering::Release);
-    if let Ok(mut settings) = AppSettings::load()
-        && settings.meetings.recording_indicator_corner != corner
-    {
-        settings.meetings.recording_indicator_corner = corner;
-        if let Err(error) = settings.save() {
-            tracing::warn!(%error, "could not persist meeting recording indicator corner");
-        }
-    }
-}
-
-/// Keys of the websites and apps that never get a recording offer.
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-pub fn meeting_never_offer_keys() -> Vec<String> {
-    MEETING_NEVER_OFFER
+pub fn meeting_provider_choices() -> Vec<MeetingProviderChoice> {
+    MEETING_PROVIDERS
         .get_or_init(Default::default)
         .read()
         .unwrap_or_else(|error| error.into_inner())
         .clone()
 }
 
-/// Adds `entry` once; returns whether the settings changed.
+/// The connected calendar's reminder settings, as last applied.
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-pub fn insert_never_offer(meetings: &mut MeetingSettings, entry: NeverOfferMeeting) -> bool {
-    if meetings
-        .never_offer
-        .iter()
-        .any(|known| known.key == entry.key)
-    {
-        return false;
-    }
-    meetings.never_offer.push(entry);
-    true
+pub fn calendar_settings() -> CalendarSettings {
+    CALENDAR_SETTINGS
+        .get_or_init(Default::default)
+        .read()
+        .unwrap_or_else(|error| error.into_inner())
+        .clone()
 }
 
-/// Saves a "Never offer" choice made while the Settings window is closed.
+/// Sets one provider's policy; returns whether the settings changed.
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-pub fn save_never_offer_meeting(entry: NeverOfferMeeting) {
+pub fn set_meeting_provider(meetings: &mut MeetingSettings, choice: MeetingProviderChoice) -> bool {
+    match meetings
+        .providers
+        .iter_mut()
+        .find(|known| known.key == choice.key)
+    {
+        Some(known) if known.policy == choice.policy => false,
+        Some(known) => {
+            known.policy = choice.policy;
+            true
+        }
+        None => {
+            meetings.providers.push(choice);
+            true
+        }
+    }
+}
+
+/// Saves a choice made from a meeting capsule while the Settings window is
+/// closed.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn save_meeting_provider(choice: MeetingProviderChoice) {
     match AppSettings::load() {
         Ok(mut settings) => {
-            if insert_never_offer(&mut settings.meetings, entry)
+            if set_meeting_provider(&mut settings.meetings, choice)
                 && let Err(error) = settings.save()
             {
-                tracing::warn!(%error, "could not save never-offer meeting choice");
+                tracing::warn!(%error, "could not save a meeting provider choice");
             }
         }
-        Err(error) => tracing::warn!(%error, "could not load settings to save never-offer choice"),
+        Err(error) => tracing::warn!(%error, "could not load settings to save a meeting choice"),
+    }
+}
+
+/// Saves the corner the recording capsule was dragged to.
+#[cfg(target_os = "macos")]
+pub fn save_meeting_indicator_corner(corner: MeetingIndicatorCorner) {
+    match AppSettings::load() {
+        Ok(mut settings) => {
+            if settings.meetings.recording_indicator_corner == corner {
+                return;
+            }
+            settings.meetings.recording_indicator_corner = corner;
+            if let Err(error) = settings.save() {
+                tracing::warn!(%error, "could not save the recording capsule's corner");
+            }
+        }
+        Err(error) => tracing::warn!(%error, "could not load settings to save the capsule corner"),
     }
 }
 
@@ -1570,7 +1807,7 @@ pub fn set_dock_icon_visible(visible: bool) {
     } else {
         NSApplicationActivationPolicy::Accessory
     };
-    if !application.setActivationPolicy(policy) {
+    if application.activationPolicy() != policy && !application.setActivationPolicy(policy) {
         tracing::warn!(visible, "could not change Dock icon visibility");
     }
 }
@@ -1646,6 +1883,17 @@ mod tests {
     use super::*;
 
     #[test]
+    fn the_setting_the_experiment_or_an_installed_driver_turns_the_voice_filter_on() {
+        if env_hex_experimental_mic() {
+            return;
+        }
+        assert!(!voice_filter_enabled(false, false, false));
+        assert!(voice_filter_enabled(true, false, false));
+        assert!(voice_filter_enabled(false, true, false));
+        assert!(voice_filter_enabled(false, false, true));
+    }
+
+    #[test]
     fn missing_fields_receive_defaults() {
         let settings: AppSettings = serde_json::from_str("{}").unwrap();
         assert!(!settings.commands_enabled);
@@ -1692,6 +1940,83 @@ mod tests {
                 .ends_with("Hex Meetings")
         );
         assert!(settings.text_replacements.is_empty());
+    }
+
+    #[test]
+    fn calendar_reminders_stay_off_until_connected_and_survive_older_files() {
+        let older: AppSettings =
+            serde_json::from_str(r#"{"meetings":{"enabled":true,"providers":[]}}"#).unwrap();
+        assert_eq!(older.meetings.calendar, CalendarSettings::default());
+        assert!(!older.meetings.calendar.connected);
+        assert!(!older.meetings.calendar.reminders_active());
+        assert_eq!(
+            older.meetings.calendar.lead(),
+            std::time::Duration::from_secs(60)
+        );
+
+        let partial: AppSettings =
+            serde_json::from_str(r#"{"meetings":{"calendar":{"connected":true}}}"#).unwrap();
+        assert!(partial.meetings.calendar.reminders_active());
+        assert!(partial.meetings.calendar.includes("any-calendar"));
+
+        let mut calendar = partial.meetings.calendar.clone();
+        calendar.excluded_calendars.push("work".into());
+        calendar.lead_minutes = 5;
+        let written = serde_json::to_value(&calendar).unwrap();
+        let reread: CalendarSettings = serde_json::from_value(written).unwrap();
+        assert_eq!(reread, calendar);
+        assert!(!reread.includes("work"));
+        assert_eq!(reread.lead(), std::time::Duration::from_secs(300));
+
+        // A hand-edited lead time outside the choices falls back to a minute.
+        let odd: CalendarSettings = serde_json::from_str(r#"{"lead_minutes":7}"#).unwrap();
+        assert_eq!(odd.lead(), std::time::Duration::from_secs(60));
+    }
+
+    #[test]
+    fn meeting_providers_ask_by_default_and_legacy_never_offer_entries_stay_never() {
+        let fresh: AppSettings = serde_json::from_str(r#"{"meetings":{"enabled":true}}"#).unwrap();
+        assert!(fresh.meetings.providers.is_empty());
+
+        let legacy: AppSettings = serde_json::from_str(
+            r#"{"meetings":{"never_offer":[{"key":"problems.kitlangton.com","label":"problems.kitlangton.com"}]}}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            legacy.meetings.providers,
+            vec![MeetingProviderChoice {
+                key: "problems.kitlangton.com".into(),
+                label: "problems.kitlangton.com".into(),
+                policy: MeetingPolicy::NeverOffer,
+            }]
+        );
+
+        let mut meetings = legacy.meetings.clone();
+        assert!(set_meeting_provider(
+            &mut meetings,
+            MeetingProviderChoice {
+                key: "com.tinyspeck.slackmacgap".into(),
+                label: "Slack huddles".into(),
+                policy: MeetingPolicy::AlwaysRecord,
+            }
+        ));
+        let written = serde_json::to_value(&meetings).unwrap();
+        assert!(written.get("never_offer").is_none());
+        assert_eq!(written["providers"][0]["policy"], "never_offer");
+        assert_eq!(written["providers"][1]["policy"], "always_record");
+        let reread: MeetingSettings = serde_json::from_value(written).unwrap();
+        assert_eq!(reread, meetings);
+        // Choosing Ask again keeps the row, so Settings still lists the site.
+        let mut asked = reread.clone();
+        assert!(set_meeting_provider(
+            &mut asked,
+            MeetingProviderChoice {
+                policy: MeetingPolicy::Ask,
+                ..reread.providers[0].clone()
+            }
+        ));
+        assert_eq!(asked.providers.len(), 2);
+        assert_eq!(asked.providers[0].policy, MeetingPolicy::Ask);
     }
 
     #[test]
@@ -1811,6 +2136,55 @@ mod tests {
             reloaded.transcription.model,
             TranscriptionModelId::ParakeetV3
         );
+    }
+
+    #[test]
+    fn vocabulary_round_trips_and_stays_out_of_files_without_one() {
+        use crate::vocabulary::VocabularyEntry;
+        // A file from before the vocabulary loads with an empty one and is
+        // not rewritten to gain the field.
+        let dir = TestSettingsDir::new("vocabulary");
+        let older = r#"{"sound_effects": false}"#;
+        fs::write(&dir.path, older).unwrap();
+        let settings = AppSettings::load_from(&dir.path).unwrap();
+        assert!(settings.vocabulary.is_empty());
+        assert!(
+            !fs::read_to_string(&dir.path)
+                .unwrap()
+                .contains("vocabulary")
+        );
+        assert!(
+            serde_json::to_value(AppSettings::default())
+                .unwrap()
+                .get("vocabulary")
+                .is_none()
+        );
+
+        let filled = AppSettings {
+            vocabulary: vec![
+                VocabularyEntry {
+                    term: "Abattoir".into(),
+                    sounds_like: vec!["avatar".into(), "a bat war".into()],
+                },
+                VocabularyEntry {
+                    term: "Rune".into(),
+                    sounds_like: vec![],
+                },
+            ],
+            ..settings
+        };
+        filled.write_to(&dir.path).unwrap();
+        let json: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&dir.path).unwrap()).unwrap();
+        assert_eq!(
+            json["vocabulary"],
+            serde_json::json!([
+                {"term": "Abattoir", "sounds_like": ["avatar", "a bat war"]},
+                {"term": "Rune"},
+            ])
+        );
+        let reloaded = AppSettings::load_from(&dir.path).unwrap();
+        assert_eq!(reloaded.vocabulary, filled.vocabulary);
     }
 
     struct TestSettingsDir {
@@ -2498,5 +2872,51 @@ mod tests {
         settings.voice_action.enabled = false;
         assert!(settings.runtime_hotkeys().edit.is_none());
         assert_eq!(settings.edit_hotkey, saved_binding);
+    }
+
+    #[test]
+    fn side_selection_changes_modifier_only_bindings_and_ignores_key_chords() {
+        let mut standalone = HotkeyBinding {
+            modifiers: HotkeyModifiers {
+                option: Some(ModifierSide::Left),
+                command: Some(ModifierSide::Left),
+                ..Default::default()
+            },
+            key: None,
+        };
+        assert_eq!(standalone.standalone_side(), Some(ModifierSide::Left));
+        standalone.set_standalone_side(ModifierSide::Right);
+        assert_eq!(
+            standalone.modifiers,
+            HotkeyModifiers {
+                option: Some(ModifierSide::Right),
+                command: Some(ModifierSide::Right),
+                ..Default::default()
+            }
+        );
+
+        let mixed = HotkeyBinding {
+            modifiers: HotkeyModifiers {
+                option: Some(ModifierSide::Left),
+                command: Some(ModifierSide::Right),
+                ..Default::default()
+            },
+            key: None,
+        };
+        assert_eq!(mixed.standalone_side(), None);
+
+        let mut chord = HotkeyBinding {
+            modifiers: HotkeyModifiers {
+                option: Some(ModifierSide::Left),
+                ..Default::default()
+            },
+            key: Some(HotkeyKey {
+                code: 0,
+                label: "A".into(),
+            }),
+        };
+        assert_eq!(chord.standalone_side(), None);
+        chord.set_standalone_side(ModifierSide::Right);
+        assert_eq!(chord.modifiers.option, Some(ModifierSide::Left));
     }
 }

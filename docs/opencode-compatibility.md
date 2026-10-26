@@ -29,12 +29,16 @@ managed service, or restart or update it. `opencode2 api` discovers or starts
 the service through OpenCode's own lifecycle.
 
 Catalog loading and generation use `opencode2 api get /api/info` to identify
-the authenticated active server, starting it through the CLI when needed. An
-exact CLI `HTTP 404 Not Found` falls back to the older `/api/status`, then
-`/api/health`, names within the same deadline; any other failure is final.
-`opencode2 debug paths` locates its state directory. HEX reads endpoint and
-password together from the bounded, owner-only service registration matching
-that server's PID and version.
+the authenticated active server, starting it through the CLI when needed. A
+CLI `HTTP 404 Not Found` as the last stderr line (earlier lines may be warnings,
+such as a client/server version mismatch) falls back to the older
+`/api/status`, then `/api/health`, names within the same deadline; any other
+failure is final. HEX reads endpoint and password together from the bounded,
+owner-only service registration matching that server's PID and version, in the
+state directory `opencode2 debug paths` reports and in OpenCode's default one
+(`$XDG_STATE_HOME/opencode`, else `~/.local/state/opencode`). A wrapper that
+rejects `debug paths` or redirects the CLI's own state still finds the default
+service's registration.
 It never reads or regenerates the configured password, changes service settings,
 or includes credentials in diagnostics.
 

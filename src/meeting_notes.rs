@@ -15,8 +15,8 @@ use color_eyre::eyre::{Result, WrapErr, eyre};
 use serde::{Deserialize, Deserializer, Serialize};
 
 use super::{
-    MeetingManifest, MeetingStatus, TranscriptEntry, TranscriptPublication, TranscriptReader,
-    coalesce_transcript, format_duration, read_manifest, root, sync_directory, write_manifest,
+    MeetingManifest, MeetingStatus, TranscriptEntry, TranscriptReader, coalesce_transcript,
+    format_duration, read_manifest, root, sync_directory, write_manifest,
 };
 use crate::apple_intelligence::{self, GeneratedNotes, GenerationError};
 use crate::events::now_ms;
@@ -244,9 +244,52 @@ pub(super) fn summarize_entries(
     entries: &[TranscriptEntry],
     max_chars: usize,
     deadline: Instant,
+    generate: impl FnMut(&str, &str, Duration) -> Result<GeneratedNotes, GenerationError>,
+) -> Result<Summary> {
+    summarize_with_calendar(entries, None, max_chars, deadline, generate)
+}
+
+/// The most attendee names a notes prompt lists.
+const MAX_PROMPT_ATTENDEES: usize = 12;
+
+/// The calendar event's title and attendees, ahead of the transcript.
+fn calendar_preamble(calendar: Option<&super::MeetingCalendar>) -> String {
+    let Some(calendar) = calendar else {
+        return String::new();
+    };
+    let mut preamble = String::new();
+    let title = calendar.title.trim();
+    if !title.is_empty() {
+        let title = title.chars().take(200).collect::<String>();
+        preamble.push_str(&format!("Calendar event: {title}\n"));
+    }
+    let attendees = calendar
+        .attendees
+        .iter()
+        .map(|name| name.trim())
+        .filter(|name| !name.is_empty())
+        .take(MAX_PROMPT_ATTENDEES)
+        .map(|name| name.chars().take(80).collect::<String>())
+        .collect::<Vec<_>>();
+    if !attendees.is_empty() {
+        preamble.push_str(&format!("Attendees: {}\n", attendees.join(", ")));
+    }
+    if !preamble.is_empty() {
+        preamble.push('\n');
+    }
+    preamble
+}
+
+/// [`summarize_entries`] with the calendar event as context.
+pub(super) fn summarize_with_calendar(
+    entries: &[TranscriptEntry],
+    calendar: Option<&super::MeetingCalendar>,
+    max_chars: usize,
+    deadline: Instant,
     mut generate: impl FnMut(&str, &str, Duration) -> Result<GeneratedNotes, GenerationError>,
 ) -> Result<Summary> {
-    let mut max_chars = max_chars;
+    let preamble = calendar_preamble(calendar);
+    let mut max_chars = max_chars.saturating_sub(preamble.len()).max(1);
     let mut calls = 0;
     loop {
         let excerpt = excerpt(entries, max_chars);
@@ -258,7 +301,7 @@ pub(super) fn summarize_entries(
             return Err(eyre!("Apple Intelligence did not finish in time"));
         }
         calls += 1;
-        let prompt = format!("Meeting transcript:\n\n{}", excerpt.text);
+        let prompt = format!("{preamble}Meeting transcript:\n\n{}", excerpt.text);
         match generate(NOTES_INSTRUCTIONS, &prompt, remaining.min(CALL_TIMEOUT)) {
             Ok(notes) => {
                 return Ok(Summary {
@@ -296,6 +339,11 @@ fn clean_summary(summary: &str) -> String {
         .filter(|word| !word.is_empty())
         .collect::<Vec<_>>()
         .join(" ");
+    // Guided generation sometimes leaks a closing brace from its JSON.
+    let text = text
+        .trim_start_matches(['{', '['])
+        .trim_end_matches(['}', ']'])
+        .trim();
     let mut end = text.len();
     let mut sentences = 0;
     for (index, character) in text.char_indices() {
@@ -334,9 +382,25 @@ impl MeetingNotes {
 
 /// The title shown for a meeting. A meeting with a default app-and-time
 /// title shows its generated title, else its provisional title; a named or
-/// renamed meeting keeps its name.
+/// renamed meeting keeps its name. Chapters extend any title but one the
+/// user typed.
 pub fn display_title(manifest: &MeetingManifest) -> String {
-    if manifest.title != super::default_title(manifest.app.as_deref(), manifest.created_at_ms) {
+    let base = base_title(manifest);
+    if manifest.chapters.is_empty() || manifest.title_source() == super::TitleSource::User {
+        return base;
+    }
+    // While recording, the last chapter runs until now.
+    let end_ms = manifest.duration_ms.or_else(|| {
+        manifest
+            .status
+            .is_active()
+            .then(|| now_ms().saturating_sub(manifest.created_at_ms))
+    });
+    super::chapters::titled(&base, &manifest.chapters, end_ms)
+}
+
+fn base_title(manifest: &MeetingManifest) -> String {
+    if manifest.title_source() != super::TitleSource::Default {
         return manifest.title.clone();
     }
     manifest
@@ -691,7 +755,7 @@ pub fn notes_wanted() -> bool {
 
 /// Yields to dictation for at most `DICTATION_WAIT`. Returns false when
 /// `stop` was set meanwhile.
-fn wait_for_dictation(stop: &AtomicBool) -> bool {
+pub(super) fn wait_for_dictation(stop: &AtomicBool) -> bool {
     let started = Instant::now();
     while crate::parakeet::dictation_busy() && started.elapsed() < DICTATION_WAIT {
         if stop.load(Ordering::Relaxed) {
@@ -722,11 +786,15 @@ fn summarize_claimed(id: &str, _claim: InProgress) -> Result<MeetingManifest> {
     if manifest.status != MeetingStatus::Complete {
         return Err(eyre!("only completed meetings can be summarized"));
     }
-    let entries = super::completed_transcript(id, Some(TranscriptPublication::Final))?.entries;
-    let started = Instant::now();
+    let entries = super::read_ndjson(&directory.join("transcript.ndjson"))?;
     let never = AtomicBool::new(false);
-    let result = summarize_entries(
+    if crate::experiments::enabled(crate::experiments::Experiment::LiveChapters) {
+        super::chapters::refine_meeting(&directory, &entries, &never);
+    }
+    let started = Instant::now();
+    let result = summarize_with_calendar(
         &entries,
+        manifest.calendar.as_ref(),
         excerpt_budget(apple_intelligence::context_tokens(), FINAL_EXCERPT_CHARS),
         started + TOTAL_DEADLINE,
         |instructions, prompt, timeout| {
@@ -996,6 +1064,29 @@ mod tests {
     }
 
     #[test]
+    fn a_calendar_meeting_gives_its_title_and_attendees_as_context() {
+        let calendar = crate::meeting::MeetingCalendar {
+            title: "Q4 launch sync".into(),
+            attendees: vec!["Ana Ruiz".into(), " ".into(), "Ben Ito".into()],
+        };
+        let mut prompts = Vec::new();
+        summarize_with_calendar(
+            &conversation(2),
+            Some(&calendar),
+            FINAL_EXCERPT_CHARS,
+            Instant::now() + Duration::from_secs(60),
+            |_, prompt, _| {
+                prompts.push(prompt.to_string());
+                Ok(generated("Launch", "They met."))
+            },
+        )
+        .unwrap();
+        assert!(prompts[0].starts_with(
+            "Calendar event: Q4 launch sync\nAttendees: Ana Ruiz, Ben Ito\n\nMeeting transcript:\n\n[00:00] You: Turn 0"
+        ));
+    }
+
+    #[test]
     fn long_meetings_are_excerpted_from_the_opening_middle_and_ending() {
         let entries = conversation(400);
         let excerpt = excerpt(&entries, 12_000);
@@ -1115,6 +1206,10 @@ mod tests {
             "Version 2.1 ships. Docs follow."
         );
         assert_eq!(clean_summary("No end punctuation"), "No end punctuation");
+        assert_eq!(
+            clean_summary("The team shipped. Docs were discussed.}"),
+            "The team shipped. Docs were discussed."
+        );
         let long = clean_summary(&"word ".repeat(200));
         assert!(long.len() <= MAX_SUMMARY_CHARS + "…".len() && long.ends_with('…'));
     }

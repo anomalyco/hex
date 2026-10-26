@@ -7,7 +7,7 @@
   <key>CFBundleExecutable</key>
   <string>hex</string>
   <key>CFBundleIdentifier</key>
-  <string>com.kitlangton.hex2</string>
+  <string>anomaly.hex</string>
   <key>CFBundleInfoDictionaryVersion</key>
   <string>6.0</string>
   <key>CFBundleIconFile</key>
@@ -32,21 +32,13 @@
   <string>HEX uses Accessibility to paste dictation and read selected text for Voice Action.</string>
   <key>NSAudioCaptureUsageDescription</key>
   <string>HEX records the other participants' audio only while you record a meeting, and keeps it on this Mac.</string>
+  <key>NSCalendarsFullAccessUsageDescription</key>
+  <string>HEX reads your calendar on this Mac to remind you before meetings and title their recordings. Nothing leaves your Mac.</string>
+  <key>NSCalendarsUsageDescription</key>
+  <string>HEX reads your calendar on this Mac to remind you before meetings and title their recordings. Nothing leaves your Mac.</string>
   <key>NSInputMonitoringUsageDescription</key>
   <string>HEX uses Input Monitoring to detect your dictation shortcuts in every app.</string>
   <key>NSMicrophoneUsageDescription</key>
   <string>HEX uses your microphone for private local dictation and does not store the captured audio.</string>
-  <key>SUEnableAutomaticChecks</key>
-  <true/>
-  <key>SUAutomaticallyUpdate</key>
-  <false/>
-  <key>SUAllowsAutomaticUpdates</key>
-  <false/>
-  <key>SUFeedURL</key>
-  <string>https://downloads.hex.kitlangton.dev/appcast.xml</string>
-  <key>SUPublicEDKey</key>
-  <string>mIek27lttJe8cIBqVZFhh6reRKjpTx1h9ZY9OKWPtuM=</string>
-  <key>SUVerifyUpdateBeforeExtraction</key>
-  <true/>
 </dict>
 </plist>

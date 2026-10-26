@@ -1,10 +1,10 @@
 name: Windows installer
 
-# Builds and silently tests HEX-Setup-<version>-<x64|arm64>.exe around the
-# executables already published in the signed update feeds, so installer
-# changes are tested on real Windows runners and a published release can gain
-# installers without rebuilding or re-signing it. Release desktop builds the
-# installers for new releases itself.
+# Builds and silently tests Hex-Setup-<version>-windows-<x64|arm64>.exe
+# around the executables the release service publishes (the stable manifest
+# on anoma.ly/release, or dev.anoma.ly/release before the first release), so
+# installer changes are tested on real Windows runners without a full
+# release. Release builds the installers for new releases itself.
 on:
   pull_request:
     paths:
@@ -33,17 +33,24 @@ jobs:
         with:
           persist-credentials: false
       - id: fetch
-        name: Download and verify the signed feeds and their artifacts
+        name: Download the published Windows executables and check them against the manifest
         run: |
-          base=https://downloads.hex.kitlangton.dev
-          mkdir -p dist
-          for feed in linux-update.json windows-update.json windows-aarch64-update.json; do
-            curl --fail --silent --show-error --proto '=https' "$base/$feed" -o "dist/$feed"
-            artifact=$(jq -r .payload "dist/$feed" | base64 -d | jq -r .artifact)
-            curl --fail --silent --show-error --proto '=https' "$base/releases/$artifact" -o "dist/$artifact"
+          for release in https://anoma.ly/release https://dev.anoma.ly/release; do
+            manifest="$release/hex/desktop/stable.json"
+            curl --fail --silent --show-error --proto '=https' "$manifest" -o manifest.json && break
+            rm -f manifest.json
           done
-          scripts/release-feed.sh verify dist linux-update.json windows-update.json windows-aarch64-update.json
-          echo "version=$(jq -r .payload dist/windows-update.json | base64 -d | jq -r .version)" >> "$GITHUB_OUTPUT"
+          test -f manifest.json
+          version=$(jq -er .release.version manifest.json)
+          mkdir -p dist
+          for label in x64 arm64; do
+            url="${release%/release}$(jq -er --arg t "windows-$label" '.release.targets[$t].url' manifest.json)"
+            file="dist/Hex-$version-windows-$label.exe"
+            curl --fail --silent --show-error --proto '=https' "$url" -o "$file"
+            test "$(sha256sum < "$file" | cut -d' ' -f1)" = "$(jq -r --arg t "windows-$label" '.release.targets[$t].sha256' manifest.json)"
+          done
+          echo "Testing installers around Hex $version from $manifest." >> "$GITHUB_STEP_SUMMARY"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@v7
         with:
           name: published
@@ -78,13 +85,12 @@ jobs:
       - name: Build the installer
         shell: pwsh
         run: |
-          $exe = Get-ChildItem published -Filter "HEX-$env:HEX_VERSION-*-${{ matrix.arch }}-windows.exe" | Select-Object -First 1
-          if (-not $exe) { throw 'The published executable is missing.' }
-          "HEX_EXE=$($exe.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append
-          scripts/build-windows-installer.ps1 -Executable $exe.FullName -Version $env:HEX_VERSION -Arch ${{ matrix.arch }} -OutDir installers
+          $exe = (Resolve-Path "published/Hex-$env:HEX_VERSION-windows-${{ matrix.label }}.exe").Path
+          "HEX_EXE=$exe" | Out-File -FilePath $env:GITHUB_ENV -Append
+          scripts/build-windows-installer.ps1 -Executable $exe -Version $env:HEX_VERSION -Arch ${{ matrix.arch }} -OutDir installers
       - name: Install, reinstall, refuse a downgrade, and uninstall silently
         shell: pwsh
-        run: scripts/test-windows-installer.ps1 -Installer "installers/HEX-Setup-$env:HEX_VERSION-${{ matrix.label }}.exe" -Executable $env:HEX_EXE -Version $env:HEX_VERSION
+        run: scripts/test-windows-installer.ps1 -Installer "installers/Hex-Setup-$env:HEX_VERSION-windows-${{ matrix.label }}.exe" -Executable $env:HEX_EXE -Version $env:HEX_VERSION
       - name: Upload installer logs
         if: always()
         uses: actions/upload-artifact@v7

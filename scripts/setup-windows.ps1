@@ -41,29 +41,6 @@ function Invoke-Rustup {
     throw "rustup did not finish replacing $script:RustupPath"
 }
 
-function Find-FxcCompiler {
-    $configured = [Environment]::GetEnvironmentVariable("GPUI_FXC_PATH", "User")
-    if (-not [string]::IsNullOrWhiteSpace($configured) -and
-        (Test-Path -LiteralPath $configured -PathType Leaf)) {
-        return $configured
-    }
-
-    $onPath = Get-Command "fxc.exe" -ErrorAction SilentlyContinue
-    if ($null -ne $onPath) {
-        return $onPath.Source
-    }
-
-    $kitBin = Join-Path ${env:ProgramFiles(x86)} "Windows Kits\10\bin"
-    if (-not (Test-Path -LiteralPath $kitBin -PathType Container)) {
-        return $null
-    }
-    return Get-ChildItem -LiteralPath $kitBin -Directory |
-        Sort-Object Name -Descending |
-        ForEach-Object { Join-Path $_.FullName "x64\fxc.exe" } |
-        Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } |
-        Select-Object -First 1
-}
-
 if (-not (Test-Tool "winget")) {
     throw "winget is required. Install or update App Installer from Microsoft Store."
 }
@@ -123,14 +100,6 @@ if ($arm64) {
     $env:TRANSCRIBE_CMAKE_ARGS = "-DGGML_NATIVE=OFF -DGGML_OPENMP=OFF"
     Write-Host "ARM64: building with clang-cl and Ninja from a Developer PowerShell for VS."
 }
-
-$fxcPath = Find-FxcCompiler
-if ([string]::IsNullOrWhiteSpace($fxcPath)) {
-    throw "fxc.exe is required by GPUI. Install the Windows 10/11 SDK through Visual Studio Installer."
-}
-$env:GPUI_FXC_PATH = $fxcPath
-[Environment]::SetEnvironmentVariable("GPUI_FXC_PATH", $fxcPath, "User")
-Write-Host "Using GPUI shader compiler: $fxcPath"
 
 Invoke-Rustup -Arguments @("toolchain", "install", "stable", "--profile", "minimal")
 Invoke-Rustup -Arguments @("default", "stable")

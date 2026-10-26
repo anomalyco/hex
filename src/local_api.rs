@@ -32,6 +32,9 @@ const MAX_PATH_BYTES: usize = 2 * 1024;
 const MAX_AUDIO_BYTES: usize = 64 * 1024 * 1024;
 const MAX_DEVELOPER_CONTROL_BYTES: usize = 16 * 1024;
 const DEVELOPER_CONTROL_TIMEOUT: Duration = Duration::from_secs(2);
+const MAX_CONTROL_BYTES: usize = 64 * 1024;
+/// How long the app may take to carry out one `hex` control command.
+const CONTROL_TIMEOUT: Duration = Duration::from_secs(10);
 const DICTATION_CONTROL_TIMEOUT: Duration = Duration::from_secs(120);
 const MAX_DICTATION_SOURCE_BYTES: usize = 128;
 
@@ -111,6 +114,7 @@ struct HttpContext {
     shutdown: Arc<AtomicBool>,
     transcription: crate::transcription_service::TranscriptionServiceHandle,
     developer_control: Option<SyncSender<crate::developer_control::DeveloperCall>>,
+    control: Option<SyncSender<crate::control::ControlCall>>,
     dictation_control: Option<SyncSender<RecognitionControl>>,
     dictation_levels: Arc<Mutex<HashMap<u64, DictationLevels>>>,
 }
@@ -129,12 +133,15 @@ struct CapabilitiesResponse {
     partial_transcripts: bool,
     service_capture: bool,
     developer_control: bool,
+    control: bool,
 }
 
 /// Optional control channels the running app exposes through its local API.
 #[derive(Default)]
 pub struct LocalApiOptions {
     pub developer_control: Option<SyncSender<crate::developer_control::DeveloperCall>>,
+    /// The `hex` control commands (`POST /control`).
+    pub control: Option<SyncSender<crate::control::ControlCall>>,
     pub dictation_control: Option<SyncSender<RecognitionControl>>,
 }
 
@@ -211,6 +218,7 @@ impl LocalApi {
             shutdown: worker_shutdown,
             transcription,
             developer_control: options.developer_control,
+            control: options.control,
             dictation_control: options.dictation_control,
             dictation_levels: Arc::new(Mutex::new(HashMap::new())),
         };
@@ -465,6 +473,21 @@ fn http_worker(pending: Arc<Mutex<Receiver<TcpStream>>>, context: Arc<HttpContex
                     tracing::debug!(%error, "developer control client disconnected");
                 }
             }
+            RequestAction::Control {
+                content_length,
+                body_prefix,
+            } => {
+                let response = control(
+                    &mut stream,
+                    content_length,
+                    body_prefix,
+                    context.control.as_ref(),
+                    &context.shutdown,
+                );
+                if let Err(error) = write_response(&mut stream, response) {
+                    tracing::debug!(%error, "control client disconnected");
+                }
+            }
             RequestAction::DictationStart {
                 content_length,
                 body_prefix,
@@ -498,6 +521,19 @@ fn handle_request(request: HttpRequest, context: &HttpContext) -> RequestAction 
     }
     if request.method == "POST" && path == "/dev/control" {
         return developer_control_action(request, context.developer_control.is_some());
+    }
+    if request.method == "POST" && path == "/control" {
+        return json_post_action(
+            request,
+            context.control.is_some(),
+            "control-unavailable",
+            MAX_CONTROL_BYTES,
+            "control-too-large",
+            |content_length, body_prefix| RequestAction::Control {
+                content_length,
+                body_prefix,
+            },
+        );
     }
     if request.method == "POST" && path == "/dictations" {
         return dictation_start_action(request, context.dictation_control.is_some());
@@ -533,6 +569,7 @@ fn handle_request(request: HttpRequest, context: &HttpContext) -> RequestAction 
                 partial_transcripts: false,
                 service_capture: context.dictation_control.is_some(),
                 developer_control: context.developer_control.is_some(),
+                control: context.control.is_some(),
             },
         ),
         ("GET", "/models") => match model_infos(&request.path) {
@@ -999,6 +1036,63 @@ fn developer_control(
     }
 }
 
+/// Hands one `hex` control request to the app and waits for its reply.
+/// Refusals travel as a 200 `ControlReply::Error`; an HTTP error means the
+/// request never reached the app.
+fn control(
+    stream: &mut TcpStream,
+    content_length: usize,
+    mut body: Vec<u8>,
+    controls: Option<&SyncSender<crate::control::ControlCall>>,
+    shutdown: &AtomicBool,
+) -> HttpResponse {
+    use crate::control::{ControlCall, ControlReply, ControlRequest, ControlResponse};
+
+    if let Err(error) = read_body_bounded(
+        stream,
+        content_length,
+        &mut body,
+        shutdown,
+        MAX_CONTROL_BYTES,
+        DEVELOPER_CONTROL_TIMEOUT,
+    ) {
+        return body_read_response(error);
+    }
+    let request = match serde_json::from_slice::<ControlRequest>(&body) {
+        Ok(request) => request,
+        // A newer `hex` may name a command this app doesn't know.
+        Err(_) => match serde_json::from_slice::<serde_json::Value>(&body)
+            .ok()
+            .and_then(|value| value.get("version")?.as_u64())
+        {
+            Some(version) if version != u64::from(crate::control::CONTROL_VERSION) => {
+                let error = crate::control::version_mismatch(version);
+                return HttpResponse::json(200, &ControlResponse::from(ControlReply::from(error)));
+            }
+            _ => return HttpResponse::code(400, "invalid-control-command"),
+        },
+    };
+    if let Err(error) = crate::control::check_version(&request) {
+        return HttpResponse::json(200, &ControlResponse::from(ControlReply::from(error)));
+    }
+    let Some(controls) = controls else {
+        return HttpResponse::code(404, "control-unavailable");
+    };
+    let (reply, response) = mpsc::sync_channel(1);
+    match controls.try_send(ControlCall { request, reply }) {
+        Ok(()) => {}
+        Err(TrySendError::Full(_)) => return HttpResponse::code(503, "control-busy"),
+        Err(TrySendError::Disconnected(_)) => {
+            return HttpResponse::code(503, "control-unavailable");
+        }
+    }
+    match response.recv_timeout(CONTROL_TIMEOUT) {
+        Ok(reply) => HttpResponse::json(200, &reply),
+        Err(RecvTimeoutError::Timeout) => HttpResponse::code(504, "control-timeout"),
+        Err(RecvTimeoutError::Disconnected) => HttpResponse::code(503, "control-unavailable"),
+    }
+}
+
 fn body_read_response(error: BodyReadError) -> HttpResponse {
     match error {
         BodyReadError::ResourceExhausted => HttpResponse::code(413, "resource-exhausted"),
@@ -1349,6 +1443,7 @@ fn stream_model_prepare_with(
     let mut last_heartbeat = Instant::now();
     let total_bytes = model.download_bytes().unwrap_or(0);
     let mut connected = true;
+    let mut finished = None;
     let result = loop {
         if shutdown.load(Ordering::Acquire) {
             canceled.store(true, Ordering::Release);
@@ -1389,12 +1484,9 @@ fn stream_model_prepare_with(
         }
         last_stage = Some(current_stage);
         last_downloaded = current_downloaded;
-        match result_receiver.try_recv() {
-            Ok(result) => break Some(result),
-            Err(TryRecvError::Disconnected) => {
-                break Some(Err(eyre!("model preparer stopped unexpectedly")));
-            }
-            Err(TryRecvError::Empty) => {}
+        // The last stage has been reported, so a finished result ends here.
+        if let Some(result) = finished.take() {
+            break Some(result);
         }
         if last_heartbeat.elapsed() >= Duration::from_secs(5) {
             if stream.write_all(b": keep-alive\n\n").is_err() || stream.flush().is_err() {
@@ -1404,7 +1496,13 @@ fn stream_model_prepare_with(
             }
             last_heartbeat = Instant::now();
         }
-        thread::sleep(Duration::from_millis(100));
+        match result_receiver.recv_timeout(Duration::from_millis(100)) {
+            Ok(result) => finished = Some(result),
+            Err(RecvTimeoutError::Disconnected) => {
+                finished = Some(Err(eyre!("model preparer stopped unexpectedly")));
+            }
+            Err(RecvTimeoutError::Timeout) => {}
+        }
     };
     if worker.join().is_err() {
         tracing::error!(model = model.id.as_str(), "model preparer panicked");
@@ -1578,6 +1676,10 @@ enum RequestAction {
         admission: crate::transcription_service::AudioAdmission,
     },
     DeveloperControl {
+        content_length: usize,
+        body_prefix: Vec<u8>,
+    },
+    Control {
         content_length: usize,
         body_prefix: Vec<u8>,
     },
@@ -1759,39 +1861,101 @@ fn current_health() -> HealthResponse {
 pub fn call_developer(
     command: &crate::developer_control::DeveloperCommand,
 ) -> Result<crate::developer_control::DeveloperReply> {
-    let discovery_path = crate::app_paths::local_api_discovery_file()?;
-    let document: DiscoveryDocument = serde_json::from_slice(
-        &fs::read(&discovery_path)
-            .wrap_err_with(|| format!("could not read {}", discovery_path.display()))?,
-    )
-    .wrap_err("local API discovery is invalid")?;
-    if !valid_discovery(&document) || !discovery_is_live(&document) {
-        bail!("HEX local API is not running");
-    }
     let body = serde_json::to_vec(command)?;
+    let (status, body) = post_json("/dev/control", &body, DEVELOPER_CONTROL_TIMEOUT, 64 * 1024)?;
+    if status != 200 {
+        bail!(
+            "HEX developer control failed: {}",
+            error_code(status, &body)
+        );
+    }
+    serde_json::from_slice(&body).wrap_err("HEX developer response is invalid")
+}
+
+/// Sends one `hex` control request to the running app.
+pub fn call_control(
+    request: &crate::control::ControlRequest,
+) -> Result<crate::control::ControlResponse> {
+    let body = serde_json::to_vec(request)?;
+    // The app answers within CONTROL_TIMEOUT or the server replies 504.
+    let (status, body) = post_json(
+        "/control",
+        &body,
+        CONTROL_TIMEOUT + Duration::from_secs(5),
+        1024 * 1024,
+    )?;
+    if status != 200 {
+        let code = error_code(status, &body);
+        bail!(match code.as_str() {
+            "control-unavailable" => {
+                "the running Hex doesn't accept control commands; update Hex".to_string()
+            }
+            "control-busy" => "Hex is busy with other control commands; try again".into(),
+            "control-timeout" => "Hex didn't answer in time; check `hex status`".into(),
+            "invalid-control-command" => {
+                "the running Hex doesn't know this command; update Hex".into()
+            }
+            _ => format!("Hex refused the request ({code})"),
+        });
+    }
+    serde_json::from_slice(&body).wrap_err("Hex sent an invalid control reply")
+}
+
+/// The running app's process id, if its local API is live.
+pub fn running_pid() -> Option<u32> {
+    live_discovery().ok().map(|document| document.pid)
+}
+
+fn live_discovery() -> Result<DiscoveryDocument> {
+    let path = crate::app_paths::local_api_discovery_file()?;
+    let bytes = match fs::read(&path) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            bail!("Hex is not running")
+        }
+        Err(error) => {
+            return Err(error).wrap_err_with(|| format!("could not read {}", path.display()));
+        }
+    };
+    let document: DiscoveryDocument =
+        serde_json::from_slice(&bytes).wrap_err("Hex's local API discovery file is invalid")?;
+    if !valid_discovery(&document) || !discovery_is_live(&document) {
+        bail!("Hex is not running");
+    }
+    Ok(document)
+}
+
+fn post_json(
+    path: &str,
+    body: &[u8],
+    read_timeout: Duration,
+    max_response: usize,
+) -> Result<(u16, Vec<u8>)> {
+    let document = live_discovery()?;
     let address = SocketAddr::from(([127, 0, 0, 1], document.port));
     let mut stream = TcpStream::connect_timeout(&address, CONNECTION_TIMEOUT)
-        .wrap_err("could not connect to HEX local API")?;
-    stream.set_read_timeout(Some(DEVELOPER_CONTROL_TIMEOUT))?;
+        .wrap_err("could not connect to Hex's local API")?;
+    stream.set_read_timeout(Some(read_timeout))?;
     stream.set_write_timeout(Some(CONNECTION_TIMEOUT))?;
     write!(
         stream,
-        "POST /dev/control HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: Bearer {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        "POST {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: Bearer {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
         document.token,
         body.len(),
     )?;
-    stream.write_all(&body)?;
+    stream.write_all(body)?;
     stream.flush()?;
 
     let mut response = Vec::new();
     (&mut stream)
-        .take(64 * 1024 + 1)
-        .read_to_end(&mut response)?;
-    if response.len() > 64 * 1024 {
-        bail!("HEX developer response is too large");
+        .take(max_response as u64 + 1)
+        .read_to_end(&mut response)
+        .wrap_err("Hex didn't answer")?;
+    if response.len() > max_response {
+        bail!("Hex's response is too large");
     }
     let Some(header_end) = response.windows(4).position(|window| window == b"\r\n\r\n") else {
-        bail!("HEX developer response is malformed");
+        bail!("Hex's response is malformed");
     };
     let headers = std::str::from_utf8(&response[..header_end])?;
     let status = headers
@@ -1799,16 +1963,15 @@ pub fn call_developer(
         .next()
         .and_then(|line| line.split_ascii_whitespace().nth(1))
         .and_then(|status| status.parse::<u16>().ok())
-        .ok_or_else(|| eyre!("HEX developer response has no HTTP status"))?;
-    let body = &response[header_end + 4..];
-    if status != 200 {
-        let code = serde_json::from_slice::<serde_json::Value>(body)
-            .ok()
-            .and_then(|value| value.get("code")?.as_str().map(str::to_owned))
-            .unwrap_or_else(|| format!("http-{status}"));
-        bail!("HEX developer control failed: {code}");
-    }
-    serde_json::from_slice(body).wrap_err("HEX developer response is invalid")
+        .ok_or_else(|| eyre!("Hex's response has no HTTP status"))?;
+    Ok((status, response.split_off(header_end + 4)))
+}
+
+fn error_code(status: u16, body: &[u8]) -> String {
+    serde_json::from_slice::<serde_json::Value>(body)
+        .ok()
+        .and_then(|value| value.get("code")?.as_str().map(str::to_owned))
+        .unwrap_or_else(|| format!("http-{status}"))
 }
 
 fn generate_token() -> Result<String> {
@@ -1909,6 +2072,8 @@ mod tests {
     use super::*;
 
     static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
+    /// How long a test waits on another thread before failing instead of hanging.
+    const TEST_WAIT: Duration = Duration::from_secs(5);
 
     #[test]
     fn authenticated_server_reports_live_health_and_cleans_up_discovery() {
@@ -1943,6 +2108,7 @@ mod tests {
         assert_eq!(capabilities["partialTranscripts"], false);
         assert_eq!(capabilities["serviceCapture"], false);
         assert_eq!(capabilities["developerControl"], false);
+        assert_eq!(capabilities["control"], false);
         assert_eq!(capabilities["audioFormats"][0], "audio/wav");
         let models = request(document.port, Some(&document.token), "/models");
         let models: Vec<serde_json::Value> = serde_json::from_str(response_body(&models)).unwrap();
@@ -2011,7 +2177,7 @@ mod tests {
             events,
             LocalApiOptions {
                 developer_control: Some(sender),
-                dictation_control: None,
+                ..Default::default()
             },
         )
         .unwrap();
@@ -2047,6 +2213,93 @@ mod tests {
     }
 
     #[test]
+    fn control_requests_are_authenticated_versioned_and_typed() {
+        use crate::control::{ControlCommand, ControlReply, ControlResponse};
+
+        let directory = temp_directory();
+        let events = EventLog::create(&directory.join("events.ndjson")).unwrap();
+        let (sender, controls) = mpsc::sync_channel(1);
+        let mut api = start_unpublished(
+            events,
+            LocalApiOptions {
+                control: Some(sender),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let port = api.document.port;
+        let token = api.document.token.clone();
+        fn post_to(port: u16, token: &str, body: &str) -> String {
+            raw_request(
+                port,
+                &format!(
+                    "POST /control HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: Bearer {token}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                ),
+            )
+        }
+        let post = |token: &str, body: &str| post_to(port, token, body);
+
+        let client_token = token.clone();
+        let client = thread::spawn(move || {
+            post_to(
+                port,
+                &client_token,
+                r#"{"version":1,"command":"meeting-record","title":"Standup"}"#,
+            )
+        });
+        let call = controls.recv_timeout(Duration::from_secs(2)).unwrap();
+        assert_eq!(
+            call.request.command,
+            ControlCommand::MeetingRecord {
+                title: Some("Standup".into())
+            }
+        );
+        call.reply
+            .send(ControlReply::done("Started recording").into())
+            .unwrap();
+        let response = client.join().unwrap();
+        assert!(response.starts_with("HTTP/1.1 200"));
+        assert_eq!(
+            serde_json::from_str::<ControlResponse>(response_body(&response))
+                .unwrap()
+                .reply,
+            ControlReply::done("Started recording")
+        );
+
+        let unauthorized = post("hex_wrong", r#"{"version":1,"command":"status"}"#);
+        assert!(unauthorized.starts_with("HTTP/1.1 401"));
+        let unknown = post(&token, r#"{"version":1,"command":"explode"}"#);
+        assert!(unknown.starts_with("HTTP/1.1 400"));
+        // Another protocol version is answered without reaching the app.
+        for body in [
+            r#"{"version":2,"command":"status"}"#,
+            r#"{"version":2,"command":"explode"}"#,
+        ] {
+            let mismatch = post(&token, body);
+            let reply = serde_json::from_str::<ControlResponse>(response_body(&mismatch))
+                .unwrap()
+                .reply;
+            assert!(
+                matches!(&reply, ControlReply::Error { code, .. } if code == "version-mismatch"),
+                "{reply:?}"
+            );
+        }
+        let too_large = raw_request(
+            port,
+            &format!(
+                "POST /control HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: Bearer {token}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                MAX_CONTROL_BYTES + 1
+            ),
+        );
+        assert!(too_large.starts_with("HTTP/1.1 413"));
+        assert!(controls.try_recv().is_err());
+
+        api.shutdown();
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
     fn authenticated_running_app_dictation_streams_observations_and_returns_raw_text() {
         let directory = temp_directory();
         let events = EventLog::create(&directory.join("events.ndjson")).unwrap();
@@ -2054,20 +2307,21 @@ mod tests {
         let mut api = start_unpublished(
             events,
             LocalApiOptions {
-                developer_control: None,
                 dictation_control: Some(sender),
+                ..Default::default()
             },
         )
         .unwrap();
         let port = api.document.port;
         let token = api.document.token.clone();
+        let (attached, audio_attached) = mpsc::channel();
         let controller = thread::spawn(move || {
             let crate::recognition::RecognitionControl::StartDictation {
                 source,
                 owner_token,
                 levels,
                 reply,
-            } = controls.recv().unwrap()
+            } = controls.recv_timeout(TEST_WAIT).unwrap()
             else {
                 panic!("expected dictation start")
             };
@@ -2090,7 +2344,7 @@ mod tests {
                 id,
                 owner_token: heartbeat_token,
                 reply,
-            } = controls.recv().unwrap()
+            } = controls.recv_timeout(TEST_WAIT).unwrap()
             else {
                 panic!("expected dictation heartbeat")
             };
@@ -2103,7 +2357,7 @@ mod tests {
                 owner_token: audio_token,
                 audio,
                 reply,
-            } = controls.recv().unwrap()
+            } = controls.recv_timeout(TEST_WAIT).unwrap()
             else {
                 panic!("expected dictation audio subscription")
             };
@@ -2115,12 +2369,13 @@ mod tests {
                     samples: vec![0.25, -0.5],
                 })
                 .unwrap();
+            attached.send(()).unwrap();
 
             let crate::recognition::RecognitionControl::FinishDictation {
                 id,
                 owner_token: finish_token,
                 reply,
-            } = controls.recv().unwrap()
+            } = controls.recv_timeout(TEST_WAIT).unwrap()
             else {
                 panic!("expected dictation finish")
             };
@@ -2169,13 +2424,16 @@ mod tests {
 
         let level_token = token.clone();
         let level_owner = owner_token.clone();
+        let (subscribed, levels_subscribed) = mpsc::channel();
         let levels = thread::spawn(move || {
-            request_with_dictation_token(
+            // The level sent at start arrives once the stream has subscribed.
+            raw_request_signalling(
                 port,
-                &level_token,
-                &level_owner,
-                "GET",
-                "/dictations/7/levels",
+                &format!(
+                    "GET /dictations/7/levels HTTP/1.1\r\nAuthorization: Bearer {level_token}\r\nX-Hex-Dictation-Token: {level_owner}\r\nConnection: close\r\n\r\n"
+                ),
+                b"rmsDb",
+                subscribed,
             )
         });
         let audio_token = token.clone();
@@ -2183,7 +2441,8 @@ mod tests {
         let audio = thread::spawn(move || {
             request_bytes(port, &audio_token, &audio_owner, "/dictations/7/audio")
         });
-        thread::sleep(Duration::from_millis(20));
+        levels_subscribed.recv_timeout(TEST_WAIT).unwrap();
+        audio_attached.recv_timeout(TEST_WAIT).unwrap();
         let finish = request_with_dictation_token(
             port,
             &token,
@@ -2196,7 +2455,7 @@ mod tests {
             serde_json::from_str::<serde_json::Value>(response_body(&finish)).unwrap(),
             serde_json::json!({ "transcript": "raw words", "durationMs": 875 })
         );
-        let levels = levels.join().unwrap();
+        let levels = String::from_utf8(levels.join().unwrap()).unwrap();
         assert!(levels.starts_with("HTTP/1.1 200"));
         assert!(levels.contains(r#""rmsDb":-24.5"#));
         assert!(levels.contains(r#""peakDb":-8.0"#));
@@ -2492,6 +2751,7 @@ mod tests {
             shutdown: Arc::new(AtomicBool::new(false)),
             transcription,
             developer_control: None,
+            control: None,
             dictation_control: None,
             dictation_levels: Arc::new(Mutex::new(HashMap::new())),
         };
@@ -2568,6 +2828,40 @@ mod tests {
     }
 
     #[test]
+    fn a_prepare_that_finishes_at_once_still_reports_its_last_stage() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let client = thread::spawn(move || {
+            let mut stream = TcpStream::connect(address).unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(10)))
+                .unwrap();
+            let mut response = String::new();
+            stream.read_to_string(&mut response).unwrap();
+            response
+        });
+        let (mut stream, _) = listener.accept().unwrap();
+        let preparer: ModelPreparer = Box::new(|_, _, stage| {
+            crate::transcription_models::ModelPreparationStage::Loading.store(&stage);
+            Ok(())
+        });
+        stream_model_prepare_with(
+            &mut stream,
+            crate::transcription_models::definition(
+                crate::transcription_models::TranscriptionModelId::ParakeetV2,
+            ),
+            Arc::new(AtomicBool::new(true)),
+            &AtomicBool::new(false),
+            preparer,
+        );
+        drop(stream);
+        let response = client.join().unwrap();
+        let loading = response.find("\"type\":\"loading\"").unwrap();
+        let ok = response.find("\"type\":\"ok\"").unwrap();
+        assert!(loading < ok);
+    }
+
+    #[test]
     fn tokens_have_256_bits_of_random_lowercase_hex() {
         let first = generate_token().unwrap();
         let second = generate_token().unwrap();
@@ -2625,6 +2919,32 @@ mod tests {
         let mut response = Vec::new();
         stream.read_to_end(&mut response).unwrap();
         response
+    }
+
+    /// Like `raw_request_bytes`, signalling once the response contains `marker`.
+    fn raw_request_signalling(
+        port: u16,
+        request: &str,
+        marker: &[u8],
+        ready: mpsc::Sender<()>,
+    ) -> Vec<u8> {
+        let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        stream.set_read_timeout(Some(TEST_WAIT)).unwrap();
+        stream.write_all(request.as_bytes()).unwrap();
+        let mut response = Vec::new();
+        let mut buffer = [0; 1024];
+        let mut signalled = false;
+        loop {
+            let read = stream.read(&mut buffer).unwrap();
+            if read == 0 {
+                return response;
+            }
+            response.extend_from_slice(&buffer[..read]);
+            if !signalled && response.windows(marker.len()).any(|bytes| bytes == marker) {
+                signalled = true;
+                let _ = ready.send(());
+            }
+        }
     }
 
     fn request_with_dictation_token(

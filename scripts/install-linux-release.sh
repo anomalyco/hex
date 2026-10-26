@@ -1,7 +1,12 @@
 #!/bin/sh
 set -eu
 
-base_url=${HEX_RELEASE_BASE_URL:-https://downloads.hex.kitlangton.com}
+# Installs Hex from the Anomaly release service (docs/plans/release-service.md):
+# the stable manifest names the linux-x64 executable with its size and
+# SHA-256, and install.json marks the install as one Hex updates itself.
+origin=${HEX_RELEASE_BASE_URL:-https://anoma.ly/release}
+origin=${origin%/}
+channel=stable
 install_dir=${HEX_INSTALL_DIR:-"$HOME/.local/bin"}
 data_home=${XDG_DATA_HOME:-$HOME/.local/share}
 config_home=${XDG_CONFIG_HOME:-$HOME/.config}
@@ -10,8 +15,6 @@ applications="$data_home/applications"
 autostart="$config_home/autostart"
 units="$config_home/systemd/user"
 unit="$units/hex.service"
-expected_public_key=bfad02e62208ff144b5c9d21c7e79c7c16c6904299a437d857303007cd4ff7d8
-public_key_prefix=302a300506032b6570032100
 
 require() {
   if ! command -v "$1" >/dev/null 2>&1; then
@@ -88,7 +91,7 @@ uninstall() {
       rm -f "$desktop"
     fi
   done
-  rm -f "$support_dir/current" "$support_dir/.current.next"
+  rm -f "$support_dir/current" "$support_dir/.current.next" "$support_dir/install.json"
   rm -rf "$support_dir/versions"
   echo "Removed HEX. Logs and settings remain in $support_dir."
 }
@@ -146,59 +149,53 @@ cleanup() {
 }
 trap cleanup EXIT
 trap 'exit 1' HUP INT TERM
-feed="$temporary/linux-update.json"
-payload="$temporary/payload.json"
-signature="$temporary/signature"
-public_der="$temporary/public.der"
-public_pem="$temporary/public.pem"
+manifest="$temporary/manifest.json"
 artifact_path=${HEX_INSTALL_ARTIFACT:-$temporary/hex}
 version=${HEX_INSTALL_VERSION:-}
 
 if [ -z "${HEX_INSTALL_ARTIFACT:-}" ]; then
-  for command in curl jq openssl xxd; do
+  for command in curl jq; do
     require "$command"
   done
   curl_version=$(curl --version | awk 'NR == 1 { print $2 }')
   oldest=$(printf '%s\n%s\n' 8.4.0 "$curl_version" | sort -V | head -1)
-  test "$oldest" = 8.4.0 || fail "HEX installation requires curl 8.4.0 or newer."
+  test "$oldest" = 8.4.0 || fail "Hex installation requires curl 8.4.0 or newer."
+  case "$origin" in
+    https://*) ;;
+    *) fail "HEX_RELEASE_BASE_URL must be an https:// URL." ;;
+  esac
+  manifest_url="$origin/hex/desktop/$channel.json"
   curl --fail --location --proto '=https' --proto-redir '=https' \
     --silent --show-error --connect-timeout 10 --max-time 60 \
-    --max-filesize 65536 "$base_url/linux-update.json" -o "$feed"
-  printf '%s%s' "$public_key_prefix" "$expected_public_key" | xxd -r -p > "$public_der"
-  openssl pkey -pubin -inform DER -in "$public_der" -out "$public_pem"
-  jq -er .payload "$feed" | openssl base64 -d -A > "$payload"
-  jq -er .signature "$feed" | openssl base64 -d -A > "$signature"
-  openssl pkeyutl -verify -rawin -pubin -inkey "$public_pem" \
-    -in "$payload" -sigfile "$signature" >/dev/null
-
-  schema=$(jq -er .schema_version "$payload")
-  channel=$(jq -er .channel "$payload")
-  target=$(jq -er .target "$payload")
-  version=$(jq -er .version "$payload")
-  artifact=$(jq -er .artifact "$payload")
-  bytes=$(jq -er .bytes "$payload")
-  sha256=$(jq -er .sha256 "$payload")
-  test "$schema" = 1 || fail "Unsupported Linux release schema."
-  test "$channel" = stable || fail "Unsupported Linux release channel."
-  test "$target" = x86_64-unknown-linux-gnu || fail "Linux release targets the wrong platform."
+    --max-filesize 1048576 "$manifest_url" -o "$manifest"
+  test "$(jq -r '"\(.schema) \(.app) \(.artifact) \(.channel)"' "$manifest")" = "1 hex desktop $channel" \
+    || fail "$manifest_url is not the Hex desktop $channel manifest."
+  version=$(jq -er .release.version "$manifest")
+  url=$(jq -er '.release.targets["linux-x64"].url' "$manifest") \
+    || fail "Hex $version has no linux-x64 build."
+  bytes=$(jq -er '.release.targets["linux-x64"].size' "$manifest")
+  sha256=$(jq -er '.release.targets["linux-x64"].sha256' "$manifest")
   printf '%s\n' "$bytes" | grep -Eq '^[1-9][0-9]*$' \
     || fail "Linux release has an invalid size."
   printf '%s\n' "$sha256" | grep -Eq '^[0-9a-f]{64}$' \
     || fail "Linux release has an invalid checksum."
   test "$bytes" -le 536870912 || fail "Linux release exceeds the 512 MiB limit."
-  test "$artifact" = "HEX-$version-$sha256-x86_64-linux" \
-    || fail "Linux release is not content-addressed."
+  # Target URLs are absolute paths on the manifest's host, under the app's
+  # files (anomalyco/release docs/protocol.md).
+  printf '%s\n' "$url" | grep -Eq '^/([A-Za-z0-9._-]+/)*hex/files/[0-9a-f]{64}/[A-Za-z0-9._-]+$' \
+    || fail "Linux release names an unexpected file URL."
+  host=$(printf '%s\n' "$origin" | sed -E 's#^([a-z]+://[^/]+).*#\1#')
 
   curl --fail --location --proto '=https' --proto-redir '=https' \
     --silent --show-error --connect-timeout 10 --max-time 600 \
-    --max-filesize "$bytes" "$base_url/releases/$artifact" -o "$artifact_path"
+    --max-filesize "$bytes" "$host$url" -o "$artifact_path"
   test "$(wc -c < "$artifact_path" | tr -d ' ')" = "$bytes" \
     || fail "Downloaded Linux release has the wrong size."
   test "$(sha256sum "$artifact_path" | awk '{ print $1 }')" = "$sha256" \
     || fail "Downloaded Linux release checksum does not match."
   chmod 755 "$artifact_path"
 fi
-printf '%s\n' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' \
+printf '%s\n' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-(beta|dev)\.[0-9]+)?$' \
   || fail "Linux release has an invalid version."
 test -x "$artifact_path" || fail "HEX executable is missing: $artifact_path"
 
@@ -217,9 +214,7 @@ explain_unrunnable() {
     for library in $(ldd "$artifact_path" 2>/dev/null | awk '/not found/ { print $1 }'); do
       case "$library" in
         libasound.*) package=alsa-lib ;;
-        libgtk-layer-shell.*) package=gtk-layer-shell ;;
-        libgtk-3.* | libgdk-3.*) package=gtk3 ;;
-        libappindicator3.* | libayatana-appindicator3.*) package=libappindicator-gtk3 ;;
+        libglib-2.0.* | libgio-2.0.* | libgobject-2.0.*) package=glib2 ;;
         libopenblas.* | libblas.*) package=openblas ;;
         libvulkan.*) package=vulkan-icd-loader ;;
         libxkbcommon-x11.*) package=libxkbcommon-x11 ;;
@@ -275,14 +270,14 @@ if [ -e "$current" ] || [ -L "$current" ]; then
   fi
   current_target=$(readlink "$current")
   printf '%s\n' "$current_target" \
-    | grep -Eq '^versions/[0-9]+\.[0-9]+\.[0-9]+$' \
+    | grep -Eq '^versions/[0-9]+\.[0-9]+\.[0-9]+(-(beta|dev)\.[0-9]+)?$' \
     || fail "Installed HEX has an invalid current version link."
   current_executable="$support_dir/$current_target/hex"
 fi
 if [ -n "$current_executable" ] && [ -x "$current_executable" ]; then
   current_version=$("$current_executable" --version \
     | awk 'NF { value=$NF } END { print value }')
-  printf '%s\n' "$current_version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' \
+  printf '%s\n' "$current_version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-(beta|dev)\.[0-9]+)?$' \
     || fail "Installed HEX reports an invalid version."
   newest=$(printf '%s\n%s\n' "$current_version" "$version" | sort -V | tail -1)
   if [ "$newest" != "$version" ]; then
@@ -333,19 +328,24 @@ umask 077
 cat > "$application_staged" <<EOF
 [Desktop Entry]
 Type=Application
-Name=HEX
+Name=Hex
 Comment=Local voice dictation
-Exec="$binary" app
+Exec="$binary"
 Icon=audio-input-microphone
 Terminal=false
 Categories=Utility;Accessibility;
 StartupNotify=true
+Actions=quit;
 X-HEX-Managed=true
+
+[Desktop Action quit]
+Name=Quit Hex
+Exec="$binary" quit
 EOF
 cat > "$autostart_staged" <<EOF
 [Desktop Entry]
 Type=Application
-Name=HEX
+Name=Hex
 Comment=Local voice dictation
 Exec="$binary" start
 Icon=audio-input-microphone
@@ -368,7 +368,8 @@ StartLimitIntervalSec=60
 StartLimitBurst=5
 
 [Service]
-Type=simple
+Type=notify
+NotifyAccess=main
 ExecStart="$unit_binary" service
 Environment="HEX_APPLICATION_SUPPORT_DIR=$unit_support"
 EnvironmentFile=-$unit_support/session.env
@@ -389,11 +390,27 @@ install -m755 "$artifact_path" "$version_staged"
 sync -f "$version_staged"
 mv -Tf "$version_staged" "$version_dir/hex"
 version_staged=
+# A build from a checkout updates from that checkout, never from the
+# release service.
+if [ "${HEX_INSTALL_SOURCE:-}" = 1 ]; then
+  : > "$version_dir/source-build"
+else
+  rm -f "$version_dir/source-build"
+fi
 sync -f "$version_dir"
 rm -f "$current_staged" "$binary_staged"
 ln -s "versions/$version" "$current_staged"
 mv -Tf "$current_staged" "$support_dir/current"
 current_staged=
+# The receipt that lets Hex update itself; the support path was checked for
+# quotes, backslashes, and control characters above.
+if [ "${HEX_INSTALL_SOURCE:-}" = 1 ]; then
+  rm -f "$support_dir/install.json"
+else
+  printf '{"app":"hex","artifact":"desktop","channel":"%s","method":"direct","root":"%s"}\n' \
+    "$channel" "$support_dir" > "$support_dir/.install.json.next"
+  mv -Tf "$support_dir/.install.json.next" "$support_dir/install.json"
+fi
 sync -f "$support_dir"
 ln -s "$support_dir/current/hex" "$binary_staged"
 mv -Tf "$binary_staged" "$binary"
@@ -417,6 +434,6 @@ fi
 
 printf 'Installed HEX %s to %s\n' "$version" "$binary"
 printf 'Install a model: %s model install\n' "$binary"
-printf 'Launch HEX: %s app\n' "$binary"
-printf 'Background service: %s start (stop with %s stop)\n' "$binary" "$binary"
+printf 'Launch HEX: %s\n' "$binary"
+printf 'Start in the background: %s start (quit with %s quit)\n' "$binary" "$binary"
 printf 'Uninstall: sh install-linux.sh uninstall\n'

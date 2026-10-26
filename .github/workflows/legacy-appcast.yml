@@ -1,0 +1,39 @@
+name: Legacy appcast
+
+# Replaces the frozen 2.3.1 appcast (https://anoma.ly/hex/files/appcast.xml,
+# which Kit-era Macs read through Kit's redirect) with
+# packaging/macos/legacy-appcast.xml: the 2.3.1 items plus one informational
+# item that points those installs at https://anoma.ly/hex. Run once, with the
+# first release on the release service (docs/releasing.md, "Old clients").
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    environment: release
+    env:
+      HEX_RELEASE_BUCKET: hex-production-files
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Check the appcast
+        run: |
+          appcast=packaging/macos/legacy-appcast.xml
+          python3 -c 'import sys, xml.dom.minidom; xml.dom.minidom.parse(sys.argv[1])' "$appcast"
+          grep -Fq '<sparkle:informationalUpdate' "$appcast"
+          grep -Fq 'https://anoma.ly/hex' "$appcast"
+          curl -fsS https://anoma.ly/hex/files/appcast.xml -o live.xml
+          { echo '### Live → new appcast'; echo '```diff'; diff -u live.xml "$appcast" || true; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload it
+        env:
+          R2_ACCESS_KEY_ID: ${{ vars.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        run: |
+          scripts/r2-put.sh appcast.xml packaging/macos/legacy-appcast.xml application/xml no-cache
+          curl -fsS -H 'Cache-Control: no-cache' "https://anoma.ly/hex/files/appcast.xml?check=$(date +%s)" \
+            | cmp - packaging/macos/legacy-appcast.xml

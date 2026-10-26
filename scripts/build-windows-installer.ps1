@@ -1,9 +1,9 @@
-# Builds HEX-Setup-<version>-<x64|arm64>.exe, the per-user Windows installer,
-# around an already-built release hex.exe. Installs Inno Setup 6 when ISCC is
-# missing. The installer embeds the executable byte for byte, so the version
-# and checksum it reports must match the signed update feed.
+# Builds Hex-Setup-<version>-windows-<x64|arm64>.exe, the per-user Windows
+# installer, around an already-built (and signed) release hex.exe. Installs
+# Inno Setup 6 when ISCC is missing. The installer embeds the executable byte
+# for byte.
 #
-#   scripts/build-windows-installer.ps1 -Executable dist\HEX-...-x86_64-windows.exe `
+#   scripts/build-windows-installer.ps1 -Executable dist\Hex-2.4.0-windows-x64.exe `
 #     -Version 2.3.0 -Arch x86_64 -OutDir dist
 [CmdletBinding()]
 param(
@@ -14,7 +14,7 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 
-if ($Version -notmatch '^\d+\.\d+\.\d+$') { throw "Expected a stable version, not $Version." }
+if ($Version -notmatch '^\d+\.\d+\.\d+(-(beta|dev)\.\d+)?$') { throw "Expected a release version, not $Version." }
 $Executable = (Resolve-Path $Executable).Path
 New-Item -ItemType Directory -Force $OutDir | Out-Null
 $OutDir = (Resolve-Path $OutDir).Path
@@ -46,6 +46,6 @@ if (-not $iscc) {
 
 & $iscc /Qp "/DAppVersion=$Version" "/DArch=$label" "/DExecutable=$Executable" "/DOutputDir=$OutDir" $script
 if ($LASTEXITCODE -ne 0) { throw "ISCC failed with exit code $LASTEXITCODE." }
-$installer = Join-Path $OutDir "HEX-Setup-$Version-$label.exe"
+$installer = Join-Path $OutDir "Hex-Setup-$Version-windows-$label.exe"
 if (-not (Test-Path $installer)) { throw "ISCC did not produce $installer." }
 Write-Output $installer

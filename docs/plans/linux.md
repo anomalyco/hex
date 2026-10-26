@@ -18,7 +18,7 @@ The Linux beta keeps its contracts explicit:
 | Inference | Vulkan with CPU fallback |
 | Shortcut | Configurable key-containing chord; default `Alt+Space` |
 | Insertion | Clipboard plus Ctrl-V, with a Ctrl-Shift-V terminal setting |
-| UI | On-demand GPUI service client; no tray; service-owned Wayland layer-shell HUD |
+| UI | One process: the Rune window on demand and a Rune overlay HUD (layer-shell on Wayland, override-redirect on X11); no tray |
 
 The beta does not claim voice commands, application or browser context,
 meetings, or universal Wayland support. Wayland needs `wl-copy`, `wtype`, and
@@ -35,8 +35,9 @@ There is no hidden XWayland or privileged injection fallback. See
 - Automatic clipboard insertion with bounded settling. The transcript remains
   on the clipboard; arbitrary previous formats are not restored.
 - CLI microphone override.
-- Per-user systemd service, independent GPUI Settings client, CLI controls,
-  owner-only Unix IPC, desktop launcher, and service-only autostart entry.
+- One Hex process per user (optionally under a systemd user unit) with the
+  Rune window on demand, CLI controls, owner-only Unix IPC, desktop launcher,
+  and autostart entry.
 - One shortcut state machine fed by X11 grabs, the Wayland GlobalShortcuts
   portal, or idempotent `hex dictation`, `hex voice-action`, and
   `hex paste-last` commands for desktops without the portal; persistent
@@ -70,7 +71,7 @@ Arch/i3 host. Verify:
 - atomic activation and application restart;
 - retained-version rollback;
 - refusal to overwrite development, root, or package-manager installs;
-- service/client restart and reconnect without requiring a tray host.
+- systemd service restart and window reopen without requiring a tray host.
 
 This validation blocks calling the direct-install update channel proven.
 
@@ -192,7 +193,7 @@ implementation assumptions.
 | Send (paste plus Return) | Required | Required when shipped | Required when shipped |
 | Browser, terminal, editor, Electron insertion | Required | Required | Capability-dependent |
 | Application context | Required | Required when shipped | Capability-dependent |
-| GPUI shell and settings | Required | Required | Required |
+| Desktop window and settings | Required | Required | Required |
 | Manual two-track meeting | Required in developer builds | Required when shipped | Required when shipped |
 | Offer-only meeting detection | Required in developer builds | Required when shipped | Required when shipped |
 | Shutdown and route-loss recovery | Required | Required | Required |
@@ -220,4 +221,4 @@ implementation assumptions.
 - Do not install a privileged helper for the X11 contract.
 - Rebuild the proposals in [#28](https://github.com/anomalyco/hex/pull/28) and
   [#29](https://github.com/anomalyco/hex/pull/29) with regression coverage for
-  input state, GTK ownership, helper I/O, settings restart, and Nix environments.
+  input state, overlay ownership, helper I/O, settings restart, and Nix environments.

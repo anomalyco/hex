@@ -326,11 +326,12 @@ impl ProcessTapSource {
             unsafe { AudioHardwareCreateProcessTap(Some(&description), &mut tap) },
             "could not create the system audio tap",
         )?;
+        let (sender, buffers) = mpsc::sync_channel::<Vec<f32>>(TAP_QUEUE_CAPACITY);
         let mut source = Self {
             tap,
             aggregate: 0,
             io_proc: None,
-            buffers: mpsc::sync_channel(1).1,
+            buffers,
             callbacks: Arc::new(AtomicU64::new(0)),
             format_error: Arc::new(AtomicBool::new(false)),
             seen_callbacks: 0,
@@ -351,8 +352,6 @@ impl ProcessTapSource {
         let tap_uid = unsafe { description.UUID() }.UUIDString();
         source.aggregate = create_tap_aggregate(&tap_uid)?;
 
-        let (sender, receiver) = mpsc::sync_channel::<Vec<f32>>(TAP_QUEUE_CAPACITY);
-        source.buffers = receiver;
         let channels = format.mChannelsPerFrame.max(1) as usize;
         let non_interleaved = format.mFormatFlags & kAudioFormatFlagIsNonInterleaved != 0;
         let callbacks = source.callbacks.clone();
@@ -542,7 +541,7 @@ fn create_tap_aggregate(tap_uid: &NSString) -> Result<AudioObjectID> {
         ],
     );
     let taps = NSArray::from_retained_slice(&[sub_tap]);
-    let uid = format!("com.kitlangton.hex.meeting-tap.{}", std::process::id());
+    let uid = format!("anomaly.hex.meeting-tap.{}", std::process::id());
     let description: Retained<NSDictionary<NSString, AnyObject>> =
         NSDictionary::from_retained_objects(
             &[

@@ -51,6 +51,8 @@ in
         PartOf = [ cfg.systemdTarget ];
       };
       Service = {
+        Type = "notify";
+        NotifyAccess = "main";
         ExecStartPre = lib.getExe waitForSession;
         ExecStart = "${lib.getExe cfg.package} service";
         Environment = [ "HEX_APPLICATION_SUPPORT_DIR=${config.xdg.dataHome}/voice-control" ];

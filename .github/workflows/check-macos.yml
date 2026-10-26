@@ -6,23 +6,33 @@ on:
       - "Cargo.toml"
       - "Cargo.lock"
       - "build.rs"
+      - "crates/**"
       - "src/**"
       - "native/**"
       - "macos/HexMicrophoneDriver/Info.plist"
       - "resources/**"
       - "assets/**"
+      - "app/**"
+      - "scripts/validate-app.sh"
+      - "scripts/test-app-identity.sh"
+      - ".config/nextest.toml"
       - ".github/workflows/check-macos.yml"
   push:
-    branches: [main]
+    branches: [dev]
     paths:
       - "Cargo.toml"
       - "Cargo.lock"
       - "build.rs"
+      - "crates/**"
       - "src/**"
       - "native/**"
       - "macos/HexMicrophoneDriver/Info.plist"
       - "resources/**"
       - "assets/**"
+      - "app/**"
+      - "scripts/validate-app.sh"
+      - "scripts/test-app-identity.sh"
+      - ".config/nextest.toml"
       - ".github/workflows/check-macos.yml"
 
 permissions:
@@ -46,10 +56,14 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest
       - name: Install the Metal toolchain
         run: xcrun --sdk macosx metal --version || xcodebuild -downloadComponent MetalToolchain
       - run: cargo fmt --all --check
-      - run: cargo clippy --locked --bin voice-control --tests -- -D warnings
-      - run: cargo test --locked --bin voice-control
+      - run: scripts/test-app-identity.sh
+      - run: cargo clippy --locked -p voice-control -p scrawl-capture --bin voice-control --lib --tests --features capture -- -D warnings
+      - run: cargo nextest run --locked --profile ci -p voice-control -p scrawl-capture --bin voice-control --lib --features capture
       - name: No compromised eMudhra CA roots
         run: cargo build --locked --bin voice-control && scripts/check-ca-roots.sh target/debug/voice-control

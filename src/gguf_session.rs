@@ -3,9 +3,11 @@
 //! every live stream) so retained scheduler scratch never outlives the
 //! inference that sized it.
 
+use std::cell::RefCell;
 use std::path::Path;
+use std::time::{Duration, Instant};
 
-use color_eyre::eyre::{Result, eyre};
+use color_eyre::eyre::{Result, WrapErr, eyre};
 
 use crate::transcription_models::{
     AUTO_LANGUAGE, ModelDefinition, ModelRuntime, TranscriptionSelection,
@@ -16,6 +18,32 @@ use crate::transcription_models::{
 /// during launch. With a 1 s probe, a new build's first dictation compiled
 /// them in its finish step and took 3-4 s on an RTX 5070 Ti.
 const STREAM_PREWARM_SAMPLES: usize = 8 * 16_000;
+
+thread_local! {
+    static JOB_CANCEL: RefCell<Option<transcribe_cpp::CancelToken>> = const { RefCell::new(None) };
+}
+
+/// Runs `work` with `cancel` installed on every offline run it makes on this
+/// thread, so cancelling one engine job aborts its model between decode steps
+/// and between chunks. The engine's offline closures reach the session through
+/// model types that know nothing of jobs.
+pub(crate) fn with_job_cancel<R>(
+    cancel: &transcribe_cpp::CancelToken,
+    work: impl FnOnce() -> R,
+) -> R {
+    struct Restore(Option<transcribe_cpp::CancelToken>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            JOB_CANCEL.with(|slot| *slot.borrow_mut() = self.0.take());
+        }
+    }
+    let _restore = Restore(JOB_CANCEL.with(|slot| slot.borrow_mut().replace(cancel.clone())));
+    work()
+}
+
+pub(crate) fn job_cancel() -> Option<transcribe_cpp::CancelToken> {
+    JOB_CANCEL.with(|slot| slot.borrow().clone())
+}
 
 pub(crate) fn validate_gguf_artifact(
     path: &Path,
@@ -64,10 +92,16 @@ fn session_options(device_type: transcribe_cpp::DeviceType) -> transcribe_cpp::S
     }
 }
 
+/// A run this recent leaves the weights resident (ggml keeps them so for three
+/// minutes), so a prewarm after it would only repeat work.
+const RECENT_RUN: Duration = Duration::from_secs(60);
+
 pub(crate) struct OfflineGgufSession {
     model: transcribe_cpp::Model,
     session: Option<transcribe_cpp::Session>,
     options: transcribe_cpp::SessionOptions,
+    /// When the last run or live stream completed; `None` until the first.
+    last_run: Option<Instant>,
 }
 
 impl OfflineGgufSession {
@@ -86,7 +120,14 @@ impl OfflineGgufSession {
             model,
             session: Some(session),
             options,
+            last_run: None,
         })
+    }
+
+    /// Whether a run or live stream completed within [`RECENT_RUN`].
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    pub(crate) fn ran_recently(&self) -> bool {
+        ran_within(self.last_run, Instant::now(), RECENT_RUN)
     }
 
     /// Streams only on a GPU (Metal, Vulkan): a CPU stream re-encodes each
@@ -177,6 +218,9 @@ impl OfflineGgufSession {
             .stream(options, stream_options)
             .map(|mut stream| drive(&mut stream));
         drop(session);
+        if result.is_ok() {
+            self.last_run = Some(Instant::now());
+        }
         self.session = self.model.session_with(&self.options).ok();
         result
     }
@@ -194,6 +238,9 @@ impl OfflineGgufSession {
             Some(session) => session,
             None => self.model.session_with(&self.options)?,
         };
+        if let Some(cancel) = job_cancel() {
+            session.set_cancel_token(&cancel);
+        }
         let result = session.run(samples, options).map(|mut transcript| {
             if let Some(transcribe_cpp::RunExtension::Whisper(whisper)) = &options.family
                 && let Some(prompt) = &whisper.initial_prompt
@@ -203,6 +250,9 @@ impl OfflineGgufSession {
             transcript
         });
         drop(session);
+        if result.is_ok() {
+            self.last_run = Some(Instant::now());
+        }
         match self.model.session_with(&self.options) {
             Ok(session) => {
                 self.session = Some(session);
@@ -214,6 +264,40 @@ impl OfflineGgufSession {
             },
         }
     }
+
+    pub(crate) fn transcribe_chunked(
+        &mut self,
+        samples: &[f32],
+        options: &transcribe_cpp::RunOptions,
+        max_audio_samples: Option<usize>,
+    ) -> Result<String> {
+        let Some(max_samples) =
+            max_audio_samples.filter(|&max_samples| samples.len() > max_samples)
+        else {
+            return self
+                .run(samples, options)
+                .map(|transcript| transcript.text)
+                .wrap_err("transcription failed");
+        };
+        let mut output = Vec::new();
+        for samples in samples.chunks(max_samples) {
+            if job_cancel().is_some_and(|cancel| cancel.is_cancelled()) {
+                return Err(eyre!("transcription was cancelled"));
+            }
+            let mut chunk = samples.to_vec();
+            crate::dictation::pad_for_parakeet(&mut chunk);
+            let transcript = self.run(&chunk, options).wrap_err("transcription failed")?;
+            let text = transcript.text.trim();
+            if !text.is_empty() {
+                output.push(text.to_string());
+            }
+        }
+        Ok(output.join(" "))
+    }
+}
+
+fn ran_within(last_run: Option<Instant>, now: Instant, window: Duration) -> bool {
+    last_run.is_some_and(|last_run| now.saturating_duration_since(last_run) < window)
 }
 
 /// Drops Whisper segments that only repeat the recognition hints. Whisper
@@ -276,6 +360,20 @@ fn drop_prompt_echo(transcript: &mut transcribe_cpp::Transcript, prompt: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_a_completed_run_inside_the_window_counts_as_recent() {
+        let now = Instant::now();
+        let window = Duration::from_secs(60);
+        assert!(!ran_within(None, now, window), "a fresh load has not run");
+        assert!(ran_within(Some(now), now, window));
+        assert!(ran_within(Some(now - Duration::from_secs(59)), now, window));
+        assert!(!ran_within(
+            Some(now - Duration::from_secs(60)),
+            now,
+            window
+        ));
+    }
 
     #[test]
     fn gpu_sessions_bound_decoder_threads_and_cpu_sessions_keep_library_default() {
@@ -392,5 +490,28 @@ mod tests {
         let mut silence = transcribe_cpp::Transcript::default();
         drop_prompt_echo(&mut silence, "  ");
         assert_eq!(silence, transcribe_cpp::Transcript::default());
+    }
+
+    #[test]
+    fn a_job_cancel_token_is_installed_only_inside_its_scope() {
+        let outer = transcribe_cpp::CancelToken::new();
+        let inner = transcribe_cpp::CancelToken::new();
+        assert!(job_cancel().is_none());
+        with_job_cancel(&outer, || {
+            with_job_cancel(&inner, || {
+                inner.cancel();
+                assert!(job_cancel().unwrap().is_cancelled());
+            });
+            assert!(
+                !job_cancel().unwrap().is_cancelled(),
+                "the outer job is restored"
+            );
+        });
+        assert!(job_cancel().is_none());
+        let _ = std::panic::catch_unwind(|| with_job_cancel(&outer, || panic!("run failed")));
+        assert!(
+            job_cancel().is_none(),
+            "a panicking run still uninstalls its token"
+        );
     }
 }

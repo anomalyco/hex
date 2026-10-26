@@ -3,9 +3,10 @@
 ;
 ;   %APPDATA%\voice-control\versions\<version>\hex.exe
 ;   %APPDATA%\voice-control\current-version
+;   %APPDATA%\voice-control\install.json  (the direct-install receipt)
 ;   Start Menu\Programs\Hex.lnk  (description "HEX managed install")
 ;
-; so the app keeps updating itself through the signed feed afterwards. The
+; so the app keeps updating itself from the release service afterwards. The
 ; uninstaller lives outside versions\ because the updater prunes old version
 ; directories. Settings, logs, history, and models stay on uninstall, as with
 ; install-windows.ps1 -Uninstall.
@@ -41,10 +42,10 @@ AppId={{8FCF0256-C55C-40C3-865D-5FADB32D13B3}
 AppName=Hex
 AppVersion={#AppVersion}
 AppVerName=Hex {#AppVersion}
-AppPublisher=Kit Langton
-AppPublisherURL=https://hex.kitlangton.com/
+AppPublisher=Anomaly Innovations, Inc.
+AppPublisherURL=https://anoma.ly/
 AppSupportURL=https://github.com/anomalyco/hex/issues
-AppUpdatesURL=https://hex.kitlangton.com/
+AppUpdatesURL=https://github.com/anomalyco/hex/releases
 PrivilegesRequired=lowest
 ArchitecturesAllowed={#AllowedArchitectures}
 ArchitecturesInstallIn64BitMode={#AllowedArchitectures}
@@ -62,7 +63,7 @@ WizardStyle=modern
 Compression=lzma2/max
 SolidCompression=yes
 OutputDir={#OutputDir}
-OutputBaseFilename=HEX-Setup-{#AppVersion}-{#Arch}
+OutputBaseFilename=Hex-Setup-{#AppVersion}-windows-{#Arch}
 CloseApplications=yes
 RestartApplications=no
 MinVersion=10.0
@@ -82,6 +83,7 @@ Type: filesandordirs; Name: "{app}\versions"
 Type: filesandordirs; Name: "{app}\updates"
 Type: files; Name: "{app}\current-version"
 Type: files; Name: "{app}\current-version.partial"
+Type: files; Name: "{app}\install.json"
 
 [Code]
 function VersionPart(var Text: String): Integer;
@@ -172,21 +174,34 @@ begin
   Result := '';
 end;
 
-{ Point current-version at this version only once its files are in place. }
+{ Replaces Path with Contents through a .partial file. }
+procedure WriteAtomically(Path, Contents: String);
+var
+  Partial: String;
+begin
+  Partial := Path + '.partial';
+  DeleteFile(Partial);
+  if not SaveStringToFile(Partial, Contents, False) then
+    RaiseException('Could not write ' + Partial);
+  DeleteFile(Path);
+  if not RenameFile(Partial, Path) then
+    RaiseException('Could not write ' + Path);
+end;
+
+{ Point current-version at this version only once its files are in place,
+  then mark the install as direct so the app updates itself
+  (docs/plans/release-service.md). }
 procedure CurStepChanged(CurStep: TSetupStep);
 var
-  Pointer, Partial: String;
+  Root: String;
 begin
   if CurStep = ssPostInstall then
   begin
-    Pointer := ExpandConstant('{app}\current-version');
-    Partial := Pointer + '.partial';
-    DeleteFile(Partial);
-    if not SaveStringToFile(Partial, '{#AppVersion}' + #10, False) then
-      RaiseException('Could not write ' + Partial);
-    DeleteFile(Pointer);
-    if not RenameFile(Partial, Pointer) then
-      RaiseException('Could not write ' + Pointer);
+    WriteAtomically(ExpandConstant('{app}\current-version'), '{#AppVersion}' + #10);
+    Root := ExpandConstant('{app}');
+    StringChangeEx(Root, '\', '\\', True);
+    WriteAtomically(ExpandConstant('{app}\install.json'),
+      '{"app":"hex","artifact":"desktop","channel":"stable","method":"direct","root":"' + Root + '"}' + #10);
   end;
 end;
 

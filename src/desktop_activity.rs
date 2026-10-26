@@ -1,4 +1,6 @@
-use crate::events::{DictationPhase, EventReader, VoiceEvent, VoiceState};
+use crate::events::{
+    CommandOutcome, DictationPhase, EventReader, TranscriptPhase, VoiceEvent, VoiceState,
+};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct DesktopActivity {
@@ -52,6 +54,117 @@ impl DesktopActivity {
             }
         }
         activity
+    }
+}
+
+/// One line describing `event` for the Activity pane.
+pub(crate) fn event_summary(event: &VoiceEvent) -> String {
+    match event {
+        VoiceEvent::SessionStarted { .. } => "Hex session started".into(),
+        VoiceEvent::State { state, device, .. } => match state {
+            VoiceState::Sleeping => "Voice commands went to sleep".into(),
+            VoiceState::Listening => format!("Voice commands resumed on {device}"),
+            VoiceState::Dictating => format!("Dictation started on {device}"),
+            VoiceState::Transcribing => "Dictation is being transcribed".into(),
+            VoiceState::Stopping => "Hex is stopping".into(),
+        },
+        VoiceEvent::Transcript {
+            phase,
+            latency_ms,
+            text,
+            ..
+        } => match phase {
+            TranscriptPhase::Started => "Speech recognition started".into(),
+            TranscriptPhase::Updated => format!("Heard \"{text}\" so far"),
+            TranscriptPhase::Completed => format!("Heard \"{text}\" in {latency_ms} ms"),
+        },
+        VoiceEvent::Command {
+            heard,
+            command,
+            outcome,
+            ..
+        } => {
+            let command = command.as_deref().unwrap_or("an unmatched command");
+            match outcome {
+                CommandOutcome::Ignored => format!("Ignored \"{heard}\""),
+                CommandOutcome::Woke => format!("\"{heard}\" woke Hex"),
+                CommandOutcome::Slept => format!("\"{heard}\" put voice commands to sleep"),
+                CommandOutcome::Submitted => format!("Sent {command} for \"{heard}\""),
+                CommandOutcome::Executed => format!("Ran {command} for \"{heard}\""),
+                CommandOutcome::Failed(error) => format!("Could not run {command}: {error}"),
+            }
+        }
+        VoiceEvent::Dictation {
+            phase,
+            text,
+            processing,
+            ..
+        } => {
+            let description = match phase {
+                DictationPhase::Started => "Dictation started".into(),
+                DictationPhase::Discarded => "A brief dictation was discarded".into(),
+                DictationPhase::Cancelled => "Dictation was cancelled".into(),
+                DictationPhase::Transcribing => "Dictation is being transcribed".into(),
+                DictationPhase::Pasted => text_or("Dictation was pasted", text),
+                DictationPhase::Edited => text_or("Selected text was edited", text),
+                DictationPhase::VoiceAction => text_or("Voice Action completed", text),
+                DictationPhase::Logged => text_or("Journal entry was saved", text),
+                DictationPhase::Repasted => text_or("The last dictation was pasted again", text),
+                DictationPhase::MeetingPasted => text_or("New meeting transcript was pasted", text),
+                DictationPhase::Failed(error) => format!("Dictation failed: {error}"),
+            };
+            processing
+                .as_ref()
+                .map_or(description.clone(), |processing| {
+                    processing.fallback.as_ref().map_or_else(
+                        || {
+                            format!(
+                                "{description} · {} profile · {} ms",
+                                processing.profile, processing.latency_ms
+                            )
+                        },
+                        |error| {
+                            format!(
+                                "{description} · {} profile fell back to raw after {} ms: {}",
+                                processing.profile, processing.latency_ms, error
+                            )
+                        },
+                    )
+                })
+        }
+        VoiceEvent::Context {
+            application,
+            browser_url,
+            ..
+        } => match (application, browser_url) {
+            (Some(application), Some(url)) => format!("Context changed to {application} / {url}"),
+            (Some(application), None) => format!("Context changed to {application}"),
+            _ => "Foreground context became unavailable".into(),
+        },
+        VoiceEvent::ApiServerStarted { port, .. } => {
+            format!("Local API started on port {port}")
+        }
+        VoiceEvent::ApiServerStopped { .. } => "Local API stopped".into(),
+        VoiceEvent::ApiAuthFailed { method, path, .. } => {
+            format!("Rejected unauthenticated {method} {path}")
+        }
+        VoiceEvent::SmartTurn {
+            probability,
+            silence_ms,
+            decision,
+            ..
+        } => {
+            let probability = probability.map_or_else(String::new, |p| format!(", P {p:.2}"));
+            format!("Smart Turn after {silence_ms} ms of silence{probability}: {decision:?}")
+        }
+    }
+}
+
+fn text_or(prefix: &str, text: &str) -> String {
+    if text.is_empty() {
+        prefix.into()
+    } else {
+        format!("{prefix}: \"{text}\"")
     }
 }
 
@@ -116,12 +229,14 @@ mod tests {
                 phase: DictationPhase::Failed("first".into()),
                 text: String::new(),
                 processing: None,
+                reason: None,
             },
             VoiceEvent::Dictation {
                 timestamp_ms: 3,
                 phase: DictationPhase::Failed("second".into()),
                 text: String::new(),
                 processing: None,
+                reason: None,
             },
         ];
         assert_eq!(

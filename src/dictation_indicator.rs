@@ -9,7 +9,6 @@ use core_graphics_types::geometry::CGSize;
 use core_video::base::{CVOptionFlags, CVTimeStamp, CVTimeStampFlags};
 use core_video::display_link::{CVDisplayLink, CVDisplayLinkRef};
 use core_video::r#return::CVReturn;
-use gpui::App;
 use metal::{
     CommandQueue, Device, MTLLoadAction, MTLPixelFormat, MTLPrimitiveType, MTLStoreAction,
     MetalLayer, RenderPassDescriptor, RenderPipelineDescriptor, RenderPipelineState,
@@ -24,7 +23,7 @@ use objc2_foundation::{NSPoint, NSRect, NSSize};
 use objc2_quartz_core::CALayer;
 
 use crate::app_settings::IndicatorPosition;
-use crate::motion::{Spec, Spring, reduced_motion};
+use crate::spring::{REDUCED_FADE, Spec, Spring, reduced_motion};
 
 #[link(name = "CoreGraphics", kind = "framework")]
 unsafe extern "C" {
@@ -32,6 +31,17 @@ unsafe extern "C" {
     fn CGColorSpaceCreateWithName(name: *const c_void) -> *mut c_void;
     fn CGColorSpaceRelease(space: *mut c_void);
     fn CGMainDisplayID() -> u32;
+}
+
+/// A `CGColorSpaceRef` as Objective-C encodes it, so `setColorspace:` passes
+/// the method-signature check debug builds of objc2 run.
+#[repr(transparent)]
+struct ColorSpaceRef(*mut c_void);
+
+// SAFETY: a transparent CGColorSpace pointer, encoded as one.
+unsafe impl objc2::Encode for ColorSpaceRef {
+    const ENCODING: objc2::Encoding =
+        objc2::Encoding::Pointer(&objc2::Encoding::Struct("CGColorSpace", &[]));
 }
 
 const WINDOW_WIDTH: f32 = 112.0;
@@ -151,7 +161,7 @@ impl DictationIndicatorUi {
         Self { indicator }
     }
 
-    pub fn handle(&mut self, event: DictationIndicatorEvent, _cx: &mut App) {
+    pub fn handle(&mut self, event: DictationIndicatorEvent) {
         if self.indicator.is_none()
             && matches!(
                 event,
@@ -171,7 +181,7 @@ impl DictationIndicatorUi {
         }
     }
 
-    pub fn follow_pointer(&mut self, _cx: &mut App) {
+    pub fn follow_pointer(&mut self) {
         if let Some(indicator) = &mut self.indicator {
             indicator.maintain();
         }
@@ -350,45 +360,17 @@ impl MetalIndicator {
             DictationIndicatorEvent::Started | DictationIndicatorEvent::EditingStarted
         ) && crate::app_settings::indicator_position() != IndicatorPosition::Hidden
         {
-            self.position_on_pointer_screen();
-            self.window.orderFrontRegardless();
-            self.ordered = true;
-            if std::env::var_os("HEX_RECORD_HUD_WINDOW").is_some() {
-                let num = self.window.windowNumber();
-                if num > 0 {
-                    crate::motion::maybe_start_self_window_recorder(Some(num as u32));
-                }
-            }
+            self.show_on_pointer_screen();
             tracing::info!("Metal dictation indicator shown");
         }
-        self.ensure_display_link(true);
-        if let Some(display_link) = &mut self.display_link {
-            if !display_link.is_running()
-                && let Err(status) = display_link.start()
-            {
-                tracing::error!(status, "could not start indicator display link");
-            }
-        } else {
-            self.renderer.draw(None);
-        }
+        self.drive_frames(true);
     }
 
     fn maintain(&mut self) {
         let hidden = crate::app_settings::indicator_position() == IndicatorPosition::Hidden;
         if self.renderer.is_active() && !hidden {
-            self.position_on_pointer_screen();
-            if !self.ordered {
-                self.window.orderFrontRegardless();
-                self.ordered = true;
-            }
-            self.ensure_display_link(false);
-            if let Some(display_link) = &mut self.display_link {
-                if !display_link.is_running() {
-                    let _ = display_link.start();
-                }
-            } else {
-                self.renderer.draw(None);
-            }
+            self.show_on_pointer_screen();
+            self.drive_frames(false);
         } else {
             if let Some(display_link) = &mut self.display_link
                 && display_link.is_running()
@@ -399,6 +381,28 @@ impl MetalIndicator {
                 self.window.orderOut(None);
                 self.ordered = false;
             }
+        }
+    }
+
+    fn show_on_pointer_screen(&mut self) {
+        self.position_on_pointer_screen();
+        if !self.ordered {
+            self.window.orderFrontRegardless();
+            self.ordered = true;
+        }
+    }
+
+    fn drive_frames(&mut self, force: bool) {
+        self.ensure_display_link(force);
+        if let Some(display_link) = &mut self.display_link {
+            if !display_link.is_running()
+                && let Err(status) = display_link.start()
+                && force
+            {
+                tracing::error!(status, "could not start indicator display link");
+            }
+        } else {
+            self.renderer.draw(None);
         }
     }
 
@@ -635,7 +639,7 @@ impl MetalRenderer {
             if !color_space.is_null() {
                 let any_layer = &*(layer.as_ref() as *const metal::MetalLayerRef)
                     .cast::<objc2::runtime::AnyObject>();
-                let _: () = objc2::msg_send![any_layer, setColorspace: color_space];
+                let _: () = objc2::msg_send![any_layer, setColorspace: ColorSpaceRef(color_space)];
                 CGColorSpaceRelease(color_space);
             }
         }
@@ -909,16 +913,11 @@ impl MetalRenderer {
             self.softness.v = 0.0;
             self.exiting = true;
         }
-        let target_width = match self.phase {
-            Phase::Recording => CAPSULE_WIDTH,
-            Phase::Transcribing => CAPSULE_HEIGHT,
-            Phase::Hidden | Phase::Completed | Phase::Cancelled | Phase::Failed => self.width.x,
-        };
-        let target_processing = match self.phase {
-            Phase::Recording => 0.0,
-            Phase::Transcribing => 1.0,
+        let (target_width, target_processing) = match self.phase {
+            Phase::Recording => (CAPSULE_WIDTH, 0.0),
+            Phase::Transcribing => (CAPSULE_HEIGHT, 1.0),
             Phase::Hidden | Phase::Completed | Phase::Cancelled | Phase::Failed => {
-                self.processing.x
+                (self.width.x, self.processing.x)
             }
         };
         let target_post_processing = if self
@@ -944,22 +943,12 @@ impl MetalRenderer {
         self.average
             .step_to(self.target_average, meter_average_spec, dt);
         self.peak.step_to(self.target_peak, meter_peak_spec, dt);
-        let snap_before = std::env::var_os("HEX_PREVIEW_BEFORE").is_some();
-        if reduce || snap_before {
+        if reduce {
             self.width.jump(target_width);
             self.processing.jump(target_processing);
             self.post_processing.jump(target_post_processing);
-            if snap_before {
-                self.opacity.jump(if visible { 1.0 } else { 0.0 });
-                self.average.jump(self.target_average);
-                self.peak.jump(self.target_peak);
-            } else {
-                self.opacity.step_to(
-                    if visible { 1.0 } else { 0.0 },
-                    crate::motion::presets::REDUCED_FADE,
-                    dt,
-                );
-            }
+            self.opacity
+                .step_to(if visible { 1.0 } else { 0.0 }, REDUCED_FADE, dt);
             self.visual_scale.jump(1.0);
             self.softness.jump(0.0);
         } else {
@@ -1043,7 +1032,7 @@ impl MetalRenderer {
         command_buffer.commit();
 
         let exit_spec = if reduce {
-            crate::motion::presets::REDUCED_FADE
+            REDUCED_FADE
         } else {
             Spec::from_omega(EXIT_ANGULAR_FREQUENCY)
         };
@@ -1174,29 +1163,14 @@ mod tests {
     fn processing_morph_duration_matches_geometry_spring() {
         let spec = Spec::from_omega(GEOMETRY_ANGULAR_FREQUENCY);
         let mut width = Spring::at(CAPSULE_WIDTH);
+        let mut previous_width = width.x;
         for _ in 0..15 {
             width.step_to(CAPSULE_HEIGHT, spec, 1.0 / 60.0);
+            assert!((CAPSULE_HEIGHT..=previous_width).contains(&width.x));
+            previous_width = width.x;
         }
         assert!(width.x < CAPSULE_HEIGHT + 0.7);
         assert_eq!(PROCESSING_MORPH_DURATION, Duration::from_millis(250));
-    }
-
-    #[test]
-    fn processing_morph_only_contracts_the_capsule() {
-        let spec = Spec::from_omega(GEOMETRY_ANGULAR_FREQUENCY);
-        let mut width = Spring::at(CAPSULE_WIDTH);
-        let mut height = Spring::at(CAPSULE_HEIGHT);
-        let mut previous_width = width.x;
-
-        for _ in 0..15 {
-            width.step_to(CAPSULE_HEIGHT, spec, 1.0 / 60.0);
-            height.step_to(CAPSULE_HEIGHT, spec, 1.0 / 60.0);
-            assert!((CAPSULE_HEIGHT..=previous_width).contains(&width.x));
-            assert_eq!(height.x, CAPSULE_HEIGHT);
-            previous_width = width.x;
-        }
-
-        assert!(width.x < CAPSULE_HEIGHT + 0.7);
     }
 
     #[test]

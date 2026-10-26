@@ -16,7 +16,8 @@ offer a download link; downloading and installing remains an explicit user actio
 
 The Rust app is called **Hex**, packaged as **Hex.app**, with
 bundle identifier `com.kitlangton.hex2` and executable `hex`. Its Application Support
-root remains `voice-control`. The supported platform remains Apple silicon with
+root is `hex` (older Rust builds used `voice-control`, which is renamed once on
+launch with a compatibility symlink). The supported platform remains Apple silicon with
 macOS 15 or newer. The new bundle identity requires fresh macOS permission grants;
 changing the display name alone does not change signing ownership.
 

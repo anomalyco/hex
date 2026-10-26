@@ -1,0 +1,57 @@
+name: Site deploy
+
+# Builds site/ for one environment and deploys its Worker (the site at /hex and
+# the files bucket at /hex/files) with `cf deploy --prebuilt --mode <mode>`:
+# dev -> https://dev.anoma.ly/hex, production -> https://anoma.ly/hex. The
+# github-actions-hex token lives in the release environment (dev, production
+# and app-v* only; dev so pushes to dev can deploy the dev site). Called by
+# Site for dev and by Release after a stable publish.
+on:
+  workflow_call:
+    inputs:
+      mode:
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: release
+    concurrency:
+      group: site-deploy-${{ inputs.mode }}
+      cancel-in-progress: false
+    defaults:
+      run:
+        working-directory: site
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - name: Build and deploy
+        env:
+          MODE: ${{ inputs.mode }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          case "$MODE" in dev|production) ;; *) exit 1 ;; esac
+          bun run "deploy:$MODE"
+      - name: Check the live site and every download link
+        env:
+          MODE: ${{ inputs.mode }}
+        run: |
+          host=$([ "$MODE" = dev ] && echo dev.anoma.ly || echo anoma.ly)
+          for attempt in 1 2 3 4 5 6; do
+            status=$(curl --silent --output /dev/null --write-out '%{http_code}' "https://$host/hex/")
+            [ "$status" = 200 ] && break
+            sleep 10
+          done
+          test "$status" = 200
+          bun run check:downloads

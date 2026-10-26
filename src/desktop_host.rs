@@ -3,6 +3,9 @@ use crate::transcription_models::{
     ModelPreparationStage, TranscriptionModelId, TranscriptionSelection,
 };
 
+/// The Linux service's snapshot; Windows and macOS publish their own
+/// in-process.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct DesktopSnapshot {
     pub(crate) activity: DesktopActivity,
@@ -34,8 +37,10 @@ pub(crate) struct DesktopListenerSnapshot {
 /// How the running listener receives its shortcuts.
 #[derive(Clone, Debug, Default, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub(crate) enum DesktopShortcuts {
-    /// Hex registers the shortcuts Settings records (X11).
+    /// No listener has registered its shortcuts yet: it is starting or stopped.
     #[default]
+    Unregistered,
+    /// Hex registers the shortcuts Settings records (X11).
     Registered,
     /// The desktop's shortcuts portal bound these, in request order.
     Portal(Vec<DesktopGrantedShortcut>),
@@ -50,13 +55,29 @@ pub(crate) struct DesktopGrantedShortcut {
     pub(crate) trigger: Option<String>,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub(crate) enum DesktopUpdateStatus {
+    /// A test build, which never updates.
     Unavailable,
+    /// An administrator turned updates off (`DisableUpdates`).
+    Managed,
     Checking,
     Current,
     Failed,
+    Downloading,
+    /// A newer release exists that this install cannot apply itself; the
+    /// window links to its download.
+    Available,
     ReadyToRestart,
+    /// Installed from a source checkout, which updates it; the release
+    /// service never replaces it.
+    SourceBuild,
+    /// Installed by a package manager (pacman, Nix), which updates it.
+    PackageManager,
+    /// The package manager that installed Hex serves a newer version.
+    PackageUpdate {
+        command: String,
+    },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -71,7 +92,11 @@ pub(crate) struct DesktopShortcut {
 
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub(crate) enum DesktopAction {
+    /// Checks for an update now ("Check for updates").
+    CheckForUpdates,
     ClearError,
+    /// Opens the download an install cannot apply itself.
+    OpenUpdate,
     RestartIntoUpdate,
     SetDictationShortcut(DesktopShortcut),
     StartListening,
@@ -83,12 +108,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn older_listener_snapshots_have_no_warning() {
+    fn older_listener_snapshots_have_no_warning_or_shortcuts() {
         let snapshot: DesktopListenerSnapshot =
             serde_json::from_str(r#"{"running":true,"status":"Listening"}"#).unwrap();
         assert!(snapshot.running);
         assert_eq!(snapshot.status, "Listening");
         assert!(snapshot.warning.is_none());
-        assert_eq!(snapshot.shortcuts, DesktopShortcuts::Registered);
+        assert_eq!(snapshot.shortcuts, DesktopShortcuts::Unregistered);
     }
 }

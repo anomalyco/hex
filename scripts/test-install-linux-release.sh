@@ -1,8 +1,12 @@
 #!/bin/sh
+# Runs install-linux-release.sh against a fixture release service on
+# loopback: install, receipt, uninstall, refused manifests and downloads,
+# source installs, and symlink safety. Never touches the real user's systemd
+# manager or data.
 set -eu
 
 root=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
-for command in curl jq openssl python3 sha256sum xxd; do
+for command in curl jq python3 sha256sum; do
   if ! command -v "$command" >/dev/null 2>&1; then
     echo "Installer test requires $command." >&2
     exit 1
@@ -18,7 +22,6 @@ if [ "$(id -u)" -eq 0 ]; then
 fi
 
 temporary=$(mktemp -d)
-# Never control the real user's systemd manager from installer fixtures.
 mkdir -p "$temporary/bin"
 printf '#!/bin/sh\nexit 0\n' > "$temporary/bin/systemctl"
 chmod 755 "$temporary/bin/systemctl"
@@ -34,53 +37,37 @@ cleanup() {
 trap cleanup EXIT HUP INT TERM
 
 server="$temporary/server"
-mkdir -p "$server/releases"
-private_key="$temporary/private.pem"
-public_der="$temporary/public.der"
-payload="$temporary/payload.json"
-signature="$temporary/signature"
 installer="$temporary/install-linux.sh"
 version=9.8.7
-
-openssl genpkey -algorithm Ed25519 -out "$private_key"
-openssl pkey -in "$private_key" -pubout -outform DER -out "$public_der"
-public_key=$(tail -c 32 "$public_der" | xxd -p -c 64)
+# The fixture service is plain HTTP on loopback.
 sed \
-  -e "s/^expected_public_key=.*/expected_public_key=$public_key/" \
   -e "s/--proto '=https'/--proto '=http,https'/g" \
   -e "s/--proto-redir '=https'/--proto-redir '=http,https'/g" \
+  -e 's|^    https://\*) ;;$|    http://127.0.0.1:*\|https://*) ;;|' \
   "$root/scripts/install-linux-release.sh" > "$installer"
 
 unsigned="$temporary/hex"
-cat > "$unsigned" <<EOF
-#!/bin/sh
-echo "voice-control $version"
-EOF
+printf '#!/bin/sh\necho "voice-control %s"\n' "$version" > "$unsigned"
 chmod 755 "$unsigned"
 sha256=$(sha256sum "$unsigned" | awk '{ print $1 }')
 bytes=$(wc -c < "$unsigned" | tr -d ' ')
-artifact="HEX-$version-$sha256-x86_64-linux"
-cp "$unsigned" "$server/releases/$artifact"
-jq -cn \
-  --arg version "$version" \
-  --arg artifact "$artifact" \
-  --arg sha256 "$sha256" \
-  --argjson bytes "$bytes" \
-  '{schema_version:1,channel:"stable",target:"x86_64-unknown-linux-gnu",version:$version,artifact:$artifact,bytes:$bytes,sha256:$sha256}' \
-  > "$payload"
-openssl pkeyutl -sign -rawin -inkey "$private_key" \
-  -in "$payload" -out "$signature"
-jq -n \
-  --arg payload "$(openssl base64 -A -in "$payload")" \
-  --arg signature "$(openssl base64 -A -in "$signature")" \
-  '{payload:$payload,signature:$signature}' > "$server/linux-update.json"
+file="hex-$version-linux-x64"
+mkdir -p "$server/release/hex/desktop" "$server/release/hex/files/$sha256"
+cp "$unsigned" "$server/release/hex/files/$sha256/$file"
+jq -n --arg version "$version" --arg url "/release/hex/files/$sha256/$file" --arg sha256 "$sha256" --argjson size "$bytes" \
+  '{schema: 1, app: "hex", artifact: "desktop", channel: "stable", sequence: 1,
+    published_at: "2026-10-24T00:00:00Z",
+    release: {version: $version, rollout_percent: 100, revoked_versions: [],
+      targets: {"linux-x64": {url: $url, size: $size, sha256: $sha256}},
+      distributions: [{kind: "direct"}]}}' > "$server/release/hex/desktop/stable.json"
+cp "$server/release/hex/desktop/stable.json" "$temporary/manifest.json"
 
 port=$((38000 + ($$ % 1000)))
 python3 -m http.server "$port" --bind 127.0.0.1 --directory "$server" \
   > "$temporary/server.log" 2>&1 &
 server_pid=$!
 attempt=0
-until curl --fail --silent "http://127.0.0.1:$port/linux-update.json" >/dev/null; do
+until curl --fail --silent "http://127.0.0.1:$port/release/hex/desktop/stable.json" >/dev/null; do
   attempt=$((attempt + 1))
   if [ "$attempt" -ge 20 ]; then
     echo "Fixture server did not start." >&2
@@ -96,12 +83,24 @@ install_dir="$home/.local/bin"
 support_dir="$home/.local/share/voice-control"
 mkdir -p "$support_dir"
 printf 'preserve me\n' > "$support_dir/settings.json"
-HOME="$home" \
-  HEX_INSTALL_DIR="$install_dir" \
-  HEX_APPLICATION_SUPPORT_DIR="$support_dir" \
-  HEX_RELEASE_BASE_URL="http://127.0.0.1:$port" \
-  sh "$installer"
 
+install() {
+  HOME="$home" HEX_INSTALL_DIR="$install_dir" HEX_APPLICATION_SUPPORT_DIR="$support_dir" \
+    HEX_RELEASE_BASE_URL="http://127.0.0.1:$port/release" sh "$installer" "$@"
+}
+
+# Refuses a manifest, then checks that nothing was installed.
+refuses() {
+  if install > "$temporary/refused.log" 2>&1; then
+    echo "Installer accepted $1." >&2
+    exit 1
+  fi
+  test ! -e "$install_dir/hex"
+  test ! -e "$support_dir/versions"
+  cp "$temporary/manifest.json" "$server/release/hex/desktop/stable.json"
+}
+
+install
 test -L "$install_dir/hex"
 test "$("$install_dir/hex" --version)" = "voice-control $version"
 grep -Fq 'X-HEX-Managed=true' "$home/.local/share/applications/hex.desktop"
@@ -109,66 +108,45 @@ grep -Fq 'X-HEX-Managed=true' "$home/.config/autostart/HEX.desktop"
 grep -Fq '" start' "$home/.config/autostart/HEX.desktop"
 grep -Fq '# X-HEX-Managed=true' "$home/.config/systemd/user/hex.service"
 grep -Fq '" service' "$home/.config/systemd/user/hex.service"
+grep -Fxq 'Type=notify' "$home/.config/systemd/user/hex.service"
+grep -Fxq 'NotifyAccess=main' "$home/.config/systemd/user/hex.service"
+grep -Fxq "Exec=\"$install_dir/hex\"" "$home/.local/share/applications/hex.desktop"
+grep -Fxq "Exec=\"$install_dir/hex\" quit" "$home/.local/share/applications/hex.desktop"
 grep -Fxq "EnvironmentFile=-$support_dir/session.env" "$home/.config/systemd/user/hex.service"
+test ! -e "$support_dir/versions/$version/source-build"
+test "$(jq -c . "$support_dir/install.json")" = \
+  "$(jq -cn --arg root "$support_dir" '{app: "hex", artifact: "desktop", channel: "stable", method: "direct", root: $root}')"
 
-HOME="$home" \
-  HEX_INSTALL_DIR="$install_dir" \
-  HEX_APPLICATION_SUPPORT_DIR="$support_dir" \
-  sh "$installer" uninstall
+install uninstall
 test ! -e "$install_dir/hex"
 test ! -e "$support_dir/versions"
+test ! -e "$support_dir/install.json"
 test ! -e "$home/.config/systemd/user/hex.service"
 test -f "$support_dir/settings.json"
 
-cp "$server/linux-update.json" "$temporary/feed.valid.json"
-jq '.signature = "AAAA"' "$temporary/feed.valid.json" > "$server/linux-update.json"
-if HOME="$home" \
-  HEX_INSTALL_DIR="$install_dir" \
-  HEX_APPLICATION_SUPPORT_DIR="$support_dir" \
-  HEX_RELEASE_BASE_URL="http://127.0.0.1:$port" \
-  sh "$installer" > "$temporary/signature.log" 2>&1
-then
-  echo "Installer accepted an invalid feed signature." >&2
-  exit 1
-fi
-test ! -e "$install_dir/hex"
-test ! -e "$support_dir/versions"
-cp "$temporary/feed.valid.json" "$server/linux-update.json"
+jq '.app = "other"' "$temporary/manifest.json" > "$server/release/hex/desktop/stable.json"
+refuses "another app's manifest"
+jq '.release.targets = {}' "$temporary/manifest.json" > "$server/release/hex/desktop/stable.json"
+refuses "a release without a linux-x64 build"
+jq '.release.targets["linux-x64"].url = "https://example.com/hex"' "$temporary/manifest.json" > "$server/release/hex/desktop/stable.json"
+refuses "a file outside the service"
+printf 'X' | dd of="$server/release/hex/files/$sha256/$file" bs=1 seek=0 conv=notrunc >/dev/null 2>&1
+refuses "a same-size corrupted download"
 
-printf 'X' | dd of="$server/releases/$artifact" bs=1 seek=0 conv=notrunc \
-  >/dev/null 2>&1
-if HOME="$home" \
-  HEX_INSTALL_DIR="$install_dir" \
-  HEX_APPLICATION_SUPPORT_DIR="$support_dir" \
-  HEX_RELEASE_BASE_URL="http://127.0.0.1:$port" \
-  sh "$installer" > "$temporary/tampered.log" 2>&1
-then
-  echo "Installer accepted a same-size corrupted artifact." >&2
-  exit 1
-fi
-test ! -e "$install_dir/hex"
-test ! -e "$support_dir/versions"
-
-HOME="$home" \
-  HEX_INSTALL_DIR="$install_dir" \
-  HEX_APPLICATION_SUPPORT_DIR="$support_dir" \
-  HEX_INSTALL_ARTIFACT="$unsigned" \
-  HEX_INSTALL_VERSION="$version" \
+HOME="$home" HEX_INSTALL_DIR="$install_dir" HEX_APPLICATION_SUPPORT_DIR="$support_dir" \
+  HEX_INSTALL_ARTIFACT="$unsigned" HEX_INSTALL_VERSION="$version" HEX_INSTALL_SOURCE=1 \
   sh "$installer"
 test "$("$install_dir/hex" --version)" = "voice-control $version"
-HOME="$home" \
-  HEX_INSTALL_DIR="$install_dir" \
-  HEX_APPLICATION_SUPPORT_DIR="$support_dir" \
-  sh "$installer" uninstall
+test -e "$support_dir/versions/$version/source-build"
+test ! -e "$support_dir/install.json"
+install uninstall
 
 important="$temporary/important"
 support_link="$temporary/support-link"
 mkdir -p "$important/versions"
 touch "$important/versions/preserve"
 ln -s "$important" "$support_link"
-if HOME="$home" \
-  HEX_INSTALL_DIR="$install_dir" \
-  HEX_APPLICATION_SUPPORT_DIR="$support_link" \
+if HOME="$home" HEX_INSTALL_DIR="$install_dir" HEX_APPLICATION_SUPPORT_DIR="$support_link" \
   sh "$installer" uninstall > "$temporary/symlink.log" 2>&1
 then
   echo "Uninstaller accepted a managed support symlink." >&2

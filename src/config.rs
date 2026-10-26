@@ -31,9 +31,9 @@ fn dictation_profiles_lock() -> &'static RwLock<Profiles> {
 }
 
 fn build_dictation_profiles(settings: &DictationProcessingSettings) -> Profiles {
-    let mut profiles = Profiles::new(mode_profile(&settings.default_mode));
+    let mut profiles = Profiles::new(Profile::from_mode(&settings.default_mode));
     for mode in &settings.modes {
-        let profile = mode_profile(mode);
+        let profile = Profile::from_mode(mode);
         for application in &mode.applications {
             profiles = profiles.application(application.clone(), profile.clone());
         }
@@ -42,38 +42,6 @@ fn build_dictation_profiles(settings: &DictationProcessingSettings) -> Profiles 
         }
     }
     profiles
-}
-
-fn mode_profile(mode: &crate::app_settings::DictationMode) -> Profile {
-    let processing = &mode.post_processing;
-    let name = if mode.name.trim().is_empty() {
-        "Untitled mode"
-    } else {
-        &mode.name
-    };
-    let mut profile = Profile::new(name, &processing.prompt)
-        .ai_enabled(processing.enabled)
-        .replacements(crate::text_replacements::ReplacementSet::new(
-            &mode.replacements,
-        ))
-        .transformations(mode.transformations.clone());
-    if let Some((provider, model)) = processing
-        .model
-        .as_deref()
-        .and_then(|model| model.split_once('/'))
-    {
-        profile = profile.model(provider, model);
-        if let Some(variant) = processing
-            .variant
-            .as_deref()
-            .filter(|variant| !variant.is_empty())
-        {
-            profile = profile.variant(variant);
-        }
-    }
-    profile.deadline(std::time::Duration::from_secs(
-        processing.deadline_seconds.max(1),
-    ))
 }
 
 /// Native system commands and typed captures that cannot yet be expressed by

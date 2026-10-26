@@ -3,7 +3,7 @@ name: Check Windows
 on:
   pull_request:
   push:
-    branches: [main]
+    branches: [dev]
   workflow_dispatch:
 
 concurrency:
@@ -24,6 +24,9 @@ jobs:
         with:
           components: clippy, rustfmt
       - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest
       - name: Install the Vulkan SDK
         uses: humbletim/install-vulkan-sdk@v1.2
         with:
@@ -37,18 +40,9 @@ jobs:
           $prefix = "$env:VCPKG_INSTALLATION_ROOT/installed/x64-windows" -replace '\\','/'
           $combined = if ($env:CMAKE_PREFIX_PATH) { "$prefix;$env:CMAKE_PREFIX_PATH" } else { $prefix }
           Add-Content $env:GITHUB_ENV "CMAKE_PREFIX_PATH=$combined"
-      - name: Locate the GPUI shader compiler
-        shell: pwsh
-        run: |
-          $fxc = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Recurse -Filter fxc.exe -ErrorAction SilentlyContinue |
-            Where-Object { $_.FullName -match '\\x64\\' } |
-            Sort-Object FullName -Descending |
-            Select-Object -First 1
-          if (-not $fxc) { throw "fxc.exe was not found in the Windows SDK" }
-          "GPUI_FXC_PATH=$($fxc.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append
       - run: cargo fmt --check
       - run: cargo clippy --release --all-targets -- -D warnings
-      - run: cargo test --release
+      - run: cargo nextest run --release --profile ci
       - run: cargo build --locked --release
       - name: Check the executable needs no Visual C++ Redistributable
         shell: pwsh
@@ -85,15 +79,10 @@ jobs:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: Locate the GPUI shader compiler
-        shell: pwsh
-        run: |
-          $fxc = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Recurse -Filter fxc.exe -ErrorAction SilentlyContinue |
-            Sort-Object FullName -Descending |
-            Select-Object -First 1
-          if (-not $fxc) { throw "fxc.exe was not found in the Windows SDK" }
-          "GPUI_FXC_PATH=$($fxc.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append
-      - run: cargo test --release
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest
+      - run: cargo nextest run --release --profile ci
       - run: cargo build --locked --release
       - uses: actions/upload-artifact@v4
         with:

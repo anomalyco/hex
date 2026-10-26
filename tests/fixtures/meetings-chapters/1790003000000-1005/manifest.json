@@ -1,0 +1,54 @@
+{
+  "schema_version": 1,
+  "id": "1790003000000-1005",
+  "title": "Team sync",
+  "status": "complete",
+  "created_at_ms": 1790003000000,
+  "ended_at_ms": 1790003540000,
+  "duration_ms": 540000,
+  "system": {
+    "file": "system.wav",
+    "sample_rate": 16000,
+    "first_pts_us": null,
+    "last_pts_us": null,
+    "first_arrival_us": null,
+    "samples": 0,
+    "dropped_packets": 0
+  },
+  "microphone": {
+    "file": "microphone.wav",
+    "sample_rate": 16000,
+    "first_pts_us": null,
+    "last_pts_us": null,
+    "first_arrival_us": null,
+    "samples": 0,
+    "dropped_packets": 0
+  },
+  "live_transcription_error": null,
+  "error": null,
+  "app": "Zoom",
+  "export_path": null,
+  "export_error": null,
+  "echo_suppressed_utterances": 0,
+  "notes": null,
+  "notes_error": null,
+  "title_source": "calendar",
+  "chapters": [
+    {
+      "title": "Image storage",
+      "summary": "Where uploaded images live and how long they are kept.",
+      "start_ms": 0
+    },
+    {
+      "title": "Motion lint",
+      "summary": "A lint that flags animations which snap instead of easing.",
+      "start_ms": 180000
+    },
+    {
+      "title": "Chat app name",
+      "summary": "Picking a name for the chat app.",
+      "start_ms": 390000
+    }
+  ],
+  "chapters_refined": true
+}

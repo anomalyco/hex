@@ -270,21 +270,22 @@ listener worker fails -> reap worker -> show failure
   ├── Retry -> new managed listener -> fresh capture -> expected output
   └── Dismiss -> clear error                            // not evidence of recovery
 
-close/crash Settings -> disconnect client -> service keeps running
-  └── that client's uncommitted shortcut capture -> cancel edit -> restore prior listening
+close the window -> Hex keeps running
+  └── uncommitted shortcut capture -> cancel edit -> restore prior listening
 
-service exits -> systemd restart-on-failure OR explicit hex start
-  -> client reconnects -> live snapshot, not stale log state
+Hex crashes -> systemd restart-on-failure (no window) OR explicit hex start
+  -> hex / hex status -> live state, not stale log state
 
-hex stop -> stop service -> release microphone and hotkeys
+hex quit / Quit Hex -> drain accepted work -> release microphone and hotkeys -> exit 0
 ```
 Sources/checks: [linux_app.rs](../../src/linux_app.rs),
 [Linux CI](../../.github/workflows/check-linux.yml),
 [test-wayland-paste.sh](../../scripts/test-wayland-paste.sh), and
 [test-linux-service.py](../../scripts/test-linux-service.py).
 Proof limit: source and available headless checks, not current supported-host
-behavior. Native compositor/device validation remains separate. The service
-socket is same-user only; bounded I/O and queues keep client stalls off the audio loop.
+behavior. Native compositor/device validation remains separate. The
+single-instance socket is same-user only; bounded I/O and queues keep client
+stalls off the audio loop.
 
 **Fixed after 2.1.24:** on X11 the Escape-cancel grab is best-effort.
 
@@ -326,8 +327,8 @@ Checks in [linux_input.rs](../../src/linux_input.rs):
 `escape_is_wanted_only_while_something_records`,
 `escape_grab_conflict_is_not_fatal`, `non_conflict_grab_errors_stay_fatal`,
 and `escape_warning_is_logged_once_per_episode_and_clears_on_recovery`.
-`listener_warning_is_nonfatal_and_round_trips_in_service_snapshots` in
-[linux_app.rs](../../src/linux_app.rs) checks snapshot serialization, warning
+`listener_warning_is_nonfatal_and_round_trips_in_status` in
+[linux_app.rs](../../src/linux_app.rs) checks status publication, warning
 recovery, and listener shutdown. The ignored X11 checks
 `conflicted_escape_still_dictates_without_cancel`,
 `modified_escape_conflict_keeps_plain_escape_cancel`, and
@@ -357,7 +358,7 @@ did not verify the new visible warning or bare-Escape fallback.
 
 ```ts
 GUI startup -> require OS main thread -> initialize_layout // recover.keyboard-layout
-  -> publish complete snapshot BEFORE settings/workers/GPUI
+  -> publish complete snapshot BEFORE settings/workers/Rune
      ├── cached character -> keycode
      ├── missing ASCII character -> filled from ASCII-capable layout
      └── Command layer (UCKeyTranslate with cmdKey) -> separate map
@@ -373,7 +374,7 @@ Headless lookup without snapshot -> shared native lock -> current layout query
 Concurrent snapshot construction -> same lock          // serialized, not a separate race
 ```
 Sources: [keyboard.rs](../../src/keyboard.rs),
-[meeting_watcher.rs](../../src/meeting_watcher.rs).
+[macos_rune.rs](../../src/macos_rune.rs).
 The lock alone is not GUI thread safety: successful main-thread prewarming and
 pure cached misses prevent later GUI workers from querying native layout APIs.
 The GUI snapshot remains fixed until restart. CLI lookups without a snapshot

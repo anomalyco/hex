@@ -14,14 +14,27 @@ were run for this rewrite.
 
 Settings shortcut capture persists the candidate before showing Saved. If the
 write fails, capture remains active with an error; retry or cancel it explicitly.
-`failed_shortcut_save_stays_in_capture_and_preserves_pending_edits` in
-[app_window.rs](../../src/app_window.rs) checks this with injected persistence
-failure, not a physical shortcut or installed-app disk failure.
+The GPUI regression that injected this failure went with GPUI; no Rune test
+injects a failed shortcut save yet.
 
 **Shortcut:** Option by default, after macOS permissions and the selected local
-model are ready. Commands and OpenCode are not required. Settings > Dictation
-shortcut accepts modifier-only, modifier-plus-key, standalone Fn/Globe, and
+model are ready. Commands and OpenCode are not required. General > Dictation >
+Shortcut accepts modifier-only, modifier-plus-key, standalone Fn/Globe, and
 standalone function-key bindings. Capturing a replacement suspends global matching.
+The shortcut's keys sit in a recessed tray as tall as the recorder, between
+the macOS side picker and the recorder; with no shortcut the tray reads Off.
+On macOS and Windows the recorder shows the modifiers held so far as pressed
+keys (`⌥ ⌘ …`); a key records them at once, and releasing them all records the
+most held. Saved shows for a second, then the recorder returns to Change
+shortcut. The recorder keeps one width in every state, so it, the tray, and the
+side picker never move while it records; with the picker showing, keycaps leave
+the side to it, and otherwise they name it (`Left ⌥`).
+Checks: `a_recorder_shows_the_modifiers_held_so_far` in `rune_ui/tests.rs`,
+`the_shortcut_row_holds_still_through_every_face_and_side`,
+`a_new_shortcut_s_keys_stay_inside_their_tray`, and
+`esc_stays_on_the_recorder_however_many_keys_are_held` in
+`rune_ui/tests/panes.rs`, the `shortcut-row*` scenes, and the `ChordCapture`
+tests in `rune_ui/macos_host.rs` (no native end-to-end run).
 
 **CLI:** `hex listen` uses saved settings; `--device` is authoritative. This is
 the CLI listener, not Settings. Do not run it beside an existing listener.
@@ -33,13 +46,28 @@ Neither proves the physical dictation shortcut; see the [feature index](README.m
 
 ## Sub-features
 
+### Vocabulary Quality Checks
+
+`hex benchmark-transcription` accepts a scoring vocabulary and expected terms,
+and reports recall, excess vocabulary occurrences and WER by corpus group, plus
+overall latency. Its companion scorer also reports per-group latency.
+The [fixture guide](../../tests/fixtures/vocabulary/README.md) describes
+the synthetic set, public guard download, and ignored private manifest path.
+This is offline evaluation coverage, not a shipped vocabulary feature or proof
+of recognition quality on a microphone. Metric checks live in
+`transcription_benchmark::tests`; inference results belong in the research report.
+
 ### Hold And Short Taps
 
 ```ts
 Ordinary hold                            // lock activation is mapped below
   ├── Hold -> Speak -> Release -> Finish          // dictate.hold
   ├── Release before 300 ms -> Discard            // dictate.short-tap
-  └── Early unrelated shortcut/click -> Discard   // not intentional dictation
+  ├── Early unrelated shortcut/click -> Discard   // not intentional dictation
+  │   └── Includes another app's global shortcut  // dictate.hidden-chord
+  │       (Spaceman's Option-1) -> Seen at HID -> Discard, no double-tap lock
+  └── Modifier-only hold + any key, at any time -> Discard  // dictate.held-chord
+      (key reaches the app; locked and toggle captures keep recording)
 
 Ordinary shortcut -> No recording mute/pause or idle-sleep prevention
 Intentional recording -> No automatic duration limit
@@ -51,12 +79,43 @@ Checks in [suppression.rs](../../src/suppression.rs):
 `callback_press_reaches_intentional_hold_on_the_audio_clock`.
 These cover constructed callback/reducer timing, not physical event delivery.
 
+A chord discard logs its cause to `process.log` (`dictation press discarded as
+a chord`, or `dictation press dropped` when HID evidence overtook the press)
+with the key code, the milliseconds after the press, and for HID evidence the
+raw timestamp, how it was read, and its arrival delay. The `discarded` event in
+`live.ndjson` carries the same cause as `reason`: `key`, `hid-key`, `mouse`, or
+`extra-modifier`. Short taps have no `reason`.
+
+**Fixed October 22, 2026:** a global shortcut registered with Carbon (Spaceman's
+Option-1 to Option-0 workspace keys, for example) consumes its key before the
+session taps, so Hex saw only the Option press and release. Holding Option past
+300 ms while switching workspaces recorded and pasted whatever the microphone
+heard, and two quick switches could double-tap lock. A listen-only HID tap now
+reports key presses as chord evidence only; session events still own key state,
+and Escape and Hex's own shortcuts are excluded. Evidence that overtakes its
+press still prevents the capture. Command-Tab likewise swallows Tab's release,
+which caused the routine `resynchronized stale input tracking` warnings, now
+logged with `key_codes`. Checks:
+`hid_evidence_discards_a_chord_hidden_by_a_global_shortcut`,
+`hidden_chords_in_quick_succession_never_double_tap_lock`,
+`hid_evidence_that_overtakes_its_press_prevents_the_capture`. Observed with
+listen-only session and HID taps on Kit's Studio: Spaceman's Option-1/2/3
+reached HID but never the session. The installed fix has no physical-keyboard
+run yet.
+
+**Changed October 22, 2026:** Kit holds Option a little past 300 ms before
+pressing the digit, which 2.3.0 and the Swift app both ignored after the
+threshold. Any non-modifier key pressed while a modifier-only shortcut is still
+held now discards the capture, with no transcription or paste. Keyed shortcuts
+keep the 300 ms rule. Check:
+`held_modifier_only_shortcut_plus_any_key_discards_after_the_hold_threshold`.
+
 ### Shortcut Mode
 
 ```ts
-Settings > Shortcut mode = Hold (default)            // dictate.shortcut-mode
+General > Shortcut mode = Hold (default)             // dictate.shortcut-mode
   -> Hold and lock behave as described above
-Settings > Shortcut mode = Toggle
+General > Shortcut mode = Toggle
   Press -> Start (pre-roll as usual) -> Release keeps recording
   -> Fresh shortcut press -> Finish (with the release tail)
   -> Escape -> Cancel
@@ -78,6 +137,50 @@ the Windows build was compiled and tested locally (2026-10-19); macOS relies on
 CI. The Linux state machine and X11 grab tests ran on 2026-10-22 (the grabs on
 an isolated Xwayland display). No physical keyboard check yet.
 
+```ts
+General > Shortcut mode > How it works                // dictate.shortcut-explainer
+  -> Modal: Hold and Toggle cards, each the shortcut's keycaps (one per key,
+     pressing together) beside two lanes (key above, recording below) on a
+     chart-recorder tape: a still pen at the right, the tape scrolling left
+     without end and fading out at its left edge; opening it ends a shortcut
+     recording and closes the model picker
+  ├── Opens centred at its Hold height in either mode; a window resize
+  │   centres it again
+  ├── Long chord -> The panel widens (up to the window) so each card's lanes
+  │   keep at least 64 pt beside the keycaps
+  ├── Pick a card (click, Enter, Space) -> Saves Shortcut mode
+  ├── Hold -> Double-tap to lock row: switch + striped hands-free lane
+  ├── Toggle -> No lock row; it folds inside its own slot and the panel's
+  │   bottom edge rises with it (the top stays put)
+  ├── Tab -> Hold, Toggle, lock switch, Close; focus stays inside
+  ├── Close, Escape, or a press outside -> Closes; focus returns to the link
+  ├── Change pane, menu bar, or `hex window show` -> Closes
+  └── Reduce Motion -> One whole take, still, no wakes; turned off while
+      open, the tape starts again when the window regains focus
+```
+
+The lanes are Rune shapes drawn at their laid-out width and redrawn from the
+window's poll clock while the modal is open (`src/rune_ui/explainer.rs`).
+Checks: `how_it_works_opens_the_shortcut_explainer_and_keeps_focus_inside`,
+`explainer_cards_pick_the_shortcut_mode`,
+`the_explainer_loops_on_the_poll_clock`,
+`reduce_motion_shows_the_finished_explainer_without_waking`,
+`the_explainer_restarts_when_reduce_motion_turns_off`,
+`the_explainer_centres_at_its_hold_height_in_either_mode`,
+`a_long_chord_widens_the_explainer` (five keys),
+the tape's own `nothing_draws_past_the_pen`, `the_tape_scrolls_without_steps`,
+`the_still_frame_shows_a_whole_take`, `narrow_lanes_draw_nothing` and
+`the_past_leaves_the_tape` in `explainer.rs`,
+`the_explainer_draws_a_keycap_per_key_and_lines_up_the_lanes`, and
+`the_explainer_picker_and_shortcut_recording_never_share_the_window` in
+[tests/panes.rs](../../src/rune_ui/tests/panes.rs), plus the
+`shortcut-explainer`, `shortcut-explainer-toggle`, and
+`shortcut-explainer-chord` (Ctrl+Alt+Space) goldens (frozen at 1.8 s into the
+tape). The animation itself has been seen only in headless
+frames, not on a real window; a headless trace of Hold, Toggle and rapid
+switching on 2026-10-25 kept every element inside the panel and clear of
+Close on every frame (no automated check yet).
+
 On Linux, `hex dictation start` and `stop` bypass Hold, Toggle, and the
 double-tap rules: start records unless something already records, stop
 finishes, and `toggle` does whichever applies. Bound to a key's press and
@@ -90,13 +193,13 @@ and explicit programmatic capture have different intentional-start rules.
 ### Lock, With Or Without Hold
 
 ```ts
-Settings > Double-tap to lock                         // dictate.lock
+General > Double-tap to lock                          // dictate.lock; Hold only
   Hold -> Ordinary hold path remains available
   Tap -> Tap
     ├── Second press AND release <300 ms after first release -> LOCKED
     └── Slow second release -> No lock
 
-Settings > Double-tap only                            // dictate.double-tap-only
+General > Advanced > Double-tap only                  // dictate.double-tap-only
   Requires a key binding AND locking enabled
   Single press/hold -> No capture                     // disables hold, not a toggle
   Same two qualifying complete taps -> LOCKED         // same lock, not a third mode
@@ -108,10 +211,80 @@ LOCKED -> Speak hands-free -> Fresh shortcut press -> Finish
 
 Checks in [suppression.rs](../../src/suppression.rs):
 `callback_double_tap_locks_for_modifier_and_key_bindings`,
-`a_slow_second_release_does_not_lock`,
+`callback_hold_and_double_tap_boundaries_are_milliseconds`,
+`second_tap_finishes_as_press_and_hold_when_double_tap_cannot_lock`,
 `double_tap_only_waits_for_two_complete_key_chord_taps`,
 `locked_dictation_finishes_after_a_missing_key_release`.
 These cover gesture decisions, not hardware keyboard-layout or remapping equivalence.
+
+### Smart Turn Auto-Stop (Experiment `smart-turn`)
+
+macOS only, off unless the `smart-turn` [experiment](experiments.md) is on.
+It finishes a hands-free capture when the speaker seems done, so a locked
+capture needs no finishing press.
+
+```ts
+Shortcut or spoken-start dictation records         // dictate.smart-turn
+  // only double-tap LOCKED, Toggle after its release, `hex dictation start`
+  // (it locks), or the spoken start phrase may stop; never Hold, Voice
+  // Action, edit, API capture, or meetings
+  -> First such capture -> Find the ONNX Runtime library, then download and
+       verify the pinned model           // models/smart-turn-v3.2-cpu.onnx, size + SHA-256
+  ├── Model not ready yet -> Nothing is followed; no check, no fallback
+  └── Model ready -> 16 kHz, 20 ms frames, the meeting pause detector's speech rule
+        // shortcut: from the press, so speech while the key is down counts
+        // spoken start: only audio after the start phrase ends
+        ├── Under 200 ms of speech so far -> Pauses don't count
+        ├── Not hands-free yet (key still down) -> Speech counts, pauses don't
+        │     // the silence clock starts again at the lock
+        ├── Silence reaches the check point (300 ms)
+        │     -> Worker scores the last 8 s     // off the audio loop; newest pause wins
+        │     ├── P >= threshold (0.7) -> Finish as a locked finishing press
+        │     │     // hotkey: same release tail, transcription, paste, tones;
+        │     │     // shortcut presses during the tail are ignored
+        │     │     // spoken start: as the stop phrase; a control phrase at
+        │     │     // the end of the transcript still applies, so
+        │     │     // "dictate cancel" cancels and "dictate send" sends
+        │     ├── P < threshold -> Keep listening
+        │     └── P not a finite number -> `failed`; keep listening
+        ├── Silence reaches the fallback (2 s) -> Finish the same way
+        ├── Speech resumes, or the capture ends or changes -> Late answer ignored
+        ├── Escape or shortcut press queued -> Handled first; the stop waits
+        └── Download, runtime, or model fails -> Logged; dictation as if it were off
+```
+
+`HEX_SMART_TURN_CHECK_MS`, `HEX_SMART_TURN_THRESHOLD`, and
+`HEX_SMART_TURN_FALLBACK_MS` override the defaults at launch (invalid values
+are logged and ignored; the fallback is at least 500 ms after the check, so
+the model is always asked first). A
+patient preset is `1500`, `0.8`, `3000`. Every check writes one `smart_turn`
+event to `live.ndjson` with the probability, silence, decision (`stop`,
+`continue`, `fallback`, `stale`, `failed`), and inference time, never text.
+The model runs on the ONNX Runtime library Moonshine already ships, loaded
+with `ort`'s `load-dynamic`; its Whisper log-mel features are computed in Rust.
+
+Checks in [smart_turn.rs](../../src/smart_turn.rs): `log_mel_matches_whisper_feature_extractor`
+(against `transformers`' `WhisperFeatureExtractor(chunk_length=8)` on a
+synthetic signal), `checks_once_per_pause_after_speech`,
+`silence_alone_never_checks_or_stops`,
+`a_confident_answer_stops_and_a_doubtful_one_waits_for_the_fallback`,
+`answers_about_an_earlier_pause_are_stale`,
+`the_model_is_always_asked_before_the_fallback`,
+`stops_a_hands_free_capture_when_the_model_hears_the_end`,
+`an_answer_for_an_ended_or_newer_capture_does_nothing`,
+`an_ended_capture_drops_its_waiting_check`,
+`nothing_is_followed_or_stopped_before_the_model_is_ready`,
+`a_failed_load_leaves_dictation_alone`,
+`speech_while_held_counts_but_only_a_hands_free_capture_stops`,
+`listening_starts_after_the_start_phrase`,
+`a_non_finite_probability_fails_the_check`,
+`non_finite_samples_read_as_silence`, and `off_reads_and_loads_nothing`,
+all with a scripted predictor; `a_spoken_control_decides_a_smart_turn_voice_target`
+in [parakeet.rs](../../src/parakeet.rs). The ignored
+`real_model_matches_python_on_the_reference_signal` downloads the model and
+matched Python onnxruntime 1.23.2 (P 0.8643) on 2026-10-24. Not covered: the
+recognition-loop wiring (queued input, the release tail, spoken controls end
+to end), a physical microphone, or whether the defaults suit real speech.
 
 ### Warm And Cold Capture
 
@@ -133,13 +306,16 @@ Release or locked finishing press                     // dictate.release-tail
   -> A press inside the tail starts after the old clip finishes, with its own pre-roll
 
 Release that will transcribe                          // dictate.stop-tone
-  -> Linux, Windows: stop tone and mute/pause restore at the release, while the
-     tail is still captured; a muted Linux output unmutes first, then the tone
+  -> Stop tone and mute/pause/sleep restore at the release, while the tail is
+     still captured; a muted output (macOS, Linux) unmutes first, then the tone
      ├── Short tap or chord -> No stop tone; the start tone is retracted
      ├── Clip later near-silent or without speech -> Tone already played;
      │   discard, nothing pasted
      └── Escape after the release -> Not bound; the clip still transcribes
-  -> macOS: stop tone after the tail (up to 200 ms later; 300 ms on a stall)
+  -> macOS: the audio owner announces it before draining the tail; HUD
+     Transcribing and submission still follow the tail
+  -> Paused media resumes without delaying the tone
+  -> Voice controls (no tail) -> Tone when the clip is submitted, as before
   -> The silence gate ignores the tail, so a tone the microphone hears there
      never makes a silent clip transcribe
 
@@ -185,9 +361,15 @@ drive the owner with a fake stream: `release_waits_for_its_tail_and_keeps_no_lat
 `a_press_inside_the_tail_starts_its_own_capture_after_the_old_one_finishes`,
 `a_stalled_or_failed_stream_bounds_the_tail_wait`, and
 `escape_and_short_taps_finish_without_waiting_for_a_tail`. The macOS coordinator
-blocks on the tail, so the stop tone, HUD Transcribing, and submission follow the
-release by up to 200 ms (300 ms on a stalled stream); their order is unchanged.
-Linux and Windows play the stop tone at the release instead. On Linux this used
+blocks on the tail, so HUD Transcribing and submission follow the release by up
+to 200 ms (300 ms on a stalled stream). The stop tone no longer does: the audio
+owner's `Finish` ends the recording environment through
+`end_recording_environment_then` and plays the tone from the environment worker
+once a muted output is restored (at once with paused media), then drains the
+tail; `finish_dictation` plays the tone itself only for tail-free finishes. This
+macOS change compiles and passes Clippy on hailmary (2026-10-22); physical tone
+timing and the unmute-then-tone order on a Mac audio device remain unverified.
+Linux and Windows play the stop tone at the release too. On Linux this used
 to follow the tail too: on 2026-10-22, an isolated service on apollo (ALSA
 Loopback microphone and speaker, `hex dictation stop`) measured the stop tone
 requested 203 ms after the release was handled before the fix and within the same
@@ -222,6 +404,11 @@ Model advertises streaming, GPU device             // dictate.streaming
   Voice-delimited and programmatic captures (macOS) -> Whole clip after release
   Nothing is shown or pasted until the final text exists
   Picker -> "Streams" tag on catalog models whose artifact streams   // setup.model-card
+  Picker -> Per-language Recommended/Fastest/Most accurate cards         // setup.model-routing
+  ├── el: Cohere; tr, ms, fil, fa, mk, ar, ja, fi, sv, da: Whisper turbo first
+  ├── auto, yue, ko: no SenseVoice; mt: Parakeet v3 only (Whisper fails Maltese)
+  └── Saved or installed model no longer recommended -> Still listed, no badge,
+      selectable and deletable; never auto-switched or auto-downloaded
 ```
 
 Source: [transcription_engine.rs](../../src/transcription_engine.rs) (one thread
@@ -584,11 +771,11 @@ Linux now uses the same recording sounds with its own persisted Sound volume
 control; see [Linux feedback](README.md#other-platforms-and-consumers) for its
 entry points, timing, defaults, and verification limits.
 
-Check: [capture-preview.sh](../../scripts/capture-preview.sh), `dictation-hud`
-preview. It repeats the recording/processing sequence until the preview exits,
-so fullscreen and Space transitions can be checked without a ten-second deadline.
-This renders a real window with deterministic state; it does not prove that
-actual capture caused that state.
+Check: in a debug app, `hex dev hud recording|transcribing|processing|reset`
+or the HUD Lab pane drives the real HUD with deterministic state, so
+fullscreen and Space transitions can be checked. (The `dictation-hud` preview
+that looped the sequence went with GPUI.) This does not prove that actual
+capture caused that state.
 
 The macOS HUD is a click-through, nonactivating `NSPanel` with
 `CanJoinAllSpaces`, `CanJoinAllApplications`, and `FullScreenAuxiliary` collection

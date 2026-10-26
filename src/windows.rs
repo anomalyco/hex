@@ -1,14 +1,12 @@
-use std::fs::{self, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use clap::{Args, Parser, Subcommand};
 use color_eyre::Result;
 use color_eyre::eyre::{WrapErr, bail};
-use tracing_subscriber::fmt::writer::MakeWriterExt;
 use windows_sys::Win32::System::Console::FreeConsole;
 
 use crate::audio::{AudioInput, AudioInputEvent};
@@ -35,6 +33,9 @@ enum Command {
         /// Start the resident listener without showing the Settings window.
         #[arg(long)]
         hidden: bool,
+        /// Arguments for a headless render, such as `--snap out.png --scene modes`.
+        #[arg(last = true)]
+        rune_args: Vec<String>,
     },
     /// Listen globally: hold the configured shortcut to dictate and release to paste.
     Listen {
@@ -67,6 +68,16 @@ enum Command {
     Model {
         #[command(subcommand)]
         command: ModelCommand,
+    },
+    /// Read and change settings (macOS only for now; use the Hex window).
+    Settings {
+        #[command(subcommand)]
+        command: crate::control::cli::SettingsCommand,
+    },
+    /// Turn unfinished, unsupported features on or off for your Hex.
+    Experiments {
+        #[command(subcommand)]
+        command: crate::experiments::ExperimentsCommand,
     },
 }
 
@@ -135,32 +146,37 @@ impl SelectionArgs {
 pub fn run(shutdown: &'static AtomicBool) -> Result<()> {
     color_eyre::install()?;
     // Parse first so `--version` and `--help` exit without creating app data.
-    let command = Cli::parse()
-        .command
-        .unwrap_or(Command::App { hidden: false });
-    let log_dir = crate::app_paths::logs_dir()?;
-    fs::create_dir_all(&log_dir)?;
-    let process_log = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(log_dir.join("process.log"))?;
-    let filter = tracing_subscriber::EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("voice_control=info"));
-    tracing_subscriber::fmt()
-        .with_env_filter(filter)
-        .with_writer(std::io::stderr.and(Mutex::new(process_log)))
-        .init();
-    ctrlc::set_handler(|| shutdown.store(true, Ordering::Relaxed))?;
+    let command = Cli::parse().command.unwrap_or(Command::App {
+        hidden: false,
+        rune_args: Vec::new(),
+    });
+    if let Command::Settings { command } = command {
+        crate::control::cli::finish(crate::control::cli::settings(command));
+    }
+    // Like a read command: no log, lock, or running Hex.
+    if let Command::Experiments { command } = &command {
+        return crate::experiments::run(command);
+    }
+    let log_dir = crate::app_paths::init_process_logging(shutdown)?;
 
     let event_path = log_dir.join("live.ndjson");
     match command {
-        Command::App { hidden } => {
+        Command::App { hidden, rune_args } => {
+            // A headless render (`--snap`) draws fixtures without starting
+            // the runtime and prints to the terminal that ran it.
+            if !rune_args.is_empty() {
+                crate::rune_ui::app(Default::default())
+                    .args(rune_args)
+                    .run();
+                return Ok(());
+            }
             detach_from_console();
-            crate::windows_app::open(event_path, shutdown, hidden)
+            crate::windows_rune::open(event_path, shutdown, hidden)
         }
         Command::Listen { device, selection } => {
             shutdown.store(false, Ordering::Relaxed);
             let _instance = crate::instance::acquire("windows-listener")?;
+            crate::experiments::log_launch();
             let settings = crate::app_settings::AppSettings::load()?;
             let history = crate::history::History::open_default(settings.history_retention)?;
             let config = crate::windows_dictation::WindowsDictationConfig {
@@ -178,7 +194,14 @@ pub fn run(shutdown: &'static AtomicBool) -> Result<()> {
                         )
                     })
                     .flatten();
-            crate::windows_dictation::run(&event_path, &selection.resolve()?, config, shutdown)
+            // Settings a foreground listener loaded stay as they are.
+            crate::windows_dictation::run(
+                &event_path,
+                &selection.resolve()?,
+                config,
+                std::sync::mpsc::channel().1,
+                shutdown,
+            )
         }
         Command::Capture {
             device,
@@ -199,6 +222,8 @@ pub fn run(shutdown: &'static AtomicBool) -> Result<()> {
         }
         Command::Status { lines } => print_status(&event_path, lines),
         Command::Model { command } => run_model_command(command, shutdown),
+        Command::Settings { .. } => unreachable!("handled before logging"),
+        Command::Experiments { .. } => unreachable!("handled before logging"),
     }
 }
 
@@ -485,6 +510,11 @@ fn fail_capture(events: &EventLog, device: &str, error: &str) -> Result<()> {
 }
 
 fn print_status(path: &Path, limit: usize) -> Result<()> {
+    // Read from the sources now; the running Hex read them at its launch.
+    let experiments = crate::experiments::active_names();
+    if !experiments.is_empty() {
+        println!("experiments\t{}", experiments.join(","));
+    }
     if !path.exists() {
         println!("No observations yet at {}", path.display());
         return Ok(());

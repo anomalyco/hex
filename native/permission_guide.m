@@ -2,6 +2,8 @@
 #import <AVFoundation/AVFoundation.h>
 #import <ApplicationServices/ApplicationServices.h>
 #import <CoreGraphics/CoreGraphics.h>
+#import <CoreImage/CoreImage.h>
+#import <IOKit/hidsystem/IOHIDLib.h>
 #import <QuartzCore/QuartzCore.h>
 #import <dlfcn.h>
 
@@ -16,6 +18,21 @@ static NSPanel *guidePanel;
 static NSTimer *guideTimer;
 static BOOL sawSettingsWindow;
 static HexPermission activePermission;
+static NSView *guideTile;
+
+/// The tile flies on its own from the click in Hex's window to its place in
+/// the guide, so the eye can follow it to System Settings.
+static NSPanel *flightPanel;
+static CALayer *flightLayer;
+static NSTimer *flightTimer;
+static NSPoint flightOrigin;
+static CFTimeInterval flightShownAt;
+static CFTimeInterval flightStartedAt;
+static const CGFloat flightPadding = 40;
+static const CFTimeInterval flightLift = 0.18;
+static const CFTimeInterval flightDuration = 0.62;
+/// Settings that has not opened by then gets no flight.
+static const CFTimeInterval flightPatience = 4;
 
 @interface HexDragView : NSView <NSDraggingSource>
 @property(nonatomic, strong) NSURL *bundleURL;
@@ -54,6 +71,33 @@ const char *hex_permission_list_name(int permission) {
     return "Privacy & Security";
 }
 
+static BOOL isDark(NSAppearance *appearance) {
+    NSAppearanceName match = [appearance bestMatchFromAppearancesWithNames:@[
+        NSAppearanceNameAqua,
+        NSAppearanceNameDarkAqua,
+    ]];
+    return [match isEqualToString:NSAppearanceNameDarkAqua];
+}
+
+/// The app's tile as System Settings will list it: icon and name.
+static void drawTile(NSRect bounds, NSImage *icon, NSString *name, BOOL dark) {
+    NSBezierPath *background = [NSBezierPath bezierPathWithRoundedRect:bounds
+                                                               xRadius:8
+                                                               yRadius:8];
+    [[NSColor colorWithWhite:(dark ? 0.18 : 0.89) alpha:1] setFill];
+    [background fill];
+    [[NSColor colorWithWhite:(dark ? 1 : 0) alpha:0.10] setStroke];
+    background.lineWidth = 1;
+    [background stroke];
+
+    [icon drawInRect:NSMakeRect(10, 6, 32, 32)];
+    NSDictionary *attributes = @{
+        NSFontAttributeName: [NSFont systemFontOfSize:13 weight:NSFontWeightSemibold],
+        NSForegroundColorAttributeName: [NSColor colorWithWhite:(dark ? 0.94 : 0.12) alpha:1],
+    };
+    [name drawAtPoint:NSMakePoint(52, 14) withAttributes:attributes];
+}
+
 @implementation HexDragView
 
 - (instancetype)initWithFrame:(NSRect)frame bundleURL:(NSURL *)bundleURL {
@@ -77,26 +121,7 @@ const char *hex_permission_list_name(int permission) {
 
 - (void)drawRect:(NSRect)dirtyRect {
     [super drawRect:dirtyRect];
-    NSAppearanceName appearance = [self.effectiveAppearance bestMatchFromAppearancesWithNames:@[
-        NSAppearanceNameAqua,
-        NSAppearanceNameDarkAqua,
-    ]];
-    BOOL dark = [appearance isEqualToString:NSAppearanceNameDarkAqua];
-    NSBezierPath *background = [NSBezierPath bezierPathWithRoundedRect:self.bounds
-                                                               xRadius:8
-                                                               yRadius:8];
-    [[NSColor colorWithWhite:(dark ? 0.18 : 0.89) alpha:1] setFill];
-    [background fill];
-    [[NSColor colorWithWhite:(dark ? 1 : 0) alpha:0.10] setStroke];
-    background.lineWidth = 1;
-    [background stroke];
-
-    [self.appIcon drawInRect:NSMakeRect(10, 6, 32, 32)];
-    NSDictionary *attributes = @{
-        NSFontAttributeName: [NSFont systemFontOfSize:13 weight:NSFontWeightSemibold],
-        NSForegroundColorAttributeName: [NSColor colorWithWhite:(dark ? 0.94 : 0.12) alpha:1],
-    };
-    [self.appName drawAtPoint:NSMakePoint(52, 14) withAttributes:attributes];
+    drawTile(self.bounds, self.appIcon, self.appName, isDark(self.effectiveAppearance));
 }
 
 - (void)mouseDown:(NSEvent *)event {
@@ -197,10 +222,12 @@ static BOOL systemAudioGranted(void) {
 
 static BOOL permissionGranted(void) {
     switch (activePermission) {
+        // What System Settings shows now: the preflights keep their launch
+        // answer until Hex restarts.
         case HexPermissionInputMonitoring:
-            return CGPreflightListenEventAccess();
+            return IOHIDCheckAccess(kIOHIDRequestTypeListenEvent) == kIOHIDAccessTypeGranted;
         case HexPermissionAccessibility:
-            return CGPreflightPostEventAccess();
+            return AXIsProcessTrusted();
         case HexPermissionMicrophone:
             return [AVCaptureDevice authorizationStatusForMediaType:AVMediaTypeAudio] ==
                    AVAuthorizationStatusAuthorized;
@@ -210,12 +237,155 @@ static BOOL permissionGranted(void) {
     return NO;
 }
 
+static void endFlight(void) {
+    [flightTimer invalidate];
+    flightTimer = nil;
+    [flightPanel orderOut:nil];
+    flightPanel = nil;
+    flightLayer = nil;
+    guideTile.hidden = NO;
+    guidePanel.alphaValue = 1;
+}
+
 static void closeGuide(void) {
+    endFlight();
     [guideTimer invalidate];
     guideTimer = nil;
     [guidePanel orderOut:nil];
     guidePanel = nil;
+    guideTile = nil;
     sawSettingsWindow = NO;
+}
+
+static CGFloat clamp01(CGFloat value) {
+    return MIN(MAX(value, 0), 1);
+}
+
+static CGFloat easeInOutCubic(CGFloat t) {
+    return t < 0.5 ? 4 * t * t * t : 1 - pow(-2 * t + 2, 3) / 2;
+}
+
+static CGFloat easeOutCubic(CGFloat t) {
+    return 1 - pow(1 - t, 3);
+}
+
+/// Where the tile lands: its slot in the guide, in screen coordinates.
+static NSPoint tileTarget(void) {
+    NSRect slot = [guideTile convertRect:guideTile.bounds toView:nil];
+    NSRect screen = [guidePanel convertRectToScreen:slot];
+    return NSMakePoint(NSMidX(screen), NSMidY(screen));
+}
+
+static void placeFlight(NSPoint center, CGFloat scale, CGFloat blur, CGFloat opacity) {
+    NSSize size = flightPanel.frame.size;
+    [flightPanel setFrameOrigin:NSMakePoint(center.x - size.width / 2, center.y - size.height / 2)];
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
+    flightLayer.transform = CATransform3DMakeScale(scale, scale, 1);
+    flightLayer.opacity = (float)opacity;
+    [flightLayer setValue:@(blur) forKeyPath:@"filters.blur.inputRadius"];
+    [CATransaction commit];
+}
+
+static void stepFlight(void) {
+    CFTimeInterval now = CACurrentMediaTime();
+    if (flightStartedAt == 0) {
+        // Lifted out of the row, waiting for System Settings to open.
+        if (now - flightShownAt > flightPatience) {
+            endFlight();
+            return;
+        }
+        CGFloat t = easeOutCubic(clamp01((now - flightShownAt) / flightLift));
+        placeFlight(NSMakePoint(flightOrigin.x, flightOrigin.y + 12 * t), 0.7 + 0.1 * t,
+                    4 * (1 - t), t);
+        return;
+    }
+    CGFloat t = clamp01((now - flightStartedAt) / flightDuration);
+    CGFloat e = easeInOutCubic(t);
+    NSPoint start = NSMakePoint(flightOrigin.x, flightOrigin.y + 12);
+    NSPoint end = tileTarget();
+    CGFloat distance = hypot(end.x - start.x, end.y - start.y);
+    NSPoint control = NSMakePoint((start.x + end.x) / 2,
+                                  MAX(start.y, end.y) + MIN(160, distance * 0.25));
+    CGFloat u = 1 - e;
+    NSPoint point = NSMakePoint(u * u * start.x + 2 * u * e * control.x + e * e * end.x,
+                                u * u * start.y + 2 * u * e * control.y + e * e * end.y);
+    placeFlight(point, 0.8 + 0.2 * e, 6 * sin(M_PI * e), 1);
+    guidePanel.alphaValue = easeOutCubic(clamp01((t - 0.45) / 0.55));
+    if (t >= 1) {
+        endFlight();
+    }
+}
+
+/// The click that asked for the guide, when it was in one of Hex's windows.
+static BOOL clickInHexWindow(NSPoint point) {
+    for (NSWindow *window in NSApp.windows) {
+        if (window.visible && window != guidePanel && window != flightPanel &&
+            NSPointInRect(point, window.frame)) {
+            return YES;
+        }
+    }
+    return NO;
+}
+
+/// Lifts a copy of the tile out of Hex's window at `origin`.
+static void beginFlight(NSPoint origin, NSURL *bundleURL, NSSize tileSize) {
+    flightOrigin = origin;
+    flightShownAt = CACurrentMediaTime();
+    flightStartedAt = 0;
+    NSImage *icon = [[NSWorkspace sharedWorkspace] iconForFile:bundleURL.path];
+    icon.size = NSMakeSize(32, 32);
+    NSString *name = hexAppName(bundleURL);
+    BOOL dark = isDark(NSApp.effectiveAppearance);
+    NSImage *image = [NSImage imageWithSize:tileSize
+                                    flipped:NO
+                             drawingHandler:^BOOL(NSRect rect) {
+        drawTile(rect, icon, name, dark);
+        return YES;
+    }];
+
+    NSSize size = NSMakeSize(tileSize.width + 2 * flightPadding, tileSize.height + 2 * flightPadding);
+    flightPanel = [[NSPanel alloc] initWithContentRect:NSMakeRect(0, 0, size.width, size.height)
+                                             styleMask:NSWindowStyleMaskBorderless |
+                                                       NSWindowStyleMaskNonactivatingPanel
+                                               backing:NSBackingStoreBuffered
+                                                 defer:NO];
+    flightPanel.level = NSFloatingWindowLevel + 1;
+    flightPanel.collectionBehavior = NSWindowCollectionBehaviorCanJoinAllSpaces |
+                                     NSWindowCollectionBehaviorFullScreenAuxiliary;
+    flightPanel.opaque = NO;
+    flightPanel.backgroundColor = NSColor.clearColor;
+    flightPanel.hasShadow = NO;
+    flightPanel.ignoresMouseEvents = YES;
+    flightPanel.hidesOnDeactivate = NO;
+    flightPanel.releasedWhenClosed = NO;
+
+    NSView *host = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, size.width, size.height)];
+    host.layer = [CALayer layer];
+    host.wantsLayer = YES;
+    host.layerUsesCoreImageFilters = YES;
+    flightLayer = [CALayer layer];
+    flightLayer.bounds = CGRectMake(0, 0, tileSize.width, tileSize.height);
+    flightLayer.position = CGPointMake(size.width / 2, size.height / 2);
+    flightLayer.contents = image;
+    flightLayer.contentsScale = NSScreen.mainScreen.backingScaleFactor;
+    flightLayer.shadowOpacity = 0.25;
+    flightLayer.shadowRadius = 12;
+    flightLayer.shadowOffset = CGSizeMake(0, -6);
+    CIFilter *blur = [CIFilter filterWithName:@"CIGaussianBlur"];
+    blur.name = @"blur";
+    [blur setValue:@0 forKey:kCIInputRadiusKey];
+    flightLayer.filters = @[ blur ];
+    [host.layer addSublayer:flightLayer];
+    flightPanel.contentView = host;
+
+    placeFlight(origin, 0.7, 4, 0);
+    [flightPanel orderFrontRegardless];
+    flightTimer = [NSTimer timerWithTimeInterval:1.0 / 120 repeats:YES block:^(NSTimer *timer) {
+        (void)timer;
+        stepFlight();
+    }];
+    [[NSRunLoop mainRunLoop] addTimer:flightTimer forMode:NSRunLoopCommonModes];
 }
 
 static void updateGuidePosition(void) {
@@ -233,22 +403,33 @@ static void updateGuidePosition(void) {
     sawSettingsWindow = YES;
     NSRect settings = appKitFrame(quartzFrame);
     NSSize size = guidePanel.frame.size;
-    NSScreen *screen = [NSScreen.screens filteredArrayUsingPredicate:
-        [NSPredicate predicateWithBlock:^BOOL(NSScreen *candidate, NSDictionary *bindings) {
-            (void)bindings;
-            return NSIntersectsRect(candidate.frame, settings);
-        }]].firstObject ?: NSScreen.mainScreen;
+    NSScreen *screen = nil;
+    for (NSScreen *candidate in NSScreen.screens) {
+        if (NSIntersectsRect(candidate.frame, settings)) {
+            screen = candidate;
+            break;
+        }
+    }
+    if (screen == nil) {
+        screen = NSScreen.mainScreen;
+    }
     NSRect visible = screen != nil ? screen.visibleFrame : settings;
     CGFloat x = NSMaxX(settings) - size.width - 16;
     CGFloat y = NSMinY(settings) + 16;
     x = MIN(MAX(x, NSMinX(visible) + 8), NSMaxX(visible) - size.width - 8);
     y = MIN(MAX(y, NSMinY(visible) + 8), NSMaxY(visible) - size.height - 8);
     [guidePanel setFrameOrigin:NSMakePoint(x, y)];
+    if (flightPanel != nil && flightStartedAt == 0) {
+        flightStartedAt = CACurrentMediaTime();
+    }
     [guidePanel orderFrontRegardless];
 }
 
 void hex_show_permission_guide(int permission) {
     NSCAssert(NSThread.isMainThread, @"permission guide must run on the main thread");
+    NSPoint click = NSEvent.mouseLocation;
+    BOOL fly = clickInHexWindow(click) &&
+               !NSWorkspace.sharedWorkspace.accessibilityDisplayShouldReduceMotion;
     closeGuide();
     activePermission = (HexPermission)permission;
 
@@ -320,8 +501,14 @@ void hex_show_permission_guide(int permission) {
             initWithFrame:NSMakeRect(18, 17, panelSize.width - 36, 44)
                  bundleURL:bundleURL];
         [content addSubview:dragView];
+        guideTile = dragView;
     }
     guidePanel.contentView = content;
+    if (draggable && fly) {
+        guideTile.hidden = YES;
+        guidePanel.alphaValue = 0;
+        beginFlight(click, bundleURL, guideTile.frame.size);
+    }
 
     guideTimer = [NSTimer scheduledTimerWithTimeInterval:0.12
                                                  repeats:YES

@@ -1,0 +1,1008 @@
+//! The `hex` control client: parses a command, sends it to the running Hex,
+//! and prints the answer for a person or, with `--json`, the versioned reply.
+//!
+//! Exit codes: 0 when the command ran (or there was nothing to change), 1
+//! when Hex refused or failed it, 2 for usage errors (clap), and 3 when Hex
+//! isn't running. Nothing here launches Hex except `start` and `restart`.
+
+use std::io::Write;
+
+use clap::{Args, Subcommand};
+use serde_json::Value;
+
+use super::{
+    CONTROL_VERSION, CaptureAction, ControlCommand, ControlReply, ControlRequest, ControlResponse,
+    ModelInfo, Pane, StatusReport, settings::SettingValue,
+};
+use crate::vocabulary::VocabularyEntry;
+
+pub const EXIT_REFUSED: u8 = 1;
+pub const EXIT_NOT_RUNNING: u8 = 3;
+
+#[derive(Args, Clone, Copy, Debug, Default)]
+pub struct Output {
+    /// Print the versioned JSON reply (see docs/cli.md).
+    #[arg(long)]
+    pub json: bool,
+}
+
+/// The control commands at the top of `hex`.
+#[derive(Subcommand, Debug)]
+pub enum ControlCli {
+    /// Show what the running Hex is doing.
+    ///
+    /// Recording, meeting, model, features, permissions, window, version,
+    /// pid, and memory footprint.
+    Status {
+        #[command(flatten)]
+        output: Output,
+    },
+    /// Open Hex if it isn't running, and wait until it answers.
+    Start {
+        #[command(flatten)]
+        output: Output,
+    },
+    /// Quit Hex.
+    ///
+    /// Refused while a meeting or dictation is in progress unless --force.
+    Quit {
+        /// Quit even while recording; the recording is lost.
+        #[arg(long)]
+        force: bool,
+        #[command(flatten)]
+        output: Output,
+    },
+    /// Quit and reopen Hex (or open it if it isn't running).
+    Restart {
+        /// Restart even while recording; the recording is lost.
+        #[arg(long)]
+        force: bool,
+        #[command(flatten)]
+        output: Output,
+    },
+    /// Start, stop, cancel, or toggle a dictation, as the shortcut would.
+    ///
+    /// `start` locks the recording: `stop` or the shortcut finishes it,
+    /// `cancel` or Escape discards it. Repeating a command changes nothing.
+    Dictation {
+        #[arg(value_enum)]
+        action: CaptureAction,
+        #[command(flatten)]
+        output: Output,
+    },
+    /// Start, stop, cancel, or toggle a Voice Action.
+    ///
+    /// Needs voice_action.enabled. Selected text becomes its context.
+    VoiceAction {
+        #[arg(value_enum)]
+        action: CaptureAction,
+        #[command(flatten)]
+        output: Output,
+    },
+    /// Paste the last dictation at the current focus (Option-Shift-V).
+    PasteLast {
+        #[command(flatten)]
+        output: Output,
+    },
+    /// Read and change any persisted setting, shortcuts included.
+    Settings {
+        #[command(subcommand)]
+        command: SettingsCommand,
+    },
+    /// List, switch, and install transcription models.
+    Model {
+        #[command(subcommand)]
+        command: ModelCommand,
+    },
+    /// Open the Hex window at a pane, or close it.
+    Window {
+        #[command(subcommand)]
+        command: WindowCommand,
+    },
+    /// Check for a Hex update now; Hex shows what it finds.
+    CheckForUpdates {
+        #[command(flatten)]
+        output: Output,
+    },
+    /// Show Launch at Login, or turn it on or off.
+    LaunchAtLogin {
+        #[arg(value_enum)]
+        state: Option<Toggle>,
+        #[command(flatten)]
+        output: Output,
+    },
+    /// Experiment: list, add, and remove vocabulary terms (`hex experiments enable vocabulary`).
+    Vocabulary {
+        #[command(subcommand)]
+        command: VocabularyCommand,
+    },
+    /// Print Hex's recent log lines; works without Hex running.
+    Logs {
+        /// Read process.log (Rust and native diagnostics) instead of the
+        /// live.ndjson event log.
+        #[arg(long)]
+        process: bool,
+        /// How many lines from the end.
+        #[arg(short = 'n', long, default_value_t = 50)]
+        lines: usize,
+        /// Keep printing new lines until interrupted.
+        #[arg(short, long)]
+        follow: bool,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum SettingsCommand {
+    /// Every setting with its value, kind, and whether it can be set.
+    List {
+        #[command(flatten)]
+        output: Output,
+    },
+    /// One setting's value, or every setting under a prefix (`meetings`).
+    Get {
+        key: String,
+        #[command(flatten)]
+        output: Output,
+    },
+    /// Change a setting as the window would.
+    ///
+    /// Booleans take on/off, shortcuts take text such as `option+shift+v`,
+    /// `right-command`, `fn`, or `f5`, and optional settings take `none`.
+    Set {
+        key: String,
+        value: String,
+        /// Accept a change that also turns another setting off (commands and
+        /// release_microphone_while_idle exclude each other).
+        #[arg(long)]
+        yes: bool,
+        #[command(flatten)]
+        output: Output,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum ModelCommand {
+    /// Every model with its languages, size, and whether it's installed.
+    List {
+        #[command(flatten)]
+        output: Output,
+    },
+    /// Switch to an installed model. Never downloads.
+    Use {
+        /// A model id from `hex model list`.
+        model: String,
+        /// A language the model supports (default: its best match for the
+        /// current language).
+        #[arg(long)]
+        language: Option<String>,
+        #[command(flatten)]
+        output: Output,
+    },
+    /// Download a model, then switch to it.
+    Install {
+        model: String,
+        #[arg(long)]
+        language: Option<String>,
+        #[command(flatten)]
+        output: Output,
+    },
+    /// Stop a download or load in progress.
+    Cancel {
+        #[command(flatten)]
+        output: Output,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum WindowCommand {
+    /// Open the window, at a pane if given.
+    Show {
+        #[arg(value_enum)]
+        pane: Option<Pane>,
+        #[command(flatten)]
+        output: Output,
+    },
+    /// Close the window. Hex keeps running in the menu bar.
+    Hide {
+        #[command(flatten)]
+        output: Output,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum VocabularyCommand {
+    /// Every term with its "sounds like" spellings.
+    List {
+        #[command(flatten)]
+        output: Output,
+    },
+    /// Add a term, or more spellings to a term already in the list.
+    Add {
+        term: String,
+        /// Spellings a transcript may show instead, comma-separated
+        /// (`--sounds-like "avatar,a bat war"`).
+        #[arg(long, value_name = "SPELLINGS")]
+        sounds_like: Option<String>,
+        #[command(flatten)]
+        output: Output,
+    },
+    /// Remove a term and its spellings.
+    Remove {
+        term: String,
+        #[command(flatten)]
+        output: Output,
+    },
+}
+
+#[derive(Clone, Copy, Debug, clap::ValueEnum)]
+pub enum Toggle {
+    On,
+    Off,
+}
+
+/// `hex commands enable|disable|retry`.
+#[derive(Clone, Copy, Debug)]
+pub enum CommandsAction {
+    Enable { confirm: bool },
+    Disable,
+    Retry,
+}
+
+/// Exits with `code` once stdout is flushed.
+pub fn finish(code: u8) -> ! {
+    let _ = std::io::stdout().flush();
+    std::process::exit(code.into())
+}
+
+pub fn run(command: ControlCli) -> u8 {
+    match command {
+        ControlCli::Status { output } => send(ControlCommand::Status, output),
+        ControlCli::Start { output } => start(output),
+        ControlCli::Quit { force, output } => send(ControlCommand::Quit { force }, output),
+        ControlCli::Restart { force, output } => {
+            if running() {
+                send(ControlCommand::Restart { force }, output)
+            } else {
+                start(output)
+            }
+        }
+        ControlCli::Dictation { action, output } => {
+            send(ControlCommand::Dictation { action }, output)
+        }
+        ControlCli::VoiceAction { action, output } => {
+            send(ControlCommand::VoiceAction { action }, output)
+        }
+        ControlCli::PasteLast { output } => send(ControlCommand::PasteLast, output),
+        ControlCli::Settings { command } => settings(command),
+        ControlCli::Model { command } => match command {
+            ModelCommand::List { output } => send(ControlCommand::ModelList, output),
+            ModelCommand::Use {
+                model,
+                language,
+                output,
+            } => send(ControlCommand::ModelUse { model, language }, output),
+            ModelCommand::Install {
+                model,
+                language,
+                output,
+            } => send(ControlCommand::ModelInstall { model, language }, output),
+            ModelCommand::Cancel { output } => send(ControlCommand::ModelCancel, output),
+        },
+        ControlCli::Window { command } => match command {
+            WindowCommand::Show { pane, output } => {
+                send(ControlCommand::WindowShow { pane }, output)
+            }
+            WindowCommand::Hide { output } => send(ControlCommand::WindowHide, output),
+        },
+        ControlCli::CheckForUpdates { output } => send(ControlCommand::CheckForUpdates, output),
+        ControlCli::LaunchAtLogin { state, output } => send(
+            ControlCommand::LaunchAtLogin {
+                enabled: state.map(|state| matches!(state, Toggle::On)),
+            },
+            output,
+        ),
+        ControlCli::Vocabulary { command } => match command {
+            VocabularyCommand::List { output } => send(ControlCommand::VocabularyList, output),
+            VocabularyCommand::Add {
+                term,
+                sounds_like,
+                output,
+            } => send(
+                ControlCommand::VocabularyAdd {
+                    term,
+                    sounds_like: sounds_like.into_iter().collect(),
+                },
+                output,
+            ),
+            VocabularyCommand::Remove { term, output } => {
+                send(ControlCommand::VocabularyRemove { term }, output)
+            }
+        },
+        ControlCli::Logs {
+            process,
+            lines,
+            follow,
+        } => logs(process, lines, follow),
+    }
+}
+
+pub fn settings(command: SettingsCommand) -> u8 {
+    match command {
+        SettingsCommand::List { output } => send(ControlCommand::SettingsGet { key: None }, output),
+        SettingsCommand::Get { key, output } => {
+            send(ControlCommand::SettingsGet { key: Some(key) }, output)
+        }
+        SettingsCommand::Set {
+            key,
+            value,
+            yes,
+            output,
+        } => send(
+            ControlCommand::SettingsSet {
+                key,
+                value,
+                confirm: yes,
+            },
+            output,
+        ),
+    }
+}
+
+pub fn commands(action: CommandsAction, output: Output) -> u8 {
+    send(
+        match action {
+            CommandsAction::Enable { confirm } => ControlCommand::SettingsSet {
+                key: "commands_enabled".into(),
+                value: "on".into(),
+                confirm,
+            },
+            CommandsAction::Disable => ControlCommand::SettingsSet {
+                key: "commands_enabled".into(),
+                value: "off".into(),
+                confirm: false,
+            },
+            CommandsAction::Retry => ControlCommand::CommandsRetry,
+        },
+        output,
+    )
+}
+
+/// `hex history clear`; the confirmation is asked here, before Hex is.
+pub fn clear_history(confirm: bool, output: Output) -> u8 {
+    if !confirm {
+        return print(
+            ControlReply::error(
+                "confirmation-required",
+                "this deletes every retained dictation; pass --yes to clear history",
+            ),
+            output,
+        );
+    }
+    send(ControlCommand::HistoryClear, output)
+}
+
+pub fn send(command: ControlCommand, output: Output) -> u8 {
+    match call(ControlRequest::new(command)) {
+        Ok(response) => print(response.reply, output),
+        Err(reply) => print(reply, output),
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn running() -> bool {
+    crate::local_api::running_pid().is_some()
+}
+
+#[cfg(not(target_os = "macos"))]
+fn running() -> bool {
+    false
+}
+
+#[cfg(target_os = "macos")]
+fn call(request: ControlRequest) -> Result<ControlResponse, ControlReply> {
+    if !running() {
+        return Err(not_running());
+    }
+    crate::local_api::call_control(&request)
+        .map_err(|error| ControlReply::error("transport", format!("{error:#}")))
+}
+
+#[cfg(not(target_os = "macos"))]
+fn call(_request: ControlRequest) -> Result<ControlResponse, ControlReply> {
+    Err(unsupported())
+}
+
+fn not_running() -> ControlReply {
+    ControlReply::error("not-running", "Hex is not running; run `hex start`")
+}
+
+#[cfg_attr(target_os = "macos", allow(dead_code))]
+fn unsupported() -> ControlReply {
+    ControlReply::error(
+        "unsupported",
+        "this command is not supported on this OS yet; use the Hex window",
+    )
+}
+
+#[cfg(target_os = "macos")]
+fn start(output: Output) -> u8 {
+    use std::time::{Duration, Instant};
+
+    if let Some(pid) = crate::local_api::running_pid() {
+        return print(
+            ControlReply::unchanged(format!("Hex is already running (pid {pid})")),
+            output,
+        );
+    }
+    let arguments = open_arguments(
+        installed_bundle().as_deref(),
+        crate::app_paths::is_macos_test_build(),
+        std::env::vars_os(),
+    );
+    match std::process::Command::new("/usr/bin/open")
+        .args(arguments)
+        .status()
+    {
+        Ok(status) if status.success() => {}
+        Ok(_) | Err(_) => {
+            return print(
+                ControlReply::error("failed", "couldn't open Hex.app; is it installed?"),
+                output,
+            );
+        }
+    }
+    let started = Instant::now();
+    while started.elapsed() < Duration::from_secs(20) {
+        if let Some(pid) = crate::local_api::running_pid() {
+            return print(
+                ControlReply::done(format!("Started Hex (pid {pid})")),
+                output,
+            );
+        }
+        std::thread::sleep(Duration::from_millis(200));
+    }
+    print(
+        ControlReply::done("Opened Hex; it isn't answering yet (setup may be waiting)"),
+        output,
+    )
+}
+
+#[cfg(not(target_os = "macos"))]
+fn start(output: Output) -> u8 {
+    print(unsupported(), output)
+}
+
+/// `open` arguments for `hex start`: the caller's `HEX_*` environment, then
+/// the Hex.app this `hex` belongs to, or the installed app by bundle id.
+#[cfg(target_os = "macos")]
+fn open_arguments(
+    bundle: Option<&std::path::Path>,
+    test_build: bool,
+    vars: impl IntoIterator<Item = (std::ffi::OsString, std::ffi::OsString)>,
+) -> Vec<std::ffi::OsString> {
+    let mut arguments = crate::onboarding::open_env_arguments(vars);
+    match bundle {
+        Some(bundle) => arguments.push(bundle.into()),
+        None => arguments.extend([
+            "-b".into(),
+            if test_build {
+                "anomaly.hex.test"
+            } else {
+                "anomaly.hex"
+            }
+            .into(),
+        ]),
+    }
+    arguments
+}
+
+/// The Hex.app this `hex` belongs to, when it runs from (or links into) one.
+#[cfg(target_os = "macos")]
+fn installed_bundle() -> Option<std::path::PathBuf> {
+    let executable = std::fs::canonicalize(std::env::current_exe().ok()?).ok()?;
+    executable
+        .ancestors()
+        .nth(3)
+        .filter(|path| path.extension().is_some_and(|extension| extension == "app"))
+        .map(ToOwned::to_owned)
+}
+
+fn logs(process: bool, lines: usize, follow: bool) -> u8 {
+    use std::io::{BufRead, Seek, SeekFrom};
+
+    let path = match crate::app_paths::logs_dir() {
+        Ok(directory) => directory.join(if process {
+            "process.log"
+        } else {
+            "live.ndjson"
+        }),
+        Err(error) => return fail(&format!("{error:#}")),
+    };
+    let mut file = match std::fs::File::open(&path) {
+        Ok(file) => file,
+        Err(error) => return fail(&format!("couldn't read {}: {error}", path.display())),
+    };
+    let length = file.metadata().map(|metadata| metadata.len()).unwrap_or(0);
+    // Read at most the last 4 MiB for the tail.
+    let start = length.saturating_sub(4 * 1024 * 1024);
+    let mut reader = std::io::BufReader::new(&mut file);
+    if reader.seek(SeekFrom::Start(start)).is_err() {
+        return fail("couldn't read the log");
+    }
+    let mut tail = std::collections::VecDeque::with_capacity(lines.min(10_000));
+    let mut line = String::new();
+    let mut first = start > 0;
+    while reader.read_line(&mut line).unwrap_or(0) > 0 {
+        if !std::mem::take(&mut first) {
+            if tail.len() == lines {
+                tail.pop_front();
+            }
+            if lines > 0 {
+                tail.push_back(line.clone());
+            }
+        }
+        line.clear();
+    }
+    let mut stdout = std::io::stdout().lock();
+    for line in tail {
+        let _ = stdout.write_all(line.as_bytes());
+    }
+    let _ = stdout.flush();
+    if !follow {
+        return 0;
+    }
+    let mut position = reader.stream_position().unwrap_or(length);
+    drop(reader);
+    loop {
+        std::thread::sleep(std::time::Duration::from_millis(250));
+        let length = match std::fs::metadata(&path) {
+            Ok(metadata) => metadata.len(),
+            Err(_) => continue,
+        };
+        if length < position {
+            // Rotated or truncated: start over from the new file.
+            match std::fs::File::open(&path) {
+                Ok(reopened) => file = reopened,
+                Err(_) => continue,
+            }
+            position = 0;
+        }
+        if length == position {
+            continue;
+        }
+        if file.seek(SeekFrom::Start(position)).is_err() {
+            continue;
+        }
+        let mut reader = std::io::BufReader::new(&mut file);
+        while reader.read_line(&mut line).unwrap_or(0) > 0 {
+            if !line.ends_with('\n') {
+                break;
+            }
+            position += line.len() as u64;
+            if stdout.write_all(line.as_bytes()).is_err() {
+                return 0;
+            }
+            line.clear();
+        }
+        line.clear();
+        let _ = stdout.flush();
+    }
+}
+
+fn fail(message: &str) -> u8 {
+    eprintln!("hex: {message}");
+    EXIT_REFUSED
+}
+
+/// Prints `reply` and returns its exit code.
+fn print(reply: ControlReply, output: Output) -> u8 {
+    let code = exit_code(&reply);
+    if output.json {
+        let response = ControlResponse {
+            version: CONTROL_VERSION,
+            reply,
+        };
+        match serde_json::to_string_pretty(&response) {
+            Ok(json) => println!("{json}"),
+            Err(error) => return fail(&error.to_string()),
+        }
+        return code;
+    }
+    match reply {
+        ControlReply::Done { message, .. } => println!("{message}"),
+        ControlReply::Status(report) => print!("{}", human_status(&report)),
+        ControlReply::Settings { settings } => print!("{}", human_settings(&settings)),
+        ControlReply::Models { models } => print!("{}", human_models(&models)),
+        ControlReply::Vocabulary { entries } => print!("{}", human_vocabulary(&entries)),
+        ControlReply::ScrawlCapture(report) => print!("{}", human_scrawl_capture(&report)),
+        ControlReply::Error { message, .. } => eprintln!("hex: {message}"),
+    }
+    code
+}
+
+fn human_scrawl_capture(report: &super::ScrawlCaptureReport) -> String {
+    use super::ScrawlCaptureState;
+    let mut out = String::new();
+    let bundle = |bundle: &Option<std::path::PathBuf>| {
+        bundle
+            .as_ref()
+            .map_or_else(String::new, |bundle| bundle.display().to_string())
+    };
+    match (report.state, report.changed) {
+        (ScrawlCaptureState::Recording, true) => {
+            out.push_str(&format!("Capturing into {}\n", bundle(&report.bundle)));
+        }
+        (ScrawlCaptureState::Recording, false) => out.push_str(&format!(
+            "Capturing into {} ({} ms)\n",
+            bundle(&report.bundle),
+            report.elapsed_ms.unwrap_or_default()
+        )),
+        (ScrawlCaptureState::Idle, true) => {
+            out.push_str(&format!("Ended the capture {}\n", bundle(&report.bundle)));
+        }
+        (ScrawlCaptureState::Idle, false) => out.push_str("No capture is recording\n"),
+    }
+    for finishing in &report.finishing {
+        out.push_str(&format!("Writing {}\n", finishing.display()));
+    }
+    if let Some(last) = &report.last {
+        let words = last
+            .words
+            .map_or_else(String::new, |words| format!(", {words} words"));
+        let gaps = last
+            .gaps
+            .filter(|gaps| *gaps > 0)
+            .map_or_else(String::new, |gaps| format!(", {gaps} audio gaps"));
+        let missing = last
+            .missing_transcript
+            .as_ref()
+            .map_or_else(String::new, |why| format!(", no transcript ({why})"));
+        out.push_str(&format!(
+            "Last: {} {}{words}{gaps}{missing}\n",
+            last.stage,
+            last.bundle.display()
+        ));
+    }
+    out
+}
+
+pub fn exit_code(reply: &ControlReply) -> u8 {
+    match reply {
+        ControlReply::Error { code, .. } if code == "not-running" => EXIT_NOT_RUNNING,
+        ControlReply::Error { .. } => EXIT_REFUSED,
+        _ => 0,
+    }
+}
+
+fn human_value(value: &Value) -> String {
+    match value {
+        Value::String(text) => text.clone(),
+        Value::Null => "none".into(),
+        other => other.to_string(),
+    }
+}
+
+fn human_settings(settings: &[SettingValue]) -> String {
+    if let [setting] = settings {
+        return format!("{}\n", human_value(&setting.value));
+    }
+    let width = settings
+        .iter()
+        .map(|setting| setting.key.len())
+        .max()
+        .unwrap_or(0);
+    settings
+        .iter()
+        .map(|setting| {
+            let mut value = human_value(&setting.value);
+            if value.len() > 60 {
+                value = format!("{}…", value.chars().take(59).collect::<String>());
+            }
+            format!(
+                "{:width$}  {value}{}\n",
+                setting.key,
+                if setting.writable {
+                    ""
+                } else {
+                    "  (read-only)"
+                }
+            )
+        })
+        .collect()
+}
+
+fn human_models(models: &[ModelInfo]) -> String {
+    let width = models.iter().map(|model| model.id.len()).max().unwrap_or(0);
+    let name_width = models
+        .iter()
+        .map(|model| model.name.len())
+        .max()
+        .unwrap_or(0);
+    models
+        .iter()
+        .map(|model| {
+            let languages = if model.languages.len() > 6 {
+                format!("{} languages", model.languages.len())
+            } else {
+                model.languages.join(", ")
+            };
+            format!(
+                "{} {:width$}  {:name_width$}  {:>8}  {:13}  {languages}\n",
+                if model.selected { "*" } else { " " },
+                model.id,
+                model.name,
+                model.size,
+                if model.installed {
+                    "installed"
+                } else {
+                    "not installed"
+                },
+            )
+        })
+        .collect()
+}
+
+fn human_vocabulary(entries: &[VocabularyEntry]) -> String {
+    if entries.is_empty() {
+        return "The vocabulary is empty; `hex vocabulary add <term>` adds one\n".into();
+    }
+    entries
+        .iter()
+        .map(|entry| match entry.sounds_like.as_slice() {
+            [] => format!("{}\n", entry.term),
+            spellings => format!("{}  (sounds like {})\n", entry.term, spellings.join(", ")),
+        })
+        .collect()
+}
+
+fn duration(seconds: u64) -> String {
+    if seconds >= 3600 {
+        format!(
+            "{}:{:02}:{:02}",
+            seconds / 3600,
+            seconds / 60 % 60,
+            seconds % 60
+        )
+    } else {
+        format!("{}:{:02}", seconds / 60, seconds % 60)
+    }
+}
+
+fn on(enabled: bool) -> &'static str {
+    if enabled { "on" } else { "off" }
+}
+
+fn human_status(report: &StatusReport) -> String {
+    let memory = report
+        .memory_footprint_bytes
+        .map(|bytes| format!(", {} MB", bytes / 1_000_000))
+        .unwrap_or_default();
+    let capture = match report.capture.recording {
+        Some(kind) => format!(
+            "recording {}",
+            serde_json::to_value(kind)
+                .ok()
+                .and_then(|value| value.as_str().map(str::to_owned))
+                .unwrap_or_default()
+        ),
+        None => serde_json::to_value(report.capture.state)
+            .ok()
+            .and_then(|value| value.as_str().map(str::to_owned))
+            .unwrap_or_default(),
+    };
+    let pending = match report.capture.pending_jobs {
+        0 => String::new(),
+        jobs => format!(" ({jobs} pending)"),
+    };
+    let meeting = match (&report.meeting.title, report.meeting.elapsed_seconds) {
+        (Some(title), Some(elapsed)) => {
+            format!(
+                "{} “{title}” for {}",
+                report.meeting.state,
+                duration(elapsed)
+            )
+        }
+        _ if report.features.meetings => report.meeting.state.clone(),
+        _ => "off".into(),
+    };
+    let model = &report.model;
+    let mut model_line = format!(
+        "{} ({}){}",
+        model.name,
+        model.language,
+        if model.installed {
+            ""
+        } else {
+            ", not installed"
+        }
+    );
+    if let Some(preparing) = &model.preparing {
+        model_line.push_str(&format!(
+            "; preparing {preparing} ({} MB)",
+            model.downloaded_bytes / 1_000_000
+        ));
+    }
+    if let Some(error) = &model.error {
+        model_line.push_str(&format!("; error: {error}"));
+    }
+    let features = &report.features;
+    let permissions = &report.permissions;
+    let permission_line = if permissions.ready {
+        "ready".to_string()
+    } else {
+        format!(
+            "microphone {}, input monitoring {}, accessibility {}, model {}",
+            permissions.microphone,
+            permissions.input_monitoring,
+            permissions.accessibility,
+            if permissions.transcription_model {
+                "ready"
+            } else {
+                "missing"
+            }
+        )
+    };
+    let window = match (&report.window.pane, report.window.open) {
+        (Some(pane), true) => format!("open ({pane})"),
+        (None, true) => "open".into(),
+        _ => "closed".into(),
+    };
+    // Shown only when on: experiments are unsupported and off for nearly everyone.
+    let experiments = match report.experiments.as_slice() {
+        [] => String::new(),
+        names => format!("Experiments  {}\n", names.join(", ")),
+    };
+    format!(
+        "Hex {} (pid {}{memory})\n\
+         Listener     {}\n\
+         Capture      {capture}{pending}\n\
+         Meeting      {meeting}\n\
+         Model        {model_line}\n\
+         Features     commands {} (model {}), voice action {}, meetings {}, \
+         release mic while idle {}, history {}\n\
+         Permissions  {permission_line}\n\
+         Window       {window}\n\
+         Update       {}\n\
+         {experiments}",
+        report.app_version,
+        report.pid,
+        if report.listener.running {
+            format!("running: {}", report.listener.status)
+        } else {
+            format!("waiting: {}", report.listener.status)
+        },
+        on(features.commands),
+        features.command_model,
+        on(features.voice_action),
+        on(features.meetings),
+        on(features.release_microphone_while_idle),
+        features.history_retention,
+        report.update,
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn exit_codes_are_stable() {
+        assert_eq!(exit_code(&ControlReply::done("ok")), 0);
+        assert_eq!(exit_code(&ControlReply::unchanged("ok")), 0);
+        assert_eq!(exit_code(&ControlReply::error("busy", "x")), EXIT_REFUSED);
+        assert_eq!(exit_code(&not_running()), EXIT_NOT_RUNNING);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn start_forwards_the_callers_hex_environment() {
+        let vars = || {
+            [
+                ("HOME", "/Users/kit"),
+                ("HEX_RETAIN_DICTATION_AUDIO", "1"),
+                ("HEX_ENABLE_LLM", "1"),
+            ]
+            .map(|(key, value)| (key.into(), value.into()))
+        };
+        let strings = |arguments: Vec<std::ffi::OsString>| {
+            arguments
+                .into_iter()
+                .map(|argument| argument.into_string().unwrap())
+                .collect::<Vec<_>>()
+        };
+        let env = [
+            "--env",
+            "HEX_ENABLE_LLM=1",
+            "--env",
+            "HEX_RETAIN_DICTATION_AUDIO=1",
+        ];
+        let bundle = std::path::Path::new("/Applications/Hex.app");
+        assert_eq!(
+            strings(open_arguments(Some(bundle), false, vars())),
+            [&env[..], &["/Applications/Hex.app"]].concat()
+        );
+        assert_eq!(
+            strings(open_arguments(None, false, vars())),
+            [&env[..], &["-b", "anomaly.hex"]].concat()
+        );
+        assert_eq!(
+            strings(open_arguments(None, true, [])),
+            ["-b", "anomaly.hex.test"]
+        );
+    }
+
+    #[test]
+    fn one_setting_prints_its_bare_value() {
+        let setting = |key: &str, value: Value| SettingValue {
+            key: key.into(),
+            value,
+            kind: "text".into(),
+            choices: vec![],
+            writable: true,
+            about: String::new(),
+        };
+        assert_eq!(
+            human_settings(&[setting("dictation_hotkey", "option".into())]),
+            "option\n"
+        );
+        assert_eq!(human_settings(&[setting("a", Value::Null)]), "none\n");
+        let listed = human_settings(&[
+            setting("sound_effects", true.into()),
+            setting("a", 0.5.into()),
+        ]);
+        assert_eq!(listed, "sound_effects  true\na              0.5\n");
+    }
+
+    #[test]
+    fn vocabulary_lists_terms_with_their_spellings() {
+        assert!(human_vocabulary(&[]).starts_with("The vocabulary is empty"));
+        let entries = [
+            VocabularyEntry {
+                term: "abattoir".into(),
+                sounds_like: vec!["avatar".into(), "a bat war".into()],
+            },
+            VocabularyEntry {
+                term: "Rune".into(),
+                sounds_like: vec![],
+            },
+        ];
+        assert_eq!(
+            human_vocabulary(&entries),
+            "abattoir  (sounds like avatar, a bat war)\nRune\n"
+        );
+    }
+
+    #[test]
+    fn status_reads_for_a_person() {
+        let mut report = StatusReport {
+            app_version: "2.3.1".into(),
+            pid: 42,
+            memory_footprint_bytes: Some(412_000_000),
+            ..Default::default()
+        };
+        report.meeting.state = "recording".into();
+        report.meeting.title = Some("Design sync".into());
+        report.meeting.elapsed_seconds = Some(3723);
+        report.features.meetings = true;
+        let text = human_status(&report);
+        assert!(text.starts_with("Hex 2.3.1 (pid 42, 412 MB)\n"));
+        assert!(text.contains("Meeting      recording “Design sync” for 1:02:03\n"));
+        assert!(!text.contains("Experiments"));
+
+        report.experiments = vec!["live-chapters".into(), "vocabulary".into()];
+        assert!(human_status(&report).ends_with("Experiments  live-chapters, vocabulary\n"));
+    }
+
+    #[test]
+    fn status_reports_experiments_and_reads_older_replies_without_them() {
+        let report = StatusReport {
+            experiments: vec!["vocabulary".into()],
+            ..Default::default()
+        };
+        let mut json = serde_json::to_value(&report).unwrap();
+        assert_eq!(json["experiments"], serde_json::json!(["vocabulary"]));
+        json.as_object_mut().unwrap().remove("experiments");
+        let older: StatusReport = serde_json::from_value(json).unwrap();
+        assert!(older.experiments.is_empty());
+    }
+}

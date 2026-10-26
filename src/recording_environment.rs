@@ -3,8 +3,10 @@ use std::ffi::c_void;
 use std::mem::size_of;
 use std::process::Command;
 use std::ptr::NonNull;
+use std::sync::Mutex;
 use std::sync::mpsc::{self, Sender};
-use std::thread;
+use std::thread::{self, JoinHandle};
+use std::time::{Duration, Instant};
 
 use objc2_app_kit::NSWorkspace;
 use objc2_core_audio::{
@@ -89,9 +91,42 @@ impl RecordingEnvironment {
     }
 }
 
+/// What the controller holds while any session is active.
+trait Environment: Sized {
+    /// Restores everything, running `then` once a muted output is audible.
+    fn restore_then(self, then: Callback) {
+        drop(self);
+        then();
+    }
+}
+
+impl Environment for () {}
+
+impl Environment for RecordingEnvironment {
+    fn restore_then(self, then: Callback) {
+        let Self {
+            _sleep: sleep,
+            _audio: audio,
+        } = self;
+        drop(sleep);
+        if matches!(audio, AudioBehaviorGuard::Muted { .. }) {
+            drop(audio);
+            then();
+        } else {
+            // Resuming media runs AppleScript; `then` never waits for it.
+            then();
+            drop(audio);
+        }
+    }
+}
+
+type Callback = Box<dyn FnOnce() + Send + Sync>;
+
 enum EnvironmentCommand {
     Start,
     Stop,
+    /// Stops, then runs the callback once a muted output is audible again.
+    StopThen(Callback),
     #[cfg(test)]
     Barrier(Sender<()>),
 }
@@ -101,33 +136,76 @@ pub struct RecordingEnvironmentController {
     commands: Sender<EnvironmentCommand>,
 }
 
+/// Environment threads that may still have output to unmute or media to
+/// resume. Each ends once its controller and every session are dropped.
+static RESTORERS: Mutex<Vec<JoinHandle<()>>> = Mutex::new(Vec::new());
+
+/// Waits, up to `deadline`, for every recording environment to restore
+/// output and media after its listener stopped. Quitting calls this before
+/// `_exit`, which would otherwise leave the output muted.
+pub fn wait_until_restored(deadline: Duration) -> bool {
+    let started = Instant::now();
+    let mut restorers = RESTORERS.lock().unwrap_or_else(|error| error.into_inner());
+    loop {
+        restorers.retain(|restorer| !restorer.is_finished());
+        if restorers.is_empty() {
+            return true;
+        }
+        if started.elapsed() >= deadline {
+            tracing::warn!("Hex quit before restoring output or media after dictation");
+            return false;
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+}
+
 impl RecordingEnvironmentController {
     pub fn start() -> Self {
-        Self::with_environment(RecordingEnvironment::start)
+        Self::restoring(RecordingEnvironment::start)
     }
 
     #[cfg(test)]
     pub(crate) fn for_test() -> Self {
-        Self::with_environment(|| ())
+        Self::with_environment(|| ()).0
     }
 
-    fn with_environment<E>(start: impl Fn() -> E + Send + 'static) -> Self {
+    fn restoring<E: Environment>(start: impl Fn() -> E + Send + 'static) -> Self {
+        let (controller, restorer) = Self::with_environment(start);
+        let mut restorers = RESTORERS.lock().unwrap_or_else(|error| error.into_inner());
+        restorers.retain(|restorer| !restorer.is_finished());
+        restorers.push(restorer);
+        controller
+    }
+
+    fn with_environment<E: Environment>(
+        start: impl Fn() -> E + Send + 'static,
+    ) -> (Self, JoinHandle<()>) {
         let (commands, receiver) = mpsc::channel();
-        thread::spawn(move || {
+        let restorer = thread::spawn(move || {
             let mut sessions = 0_u32;
-            let mut _environment = None;
+            let mut environment = None;
             while let Ok(command) = receiver.recv() {
                 match command {
                     EnvironmentCommand::Start => {
                         sessions = sessions.saturating_add(1);
                         if sessions == 1 {
-                            _environment = Some(start());
+                            environment = Some(start());
                         }
                     }
                     EnvironmentCommand::Stop => {
                         sessions = sessions.saturating_sub(1);
                         if sessions == 0 {
-                            _environment = None;
+                            environment = None;
+                        }
+                    }
+                    EnvironmentCommand::StopThen(then) => {
+                        sessions = sessions.saturating_sub(1);
+                        match environment.take() {
+                            Some(active) if sessions == 0 => active.restore_then(then),
+                            active => {
+                                environment = active;
+                                then();
+                            }
                         }
                     }
                     #[cfg(test)]
@@ -137,7 +215,7 @@ impl RecordingEnvironmentController {
                 }
             }
         });
-        Self { commands }
+        (Self { commands }, restorer)
     }
 
     pub fn begin(&self) -> RecordingEnvironmentSession {
@@ -145,18 +223,36 @@ impl RecordingEnvironmentController {
         let _ = self.commands.send(EnvironmentCommand::Start);
         RecordingEnvironmentSession {
             commands: self.commands.clone(),
+            then: None,
         }
     }
 }
 
 pub struct RecordingEnvironmentSession {
     commands: Sender<EnvironmentCommand>,
+    then: Option<Callback>,
+}
+
+impl RecordingEnvironmentSession {
+    /// Ends the session and runs `then` once a muted output is audible
+    /// again; with paused media or other live sessions it runs at once.
+    pub fn end_then(mut self, then: impl FnOnce() + Send + Sync + 'static) {
+        self.then = Some(Box::new(then));
+    }
 }
 
 impl Drop for RecordingEnvironmentSession {
     fn drop(&mut self) {
         INTENTIONAL_RECORDINGS.fetch_sub(1, std::sync::atomic::Ordering::AcqRel);
-        let _ = self.commands.send(EnvironmentCommand::Stop);
+        let command = match self.then.take() {
+            Some(then) => EnvironmentCommand::StopThen(then),
+            None => EnvironmentCommand::Stop,
+        };
+        if let Err(mpsc::SendError(EnvironmentCommand::StopThen(then))) =
+            self.commands.send(command)
+        {
+            then();
+        }
     }
 }
 
@@ -456,6 +552,8 @@ mod tests {
 
     struct ObservedEnvironment(Sender<Event>);
 
+    impl Environment for ObservedEnvironment {}
+
     impl Drop for ObservedEnvironment {
         fn drop(&mut self) {
             let _ = self.0.send(Event::Restored);
@@ -467,8 +565,30 @@ mod tests {
         let controller = RecordingEnvironmentController::with_environment(move || {
             let _ = events.send(Event::Started);
             ObservedEnvironment(events.clone())
-        });
+        })
+        .0;
         (controller, receiver)
+    }
+
+    #[test]
+    fn quitting_waits_for_the_last_session_to_restore() {
+        struct SlowRestore(Sender<Event>);
+        impl Environment for SlowRestore {}
+        impl Drop for SlowRestore {
+            fn drop(&mut self) {
+                thread::sleep(Duration::from_millis(100));
+                let _ = self.0.send(Event::Restored);
+            }
+        }
+        let (events, restored) = mpsc::channel();
+        let controller =
+            RecordingEnvironmentController::restoring(move || SlowRestore(events.clone()));
+        let session = controller.begin();
+        // The listener stopping drops both.
+        drop(controller);
+        drop(session);
+        assert!(wait_until_restored(Duration::from_secs(2)));
+        assert_eq!(restored.try_recv(), Ok(Event::Restored));
     }
 
     fn assert_events(

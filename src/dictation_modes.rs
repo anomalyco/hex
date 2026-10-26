@@ -56,19 +56,7 @@ impl ModeRuntime {
                     &self.default,
                 )
             },
-            |mode| {
-                let name = if mode.name.trim().is_empty() {
-                    "Untitled mode"
-                } else {
-                    &mode.name
-                };
-                Profile::configured(
-                    name,
-                    ReplacementSet::new(&mode.replacements),
-                    mode.transformations.clone(),
-                    &mode.post_processing,
-                )
-            },
+            Profile::from_mode,
         );
         let cancelled = AtomicBool::new(false);
         let mut processed = Profiles::new(profile).process_cancellable(&text, context, &cancelled);

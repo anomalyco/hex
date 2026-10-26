@@ -2,13 +2,14 @@
 
 HEX ships the macOS product loop: configurable hold-to-talk local dictation,
 explicit selected-text voice editing, optional context-aware OpenCode
-post-processing, a Metal HUD, bounded paste workers, settings, and a signed GPUI
-app bundle. Streaming commands are a disabled-by-default experimental opt-in;
-meetings remain a developer prototype until their product surface is redesigned.
-An x86_64 Arch/i3 X11 beta now provides hotkey dictation, automatic paste, a
-GPUI shell, and signed user-local updates; it does not yet include commands or
-meetings. Native wlroots-compatible Wayland and Nix packaging are implemented
-and awaiting supported-host validation before release.
+post-processing, a Metal HUD, bounded paste workers, settings, and a signed
+app bundle. Streaming commands are a disabled-by-default experimental opt-in,
+and Meetings (beta) is a separate persisted opt-in (`meetings.enabled`, default
+off). Windows (x64 and ARM64) and x86_64 Linux (i3/X11 and compatible wlroots
+Wayland compositors) betas provide hotkey dictation, Modes, Voice Action,
+History, the shared Rune window, and signed user-local updates; they do not yet
+include voice commands or meetings. Nix packaging for Linux is implemented and
+awaiting supported-host validation before release.
 The authenticated local transcription service now implements discovery,
 direct-child embedding, model preparation, and bounded host-audio transcription;
 `@kitlangton/hex@0.3.0` publishes ready transcribers through Promise and Effect
@@ -16,6 +17,18 @@ entrypoints. Local Electron capture and native transcription have been exercised
 signed helper packaging and a signed first-consumer integration remain. Follow the
 [embedded desktop delivery plan](docs/plans/typescript-sdk.md); Apple Silicon
 macOS is the proposed first target, not a cross-platform availability promise.
+
+## Validate The Rune Desktop App
+
+The window, menu-bar and tray hosts, HUDs, meeting capsules, and onboarding now
+run only on Rune (GPUI is gone). Linux has been run in a real session; macOS
+has been compiled, tested, and launched without being seen on screen; Windows
+has only been cross-compiled. Before releasing `dev`, a person runs each
+OS through the checklist in [the Rune port plan](docs/plans/rune-ui.md#needs-a-person-to-look), including
+the Windows x64 and ARM64 tray app, the macOS HUD and meeting capsules, and
+shortcut capture on every OS. Restore application icons in the Modes picker
+(removed with GPUI) on Rune's raster images, and add native file dialogs on
+macOS and Windows.
 
 ## Validate The macOS Release
 
@@ -30,6 +43,12 @@ installation, and source-free launch. Preserve the stable bundle identity that
 owns Microphone, Accessibility, Input Monitoring, and Automation permissions.
 
 ## Finish Settings And First-Run Health
+
+Later, split features from settings into two windows (Kit, 2026-10-24; deferred
+in favour of the one-window feature-owned panes): the Hex window keeps what you
+use, History and Meetings recordings, and a separate Settings window (⌘, and
+the menu bar's Settings…) holds General, Modes, Voice Action, Commands,
+Meetings settings, and Experiments.
 
 Microphone selection, idle-safe live switching, unavailable-device fallback,
 sound-effect volume, application/browser-host processing modes, and the native
@@ -61,17 +80,18 @@ Run a genuine signed update between two published versions on the target
 Arch/i3 machine. Verify exact artifact validation, atomic activation, restart,
 and retained-version rollback. Smoke-test installation, model download, the CLI
 microphone override, hotkey rebinding, locked capture, cancellation, automatic
-paste, service autostart, client reconnect, and Settings closing without stopping
-accepted work. Linux no longer uses a tray.
+paste, systemd autostart, launch forwarding (`Activate`), and closing the window
+without stopping accepted work. Linux no longer uses a tray.
 
 Keep app-managed updates limited to the user-local direct-install layout. A
 future Arch package must leave updates to the package manager. Nix owns its
 packaged installation and optional Home Manager service. Validate the Wayland
 beta on a compatible compositor with physical portal shortcuts, the `hex`
 commands bound in a desktop without the portal, microphone, foreground paste,
-click-through HUD, and independent service/client shutdown. See
-[`docs/plans/linux.md`](docs/plans/linux.md). Add commands, context, meetings, or
-broader Wayland support only as explicit later capability slices.
+click-through HUD, and window close leaving the process running while `hex quit`
+drains and exits. See [`docs/plans/linux.md`](docs/plans/linux.md). Add commands,
+context, meetings, or broader Wayland support only as explicit later capability
+slices.
 
 macOS, Windows, and Linux now share one window and one `settings.json` (see
 [`docs/plans/shared-desktop-ui.md`](docs/plans/shared-desktop-ui.md)). Remaining
@@ -91,11 +111,10 @@ may reset without affecting active capture. Physically smoke-test delayed
 shortcut boundaries, custom modifier and key chords, lock behavior,
 cancellation, foreground insertion, and both reserved paste shortcuts.
 
-macOS still plays the stop tone after the 200 ms post-release tail because the
-coordinator blocks in `DictationAudio::finish_with_tail`; Linux and Windows
-play it at the release. Announce a release that will transcribe from the audio
-owner before it drains the tail, ending the recording environment there so a
-muted output is restored before the tone, and verify it on a Mac.
+The macOS stop tone now sounds at the release, from the audio owner before it
+drains the tail, after a muted output is restored. That change was written
+without a Mac: compile it, run the `recording_environment` and `dictation_audio`
+tests, and hear the tone at key-up with While dictating set to Mute.
 
 The first installed timestamped-timeline build regressed physical dictation:
 shortcut input arrived, but long captures discarded and one accepted job reached
@@ -164,7 +183,7 @@ gesture-decision tests do not establish those integrated transitions.
 
 ## Make Diagnostics Incremental
 
-Ratatui and GPUI now share a bounded incremental event reader with session and
+Ratatui and the Activity pane now share a bounded incremental event reader with session and
 partial-write handling, and observation writes run on a bounded background
 writer. Add heartbeat or process-liveness evidence so a crash cannot leave an
 old `Listening` event looking live.
@@ -176,7 +195,7 @@ changes but must not mutate compiled configuration automatically.
 
 Authenticated developer control now rides the existing loopback API through the
 debug-only `hex dev` subcommand: it inspects app state, drives semantic HUD
-scenarios, opens/focuses panes, and toggles command mode on the GPUI thread.
+scenarios, opens/focuses panes, and toggles command mode.
 Extend the same bounded typed channel with fixture-audio capture, microphone
 recovery, model switching, permission snapshots, deterministic screenshots,
 and assertions over capture/job/UI state. MCP may wrap this protocol later; it
@@ -238,13 +257,22 @@ the npm-package guidance above applies only to a developer-control wrapper.
 
 Give durable transcript entries stable identities so live-to-final reconciliation,
 incremental UI refresh, and meeting-delta paste can advance without rereading
-broad history. Keep `You` and `Them` source labels and the recoverable live
-draft when final transcription fails.
+broad history. Keep `You` and `Them` source labels and the recoverable rolling
+transcript when final transcription fails.
 
 Add end-to-end coverage for voice-triggered start/stop, shutdown during capture,
 forced final-transcription failure, and live provider detection. Evaluate
 synchronized playback, echo annotation, summarization, and person-level
 diarization only against real meeting recordings.
+
+## Recommend Better Models To Existing Users
+
+After the Rune port is fully done (the macOS app has passed its smoke test),
+add a gentle, dismissible "recommended update" hint in the model picker and
+Settings for users whose saved model is no longer recommended for their
+language, explaining how to switch. Language routing already keeps their model
+and lists it in the picker ([plan](docs/plans/language-recommendations.md)); the
+hint never switches or downloads anything itself.
 
 ## Deliberate Deferrals
 

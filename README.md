@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <a href="https://hex.kitlangton.com/"><strong>Download for Mac, Windows, or Linux</strong></a>
+  <a href="https://anoma.ly/hex/"><strong>Download for Mac, Windows, or Linux</strong></a>
   · <a href="docs/windows.md">Windows beta</a>
   · <a href="docs/linux.md">Linux beta</a>
   · <a href="sdk/typescript/README.md">TypeScript SDK</a>
@@ -30,8 +30,8 @@ pastes the result into the app you are using.
   recognition.
 
 The macOS app is available now. The [Windows beta](#windows-beta) covers x64 and
-ARM64 PCs, and the [Linux beta](#linux-beta) has a smaller feature set and requires
-a source build or Nix. See [Privacy and local data](#privacy-and-local-data)
+ARM64 PCs, and the [Linux beta](#linux-beta) covers x86_64 X11 and compatible
+wlroots Wayland compositors. See [Privacy and local data](#privacy-and-local-data)
 for what stays on your device and what optional features send to a provider.
 
 ## Install HEX
@@ -50,7 +50,7 @@ or forcibly replace another app already named `Hex.app`.
 
 Or install manually:
 
-1. [Download the latest signed DMG](https://downloads.hex.kitlangton.com/releases/HEX-latest-arm64.dmg) and open it.
+1. [Download the latest signed DMG](https://anoma.ly/hex/files/releases/HEX-latest-arm64.dmg) and open it.
 2. Drag `Hex.app` into Applications, then launch it.
 3. Complete the permission and model steps in setup.
 
@@ -64,10 +64,13 @@ to check immediately.
 
 Organizations that manage app versions themselves can turn off in-app updates,
 including manual checks, with the `DisableUpdates` Boolean in the
-`com.kitlangton.hex2` preference domain. Deploy it in a configuration profile
-(payload type `com.kitlangton.hex2`, key `DisableUpdates`, value `true`), or for a
-single Mac run `defaults write com.kitlangton.hex2 DisableUpdates -bool true`.
-Relaunch HEX to apply it. Model downloads still work.
+`anomaly.hex` preference domain. Deploy it in a configuration profile
+(payload type `anomaly.hex`, key `DisableUpdates`, value `true`), or for a
+single Mac run `defaults write anomaly.hex DisableUpdates -bool true`. On
+Windows, set the DWORD `DisableUpdates` to `1` under
+`HKLM\SOFTWARE\Policies\Anomaly\Hex` (Group Policy) or the same path in HKCU.
+Relaunch HEX to apply it. Model downloads still work. Releases through 2.3.1
+used the `com.kitlangton.hex2` domain; profiles for those keep applying only to them.
 
 **Download blocked?** [Alternative download: GitHub — Hex 2.3.1](https://github.com/anomalyco/hex/releases/download/app-v2.3.1/HEX-2.3.1-arm64.dmg)
 contains the identical signed DMG for Apple silicon and macOS 15+. App releases
@@ -75,9 +78,10 @@ use `app-v…` tags; the repository also publishes separate TypeScript SDK relea
 If an older installation cannot check for updates on your network, install the
 DMG manually over the existing Rust app.
 
-On managed networks, ask IT to allow `downloads.hex.kitlangton.com` and
-`downloads.hex.kitlangton.dev` (in-app updates) for the app
-and updates. Local model setup separately needs `huggingface.co` and its model
+On managed networks, ask IT to allow `anoma.ly`: Hex downloads and updates
+from the Anomaly release service at `https://anoma.ly/release` (releases up to
+2.3.1 use `https://anoma.ly/hex/files` and `downloads.hex.kitlangton.dev`,
+which redirects there). Local model setup separately needs `huggingface.co` and its model
 download CDN; optional Voice Commands needs `download.moonshine.ai`. A successful
 app download does not establish that those model hosts are reachable. After
 restoring access, retry model preparation in Settings (or Retry for Commands).
@@ -150,14 +154,31 @@ install the official HEX skill:
 npx skills add anomalyco/hex --skill hex-personal-commands
 ```
 
+## Read Transcripts From The CLI
+
+The macOS release binary provides read-only queries while the app runs:
+
+```sh
+/Applications/Hex.app/Contents/MacOS/hex history --since 3d --app 'OpenCode Beta' --grep problems --json
+/Applications/Hex.app/Contents/MacOS/hex meetings list --since 7d --json
+/Applications/Hex.app/Contents/MacOS/hex meetings show latest --md
+/Applications/Hex.app/Contents/MacOS/hex meetings search 'release schedule'
+```
+
+History supports `--until`, `--limit`, `--raw`, and `--oldest-first`; queries
+respect the saved retention window. Meetings share the read-only MCP query
+layer. No microphone, GUI, model, or app service starts.
+See [flags and the versioned JSON schema](docs/transcript-cli.md).
+
 ## Privacy And Local Data
 
 - Speech transcription and command recognition run locally.
 - HEX does not save dictation audio by default.
-- On macOS, History retains successfully pasted dictation and Voice Action text
+- History retains successfully pasted dictation and Voice Action text
   for seven days by default, including the local transcript, final text, and
   limited application and timing metadata. It never stores audio, full browser
-  URLs, or window titles. Every retention choice has entry and byte limits.
+  URLs, or window titles. Every retention choice is capped at 10,000 entries and
+  16 MiB of raw plus final text, with oldest entries evicted first.
 - Use **History > Keep: Off** to stop adding entries, or **Clear all** to remove
   existing history. Turning retention off does not delete existing entries or
   disable diagnostic logging.
@@ -205,8 +226,8 @@ driver, Parakeet Unified English streams while you speak, so text arrives within
 about 100 ms of release even after minutes of talking; ARM64 transcribes on the
 CPU. Voice commands, meetings, and the local transcription API are not included.
 Download the installer for
-[x64](https://downloads.hex.kitlangton.com/releases/HEX-Setup-2.3.1-x64.exe) or
-[ARM64](https://downloads.hex.kitlangton.com/releases/HEX-Setup-2.3.1-arm64.exe)
+[x64](https://anoma.ly/hex/files/releases/HEX-Setup-2.3.1-x64.exe) or
+[ARM64](https://anoma.ly/hex/files/releases/HEX-Setup-2.3.1-arm64.exe)
 and run it; it installs for your user without administrator rights. It is not
 code-signed yet, so SmartScreen may warn: choose **More info**, then **Run
 anyway**. See the [Windows guide](docs/windows.md) for details or to build from
@@ -215,8 +236,8 @@ source.
 ## Linux Beta
 
 The Linux beta targets x86_64 Linux on i3/X11 and compatible wlroots Wayland
-compositors. It supports local hotkey dictation, a GPUI settings shell, and
-signed updates for direct installs. With a Vulkan graphics driver, dictation
+compositors. It supports local hotkey dictation, Modes, Voice Action, History,
+the Hex window, and signed updates for direct installs. With a Vulkan graphics driver, dictation
 streams while you speak, as on macOS and Windows. Native Wayland requires
 compositor support for clipboard, virtual-keyboard, and layer-shell protocols.
 Shortcuts come from the desktop's GlobalShortcuts portal, or you bind
@@ -227,13 +248,25 @@ included.
 Install the signed release on x86_64 Arch Linux (glibc 2.44 or later) with:
 
 ```sh
-curl -fsSL https://downloads.hex.kitlangton.com/install-linux.sh | sh
+curl -fsSL https://anoma.ly/hex/files/install-linux.sh | sh
 ```
+
+From the next release on, Arch users can instead install the AUR package
+`hex-bin` (for example `yay -S hex-bin`), which pacman updates; it is not on the
+AUR yet.
 
 The [Linux installation guide](docs/linux.md) covers inspecting the installer
 first, uninstalling, and building from source. It also describes
 requirements and limitations.
 For Nix/NixOS packaging and per-user autostart, see the [Nix guide](docs/nix.md).
+
+## Testing Builds
+
+Every push to `dev` produces unsigned test builds for macOS, Windows, and
+Linux in the [Test builds](https://github.com/anomalyco/hex/actions/workflows/test-builds.yml)
+workflow. Open the latest green run and download from its summary. The
+[test build guide](docs/test-builds.md) explains how to install and remove each
+one without disturbing an installed Hex.
 
 ## Build With HEX
 

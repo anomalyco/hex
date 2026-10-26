@@ -131,9 +131,7 @@ impl WindowsPaster {
         });
         Ok(())
     }
-}
 
-impl WindowsPaster {
     /// Copy the focused application's current selection with a synthesized
     /// Ctrl+C, then restore the previous clipboard. `None` means the
     /// application published nothing (no selection).
@@ -166,14 +164,7 @@ impl WindowsPaster {
 
 fn send_copy_shortcut() -> Result<()> {
     let inputs = control_chord(VK_C);
-    let sent = unsafe {
-        SendInput(
-            inputs.len() as u32,
-            inputs.as_ptr(),
-            size_of::<INPUT>() as i32,
-        )
-    };
-    if sent == inputs.len() as u32 {
+    if send_inputs(&inputs) == inputs.len() as u32 {
         Ok(())
     } else {
         Err(eyre!("Windows rejected the synthesized Ctrl+C"))
@@ -243,13 +234,7 @@ fn key_down(key: u16) -> bool {
 
 fn send_paste_shortcut() -> Result<()> {
     let inputs = control_chord(VK_V);
-    let sent = unsafe {
-        SendInput(
-            inputs.len() as u32,
-            inputs.as_ptr(),
-            size_of::<INPUT>() as i32,
-        )
-    };
+    let sent = send_inputs(&inputs);
     if sent != inputs.len() as u32 {
         // Release only what this chord pressed; never a key the user holds.
         let cleanup = inputs
@@ -257,19 +242,23 @@ fn send_paste_shortcut() -> Result<()> {
             .filter(|input| unsafe { input.Anonymous.ki.dwFlags } & KEYEVENTF_KEYUP != 0)
             .copied()
             .collect::<Vec<_>>();
-        unsafe {
-            SendInput(
-                cleanup.len() as u32,
-                cleanup.as_ptr(),
-                size_of::<INPUT>() as i32,
-            );
-        }
+        send_inputs(&cleanup);
         return Err(eyre!(
             "Windows accepted only {sent} of {} synthetic paste events; an elevated target window may reject input",
             inputs.len()
         ));
     }
     Ok(())
+}
+
+fn send_inputs(inputs: &[INPUT]) -> u32 {
+    unsafe {
+        SendInput(
+            inputs.len() as u32,
+            inputs.as_ptr(),
+            size_of::<INPUT>() as i32,
+        )
+    }
 }
 
 fn keyboard_input(key: u16, flags: u32) -> INPUT {

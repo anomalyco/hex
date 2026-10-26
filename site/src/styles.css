@@ -706,6 +706,44 @@ button.download:hover {
   font-size: 1rem;
 }
 
+/* The Anomaly copyright, as on opentunnel.xyz and the OpenCode console: the signature sits faintly behind the line. */
+.site-footer {
+  display: flex;
+  justify-content: center;
+  padding: 2.5rem 1.25rem 4rem;
+  background: #070707;
+}
+
+.copyright {
+  position: relative;
+  color: #909090;
+  font-size: 0.8125rem;
+  line-height: 1.5rem;
+}
+
+.copyright img {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+.copyright p {
+  position: relative;
+  margin: 0;
+}
+
+.copyright a {
+  color: inherit;
+  text-decoration: underline rgba(255, 255, 255, 0.2);
+  text-underline-offset: 2px;
+}
+
+.copyright a:hover {
+  color: #f2f2ef;
+}
+
 @media (max-width: 39rem) {
   .hero {
     gap: 1.4rem;

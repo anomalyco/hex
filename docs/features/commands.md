@@ -11,7 +11,8 @@ previews, providers, or native actions were run for this split.
 
 ```ts
 Hex > Commands                                      // commands; off by default
-├── Enable -> Prepare command model                  // needs setup permissions
+├── Top card "Voice commands" switch -> Prepare command model // needs setup permissions
+├── Model failed -> card below it: Retry / Turn off commands  // only in this pane
 ├── Search / select a catalog row -> Inspect, not execute
 └── Create config / Edit config / Copy agent prompt  // personal workspace
 
@@ -20,10 +21,11 @@ hex listen -> Use saved command opt-in               // never beside another lis
 ```
 
 The catalog and config controls remain reachable while Commands is off. Sources:
-`render_commands` in [app_window.rs](../../src/app_window.rs), CLI routes in
+[rune_ui/commands.rs](../../src/rune_ui/commands.rs), CLI routes in
 [main.rs](../../src/main.rs), and workspace paths in
-[app_paths.rs](../../src/app_paths.rs). Debug-only `hex dev commands on|off`
-changes the running app's opt-in; it is not a release CLI route.
+[app_paths.rs](../../src/app_paths.rs). The release
+`hex commands enable|disable|retry` ([control CLI](control-cli.md)) changes the
+running app's opt-in like the window; debug `hex dev commands on|off` remains.
 
 ## Sub-features
 
@@ -41,10 +43,11 @@ Hotkey dictation -> Remains available during preparation and failure
 ```
 
 Sources: `load_command_recognizer` and live policy handling in
-[recognition.rs](../../src/recognition.rs); `render_model_notice` in
-[app_window.rs](../../src/app_window.rs). Checks:
+[recognition.rs](../../src/recognition.rs); the enable card and command model
+notice in [rune_ui/commands.rs](../../src/rune_ui/commands.rs). Checks:
 `command_preparation_does_not_block_the_listener_or_propagate_failure`,
-`command_model_failure_has_recovery_without_blocking_dictation`, and
+`a_failed_command_model_offers_retry_and_turning_commands_off`,
+`commands_turn_on_from_their_card` (scene `mac-commands-unavailable`), and
 `missing_fields_receive_defaults` /
 `microphone_policy_requires_explicit_combined_transitions` in
 [app_settings.rs](../../src/app_settings.rs).
@@ -128,12 +131,18 @@ is discoverability, not proof that its scope is active or its action succeeded.
 
 ```ts
 Create config / hex commands init                      // commands.personal-config
-  -> Managed Bun workspace + @hex/commands SDK
+  -> Managed Bun workspace + @hex/commands SDK -> Bun install
   -> ~/.config/hex/hex.config.ts                         // trusted executable user code
+     // published last, atomically, so its appearance means installed
+
+No config at launch -> Not configured; poll for hex.config.ts
+  // the workspace folder may not exist yet; no restart needed
+Config appears + workspace settles -> Prepare and start host as at launch
 
 Running watcher sees config edit -> Validate candidate
 ├── Valid -> Replace active registry and catalog
-└── Invalid -> Preserve active registry; show reload error
+├── Invalid -> Preserve active registry; show reload error
+└── Config deleted -> Stop host; native registry; back to polling
 
 Same workspace -> Custom transformations for Modes     // Commands need not be enabled
 ```
@@ -143,8 +152,13 @@ in [personal_commands.rs](../../src/personal_commands.rs), plus
 [host.ts](../../sdk/commands/src/host.ts). Checks in `personal_commands.rs`:
 `clean_workspace_provisioning_preserves_user_config_on_refresh`,
 `invalid_candidate_does_not_mutate_base_registry`,
-`wake_sleep_ids_and_phrases_are_reserved`.
-These cover provisioning/registration fixtures, not a live editor-to-reload path.
+`wake_sleep_ids_and_phrases_are_reserved`,
+`unconfigured_host_starts_when_config_appears_without_restart`,
+`unconfigured_host_wait_stops_on_shutdown`,
+`initialization_publishes_config_only_after_install`,
+`deactivation_forgets_the_removed_host`.
+These cover provisioning/registration fixtures and the not-configured wait, not
+a live editor-to-reload path or a real host start after the config appears.
 
 [Host tests](../../sdk/commands/test/host.test.ts), including
 `emits a bounded serializable registration without handlers` and
@@ -200,11 +214,10 @@ native voice-to-paste pass.
 
 ## Gaps And Constraints
 
-- **Pre-watcher startup failure:** `run_worker` can return before starting
-  `watch_workspace` when config, Bun, or SDK preparation is unavailable. Repairing
-  the files alone then has no watcher to trigger a reload. The live-reload
-  contract above applies only after the watcher starts; startup recovery remains
-  a gap.
+- **Pre-watcher startup failure:** a missing config is watched for, but
+  `run_worker` still returns before starting `watch_workspace` when Bun or SDK
+  preparation fails. Repairing those alone then has no watcher to trigger a
+  reload; that startup recovery remains a gap.
 - **Timeout and late native result:** [#20](https://github.com/anomalyco/hex/issues/20)
   remains a known gap. Host interruption removes tool correlation;
   a late reply is rejected, and Rust rejects completion with outstanding tools.

@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# The local check loop.
+#
+#   scripts/check                 fmt, clippy, then every test
+#   scripts/check meeting::query  fmt, then only the tests matching the filters
+#
+# Tests run through cargo-nextest (.config/nextest.toml): each test is its own
+# process, and one that hangs is killed and reported by name. Exit codes:
+# 10 fmt, 11 clippy, 12 tests. NEXTEST_PROFILE=ci selects CI's profile.
+# Tests build with the `capture` feature, so the debug-only capture
+# experiment's code (macOS) is tested too. `crates/capture` sits outside the
+# workspace (Cargo.toml), so on macOS it is named to be linted and tested.
+set -uo pipefail
+
+cd "$(dirname "${BASH_SOURCE[0]}")/.."
+
+packages=(--workspace)
+if [[ "$(uname -s)" == Darwin ]]; then
+    packages=(-p voice-control -p scrawl-router -p scrawl-capture)
+fi
+
+stage() {
+    printf '\n==> %s\n' "$1"
+}
+
+stage "fmt"
+cargo fmt --all --check || exit 10
+
+if [[ $# -eq 0 ]]; then
+    stage "clippy"
+    cargo clippy --locked "${packages[@]}" --all-targets --features capture,onnx-benchmark -- -D warnings || exit 11
+fi
+
+if command -v cargo-nextest >/dev/null 2>&1; then
+    stage "test (nextest${1:+: $*})"
+    cargo nextest run --locked "${packages[@]}" --features capture --no-tests=warn "$@" || exit 12
+else
+    stage "test (cargo test${1:+: $*})"
+    echo "cargo-nextest is not installed, so a hung test stalls the run without" >&2
+    echo "a name. Install it with: brew install cargo-nextest" >&2
+    cargo test --locked "${packages[@]}" --features capture -- "$@" || exit 12
+fi

@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::fs;
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
@@ -6,7 +6,7 @@ use std::time::Instant;
 
 use color_eyre::eyre::{Result, WrapErr, bail, eyre};
 use hound::{SampleFormat, WavReader};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use crate::dictation::{pad_for_parakeet, resample_for_parakeet};
@@ -18,7 +18,7 @@ pub enum Backend {
 }
 
 enum LoadedBackend {
-    TranscribeCpp(Parakeet),
+    TranscribeCpp(Box<Parakeet>),
     #[cfg(feature = "onnx-benchmark")]
     Onnx(transcribe_rs::onnx::parakeet::ParakeetModel),
 }
@@ -27,9 +27,9 @@ impl LoadedBackend {
     fn load(backend: Backend) -> Result<Self> {
         match backend {
             Backend::Onnx => load_onnx(),
-            Backend::TranscribeCpp { model } => {
-                Ok(Self::TranscribeCpp(Parakeet::load_for_benchmark(&model)?))
-            }
+            Backend::TranscribeCpp { model } => Ok(Self::TranscribeCpp(Box::new(
+                Parakeet::load_for_benchmark(&model)?,
+            ))),
         }
     }
 
@@ -86,6 +86,9 @@ fn load_onnx() -> Result<LoadedBackend> {
 
 #[derive(Deserialize)]
 struct Manifest {
+    /// Scoring vocabulary, not recognition hints. Never passed to the model.
+    #[serde(default)]
+    vocabulary: Vec<String>,
     clips: Vec<ClipDefinition>,
 }
 
@@ -94,6 +97,14 @@ struct ClipDefinition {
     id: String,
     audio: PathBuf,
     expected: String,
+    #[serde(default)]
+    expected_terms: Vec<String>,
+    #[serde(default = "ordinary_group")]
+    group: String,
+}
+
+fn ordinary_group() -> String {
+    "ordinary".into()
 }
 
 struct Clip {
@@ -101,6 +112,82 @@ struct Clip {
     expected: String,
     samples: Vec<f32>,
     audio_ms: f64,
+    expected_terms: Vec<String>,
+    group: String,
+}
+
+#[derive(Default, Serialize)]
+struct Quality {
+    clips: usize,
+    word_errors: usize,
+    reference_words: usize,
+    expected_terms: usize,
+    recalled_terms: usize,
+    false_replacements: usize,
+    clips_with_false_replacements: usize,
+}
+
+impl Quality {
+    fn record(&mut self, clip: &Clip, actual: &str, vocabulary: &[String]) {
+        let (errors, words) = word_errors(&clip.expected, actual);
+        self.clips += 1;
+        self.word_errors += errors;
+        self.reference_words += words;
+        self.expected_terms += clip.expected_terms.len();
+        self.recalled_terms += clip
+            .expected_terms
+            .iter()
+            .filter(|term| term_count(actual, term) > 0)
+            .count();
+        let false_replacements = vocabulary
+            .iter()
+            .map(|term| term_count(actual, term).saturating_sub(term_count(&clip.expected, term)))
+            .sum::<usize>();
+        self.false_replacements += false_replacements;
+        self.clips_with_false_replacements += usize::from(false_replacements > 0);
+    }
+
+    fn report(&self) -> serde_json::Value {
+        let mut report = serde_json::to_value(self).expect("quality counters serialize");
+        report["wer"] = json!(ratio(self.word_errors, self.reference_words));
+        report["term_recall"] = json!(ratio(self.recalled_terms, self.expected_terms));
+        report["false_replacement_rate"] =
+            json!(ratio(self.clips_with_false_replacements, self.clips));
+        report
+    }
+}
+
+fn ratio(numerator: usize, denominator: usize) -> Option<f64> {
+    (denominator > 0).then(|| numerator as f64 / denominator as f64)
+}
+
+/// Ignore case and internal spacing, but never match a substring of a word.
+/// Thus OpenCode == open code, while Hex != hexadecimal and Kit != toolkit.
+fn term_count(text: &str, term: &str) -> usize {
+    let target = normalized_words(term).concat();
+    if target.is_empty() {
+        return 0;
+    }
+    let words = normalized_words(text);
+    let mut count = 0;
+    let mut start = 0;
+    while start < words.len() {
+        let mut candidate = String::new();
+        let mut next = start + 1;
+        for (end, word) in words.iter().enumerate().skip(start) {
+            candidate.push_str(word);
+            if candidate == target {
+                count += 1;
+                next = end + 1;
+                break;
+            }
+            if !target.starts_with(&candidate) {
+                break;
+            }
+        }
+        start = next;
+    }
+    count
 }
 
 pub fn run(manifest_path: &Path, warmups: usize, runs: usize, backend: Backend) -> Result<()> {
@@ -115,6 +202,7 @@ pub fn run(manifest_path: &Path, warmups: usize, runs: usize, backend: Backend) 
     let manifest: Manifest = serde_json::from_slice(&manifest_data)
         .wrap_err_with(|| format!("could not parse {}", manifest_path.display()))?;
     validate_manifest(&manifest)?;
+    let vocabulary = manifest.vocabulary;
     let root = manifest_path.parent().unwrap_or_else(|| Path::new("."));
     let clips = manifest
         .clips
@@ -139,6 +227,7 @@ pub fn run(manifest_path: &Path, warmups: usize, runs: usize, backend: Backend) 
             "audio_ms": total_audio_ms,
             "warmups": warmups,
             "runs": runs,
+            "scoring_vocabulary": vocabulary,
         }),
     )?;
 
@@ -181,6 +270,8 @@ pub fn run(manifest_path: &Path, warmups: usize, runs: usize, backend: Backend) 
     let mut clip_times = Vec::with_capacity(runs * clips.len());
     let mut total_word_errors = 0;
     let mut total_reference_words = 0;
+    let mut quality = Quality::default();
+    let mut groups = BTreeMap::<String, Quality>::new();
     for run in 0..runs {
         let mut inference_ms = 0.0;
         for clip in &clips {
@@ -200,6 +291,14 @@ pub fn run(manifest_path: &Path, warmups: usize, runs: usize, backend: Backend) 
                 }),
             )?;
             if run == 0 {
+                let mut clip_quality = Quality::default();
+                clip_quality.record(clip, &transcript, &vocabulary);
+                quality.record(clip, &transcript, &vocabulary);
+                groups.entry(clip.group.clone()).or_default().record(
+                    clip,
+                    &transcript,
+                    &vocabulary,
+                );
                 let (word_errors, reference_words) = word_errors(&clip.expected, &transcript);
                 total_word_errors += word_errors;
                 total_reference_words += reference_words;
@@ -216,6 +315,8 @@ pub fn run(manifest_path: &Path, warmups: usize, runs: usize, backend: Backend) 
                         "reference_words": reference_words,
                         "expected": clip.expected,
                         "transcript": transcript,
+                        "group": clip.group,
+                        "quality": clip_quality.report(),
                     }),
                 )?;
             }
@@ -256,6 +357,8 @@ pub fn run(manifest_path: &Path, warmups: usize, runs: usize, backend: Backend) 
             "word_errors": total_word_errors,
             "reference_words": total_reference_words,
             "wer": total_word_errors as f64 / total_reference_words as f64,
+            "quality": quality.report(),
+            "groups": groups.iter().map(|(name, quality)| (name, quality.report())).collect::<BTreeMap<_, _>>(),
         }),
     )?;
     output.flush()?;
@@ -267,6 +370,14 @@ fn validate_manifest(manifest: &Manifest) -> Result<()> {
         bail!("benchmark manifest contains no clips");
     }
     let mut ids = HashSet::new();
+    let vocabulary = manifest
+        .vocabulary
+        .iter()
+        .map(|term| normalized_words(term).concat())
+        .collect::<HashSet<_>>();
+    if vocabulary.contains("") || vocabulary.len() != manifest.vocabulary.len() {
+        bail!("scoring vocabulary must contain unique, nonempty terms");
+    }
     for clip in &manifest.clips {
         if clip.id.trim().is_empty() {
             bail!("benchmark clip id cannot be empty");
@@ -276,6 +387,30 @@ fn validate_manifest(manifest: &Manifest) -> Result<()> {
         }
         if normalized_words(&clip.expected).is_empty() {
             bail!("benchmark clip reference cannot be empty: {}", clip.id);
+        }
+        if !["target", "distractor", "ordinary", "private"].contains(&clip.group.as_str()) {
+            bail!("unknown benchmark group: {}", clip.group);
+        }
+        if clip.group == "target" && clip.expected_terms.is_empty() {
+            bail!("target clip has no expected terms: {}", clip.id);
+        }
+        if ["distractor", "ordinary"].contains(&clip.group.as_str())
+            && !clip.expected_terms.is_empty()
+        {
+            bail!("guard clip cannot have expected terms: {}", clip.id);
+        }
+        let mut terms = HashSet::new();
+        for term in &clip.expected_terms {
+            let normalized = normalized_words(term).concat();
+            if !vocabulary.contains(&normalized)
+                || !terms.insert(normalized)
+                || term_count(&clip.expected, term) == 0
+            {
+                bail!(
+                    "expected term must be unique, in vocabulary and reference: {} ({term})",
+                    clip.id
+                );
+            }
         }
     }
     Ok(())
@@ -329,6 +464,8 @@ fn load_clip(root: &Path, definition: ClipDefinition) -> Result<Clip> {
         expected: definition.expected,
         samples,
         audio_ms,
+        expected_terms: definition.expected_terms,
+        group: definition.group,
     })
 }
 
@@ -408,11 +545,16 @@ mod tests {
 
     #[test]
     fn manifest_requires_unique_ids_and_spoken_references() {
-        let manifest = |clips| Manifest { clips };
+        let manifest = |clips| Manifest {
+            vocabulary: vec![],
+            clips,
+        };
         let clip = |id: &str, expected: &str| ClipDefinition {
             id: id.into(),
             audio: "unused.wav".into(),
             expected: expected.into(),
+            expected_terms: vec![],
+            group: ordinary_group(),
         };
 
         assert!(validate_manifest(&manifest(vec![])).is_err());
@@ -456,6 +598,8 @@ mod tests {
                 id: "stereo".into(),
                 audio: "stereo.wav".into(),
                 expected: "reference".into(),
+                expected_terms: vec![],
+                group: ordinary_group(),
             },
         )
         .unwrap();
@@ -464,5 +608,31 @@ mod tests {
         assert_eq!(clip.samples.len(), 24_000);
         assert_eq!(&clip.samples[..2], &[0.0, 0.5]);
         fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn vocabulary_scoring_respects_word_boundaries_and_counts_insertions() {
+        assert_eq!(term_count("Use OPEN CODE and OpenCode.", "OpenCode"), 2);
+        assert_eq!(term_count("hexadecimal toolkit effects runes", "Hex"), 0);
+        assert_eq!(term_count("hexadecimal toolkit effects runes", "Kit"), 0);
+        assert_eq!(term_count("a rune carved in stone", "Rune"), 1);
+        let clip = Clip {
+            id: "guard".into(),
+            expected: "Tom Hanks found a rune".into(),
+            expected_terms: vec![],
+            group: "distractor".into(),
+            samples: vec![],
+            audio_ms: 1000.0,
+        };
+        let mut quality = Quality::default();
+        quality.record(
+            &clip,
+            "Tom Hex found a rune",
+            &["Hex".into(), "Rune".into()],
+        );
+        assert_eq!(quality.false_replacements, 1);
+        assert_eq!(quality.clips_with_false_replacements, 1);
+        assert_eq!(quality.report()["term_recall"], serde_json::Value::Null);
+        assert_eq!(quality.word_errors, 1);
     }
 }

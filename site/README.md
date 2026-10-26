@@ -1,10 +1,13 @@
 # Hex website
 
-`hex.kitlangton.com` is the one Hex site. `bun run dev` starts Vite. `bun run
-build` checks TypeScript and builds it; `bun run check:downloads` checks that
-every download link serves a file; `bunx wrangler deploy` publishes the Worker,
-whose `worker.ts` 301s `hex.kitlangton.dev`, plain HTTP, and workers.dev to the
-same path on `hex.kitlangton.com`.
+`https://anoma.ly/hex` is the one Hex site (dev: `https://dev.anoma.ly/hex`).
+`bun run dev` starts Vite. `bun run build [--mode dev]` checks TypeScript and
+builds Cloudflare Build Output with base `/hex/`; `bun run check:downloads`
+checks that every download link serves a file. `cloudflare.config.ts` defines
+both Workers; CI deploys them with `bun run deploy:dev` / `deploy:production`
+(`cf deploy --prebuilt --mode <mode>`), never a laptop. `worker.ts` serves the
+site and, at `/hex/files/`, the environment's R2 bucket of release files, and
+301s other hosts and plain HTTP to the canonical host.
 
 The download section (`src/Download.tsx`) names the visitor's platform on first
 paint and refines it with UA client hints: a DMG for Apple silicon Macs, the

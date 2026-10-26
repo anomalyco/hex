@@ -6,7 +6,7 @@ SRC_DIR="$ROOT_DIR/macos/HexMicrophoneDriver"
 OUT_DIR="${1:-$HOME/Library/Caches/hex-mic}"
 BUNDLE_DIR="$OUT_DIR/HexMicrophone.driver"
 VERSION="${HEX_VERSION:-$(sed -n 's/^version = "\(.*\)"/\1/p' "$ROOT_DIR/Cargo.toml" | head -1)}"
-BUILD_NUMBER="${HEX_BUILD_NUMBER:-$(printf '%s\n' "$VERSION" | awk -F. '{ print ($1 * 10000) + ($2 * 100) + $3 }')}"
+BUILD_NUMBER="${HEX_BUILD_NUMBER:-$(printf '%s\n' "${VERSION%%-*}" | awk -F. '{ print ($1 * 10000) + ($2 * 100) + $3 }')}"
 
 rm -rf "$BUNDLE_DIR"
 mkdir -p "$BUNDLE_DIR/Contents/MacOS"

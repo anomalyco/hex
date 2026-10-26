@@ -2,6 +2,16 @@ use std::path::PathBuf;
 use std::process::Command;
 
 fn main() {
+    test_build_commit();
+    // `hex_capture`: the `capture` experiment's code, only in macOS builds
+    // with the `capture` feature (which brings in `scrawl-capture`), a build
+    // option that is off in every public build.
+    println!("cargo::rustc-check-cfg=cfg(hex_capture)");
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("macos")
+        && std::env::var_os("CARGO_FEATURE_CAPTURE").is_some()
+    {
+        println!("cargo::rustc-cfg=hex_capture");
+    }
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("macos") {
         if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("linux") {
             // transcribe-cpp's static manifest records OpenBLAS as an absolute
@@ -46,6 +56,8 @@ fn main() {
         &["FoundationModels"],
     );
     println!("cargo:rustc-link-arg=-Wl,-weak_framework,FoundationModels");
+    compile_swift_bridge("calendar", "HEXCalendarBridge", &[]);
+    println!("cargo:rustc-link-lib=framework=EventKit");
     compile_indicator_shader();
     compile_permission_guide();
     println!("cargo:rustc-link-arg=-Wl,-rpath,/usr/lib/swift");
@@ -55,6 +67,39 @@ fn main() {
             developer_dir.trim()
         );
         println!("cargo:rustc-link-arg=-Wl,-rpath,{swift_runtime}");
+    }
+}
+
+/// A test build carries its commit (`HEX_COMMIT`), which the sidebar shows
+/// beside the version.
+fn test_build_commit() {
+    println!("cargo:rerun-if-env-changed=HEX_TEST_BUILD");
+    if std::env::var("HEX_TEST_BUILD").as_deref() != Ok("1") {
+        return;
+    }
+    let git = |args: &[&str]| {
+        Command::new("git")
+            .args(args)
+            .output()
+            .ok()
+            .filter(|output| output.status.success())
+            .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_owned())
+            .filter(|value| !value.is_empty())
+    };
+    let Some(commit) = git(&["rev-parse", "--short=7", "HEAD"]) else {
+        return;
+    };
+    println!("cargo:rustc-env=HEX_COMMIT={commit}");
+    let reference = git(&["symbolic-ref", "-q", "HEAD"]);
+    for name in ["HEAD", "packed-refs"]
+        .into_iter()
+        .chain(reference.as_deref())
+    {
+        if let Some(path) = git(&["rev-parse", "--path-format=absolute", "--git-path", name])
+            .filter(|path| std::path::Path::new(path).exists())
+        {
+            println!("cargo:rerun-if-changed={path}");
+        }
     }
 }
 
@@ -117,6 +162,9 @@ fn compile_permission_guide() {
     println!("cargo:rustc-link-lib=framework=ApplicationServices");
     println!("cargo:rustc-link-lib=framework=AVFoundation");
     println!("cargo:rustc-link-lib=framework=CoreGraphics");
+    println!("cargo:rustc-link-lib=framework=CoreImage");
+    println!("cargo:rustc-link-lib=framework=IOKit");
+    println!("cargo:rustc-link-lib=framework=QuartzCore");
 
     cc::Build::new()
         .file("native/permission_guide.m")

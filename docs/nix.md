@@ -69,12 +69,14 @@ explicit `programs.hex.package` override. The flake also exports
 
 The module always installs the systemd **user** service. Autostart defaults to
 `false`; when enabled, the unit is wanted by `graphical-session.target` by default.
-It waits for a Wayland socket or an X11 window manager before launching `hex service`.
-Use `hex start` to start it manually and `hex app` to open the separate Settings
-client. Closing Settings never stops the service, and there is no Linux tray.
-The service stops with the configured target and retries failed starts
-without a tight restart loop. `hex stop` leaves it stopped until
-the next session or an explicit `systemctl --user start hex.service`.
+It waits for a Wayland socket or an X11 window manager before launching `hex service`,
+which reports readiness to systemd (`Type=notify`) once its socket answers.
+Hex is one process: `hex` opens its window, starting the unit when it is not
+running, and `hex start` starts it without the window. Closing the window never
+stops Hex, and there is no Linux tray. The unit stops with the configured target
+and retries failed starts without a tight restart loop; a crash restart opens no
+window. `hex quit` (or **Quit Hex** in the window) leaves it stopped until the
+next session or the next launch.
 
 Your session manager must import its current `DISPLAY`, `XAUTHORITY`,
 `WAYLAND_DISPLAY`, and `XDG_RUNTIME_DIR` values as applicable into the systemd
@@ -87,8 +89,8 @@ start this service automatically.
 
 `hex start` records the current display/session environment in an owner-only
 file read by the unit; it clears stale variables when switching between X11 and
-Wayland. There is one active desktop service per user. Starting it from a
-different desktop explicitly restarts the service for that session.
+Wayland. There is one Hex per user. Launching it from a different desktop
+explicitly restarts the unit for that session.
 
 Home Manager's normal service-switch policy applies: newly enabled services
 can start during a switch if the session target is already active, and
