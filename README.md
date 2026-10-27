@@ -36,6 +36,23 @@ for what stays on your device and what optional features send to a provider.
 
 ## Install HEX
 
+### Downloads
+
+Builds from the dev channel, published on every change to `dev`:
+
+| Platform | Dev |
+| --- | --- |
+| macOS (Apple silicon) | [DMG](https://anoma.ly/release/hex/desktop/dev/macos-arm64-dmg) |
+| Windows x64 | [Installer](https://anoma.ly/release/hex/desktop/dev/windows-x64-setup) |
+| Windows ARM64 | [Installer](https://anoma.ly/release/hex/desktop/dev/windows-arm64-setup) |
+| Linux x86_64 | [Executable](https://anoma.ly/release/hex/desktop/dev/linux-x64) |
+
+Updater files: [macOS ZIP](https://anoma.ly/release/hex/desktop/dev/macos-arm64),
+[Windows x64 EXE](https://anoma.ly/release/hex/desktop/dev/windows-x64),
+[Windows ARM64 EXE](https://anoma.ly/release/hex/desktop/dev/windows-arm64).
+Windows links work once Windows signing is configured. On Linux you can also
+use `yay -S hex-bin` or the install script below.
+
 With Homebrew:
 
 ```sh
@@ -72,16 +89,15 @@ Windows, set the DWORD `DisableUpdates` to `1` under
 Relaunch HEX to apply it. Model downloads still work. Releases through 2.3.1
 used the `com.kitlangton.hex2` domain; profiles for those keep applying only to them.
 
-**Download blocked?** [Alternative download: GitHub — Hex 2.3.1](https://github.com/anomalyco/hex/releases/download/app-v2.3.1/HEX-2.3.1-arm64.dmg)
-contains the identical signed DMG for Apple silicon and macOS 15+. App releases
-use `v…` tags (`app-v…` through 2.3.1); the repository also publishes separate TypeScript SDK releases.
+**Download blocked?** Each app release on [GitHub Releases](https://github.com/anomalyco/hex/releases)
+has the identical signed files. App releases use `v…` tags (`app-v…` through
+2.3.1); the repository also publishes separate TypeScript SDK releases.
 If an older installation cannot check for updates on your network, install the
 DMG manually over the existing Rust app.
 
 On managed networks, ask IT to allow `anoma.ly`: Hex downloads and updates
 from the Anomaly release service at `https://anoma.ly/release` (releases up to
-2.3.1 use `https://anoma.ly/hex/files` and `downloads.hex.kitlangton.dev`,
-which redirects there). Local model setup separately needs `huggingface.co` and its model
+2.3.1 use `https://anoma.ly/hex/files`). Local model setup separately needs `huggingface.co` and its model
 download CDN; optional Voice Commands needs `download.moonshine.ai`. A successful
 app download does not establish that those model hosts are reachable. After
 restoring access, retry model preparation in Settings (or Retry for Commands).
