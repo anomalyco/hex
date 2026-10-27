@@ -7,10 +7,10 @@ use std::time::{Duration, Instant};
 use rune::{Edge, El, Key, KeyEvent, Transition, Tx, col, row, spacer, text};
 
 use super::controls::{
-    ButtonKind, CardRow, Choice, DESCRIPTION, DEVICE_SELECT_WIDTH, KEY_GAP, KeySize, METRICS, Paint,
-    button, described_row, folding, icon_button, key_tray, keycap, keycaps, link_row, note, page,
-    pulsing_dot, section, section_with, segmented, select, select_sized, setting_row, sheet_button,
-    status_dot, text_field, toggle_row, tray_roll,
+    ButtonKind, CardRow, Choice, DESCRIPTION, DEVICE_SELECT_WIDTH, KEY_GAP, KeySize, METRICS,
+    Paint, button, described_row, folding, icon_button, key_tray, keycap, keycaps, link_row, note,
+    page, pulsing_dot, section, section_with, segmented, select, select_sized, setting_row,
+    sheet_button, status_dot, text_field, toggle_row, tray_roll,
 };
 use super::{Menu, Request, Service, ShortcutTarget, Ui};
 use super::{explainer, host};
