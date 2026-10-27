@@ -2,11 +2,19 @@
 
 ## Private Kit Tool
 
-Commit and push straight to `dev` (the default branch), no PRs. Merge any open
-PR without asking. After pushing, update the installed copy. See
+`dev` and `production` take changes only through pull requests (Dax's
+ruleset; `.github/` changes also need Dax). Branch from `dev`, open a PR to
+`dev`, and merge it yourself once its checks pass; merge any open PR without
+asking. After merging, update the installed copy. See
 `~/code/control/AGENTS.md`. `production` holds what was released and moves
-only by a fast-forward from `dev` (`git push origin dev:production`) when Kit
-releases; never commit to it. There is no `main`.
+only by a fast-forward from `dev` when Kit releases; never commit to it.
+There is no `main`.
+
+Any change to what the window draws regenerates the goldens in the same PR:
+run `HEX_UPDATE_GOLDENS=1 cargo test --locked --bin voice-control rune_ui`
+on Linux (the golden tests only run there; from a Mac, dispatch
+`check-linux.yml` on the branch and take its `golden-actual` artifact),
+look at every changed image, and commit them with the change.
 
 `dev` is canonical and contains the Rune front end on every OS; GPUI is
 removed. The `rune-ui` integration branch is merged and kept only for history:
