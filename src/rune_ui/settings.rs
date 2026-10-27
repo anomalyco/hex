@@ -947,7 +947,7 @@ fn dictation_section(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
     let pinned = advanced_in_use(settings);
     rows.push(folding(
         "advanced-fold",
-        if ui.advanced || pinned {
+        if ui.advanced.unwrap_or(pinned) {
             advanced_rows(ui, p)
         } else {
             Vec::new()
@@ -1310,12 +1310,12 @@ fn double_tap_only_applies(settings: &AppSettings) -> bool {
 }
 
 /// The Dictation header's disclosure for the options most people never
-/// change, which show at the end of the card. It stays open while one is in
-/// use. (A row above them at the card's end would Tab straight into them,
+/// change, which show at the end of the card. It starts open while one is in
+/// use, and always closes when pressed. (A row above them at the card's end would Tab straight into them,
 /// but costs the 37 px that keeps General from scrolling at 760.)
 fn advanced_toggle(ui: &Ui, p: Paint, pinned: bool) -> El {
     let c = &p.k.c;
-    let open = ui.advanced || pinned;
+    let open = ui.advanced.unwrap_or(pinned);
     let toggle = row()
         .key("advanced-toggle")
         .label(tr("Advanced"))
@@ -1342,18 +1342,15 @@ fn advanced_toggle(ui: &Ui, p: Paint, pinned: bool) -> El {
             .key("arrow")
             .color(c.icon_weaker),
         );
-    if pinned {
-        return toggle;
-    }
     toggle
         .role("button")
         .hover(c.hover)
         .press(c.pressed)
         .focusable(true)
         .focus_ring(2.0, 0.0, c.border_focus)
-        .on_press(|ui: &mut Ui| {
-            ui.advanced = !ui.advanced;
-            if !ui.advanced {
+        .on_press(move |ui: &mut Ui| {
+            ui.advanced = Some(!open);
+            if open {
                 ui.confirm_release = false;
             }
         })
@@ -1379,7 +1376,7 @@ fn advanced_rows(ui: &Ui, p: Paint) -> Vec<CardRow> {
                 &[tr("Keep ready (fast)"), tr("Release when idle")],
                 usize::from(settings.release_microphone_while_idle),
                 |ui, index| {
-                    ui.advanced = true;
+                    ui.advanced = Some(true);
                     let release = index == 1;
                     if release && !ui.settings.release_microphone_while_idle {
                         ui.confirm_release = true;
@@ -1413,7 +1410,7 @@ fn advanced_rows(ui: &Ui, p: Paint) -> Vec<CardRow> {
                     tr("Wait for two complete shortcut taps before recording"),
                     settings.double_tap_only,
                     |ui: &mut Ui| {
-                        ui.advanced = true;
+                        ui.advanced = Some(true);
                         let enabled = !ui.settings.double_tap_only;
                         ui.update(|settings| settings.double_tap_only = enabled);
                     },
@@ -1593,7 +1590,7 @@ fn update_channel_row(ui: &Ui, p: Paint) -> Option<El> {
                 // Choosing the channel already in effect saves nothing, so an
                 // unset channel keeps following the build.
                 let channel = UpdateChannel::ALL[index];
-                ui.advanced = true;
+                ui.advanced = Some(true);
                 if channel != shown
                     && ui.update(|settings| settings.updates.channel = Some(channel))
                 {
