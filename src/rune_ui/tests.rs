@@ -188,6 +188,53 @@ fn toggles_save_through_the_host() {
 }
 
 #[test]
+fn choosing_an_update_channel_saves_it_and_checks_now() {
+    let mut rt = runtime("portal", true, GOLDEN_SIZE);
+    tap(&mut rt, "advanced-toggle");
+    assert_eq!(rt.state.settings.updates.channel, None);
+    tap(&mut rt, "update-channel-control/segment1");
+    assert_eq!(
+        rt.state.settings.updates.channel,
+        Some(crate::app_settings::UpdateChannel::Dev)
+    );
+    assert_eq!(saved(&rt), 1);
+    assert!(matches!(
+        sent(&rt),
+        [Request::Desktop(DesktopAction::CheckForUpdates)]
+    ));
+    tap(&mut rt, "update-channel-control/segment1");
+    assert_eq!(
+        saved(&rt),
+        1,
+        "choosing the same channel again saves nothing"
+    );
+}
+
+#[test]
+fn choosing_the_channel_in_effect_keeps_following_the_build() {
+    let mut rt = runtime("portal", true, GOLDEN_SIZE);
+    tap(&mut rt, "advanced-toggle");
+    assert_eq!(rt.state.settings.updates.channel, None);
+    tap(&mut rt, "update-channel-control/segment0");
+    assert_eq!(rt.state.settings.updates.channel, None);
+    assert_eq!(saved(&rt), 0);
+    assert!(sent(&rt).is_empty());
+}
+
+#[test]
+fn installs_that_never_update_hide_the_update_channel() {
+    let mut rt = runtime("portal", true, GOLDEN_SIZE);
+    tap(&mut rt, "advanced-toggle");
+    assert!(rt.find("update-channel").is_some());
+    if let Some(view) = &mut rt.state.view {
+        view.update_status = DesktopUpdateStatus::PackageManager;
+    }
+    rt.invalidate();
+    settle(&mut rt);
+    assert!(rt.find("update-channel").is_none());
+}
+
+#[test]
 fn quit_hex_in_the_sidebar_asks_the_host_to_quit() {
     let mut rt = runtime("portal", true, PANE_SIZE);
     tap(&mut rt, "quit");
@@ -333,6 +380,61 @@ fn service_settings_are_adopted_only_when_the_service_changes_them() {
     assert!(!ui.settings.enable_on_launch);
 }
 
+#[test]
+fn a_draft_saves_over_what_another_writer_changed_meanwhile() {
+    let mut ui = portal_fixture();
+    ui.settings.transcription.model = TranscriptionModelId::WhisperLargeV3Turbo;
+    let service = ui.settings.clone();
+    ui.adopt(service.clone());
+    ui.hints = TextEdit::new("OpenCode, Effect");
+    let start = std::time::Instant::now();
+    assert!(!ui.save_drafts(start), "waits for a pause");
+    // `hex settings set` (or a capture's saved rule) saves while it waits.
+    let mut elsewhere = service;
+    elsewhere.enable_on_launch = !elsewhere.enable_on_launch;
+    ui.adopt(elsewhere.clone());
+    assert_eq!(ui.hints.text, "OpenCode, Effect", "the typing stays");
+    assert!(ui.save_drafts(start + DRAFT_DELAY));
+    assert_eq!(ui.settings.enable_on_launch, elsewhere.enable_on_launch);
+    assert_eq!(
+        ui.settings.transcription.recognition_hints,
+        "OpenCode, Effect"
+    );
+}
+
+/// Typing in one editor keeps only that editor's text: the others take
+/// what another writer saved, so the draft's save doesn't undo it.
+#[test]
+fn a_draft_keeps_only_its_own_editor() {
+    let mut ui = portal_fixture();
+    ui.settings.transcription.model = TranscriptionModelId::WhisperLargeV3Turbo;
+    let service = ui.settings.clone();
+    ui.adopt(service.clone());
+    ui.hints = TextEdit::new("OpenCode, Effect");
+    let start = std::time::Instant::now();
+    assert!(!ui.save_drafts(start), "waits for a pause");
+    let mut elsewhere = service;
+    elsewhere
+        .dictation_processing
+        .default_mode
+        .post_processing
+        .prompt = "Keep it short.".into();
+    ui.adopt(elsewhere);
+    assert!(ui.save_drafts(start + DRAFT_DELAY));
+    assert_eq!(
+        ui.settings.transcription.recognition_hints,
+        "OpenCode, Effect"
+    );
+    assert_eq!(
+        ui.settings
+            .dictation_processing
+            .default_mode
+            .post_processing
+            .prompt,
+        "Keep it short."
+    );
+}
+
 fn settle(rt: &mut Runtime<Ui>) {
     for _ in 0..60 {
         rt.frame(1.0 / 60.0);
@@ -439,6 +541,171 @@ fn switching_panes_is_instant() {
             element.opacity >= 0.999 && !element.moving,
             "{} is still animating",
             element.path
+        );
+    }
+}
+
+fn element(rt: &Runtime<Ui>, key: &str) -> rune::ElementInfo {
+    let suffix = format!("/{key}");
+    rt.elements()
+        .into_iter()
+        .find(|e| !e.exiting && (e.key.as_deref() == Some(key) || e.path.ends_with(&suffix)))
+        .unwrap_or_else(|| panic!("no element {key}"))
+}
+
+/// The sidebar's items, top to bottom, with their drawn rects.
+fn nav_items(rt: &Runtime<Ui>) -> Vec<(Pane, [f32; 4])> {
+    Pane::ALL
+        .iter()
+        .copied()
+        .filter_map(|pane| rt.presented(pane.key()).map(|(rect, _)| (pane, rect)))
+        .collect()
+}
+
+/// The items whose hover shows, after one short frame: hover is instant.
+fn hovered_items(rt: &mut Runtime<Ui>, x: f32, y: f32) -> Vec<Pane> {
+    rt.pointer_move(x, y);
+    rt.frame(1.0 / 120.0);
+    nav_items(rt)
+        .into_iter()
+        .filter(|(pane, _)| {
+            let opacity = element(rt, &format!("{}/hover", pane.key())).opacity;
+            assert!(
+                opacity == 0.0 || opacity == 1.0,
+                "{pane:?}'s hover is fading: {opacity}"
+            );
+            opacity == 1.0
+        })
+        .map(|(pane, _)| pane)
+        .collect()
+}
+
+/// A sidebar with the Experiments group, as a developer sees it.
+fn grouped_sidebar() -> Runtime<Ui> {
+    let mut rt = runtime("mac-settings", true, PANE_SIZE);
+    rt.state.platform.developer = true;
+    rt.invalidate();
+    settle(&mut rt);
+    let items = nav_items(&rt);
+    assert!(items.iter().any(|(pane, _)| pane.experimental()));
+    assert!(items.iter().any(|(pane, _)| !pane.experimental()));
+    rt
+}
+
+#[test]
+fn the_nearest_sidebar_item_hovers_in_every_gap() {
+    let mut rt = grouped_sidebar();
+    let items = nav_items(&rt);
+    let x = items[0].1[0] + 40.0;
+    for pair in items.windows(2) {
+        let ((above, a), (below, b)) = (pair[0], pair[1]);
+        let (gap_top, gap_bottom) = (a[1] + a[3], b[1]);
+        let middle = (gap_top + gap_bottom) / 2.0;
+        assert_eq!(hovered_items(&mut rt, x, a[1] + a[3] / 2.0), [above]);
+        assert_eq!(hovered_items(&mut rt, x, gap_top + 0.5), [above]);
+        assert_eq!(hovered_items(&mut rt, x, middle - 0.5), [above]);
+        assert_eq!(hovered_items(&mut rt, x, middle + 0.5), [below]);
+        assert_eq!(hovered_items(&mut rt, x, gap_bottom - 0.5), [below]);
+    }
+    let (_, last) = items[items.len() - 1];
+    assert!(
+        hovered_items(&mut rt, x, last[1] + last[3] + 200.0).is_empty(),
+        "hover leaves at once"
+    );
+}
+
+#[test]
+fn a_press_in_a_sidebar_gap_selects_the_nearest_item() {
+    let mut rt = grouped_sidebar();
+    let items = nav_items(&rt);
+    let x = items[0].1[0] + 40.0;
+    for pair in items.windows(2) {
+        let ((above, a), (below, b)) = (pair[0], pair[1]);
+        let middle = (a[1] + a[3] + b[1]) / 2.0;
+        for (y, pane) in [(middle - 0.5, above), (middle + 0.5, below)] {
+            rt.pointer_move(x, y);
+            rt.pointer_down(x, y);
+            rt.frame(1.0 / 60.0);
+            assert_eq!(rt.state.pane, pane, "a press at {y} selects {pane:?}");
+            rt.pointer_up(x, y);
+            settle(&mut rt);
+        }
+    }
+}
+
+#[test]
+fn a_settings_row_shows_no_hover_or_press_of_its_own() {
+    let mut rt = runtime("portal", true, PANE_SIZE);
+    let before = rt.state.settings.double_tap_lock;
+    let (x, y) = rt.find("double-tap/copy").expect("the row's title");
+    rt.pointer_move(x, y);
+    rt.frame(1.0 / 120.0);
+    let row = element(&rt, "double-tap");
+    assert_eq!((row.hover, row.fill), (0.0, rune::Color::TRANSPARENT));
+    rt.pointer_down(x, y);
+    rt.frame(1.0 / 120.0);
+    assert_eq!(element(&rt, "double-tap").press, 0.0);
+    rt.pointer_up(x, y);
+    settle(&mut rt);
+    assert_ne!(
+        rt.state.settings.double_tap_lock, before,
+        "pressing the row still flips it"
+    );
+}
+
+#[test]
+fn hover_leaves_at_once() {
+    let mut rt = runtime("mac-settings", true, PANE_SIZE);
+    for key in [
+        "check-for-updates",
+        "dictation-hotkey",
+        "microphone-control-field-trigger",
+    ] {
+        let (x, y) = rt.find(key).unwrap_or_else(|| panic!("no element {key}"));
+        rt.pointer_move(x, y);
+        rt.frame(1.0 / 120.0);
+        assert_eq!(element(&rt, key).hover, 1.0, "{key} hovers at once");
+        rt.pointer_move(x, y + 400.0);
+        rt.frame(1.0 / 120.0);
+        assert_eq!(element(&rt, key).hover, 0.0, "{key} stops hovering at once");
+    }
+}
+
+/// Every hover in the tree, kit controls' inner tracks included, is at rest
+/// or fully on one short frame after the pointer moves.
+fn assert_hover_is_binary(rt: &Runtime<Ui>, what: &str) {
+    for e in rt.elements().into_iter().filter(|e| !e.exiting) {
+        assert!(
+            e.hover == 0.0 || e.hover == 1.0,
+            "{what}: {} is fading: {}",
+            e.path,
+            e.hover
+        );
+    }
+}
+
+#[test]
+fn segments_and_switch_tracks_hover_at_once() {
+    let mut rt = runtime("portal", true, PANE_SIZE);
+    let targets = [
+        rt.find("shortcut-mode-control"),
+        rt.find("double-tap/switch"),
+    ];
+    for (target, name) in targets.into_iter().zip(["segment", "switch"]) {
+        let (x, y) = target.unwrap_or_else(|| panic!("no {name}"));
+        rt.pointer_move(x, y);
+        rt.frame(1.0 / 120.0);
+        assert_hover_is_binary(&rt, name);
+        assert!(
+            rt.elements().iter().any(|e| e.hover == 1.0),
+            "{name} hovers at once"
+        );
+        rt.pointer_move(x, y + 400.0);
+        rt.frame(1.0 / 120.0);
+        assert_hover_is_binary(&rt, name);
+        assert!(
+            rt.elements().iter().all(|e| e.hover == 0.0),
+            "{name} stops hovering at once"
         );
     }
 }
@@ -804,7 +1071,8 @@ fn the_sidebar_moves_with_arrows_and_command_numbers() {
         ..Mods::default()
     };
     let shown: Vec<_> = Pane::ALL
-        .into_iter()
+        .iter()
+        .copied()
         .filter(|pane| pane.shown(&rt.state))
         .collect();
     key(&mut rt, Key::Command('3'), command);

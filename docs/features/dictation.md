@@ -66,8 +66,10 @@ Ordinary hold                            // lock activation is mapped below
   ├── Early unrelated shortcut/click -> Discard   // not intentional dictation
   │   └── Includes another app's global shortcut  // dictate.hidden-chord
   │       (Spaceman's Option-1) -> Seen at HID -> Discard, no double-tap lock
-  └── Modifier-only hold + any key, at any time -> Discard  // dictate.held-chord
-      (key reaches the app; locked and toggle captures keep recording)
+  ├── Modifier-only hold + any key, at any time -> Discard  // dictate.held-chord
+  │   (key reaches the app; locked and toggle captures keep recording)
+  └── Modifier-only hold past 300 ms -> One unassigned key press  // dictate.chord-breaker
+      -> Other apps' modifier-tap hotkeys see a chord, not a tap
 
 Ordinary shortcut -> No recording mute/pause or idle-sleep prevention
 Intentional recording -> No automatic duration limit
@@ -109,6 +111,66 @@ threshold. Any non-modifier key pressed while a modifier-only shortcut is still
 held now discards the capture, with no transcription or paste. Keyed shortcuts
 keep the 300 ms rule. Check:
 `held_modifier_only_shortcut_plus_any_key_discards_after_the_hold_threshold`.
+
+**Changed October 27, 2026 (chord breaker):** a bare-modifier shortcut is not
+consumed, so other apps saw an Option dictation as an Option tap on release. A
+Raycast hotkey on an Option tap activated Slack on every dictation, switching
+Kit out of a fullscreen Space before the paste. Tap detectors (Raycast,
+Karabiner's `to_if_alone`, AutoHotkey's Start-menu mask) cancel a tap when any
+key goes down while the modifier is held. Once Hex owns a modifier-only press
+it now posts one press of key code 0x44 under the modifiers held at that
+moment, once per press and only while exactly the shortcut's modifiers are
+still physically down (any other modifier already breaks the tap):
+
+```ts
+Hold past 300 ms (Hold mode, or a held second tap) -> Chord breaker
+Toggle start press, 40 ms after the press          -> Chord breaker
+  (the start tone's chord grace: an extra modifier pressed with it,
+   as for ⌥⇧S, discards the press first; a toggle tap is too short
+   to wait out the 300 ms hold)
+Press that finishes a lock                         -> Chord breaker at once
+Short tap, chord discard, double-tap lock taps     -> Nothing (still a tap)
+Press during voice-delimited dictation             -> Nothing (starts nothing)
+Keyed shortcuts (consumed), Globe/Fn (system tap)  -> Nothing
+Voice Action ⌥⌘, including promotion               -> Its own, after its hold
+```
+
+The breaker never reaches the focused app:
+
+```ts
+Posted at HID with Hex's marker
+  ├── HID taps, session taps            -> See a key: tap cancelled
+  ├── NSEvent global monitors           -> See a key: tap cancelled
+  ├── Hex's HID tap and its key tap     -> Marker: not a key, chord, or HID evidence
+  └── Hex's annotated-session key tap   -> Dropped
+      -> The focused app never gets it, so it never beeps (a non-text
+         view, or any text view with ⌘ held, beeps at an unhandled key)
+```
+
+0x44 is a hole in the virtual key codes (between keypad `*` and `+`): no
+keyboard sends it, it has no system action, and of the 264 layouts macOS ships
+only Unicode Hex Input maps it (to U+0000, never with Option alone). Source:
+`DictationHotkey::break_chord` and `event_callback` in
+[suppression.rs](../../src/suppression.rs), `post_chord_breaker` in
+[keyboard.rs](../../src/keyboard.rs), called from the listener loop once no
+input is pending. Checks:
+`a_held_modifier_only_shortcut_breaks_the_chord_once_after_the_hold_threshold`,
+`short_taps_chords_and_other_bindings_never_break_the_chord`,
+`locked_and_toggle_captures_break_the_chord_only_for_presses_hex_owns`,
+`voice_action_promotion_breaks_its_own_chord_after_its_hold`,
+`marked_chord_breaker_never_reaches_the_shortcut_machines_or_the_app`.
+
+Observed October 27, 2026 on a macOS 27.0.1 VM (`macvm`), with a stand-in for
+Hex (the same marked HID post, dropped by a head-inserted annotated-session
+default tap) rather than Hex itself: an Option hold reached a test app as an
+unhandled `keyDown` that beeped in a plain view when the breaker passed
+through; when dropped, the app received nothing, while an Option-tap detector
+on a HID tap, a session tap, and an NSEvent global monitor each saw the key and
+cancelled its tap. Without the breaker all three fired. Unproven: Raycast
+itself (its binary uses both event taps and a global monitor), a detector on
+an annotated-session tap placed after Hex's (it never sees the key), and a
+physical keyboard. If Hex's key tap is briefly disabled by a timeout, the
+breaker reaches the app.
 
 ### Shortcut Mode
 
@@ -666,6 +728,9 @@ Escape                                               // dictate.cancel
   ├── Active capture -> Cancel that capture first
   └── No active capture -> Cancel newest cancellable accepted job
      -> Repeat Escape -> Walk back through unfinished jobs
+  └── Programmatic dictation (local API) -> Not claimed; the key reaches the app
+     -> Even with other jobs queued; its owner cancels through /cancel
+     -> The lease ends an abandoned one
 
 Cancelled before output commit -> No insertion
 Already committed clipboard insertion -> Not undone   // not target-app undo
@@ -673,7 +738,9 @@ Already committed clipboard insertion -> Not undone   // not target-app undo
 
 Checks in [parakeet.rs](../../src/parakeet.rs):
 `output_stays_cancellable_through_preparation_but_not_after_mutation`,
-`repeated_cancellation_walks_back_through_pending_jobs`.
+`repeated_cancellation_walks_back_through_pending_jobs`,
+`escape_skips_programmatic_dictation_jobs`; [recognition.rs](../../src/recognition.rs):
+`a_programmatic_dictation_leaves_escape_with_its_owner`.
 These use a controlled paste boundary and temporary history store;
 no foreground application consumes the clipboard.
 
@@ -782,6 +849,17 @@ The macOS HUD is a click-through, nonactivating `NSPanel` with
 behaviors. The cross-application flag explicitly allows the overlay to join
 another application's fullscreen Space (#75); panel style flags on an ordinary
 `NSWindow` were not sufficient.
+
+At the top position the capsule sits 12 pt below the menu bar, or below the
+notch (`NSScreen.safeAreaInsets`) where a fullscreen Space hides the menu bar
+and `visibleFrame` reaches the top of a notched screen. Screens without a notch
+and normal Spaces keep their position. Check: `scripts/check
+dictation_indicator::tests::top_capsule` covers the math only; placement over a
+fullscreen app on a notched Mac is not yet observed.
+
+Hex itself never activates on paste. Another app's modifier-tap hotkey once
+switched Spaces before the paste; the [chord breaker](#hold-and-short-taps)
+keeps a held bare-modifier dictation from reading as a tap.
 
 **Observed September 14, 2026:** the unmodified HUD was not found on screen over
 a native fullscreen TextEdit fixture. Changing only the window class to

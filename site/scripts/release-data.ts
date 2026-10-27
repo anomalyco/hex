@@ -1,16 +1,16 @@
 // Writes src/release-data.json, the release every download link names, from
-// the Anomaly release service's stable manifest for this build mode
-// (production: anoma.ly/release, dev: dev.anoma.ly/release), and copies the
+// the Anomaly release service's stable manifest (anoma.ly/release, for both
+// site environments), and copies the
 // installers into public/. Until the service has a stable Hex release, the
 // links name the frozen 2.3.1 downloads.
 //
 //   bun scripts/release-data.ts [--mode dev]
 import { copyFileSync, writeFileSync } from "node:fs"
 import { parseArgs } from "node:util"
-import { hostForMode, originForMode } from "../src/base"
+import { originForMode, RELEASE_SERVICE } from "../src/base"
 
 const { values } = parseArgs({ options: { mode: { type: "string", default: "production" } } })
-const service = `https://${hostForMode(values.mode)}/release`
+const service = RELEASE_SERVICE
 const site = originForMode(values.mode)
 const root = new URL("..", import.meta.url)
 const manifestUrl = `${service}/hex/desktop/stable.json`
@@ -47,10 +47,7 @@ const data = current
       windowsX64: fileUrl(current, "windows-x64-setup", `${legacy}/releases/HEX-Setup-2.3.1-x64.exe`),
       windowsArm64: fileUrl(current, "windows-arm64-setup", `${legacy}/releases/HEX-Setup-2.3.1-arm64.exe`),
       linuxInstaller: `${site}/install-linux.sh`,
-      linuxCommand:
-        values.mode === "dev"
-          ? `curl -fsSL ${site}/install-linux.sh | HEX_RELEASE_BASE_URL=${service} sh`
-          : `curl -fsSL ${site}/install-linux.sh | sh`,
+      linuxCommand: `curl -fsSL ${site}/install-linux.sh | sh`,
       github: `https://github.com/anomalyco/hex/releases/tag/app-v${current.release.version}`,
       manifest: manifestUrl,
     }

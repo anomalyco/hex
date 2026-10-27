@@ -1,8 +1,9 @@
 #!/bin/sh
 # Stamps a prerelease of the checked-out version into Cargo.toml and
 # Cargo.lock, so a staging build reports the version the release service
-# publishes (X.Y.Z-dev.N or X.Y.Z-beta.N). Release builds only; the change is
-# never committed.
+# publishes (X.Y.Z-dev.N or X.Y.Z-beta.N, or X.Y.(Z+1)-dev.N: the dev channel's
+# builds once X.Y.Z is released). Release builds only; the change is never
+# committed.
 #
 #   set-crate-version.sh <source root> <version>
 set -eu
@@ -11,10 +12,11 @@ root=$1
 version=$2
 current=$(sed -n 's/^version = "\([^"]*\)"/\1/p' "$root/Cargo.toml" | head -1)
 [ "$version" = "$current" ] && exit 0
+next=$(printf '%s\n' "$current" | awk -F. '{ print $1 "." $2 "." $3 + 1 }')
 case "$version" in
-  "$current"-dev.[0-9]* | "$current"-beta.[0-9]*) ;;
+  "$current"-dev.[0-9]* | "$current"-beta.[0-9]* | "$next"-dev.[0-9]*) ;;
   *)
-    echo "Can only stamp a prerelease of $current, not $version." >&2
+    echo "Can only stamp a prerelease of $current or $next-dev, not $version." >&2
     exit 1
     ;;
 esac

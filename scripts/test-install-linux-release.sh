@@ -124,6 +124,13 @@ test ! -e "$support_dir/install.json"
 test ! -e "$home/.config/systemd/user/hex.service"
 test -f "$support_dir/settings.json"
 
+# The dev channel: its manifest, its receipt.
+jq '.channel = "dev"' "$temporary/manifest.json" > "$server/release/hex/desktop/dev.json"
+HOME="$home" HEX_INSTALL_DIR="$install_dir" HEX_APPLICATION_SUPPORT_DIR="$support_dir" \
+  HEX_RELEASE_BASE_URL="http://127.0.0.1:$port/release" HEX_INSTALL_CHANNEL=dev sh "$installer" > /dev/null
+test "$(jq -r .channel "$support_dir/install.json")" = dev
+install uninstall
+
 jq '.app = "other"' "$temporary/manifest.json" > "$server/release/hex/desktop/stable.json"
 refuses "another app's manifest"
 jq '.release.targets = {}' "$temporary/manifest.json" > "$server/release/hex/desktop/stable.json"

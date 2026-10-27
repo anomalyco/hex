@@ -2,22 +2,27 @@
 
 One run of the **Release** workflow (`.github/workflows/release-desktop.yml`)
 builds, signs, and publishes every platform from one commit to the Anomaly
-release service (`anomalyco/release`; production `https://anoma.ly/release`,
-dev `https://dev.anoma.ly/release`). Hex's names on the service are in
-[`plans/release-service.md`](plans/release-service.md).
+release service (`anomalyco/release`, `https://anoma.ly/release`). Hex's
+names on the service are in [`plans/release-service.md`](plans/release-service.md).
+The service's dev stage, `https://dev.anoma.ly/release`, is only for testing
+the release service itself: Hex never publishes to it or reads from it. Builds
+are tested before stable on the production service's `dev` channel.
 
 ```ts
-Release (workflow_dispatch: ref, channel, brew-version; or push tag app-v<version>)
+Release (workflow_dispatch: ref, channel; push to dev: dev channel; push tag app-v<version>: stable)
 ├─ resolve        version from Cargo.toml, channel, service origin, tag
 ├─ build          build-desktop.yml: Linux x86_64 (Arch container), Windows x64 + ARM64,
 │                 Authenticode via Azure Artifact Signing (docs/windows-signing.md)
 ├─ macos          build-macos.yml: Developer ID, notarized DMG and ZIP (docs/plans/macos-signing.md)
-├─ collect        one release-files artifact; stable requires every platform and Authenticode
+├─ collect        one release-files artifact; dev and stable require macOS, stable Authenticode
 ├─ publish        curl + GitHub OIDC: upload every target, then the release (scripts/release-service.sh);
 │                 records the Nix flake
-├─ github         mirrors the files to the GitHub release (scripts/publish-github-release.sh)
-├─ aur            builds and installs hex-bin from the published file; stable pushes it
+├─ github         mirrors the files to the GitHub release (scripts/publish-github-release.sh); not dev
+├─ aur            builds and installs hex-bin from the published file; stable pushes it; not dev
 ├─ record-aur     records that the AUR serves the version
+├─ homebrew       renders Casks/hex.rb from the published DMG, brew style + audit; stable pushes it; not dev
+│                 to anomalyco/homebrew-tap (scripts/release-homebrew.sh)
+├─ record-brew    records that the cask serves the version
 └─ site           stable: deploys the production site, whose links read the new manifest
 ```
 
@@ -25,14 +30,24 @@ Release (workflow_dispatch: ref, channel, brew-version; or push tag app-v<versio
 
 The service authorizes the publish jobs by their GitHub OIDC token alone:
 `registry/hex.json` in `anomalyco/release` admits repository `anomalyco/hex`
-(by name and id), workflow `.github/workflows/release-desktop.yml` running
-from `refs/heads/dev`, `refs/heads/production`, or `refs/tags/app-v*` with
-that same ref, and only in
-the `release` environment, for artifact `desktop` and channels `stable`,
-`beta`, and `dev`, on both the dev and production services. No key or secret
-publishes. Only the `publish`, `record-aur`, and `record-brew` jobs get
-`id-token: write`, run in `release`, receive no other secrets, and use actions
-pinned by SHA.
+(by name and id) and workflow `.github/workflows/release-desktop.yml` running
+from the same ref it was triggered on, for artifact `desktop` on both the dev
+and production services, as two publishers:
+
+```ts
+release      refs/heads/production, refs/tags/app-v*   channels stable, beta   waits for Dax's approval
+release-dev  refs/heads/dev                            channel  dev            no approval (deployment branch: dev)
+```
+
+Stable runs use `release`; dev and check runs use `release-dev`, so a dev
+build can never publish to `stable`. No key or secret publishes. Only the
+`publish`, `record-aur`, and `record-brew` jobs get `id-token: write`, run in
+that environment, receive no other secrets, and use actions pinned by SHA.
+Signing values must exist in each environment that signs: `release` for
+stable and `release-dev` for dev builds (the Apple secrets, and the Azure
+values with a federated credential for each environment's subject,
+`repo:anomalyco/hex:environment:release` and
+`repo:anomalyco/hex:environment:release-dev`).
 
 `publish` uploads each file under its own name with its SHA-256 (files over
 95 MiB in 90 MiB parts), then posts the release naming each target by file
@@ -40,25 +55,47 @@ and hash, with distributions `direct`, `aur` (`hex-bin`), `brew`
 (`anomalyco/tap/hex`), and `nix`. It then downloads every published URL and
 compares it with the local bytes. Package-manager entries gain a version only
 once that package manager serves it: `nix` at publish (the flake builds the
-release commit), `aur` after the push, and `brew` by dispatching Release with
-`brew-version` after bumping the cask by hand. Manifests are not signed;
+release commit), `aur` after the push, and `brew` after the cask push. Manifests are not signed;
 clients check HTTPS, each file's size and SHA-256, and the OS code signature
 (Developer ID on macOS, Authenticode on Windows). Linux has only the hash.
 
+## Homebrew
+
+`packaging/homebrew/hex.rb` is the cask `anomalyco/tap/hex`: the `anomaly.hex`
+app from the release's `macos-arm64-dmg` file URL and SHA-256, `auto_updates
+true` (Hex updates any writable `Hex.app` itself), a livecheck on the stable
+manifest, and zap paths for the new identity and the shared `hex` data folder.
+The `homebrew` job renders it on a macOS runner, runs `brew style` and `brew
+audit --cask --strict --online` in a local copy of the tap, and pushes it with
+the tap deploy key under its own SSH alias; only that step sees the key. It
+runs only for stable releases.
+
 ## Channels
 
-- `staging` (the default) is the dry run: every platform is built as
-  `<version>-dev.<run number>` (`scripts/set-crate-version.sh` stamps it into
-  the build, so the binaries report it) and published on the dev service's
-  `dev` channel (the service refuses publishing a channel's current version
-  again, and every build's bytes differ), with a draft prerelease GitHub release tagged `staging-<run-id>`;
-  the AUR package is built from the published file and installed in a
-  container but not pushed, and the AUR and Nix versions are recorded on the
-  dev service. Rerunning a failed run republishes nothing: the same version
-  with the same files is accepted as already published. Point a build at the
-  dev service with `HEX_RELEASE_BASE_URL=https://dev.anoma.ly/release`; the
-  dev site (`https://dev.anoma.ly/hex`) links the dev service's `stable`
-  files when it has any.
+- `check` (the dispatch default, run from `dev`) builds, signs, and verifies
+  every platform as `<next>-dev.<run number>` in `release-dev` and publishes
+  nothing anywhere: a dry run of the build and packaging.
+- `dev` publishes a build of `dev` to the production service's `dev`
+  channel (`https://anoma.ly/release/hex/desktop/dev.json`), which installs
+  set to the Dev update channel follow and `https://anoma.ly/hex/download/dev`
+  links. Every push to `dev` runs it, except pushes that change only `docs/`,
+  `site/`, or Markdown; a newer push cancels a dev run still in progress, and
+  `gh workflow run release-desktop.yml --ref dev -f channel=dev -f ref=dev`
+  runs it by hand. It runs in `release-dev`, so it needs no approval. The
+  version is `<next>-dev.<run number>`, where `<next>` is the crate version,
+  or its next patch once tag `app-v<version>` exists (so today
+  `2.3.2-dev.N`): every dev build is newer than the stable release before it,
+  and switching an install back to Stable waits for the next stable release
+  instead of downgrading. It publishes only signed builds, because the
+  updater checks signatures: until `release-dev` has the Apple secrets it has
+  no macOS targets, and until Azure Artifact Signing works there it has no
+  Windows targets (the run summary says so); Linux needs no signing. It
+  publishes only the release: no GitHub release, AUR, Homebrew, Nix record,
+  or site deploy. Publishing a dev build is not a release: it leaves
+  `production`, the stable channel, and the release freeze alone. Installs on
+  the Dev channel check every 10 minutes and when the window opens or gains
+  focus (at most once a minute), so a push reaches them within minutes of its
+  run finishing.
 - `stable` publishes to `https://anoma.ly/release`, the GitHub release
   `app-v<version>` (kept off "Latest", which the SDK uses), the AUR, and then
   the production site. It needs every platform, Authenticode-signed Windows
@@ -77,21 +114,16 @@ refuses force pushes and deletion.
 
 1. Bump `version` in `Cargo.toml` (and `Cargo.lock`), add
    `docs/releases/<version>.md`, push to `dev`.
-2. Run Release from `dev` with `channel: staging` and `ref: dev`; check the
-   summary, the manifest at
-   `https://dev.anoma.ly/release/hex/desktop/stable.json`, the draft release,
-   and a staged update.
+2. Let the push to `dev` publish its dev-channel build
+   (`https://anoma.ly/release/hex/desktop/dev.json`) and try it on an install
+   set to the Dev update channel.
 3. Fast-forward `production` to that commit (`git push origin
    <commit>:production`, which refuses anything but a fast-forward), then run
    Release from `production` with `channel: stable` (its default `ref`).
    Stable runs refuse any other branch.
-4. Bump the Homebrew cask (`anomalyco/homebrew-tap`, `Casks/hex.rb`: version,
-   URL of the `macos-arm64-dmg` file, sha256; keep `auto_updates true`, since
-   Hex updates any writable `Hex.app` itself), then run Release with
-   `brew-version: <version>` and `channel: stable`.
-5. Bump the README version link. The site reads the release from the service
+4. Bump the README version link. The site reads the release from the service
    when it deploys.
-6. First release on the service only: set the informational item's version in
+5. First release on the service only: set the informational item's version in
    `packaging/macos/legacy-appcast.xml` (a 2.4.0 / build 20400 placeholder) to
    the release, push it, and publish it for 2.3.1 Macs (below).
 
@@ -119,6 +151,7 @@ cloudflare.config.ts (cf deploy --prebuilt --mode <mode>, from CI only)
 └─ dev:        Worker hex-dev-site         routes dev.anoma.ly/hex, dev.anoma.ly/hex/*  bucket hex-dev-files
 
 https://anoma.ly/hex/                      the site; downloads read the service's stable manifest at build time
+├─ download/dev                            302 to the dev channel's macos-arm64-dmg, read per request
 ├─ install-linux.sh, install-windows.ps1   the installers, copied from scripts/ at build time
 └─ files/                                  the frozen 2.3.1 bucket for old clients (below)
 ```
@@ -128,6 +161,21 @@ reads the stable manifest of the mode's service when the site builds; until
 the service has a stable Hex release they name the frozen 2.3.1 downloads.
 The installers fetch the stable manifest, download their target, check its
 size and SHA-256, and write the direct-install receipt.
+
+`/hex/download/dev` is the permanent team link to the newest Mac dev build:
+the Worker reads its host's service `dev.json` on every request and redirects
+to the `macos-arm64-dmg` file, or answers 404 with a plain message when no dev
+release (or no Mac build of it) exists. The release service is another Worker
+on the anoma.ly zone, so the site Worker sets the `global_fetch_strictly_public`
+compatibility flag for that fetch to reach it. A DMG install updates itself
+from the dev channel because its version is a dev build; installs from the
+stable link switch in Settings › General › Update channel.
+The route ships with the Worker, so it is live on production only after a
+production site deploy of a commit that has it: the next stable Release, or
+Site dispatched with `mode: production` from `production` once `production`
+contains it. Both move or deploy `production`, which the release freeze
+forbids, so until the freeze lifts the link works only on dev
+(`https://dev.anoma.ly/hex/download/dev`, which reads the dev service).
 
 Deploys run only from CI (`.github/workflows/site.yml` and `site-deploy.yml`):
 a push to `dev` that touches `site/` deploys dev; a stable Release deploys
@@ -197,7 +245,9 @@ the release service compile `https://anoma.ly/release`.
 
 ## Secrets (`release` environment, limited to `dev`, `production`, and `app-v*`)
 
-`dev` is allowed because dev site deploys and staging releases run from it.
+`dev` is allowed because dev site deploys run from it. Dev-channel builds
+use the separate `release-dev` environment (branch `dev`, no approval), which
+holds only signing values.
 
 | Name | Use |
 | --- | --- |
@@ -205,6 +255,7 @@ the release service compile `https://anoma.ly/release`.
 | `CLOUDFLARE_API_TOKEN`, var `CLOUDFLARE_ACCOUNT_ID` | site deploys (`github-actions-hex`) |
 | `R2_SECRET_ACCESS_KEY`, var `R2_ACCESS_KEY_ID` | the one-time legacy appcast upload (same token) |
 | `AUR_SSH_PRIVATE_KEY` | pushes `hex-bin` (key `github-actions-hex-aur`) |
+| `HOMEBREW_TAP_DEPLOY_KEY` | pushes `Casks/hex.rb` (deploy key `github-actions-hex-homebrew`, write access on `anomalyco/homebrew-tap` only) |
 | `AZURE_*` | Authenticode (docs/windows-signing.md) |
 | `APPLE_*` | macOS signing and notarization (docs/plans/macos-signing.md) |
 | `HEX_RELEASE_SIGNING_KEY`, `SPARKLE_ED_PRIVATE_KEY` | old 2.3.1 feed keys; unused, kept for old clients |

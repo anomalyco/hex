@@ -2130,6 +2130,7 @@ mod tests {
             ],
             now_ms: 100_000,
             url: None,
+            sessions_error: None,
         }
     }
 

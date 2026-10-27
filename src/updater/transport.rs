@@ -17,6 +17,8 @@ pub const MAX_MANIFEST_BYTES: u64 = 256 * 1024;
 /// The last manifest the service sent, revalidated with its ETag.
 #[derive(Default)]
 pub struct ManifestCache {
+    /// The manifest the ETag and body belong to; switching channels changes it.
+    url: Option<String>,
     etag: Option<String>,
     body: Option<String>,
 }
@@ -53,6 +55,12 @@ impl ManifestCache {
         let body = scratch.join("manifest.json.partial");
         let headers = scratch.join("manifest.headers");
         let _ = fs::remove_file(&body);
+        if self.url.as_deref() != Some(url) {
+            *self = Self {
+                url: Some(url.to_owned()),
+                ..Self::default()
+            };
+        }
         let mut command = curl();
         command.args(["--max-time", "60", "--max-filesize"]);
         command.arg(MAX_MANIFEST_BYTES.to_string());

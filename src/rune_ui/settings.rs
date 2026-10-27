@@ -15,10 +15,10 @@ use super::{Menu, Request, Service, ShortcutTarget, Ui};
 use super::{explainer, host};
 use crate::app_settings::{
     AppSettings, HotkeyBinding, HotkeyKey, HotkeyModifiers, IndicatorPosition, ModifierSide,
-    RecordingAudioBehavior,
+    RecordingAudioBehavior, UpdateChannel,
 };
 use crate::desktop_host::{
-    DesktopAction, DesktopGrantedShortcut, DesktopShortcut, DesktopShortcuts,
+    DesktopAction, DesktopGrantedShortcut, DesktopShortcut, DesktopShortcuts, DesktopUpdateStatus,
 };
 use crate::desktop_i18n::{tr, tr_fill};
 use crate::dictation::ShortcutMode;
@@ -299,6 +299,10 @@ pub(super) fn conflicts(
         ShortcutTarget::Dictation => HotkeySlot::Dictation,
         ShortcutTarget::VoiceAction => HotkeySlot::VoiceAction,
         ShortcutTarget::PasteLast => HotkeySlot::PasteLast,
+        #[cfg(hex_capture)]
+        ShortcutTarget::Capture => HotkeySlot::Capture,
+        #[cfg(hex_capture)]
+        ShortcutTarget::CaptureList => HotkeySlot::CaptureList,
     };
     settings.hotkey_in_use(slot, binding)
 }
@@ -324,6 +328,10 @@ pub(super) fn binding(settings: &AppSettings, target: ShortcutTarget) -> Option<
         ShortcutTarget::Dictation => Some(&settings.dictation_hotkey),
         ShortcutTarget::PasteLast => settings.paste_last_hotkey.as_ref(),
         ShortcutTarget::VoiceAction => Some(&settings.edit_hotkey),
+        #[cfg(hex_capture)]
+        ShortcutTarget::Capture => Some(&settings.capture.hotkey),
+        #[cfg(hex_capture)]
+        ShortcutTarget::CaptureList => Some(&settings.capture.list_hotkey),
     }
 }
 
@@ -336,6 +344,10 @@ pub(super) fn set_binding(
         ShortcutTarget::Dictation => settings.dictation_hotkey = binding,
         ShortcutTarget::PasteLast => settings.paste_last_hotkey = Some(binding),
         ShortcutTarget::VoiceAction => settings.edit_hotkey = binding,
+        #[cfg(hex_capture)]
+        ShortcutTarget::Capture => settings.capture.hotkey = binding,
+        #[cfg(hex_capture)]
+        ShortcutTarget::CaptureList => settings.capture.list_hotkey = binding,
     }
 }
 
@@ -520,6 +532,10 @@ fn portal_grant(ui: &Ui, target: ShortcutTarget) -> Option<&DesktopGrantedShortc
         ShortcutTarget::Dictation => "Dictation",
         ShortcutTarget::PasteLast => "Paste last dictation",
         ShortcutTarget::VoiceAction => "Voice Action",
+        #[cfg(hex_capture)]
+        ShortcutTarget::Capture => "Capture",
+        #[cfg(hex_capture)]
+        ShortcutTarget::CaptureList => "Send-to list",
     };
     granted.iter().find(|shortcut| shortcut.name == name)
 }
@@ -544,6 +560,10 @@ fn shortcut_row(ui: &Ui, p: Paint, target: ShortcutTarget) -> El {
         ShortcutTarget::Dictation => ("dictation-shortcut", tr("Shortcut")),
         ShortcutTarget::PasteLast => ("paste-last", tr("Paste last dictation")),
         ShortcutTarget::VoiceAction => ("voice-action-shortcut", tr("Voice Action")),
+        #[cfg(hex_capture)]
+        ShortcutTarget::Capture => ("capture-shortcut", tr("Shortcut")),
+        #[cfg(hex_capture)]
+        ShortcutTarget::CaptureList => ("capture-list-shortcut", tr("Send-to list")),
     };
     described_row(
         p,
@@ -568,6 +588,10 @@ pub(super) fn shortcut_control(ui: &Ui, p: Paint, target: ShortcutTarget) -> El 
         ShortcutTarget::Dictation => "dictation-shortcut-control",
         ShortcutTarget::PasteLast => "paste-last-control",
         ShortcutTarget::VoiceAction => "voice-action-shortcut-control",
+        #[cfg(hex_capture)]
+        ShortcutTarget::Capture => "capture-shortcut-control",
+        #[cfg(hex_capture)]
+        ShortcutTarget::CaptureList => "capture-list-shortcut-control",
     };
     let picker = super::platform_settings::side_selector(ui, p, target);
     // The picker hangs off the keys' left edge in the room its margin
@@ -926,6 +950,10 @@ pub(super) fn hotkey_control(ui: &Ui, p: Paint, target: ShortcutTarget) -> El {
         ShortcutTarget::Dictation => "dictation-hotkey",
         ShortcutTarget::PasteLast => "paste-last-hotkey",
         ShortcutTarget::VoiceAction => "voice-action-hotkey",
+        #[cfg(hex_capture)]
+        ShortcutTarget::Capture => "capture-hotkey",
+        #[cfg(hex_capture)]
+        ShortcutTarget::CaptureList => "capture-list-hotkey",
     };
     let face = match ui.capture {
         Capture::Listening {
@@ -1187,11 +1215,12 @@ fn output_section(ui: &Ui, p: Paint) -> El {
 }
 
 /// An advanced setting is off its default, so Advanced stays open to show
-/// it: the microphone released while idle, or Double-tap only where its row
-/// shows.
+/// it: the microphone released while idle, Double-tap only where its row
+/// shows, or a chosen update channel.
 fn advanced_in_use(settings: &AppSettings) -> bool {
     settings.release_microphone_while_idle
         || (double_tap_only_applies(settings) && settings.double_tap_only)
+        || settings.updates.channel.is_some()
 }
 
 fn double_tap_only_applies(settings: &AppSettings) -> bool {
@@ -1254,7 +1283,7 @@ fn advanced_toggle(ui: &Ui, p: Paint, pinned: bool) -> El {
 /// microphone's idle release and Double-tap only.
 fn advanced_rows(ui: &Ui, p: Paint) -> Vec<CardRow> {
     let settings = &ui.settings;
-    vec![
+    let mut rows: Vec<CardRow> = vec![
         setting_row(
             p,
             "microphone-mode",
@@ -1311,7 +1340,9 @@ fn advanced_rows(ui: &Ui, p: Paint) -> Vec<CardRow> {
                 )
             }),
         ),
-    ]
+    ];
+    rows.extend(update_channel_row(ui, p).map(CardRow::from));
+    rows
 }
 
 fn release_confirmation(ui: &Ui, p: Paint) -> El {
@@ -1437,4 +1468,58 @@ fn application_section(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
         ),
     ));
     section(p, "application", tr("Application"), rows)
+}
+
+/// Stable or Dev, only while this install updates itself: test, source,
+/// managed, and package-manager installs never check a channel.
+fn update_channel_row(ui: &Ui, p: Paint) -> Option<El> {
+    let updates = matches!(
+        ui.view.as_ref()?.update_status,
+        DesktopUpdateStatus::Checking
+            | DesktopUpdateStatus::Current
+            | DesktopUpdateStatus::Failed
+            | DesktopUpdateStatus::Downloading
+            | DesktopUpdateStatus::Available
+            | DesktopUpdateStatus::ReadyToRestart
+    );
+    if !updates {
+        return None;
+    }
+    let shown = ui.settings.updates.channel.unwrap_or(
+        if crate::updater::is_dev_build(env!("CARGO_PKG_VERSION")) {
+            UpdateChannel::Dev
+        } else {
+            UpdateChannel::Stable
+        },
+    );
+    let labels: Vec<&str> = UpdateChannel::ALL
+        .iter()
+        .map(|channel| tr(channel.label()))
+        .collect();
+    Some(setting_row(
+        p,
+        "update-channel",
+        tr("Update channel"),
+        None,
+        segmented(
+            p,
+            "update-channel-control",
+            &labels,
+            UpdateChannel::ALL
+                .iter()
+                .position(|item| *item == shown)
+                .unwrap_or(0),
+            move |ui, index| {
+                // Choosing the channel already in effect saves nothing, so an
+                // unset channel keeps following the build.
+                let channel = UpdateChannel::ALL[index];
+                ui.advanced = true;
+                if channel != shown
+                    && ui.update(|settings| settings.updates.channel = Some(channel))
+                {
+                    ui.send(Request::Desktop(DesktopAction::CheckForUpdates));
+                }
+            },
+        ),
+    ))
 }

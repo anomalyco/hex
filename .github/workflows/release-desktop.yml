@@ -3,22 +3,36 @@ name: Release
 # Builds, signs, and publishes Hex for macOS, Windows, and Linux from one
 # exact commit to the Anomaly release service (docs/releasing.md,
 # docs/plans/release-service.md). The service authorizes this workflow file
-# by its GitHub OIDC token: repository anomalyco/hex, ref dev, production or
-# app-v*, environment release (anomalyco/release registry/hex.json).
+# by its GitHub OIDC token: repository anomalyco/hex, and the release-dev
+# environment from dev (dev channel only) or the release environment from
+# production or app-v* (anomalyco/release registry/hex.json). Hex never
+# publishes to or reads from the service's dev stage, dev.anoma.ly/release,
+# which only tests the service itself.
 #
 # production holds what was released and only moves by a fast-forward from
-# dev. Run staging from dev; run stable from production or push an app-v tag.
+# dev. Run stable from production or push an app-v tag.
 #
-# channel=staging (the default) is the dry run: every platform is built as
-# <version>-dev.<run number> and published on the dev service's dev channel,
-# https://dev.anoma.ly/release (the service refuses publishing a channel's
-# current version again), with a draft GitHub release, and the AUR package is
-# built and installed but not pushed. channel=stable (or an
-# app-v<version> tag) publishes to https://anoma.ly/release, the GitHub
-# release, the AUR, and the production site.
+# channel=check (the dispatch default) builds, signs, and verifies every
+# platform as <next>-dev.<run number> and publishes nothing. channel=stable
+# (or an app-v<version> tag) publishes to https://anoma.ly/release, the
+# GitHub release, the AUR, Homebrew, and the production site.
 #
-# brew-version records that the Homebrew cask (anomalyco/tap/hex, bumped by
-# hand) now serves that version, and does nothing else.
+# channel=dev publishes a build of dev, stamped <next>-dev.<run number>, to
+# the production service's dev channel (https://anoma.ly/release), where
+# installs set to the Dev update channel and the site's /hex/download/dev
+# link pick it up. Every push to dev that changes more than docs or the site
+# runs it, and a newer push cancels a dev run still in progress. It runs in
+# the release-dev environment, which needs no approval and which the service
+# lets publish only the dev channel. It publishes only signed builds: a
+# platform whose signing isn't configured in release-dev (macOS: the Apple
+# secrets; Windows: Azure Artifact Signing) is left out, with a note in the
+# summary. It touches nothing else: no GitHub release, AUR, Homebrew, Nix
+# record, or site deploy. <next> is the crate version, or its next patch once
+# that version has an app-v tag, so a dev build is always newer than the
+# stable release before it and switching back to Stable never downgrades.
+#
+# check also runs in release-dev (for its signing values); stable runs in
+# release, which waits for a reviewer.
 on:
   workflow_dispatch:
     inputs:
@@ -27,22 +41,23 @@ on:
         required: true
         default: production
       channel:
-        description: staging (dry run on dev.anoma.ly/release) or stable (public)
+        description: check (build and verify, publish nothing), dev (the dev channel; run from dev), or stable (public)
         type: choice
-        options: [staging, stable]
-        default: staging
-      brew-version:
-        description: Only record that the Homebrew cask serves this version (leave empty to release)
-        default: ""
+        options: [check, dev, stable]
+        default: check
   push:
+    branches: [dev]
     tags: ["app-v*"]
+    # Docs and the site alone cut no dev build (tag pushes ignore paths).
+    paths-ignore: ["docs/**", "site/**", "**/*.md"]
 
 permissions:
   contents: read
 
 concurrency:
-  group: release-${{ github.event_name == 'workflow_dispatch' && inputs.channel || 'stable' }}
-  cancel-in-progress: false
+  group: release-${{ github.event_name == 'workflow_dispatch' && inputs.channel || github.ref_type == 'tag' && 'stable' || 'dev' }}
+  # Only the dev channel: a newer push supersedes a dev build in progress.
+  cancel-in-progress: ${{ (github.event_name == 'workflow_dispatch' && inputs.channel || github.ref_type == 'tag' && 'stable' || 'dev') == 'dev' }}
 
 jobs:
   resolve:
@@ -54,9 +69,9 @@ jobs:
       service: ${{ steps.resolve.outputs.service }}
       tag: ${{ steps.resolve.outputs.tag }}
       notes-url: ${{ steps.resolve.outputs.notes-url }}
-      release: ${{ steps.resolve.outputs.release }}
       release-channel: ${{ steps.resolve.outputs.release-channel }}
       release-version: ${{ steps.resolve.outputs.release-version }}
+      environment: ${{ steps.resolve.outputs.environment }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -67,11 +82,12 @@ jobs:
           EVENT: ${{ github.event_name }}
           REF_NAME: ${{ github.ref_name }}
           REF_TYPE: ${{ github.ref_type }}
-          CHANNEL: ${{ github.event_name == 'workflow_dispatch' && inputs.channel || 'stable' }}
-          BREW_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.brew-version || '' }}
+          INPUT_REF: ${{ github.event_name == 'workflow_dispatch' && inputs.ref || '' }}
+          CHANNEL: ${{ github.event_name == 'workflow_dispatch' && inputs.channel || github.ref_type == 'tag' && 'stable' || 'dev' }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           sha=$(git rev-parse HEAD)
-          version=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')
+          version=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "voice-control") | .version')
           if ! printf '%s\n' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
             echo "::error::Stable releases need an X.Y.Z version, not $version."
             exit 1
@@ -79,6 +95,22 @@ jobs:
           if [ "$CHANNEL" = stable ] && [ "$REF_TYPE" != tag ] && [ "$REF_NAME" != production ]; then
             echo "::error::Stable releases run from production or an app-v tag, not $REF_NAME."
             exit 1
+          fi
+          if { [ "$CHANNEL" = dev ] || [ "$CHANNEL" = check ]; } && [ "$REF_NAME" != dev ]; then
+            echo "::error::The $CHANNEL channel runs from dev, not $REF_NAME."
+            exit 1
+          fi
+          # A dispatch builds inputs.ref, not the branch it runs from, so check
+          # that too: dev builds dev; stable builds production or its app-v tag.
+          if [ "$EVENT" = workflow_dispatch ]; then
+            if [ "$CHANNEL" = dev ] && [ "$INPUT_REF" != dev ]; then
+              echo "::error::The dev channel builds ref dev, not $INPUT_REF."
+              exit 1
+            fi
+            if [ "$CHANNEL" = stable ] && [ "$INPUT_REF" != production ] && [ "$INPUT_REF" != "app-v$version" ]; then
+              echo "::error::Stable releases build ref production or app-v$version, not $INPUT_REF."
+              exit 1
+            fi
           fi
           if [ "$EVENT:$REF_TYPE" = push:tag ] && [ "$REF_NAME" != "app-v$version" ]; then
             echo "::error::Tag $REF_NAME does not match version $version."
@@ -90,10 +122,21 @@ jobs:
               notes="https://github.com/$GITHUB_REPOSITORY/releases/tag/$tag"
               release_channel=stable release_version=$version
               ;;
-            staging)
-              service=https://dev.anoma.ly/release tag="staging-$GITHUB_RUN_ID"
+            dev | check)
+              # Once X.Y.Z is released (tagged), dev builds are X.Y.(Z+1)-dev.N,
+              # which SemVer orders above X.Y.Z.
+              # ls-remote exits 2 only when the tag is absent; any other
+              # failure stops the run rather than stamp a version below it.
+              status=0
+              git ls-remote --exit-code origin "refs/tags/app-v$version" >/dev/null || status=$?
+              case "$status" in
+                0) base=$(printf '%s\n' "$version" | awk -F. '{ print $1 "." $2 "." $3 + 1 }') ;;
+                2) base=$version ;;
+                *) echo "::error::Could not look up tag app-v$version (git ls-remote exited $status)."; exit 1 ;;
+              esac
+              service=https://anoma.ly/release tag="dev-$GITHUB_RUN_ID"
               notes="https://github.com/$GITHUB_REPOSITORY/commit/$sha"
-              release_channel=dev release_version="$version-dev.$GITHUB_RUN_NUMBER"
+              release_channel=dev release_version="$base-dev.$GITHUB_RUN_NUMBER"
               ;;
             *) echo "::error::Unknown channel $CHANNEL."; exit 1 ;;
           esac
@@ -106,17 +149,12 @@ jobs:
             echo "notes-url=$notes"
             echo "release-channel=$release_channel"
             echo "release-version=$release_version"
-            echo "release=$([ -z "$BREW_VERSION" ] && echo true || echo false)"
+            echo "environment=$([ "$CHANNEL" = stable ] && echo release || echo release-dev)"
           } >> "$GITHUB_OUTPUT"
-          if [ -n "$BREW_VERSION" ]; then
-            echo "Recording that Homebrew serves $BREW_VERSION on $service." >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo "Releasing $version ($CHANNEL) from $sha to $service as $release_channel $release_version." >> "$GITHUB_STEP_SUMMARY"
-          fi
+          echo "Releasing $version ($CHANNEL) from $sha to $service as $release_channel $release_version." >> "$GITHUB_STEP_SUMMARY"
 
   build:
     needs: resolve
-    if: needs.resolve.outputs.release == 'true'
     permissions:
       contents: read
       id-token: write
@@ -124,8 +162,8 @@ jobs:
     with:
       sha: ${{ needs.resolve.outputs.sha }}
       version: ${{ needs.resolve.outputs.release-version }}
-      sign-windows: true
-    # Azure Artifact Signing (OIDC); the values live in the release environment.
+      signing-environment: ${{ needs.resolve.outputs.environment }}
+    # Azure Artifact Signing (OIDC); the values live in the signing environment.
     secrets:
       AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
       AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
@@ -136,21 +174,20 @@ jobs:
 
   macos:
     needs: resolve
-    if: needs.resolve.outputs.release == 'true'
     uses: ./.github/workflows/build-macos.yml
     with:
       sha: ${{ needs.resolve.outputs.sha }}
       version: ${{ needs.resolve.outputs.release-version }}
-    # Its job runs in the release environment, which holds the Apple secrets.
+      # The Apple secrets live in this environment.
+      environment: ${{ needs.resolve.outputs.environment }}
+      optional: ${{ needs.resolve.outputs.channel != 'stable' }}
 
-  # Collects every platform's files into one artifact and checks them; a
-  # staging run without the macOS build (no Apple secrets yet) goes on
-  # without it, a stable one may not.
+  # Collects every platform's files into one artifact and checks them. Stable
+  # needs every platform signed; dev publishes only signed platforms; check
+  # reports what it built.
   collect:
     needs: [resolve, build, macos]
-    if: >-
-      !cancelled() && needs.resolve.outputs.release == 'true' && needs.build.result == 'success' &&
-      (needs.macos.result == 'success' || needs.resolve.outputs.channel == 'staging')
+    if: ${{ !cancelled() && needs.build.result == 'success' && needs.macos.result == 'success' }}
     runs-on: ubuntu-24.04
     env:
       HEX_VERSION: ${{ needs.resolve.outputs.release-version }}
@@ -173,10 +210,15 @@ jobs:
             test "$(head -c 2 "$exe")" = MZ
           done
           if [ ! -f "dist/Hex-$HEX_VERSION-macos-arm64.zip" ]; then
-            echo "::warning::No macOS build in this run; staging publishes Windows and Linux only."
+            if [ "$CHANNEL" = stable ]; then
+              echo "::error::Stable releases need the macOS build."
+              exit 1
+            fi
+            echo "::notice::No macOS build in this run (no Apple signing secrets); it publishes no macOS targets."
+            echo "No macOS targets: the macOS build needs the Apple signing secrets." >> "$GITHUB_STEP_SUMMARY"
           fi
           (cd dist && ls -l && sha256sum *) | tee -a "$GITHUB_STEP_SUMMARY"
-      - name: Require Authenticode signatures for stable
+      - name: Require Authenticode signatures (stable fails; dev drops unsigned Windows targets)
         run: |
           sudo apt-get install -y -qq osslsigncode >/dev/null
           unsigned=
@@ -193,7 +235,14 @@ jobs:
               echo "::error::Stable releases need Authenticode-signed Windows executables:$unsigned"
               exit 1
             fi
-            echo "::warning::Unsigned Windows executables:$unsigned"
+            if [ "$CHANNEL" = dev ]; then
+              # The updater refuses unsigned Windows builds, so dev publishes none.
+              rm -f dist/*.exe
+              echo "::notice::Windows builds are not Authenticode-signed; this dev release has no Windows targets."
+              echo "No Windows targets: Azure Artifact Signing is not configured in release-dev." >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "::warning::Unsigned Windows executables:$unsigned"
+            fi
           fi
       - uses: actions/upload-artifact@v7
         with:
@@ -201,13 +250,14 @@ jobs:
           path: dist/
           if-no-files-found: error
 
-  # The only job that can publish: its OIDC token carries the release
-  # environment the service requires. No other credentials reach it.
+  # The only job that can publish: its OIDC token carries the environment the
+  # service requires (release for stable, release-dev for dev). No
+  # other credentials reach it.
   publish:
     needs: [resolve, collect]
-    if: ${{ !cancelled() && needs.collect.result == 'success' }}
+    if: ${{ !cancelled() && needs.collect.result == 'success' && needs.resolve.outputs.channel != 'check' }}
     runs-on: ubuntu-24.04
-    environment: release
+    environment: ${{ needs.resolve.outputs.environment }}
     permissions:
       contents: read
       id-token: write
@@ -234,21 +284,20 @@ jobs:
           { echo '### Manifest'; echo '```json'; cat dist/manifest.json; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
       - name: Record the Nix flake
         # The flake builds this commit from source, so it serves the version now.
+        if: needs.resolve.outputs.channel == 'stable'
         run: scripts/release-service.sh distribution nix "$HEX_VERSION"
 
   github:
     name: GitHub release
     needs: [resolve, publish]
-    if: ${{ !cancelled() && needs.publish.result == 'success' }}
+    if: ${{ !cancelled() && needs.publish.result == 'success' && needs.resolve.outputs.channel == 'stable' }}
     runs-on: ubuntu-24.04
     permissions:
       contents: write
     env:
       HEX_VERSION: ${{ needs.resolve.outputs.release-version }}
       HEX_RELEASE_COMMIT: ${{ needs.resolve.outputs.sha }}
-      HEX_RELEASE_CHANNEL: ${{ needs.resolve.outputs.channel }}
       HEX_RELEASE_TAG: ${{ needs.resolve.outputs.tag }}
-      HEX_RELEASE_NOTES_URL: ${{ needs.resolve.outputs.service }}/hex/desktop/${{ needs.resolve.outputs.release-channel }}.json
       HEX_RELEASE_SOURCE: ${{ github.workspace }}/source
     steps:
       - uses: actions/checkout@v7
@@ -271,10 +320,10 @@ jobs:
   aur:
     name: AUR
     needs: [resolve, publish]
-    if: ${{ !cancelled() && needs.publish.result == 'success' }}
+    if: ${{ !cancelled() && needs.publish.result == 'success' && needs.resolve.outputs.channel == 'stable' }}
     runs-on: ubuntu-24.04
     container: archlinux:base-devel
-    environment: release
+    environment: ${{ needs.resolve.outputs.environment }}
     env:
       HEX_VERSION: ${{ needs.resolve.outputs.release-version }}
       LINUX_URL: ${{ needs.publish.outputs.linux-url }}
@@ -302,18 +351,16 @@ jobs:
           curl -fsS "$LINUX_URL" | cmp - "dist/hex-$HEX_VERSION-linux-x64"
           { echo '### AUR PKGBUILD'; echo '```'; cat aur/PKGBUILD; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
       - name: Push to the AUR
-        if: needs.resolve.outputs.channel == 'stable'
         env:
           AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
         run: tools/scripts/release-aur.sh publish aur
 
-  # Tells AUR installs about the version only once the AUR serves it. A
-  # staging run records it on the dev service to rehearse the call.
+  # Tells AUR installs about the version only once the AUR serves it.
   record-aur:
     needs: [resolve, aur]
     if: ${{ !cancelled() && needs.aur.result == 'success' }}
     runs-on: ubuntu-24.04
-    environment: release
+    environment: ${{ needs.resolve.outputs.environment }}
     permissions:
       contents: read
       id-token: write
@@ -327,17 +374,64 @@ jobs:
           persist-credentials: false
       - run: scripts/release-service.sh distribution aur "$HEX_VERSION"
 
+  # Renders the cask from the published DMG, checks it with brew, and pushes
+  # it to anomalyco/homebrew-tap with the tap's deploy key.
+  homebrew:
+    name: Homebrew
+    needs: [resolve, publish]
+    if: ${{ !cancelled() && needs.publish.result == 'success' && needs.resolve.outputs.channel == 'stable' }}
+    runs-on: macos-15
+    environment: ${{ needs.resolve.outputs.environment }}
+    permissions:
+      contents: read
+    env:
+      RELEASE: ${{ needs.resolve.outputs.service }}
+      HEX_VERSION: ${{ needs.resolve.outputs.release-version }}
+      RELEASE_CHANNEL: ${{ needs.resolve.outputs.release-channel }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Render the cask from the published DMG
+        run: |
+          curl -fsS "$RELEASE/hex/desktop/$RELEASE_CHANNEL.json" -o manifest.json
+          version=$(jq -er .release.version manifest.json)
+          test "$version" = "$HEX_VERSION"
+          dmg=$(jq -ec '.release.targets["macos-arm64-dmg"]' manifest.json) || {
+            echo "::error::Hex $version has no macos-arm64-dmg build."
+            exit 1
+          }
+          url="${RELEASE%/release}$(printf '%s' "$dmg" | jq -r .url)"
+          sha256=$(printf '%s' "$dmg" | jq -r .sha256)
+          scripts/release-homebrew.sh render "$version" "$url" "$sha256" hex.rb
+          { echo '### Casks/hex.rb'; echo '```ruby'; cat hex.rb; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+      - name: Check it with brew
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+          HOMEBREW_NO_INSTALL_FROM_API: "1"
+        run: |
+          brew tap anomalyco/tap
+          cp hex.rb "$(brew --repo anomalyco/tap)/Casks/hex.rb"
+          brew style --cask anomalyco/tap/hex
+          brew audit --cask --strict --online anomalyco/tap/hex
+      - name: Push to anomalyco/homebrew-tap
+        env:
+          HOMEBREW_TAP_DEPLOY_KEY: ${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}
+        run: scripts/release-homebrew.sh publish hex.rb "$HEX_VERSION"
+
+  # Tells Homebrew installs about the version only once the tap serves it.
   record-brew:
-    needs: resolve
-    if: needs.resolve.outputs.release == 'false'
+    needs: [resolve, homebrew]
+    if: ${{ !cancelled() && needs.homebrew.result == 'success' }}
     runs-on: ubuntu-24.04
-    environment: release
+    environment: ${{ needs.resolve.outputs.environment }}
     permissions:
       contents: read
       id-token: write
     env:
       RELEASE: ${{ needs.resolve.outputs.service }}
-      HEX_VERSION: ${{ inputs.brew-version }}
+      HEX_VERSION: ${{ needs.resolve.outputs.release-version }}
+      HEX_RELEASE_CHANNEL: ${{ needs.resolve.outputs.release-channel }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

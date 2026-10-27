@@ -918,7 +918,7 @@ dependencies = [
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
- "windows 0.62.2",
+ "windows 0.61.3",
 ]
 
 [[package]]
@@ -2041,7 +2041,7 @@ dependencies = [
  "js-sys",
  "log",
  "wasm-bindgen",
- "windows-core 0.62.2",
+ "windows-core 0.57.0",
 ]
 
 [[package]]
@@ -4484,7 +4484,7 @@ dependencies = [
 [[package]]
 name = "rune"
 version = "0.0.1"
-source = "git+https://github.com/anomalyco/rune.git?rev=028d08d5570d6f0415532b41ec3518e943c67ad0#028d08d5570d6f0415532b41ec3518e943c67ad0"
+source = "git+https://github.com/anomalyco/rune.git?rev=cf6677e26b58e588c2764c43c5bbc1a15f17a63b#cf6677e26b58e588c2764c43c5bbc1a15f17a63b"
 dependencies = [
  "arboard",
  "blake3",
@@ -4534,6 +4534,8 @@ dependencies = [
  "web-sys",
  "web-time",
  "wgpu",
+ "wgpu-core",
+ "wgpu-hal",
  "windows-sys 0.59.0",
  "winit",
  "x11rb 0.13.2",
@@ -4545,7 +4547,7 @@ dependencies = [
 [[package]]
 name = "rune-kit"
 version = "0.0.1"
-source = "git+https://github.com/anomalyco/rune.git?rev=028d08d5570d6f0415532b41ec3518e943c67ad0#028d08d5570d6f0415532b41ec3518e943c67ad0"
+source = "git+https://github.com/anomalyco/rune.git?rev=cf6677e26b58e588c2764c43c5bbc1a15f17a63b#cf6677e26b58e588c2764c43c5bbc1a15f17a63b"
 dependencies = [
  "rune",
  "rune-motion",
@@ -4555,12 +4557,12 @@ dependencies = [
 [[package]]
 name = "rune-motion"
 version = "0.1.0"
-source = "git+https://github.com/anomalyco/rune.git?rev=028d08d5570d6f0415532b41ec3518e943c67ad0#028d08d5570d6f0415532b41ec3518e943c67ad0"
+source = "git+https://github.com/anomalyco/rune.git?rev=cf6677e26b58e588c2764c43c5bbc1a15f17a63b#cf6677e26b58e588c2764c43c5bbc1a15f17a63b"
 
 [[package]]
 name = "rune-theme-opencode"
 version = "0.0.1"
-source = "git+https://github.com/anomalyco/rune.git?rev=028d08d5570d6f0415532b41ec3518e943c67ad0#028d08d5570d6f0415532b41ec3518e943c67ad0"
+source = "git+https://github.com/anomalyco/rune.git?rev=cf6677e26b58e588c2764c43c5bbc1a15f17a63b#cf6677e26b58e588c2764c43c5bbc1a15f17a63b"
 dependencies = [
  "rune",
  "rune-kit",
@@ -5755,9 +5757,9 @@ dependencies = [
 
 [[package]]
 name = "transcribe-cpp"
-version = "0.4.0"
+version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f6cad85eeb846a7064891c8b49b92a57a0f2d4dd089104cb199608b23043555e"
+checksum = "8bab65d30f5a4c3ea0ab6f38236823389f3914b0605bbc0073a4ec88018c0714"
 dependencies = [
  "log",
  "thiserror 2.0.21",
@@ -6075,6 +6077,7 @@ dependencies = [
  "rubato",
  "rune",
  "rune-kit",
+ "rune-motion",
  "rune-theme-opencode",
  "scrawl-capture",
  "screencapturekit",
@@ -6091,6 +6094,7 @@ dependencies = [
  "unicode-normalization",
  "unicode-segmentation",
  "url",
+ "wgpu",
  "windows 0.62.2",
  "windows-future 0.3.2",
  "windows-sys 0.61.2",
@@ -6664,12 +6668,24 @@ dependencies = [
 
 [[package]]
 name = "windows-core"
+version = "0.57.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d2ed2439a290666cd67ecce2b0ffaad89c2a56b976b736e6ece670297897832d"
+dependencies = [
+ "windows-implement 0.57.0",
+ "windows-interface 0.57.0",
+ "windows-result 0.1.2",
+ "windows-targets 0.52.6",
+]
+
+[[package]]
+name = "windows-core"
 version = "0.61.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c0fdd3ddb90610c7638aa2b3a3ab2904fb9e5cdbecc643ddb3647212781c4ae3"
 dependencies = [
- "windows-implement",
- "windows-interface",
+ "windows-implement 0.60.2",
+ "windows-interface 0.59.3",
  "windows-link 0.1.3",
  "windows-result 0.3.4",
  "windows-strings 0.4.2",
@@ -6681,8 +6697,8 @@ version = "0.62.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b8e83a14d34d0623b51dce9581199302a221863196a1dde71a7663a4c2be9deb"
 dependencies = [
- "windows-implement",
- "windows-interface",
+ "windows-implement 0.60.2",
+ "windows-interface 0.59.3",
  "windows-link 0.2.1",
  "windows-result 0.4.1",
  "windows-strings 0.5.1",
@@ -6712,9 +6728,31 @@ dependencies = [
 
 [[package]]
 name = "windows-implement"
+version = "0.57.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9107ddc059d5b6fbfbffdfa7a7fe3e22a226def0b2608f72e9d552763d3e1ad7"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+]
+
+[[package]]
+name = "windows-implement"
 version = "0.60.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "053e2e040ab57b9dc951b72c264860db7eb3b0200ba345b4e4c3b14f67855ddf"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+]
+
+[[package]]
+name = "windows-interface"
+version = "0.57.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "29bee4b38ea3cde66011baa44dba677c432a78593e202392d1e9070cf2a7fca7"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -6762,6 +6800,15 @@ checksum = "6e2e40844ac143cdb44aead537bbf727de9b044e107a0f1220392177d15b0f26"
 dependencies = [
  "windows-core 0.62.2",
  "windows-link 0.2.1",
+]
+
+[[package]]
+name = "windows-result"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5e383302e8ec8515204254685643de10811af0ed97ea37210dc26fb0032647f8"
+dependencies = [
+ "windows-targets 0.52.6",
 ]
 
 [[package]]

@@ -81,7 +81,7 @@ jobs:
           {
             echo "VOICE_CONTROL_CODESIGN_IDENTITY=$identity"
             echo "HEX_NOTARY_KEY=$key"
-            echo "VERSION=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')"
+            echo "VERSION=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "voice-control") | .version')"
             echo "SHORT=$(git rev-parse --short=7 HEAD)"
           } >> "$GITHUB_ENV"
       - name: Build, sign, and notarize Hex.app

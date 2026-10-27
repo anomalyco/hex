@@ -6,9 +6,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::OnceLock;
-use std::time::Duration;
-
-use anyhow::Result;
+use std::time::{Duration, Instant};
 
 use super::served;
 use super::smart::{Address, Candidate, Clue, Evidence, Folder, Pointer, Source, words};
@@ -28,6 +26,8 @@ const GHOSTTY: &str = "com.mitchellh.ghostty";
 #[derive(Clone, Copy)]
 pub struct Senses {
     pub hooks: Hooks,
+    /// The URL of the browser tab in front or captured (AppleScript).
+    pub tab: fn(Option<&str>, Option<&str>) -> Option<String>,
     /// The port on this Mac that serves `url`, when its host is this Mac.
     pub own_port: fn(&WebUrl) -> Option<u16>,
     /// The folder and title of a terminal app's focused pane.
@@ -50,6 +50,7 @@ impl Default for Senses {
     fn default() -> Self {
         Self {
             hooks: Hooks::default(),
+            tab: super::capture_url,
             own_port,
             terminal: terminal_pane,
             servers: || crate::env::get().config.server_folders(),
@@ -72,18 +73,37 @@ pub struct Live {
     pub error: Option<String>,
 }
 
+/// How long a whole look ([`look_live`]) may take: the tab, the terminal, the sessions and the
+/// page's publisher together. Each outside step is also bounded on its own.
+pub const LOOK_DEADLINE: Duration = Duration::from_secs(15);
+
 /// Looks at the browser tab or terminal in front (`front`) or captured (`target`), and reads
 /// the open sessions. Runs while the bundle is built. `pid` is the captured app's process, whose
-/// executable may be a dev build (Jev routing).
+/// executable may be a dev build (Jev routing). Takes at most about [`LOOK_DEADLINE`].
 pub fn look_live(
     front: Option<&str>,
     target: Option<&str>,
     pid: Option<i32>,
     senses: &Senses,
 ) -> Live {
-    let url = super::capture_url(front, target);
+    look_live_by(front, target, pid, Instant::now() + LOOK_DEADLINE, senses)
+}
+
+/// [`look_live`], done by `deadline`: the steps not begun by then are skipped, and the session
+/// read gets what's left (at most [`super::LOOK_BUDGET`]). A step under way when it passes still
+/// ends on its own bound.
+pub fn look_live_by(
+    front: Option<&str>,
+    target: Option<&str>,
+    pid: Option<i32>,
+    deadline: Instant,
+    senses: &Senses,
+) -> Live {
+    let left = || deadline.saturating_duration_since(Instant::now());
+    let url = (senses.tab)(front, target);
     let mut clues = url
         .as_deref()
+        .filter(|_| !left().is_zero())
         .map(|url| url_clues(url, senses, true))
         .unwrap_or_default();
     if super::jev::enabled()
@@ -91,9 +111,12 @@ pub fn look_live(
     {
         clues.extend(dev_build_clue(target.or(front), &exe));
     }
+    // Read beside the sessions, so its folder's and session's are read too.
+    clues.extend(target.and_then(|id| app_rule_clue(id, &(senses.apps)())));
     if let Some((cwd, title)) = [front, target]
         .into_iter()
         .flatten()
+        .filter(|_| !left().is_zero())
         .find_map(|id| (senses.terminal)(id))
     {
         clues.push(Clue::new(
@@ -110,8 +133,11 @@ pub fn look_live(
             ));
         }
     }
-    let (mut candidates, error) = read_for(&clues, None, senses);
-    look_at_page(url.as_deref(), &mut clues, &mut candidates, senses);
+    let (mut candidates, error) =
+        read_with(&clues, None, &[], left().min(super::LOOK_BUDGET), senses);
+    if !left().is_zero() {
+        look_at_page(url.as_deref(), &mut clues, &mut candidates, senses);
+    }
     Live {
         url,
         clues,
@@ -232,10 +258,8 @@ pub fn look_at_page(
             _ => None,
         })
         .collect();
-    if !missing.is_empty()
-        && let Ok(more) = read_candidates(&mut api, &[], &missing, 0)
-    {
-        candidates.extend(more);
+    if !missing.is_empty() {
+        candidates.extend(read_candidates(&mut api, &[], &missing, 0).candidates);
     }
     clues.extend(found);
 }
@@ -253,20 +277,21 @@ fn root_session(get: &mut ApiGet, id: &str) -> String {
     current
 }
 
-/// Reads the sessions the clues and address could name.
+/// Reads the sessions the clues and address could name, within [`super::LOOK_BUDGET`].
 pub(crate) fn read_for(
     clues: &[Clue],
     address: Option<&Address>,
     senses: &Senses,
 ) -> (Vec<Candidate>, Option<String>) {
-    read_with(clues, address, &[], senses)
+    read_with(clues, address, &[], super::LOOK_BUDGET, senses)
 }
 
-/// [`read_for`], also reading the sessions `also` names.
+/// [`read_for`], also reading the sessions `also` names, within `budget`.
 pub(crate) fn read_with(
     clues: &[Clue],
     address: Option<&Address>,
     also: &[String],
+    budget: Duration,
     senses: &Senses,
 ) -> (Vec<Candidate>, Option<String>) {
     let mut roots = Vec::new();
@@ -280,11 +305,16 @@ pub(crate) fn read_with(
     }
     ids.extend(address.map(|a| a.session().to_owned()));
     ids.extend(also.iter().cloned());
-    let mut api = super::within(senses.hooks.api, super::SESSIONS_BUDGET);
-    match read_candidates(&mut api, &roots, &ids, SESSION_PAGES) {
-        Ok(candidates) => (candidates, None),
-        Err(err) => (Vec::new(), Some(format!("couldn't list sessions: {err:#}"))),
-    }
+    let mut api = super::within(senses.hooks.api, budget);
+    let Read { candidates, error } = read_candidates(&mut api, &roots, &ids, SESSION_PAGES);
+    let error = error.map(|err| {
+        if candidates.is_empty() {
+            format!("couldn't list sessions: {err:#}")
+        } else {
+            format!("couldn't list every session: {err:#}")
+        }
+    });
+    (candidates, error)
 }
 
 /// The clues a tab gives: its `/sdk.js` registration, and the folder of the process serving
@@ -387,7 +417,7 @@ pub fn dev_build_clue(bundle_id: Option<&str>, executable: &Path) -> Option<Clue
     ))
 }
 
-/// The clue a `routing.apps` rule covering `bundle_id` gives (Jev routing).
+/// The clue a `routing.apps` rule covering `bundle_id` gives.
 pub fn app_rule_clue(bundle_id: &str, apps: &[(String, PathBuf)]) -> Option<Clue> {
     let (key, to) = super::policy::app_rule(bundle_id, apps)?;
     let text = to.to_string_lossy();
@@ -446,11 +476,16 @@ fn spoken_address(bundle: &ScrawlBundle, candidates: &[Candidate]) -> Option<Clu
 /// recording carries.
 pub fn evidence_for(bundle: &ScrawlBundle, dir: &Path, live: Live) -> Evidence {
     let mut clues = live.clues;
-    clues.extend(bundle_clues(
+    // The live look already gave the app's rule.
+    for clue in bundle_clues(
         bundle,
         &live.candidates,
         &crate::env::get().config.app_rules(),
-    ));
+    ) {
+        if !clues.contains(&clue) {
+            clues.push(clue);
+        }
+    }
     clues.extend(spoken_address(bundle, &live.candidates));
     Evidence {
         address: crate::opencode::recorded_destination(dir).map(Address::Recorded),
@@ -458,6 +493,7 @@ pub fn evidence_for(bundle: &ScrawlBundle, dir: &Path, live: Live) -> Evidence {
         candidates: live.candidates,
         now_ms: bundle.created_at_ms,
         url: live.url,
+        sessions_error: live.error,
     }
 }
 
@@ -539,9 +575,7 @@ pub fn bundle_clues(
     }
     let opencode = is_opencode(bundle_id);
     let about = opencode.then(|| about(bundle));
-    let app_rule = super::jev::enabled()
-        .then(|| app_rule_clue(bundle_id, apps))
-        .flatten();
+    let app_rule = app_rule_clue(bundle_id, apps);
     let ruled = app_rule.is_some();
     clues.extend(app_rule);
     if !ruled && let Some((folder, configured)) = app_checkout(target, candidates, apps) {
@@ -953,33 +987,43 @@ fn candidate(session: OpenCodeSession, repos: &mut HashMap<PathBuf, Option<PathB
     }
 }
 
+/// The sessions [`read_candidates`] read, and why it read no more.
+#[derive(Debug)]
+pub struct Read {
+    pub candidates: Vec<Candidate>,
+    /// The first read that failed (a page timing out); the reads after it were still tried.
+    pub error: Option<anyhow::Error>,
+}
+
 /// Open root sessions: the newest `pages` pages, the newest page in each of `roots`, and each
-/// of `ids` (whatever its state, since something named it).
-pub fn read_candidates(
-    get: &mut ApiGet,
-    roots: &[PathBuf],
-    ids: &[String],
-    pages: usize,
-) -> Result<Vec<Candidate>> {
+/// of `ids` (whatever its state, since something named it). A read that fails keeps what was
+/// read before it and the reads after it are still tried, so a folder or session a rule names
+/// is read even when the newest pages can't be; the first failure is kept in [`Read::error`].
+pub fn read_candidates(get: &mut ApiGet, roots: &[PathBuf], ids: &[String], pages: usize) -> Read {
     let mut raw: Vec<OpenCodeSession> = Vec::new();
     let add = |raw: &mut Vec<OpenCodeSession>, session: OpenCodeSession| {
         if !raw.iter().any(|s| s.id == session.id) {
             raw.push(session);
         }
     };
-    find_root_session(get, "", pages, |session| {
+    let mut error = None;
+    if let Err(err) = find_root_session(get, "", pages, |session| {
         add(&mut raw, session.clone());
         Scan::Skip
-    })?;
+    }) {
+        error = Some(err);
+    }
     for root in roots {
         if super::smart::is_home_or_root(root) {
             continue;
         }
         let query = format!("&directory={}", query_escape(&root.to_string_lossy()));
-        find_root_session(get, &query, 1, |session| {
+        if let Err(err) = find_root_session(get, &query, 1, |session| {
             add(&mut raw, session.clone());
             Scan::Skip
-        })?;
+        }) {
+            error.get_or_insert(err);
+        }
     }
     for id in ids {
         if !raw.iter().any(|s| &s.id == id)
@@ -989,7 +1033,10 @@ pub fn read_candidates(
         }
     }
     let mut repos = HashMap::new();
-    Ok(raw.into_iter().map(|s| candidate(s, &mut repos)).collect())
+    Read {
+        candidates: raw.into_iter().map(|s| candidate(s, &mut repos)).collect(),
+        error,
+    }
 }
 
 // MARK: This Mac's own names
@@ -1097,6 +1144,7 @@ mod tests {
     use super::*;
     use crate::opencode::fake_api::session;
     use crate::routing::Registration;
+    use anyhow::Result;
 
     #[test]
     fn tailscale_serve_maps_this_macs_name_to_a_loopback_port() {
@@ -1349,6 +1397,7 @@ mod tests {
                 candidates,
                 now_ms: 0,
                 url: None,
+                sessions_error: None,
             };
             let ladder = destination(&decide(&evidence, Policy::Ladder), Some(url));
             assert_eq!(ladder, today, "{url}");
@@ -1555,6 +1604,124 @@ mod tests {
     }
 
     #[test]
+    fn a_capture_look_waits_out_a_slow_server() {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static SLOWEST: AtomicU64 = AtomicU64::new(u64::MAX);
+        // A busy OpenCode answers a page in seconds; each request is let wait what's left.
+        fn busy(path: &str, left: Duration) -> Result<Vec<u8>> {
+            SLOWEST.fetch_min(left.as_millis() as u64, Ordering::Relaxed);
+            anyhow::ensure!(left > super::super::SESSIONS_BUDGET, "budget too short");
+            api(path, left)
+        }
+        let senses = Senses {
+            hooks: Hooks {
+                sdk: no_sdk,
+                listener_dir: listener,
+                api: busy,
+            },
+            own_port: tailnet,
+            terminal: no_terminal,
+            ..Senses::default()
+        };
+        let live = look_live(None, None, None, &senses);
+        assert_eq!(live.error, None);
+        assert_eq!(live.candidates.len(), 2);
+        let slowest = Duration::from_millis(SLOWEST.load(Ordering::Relaxed));
+        assert!(slowest > super::super::LOOK_BUDGET - Duration::from_secs(1));
+    }
+
+    /// 150 newer sessions elsewhere, then BOARD in `/p/board` and PINNED, the oldest; any page
+    /// after the first fails.
+    fn second_page_fails(path: &str, _: Duration) -> Result<Vec<u8>> {
+        anyhow::ensure!(!path.contains("cursor="), "page 2 timed out");
+        let mut sessions: Vec<_> = (0..150)
+            .map(|n| session(&format!("ses_new{n:03}"), "NEW", "/q", 1_000 + n))
+            .collect();
+        sessions.push(session("ses_board", "BOARD", "/p/board", 1));
+        sessions.push(session("ses_pinned", "PINNED", "/q", 0));
+        crate::opencode::fake_api::serve(&sessions, path)
+    }
+
+    #[test]
+    fn a_failing_page_keeps_what_was_read_and_still_reads_what_rules_name() {
+        let read = read_candidates(
+            &mut |path: &str| second_page_fails(path, Duration::ZERO),
+            &[PathBuf::from("/p/board")],
+            &["ses_pinned".into()],
+            SESSION_PAGES,
+        );
+        let ids: Vec<&str> = read.candidates.iter().map(|c| c.id.as_str()).collect();
+        assert_eq!(ids.len(), 102, "the first page, the folder's, and the id");
+        assert!(ids.contains(&"ses_new149") && !ids.contains(&"ses_new000"));
+        assert!(ids.contains(&"ses_board") && ids.contains(&"ses_pinned"));
+        assert!(format!("{:#}", read.error.unwrap()).contains("page 2 timed out"));
+    }
+
+    #[test]
+    fn an_app_rules_folder_is_read_with_the_sessions() {
+        fn apps() -> Vec<(String, PathBuf)> {
+            vec![("com.example.board".into(), PathBuf::from("/p/board"))]
+        }
+        fn no_tab(_: Option<&str>, _: Option<&str>) -> Option<String> {
+            None
+        }
+        let senses = Senses {
+            hooks: Hooks {
+                sdk: no_sdk,
+                listener_dir: listener,
+                api: second_page_fails,
+            },
+            tab: no_tab,
+            own_port: tailnet,
+            terminal: no_terminal,
+            apps,
+            ..Senses::default()
+        };
+        let live = look_live(None, Some("com.example.board"), None, &senses);
+        assert!(live.clues.iter().any(|c| c.source == Source::AppRule));
+        assert!(
+            live.candidates.iter().any(|c| c.id == "ses_board"),
+            "BOARD is past the pages read, so only its folder's read finds it"
+        );
+        assert!(
+            live.error
+                .unwrap()
+                .starts_with("couldn't list every session")
+        );
+    }
+
+    #[test]
+    fn a_look_past_its_deadline_skips_what_it_hadnt_begun() {
+        fn slow_tab(_: Option<&str>, _: Option<&str>) -> Option<String> {
+            std::thread::sleep(Duration::from_millis(60));
+            Some("https://studio.example.ts.net:4948/".into())
+        }
+        fn terminal(_: &str) -> Option<(PathBuf, String)> {
+            panic!("the terminal is looked at after the deadline")
+        }
+        let senses = Senses {
+            hooks: Hooks {
+                sdk: no_sdk,
+                listener_dir: listener,
+                api,
+            },
+            tab: slow_tab,
+            own_port: tailnet,
+            terminal,
+            ..Senses::default()
+        };
+        let deadline = std::time::Instant::now() + Duration::from_millis(30);
+        let live = look_live_by(Some("com.brave.Browser"), None, None, deadline, &senses);
+        assert_eq!(
+            live.url.as_deref(),
+            Some("https://studio.example.ts.net:4948/")
+        );
+        assert!(live.clues.is_empty(), "the tab came too late to look into");
+        assert!(live.candidates.is_empty());
+        assert!(live.error.unwrap().contains("couldn't list sessions"));
+    }
+
+    #[test]
     fn a_tab_on_this_macs_tailnet_name_is_a_local_dev_site() {
         let senses = Senses {
             hooks: Hooks {
@@ -1579,6 +1746,7 @@ mod tests {
             candidates,
             now_ms: 15,
             url: None,
+            sessions_error: None,
         };
         let j = super::super::smart::decide(&evidence, super::super::smart::Policy::Weigh);
         let dest = super::super::smart::destination(&j, Some(url)).unwrap();
@@ -1587,6 +1755,64 @@ mod tests {
             ("ses_board", "localhost")
         );
         assert_eq!(dest.directory.as_deref(), Some("/p/board"));
+    }
+
+    thread_local! {
+        static SITES: std::cell::RefCell<Vec<(String, PathBuf)>> = std::cell::RefCell::default();
+    }
+
+    fn saved_sites() -> Vec<(String, PathBuf)> {
+        SITES.with(|s| s.borrow().clone())
+    }
+
+    #[test]
+    fn an_always_rule_makes_its_sites_next_capture_a_saved_rule() {
+        use super::super::policy::saved_rule;
+        use super::super::smart::{Decision, Policy, decide};
+        let senses = Senses {
+            hooks: Hooks {
+                sdk: no_sdk,
+                listener_dir: listener,
+                api,
+            },
+            own_port: |_| None,
+            terminal: no_terminal,
+            sites: saved_sites,
+            ..Senses::default()
+        };
+        let url = "https://board.example.com/cards";
+        let judge = || {
+            let clues = url_clues(url, &senses, false);
+            let (candidates, _) = read_for(&clues, None, &senses);
+            let evidence = Evidence {
+                address: None,
+                clues,
+                candidates,
+                now_ms: 30,
+                url: Some(url.into()),
+                sessions_error: None,
+            };
+            decide(&evidence, Policy::Weigh).decision
+        };
+        assert!(
+            !matches!(judge(), Decision::Send { ref to, .. } if saved_rule(to)),
+            "nothing the person saved covers the site yet"
+        );
+        // "Always send board.example.com here", as the capsule saves it (to the session
+        // when its folder isn't on this Mac).
+        let saved = crate::RouterConfig::default()
+            .with_rule(
+                crate::RuleKind::Site,
+                "https://board.example.com",
+                "ses_board",
+            )
+            .unwrap();
+        SITES.with(|s| *s.borrow_mut() = saved.site_rules());
+        let Decision::Send { to, .. } = judge() else {
+            panic!("the saved rule names the session");
+        };
+        assert_eq!(to.candidate.id, "ses_board");
+        assert!(saved_rule(&to));
     }
 
     // MARK: Pages from a file server
@@ -1619,6 +1845,7 @@ mod tests {
                 listener_dir: listener,
                 api: down,
             },
+            tab: |_, _| None,
             own_port: tailnet,
             terminal: no_terminal,
             servers: page_servers,

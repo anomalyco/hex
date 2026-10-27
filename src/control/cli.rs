@@ -615,6 +615,9 @@ fn print(reply: ControlReply, output: Output) -> u8 {
         ControlReply::Models { models } => print!("{}", human_models(&models)),
         ControlReply::Vocabulary { entries } => print!("{}", human_vocabulary(&entries)),
         ControlReply::ScrawlCapture(report) => print!("{}", human_scrawl_capture(&report)),
+        ControlReply::ScrawlCaptures { captures } => print!("{}", human_captures(&captures)),
+        ControlReply::ScrawlCaptureDetail(detail) => print!("{}", human_capture_detail(&detail)),
+        ControlReply::ScrawlCaptureRoute { explanation } => print!("{explanation}"),
         ControlReply::Error { message, .. } => eprintln!("hex: {message}"),
     }
     code
@@ -664,6 +667,90 @@ fn human_scrawl_capture(report: &super::ScrawlCaptureReport) -> String {
         ));
     }
     out
+}
+
+fn human_captures(captures: &[super::ScrawlCaptureSummary]) -> String {
+    if captures.is_empty() {
+        return "No captures\n".into();
+    }
+    captures
+        .iter()
+        .map(|capture| format!("{}\n", capture_line(capture)))
+        .collect()
+}
+
+/// `1792933491953.scrawl  2026-10-26 14:02  0:04  window · Brave  12 words  → Hex`
+fn capture_line(capture: &super::ScrawlCaptureSummary) -> String {
+    let seconds = capture.duration_ms / 1_000;
+    let mut line = format!(
+        "{}  {}  {}:{:02}  {}",
+        capture.id,
+        local_minute(capture.created_at_ms),
+        seconds / 60,
+        seconds % 60,
+        capture.mode
+    );
+    if let Some(app) = &capture.app {
+        line.push_str(&format!(" · {app}"));
+    }
+    line.push_str(&format!("  {} words", capture.words));
+    if let Some(sent) = &capture.sent_to {
+        line.push_str(&format!("  → {}", sent.title));
+    }
+    if capture.queued {
+        line.push_str(" (queued)");
+    }
+    line
+}
+
+fn human_capture_detail(detail: &super::ScrawlCaptureDetail) -> String {
+    let mut out = format!(
+        "{}\n{}\n",
+        capture_line(&detail.summary),
+        detail.summary.bundle.display()
+    );
+    if let Some(title) = &detail.window_title {
+        out.push_str(&format!("Window: {title}\n"));
+    }
+    if let Some(sent) = &detail.summary.sent_to {
+        out.push_str(&format!("Sent to: {} ({})\n", sent.title, sent.session));
+    }
+    out.push_str(&format!(
+        "{} marks, {} keyframes\n",
+        detail.marks, detail.keyframes
+    ));
+    for (label, path) in [
+        ("Video", &detail.video),
+        ("Audio", &detail.audio),
+        ("Contact sheet", &detail.contact_sheet),
+    ] {
+        if let Some(path) = path {
+            out.push_str(&format!("{label}: {}\n", path.display()));
+        }
+    }
+    if let Some(note) = &detail.note {
+        out.push_str(&format!("\nNote: {note}\n"));
+    }
+    match (&detail.missing_transcript, detail.transcript.trim()) {
+        (Some(why), _) => out.push_str(&format!("\nNo transcript: {why}\n")),
+        (None, "") => out.push_str("\nNo words\n"),
+        (None, text) => out.push_str(&format!("\n{text}\n")),
+    }
+    out
+}
+
+/// `2026-10-26 14:02` in local time where Hex knows it.
+fn local_minute(ms: u64) -> String {
+    #[cfg(target_os = "macos")]
+    {
+        let iso = crate::meeting::query::iso_local(ms);
+        iso.get(..16)
+            .map_or(iso.clone(), |minute| minute.replace('T', " "))
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        format!("{ms} ms")
+    }
 }
 
 pub fn exit_code(reply: &ControlReply) -> u8 {

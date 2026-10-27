@@ -22,6 +22,7 @@ use std::time::Duration;
 
 use color_eyre::eyre::{Result, WrapErr, eyre};
 
+use crate::app_settings::{AppSettings, UpdateChannel};
 use crate::desktop_host::{DesktopAction, DesktopUpdateStatus};
 use protocol::{Decision, Install};
 
@@ -34,6 +35,10 @@ const ARTIFACT: &str = "desktop";
 const ORIGIN: &str = "https://anoma.ly/release";
 const STARTUP_DELAY: Duration = Duration::from_secs(10);
 const CHECK_INTERVAL: Duration = Duration::from_secs(60 * 60);
+/// Dev builds land on every push to dev, so the Dev channel checks often.
+const DEV_CHECK_INTERVAL: Duration = Duration::from_secs(10 * 60);
+/// Opening or focusing the window checks the Dev channel at most this often.
+const FOCUS_CHECK_GAP: Duration = Duration::from_secs(60);
 const MAX_BACKOFF: Duration = Duration::from_secs(6 * 60 * 60);
 
 /// How this install receives updates, which decides what the updater does.
@@ -73,6 +78,26 @@ impl Method {
     }
 }
 
+/// The channel to check: package managers follow `stable`; everything else
+/// the `updates.channel` setting, else `dev` for a dev build
+/// (`X.Y.Z-dev.N`), else the install's own channel. Switching never
+/// downgrades: the protocol only installs a strictly newer version.
+fn channel(method: &Method, setting: Option<UpdateChannel>, version: &str) -> String {
+    if matches!(method, Method::Package(_)) {
+        return method.channel().into();
+    }
+    match setting {
+        Some(channel) => channel.name().into(),
+        None if is_dev_build(version) => UpdateChannel::Dev.name().into(),
+        None => method.channel().into(),
+    }
+}
+
+/// Builds the Release workflow's dev channel stamps `X.Y.Z-dev.N`.
+pub fn is_dev_build(version: &str) -> bool {
+    version.contains("-dev.")
+}
+
 #[derive(Clone, Debug)]
 enum State {
     Disabled(DesktopUpdateStatus),
@@ -100,6 +125,8 @@ struct Shared {
     /// Set by "Check for updates" and `stop`; the worker waits on it between checks.
     wake: Mutex<Wake>,
     signal: Condvar,
+    /// The channel and start of the latest check.
+    last: Mutex<Option<(String, std::time::Instant)>>,
 }
 
 #[derive(Default)]
@@ -134,6 +161,7 @@ impl Updater {
             packaged: matches!(method, Method::Package(_)),
             wake: Mutex::new(Wake::default()),
             signal: Condvar::new(),
+            last: Mutex::new(None),
         });
         if checks {
             let worker = shared.clone();
@@ -148,6 +176,21 @@ impl Updater {
         Self { shared }
     }
 
+    /// An updater with no worker in the Current state, for tests of when it
+    /// asks for a check.
+    #[cfg(test)]
+    fn idle_checking() -> Self {
+        Self {
+            shared: Arc::new(Shared {
+                state: Mutex::new(State::Current),
+                packaged: false,
+                wake: Mutex::new(Wake::default()),
+                signal: Condvar::new(),
+                last: Mutex::new(None),
+            }),
+        }
+    }
+
     /// An updater that never checks, for tests of the hosts that own one.
     #[cfg(all(test, target_os = "linux"))]
     pub fn idle() -> Self {
@@ -157,6 +200,7 @@ impl Updater {
                 packaged: false,
                 wake: Mutex::new(Wake::default()),
                 signal: Condvar::new(),
+                last: Mutex::new(None),
             }),
         }
     }
@@ -177,6 +221,17 @@ impl Updater {
         self.shared.signal.notify_all();
     }
 
+    /// The window opened or gained focus: on the Dev channel, check now
+    /// unless a check started within the last minute.
+    pub fn window_focused(&self) {
+        let recent = lock(&self.shared.last)
+            .as_ref()
+            .is_some_and(|(channel, at)| channel != "dev" || at.elapsed() < FOCUS_CHECK_GAP);
+        if !recent {
+            self.check_now();
+        }
+    }
+
     pub fn stop(&self) {
         lock(&self.shared.wake).stop = true;
         self.shared.signal.notify_all();
@@ -185,8 +240,12 @@ impl Updater {
     pub fn status(&self) -> DesktopUpdateStatus {
         match &*lock(&self.shared.state) {
             State::Disabled(status) => status.clone(),
+            // A package manager updates Hex: its own checks only look for
+            // the manager's command, so they show nothing of their own.
+            State::Checking | State::Current | State::Failed if self.shared.packaged => {
+                DesktopUpdateStatus::PackageManager
+            }
             State::Checking => DesktopUpdateStatus::Checking,
-            State::Current if self.shared.packaged => DesktopUpdateStatus::PackageManager,
             State::Current => DesktopUpdateStatus::Current,
             State::Failed => DesktopUpdateStatus::Failed,
             State::Downloading => DesktopUpdateStatus::Downloading,
@@ -204,6 +263,7 @@ impl Updater {
     pub fn act(&self, action: &DesktopAction) -> Result<bool> {
         match action {
             DesktopAction::CheckForUpdates => self.check_now(),
+            DesktopAction::WindowFocused => self.window_focused(),
             DesktopAction::OpenUpdate => self.open_download(),
             DesktopAction::RestartIntoUpdate => {
                 self.restart_into_update()?;
@@ -292,25 +352,38 @@ fn wait(shared: &Shared, delay: Duration) -> bool {
     wake.stop
 }
 
+/// How often a channel is checked: Dev every few minutes, others hourly.
+fn check_interval(channel: &str) -> Duration {
+    if channel == "dev" {
+        DEV_CHECK_INTERVAL
+    } else {
+        CHECK_INTERVAL
+    }
+}
+
 fn run(shared: &Shared, method: &Method) {
     let mut cache = transport::ManifestCache::default();
-    let mut backoff = CHECK_INTERVAL;
+    let mut failures = 0;
     if wait(shared, STARTUP_DELAY) {
         return;
     }
     loop {
         *lock(&shared.state) = State::Checking;
-        let delay = match check(shared, method, &mut cache) {
+        let result = check(shared, method, &mut cache);
+        let interval = lock(&shared.last)
+            .as_ref()
+            .map_or(CHECK_INTERVAL, |(channel, _)| check_interval(channel));
+        let delay = match result {
             Ok(next) => {
-                backoff = CHECK_INTERVAL;
+                failures = 0;
                 *lock(&shared.state) = next;
-                CHECK_INTERVAL
+                interval
             }
             Err(error) => {
                 tracing::warn!(error = %format!("{error:#}"), "update check failed");
                 *lock(&shared.state) = State::Failed;
-                backoff = (backoff * 2).min(MAX_BACKOFF);
-                backoff
+                failures = (failures + 1).min(8);
+                (interval * 2u32.pow(failures)).min(MAX_BACKOFF)
             }
         };
         if matches!(&*lock(&shared.state), State::Ready(_)) {
@@ -325,7 +398,12 @@ fn run(shared: &Shared, method: &Method) {
 
 fn check(shared: &Shared, method: &Method, cache: &mut transport::ManifestCache) -> Result<State> {
     let updates = updates_dir()?;
-    let manifest_url = manifest_url(method.channel());
+    // Read each check, so a change from the window or `hex settings` applies
+    // at the next one.
+    let setting = AppSettings::saved_update_channel();
+    let channel = channel(method, setting, env!("CARGO_PKG_VERSION"));
+    *lock(&shared.last) = Some((channel.clone(), std::time::Instant::now()));
+    let manifest_url = manifest_url(&channel);
     let manifest = cache.fetch(&manifest_url, &updates)?;
     let install = Install {
         version: env!("CARGO_PKG_VERSION").into(),
@@ -333,7 +411,7 @@ fn check(shared: &Shared, method: &Method, cache: &mut transport::ManifestCache)
         distribution: method.distribution().into(),
         rollout_bucket: rollout_bucket(&crate::app_paths::support_dir()?)?,
     };
-    let decision = protocol::decide(APP, ARTIFACT, method.channel(), &manifest, &install);
+    let decision = protocol::decide(APP, ARTIFACT, &channel, &manifest, &install);
     tracing::info!(?decision, "update decision");
     match decision {
         Decision::Reject { reason } => Err(eyre!("the update manifest was rejected: {reason}")),
@@ -377,7 +455,8 @@ fn check(shared: &Shared, method: &Method, cache: &mut transport::ManifestCache)
 }
 
 /// `HEX_RELEASE_BASE_URL` (HTTPS only) points a build at another service
-/// origin, e.g. `https://dev.anoma.ly/release`, for dry runs.
+/// origin, for local tests against a fixture service. Nothing defaults to the
+/// service's dev stage, which only tests the service itself.
 fn manifest_url(channel: &str) -> String {
     let origin = std::env::var("HEX_RELEASE_BASE_URL")
         .ok()
@@ -509,6 +588,160 @@ mod tests {
         assert_eq!(Method::Package("aur").distribution(), "aur");
         assert_eq!(Method::Unknown.distribution(), "unknown");
         assert_eq!(Method::Package("aur").channel(), "stable");
+    }
+
+    #[test]
+    fn a_package_manager_install_never_shows_its_own_checks() {
+        let updater = |state: State, packaged: bool| Updater {
+            shared: Arc::new(Shared {
+                state: Mutex::new(state),
+                packaged,
+                wake: Mutex::new(Wake::default()),
+                signal: Condvar::new(),
+                last: Mutex::new(None),
+            }),
+        };
+        for state in [State::Checking, State::Current, State::Failed] {
+            assert_eq!(
+                updater(state, true).status(),
+                DesktopUpdateStatus::PackageManager
+            );
+        }
+        assert_eq!(
+            updater(State::Checking, false).status(),
+            DesktopUpdateStatus::Checking
+        );
+        assert_eq!(
+            updater(State::Failed, false).status(),
+            DesktopUpdateStatus::Failed
+        );
+    }
+
+    #[test]
+    fn the_setting_picks_the_channel_unless_a_package_manager_updates_hex() {
+        let direct = Method::Direct {
+            channel: "beta".into(),
+        };
+        assert_eq!(channel(&direct, None, "2.4.0"), "beta");
+        assert_eq!(channel(&direct, None, "2.4.0-dev.12"), "dev");
+        assert_eq!(
+            channel(&direct, Some(UpdateChannel::Stable), "2.4.0-dev.12"),
+            "stable"
+        );
+        assert_eq!(channel(&direct, Some(UpdateChannel::Dev), "2.4.0"), "dev");
+        assert_eq!(channel(&Method::DownloadOnly, None, "2.4.0"), "stable");
+        assert_eq!(
+            channel(&Method::DownloadOnly, Some(UpdateChannel::Dev), "2.4.0"),
+            "dev"
+        );
+        assert_eq!(
+            channel(
+                &Method::Package("aur"),
+                Some(UpdateChannel::Dev),
+                "2.4.0-dev.1"
+            ),
+            "stable"
+        );
+    }
+
+    #[test]
+    fn switching_from_dev_to_stable_never_downgrades() {
+        let manifest = |channel: &str, version: &str| {
+            serde_json::json!({
+                "schema": 1,
+                "app": "hex",
+                "artifact": "desktop",
+                "channel": channel,
+                "sequence": 1,
+                "published_at": "2026-10-27T00:00:00Z",
+                "release": {
+                    "version": version,
+                    "rollout_percent": 100,
+                    "revoked_versions": [],
+                    "distributions": [{ "kind": "direct" }],
+                    "targets": {
+                        "macos-arm64": {
+                            "url": "/release/hex/files/aa/Hex.zip",
+                            "sha256": "a".repeat(64),
+                            "size": 1
+                        }
+                    }
+                }
+            })
+            .to_string()
+        };
+        let install = |version: &str| Install {
+            version: version.into(),
+            target: "macos-arm64".into(),
+            distribution: "direct".into(),
+            rollout_bucket: 0,
+        };
+        let running = install("2.4.0-dev.12");
+        assert!(matches!(
+            protocol::decide(
+                APP,
+                ARTIFACT,
+                "stable",
+                &manifest("stable", "2.3.1"),
+                &running
+            ),
+            Decision::None { .. }
+        ));
+        assert!(matches!(
+            protocol::decide(
+                APP,
+                ARTIFACT,
+                "stable",
+                &manifest("stable", "2.4.0"),
+                &running
+            ),
+            Decision::Install { .. }
+        ));
+        assert!(matches!(
+            protocol::decide(
+                APP,
+                ARTIFACT,
+                "dev",
+                &manifest("dev", "2.4.0-dev.13"),
+                &running
+            ),
+            Decision::Install { .. }
+        ));
+    }
+
+    #[test]
+    fn the_dev_channel_checks_every_ten_minutes_and_others_hourly() {
+        assert_eq!(check_interval("dev"), Duration::from_secs(600));
+        assert_eq!(check_interval("stable"), Duration::from_secs(3600));
+        assert_eq!(check_interval("beta"), Duration::from_secs(3600));
+    }
+
+    #[test]
+    fn focusing_the_window_checks_the_dev_channel_at_most_once_a_minute() {
+        let updater = Updater::idle_checking();
+        updater.window_focused();
+        assert!(lock(&updater.shared.wake).check, "the first focus checks");
+        lock(&updater.shared.wake).check = false;
+        *lock(&updater.shared.last) = Some(("dev".into(), std::time::Instant::now()));
+        updater.window_focused();
+        assert!(!lock(&updater.shared.wake).check, "a check just started");
+        *lock(&updater.shared.last) = Some((
+            "dev".into(),
+            std::time::Instant::now() - FOCUS_CHECK_GAP - Duration::from_secs(1),
+        ));
+        updater.window_focused();
+        assert!(
+            lock(&updater.shared.wake).check,
+            "the last check is over a minute old"
+        );
+        lock(&updater.shared.wake).check = false;
+        *lock(&updater.shared.last) =
+            Some(("stable".into(), std::time::Instant::now() - CHECK_INTERVAL));
+        updater.window_focused();
+        assert!(
+            !lock(&updater.shared.wake).check,
+            "Stable keeps its hourly checks"
+        );
     }
 
     #[test]

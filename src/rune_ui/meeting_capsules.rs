@@ -24,8 +24,8 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use rune::{
-    Align, Cursor, Cx, Drag, El, OverlayHandle, OverlaySpec, Phase, ScreenEdge, Spring, Tx, col,
-    row, text,
+    Align, Anim, Cursor, Cx, Drag, El, OverlayHandle, OverlaySpec, Phase, ScreenEdge, Spring, Tx,
+    col, row, text,
 };
 use rune_kit::{Badge, BadgeVariant, Button, ButtonVariant};
 
@@ -658,6 +658,10 @@ fn button(
 }
 
 fn view(capsule: &Capsule, cx: &mut Cx<Capsule>) -> El {
+    view_body(capsule, cx).hover_motion_within(Anim::INSTANT, Anim::INSTANT)
+}
+
+fn view_body(capsule: &Capsule, cx: &mut Cx<Capsule>) -> El {
     let p = Paint::new(cx.system_dark(), cx.env().scale);
     let Some(kind) = &capsule.kind else {
         return row().key("empty");

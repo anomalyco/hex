@@ -37,6 +37,9 @@ pub enum PermissionKind {
     Accessibility,
     /// System Audio Recording, asked only when Meetings is on.
     SystemAudio,
+    /// Screen Recording, asked only from the Scrawl pane or at a first
+    /// capture, never in the tour.
+    ScreenRecording,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

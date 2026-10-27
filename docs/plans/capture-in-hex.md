@@ -1,6 +1,7 @@
 # Captures In Hex
 
-Status: steps 2 and 3 are built on `dev` as an experiment behind a build
+Status: steps 2 and 3, and the input half of step 4 with the Scrawl pane,
+are built (step 4's half on branch `scrawl-in-hex`) as an experiment behind a build
 option (off in every public build) on Scrawl's real engine, the
 `scrawl-capture` crate imported into `crates/capture` (see
 [Built so far](#built-so-far)); nothing ships, and Kit decides later whether
@@ -25,7 +26,7 @@ Step 3, `capture_host` on that crate:
 ```ts
 hex capture start|stop|cancel|status     // `--features capture`; POST /control `scrawl-capture`
 └── listener thread -> capture_host::CaptureHost (exists only with the experiment on)
-    ├── start -> owner-only <captures>/<unix ms>.scrawl -> reply at once
+    ├── start -> owner-only <captures folder>/<unix ms>.scrawl -> reply at once
     │   ├── DictationAudio::open_capture_sink(bounded 512 chunks, since = t0)
     │   └── capture-audio thread -> Engine::start(Start { t0_boot_ns, ActiveDisplay,
     │       AudioIn::External, bundle_dir }) (blocks: target lookup, ScreenCaptureKit)
@@ -69,14 +70,77 @@ hex capture start|stop|cancel|status     // `--features capture`; POST /control 
   two at a time. With `SharedResources::none()` each capture has its own
   input telemetry, so a capture recording while an earlier one is written
   shares nothing with it.
-- Bundles go to `<support>/captures/<unix ms>.scrawl` (`hex-test` for
-  `Hex Test.app`): Scrawl's own `scrawl.json` format, words in ms on the
-  capture's clock.
+- Bundles go to `<captures folder>/<unix ms>.scrawl`, Scrawl's own folder
+  unless `capture.folder` names another (step 3 used `<support>/captures`):
+  Scrawl's own `scrawl.json` format, words in ms on the capture's clock.
 - `hex dev capture-replay <wav>…` runs the same `CaptureHost` headlessly on a
   fresh transcription engine, feeding WAV files instead of the microphone; it
   records the screen too (debug builds only, like every `hex dev` command).
-- Not built yet: the shortcut, input and Escape, overlays, routing, the pane,
-  settings import, and coexistence.
+- Views read one `CaptureSnapshot` (`capture_host::snapshot`, woken by
+  `capture_host::watch`): the recording capture (bundle, start, whether the
+  screen started), stopped captures with the engine's latest stage, and the
+  last settled one (done, failed, cancelled, with words and gaps). The host
+  publishes it on every change; engine progress moves a capture on but never
+  settles it. The capsule, the router, and `hex capture list` subscribe here
+  rather than to the host.
+- Routing and delivery (step 5), a cabled iPhone, the capsule, the on-screen
+  picker, and the ink and laser overlays are built; see those sections and
+  `docs/features/capture.md`. Not built yet: iPhone ingest (ScrawlKit
+  pairing), moving the ingest token, and a listener key path for the open
+  list (⌥⇧V, typing, arrows, Return).
+
+Step 4, first half (the shortcut, input, Escape) with the pane, import, and
+coexistence from step 5:
+
+```ts
+settings.json capture.* (CaptureSettings, cfg hex_capture; other builds keep the raw key)
+├── enabled (off) · hotkey (⌥⇧S) · transcriber (parakeet|apple) · folder (None = Scrawl's)
+│   · media_days / bundle_days (Scrawl's Week preset: 7 / 30)
+├── every key in `hex settings` (control/settings.rs CAPTURE_KEYS)
+└── load -> import once (migration `scrawl-capture-settings`, not in MIGRATIONS):
+    ~/.config/scrawl/config.json + Scrawl's shortcut file, read-only
+
+recognition loop, every iteration
+├── CaptureHost::reconcile -> start/stop the host as capture_on() changes
+│   (experiment && capture.enabled); watch_scrawl polls Scrawl.app every 2 s
+├── runtime_hotkeys() drops capture while Scrawl.app runs
+├── fresh ⌥⇧S press (CaptureShortcut) -> CaptureHost::toggle: start | stop
+│   (a press within SHORTCUT_DEBOUNCE, 400 ms, of the start is ignored)
+└── Esc, nothing else recording, a capture recording -> cancel it first
+
+suppression event tap (the one session tap)
+├── observation mask + mouse down/up/drag/scroll when capture_available()
+├── wants_input() (a capture records) -> report_capture_input -> TAP_INPUT
+│   (bounded 1 024, drops counted) -> LiveInput::forward -> HostInput
+│   (Moved / ModifiersChanged stand in for Scrawl's 8 ms poller)
+└── capture-only events end there; keys, flags, and downs continue to the listener
+
+crates/capture hosted_input.rs: Scrawl's ink and click rules as pure functions
+(is_pin_click, drew_before, is_real_ink, on_own_window); Scrawl's own key tap
+calls the same key_input / key_name. after_shortcut(): Shift must come up once.
+
+Settings › Experiments › Scrawl (rune_ui/scrawl.rs; PlatformState.scrawl is
+Some while capture_available(), so the pane exists only then)
+├── Capture with Hex · Shortcut · Screen Recording · Transcriber
+├── Captures folder (Reveal | choose) · Keep (retention presets)
+├── "Scrawl is running" + Use Hex for captures -> quit_scrawl (NSRunningApplication)
+└── "Hex copied Scrawl's settings once…" when the import read a file
+
+capture-retention thread -> retention::run_pass(capture.* policy): 90 s, then hourly;
+skipped while a capture is unfinished or Scrawl.app runs
+```
+
+- Deviations from Scrawl: the shortcut acts on the press (Scrawl's Carbon
+  hotkey also starts on press, but Hex has no "start on key-up" pending
+  state), a press within 400 ms of the start is ignored rather than stopping
+  a capture that has barely begun, and pointer position comes from tap events
+  rather than an 8 ms poller.
+- The pane exists only in `cfg(hex_capture)` builds: a public build never
+  compiles the module, its strings, or its scenes, and a feature build shows
+  it only while the experiment is on. Its scenes (`mac-scrawl*`) render only
+  from a feature build, so they have no goldens (goldens run on Linux).
+- iPhone pairing is omitted, not shown disabled: it needs the ingest server,
+  which Hex doesn't run yet. A cabled iPhone needs no row.
 
 ### Features and gating
 
@@ -108,7 +172,13 @@ hex capture start|stop|cancel|status     // `--features capture`; POST /control 
   (`target/<profile>`, three levels above `OUT_DIR`), and the engine looks
   for it beside its own executable (`helper::path`); `$SCRAWL_HELPER`
   overrides. Missing, finish keeps the 480 px candidate frames as keyframes.
-  Hex's capture path uses it only for movie decoding, which needs no TCC.
+  Hex's capture path uses it for movie decoding, which needs no TCC, for
+  `devices` (the USB registry, no TCC), and for `mirror --no-microphone`, a
+  cabled iPhone's capture, which needs Camera.
+- Camera belongs to Hex, the helper's responsible process, so only
+  `HEX_CAPTURE=1` builds add `NSCameraUsageDescription` to Hex.app's
+  Info.plist (and the helper's embedded one); `scripts/validate-app.sh`
+  refuses a release bundle that has it.
 - `HEX_CAPTURE=1 scripts/build-app.sh` builds with `--features capture` and
   `SCRAWL_HELPER_PLIST=packaging/macos/scrawl-helper-Info.plist` (embedded
   bundle ID `anomaly.hex.scrawl-helper`, name Hex), copies the helper to
@@ -181,6 +251,7 @@ where the work starts (the `capture_host` worker), not only in the window.
   pure functions over these events, so Hex runs no second tap.
 - Escape cancels an active capture before it cancels dictation work. A
   capture never uses the hold threshold or the post-release tail.
+- Built: see step 4 in [Built so far](#built-so-far).
 
 ## Microphone
 
@@ -206,9 +277,17 @@ where the work starts (the `capture_host` worker), not only in the window.
   meanwhile waits for one chunk at most. A chunk waits while dictation
   captures or transcribes, and the engine holds one that arrives during a live
   stream until the stream ends, so it never interrupts one.
-- Scrawl's spoken cues need measured word times. Until Parakeet's word times
-  are compared with SpeechAnalyzer's on recorded captures, the engine's Apple
-  helper path stays selectable (`hex settings set capture.transcriber apple`).
+- Scrawl's spoken cues need measured word times. Compared with Apple's
+  SpeechAnalyzer on 36 real captures (Oct 25), Parakeet Unified English's word
+  times run late: starts by a median 280 ms (about 520 ms after a pause), ends
+  by 180 ms, with no drift and no cost at the 30 s seams; raw, 53% of cue words
+  are over 300 ms late. `HexTranscriber` subtracts the lag fitted on half the
+  captures (`WORD_LAGS` in `capture_host`: starts 280 ms, or 520 ms when the
+  gap since the previous word's end is at least 250 ms; ends 195 ms), which
+  puts 96% of the other half's cue words within 300 ms of Apple. The lag is
+  keyed to the pinned model file: another model, or a new pin, keeps raw times
+  until it is measured again. The Apple helper path stays selectable
+  (`hex settings set capture.transcriber apple`).
 
 ## Interface
 
@@ -217,32 +296,60 @@ where the work starts (the `capture_host` worker), not only in the window.
   Their window ids go to the engine through `Host::own_windows` so screen
   capture leaves them out and clicks pass through.
 - Each state has a `--snap` scene and a storybook entry.
-- A Captures pane joins the window as a feature-owned pane (D-5): opt-in,
-  shortcut, transcriber, captures folder, retention, iPhone, and "Use Hex for
-  captures" while Scrawl runs.
-- Screen Recording is asked for at the first capture, not in core onboarding.
+- Scrawl's switch chips (`docs/capture.md`): a shortcut-started recording opens
+  onto Area · Window · Screen for 3.5 s (never folding while hovered) or until
+  the first click, scroll, or stroke. A chip restarts rather than retargets:
+  Window and Area discard the recording and turn the capsule into the picker.
+  The host side is built: `CaptureTarget`, `CaptureCommand::{Start, Discard, Switch}`
+  through `RecognitionControl::CaptureCommand`, `RecordingCapture::{target,
+  worked}`, `SettledCapture::error`, and `begin_picking` for ⌥⇧S and Esc while
+  the picker is open. The shortcut starts on its modifiers' release, as
+  Scrawl's does. The iPhone chip's host side is built too:
+  `CaptureTarget::Phone`, `TargetKind::Phone`, `CaptureSnapshot.phone` (the
+  cabled phone's name from a `capture-phone` look at each start and on
+  `CaptureCommand::FindPhone`). The mirror runs with `--no-microphone`; the
+  narration is Hex's timeline audio moved onto the movie's clock
+  (`RecordedAudio::since`) and transcribed by Hex's transcriber. A mirror
+  that ends on its own (`Event::PhoneEnded`) finishes the capture at the
+  listener's next reap.
+- The done capsule's route chips read `SettledCapture.route` (its answer,
+  then only the deliveries the capsule can't know itself) and send
+  `CaptureCommand::{Send, Undo, Redirect}`. Built; `offer` isn't drawn.
+- A Scrawl pane under Experiments, feature-owned (D-5): opt-in, shortcut,
+  Screen Recording, transcriber, captures folder, retention, and "Use Hex for
+  captures" while Scrawl runs (built; iPhone joins with ingest).
+- Screen Recording is asked for at the first capture or from the pane, not in
+  core onboarding.
 
 ## Routing and delivery
 
-- Captures route through the engine's router in-process. The Send to session
-  experiment switches from `scrawl router decide` to the same function, and
-  the JSON contract in `docs/` becomes the function's types.
-- Delivery uses the engine's queue and retry path. Hex never stores the
-  OpenCode server password itself; the engine reads it as Scrawl does.
-- `live.ndjson` gets ids, bands, scores, model, stages, and outcomes, never
-  transcript, summary, or window text.
+- Built (`capture_host/routing.rs`): Scrawl's router (`crates/router`) runs
+  in Hex's process with `capture.routing` (imported once from Scrawl; never a
+  Jev key) and Scrawl's own router folders, so `scrawl router undo`, rule
+  offers, and evals see Hex's sends as Scrawl's. A `capture-look` thread
+  reads the tab, terminal, and sessions at the stop; the one `capture-route`
+  thread (queue 16) decides once the bundle is written, waits out a rule's
+  3 s undo, sends, and carries out the capsule's Send, Undo, and Redirect on
+  the newest capture in order. Each change lands in `last.route`.
+- Delivery uses the engine's delivery path. Queued sends retry every 15 s,
+  except in tests, while Scrawl.app runs, or while anything serves the ingest
+  port (that process retries). Hex never stores the OpenCode server password
+  itself; the engine reads it as Scrawl does.
+- Not built: `live.ndjson` events for routing (ids, bands, scores, model,
+  stages, and outcomes, never transcript, summary, or window text).
 
 ## Coexistence with Scrawl
 
 - One owner at a time. While Scrawl (`dev.kitlangton.scrawl`) runs, Hex does
-  not register the capture shortcut, bind the ingest port (47777), or run
-  delivery retries. Settings shows "Use Hex for captures", which quits Scrawl
-  only on that click.
+  not register the capture shortcut, run retention, bind the ingest port
+  (47777), or run delivery retries. Settings shows "Use Hex for captures",
+  which quits Scrawl only on that click (built, without ingest).
 - Configuration: a one-time, read-only import of Scrawl's settings into
-  `settings.json` `capture.*` keys, each with a `hex settings` key. The ingest
-  token moves to an owner-only file in Hex's support folder so paired phones
-  keep working.
-- Captures stay in Scrawl's captures folder; Hex reads and cleans them there.
+  `settings.json` `capture.*` keys, each with a `hex settings` key (built).
+  The ingest token moves to an owner-only file in Hex's support folder so
+  paired phones keep working (not built).
+- Captures stay in Scrawl's captures folder; Hex writes and cleans them there
+  (built).
 
 ## Invariants to add
 
@@ -256,10 +363,12 @@ where the work starts (the `capture_host` worker), not only in the window.
 
 ## CLI
 
-Through `POST /control`, like everything else: `hex capture start|stop|cancel|
-status` (built, behind the build option), `hex capture list|show`, `hex capture send <id> [--to <session>]`,
-and `hex capture route <id> --explain`. Engine tools (autocrop eval, capture
-simulation, reprocess) mount under `hex dev capture` in debug builds.
+Through `POST /control`, like everything else, behind the build option
+(built; `docs/cli.md`): `hex capture start|stop|cancel|status`,
+`hex capture list [--limit N]|show <capture>`, `hex capture send <capture>
+[--to <session>]`, and `hex capture route <capture> [--ask-jev]`. Not built:
+engine tools (autocrop eval, capture simulation, reprocess) under
+`hex dev capture` in debug builds.
 
 ## Order on the branch
 
@@ -270,9 +379,11 @@ simulation, reprocess) mount under `hex dev capture` in debug builds.
    Built: copied without history from `e351ddb`.
 3. `capture_host` with the experiment gate, the capture sink, Parakeet words,
    and a headless `hex capture start|stop` producing a bundle. Built.
-4. Input and Escape, then the Rune capsule and ink overlay with scenes.
-5. Router in-process, the Captures pane, import, and coexistence.
-6. Compare Parakeet and SpeechAnalyzer word times on recorded captures.
+4. Input and Escape, then the Rune capsule, picker, and ink overlay with
+   scenes and motion traces. Built.
+5. Router in-process, the Scrawl pane, import, and coexistence. Built.
+6. Compare Parakeet and SpeechAnalyzer word times on recorded captures. Done
+   (Oct 25): Parakeet's lag is corrected in `capture_host`.
 
 The Oct 18 `experiment/scrawl` branch was a copy that drifted; `feat/capture`
 supersedes its capture sink and word transcriber, so it can be deleted.

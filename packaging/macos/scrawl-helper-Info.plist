@@ -6,5 +6,7 @@
   <string>anomaly.hex.scrawl-helper</string>
   <key>CFBundleName</key>
   <string>Hex</string>
+  <key>NSCameraUsageDescription</key>
+  <string>Hex mirrors and records a cabled iPhone's screen for a capture.</string>
 </dict>
 </plist>

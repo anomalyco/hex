@@ -37,7 +37,7 @@ hex_notarize() {
 }
 
 hex_version() {
-  printf '%s\n' "${HEX_VERSION:-$(cargo metadata --no-deps --format-version 1 --manifest-path "$1/Cargo.toml" | jq -r '.packages[0].version')}"
+  printf '%s\n' "${HEX_VERSION:-$(cargo metadata --no-deps --format-version 1 --manifest-path "$1/Cargo.toml" | jq -r '.packages[] | select(.name == "voice-control") | .version')}"
 }
 
 # CFBundleVersion from X.Y.Z; a staging prerelease (X.Y.Z-dev.N) shares its

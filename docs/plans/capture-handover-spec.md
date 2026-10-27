@@ -88,8 +88,9 @@ When a capture finishes (`SealedCapture::finish` → `Finished`), the app decide
 - **Rule learning offer (`OfferRule`):** When the user manually picks the same project folder twice for the same site origin or non-general app (`router/learned.json`), the capsule offers a one-click prompt: *"Always send <site/app> to <repo>?"* with **Always** (`policy::add_rule`) and **Not now** (`policy::refuse_rule`, which adds the key to `routing.refusedRules` so it is never offered again).
 - **Taking a send back (`Router::undo`):** Clicking **Undo** on a sent capture calls `Router::undo(delivery_id, deadline)` and displays the outcome (`Report::text()`):
   - `withdrawn`: cancelled from the session's inbox before it was read.
-  - `reverted`: interrupted the turn it started and staged a revert (including file changes) to before the message.
-  - `disowned`: session was already mid-turn or had newer messages, so sent a steering follow-up telling the agent to ignore the previous message.
+  - `reverted`: interrupted the turn it started and reverted the session to before the message (file changes too, only if the turn's edit tools made them): staged, then committed, so the message and its turn are deleted.
+  - `disowned`: session was already mid-turn or had newer messages, so sent a steering follow-up telling the agent to ignore the previous message. Input arriving while the revert is staged, or a commit that fails, clears the staged revert first, since any prompt commits it.
+  - `unfinished`: the staged revert could be neither committed nor cleared; nothing more is said to the session, and the capsule shows it as too late.
   - Also calls `Recents::taken_back` so a mistaken send is never fed to Jev as precedent on the next capture.
 - **Offline queue & retry (`delivery::retry_due`):** If the OpenCode server is unreachable when delivering, a `.deliver.json` marker is written into the bundle (or `router/outbox/<key>`) and retried in the background with exponential backoff (`15 s` doubling up to `30 m`, expiring after `24 h`).
 

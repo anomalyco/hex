@@ -239,7 +239,9 @@ pub enum Target {
     ActiveDisplay,
     /// Record a specific screen, window or region target.
     Screen(TargetInfo),
-    /// Record a cabled iPhone (either a new session for `device` or an existing preview).
+    /// Record a cabled iPhone (either a new session for `device` or an existing preview). With
+    /// [`AudioIn::External`] the mirror opens no microphone and `finish`'s audio is the
+    /// narration; otherwise the mirror records the Mac's microphone into the movie.
     Phone {
         device: Option<String>,
         name: Option<String>,
@@ -1641,11 +1643,13 @@ impl SharedCaptureTelemetry {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone();
-        let own = std::process::id() as i32;
+        let excluded = self
+            .excluded_window_ids
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
         let source = self.capture_source_pid.load(Ordering::Acquire);
-        crate::windows::owned_window_at(windows, x, y, &passthrough, |pid| {
-            pid == own || (pid != source && is_helper(pid))
-        })
+        on_own_window(windows, (x, y), &passthrough, &excluded, source, is_helper)
     }
 
     pub fn normalize_point(&self, screen_x: f64, screen_y: f64) -> (f32, f32, u32, u32) {
@@ -1978,21 +1982,40 @@ fn poll_clicks(
     }
 }
 
+/// Whether the topmost window under global point `at` (in `windows`, front to back, looking
+/// through `passthrough` ones) is the host's own: this process's chrome
+/// ([`is_own_chrome`](crate::windows::is_own_chrome), with the host's `excluded` windows), or a
+/// helper's other than the app being captured (`source`). Clicks and scrolls there aren't part
+/// of what is being shown; on the host's normal windows (Hex's Settings) they are.
+pub fn on_own_window(
+    windows: &[crate::windows::RawWindow],
+    (x, y): (f64, f64),
+    passthrough: &[u32],
+    excluded: &[u32],
+    source: i32,
+    is_helper: impl Fn(i32) -> bool,
+) -> bool {
+    let own = std::process::id() as i32;
+    crate::windows::owned_window_at(windows, x, y, passthrough, |w| {
+        crate::windows::is_own_chrome(w, own, excluded) || (w.pid != source && is_helper(w.pid))
+    })
+}
+
 /// A press that moves less than this (points) before it's let go is a click, not a drag.
-const CLICK_SLOP_PT: f32 = 12.0;
+pub const CLICK_SLOP_PT: f32 = 12.0;
 /// A ⇧-press held still for longer than this drops no pin.
-const PIN_MAX_PRESS_MS: u64 = 1_000;
+pub const PIN_MAX_PRESS_MS: u64 = 1_000;
 /// Ink spanning less than this (points) is a stationary ⇧ tap, not a stroke.
-const MIN_INK_SPAN_PT: f32 = 6.0;
+pub const MIN_INK_SPAN_PT: f32 = 6.0;
 
 /// Whether a ⇧-press (`t`, global `x`, `y`) let go at `up` is a ⇧-click, which drops a pin.
-fn is_pin_click(down: (u64, f64, f64), up: (u64, f64, f64)) -> bool {
+pub fn is_pin_click(down: (u64, f64, f64), up: (u64, f64, f64)) -> bool {
     up.0.saturating_sub(down.0) <= PIN_MAX_PRESS_MS
         && ((up.1 - down.1).hypot(up.2 - down.2) as f32) < CLICK_SLOP_PT
 }
 
 /// Whether `stroke`'s points before `before_ms` reach at least `MIN_INK_SPAN_PT` from its start.
-fn drew_before(stroke: &Stroke, before_ms: u64) -> bool {
+pub fn drew_before(stroke: &Stroke, before_ms: u64) -> bool {
     let Some(first) = stroke.pts.get(0..2) else {
         return false;
     };
@@ -2014,7 +2037,7 @@ fn drew_before(stroke: &Stroke, before_ms: u64) -> bool {
 }
 
 /// Whether finished ink is worth keeping as a stroke.
-fn is_real_ink(stroke: &Stroke) -> bool {
+pub fn is_real_ink(stroke: &Stroke) -> bool {
     drew_before(stroke, u64::MAX)
 }
 
@@ -2324,7 +2347,19 @@ impl crate::log::Sink for HostLogSink {
 impl Engine {
     pub fn new(host: Arc<dyn Host>, config: Arc<dyn ConfigSource>) -> Self {
         crate::log::set_sink_if_unset(Arc::new(HostLogSink(Arc::clone(&host))));
-        let (tx, _rx) = flume::unbounded();
+        let (tx, rx) = flume::unbounded();
+        // Without an app's own telemetry, the one event a host must act on (the iPhone mirror
+        // ending on its own) reaches it through `Host::emit`; the rest are for Scrawl's UI.
+        let relay = Arc::clone(&host);
+        let _ = std::thread::Builder::new()
+            .name("scrawl-ui-events".into())
+            .spawn(move || {
+                for event in rx {
+                    if matches!(event, Event::PhoneEnded) {
+                        relay.emit(event);
+                    }
+                }
+            });
         Self {
             host,
             config,
@@ -2533,7 +2568,10 @@ impl Engine {
                 Self::restore_own_windows(&telemetry, &saved_excluded, &own);
                 // Hold interaction telemetry inactive until the helper's `recording` event arrives.
                 telemetry.active.store(false, Ordering::Release);
-                let session = if let Some(mut preview) = existing_preview {
+                // The movie's offset is measured from `t0`, the clock input and audio share.
+                let since_t0_ms = boot_time_ns().saturating_sub(req.t0_boot_ns) / 1_000_000;
+                let origin_epoch_ms = crate::pipeline::now_epoch_ms().saturating_sub(since_t0_ms);
+                let mut session = if let Some(mut preview) = existing_preview {
                     preview.begin_recording(&movie_path);
                     preview
                 } else {
@@ -2541,6 +2579,7 @@ impl Engine {
                         &movie_path,
                         device.as_deref(),
                         Some(Arc::clone(&telemetry)),
+                        req.audio == AudioIn::External,
                     ) {
                         Ok(session) => session,
                         Err(error) => {
@@ -2551,6 +2590,7 @@ impl Engine {
                         }
                     }
                 };
+                session.clock_from(origin_epoch_ms);
                 (target, InnerSource::Phone(session), session_id)
             }
             Target::ActiveDisplay | Target::Screen(_) => {
@@ -2590,6 +2630,7 @@ impl Engine {
                         target.frame,
                         started_at,
                         Arc::clone(&telemetry.window_log_request),
+                        Arc::clone(&telemetry.excluded_window_ids),
                     )
                 });
                 (
@@ -2619,6 +2660,7 @@ impl Engine {
             target,
             t0_boot_ns: req.t0_boot_ns,
             note: req.note,
+            host_narration: req.audio == AudioIn::External,
             source,
             stopped_input: None,
         })
@@ -2662,6 +2704,8 @@ pub struct Capture {
     target: TargetInfo,
     t0_boot_ns: u64,
     note: Option<String>,
+    /// A phone capture's narration is `finish`'s audio, not the movie's.
+    host_narration: bool,
     source: InnerSource,
     stopped_input: Option<(Vec<InteractionEvent>, Vec<Stroke>, Vec<u64>)>,
 }
@@ -2676,6 +2720,7 @@ pub struct SealedCapture {
     target: TargetInfo,
     t0_boot_ns: u64,
     note: Option<String>,
+    host_narration: bool,
     route_hint: RouteContext,
     events: Vec<InteractionEvent>,
     strokes: Vec<Stroke>,
@@ -2877,6 +2922,7 @@ impl Capture {
             target: self.target,
             t0_boot_ns: self.t0_boot_ns,
             note: self.note,
+            host_narration: self.host_narration,
             route_hint,
             events,
             strokes,
@@ -2939,6 +2985,20 @@ impl SealedCapture {
                             recording.flags.push(flag - recording.offset_ms);
                         }
                     }
+                    let narration = if self.host_narration {
+                        self.host.emit(Event::Progress {
+                            bundle: bundle_dir.clone(),
+                            stage: Stage::Transcribing,
+                        });
+                        Some(crate::phone::HostNarration {
+                            audio: external_audio
+                                .map(|audio| audio.since(recording.offset_ms))
+                                .transpose()?,
+                            transcriber: self.transcriber.as_deref(),
+                        })
+                    } else {
+                        None
+                    };
                     crate::phone::finalize_live_capture_for_config(
                         &bundle_dir,
                         recording,
@@ -2946,6 +3006,7 @@ impl SealedCapture {
                         strokes,
                         self.note,
                         Some(&self.engine_cfg),
+                        narration,
                     )
                 });
                 if let Err(error) = &finalized {
@@ -3087,7 +3148,9 @@ mod tests {
     }
 
     /// Clicks on `scrawl-helper`'s windows (the SwiftUI capsule, Settings, onboarding) are
-    /// Scrawl's own, except on the iPhone mirror, which is what's being recorded.
+    /// Scrawl's own, except on the iPhone mirror, which is what's being recorded. The host's
+    /// chrome takes clicks unless it lets them through: Hex's capsule is a 640×424 panel, named
+    /// and click-through (only its pill, which Hex checks itself, takes clicks).
     #[test]
     fn helper_windows_are_scrawl_s_except_the_capture_source() {
         let (sender, _receiver) = flume::unbounded();
@@ -3104,18 +3167,43 @@ mod tests {
         let own = std::process::id() as i32;
         let (settings, mirror, app) = (own + 1, own + 2, own + 3);
         let windows = [
-            window(1, own, [0.0, 0.0, 1728.0, 1117.0]), // the ink overlay, click-through
+            crate::windows::RawWindow {
+                layer: 26,
+                ..window(1, own, [0.0, 0.0, 1728.0, 1117.0]) // the ink overlay, click-through
+            },
+            crate::windows::RawWindow {
+                layer: 27,
+                ..window(5, own, [544.0, 0.0, 640.0, 424.0]) // the host's capsule panel
+            },
+            crate::windows::RawWindow {
+                layer: 25,
+                ..window(7, own, [700.0, 1000.0, 320.0, 44.0]) // a HUD of the host's
+            },
+            window(6, own, [1300.0, 900.0, 400.0, 200.0]), // the host's own Settings window
             window(2, settings, [100.0, 100.0, 600.0, 400.0]),
             window(3, mirror, [1300.0, 100.0, 300.0, 650.0]),
             window(4, app, [0.0, 0.0, 1728.0, 1117.0]),
         ];
-        telemetry.passthrough_window_ids.lock().unwrap().push(1);
+        *telemetry.excluded_window_ids.lock().unwrap() = vec![5, 1];
+        *telemetry.passthrough_window_ids.lock().unwrap() = vec![1, 5];
         telemetry.set_capture_source_pid(mirror as u32);
         let helper = |pid| pid == settings || pid == mirror;
         let at = |x, y| telemetry.scrawl_window_in(&windows, x, y, helper);
         assert!(at(300.0, 300.0), "Settings");
         assert!(!at(1400.0, 400.0), "the iPhone mirror");
         assert!(!at(1000.0, 900.0), "the app under the ink overlay");
+        assert!(!at(1100.0, 300.0), "the app under the capsule's panel");
+        assert!(at(800.0, 1020.0), "the host's HUD, unnamed");
+        telemetry
+            .passthrough_window_ids
+            .lock()
+            .unwrap()
+            .retain(|id| *id != 5);
+        assert!(at(1100.0, 300.0), "a named window that takes clicks");
+        assert!(
+            !at(1500.0, 1000.0),
+            "the host's Settings, which can be what's shown"
+        );
         telemetry.set_capture_source_pid(0);
         assert!(at(1400.0, 400.0), "a helper that isn't the source");
     }
@@ -3635,6 +3723,7 @@ mod tests {
             target,
             t0_boot_ns: 123_456_789,
             note: Some("unit test".into()),
+            host_narration: false,
             source: InnerSource::Screen {
                 session: screen_session,
                 audio: None,
@@ -3720,6 +3809,7 @@ mod tests {
             target: target.clone(),
             t0_boot_ns: 100,
             note: None,
+            host_narration: false,
             source: InnerSource::Screen {
                 session: ScreenCaptureSession {
                     started_at: Instant::now(),
@@ -3758,6 +3848,7 @@ mod tests {
             target,
             t0_boot_ns: 100,
             note: None,
+            host_narration: false,
             source: InnerSource::Screen {
                 session: ScreenCaptureSession {
                     started_at: Instant::now(),

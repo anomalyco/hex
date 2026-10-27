@@ -134,12 +134,25 @@ initial open fails OR stream interrupts
   -> bounded backoff -> reopen selected input         // warm microphone retries
   -> replacement delivers new audio
   -> fresh capture -> release -> expected output
+
+programmatic dictation (local API) when the stream interrupts or gaps
+  ├── audio delivered before the loss -> kept under its id // recover.programmatic-loss
+  │     -> /finish transcribes it; /cancel, heartbeats, and the lease still apply
+  │     -> also when /finish arrives before the loss is read (take_loss)
+  └── no audio since the start (open failed, or pre-roll only)
+        -> /finish answers 409 microphone-lost
 ```
 Checks in [audio.rs](../../src/audio.rs):
 `microphone_recovery_retries_with_bounded_backoff_and_resets`,
 `startup_retry_recovers_metadata_and_audio_without_restarting`;
 [dictation_audio.rs](../../src/dictation_audio.rs):
-`recovered_owner_delivers_audio_and_accepts_a_new_capture`.
+`recovered_owner_delivers_audio_and_accepts_a_new_capture`,
+`microphone_loss_keeps_only_a_programmatic_captures_delivered_audio`,
+`microphone_loss_with_only_pre_roll_keeps_nothing`,
+`finish_after_an_unread_microphone_loss_takes_the_kept_clip`;
+[recognition.rs](../../src/recognition.rs):
+`microphone_loss_keeps_a_programmatic_clip_for_finish` (the hold, not a `/finish`
+through the running listener).
 Proof limit: retry policy and channel-backed replacement audio, not a physical
 device reconnect or full native mic-to-target result.
 

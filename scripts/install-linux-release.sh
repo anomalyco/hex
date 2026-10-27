@@ -6,7 +6,16 @@ set -eu
 # SHA-256, and install.json marks the install as one Hex updates itself.
 origin=${HEX_RELEASE_BASE_URL:-https://anoma.ly/release}
 origin=${origin%/}
-channel=stable
+# HEX_INSTALL_CHANNEL=dev installs the newest dev build and keeps the
+# install on the Dev update channel.
+channel=${HEX_INSTALL_CHANNEL:-stable}
+case "$channel" in
+  stable | dev) ;;
+  *)
+    echo "HEX_INSTALL_CHANNEL must be stable or dev." >&2
+    exit 1
+    ;;
+esac
 install_dir=${HEX_INSTALL_DIR:-"$HOME/.local/bin"}
 data_home=${XDG_DATA_HOME:-$HOME/.local/share}
 config_home=${XDG_CONFIG_HOME:-$HOME/.config}

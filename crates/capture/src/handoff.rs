@@ -148,7 +148,7 @@ impl Clipboard for SystemClipboard {
         bundle: &crate::model::ScrawlBundle,
         terminal: bool,
     ) -> Result<()> {
-        paste_loaded_bundle_image_and_text(bundle_dir, bundle, terminal)
+        paste_loaded_bundle_image_and_text(bundle_dir, bundle, terminal, &post_paste)
     }
 }
 
@@ -243,11 +243,33 @@ pub fn paste_bundle_image_and_text(bundle_dir: &Path) -> Result<()> {
     SystemClipboard.paste_bundle(&directory, &bundle, crate::capture::is_frontmost_terminal())
 }
 
+/// [`paste_bundle_at_target`] with no click target, pasting with `paste` instead of the
+/// crate's own ⌘V: a host whose keyboard-layout lookups must stay on its main thread posts
+/// its own.
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+pub fn paste_bundle_with(bundle_dir: &Path, paste: &dyn Fn() -> Result<()>) -> Result<()> {
+    crate::capture::ensure_external_app_active();
+    let (directory, bundle) = load_bundle(bundle_dir)?;
+    paste_loaded_bundle_image_and_text(
+        &directory,
+        &bundle,
+        crate::capture::is_frontmost_terminal(),
+        paste,
+    )
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+fn post_paste() -> Result<()> {
+    crate::capture::post_synthetic_cmd_v();
+    Ok(())
+}
+
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 fn paste_loaded_bundle_image_and_text(
     directory: &Path,
     bundle: &crate::model::ScrawlBundle,
     terminal: bool,
+    paste: &dyn Fn() -> Result<()>,
 ) -> Result<()> {
     let sheet_path = directory.join(&bundle.contact_sheet);
     let image = fs::read(&sheet_path).context("Could not read contact sheet")?;
@@ -264,13 +286,12 @@ fn paste_loaded_bundle_image_and_text(
         copy_png_to_clipboard(&image)?;
     }
     std::thread::sleep(std::time::Duration::from_millis(20));
-    crate::capture::post_synthetic_cmd_v();
+    paste()?;
 
     std::thread::sleep(std::time::Duration::from_millis(160));
     copy_string_to_clipboard(&summary)?;
     std::thread::sleep(std::time::Duration::from_millis(20));
-    crate::capture::post_synthetic_cmd_v();
-    Ok(())
+    paste()
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
@@ -842,6 +863,7 @@ fn router_env_from(path: &Path) -> scrawl_router::env::Env {
         })),
         summary: Some(crate::sketch::summary_markdown),
         pages: Some(crate::web::lookup),
+        opencode: None,
         live: true,
     }
 }

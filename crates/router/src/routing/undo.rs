@@ -4,16 +4,21 @@
 //!
 //! - **withdrawn**: still in the session's inbox, so it's cancelled there.
 //! - **reverted**: it started a turn and nothing was said after it, so the turn is interrupted
-//!   and a revert to it is staged with its file changes (like the TUI's /undo; not committed).
-//! - **disowned**: it joined running work, or more came after it, so a short follow-up tells
-//!   the session to ignore it instead of undoing the session's own work.
+//!   and the session is reverted to before it, staged and committed, so the send and its turn
+//!   are deleted (no /redo). Files go back too, only if the turn's own edit tools changed them.
+//! - **disowned**: it joined running work, or more came after it (also while the revert was
+//!   staged, which is then cleared), so a short follow-up tells the session to ignore it
+//!   instead of undoing the session's own work.
 //! - **gone**: no record, or the session or message no longer exists.
+//! - **unfinished**: a staged revert could be neither committed nor cleared. Nothing more is
+//!   said to the session, since a prompt commits a staged revert, and the undo isn't saved, so
+//!   it can be tried again.
 //!
 //! The undo is logged as a correction (`event: "undo"`) and takes back any rule-offer pick the
 //! send counted. See `docs/routing.md`.
 
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
@@ -94,6 +99,9 @@ pub enum Undone {
     Gone,
     /// Past the window; nothing was done.
     TooOld,
+    /// Its turn was stopped and a revert staged that could be neither committed nor cleared;
+    /// the session's next prompt would commit it. Not saved, so it can be tried again.
+    Unfinished,
 }
 
 impl Undone {
@@ -104,6 +112,7 @@ impl Undone {
             Self::Disowned => "disowned",
             Self::Gone => "gone",
             Self::TooOld => "too-old",
+            Self::Unfinished => "unfinished",
         }
     }
 }
@@ -130,10 +139,14 @@ impl Report {
         let session = self.session.as_deref().unwrap_or("its session");
         match self.undone {
             Undone::Withdrawn => format!("Withdrawn from {session} before it was read"),
-            Undone::Reverted => format!("Reverted {session} to before it (redo with /redo)"),
+            Undone::Reverted => format!("Removed it and its turn from {session}"),
             Undone::Disowned => format!("Told {session} to ignore it"),
             Undone::Gone => "Nothing to undo: the send or its session is gone".to_owned(),
             Undone::TooOld => "Too old to undo (routing.undoWindowSec)".to_owned(),
+            Undone::Unfinished => format!(
+                "Couldn't finish taking it back from {session}: its turn is stopped and its \
+                 removal staged, which the next prompt there will apply"
+            ),
         }
     }
 }
@@ -239,15 +252,24 @@ pub fn window() -> Duration {
     )
 }
 
-/// `scrawl router undo <delivery_id>`.
-pub fn undo(id: &str) -> Result<Report> {
+/// `scrawl router undo <delivery_id>`, waiting on a busy session no longer than `deadline`.
+pub fn undo(id: &str, deadline: Duration) -> Result<Report> {
     let dir = deliveries_dir().context("no deliveries folder")?;
-    undo_with(&dir, id, &Api::default(), window(), jev::now_ms())
+    let until = Instant::now() + deadline;
+    undo_with(&dir, id, &Api::default(), window(), jev::now_ms(), until)
 }
 
-/// Undoes the send `id` remembered in `dir`. Errors only for a malformed ID or a server that
-/// can't be reached; an undo already made answers the same again.
-pub fn undo_with(dir: &Path, id: &str, api: &Api, window: Duration, now: u64) -> Result<Report> {
+/// Undoes the send `id` remembered in `dir`, retrying a busy session until `until`. Errors
+/// only for a malformed ID or a server that can't be reached; an undo already made answers
+/// the same again.
+pub fn undo_with(
+    dir: &Path,
+    id: &str,
+    api: &Api,
+    window: Duration,
+    now: u64,
+    until: Instant,
+) -> Result<Report> {
     let id = id.trim();
     ensure!(router::valid_id(id), "{id:?} isn't a delivery ID");
     let Some(mut record) = read(dir, id) else {
@@ -259,7 +281,11 @@ pub fn undo_with(dir: &Path, id: &str, api: &Api, window: Duration, now: u64) ->
     if now.saturating_sub(record.time) > window.as_millis() as u64 {
         return Ok(Report::of(Undone::TooOld, Some(&record)));
     }
-    let undone = take_back(&record, api)?;
+    let undone = take_back(&record, api, until)?;
+    if undone == Undone::Unfinished {
+        // Not saved: another undo can still finish it.
+        return Ok(Report::of(undone, Some(&record)));
+    }
     record.undone = Some(undone);
     if let Err(err) = write(dir, &record) {
         scrawl_log(format!("undo: couldn't save the undo: {err:#}"));
@@ -280,7 +306,7 @@ fn found(result: Result<Vec<u8>>) -> Result<Option<Vec<u8>>> {
 /// Times the inbox and messages are read before giving up on a send that keeps moving.
 const ROUNDS: usize = 3;
 
-fn take_back(record: &Record, api: &Api) -> Result<Undone> {
+fn take_back(record: &Record, api: &Api, until: Instant) -> Result<Undone> {
     let session = opencode::query_escape(&record.session);
     let Some(message) = record.message_id.as_deref() else {
         // Sent, but OpenCode's answer had no ID to find it by.
@@ -323,7 +349,7 @@ fn take_back(record: &Record, api: &Api) -> Result<Undone> {
             return Ok(Undone::Gone);
         }
         if now.may_revert() {
-            return revert(&session, message, api);
+            return revert(&session, message, api, until);
         }
         return disown(&session, api);
     }
@@ -398,6 +424,24 @@ struct Timeline {
     started: bool,
     /// Something was said after it (a prompt, a synthetic message, a shell command).
     later: bool,
+    /// A reply after it ran a tool that writes files.
+    edited: bool,
+}
+
+/// Tools that write files. A revert takes files back only when the turn ran one: OpenCode
+/// restores every file that changed during the turn's steps, edits made meanwhile in an
+/// editor included, and a committed revert can't be redone.
+const EDITS: &[&str] = &["edit", "write", "patch", "apply_patch", "multiedit"];
+
+/// Whether an assistant message ran a file-writing tool that didn't fail.
+fn edits_files(message: &Value) -> bool {
+    message["content"].as_array().is_some_and(|parts| {
+        parts.iter().any(|part| {
+            part["type"] == "tool"
+                && EDITS.contains(&part["name"].as_str().unwrap_or_default())
+                && part["state"]["status"] != "error"
+        })
+    })
 }
 
 /// Messages that don't end or begin a turn.
@@ -431,6 +475,8 @@ fn timeline(session: &str, message: &str, api: &Api) -> Result<Option<Timeline>>
                     timeline.found = true;
                 } else if SAID.contains(&kind) {
                     timeline.later = true;
+                } else if kind == "assistant" && edits_files(m) {
+                    timeline.edited = true;
                 }
                 continue;
             }
@@ -460,31 +506,40 @@ fn timeline(session: &str, message: &str, api: &Api) -> Result<Option<Timeline>>
     }))
 }
 
-/// Stops the turn it started and stages a revert to before it, files too. Once the turn is
-/// stopped, anything but a staged revert disowns it, which also wakes the session.
-fn revert(session: &str, message: &str, api: &Api) -> Result<Undone> {
+/// Stops the turn it started and reverts the session to before it (files too, if the turn's
+/// edit tools changed them): staged, then committed, so the send and its turn are deleted. A
+/// staged revert left alone still shows in clients that don't read `session.revert` (the Rune
+/// desktop), and whatever is prompted next commits it. Once the turn is stopped, anything but
+/// a revert disowns it, which also wakes the session. Stops retrying a busy session before
+/// `until`, leaving time to disown.
+fn revert(session: &str, message: &str, api: &Api, until: Instant) -> Result<Undone> {
     let interrupt = format!("/api/session/{session}/interrupt?resume=false");
     if found((api.post)(&interrupt, &json!({})))?.is_none() {
         return Ok(Undone::Gone);
     }
     let stage = format!("/api/session/{session}/revert/stage");
-    let body = json!({"messageID": message, "files": true});
     for _ in 0..STAGE_TRIES {
         // Something may have come in before the interrupt landed.
-        match standing(session, message, api) {
+        let files = match standing(session, message, api) {
             Ok(None) => return Ok(Undone::Gone),
             Ok(Some(now)) if !now.waiting && !now.timeline.found => return Ok(Undone::Gone),
             Ok(Some(now)) if !now.may_revert() => {
                 scrawl_log("undo: more came in after it; disowning");
                 return disown(session, api);
             }
-            Ok(Some(_)) => {}
+            Ok(Some(now)) => now.timeline.edited,
             Err(err) => return disown_or(session, api, err),
-        }
+        };
+        let body = json!({"messageID": message, "files": files});
         match (api.post)(&stage, &body) {
-            Ok(_) => return Ok(Undone::Reverted),
+            Ok(_) => return commit(session, message, api),
             // Busy while the interrupted turn winds down.
-            Err(err) if opencode::http_status(&err) == Some(409) => (api.pause)(STAGE_WAIT),
+            Err(err) if opencode::http_status(&err) == Some(409) => {
+                if Instant::now() + STAGE_WAIT + REQUEST >= until {
+                    break;
+                }
+                (api.pause)(STAGE_WAIT);
+            }
             Err(err) if opencode::http_status(&err) == Some(404) => return Ok(Undone::Gone),
             Err(err) if opencode::http_status(&err).is_some() => {
                 scrawl_log(format!(
@@ -497,6 +552,58 @@ fn revert(session: &str, message: &str, api: &Api) -> Result<Undone> {
     }
     scrawl_log("undo: the session stayed busy; disowning");
     disown(session, api)
+}
+
+/// Commits the staged revert, unless anything came in since it was staged: a commit deletes
+/// every message and inbox item after the send. Stage succeeding means the interrupted turn
+/// had stopped, so a busy (409) commit means new work started: like any failed commit, it's
+/// cleared and disowned, never retried.
+fn commit(session: &str, message: &str, api: &Api) -> Result<Undone> {
+    match standing(session, message, api) {
+        Ok(None) => return Ok(Undone::Gone),
+        Ok(Some(now)) if now.may_revert() => {}
+        Ok(Some(_)) => {
+            scrawl_log("undo: more came in while the revert was staged; clearing it");
+            return unstage(session, message, api);
+        }
+        Err(err) => {
+            scrawl_log(format!(
+                "undo: couldn't look again before committing ({err:#}); clearing"
+            ));
+            return unstage(session, message, api);
+        }
+    }
+    let path = format!("/api/session/{session}/revert/commit");
+    match (api.post)(&path, &json!({})) {
+        Ok(_) => Ok(Undone::Reverted),
+        Err(err) if opencode::http_status(&err) == Some(404) => Ok(Undone::Gone),
+        Err(err) => {
+            scrawl_log(format!(
+                "undo: couldn't commit the revert ({err:#}); clearing it"
+            ));
+            unstage(session, message, api)
+        }
+    }
+}
+
+/// Clears a staged revert that mustn't be committed, then disowns. If it can't be cleared,
+/// nothing more is said: any prompt, a disown too, would commit it.
+fn unstage(session: &str, message: &str, api: &Api) -> Result<Undone> {
+    match found((api.delete)(&format!("/api/session/{session}/revert"))) {
+        Ok(Some(_)) => disown(session, api),
+        Ok(None) => Ok(Undone::Gone),
+        Err(err) => {
+            scrawl_log(format!(
+                "undo: couldn't clear the staged revert ({err:#}); left staged"
+            ));
+            // A prompt that came in meanwhile committed it on its way in.
+            Ok(match standing(session, message, api) {
+                Ok(None) => Undone::Gone,
+                Ok(Some(now)) if !now.waiting && !now.timeline.found => Undone::Reverted,
+                _ => Undone::Unfinished,
+            })
+        }
+    }
 }
 
 /// After an interrupt, a failed request still owes the session a message: disown, or give
@@ -627,7 +734,38 @@ mod tests {
         on_interrupt: Option<Arrival>,
         /// The server stops answering stage requests.
         stage_unreachable: bool,
+        /// The message a revert is staged to, until it's committed or cleared.
+        staged: Option<String>,
+        /// Arrives just after the revert is staged.
+        on_stage: Option<Arrival>,
+        /// Commit answers with this status.
+        commit_status: Option<u16>,
+        /// The server stops answering commit requests.
+        commit_unreachable: bool,
+        /// Clearing the staged revert answers 409.
+        refuses_clear: bool,
         calls: Vec<String>,
+    }
+
+    impl Fake {
+        fn arrive(&mut self, arrival: Option<Arrival>) {
+            match arrival {
+                Some(Arrival::Waiting(id)) => self.inbox.push(id.into()),
+                Some(Arrival::Said(id)) => self.messages.push(json!({"id": id, "type": "user"})),
+                None => {}
+            }
+        }
+
+        /// Deletes the boundary message, everything after it, and the waiting items (all
+        /// enqueued after it here), as OpenCode's projector does.
+        fn commit_staged(&mut self) {
+            if let Some(to) = self.staged.take()
+                && let Some(at) = self.messages.iter().position(|m| m["id"] == to.as_str())
+            {
+                self.messages.truncate(at);
+                self.inbox.clear();
+            }
+        }
     }
 
     enum Arrival {
@@ -688,14 +826,27 @@ mod tests {
                 f.busy -= 1;
                 return Err(status(409));
             }
-            if path.contains("/interrupt") {
-                match f.on_interrupt.take() {
-                    Some(Arrival::Waiting(id)) => f.inbox.push(id.into()),
-                    Some(Arrival::Said(id)) => f.messages.push(json!({"id": id, "type": "user"})),
-                    None => {}
+            if path.ends_with("/revert/stage") {
+                f.staged = body["messageID"].as_str().map(str::to_owned);
+                let arrival = f.on_stage.take();
+                f.arrive(arrival);
+            }
+            if path.ends_with("/revert/commit") {
+                if f.commit_unreachable {
+                    return Err(anyhow!("Could not connect"));
                 }
+                if let Some(code) = f.commit_status {
+                    return Err(status(code));
+                }
+                f.commit_staged();
+            }
+            if path.contains("/interrupt") {
+                let arrival = f.on_interrupt.take();
+                f.arrive(arrival);
             }
             if path.ends_with("/prompt") {
+                // A prompt commits a staged revert before it's admitted.
+                f.commit_staged();
                 let id = format!("msg_{}", f.messages.len());
                 f.messages.push(json!({"id": id, "type": "user"}));
             }
@@ -709,6 +860,13 @@ mod tests {
             f.calls.push(format!("DELETE {path}"));
             if f.gone {
                 return Err(status(404));
+            }
+            if path.ends_with("/revert") {
+                if f.refuses_clear {
+                    return Err(status(409));
+                }
+                f.staged = None;
+                return Ok(Vec::new());
             }
             if f.refuses_cancel {
                 return Err(status(500));
@@ -772,8 +930,19 @@ mod tests {
         record.delivery_id
     }
 
+    fn later() -> Instant {
+        Instant::now() + Duration::from_secs(600)
+    }
+
     fn undo_now(dir: &Path, id: &str) -> Result<Report> {
-        undo_with(dir, id, &API, Duration::from_secs(600), SENT_AT + 5_000)
+        undo_with(
+            dir,
+            id,
+            &API,
+            Duration::from_secs(600),
+            SENT_AT + 5_000,
+            later(),
+        )
     }
 
     fn idle() -> Value {
@@ -825,12 +994,24 @@ mod tests {
         let _ = std::fs::remove_dir_all(dir);
     }
 
+    /// A reply that ran `tool`, which ended `status`.
+    fn ran(tool: &str, status: &str) -> Value {
+        json!({
+            "id": format!("msg_{tool}_{status}"),
+            "type": "assistant",
+            "content": [
+                {"type": "text", "text": "On it."},
+                {"type": "tool", "name": tool, "state": {"status": status}},
+            ],
+        })
+    }
+
     #[test]
     fn a_send_that_started_a_turn_is_interrupted_and_reverted() {
         let dir = temp_dir("revert");
         let id = sent(&dir, true);
         set(Fake {
-            messages: vec![reply(), idle(), mine(), reply()],
+            messages: vec![reply(), idle(), mine(), ran("edit", "completed")],
             busy: 2,
             ..Fake::default()
         });
@@ -844,11 +1025,168 @@ mod tests {
                 && stages[2].contains(r#""files":true"#),
             "{stages:?}"
         );
-        assert!(
-            posted("/revert/commit").is_empty(),
-            "staged only, so it can be redone"
-        );
+        // Committed at once: a staged revert still shows in the Rune desktop, and the next
+        // prompt (Kit pasting the capture again) would commit it anyway.
+        assert_eq!(posted("/revert/commit").len(), 1);
+        FAKE.with(|f| {
+            let f = f.borrow();
+            assert_eq!(f.staged, None);
+            assert_eq!(
+                f.messages,
+                vec![reply(), idle()],
+                "the send and its turn are gone"
+            );
+        });
         assert!(posted("/prompt").is_empty());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn files_are_reverted_only_when_the_turn_ran_an_edit_tool() {
+        // A shell command and a failed edit: files edited meanwhile in an editor stay.
+        let dir = temp_dir("no-files");
+        let id = sent(&dir, true);
+        set(Fake {
+            messages: vec![
+                idle(),
+                mine(),
+                ran("shell", "completed"),
+                ran("edit", "error"),
+            ],
+            ..Fake::default()
+        });
+        assert_eq!(undo_now(&dir, &id).unwrap().undone, Undone::Reverted);
+        let stages = posted("/revert/stage");
+        assert_eq!(stages.len(), 1);
+        assert!(stages[0].contains(r#""files":false"#), "{stages:?}");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    const CLEAR: &str = "DELETE /api/session/ses_hex/revert";
+
+    #[test]
+    fn input_arriving_while_the_revert_is_staged_is_kept() {
+        for (name, arrival) in [
+            ("waiting", Arrival::Waiting("msg_k")),
+            ("said", Arrival::Said("msg_k")),
+        ] {
+            let dir = temp_dir(name);
+            let id = sent(&dir, true);
+            set(Fake {
+                messages: vec![idle(), mine(), reply()],
+                on_stage: Some(arrival),
+                ..Fake::default()
+            });
+            assert_eq!(
+                undo_now(&dir, &id).unwrap().undone,
+                Undone::Disowned,
+                "{name}"
+            );
+            assert_eq!(posted("/revert/stage").len(), 1, "{name}");
+            assert!(posted("/revert/commit").is_empty(), "{name}: not committed");
+            assert!(calls().contains(&CLEAR.to_owned()), "{name}: cleared");
+            assert_eq!(
+                posted("/prompt").len(),
+                1,
+                "{name}: disowned after the clear"
+            );
+            FAKE.with(|f| {
+                let f = f.borrow();
+                assert_eq!(f.staged, None, "{name}");
+                assert!(
+                    f.messages.iter().any(|m| m["id"] == "msg_mine"),
+                    "{name}: nothing deleted"
+                );
+                let kept = f.inbox.iter().any(|i| i == "msg_k")
+                    || f.messages.iter().any(|m| m["id"] == "msg_k");
+                assert!(kept, "{name}: the new input is kept");
+            });
+            let _ = std::fs::remove_dir_all(dir);
+        }
+    }
+
+    #[test]
+    fn a_failed_commit_is_cleared_and_disowned_never_left_staged() {
+        for (name, status, unreachable) in [
+            ("commit-busy", Some(409), false),
+            ("commit-500", Some(500), false),
+            ("commit-down", None, true),
+        ] {
+            let dir = temp_dir(name);
+            let id = sent(&dir, true);
+            set(Fake {
+                messages: vec![idle(), mine(), reply()],
+                commit_status: status,
+                commit_unreachable: unreachable,
+                ..Fake::default()
+            });
+            assert_eq!(
+                undo_now(&dir, &id).unwrap().undone,
+                Undone::Disowned,
+                "{name}"
+            );
+            assert_eq!(posted("/revert/commit").len(), 1, "{name}: not retried");
+            assert!(calls().contains(&CLEAR.to_owned()), "{name}: cleared");
+            assert_eq!(posted("/prompt").len(), 1, "{name}");
+            FAKE.with(|f| {
+                let f = f.borrow();
+                assert_eq!(f.staged, None, "{name}: not left staged");
+                assert_eq!(f.messages.len(), 4, "{name}: nothing deleted");
+            });
+            let _ = std::fs::remove_dir_all(dir);
+        }
+    }
+
+    #[test]
+    fn a_staged_revert_that_cannot_be_cleared_says_so_and_can_be_tried_again() {
+        let dir = temp_dir("clear-refused");
+        let id = sent(&dir, true);
+        set(Fake {
+            messages: vec![idle(), mine(), reply()],
+            commit_status: Some(409),
+            refuses_clear: true,
+            ..Fake::default()
+        });
+        let report = undo_now(&dir, &id).unwrap();
+        assert_eq!(report.undone, Undone::Unfinished);
+        assert!(
+            report.text().starts_with("Couldn't finish"),
+            "{}",
+            report.text()
+        );
+        // A disown would commit the staged revert.
+        assert!(posted("/prompt").is_empty());
+        FAKE.with(|f| assert_eq!(f.borrow().staged.as_deref(), Some("msg_mine")));
+        assert_eq!(read(&dir, &id).unwrap().undone, None, "not saved");
+
+        set(Fake {
+            messages: vec![idle(), mine(), reply()],
+            ..Fake::default()
+        });
+        assert_eq!(undo_now(&dir, &id).unwrap().undone, Undone::Reverted);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_busy_session_is_retried_only_until_the_deadline() {
+        let dir = temp_dir("deadline");
+        let id = sent(&dir, true);
+        set(Fake {
+            messages: vec![idle(), mine(), reply()],
+            busy: 5,
+            ..Fake::default()
+        });
+        let soon = Instant::now() + Duration::from_secs(1);
+        let report = undo_with(
+            &dir,
+            &id,
+            &API,
+            Duration::from_secs(600),
+            SENT_AT + 5_000,
+            soon,
+        );
+        assert_eq!(report.unwrap().undone, Undone::Disowned);
+        assert_eq!(posted("/revert/stage").len(), 1);
         let _ = std::fs::remove_dir_all(dir);
     }
 
@@ -1067,7 +1405,14 @@ mod tests {
             post: busy_once_via_cli,
             ..API
         };
-        let report = undo_with(&dir, &id, &api, Duration::from_secs(600), SENT_AT + 5_000);
+        let report = undo_with(
+            &dir,
+            &id,
+            &api,
+            Duration::from_secs(600),
+            SENT_AT + 5_000,
+            later(),
+        );
         assert_eq!(report.unwrap().undone, Undone::Reverted);
         assert_eq!(posted("/revert/stage").len(), 2);
         let _ = std::fs::remove_dir_all(dir);
@@ -1120,10 +1465,25 @@ mod tests {
         assert_eq!(record.undone, None, "a failed undo can be tried again");
 
         set(Fake::default());
-        let late = undo_with(&dir, &id, &API, Duration::from_secs(600), SENT_AT + 601_000).unwrap();
+        let late = undo_with(
+            &dir,
+            &id,
+            &API,
+            Duration::from_secs(600),
+            SENT_AT + 601_000,
+            later(),
+        )
+        .unwrap();
         assert_eq!(late.undone, Undone::TooOld);
         assert!(calls().is_empty());
-        let wider = undo_with(&dir, &id, &API, Duration::from_secs(900), SENT_AT + 601_000);
+        let wider = undo_with(
+            &dir,
+            &id,
+            &API,
+            Duration::from_secs(900),
+            SENT_AT + 601_000,
+            later(),
+        );
         assert_ne!(
             wider.unwrap().undone,
             Undone::TooOld,

@@ -870,15 +870,12 @@ pub fn discover_target_at(window_query: Option<&str>, point: Option<[f64; 2]>) -
     let frontmost = frontmost_app_info();
     let screens = crate::screens::displays();
     if let Ok(content) = SCShareableContent::get() {
-        let our_pid = std::process::id() as i32;
         if let Some(query) = window_query {
             let q = query.to_lowercase();
+            // Normal windows only: the host's own count (Hex's Settings), its overlays don't.
             if let Some(win) = content.windows().into_iter().find(|w| {
                 w.is_on_screen()
                     && w.window_layer() == 0
-                    && w.owning_application()
-                        .as_ref()
-                        .is_none_or(|a| a.process_id() != our_pid)
                     && (w
                         .title()
                         .as_deref()
@@ -981,12 +978,13 @@ fn display_of(screens: &[crate::screens::Screen], rect: [f64; 4]) -> (u32, f64) 
     )
 }
 
-/// Lists all on-screen normal (`window_layer == 0`) windows in front-to-back order for the Window picker.
+/// Lists all on-screen normal (`window_layer == 0`) windows in front-to-back order for the
+/// Window picker, the host's own among them (Hex's Settings); its overlays and panels sit above
+/// the normal level.
 pub fn list_selectable_windows() -> Vec<TargetInfo> {
     let Ok(content) = SCShareableContent::get() else {
         return Vec::new();
     };
-    let our_pid = std::process::id() as i32;
     let screens = crate::screens::displays();
 
     content
@@ -998,9 +996,7 @@ pub fn list_selectable_windows() -> Vec<TargetInfo> {
                 && w.window_layer() == 0
                 && f.size.width >= 80.0
                 && f.size.height >= 80.0
-                && w.owning_application()
-                    .as_ref()
-                    .is_some_and(|a| a.process_id() != our_pid)
+                && w.owning_application().is_some()
         })
         .map(|w| {
             let f = w.frame();
@@ -1043,15 +1039,19 @@ pub fn ensure_external_app_active() {
     let front_pid = workspace
         .frontmostApplication()
         .map_or(0, |a| a.processIdentifier());
-    if front_pid != 0 && front_pid != our_pid {
+    let Some(target_pid) = paste_app(
+        front_pid,
+        our_pid,
+        LAST_EXTERNAL_APP_PID.load(Ordering::Acquire),
+    ) else {
+        return;
+    };
+    if target_pid == front_pid {
         LAST_EXTERNAL_APP_PID.store(front_pid, Ordering::Release);
         return;
     }
-    let target_pid = LAST_EXTERNAL_APP_PID.load(Ordering::Acquire);
-    if target_pid > 0
-        && target_pid != our_pid
-        && let Some(target_app) =
-            NSRunningApplication::runningApplicationWithProcessIdentifier(target_pid)
+    if let Some(target_app) =
+        NSRunningApplication::runningApplicationWithProcessIdentifier(target_pid)
     {
         #[allow(deprecated)]
         let _ = target_app
@@ -1070,6 +1070,15 @@ pub fn ensure_external_app_active() {
     }
 }
 
+/// The app a paste goes to: the active app unless it's the host, else the last external one.
+/// The host's own windows (Hex's Settings) count as in front for routing, never for a paste.
+fn paste_app(front_pid: i32, our_pid: i32, last_external: i32) -> Option<i32> {
+    if front_pid > 0 && front_pid != our_pid {
+        return Some(front_pid);
+    }
+    (last_external > 0 && last_external != our_pid).then_some(last_external)
+}
+
 /// The app whose non-activating panel has the keys over the active app `front` (a launcher
 /// like Invoke), from Accessibility and the window list.
 fn key_panel_pid(front: i32) -> Option<i32> {
@@ -1078,15 +1087,28 @@ fn key_panel_pid(front: i32) -> Option<i32> {
     crate::windows::panel_front(&raw, Some(front), Some(focused), std::process::id() as i32)
 }
 
+/// Whether `pid`, the active app, is what's in front: any other app, or this one while its
+/// normal window (Hex's Settings) is the topmost one. Active with only its overlays and panels
+/// (a click on the capsule), the host isn't what a capture is about. For what a capture is
+/// about only: output handed to an app goes elsewhere ([`paste_app`]).
+fn counts_as_front(pid: i32, our_pid: i32) -> bool {
+    pid > 0
+        && (pid != our_pid
+            || crate::windows::own_window_in_front(
+                &objc2::rc::autoreleasepool(|_| crate::windows::raw_windows()),
+                our_pid,
+            ))
+}
+
 /// The frontmost app's pid (an app whose floating panel has the keys counts), or the last
-/// external one while Scrawl itself is in front.
+/// external one while the host is in front without a window of its own.
 pub fn frontmost_external_pid() -> Option<i32> {
     use objc2_app_kit::NSWorkspace;
     let our_pid = std::process::id() as i32;
     let pid = NSWorkspace::sharedWorkspace()
         .frontmostApplication()
         .map_or(0, |a| a.processIdentifier());
-    if pid > 0 && pid != our_pid {
+    if counts_as_front(pid, our_pid) {
         return Some(key_panel_pid(pid).unwrap_or(pid));
     }
     let fallback = LAST_EXTERNAL_APP_PID.load(Ordering::Acquire);
@@ -1099,8 +1121,10 @@ pub fn frontmost_app_info() -> Option<(i32, String, Option<String>)> {
     let workspace = NSWorkspace::sharedWorkspace();
     if let Some(app) = workspace.frontmostApplication() {
         let pid = app.processIdentifier();
-        if pid != our_pid {
-            LAST_EXTERNAL_APP_PID.store(pid, Ordering::Release);
+        if counts_as_front(pid, our_pid) {
+            if pid != our_pid {
+                LAST_EXTERNAL_APP_PID.store(pid, Ordering::Release);
+            }
             let app = key_panel_pid(pid)
                 .and_then(NSRunningApplication::runningApplicationWithProcessIdentifier)
                 .unwrap_or(app);
@@ -1738,30 +1762,21 @@ unsafe extern "C" fn key_tap_callback(
     }
 
     let t_ms = telemetry.elapsed_ms();
-    if cmd && !ctrl && !alt && !shift && (keycode == layout_z_keycode() || keycode == KEY_Z) {
-        let _ = telemetry.ui_sender.try_send(Event::UndoStroke);
-    } else if cmd || ctrl {
-        // Only log modifier-chord shortcuts, never ordinary typing or secrets.
-        if let Some(key_name) = shortcut_key_name(keycode) {
-            let mut chord = String::new();
-            if ctrl {
-                chord.push('⌃');
-            }
-            if alt {
-                chord.push('⌥');
-            }
-            if shift {
-                chord.push('⇧');
-            }
-            if cmd {
-                chord.push('⌘');
-            }
-            chord.push_str(&key_name);
-            telemetry.handle_input(InputEvent::KeyChord {
-                t_ms,
-                shortcut: chord,
-            });
+    let modifiers = crate::hosted_input::Modifiers {
+        command: cmd,
+        control: ctrl,
+        option: alt,
+        shift,
+    };
+    let z = keycode == layout_z_keycode() || keycode == KEY_Z;
+    // Only modifier-chord shortcuts are logged, never ordinary typing or secrets.
+    let name = (cmd || ctrl).then(|| shortcut_key_name(keycode)).flatten();
+    match crate::hosted_input::key_input(t_ms, name.as_deref(), z, modifiers) {
+        Some(InputEvent::UndoStroke) => {
+            let _ = telemetry.ui_sender.try_send(Event::UndoStroke);
         }
+        Some(chord) => telemetry.handle_input(chord),
+        None => {}
     }
     event
 }
@@ -1905,54 +1920,7 @@ fn run_global_hid_poller(telemetry: Arc<SharedCaptureTelemetry>) {
 fn shortcut_key_name(keycode: u16) -> Option<String> {
     let _ = init_keyboard_layout_map();
     let chars = LAYOUT_KEY_CHARS.get();
-    key_name(keycode, |code| chars.and_then(|c| c.get(&code).copied()))
-}
-
-/// Keys that type no character are named the same on every layout; the rest come from
-/// `layout_char` (what ⌘ + the key types), else from the ANSI QWERTY positions.
-fn key_name(keycode: u16, layout_char: impl Fn(u16) -> Option<char>) -> Option<String> {
-    let fixed = match keycode {
-        36 | 76 => "↩",
-        48 => "⇥",
-        49 => "Space",
-        51 => "⌫",
-        53 => "Esc",
-        117 => "⌦",
-        123 => "←",
-        124 => "→",
-        125 => "↓",
-        126 => "↑",
-        115 => "Home",
-        119 => "End",
-        116 => "PgUp",
-        121 => "PgDn",
-        122 => "F1",
-        120 => "F2",
-        99 => "F3",
-        118 => "F4",
-        96 => "F5",
-        97 => "F6",
-        98 => "F7",
-        100 => "F8",
-        101 => "F9",
-        109 => "F10",
-        103 => "F11",
-        111 => "F12",
-        _ => "",
-    };
-    if !fixed.is_empty() {
-        return Some(fixed.to_string());
-    }
-    layout_char(keycode)
-        .or_else(|| ansi_key_char(keycode))
-        .map(|c| c.to_uppercase().collect())
-}
-
-fn ansi_key_char(keycode: u16) -> Option<char> {
-    const ANSI: &str = "asdfhgzxcv\0bqweryt123465=97-80]ou[ip\0lj'k;\\,/nm.";
-    ANSI.chars()
-        .nth(usize::from(keycode))
-        .filter(|&c| c != '\0')
+    crate::hosted_input::key_name(keycode, |code| chars.and_then(|c| c.get(&code).copied()))
 }
 
 #[cfg(test)]
@@ -1960,36 +1928,14 @@ mod tests {
     use super::*;
     use crate::model::{InteractionEvent, TargetFrame};
 
+    /// A paste never goes to the host, even with its Settings window in front: it goes to the
+    /// last external app instead.
     #[test]
-    fn shortcut_keys_are_named_by_the_layout_not_their_qwerty_position() {
-        // Dvorak puts B where QWERTY has N (45) and T where QWERTY has K (40).
-        let dvorak = |code: u16| match code {
-            45 => Some('b'),
-            40 => Some('t'),
-            13 => Some(','),
-            _ => None,
-        };
-        assert_eq!(key_name(45, dvorak).as_deref(), Some("B"));
-        assert_eq!(key_name(40, dvorak).as_deref(), Some("T"));
-        assert_eq!(key_name(13, dvorak).as_deref(), Some(","));
-        // Keys that type nothing keep fixed names whatever the layout says.
-        let odd = |_| Some('x');
-        assert_eq!(key_name(36, odd).as_deref(), Some("↩"));
-        assert_eq!(key_name(123, odd).as_deref(), Some("←"));
-        assert_eq!(key_name(122, odd).as_deref(), Some("F1"));
-        assert_eq!(key_name(53, odd).as_deref(), Some("Esc"));
-    }
-
-    #[test]
-    fn shortcut_keys_fall_back_to_ansi_positions_without_a_layout() {
-        let none = |_| None;
-        assert_eq!(key_name(45, none).as_deref(), Some("N"));
-        assert_eq!(key_name(17, none).as_deref(), Some("T"));
-        assert_eq!(key_name(0, none).as_deref(), Some("A"));
-        assert_eq!(key_name(47, none).as_deref(), Some("."));
-        assert_eq!(key_name(29, none).as_deref(), Some("0"));
-        assert_eq!(key_name(10, none), None);
-        assert_eq!(key_name(200, none), None);
+    fn a_paste_goes_to_an_external_app_never_the_host() {
+        assert_eq!(paste_app(42, 9, 7), Some(42), "the app in front");
+        assert_eq!(paste_app(9, 9, 7), Some(7), "the host in front");
+        assert_eq!(paste_app(9, 9, 9), None);
+        assert_eq!(paste_app(0, 9, 0), None);
     }
 
     /// The mouse monitor's AppKit calls pass objc2's encoding checks (which debug builds, the

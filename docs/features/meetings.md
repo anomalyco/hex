@@ -519,8 +519,8 @@ only for time rolling had covered, and Option-Control-V and the GPUI capsule's
 Copy new pasted the Moonshine draft alone, which garbled names and jargon. The
 meeting now loads no Moonshine; short Parakeet chunks replace it. Always-on
 streaming Parakeet was rejected because one loaded model cannot serve it:
-transcribe-cpp 0.2.4 allows one active stream per model across all sessions,
-and refuses any other run or stream with `Busy` while it is open
+transcribe-cpp (0.2.4, and still 0.4.1) allows one active stream per model
+across all sessions, and refuses any other run or stream with `Busy` while it is open
 (`Session::stream`). Two tracks would need a mixed track (losing You/Them and
 echo suppression) or a model copy per track (about 0.7 GB each), and every
 dictation would have to close the meeting stream and lose its 5.6 s left

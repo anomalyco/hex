@@ -24,6 +24,11 @@ const OPTION_FLAG: u64 = 1 << 19;
 const CONTROL_KEY_CODE: u16 = 59;
 const CONTROL_FLAG: u64 = 1 << 18;
 const EVENT_SOURCE_USER_DATA: u32 = 42;
+/// A hole in the virtual key codes, between keypad `*` (0x43) and keypad `+`
+/// (0x45): no keyboard sends it, and of the 264 layouts macOS ships only
+/// Unicode Hex Input maps it (to U+0000, never with Option alone). Unlike
+/// F13–F20 or the JIS keys it has no system action and nothing binds it.
+pub const CHORD_BREAKER_KEY_CODE: u16 = 0x44;
 pub const SYNTHETIC_EVENT_MARKER: i64 = 0x0056_4f49_4345;
 static KEY_CODES: OnceLock<LayoutCodes> = OnceLock::new();
 static LAYOUT_ACCESS: Mutex<()> = Mutex::new(());
@@ -135,6 +140,20 @@ fn resolve_key_code(character: char, command: bool) -> Result<u16> {
         .ok_or_else(|| eyre!("current keyboard layout has no key for {character:?}"))
 }
 
+/// The character `code` types with Command held on the active layout, read
+/// from the startup snapshot only (never TIS): a capture's key log names keys
+/// with it.
+#[cfg(hex_capture)]
+pub fn command_character(code: u16) -> Option<char> {
+    let codes = KEY_CODES.get()?;
+    codes
+        .command
+        .iter()
+        .chain(&codes.plain)
+        .find(|(_, key_code)| **key_code == code)
+        .map(|(character, _)| *character)
+}
+
 /// GUI startup must build this snapshot on the main thread before starting workers.
 /// Later lookups, including misses, never re-enter TIS/TSM from a worker thread.
 pub fn initialize_layout() -> Result<()> {
@@ -229,6 +248,28 @@ pub fn type_text(text: &str) -> Result<()> {
         up.post();
     }
     Ok(())
+}
+
+/// One press of a key that types nothing, under the modifier `flags` held
+/// now, so other apps' modifier-tap detectors read the hold as a chord, as
+/// they do for any key pressed while the modifier is down. It is posted at
+/// the HID tap, so HID and session taps and NSEvent global monitors see it;
+/// Hex's annotated-session tap then drops it before the focused app, which
+/// would otherwise beep at an unhandled key.
+pub fn post_chord_breaker(flags: u64) -> Result<()> {
+    let events = chord_breaker_event_specs(flags)
+        .map(KeyboardEvent::new)
+        .collect::<Result<Vec<_>>>()?;
+    for event in events {
+        event.post();
+    }
+    Ok(())
+}
+
+fn chord_breaker_event_specs(flags: u64) -> impl Iterator<Item = (u16, bool, u64)> {
+    [true, false]
+        .into_iter()
+        .map(move |down| (CHORD_BREAKER_KEY_CODE, down, flags))
 }
 
 pub fn post_shortcut(key: Key, modifiers: Modifiers) -> Result<()> {
@@ -397,6 +438,33 @@ fn translate(layout: *const u8, key_code: u16, modifier_state: u32) -> Option<St
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Hex's taps let its own keystrokes through by this mark, so a posted
+    /// shortcut (the capture hand-off's ⌘V included) never reads as the
+    /// user's chord.
+    #[test]
+    fn posted_keystrokes_carry_hexs_marker() {
+        #[link(name = "ApplicationServices", kind = "framework")]
+        unsafe extern "C" {
+            fn CGEventGetIntegerValueField(event: EventRef, field: u32) -> i64;
+        }
+        let chord_breaker = chord_breaker_event_specs(OPTION_FLAG).collect::<Vec<_>>();
+        assert_eq!(
+            chord_breaker,
+            [
+                (CHORD_BREAKER_KEY_CODE, true, OPTION_FLAG),
+                (CHORD_BREAKER_KEY_CODE, false, OPTION_FLAG)
+            ]
+        );
+        for event in
+            shortcut_event_specs(9, &[(COMMAND_FLAG, COMMAND_KEY_CODE)], 1).chain(chord_breaker)
+        {
+            let event = KeyboardEvent::new(event).unwrap();
+            // SAFETY: the event is valid until `event` drops.
+            let mark = unsafe { CGEventGetIntegerValueField(event.0, EVENT_SOURCE_USER_DATA) };
+            assert_eq!(mark, SYNTHETIC_EVENT_MARKER);
+        }
+    }
 
     #[test]
     fn non_latin_snapshot_gets_shortcut_letters_without_replacing_active_keys() {

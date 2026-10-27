@@ -102,12 +102,27 @@ pub fn on_path(name: &str) -> Option<PathBuf> {
 }
 
 fn opencode_binary() -> Result<PathBuf> {
-    if let Some(bin) = std::env::var_os("OPENCODE_BIN").filter(|bin| !bin.is_empty()) {
+    find_opencode_binary(
+        std::env::var_os("OPENCODE_BIN"),
+        on_path,
+        crate::env::get().opencode,
+        dirs::home_dir(),
+    )
+}
+
+/// `OPENCODE_BIN`, then `opencode2` on `PATH`, then where the host looks, then `~/bin`.
+fn find_opencode_binary(
+    configured: Option<std::ffi::OsString>,
+    on_path: impl Fn(&str) -> Option<PathBuf>,
+    host: Option<crate::env::Opencode>,
+    home: Option<PathBuf>,
+) -> Result<PathBuf> {
+    if let Some(bin) = configured.filter(|bin| !bin.is_empty()) {
         let path = PathBuf::from(bin);
         if executable(&path) {
             return Ok(path);
         }
-        if let Some(path) = path.to_str().and_then(on_path) {
+        if let Some(path) = path.to_str().and_then(&on_path) {
             return Ok(path);
         }
         bail!("OPENCODE_BIN is not an executable");
@@ -115,7 +130,10 @@ fn opencode_binary() -> Result<PathBuf> {
     if let Some(path) = on_path("opencode2") {
         return Ok(path);
     }
-    if let Some(path) = dirs::home_dir()
+    if let Some(path) = host.and_then(|find| find()) {
+        return Ok(path);
+    }
+    if let Some(path) = home
         .map(|home| home.join("bin/opencode2"))
         .filter(|path| executable(path))
     {
@@ -186,6 +204,9 @@ pub fn sync_bundle_to(host: &str, bundle_dir: &Path) -> Result<()> {
             "--exclude=*/frames-full",
             "--exclude=*/contact-sheet-full.png",
             "--exclude=*/.media-sending",
+            // Retries belong to this Mac; a copied marker would only sit there.
+            "--exclude=*/.deliver.json",
+            "--exclude=*/.deliver.json.tmp",
         ])
         .arg("-cf")
         .arg("-")
@@ -278,7 +299,7 @@ impl Drop for RemoveOnDrop {
 }
 
 fn opencode_api(method: &str, path: &str, data: Option<&serde_json::Value>) -> Result<Vec<u8>> {
-    let mut command = if let Some(host) = agent_host() {
+    let command = if let Some(host) = agent_host() {
         let mut remote = format!(
             "PATH=\"$HOME/bin:$HOME/.opencode/bin:/opt/homebrew/bin:$PATH\" {} api {} {}",
             agent_opencode(),
@@ -302,17 +323,65 @@ fn opencode_api(method: &str, path: &str, data: Option<&serde_json::Value>) -> R
         }
         command
     };
-    let output = command.output().context("Could not launch opencode2")?;
+    let output = bounded_output(command)?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         let message = format!("OpenCode API failed: {}", stderr.trim());
-        // `opencode api` prints `HTTP <status> <text>` when the server answered.
-        return Err(match cli_status(&stderr) {
+        // `opencode api` prints `HTTP <status> <text>` to stderr when the server answered, and
+        // the answer's body to stdout.
+        let err = match cli_status(&stderr) {
             Some(status) => anyhow::Error::new(HttpStatus(status)).context(message),
             None => anyhow::anyhow!(message),
+        };
+        return Err(match said(&output.stdout) {
+            Some(said) => err.context(said),
+            None => err,
         });
     }
     Ok(output.stdout)
+}
+
+/// How much of `opencode api`'s stderr is kept; the rest is read and dropped.
+const CLI_STDERR_LIMIT: u64 = 64 * 1024;
+
+/// `command.output()` with stdout capped at [`SERVER_RESPONSE_LIMIT`] (the child is killed
+/// past it) and stderr at [`CLI_STDERR_LIMIT`].
+fn bounded_output(mut command: Command) -> Result<std::process::Output> {
+    use std::io::Read;
+    use std::process::Stdio;
+    let mut child = command
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .context("Could not launch opencode2")?;
+    let mut stderr = child.stderr.take().context("No opencode2 stderr")?;
+    let errors = std::thread::spawn(move || {
+        let mut kept = Vec::new();
+        let _ = (&mut stderr).take(CLI_STDERR_LIMIT).read_to_end(&mut kept);
+        let _ = std::io::copy(&mut stderr, &mut std::io::sink());
+        kept
+    });
+    let mut stdout = Vec::new();
+    let read = child
+        .stdout
+        .take()
+        .context("No opencode2 output")?
+        .take(SERVER_RESPONSE_LIMIT + 1)
+        .read_to_end(&mut stdout);
+    let too_much = stdout.len() as u64 > SERVER_RESPONSE_LIMIT;
+    if too_much {
+        let _ = child.kill();
+    }
+    let status = child.wait().context("Could not wait for opencode2")?;
+    let stderr = errors.join().unwrap_or_default();
+    read.context("Could not read opencode2 output")?;
+    ensure!(!too_much, "OpenCode response too large");
+    Ok(std::process::Output {
+        status,
+        stdout,
+        stderr,
+    })
 }
 
 /// The status in `opencode api`'s `HTTP 409 Conflict` line.
@@ -560,9 +629,41 @@ fn http_request(
         ensure!(body.len() == length, "Incomplete OpenCode HTTP response");
     }
     if !(200..300).contains(&status) {
-        return Err(HttpStatus(status).into());
+        let err = anyhow::Error::new(HttpStatus(status));
+        return Err(match said(&body) {
+            Some(said) => err.context(said),
+            None => err,
+        });
     }
     Ok(body)
+}
+
+/// What OpenCode said in a refusal (`{"message": …}`, or its text), as `OpenCode said: …`.
+fn said(body: &[u8]) -> Option<String> {
+    const READ: usize = 64 * 1024;
+    let text = String::from_utf8_lossy(&body[..body.len().min(READ)]);
+    let text = text.trim();
+    let message = serde_json::from_str::<serde_json::Value>(text)
+        .ok()
+        .and_then(|value| {
+            let value = value
+                .get("error")
+                .filter(|e| e.is_object())
+                .unwrap_or(&value);
+            value
+                .get("message")
+                .or_else(|| value.get("error"))
+                .and_then(|m| m.as_str())
+                .map(str::to_owned)
+        })
+        .unwrap_or_else(|| text.to_owned());
+    let message = message.lines().next().unwrap_or("").trim();
+    (!message.is_empty()).then(|| {
+        format!(
+            "OpenCode said: {}",
+            message.chars().take(300).collect::<String>()
+        )
+    })
 }
 
 /// One request to the local OpenCode server (`method` is `GET`, `POST`, `DELETE`…) within
@@ -1202,6 +1303,105 @@ mod session_lookup {
         let err = anyhow::Error::new(super::HttpStatus(404)).context("OpenCode API failed");
         assert_eq!(super::http_status(&err), Some(404));
         assert_eq!(super::http_status(&anyhow::anyhow!("down")), None);
+    }
+
+    #[test]
+    fn a_refused_post_says_what_opencode_said() {
+        use std::io::{Read, Write};
+        use std::time::Duration;
+
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut buf = [0_u8; 4096];
+            let _ = stream.read(&mut buf).unwrap();
+            let body = br#"{"_tag":"InvalidRequestError","message":"Unable to read attachment: file:///a/contact-sheet.png","field":"files"}"#;
+            write!(
+                stream,
+                "HTTP/1.1 400 Bad Request\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                body.len()
+            )
+            .unwrap();
+            stream.write_all(body).unwrap();
+        });
+        let err = http_request(
+            address,
+            None,
+            "POST",
+            "/api/session/ses_x/prompt",
+            Some(b"{}"),
+            Duration::from_secs(2),
+        )
+        .unwrap_err();
+        assert_eq!(http_status(&err), Some(400));
+        assert!(
+            format!("{err:#}").starts_with(
+                "OpenCode said: Unable to read attachment: file:///a/contact-sheet.png"
+            ),
+            "{err:#}"
+        );
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn what_opencode_said_reads_its_message_or_its_text() {
+        assert_eq!(
+            said(br#"{"message":"Skill not found: x\nmore","field":"skills"}"#).as_deref(),
+            Some("OpenCode said: Skill not found: x")
+        );
+        assert_eq!(
+            said(br#"{"error":{"message":"nested"}}"#).as_deref(),
+            Some("OpenCode said: nested")
+        );
+        assert_eq!(
+            said(br#"{"error":"flat"}"#).as_deref(),
+            Some("OpenCode said: flat")
+        );
+        assert_eq!(
+            said(b"Bad Request\n").as_deref(),
+            Some("OpenCode said: Bad Request")
+        );
+        assert_eq!(said(b"  \n"), None);
+        assert_eq!(
+            said(&[b'x'; 1000]).unwrap().len(),
+            "OpenCode said: ".len() + 300
+        );
+    }
+
+    #[test]
+    fn the_host_can_say_where_opencode2_is() {
+        fn found() -> Option<PathBuf> {
+            Some(PathBuf::from("/host/opencode2"))
+        }
+        let nowhere = |_: &str| None;
+        let no_home = Some(PathBuf::from("/nonexistent-home"));
+        assert_eq!(
+            find_opencode_binary(None, nowhere, Some(found), no_home.clone()).unwrap(),
+            PathBuf::from("/host/opencode2")
+        );
+        // PATH comes first, and nothing anywhere says where to look.
+        let on = |name: &str| Some(PathBuf::from(format!("/path/{name}")));
+        assert_eq!(
+            find_opencode_binary(None, on, Some(found), no_home.clone()).unwrap(),
+            PathBuf::from("/path/opencode2")
+        );
+        let err = find_opencode_binary(None, nowhere, None, no_home).unwrap_err();
+        assert!(
+            err.to_string().contains("Could not find opencode2"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn opencode2_output_is_bounded() {
+        let mut command = Command::new("/bin/sh");
+        command.args(["-c", "head -c 200000 /dev/zero >&2; printf ok; exit 3"]);
+        let output = bounded_output(command).unwrap();
+        assert_eq!(output.stdout, b"ok");
+        assert_eq!(output.stderr.len() as u64, CLI_STDERR_LIMIT);
+        assert_eq!(output.status.code(), Some(3));
+        assert!(said(&vec![b'x'; 200_000]).is_some());
     }
 
     fn many(count: usize) -> Vec<OpenCodeSession> {

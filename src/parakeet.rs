@@ -173,6 +173,9 @@ struct JobControl {
     output_started: Mutex<bool>,
     /// The control phrase a voice transcript ended with.
     spoken: OnceLock<DictationControl>,
+    /// A programmatic dictation's job: its owner app cancels it through the
+    /// API, so Escape never does.
+    owner_cancels: bool,
 }
 
 impl JobControl {
@@ -185,6 +188,15 @@ impl JobControl {
             return false;
         }
         !self.cancelled.swap(true, Ordering::AcqRel)
+    }
+
+    /// Whether [`JobControl::cancel`] would cancel it now.
+    fn cancellable(&self) -> bool {
+        let output_started = self
+            .output_started
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        !*output_started && !self.is_cancelled()
     }
 
     fn is_cancelled(&self) -> bool {
@@ -256,7 +268,14 @@ impl WorkerState {
         self.jobs
             .iter()
             .rev()
+            .filter(|(_, control)| !control.owner_cancels)
             .find_map(|(&job_id, control)| control.cancel().then_some(job_id))
+    }
+
+    fn has_escape_cancellable_job(&self) -> bool {
+        self.jobs
+            .values()
+            .any(|control| !control.owner_cancels && control.cancellable())
     }
 }
 
@@ -385,7 +404,10 @@ impl DictationWorker {
         let (Some(engine), Some(jobs)) = (&self.engine, &self.inference_jobs) else {
             return Err("dictation worker is unavailable");
         };
-        let control = Arc::new(JobControl::default());
+        let control = Arc::new(JobControl {
+            owner_cancels: matches!(target, TranscriptionTarget::Service),
+            ..JobControl::default()
+        });
         let (_, selection) = crate::app_settings::transcription_selection();
         let submitted_at = Instant::now();
         let audio_ms = clip.duration_ms();
@@ -515,6 +537,15 @@ impl DictationWorker {
             .unwrap_or_else(|error| error.into_inner())
             .jobs
             .len()
+    }
+
+    /// Whether Escape has a queued job to cancel; programmatic dictations'
+    /// jobs don't count.
+    pub fn has_escape_cancellable_job(&self) -> bool {
+        self.state
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .has_escape_cancellable_job()
     }
 
     pub fn cancel_latest(&self) -> Option<DictationJobId> {
@@ -696,15 +727,16 @@ const WORD_DICTATION_WAIT: std::time::Duration = std::time::Duration::from_secs(
 /// meeting chunks, and never inside a dictation live stream, which finishes
 /// first. No second copy of the model is loaded, and only a weak reference
 /// to the engine is kept between chunks. Quitting stops it between chunks.
+/// Every chunk runs on `selection`.
 #[cfg(hex_capture)]
 pub fn transcribe_with_words(
     engine: &std::sync::Weak<TranscriptionEngine>,
+    selection: &crate::transcription_models::TranscriptionSelection,
     samples: Vec<f32>,
 ) -> Result<crate::transcription::Transcript> {
     if samples.is_empty() {
         return Ok(crate::transcription::Transcript::default());
     }
-    let (_, selection) = crate::app_settings::transcription_selection();
     transcribe_in_chunks(samples, WORD_CHUNK_SAMPLES, |chunk| {
         wait_for_dictation_idle()?;
         let selection = selection.clone();
@@ -1228,7 +1260,7 @@ impl Parakeet {
             model_path,
             &ModelOptions {
                 backend: Backend::Metal,
-                device: None,
+                ..Default::default()
             },
         )
         .wrap_err_with(|| {
@@ -2066,7 +2098,7 @@ mod tests {
         let engine = Arc::new(engine);
         let weak = Arc::downgrade(&engine);
         assert!(
-            transcribe_with_words(&weak, Vec::new())
+            transcribe_with_words(&weak, &Default::default(), Vec::new())
                 .unwrap()
                 .words
                 .is_empty()
@@ -2081,7 +2113,11 @@ mod tests {
         let request = {
             let weak = weak.clone();
             thread::spawn(move || {
-                transcribe_with_words(&weak, vec![0.1; WORD_CHUNK_SAMPLES + 1_600])
+                transcribe_with_words(
+                    &weak,
+                    &Default::default(),
+                    vec![0.1; WORD_CHUNK_SAMPLES + 1_600],
+                )
             })
         };
         assert!(
@@ -2111,7 +2147,7 @@ mod tests {
         // Only a weak reference is held: once the engine is gone, a capture
         // fails instead of keeping it alive.
         drop(engine);
-        assert!(transcribe_with_words(&weak, vec![0.1; 16]).is_err());
+        assert!(transcribe_with_words(&weak, &Default::default(), vec![0.1; 16]).is_err());
     }
 
     #[test]
@@ -2130,6 +2166,46 @@ mod tests {
         assert_eq!(state.cancel_latest(), Some(DictationJobId(1)));
         assert_eq!(state.cancel_latest(), Some(DictationJobId(0)));
         assert_eq!(state.cancel_latest(), None);
+    }
+
+    #[test]
+    fn escape_skips_programmatic_dictation_jobs() {
+        let owned = || {
+            Arc::new(JobControl {
+                owner_cancels: true,
+                ..JobControl::default()
+            })
+        };
+        let state = WorkerState {
+            next_sequence: 2,
+            jobs: BTreeMap::from([
+                (DictationJobId(0), Arc::new(JobControl::default())),
+                (DictationJobId(1), owned()),
+            ]),
+            pending_pastes: 0,
+        };
+        assert!(state.has_escape_cancellable_job());
+        assert_eq!(state.cancel_latest(), Some(DictationJobId(0)));
+        assert_eq!(state.cancel_latest(), None);
+        assert!(!state.has_escape_cancellable_job());
+        assert!(!state.jobs[&DictationJobId(1)].is_cancelled());
+
+        // A job whose output has started can no longer be cancelled.
+        let pasting = WorkerState {
+            next_sequence: 1,
+            jobs: BTreeMap::from([(DictationJobId(0), Arc::new(JobControl::default()))]),
+            pending_pastes: 0,
+        };
+        assert!(pasting.jobs[&DictationJobId(0)].begin_output());
+        assert!(!pasting.has_escape_cancellable_job());
+        assert_eq!(pasting.cancel_latest(), None);
+
+        let only_owned = WorkerState {
+            next_sequence: 1,
+            jobs: BTreeMap::from([(DictationJobId(0), owned())]),
+            pending_pastes: 0,
+        };
+        assert!(!only_owned.has_escape_cancellable_job());
     }
 
     #[test]

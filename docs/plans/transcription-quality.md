@@ -78,6 +78,7 @@ Transcription quality plan (ordered by value / effort)
 
 ## Phase 3: `transcribe-cpp` Bump (`0.2.4` -> `0.4.1`) and Catalog Refresh
 
+- **Status (2026-10-26):** The dependency bump is done with behavior unchanged: same transcripts on the vocabulary corpus, weights now mmap'd (peak footprint about 0.9 GB to 0.15 GB on Metal). Hints, the catalog refresh, and Vulkan prewarm verification remain.
 - **Goal:** Upgrade `transcribe-cpp` to `0.4.1` to unlock generic `RunOptions::vocabulary` / `prompt`, enable Qwen3-ASR recognition hints (`#129`), and replace `ParakeetV3` with `parakeet-ultra`.
 - **Changes:**
   - **Dependency bump (`Cargo.toml`, `src/gguf_session.rs`, `src/parakeet.rs`, `src/local_transcriber.rs`):**

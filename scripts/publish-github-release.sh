@@ -7,9 +7,9 @@
 #
 #   publish-github-release.sh <dist>
 #
-# Environment: HEX_VERSION, HEX_RELEASE_COMMIT, HEX_RELEASE_CHANNEL (stable or
-# staging), HEX_RELEASE_TAG, HEX_RELEASE_SOURCE (a checkout of the commit with
-# push credentials), HEX_RELEASE_NOTES_URL, GH_TOKEN.
+# Environment: HEX_VERSION, HEX_RELEASE_COMMIT, HEX_RELEASE_TAG,
+# HEX_RELEASE_SOURCE (a checkout of the commit with push credentials),
+# GH_TOKEN.
 set -eu
 
 repo=${HEX_RELEASE_REPO:-anomalyco/hex}
@@ -20,7 +20,6 @@ repo=${HEX_RELEASE_REPO:-anomalyco/hex}
 dist=$1
 version=${HEX_VERSION:?Set HEX_VERSION}
 commit=${HEX_RELEASE_COMMIT:?Set HEX_RELEASE_COMMIT}
-channel=${HEX_RELEASE_CHANNEL:?Set HEX_RELEASE_CHANNEL}
 tag=${HEX_RELEASE_TAG:?Set HEX_RELEASE_TAG}
 source=${HEX_RELEASE_SOURCE:?Set HEX_RELEASE_SOURCE}
 
@@ -33,32 +32,23 @@ assets=$(cd "$dist" && { ls Hex-*.zip Hex-*.dmg Hex-*.exe hex-*-linux-x64 2>/dev
   exit 1
 }
 
-if [ "$channel" = stable ]; then
-  notes="$source/docs/releases/$version.md"
-  test -f "$notes" || {
-    echo "Add release notes at docs/releases/$version.md." >&2
-    exit 1
-  }
-  # An annotated tag's peeled commit is listed last.
-  tagged=$(git -C "$source" ls-remote origin "refs/tags/$tag" "refs/tags/$tag^{}" | awk 'END { print $1 }')
-  if [ -z "$tagged" ]; then
-    git -C "$source" tag "$tag" "$commit"
-    git -C "$source" push origin "refs/tags/$tag"
-  elif [ "$tagged" != "$commit" ]; then
-    echo "Tag $tag already names $tagged, not $commit." >&2
-    exit 1
-  fi
+notes="$source/docs/releases/$version.md"
+test -f "$notes" || {
+  echo "Add release notes at docs/releases/$version.md." >&2
+  exit 1
+}
+# An annotated tag's peeled commit is listed last.
+tagged=$(git -C "$source" ls-remote origin "refs/tags/$tag" "refs/tags/$tag^{}" | awk 'END { print $1 }')
+if [ -z "$tagged" ]; then
+  git -C "$source" tag "$tag" "$commit"
+  git -C "$source" push origin "refs/tags/$tag"
+elif [ "$tagged" != "$commit" ]; then
+  echo "Tag $tag already names $tagged, not $commit." >&2
+  exit 1
 fi
 if ! gh release view "$tag" -R "$repo" --json name >/dev/null 2>&1; then
-  if [ "$channel" = stable ]; then
-    gh release create "$tag" -R "$repo" --verify-tag --title "Hex $version" \
-      --notes-file "$notes" --latest=false
-  else
-    printf 'Staging build of Hex %s from %s, published to %s.\n' \
-      "$version" "$commit" "${HEX_RELEASE_NOTES_URL:-the dev release service}" > "$temporary/notes.md"
-    gh release create "$tag" -R "$repo" --target dev --title "Hex $version (staging)" \
-      --notes-file "$temporary/notes.md" --draft --prerelease
-  fi
+  gh release create "$tag" -R "$repo" --verify-tag --title "Hex $version" \
+    --notes-file "$notes" --latest=false
 fi
 gh release view "$tag" -R "$repo" --json assets > "$temporary/release.json"
 mkdir -p "$temporary/mirror"

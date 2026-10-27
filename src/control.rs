@@ -136,6 +136,33 @@ pub enum ControlCommand {
     ScrawlCapture {
         action: ScrawlCaptureAction,
     },
+    /// The newest captures in the captures folder, newest first.
+    ScrawlCaptureList {
+        #[serde(default)]
+        limit: Option<usize>,
+    },
+    /// One capture, by bundle name, path, or `latest`.
+    ScrawlCaptureShow {
+        capture: String,
+    },
+    /// Sends a capture to an OpenCode session: `to`, or where its route or
+    /// its last send says.
+    ScrawlCaptureSend {
+        capture: String,
+        #[serde(default)]
+        to: Option<String>,
+        /// Also save a rule sending the capture's site or app there (the
+        /// newest routed capture only).
+        #[serde(default)]
+        always: bool,
+    },
+    /// What routing sees for a capture and what it decides. `ask_jev` asks
+    /// Jev again (one call).
+    ScrawlCaptureRoute {
+        capture: String,
+        #[serde(default)]
+        ask_jev: bool,
+    },
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -173,6 +200,13 @@ pub enum ControlReply {
         entries: Vec<VocabularyEntry>,
     },
     ScrawlCapture(Box<ScrawlCaptureReport>),
+    ScrawlCaptures {
+        captures: Vec<ScrawlCaptureSummary>,
+    },
+    ScrawlCaptureDetail(Box<ScrawlCaptureDetail>),
+    ScrawlCaptureRoute {
+        explanation: String,
+    },
     Error {
         code: String,
         message: String,
@@ -261,6 +295,48 @@ pub struct ScrawlCaptureOutcome {
     /// reason.
     #[serde(default)]
     pub missing_transcript: Option<String>,
+}
+
+/// A capture on disk, as `hex capture list` shows it.
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+pub struct ScrawlCaptureSummary {
+    /// The bundle's folder name, which `show`, `send`, and `route` take.
+    pub id: String,
+    pub bundle: std::path::PathBuf,
+    pub created_at_ms: u64,
+    pub duration_ms: u64,
+    /// `screen`, `window`, `area`, or `iphone`.
+    pub mode: String,
+    pub app: Option<String>,
+    pub words: usize,
+    /// The session it was sent to, if it was.
+    pub sent_to: Option<ScrawlCaptureSession>,
+    /// OpenCode didn't take its send yet; Hex retries it.
+    #[serde(default)]
+    pub queued: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct ScrawlCaptureSession {
+    pub session: String,
+    pub title: String,
+}
+
+/// `hex capture show`: a capture's summary with its words and files.
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+pub struct ScrawlCaptureDetail {
+    #[serde(flatten)]
+    pub summary: ScrawlCaptureSummary,
+    pub window_title: Option<String>,
+    pub transcript: String,
+    pub note: Option<String>,
+    /// Why there is no transcript although there was audio.
+    pub missing_transcript: Option<String>,
+    pub marks: usize,
+    pub keyframes: usize,
+    pub video: Option<std::path::PathBuf>,
+    pub audio: Option<std::path::PathBuf>,
+    pub contact_sheet: Option<std::path::PathBuf>,
 }
 
 /// A refused or failed command, with a stable code (see `docs/cli.md`).
@@ -753,6 +829,18 @@ mod tests {
                 action: ScrawlCaptureAction::Stop
             }
         );
+        let send: ControlRequest = serde_json::from_str(
+            r#"{"version":1,"command":"scrawl-capture-send","capture":"latest"}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            send.command,
+            ControlCommand::ScrawlCaptureSend {
+                capture: "latest".into(),
+                to: None,
+                always: false,
+            }
+        );
     }
 
     #[test]
@@ -792,6 +880,29 @@ mod tests {
                     missing_transcript: None,
                 }),
             })),
+            ControlReply::ScrawlCaptures {
+                captures: vec![ScrawlCaptureSummary {
+                    id: "1.scrawl".into(),
+                    sent_to: Some(ScrawlCaptureSession {
+                        session: "ses_1".into(),
+                        title: "Hex".into(),
+                    }),
+                    ..ScrawlCaptureSummary::default()
+                }],
+            },
+            ControlReply::ScrawlCaptureDetail(Box::new(ScrawlCaptureDetail {
+                summary: ScrawlCaptureSummary {
+                    id: "1.scrawl".into(),
+                    words: 3,
+                    ..ScrawlCaptureSummary::default()
+                },
+                transcript: "make it blue".into(),
+                video: Some("/tmp/1.scrawl/video.mp4".into()),
+                ..ScrawlCaptureDetail::default()
+            })),
+            ControlReply::ScrawlCaptureRoute {
+                explanation: "Capture   1.scrawl".into(),
+            },
             ControlReply::error("busy", "Hex is busy"),
         ] {
             let response = ControlResponse::from(reply);

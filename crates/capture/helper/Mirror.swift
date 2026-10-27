@@ -75,10 +75,11 @@ enum Phone {
 ///   {"event":"warning", message}                         e.g. no microphone, so no narration
 /// Commands on stdin: `show`, `hide`, `start [PATH]`, `stop`, `cancel`. End of input means stop.
 final class Mirror: NSObject, NSApplicationDelegate, NSWindowDelegate, AVCaptureFileOutputRecordingDelegate {
-  static func run(output: URL?, previewOnly: Bool = false, hiddenPreview: Bool = false, deviceID: String?, microphone: (id: String, name: String)? = nil) -> Never {
+  static func run(output: URL?, previewOnly: Bool = false, hiddenPreview: Bool = false, deviceID: String?, microphone: (id: String, name: String)? = nil, narration: Bool = true) -> Never {
     let app = NSApplication.shared
     let mirror = Mirror(output: output, previewOnly: previewOnly, hiddenPreview: hiddenPreview, deviceID: deviceID)
     mirror.microphone = microphone
+    mirror.narration = narration
     app.setActivationPolicy(.accessory)
     app.delegate = mirror
     withExtendedLifetime(mirror) { app.run() }
@@ -91,6 +92,9 @@ final class Mirror: NSObject, NSApplicationDelegate, NSWindowDelegate, AVCapture
   let deviceID: String?
   /// The microphone chosen in Settings (CoreAudio UID, which is `AVCaptureDevice.uniqueID`).
   var microphone: (id: String, name: String)?
+  /// False with `--no-microphone`: the host records the narration itself, so the movie has no
+  /// audio and the microphone is never asked for or opened.
+  var narration = true
   lazy var session = AVCaptureSession()
   lazy var movieOutput = AVCaptureMovieFileOutput()
   let queue = DispatchQueue(label: "dev.kitlangton.scrawl.helper.session")
@@ -118,21 +122,26 @@ final class Mirror: NSObject, NSApplicationDelegate, NSWindowDelegate, AVCapture
     AVCaptureDevice.requestAccess(for: .video) { granted in
       DispatchQueue.main.async {
         guard granted else { return self.die("Camera access denied; allow Scrawl in System Settings › Privacy & Security › Camera") }
+        guard self.narration else { return self.watchForPhone() }
         AVCaptureDevice.requestAccess(for: .audio) { micGranted in
           DispatchQueue.main.async {
             if !micGranted {
               self.warn("Microphone access denied; recording without narration (allow Scrawl in System Settings › Privacy & Security › Microphone)")
             }
-            Phone.publishScreenCaptureDevices()
-            let deadline = Date().addingTimeInterval(12)
-            NotificationCenter.default.addObserver(forName: AVCaptureDevice.wasConnectedNotification, object: nil, queue: .main) { [weak self] _ in
-              self?.findPhone(deadline: deadline)
-            }
-            self.findPhone(deadline: deadline)
+            self.watchForPhone()
           }
         }
       }
     }
+  }
+
+  private func watchForPhone() {
+    Phone.publishScreenCaptureDevices()
+    let deadline = Date().addingTimeInterval(12)
+    NotificationCenter.default.addObserver(forName: AVCaptureDevice.wasConnectedNotification, object: nil, queue: .main) { [weak self] _ in
+      self?.findPhone(deadline: deadline)
+    }
+    findPhone(deadline: deadline)
   }
 
   private func findPhone(deadline: Date) {
@@ -163,7 +172,7 @@ final class Mirror: NSObject, NSApplicationDelegate, NSWindowDelegate, AVCapture
     fitWindow()
 
     var mic: AVCaptureDeviceInput?
-    if AVCaptureDevice.authorizationStatus(for: .audio) == .authorized {
+    if narration, AVCaptureDevice.authorizationStatus(for: .audio) == .authorized {
       // The chosen microphone, else the macOS default: a missing one never costs the narration.
       let chosen = microphone.flatMap { AVCaptureDevice(uniqueID: $0.id) }
       let fallback = AVCaptureDevice.default(for: .audio)

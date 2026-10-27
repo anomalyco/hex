@@ -51,7 +51,12 @@ hex
 │   ├── list [--json]              every term and its "sounds like" spellings
 │   ├── add <term> [--sounds-like a,b]  add a term, or new spellings to an existing one
 │   └── remove <term>              any case
-├── capture start|stop|cancel|status  the `capture` build option + experiment (features/capture.md)
+├── capture                        the `capture` build option + experiment (features/capture.md)
+│   ├── start|stop|cancel|status   record a capture, end or discard it, or report
+│   ├── list [--limit N]           the newest captures in the captures folder
+│   ├── show <capture>             one capture's words, files, and where it went
+│   ├── send <capture> [--to <session>] [--always]  send it to an OpenCode session
+│   └── route <capture> [--ask-jev]  what routing sees and decides; sends nothing
 ├── experiments list|enable|disable  edit ~/.config/hex/experiments; no running Hex (features/experiments.md)
 ├── check-for-updates              check for an update now
 ├── launch-at-login [on|off]       report or change Launch at Login (installed Hex.app only)
@@ -112,6 +117,19 @@ of `done`, `failed`, or `cancelled`, and for a written bundle `words`, `gaps`,
 and `missing_transcript`, why it has no words). A start while two captures
 are still writing is refused with `busy`. Every action is idempotent.
 
+`<capture>` is a bundle name (`1792933491953.scrawl`, the extension
+optional), a path, or `latest`. `list`, `show`, and `route` read the captures
+folder and need only the experiment; `send` needs captures on and a listening
+Hex. `send` with `--to` takes a session ID; for the newest capture it also
+takes a name its route lists, and it acts as the capsule's pick, so the
+capsule's Undo follows it. Without `--to` it goes where the capture's route
+(its rule, or its first guess) or its last send says. `--always`, for the
+newest capture only, also saves a rule sending its site or app there, as the
+capsule's ⇧⏎ does. Its reply says what became of it (`Sent to …`,
+`Queued for …` when OpenCode didn't answer, which Hex retries). `route` is
+Scrawl's `route --explain` (`--explain` is accepted); `--ask-jev` asks Jev
+again, one network call. An unknown capture is refused with `not-found`.
+
 A CLI-started meeting is the same recording the menu bar starts: the menu-bar
 state, the recording capsule, and Stop & Transcribe all apply to it.
 `meetings record` replies once the recording has started (or after 8 s);
@@ -168,6 +186,8 @@ window-show {pane?} | window-hide
 history-clear | check-for-updates | launch-at-login {enabled?}
 vocabulary-list | vocabulary-add {term, sounds_like} | vocabulary-remove {term}
 scrawl-capture {action}                          action: start | stop | cancel | status; `capture` build option
+scrawl-capture-list {limit?} | scrawl-capture-show {capture}
+scrawl-capture-send {capture, to?, always?} | scrawl-capture-route {capture, ask_jev}
 ```
 
 Optional fields may be left out. `hex start` and `hex logs` are local and have
@@ -189,6 +209,15 @@ Replies are tagged by `status`:
 {"version": 1, "status": "scrawl-capture", "changed": true, "state": "idle",
   "bundle": "…/captures/1792933491953.scrawl", "elapsed_ms": null,
   "finishing": ["…/captures/1792933491953.scrawl"], "last": null}
+{"version": 1, "status": "scrawl-captures", "captures": [{"id": "1792933491953.scrawl",
+  "bundle": "…", "created_at_ms": 1792933491953, "duration_ms": 4000, "mode": "window",
+  "app": "Brave", "words": 12, "sent_to": {"session": "ses_…", "title": "Hex"},
+  "queued": false}]}
+{"version": 1, "status": "scrawl-capture-detail", "id": "…", "…": "the list's fields",
+  "window_title": "…", "transcript": "…", "note": null, "missing_transcript": null,
+  "marks": 2, "keyframes": 3, "video": "…/video.mp4", "audio": null,
+  "contact_sheet": "…/contact-sheet.jpg"}
+{"version": 1, "status": "scrawl-capture-route", "explanation": "Capture   …"}
 ```
 
 `done.changed` is `false` when the command found things already so ("Already
@@ -243,6 +272,7 @@ read-only              the key can't be set here (the message says where)
 invalid-value          the value doesn't parse or is out of range
 confirmation-required  the change also turns another setting off, or clears history; pass --yes
 shortcut-in-use        another Hex shortcut already uses that binding
+not-found              no such capture, or it has no scrawl.json yet
 unknown-model          no such model id (`hex model list`)
 not-installed          `model use` on a model that isn't downloaded (`hex model install`)
 feature-off            the command needs an opt-in that is off (Meetings, Voice Action, commands)
@@ -278,6 +308,17 @@ an unsaved edit.
 - `commands_enabled on` while `release_microphone_while_idle` is on, and the
   reverse, need `--yes`, because each turns the other off.
 - `voice_action.enabled on` needs a free Voice Action shortcut.
+- `updates.channel` takes `stable`, `dev`, or `none` (follow the build:
+  `dev` for an `X.Y.Z-dev.N` build, otherwise the install's channel), and
+  checks for updates at once. Switching to `stable` never downgrades: Hex
+  waits for a stable release newer than the one it runs.
+- With the `capture` build option and experiment, `capture.*` keys appear:
+  `capture.enabled`, `capture.hotkey` (default `option+shift+s`),
+  `capture.list_hotkey` (the capsule's send-to list, default
+  `option+shift+v`), `capture.transcriber`, `capture.folder`,
+  `capture.media_days`, `capture.bundle_days`, and `capture.routing`. Both
+  capture shortcuts need a key, and `capture.enabled on` needs both free; on
+  a Mac whose Paste Last is still ⌥⇧V, rebind one of the two first.
 - `transcription.model` and `transcription.language` are read-only here: use
   `hex model use`. `transcription_recents` and `meetings.calendar.connected`
   are read-only (connecting a calendar asks macOS for access from Settings).
@@ -297,7 +338,7 @@ Writable keys: `commands_enabled`, `release_microphone_while_idle`,
 `experimental.hex_microphone`, `experimental.hex_microphone_mode`,
 `experimental.hex_microphone_comfort_noise`,
 `experimental.hex_microphone_strength`, `enable_on_launch`,
-`paste_with_shift`, `ui_language`, `indicator_position`.
+`paste_with_shift`, `ui_language`, `indicator_position`, `updates.channel`.
 
 A test (`control::settings::tests::every_persisted_setting_has_a_cli_key`)
 fails when a new persisted setting has no key here.

@@ -39,6 +39,7 @@ plist_value() {
 [ "$(plist_value LSUIElement)" = true ] || fail "menu-bar application policy is disabled"
 # The capture build option is never released (scripts/build-app.sh HEX_CAPTURE).
 [ ! -e "$bundle/Contents/MacOS/scrawl-helper" ] || fail "built with the capture build option: scrawl-helper is bundled"
+! plist_value NSCameraUsageDescription >/dev/null 2>&1 || fail "built with the capture build option: Info.plist asks for the camera"
 [ -x "$bundle/Contents/MacOS/hex" ] || fail "packaged executable is missing"
 ! LC_ALL=C grep -aqF "$capture_marker" "$bundle/Contents/MacOS/hex" || fail "built with the capture build option: hex has the capture engine"
 [ "$(lipo -archs "$bundle/Contents/MacOS/hex")" = arm64 ] || fail "packaged executable is not arm64-only"

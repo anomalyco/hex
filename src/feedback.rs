@@ -23,6 +23,20 @@ pub enum Tone {
     DictationStart,
     DictationStop,
     Cancel,
+    /// A Scrawl capture started recording.
+    #[cfg(hex_capture)]
+    CaptureStart,
+    /// It stopped and is being written.
+    #[cfg(hex_capture)]
+    CaptureStop,
+    /// Its auto-send went, once Undo ran out.
+    #[cfg(hex_capture)]
+    CaptureSent,
+    /// A send was taken back, or a recording cancelled.
+    #[cfg(hex_capture)]
+    CaptureUndo,
+    #[cfg(hex_capture)]
+    CaptureFailed,
 }
 
 /// A request to the playback worker. The start tone of a shortcut press is
@@ -161,8 +175,23 @@ pub fn preload() -> Result<()> {
                 env!("CARGO_MANIFEST_DIR"),
                 "/resources/audio/cancel.mp3"
             )))?;
-            Ok((start, stop, cancel))
+            #[cfg(hex_capture)]
+            let capture = capture_sounds()?;
+            Ok((
+                start,
+                stop,
+                cancel,
+                #[cfg(hex_capture)]
+                capture,
+            ))
         })();
+        #[cfg(hex_capture)]
+        let Ok((start, stop, cancel, capture)) = result else {
+            let _ = ready_sender.send(result.map(|_| ()));
+            LOADER_STARTED.store(false, Ordering::Release);
+            return;
+        };
+        #[cfg(not(hex_capture))]
         let Ok((start, stop, cancel)) = result else {
             let _ = ready_sender.send(result.map(|_| ()));
             LOADER_STARTED.store(false, Ordering::Release);
@@ -217,6 +246,16 @@ pub fn preload() -> Result<()> {
                     Tone::DictationStart => &start,
                     Tone::DictationStop => &stop,
                     Tone::Cancel => &cancel,
+                    #[cfg(hex_capture)]
+                    Tone::CaptureStart => &capture[0],
+                    #[cfg(hex_capture)]
+                    Tone::CaptureStop => &capture[1],
+                    #[cfg(hex_capture)]
+                    Tone::CaptureSent => &capture[2],
+                    #[cfg(hex_capture)]
+                    Tone::CaptureUndo => &capture[3],
+                    #[cfg(hex_capture)]
+                    Tone::CaptureFailed => &capture[4],
                     #[cfg(target_os = "macos")]
                     Tone::Wake | Tone::Sleep | Tone::Error => continue,
                 };
@@ -243,12 +282,31 @@ pub fn play(tone: Tone) {
         return;
     }
     match tone {
-        Tone::DictationStart | Tone::DictationStop | Tone::Cancel => {
-            enqueue(DICTATION_PLAYER.get(), Request::Play(tone));
-        }
         #[cfg(target_os = "macos")]
         Tone::Wake | Tone::Sleep | Tone::Error => play_system_sound(tone),
+        _ => enqueue(DICTATION_PLAYER.get(), Request::Play(tone)),
     }
+}
+
+/// The capture tones, in [`Tone`]'s order: start, stop, sent, undo, failed.
+#[cfg(hex_capture)]
+fn capture_sounds() -> Result<[SamplesBuffer; 5]> {
+    macro_rules! sound {
+        ($name:literal) => {
+            decode(include_bytes!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/resources/audio/",
+                $name
+            )))?
+        };
+    }
+    Ok([
+        sound!("captureStart.mp3"),
+        sound!("captureStop.mp3"),
+        sound!("captureSent.mp3"),
+        sound!("captureUndo.mp3"),
+        sound!("captureFailed.mp3"),
+    ])
 }
 
 /// Plays the start tone for a shortcut press that may still become a chord or
@@ -282,7 +340,7 @@ fn enqueue(player: Option<&SyncSender<Request>>, request: Request) {
 /// How long a provisional start tone waits before sounding. Modifiers pressed
 /// together for another application's shortcut arrive within this window, so
 /// those chords stay silent while a deliberate press still sounds at once.
-const CHORD_GRACE: Duration = Duration::from_millis(40);
+pub(crate) const CHORD_GRACE: Duration = Duration::from_millis(40);
 /// How quickly a retracted start tone fades out instead of clicking off.
 const RETRACT_FADE: Duration = Duration::from_millis(20);
 const OBSERVATION_INTERVAL: Duration = Duration::from_millis(250);
@@ -447,7 +505,7 @@ fn play_system_sound(tone: Tone) {
         Tone::Wake => "Pop",
         Tone::Sleep => "Tink",
         Tone::Error => "Basso",
-        Tone::DictationStart | Tone::DictationStop | Tone::Cancel => return,
+        _ => return,
     };
     let volume = volume().to_string();
     let child = Command::new("/usr/bin/afplay")

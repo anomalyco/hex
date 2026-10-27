@@ -7,8 +7,8 @@
 #   release-service.sh publish <dist> <notes-url>   # upload every target, then the release
 #   release-service.sh distribution <kind> <version>  # a package manager now serves <version>
 #
-# RELEASE is the service origin (https://anoma.ly/release or
-# https://dev.anoma.ly/release); HEX_VERSION the version the files were built
+# RELEASE is the service origin, https://anoma.ly/release (its dev stage only
+# tests the service itself); HEX_VERSION the version the files were built
 # as and name (staging builds X.Y.Z-dev.<run> for the dev channel);
 # HEX_RELEASE_CHANNEL the channel (default stable). `publish` writes
 # <dist>/manifest.json after checking every file the service serves against
@@ -27,9 +27,9 @@ single_limit=$((95 * 1024 * 1024))
 part_size=90m
 
 case "$RELEASE" in
-  https://anoma.ly/release | https://dev.anoma.ly/release) ;;
+  https://anoma.ly/release) ;;
   *)
-    echo "RELEASE must be https://anoma.ly/release or https://dev.anoma.ly/release." >&2
+    echo "RELEASE must be https://anoma.ly/release." >&2
     exit 1
     ;;
 esac

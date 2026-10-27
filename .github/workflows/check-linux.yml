@@ -1,6 +1,7 @@
 name: Check Linux
 
 on:
+  workflow_dispatch:
   pull_request:
     paths:
       - "Cargo.toml"
@@ -47,7 +48,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: linux-${{ github.workflow }}-${{ github.ref }}
+  group: linux-${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
   cancel-in-progress: true
 
 jobs:

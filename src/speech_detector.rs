@@ -136,7 +136,7 @@ fn load(path: &Path) -> Result<VadSession> {
         path,
         &ModelOptions {
             backend: Backend::Cpu,
-            device: None,
+            ..Default::default()
         },
     )?;
     Ok(model.vad_session()?)

@@ -503,6 +503,10 @@ impl Default for Hooks {
 
 /// How long one capture's routing may spend reading sessions, all requests together.
 pub const SESSIONS_BUDGET: Duration = Duration::from_secs(3);
+/// How long a capture's look ([`look::look_live`]) may spend reading sessions, all requests together.
+/// A look runs beside the capture's writing and holds nothing up, while a busy OpenCode takes
+/// one to two seconds per page of sessions, so [`SESSIONS_BUDGET`] would leave it with none.
+pub const LOOK_BUDGET: Duration = Duration::from_secs(10);
 
 /// `api` limited to `budget` in all, counted from its first request: each request gets what's
 /// left, and none starts after.
@@ -598,25 +602,22 @@ pub fn route_capture(
     }
 }
 
-/// Smart routing's first half for a capture that just finished: the tab, terminal and sessions,
-/// or `None` when routing is off.
+/// The first half for a capture that just finished: the tab, terminal and sessions, by
+/// `deadline` ([`look::look_live_by`]), or `None` when routing is off.
 pub fn look_capture(
     front_bundle_id: Option<&str>,
     target_bundle_id: Option<&str>,
     app_pid: Option<i32>,
+    deadline: Instant,
+    senses: &look::Senses,
 ) -> Option<look::Live> {
-    routing_enabled().then(|| {
-        look::look_live(
-            front_bundle_id,
-            target_bundle_id,
-            app_pid,
-            &look::Senses::default(),
-        )
-    })
+    routing_enabled()
+        .then(|| look::look_live_by(front_bundle_id, target_bundle_id, app_pid, deadline, senses))
 }
 
-/// Smart routing's second half, once the bundle is built: decides, saves the evidence beside
-/// the bundle (`RECORD`), and logs the outcome.
+/// The second half, once the bundle is built: decides (weighing every clue with smart routing,
+/// else the port ladder; a saved rule or an address first either way), saves the evidence
+/// beside the bundle (`RECORD`), and logs the outcome.
 pub fn judge_capture(
     dir: &Path,
     bundle: &ScrawlBundle,
@@ -627,7 +628,12 @@ pub fn judge_capture(
         scrawl_log(format!("routing: {error}"));
     }
     let evidence = look::evidence_for(bundle, dir, live);
-    let judgement = smart::decide(&evidence, smart::Policy::Weigh);
+    let policy = if crate::env::get().config.smart_routing {
+        smart::Policy::Weigh
+    } else {
+        smart::Policy::Ladder
+    };
+    let judgement = smart::decide(&evidence, policy);
     let (judgement, jev) = if jev::enabled() {
         let (judgement, record) = jev::judge(
             &evidence,
@@ -689,7 +695,12 @@ pub fn judge_capture(
         smart::Decision::Keep { reason } => format!("clipboard only: {reason}"),
     };
     scrawl_log(format!(
-        "routing (smart): {} clues, {} sessions → {outcome}",
+        "routing ({}): {} clues, {} sessions → {outcome}",
+        if policy == smart::Policy::Weigh {
+            "smart"
+        } else {
+            "ladder"
+        },
         evidence.clues.len(),
         evidence.candidates.len()
     ));
@@ -764,6 +775,9 @@ pub fn explain_bundle(bundle: &Path, url: Option<&str>, ask_jev: bool) -> Result
         let _ = writeln!(out, "Warning   {error}");
     }
     out.push_str(&smart::explain(&evidence, &judgement));
+    if let Some(shown) = read_shown(&dir) {
+        let _ = writeln!(out, "Shown     {}: {}", shown.kind, shown.why);
+    }
     if let Some(saved) = jev::read_record(&dir) {
         let _ = writeln!(out, "At capture (saved)");
         out.push_str(&jev::explain(&saved));
@@ -823,6 +837,53 @@ pub fn write_record(
     Ok(())
 }
 
+/// How the host showed a capture's route, saved in its `routing.json` as `shown`: sent on its
+/// own by a saved rule, or offered as a guess, and why (the leading reason).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Shown {
+    /// `rule` or `guess`.
+    #[serde(rename = "as")]
+    pub kind: String,
+    pub why: String,
+}
+
+impl Shown {
+    pub fn rule(why: impl Into<String>) -> Self {
+        Self {
+            kind: "rule".into(),
+            why: why.into(),
+        }
+    }
+
+    pub fn guess(why: impl Into<String>) -> Self {
+        Self {
+            kind: "guess".into(),
+            why: why.into(),
+        }
+    }
+}
+
+/// Saves `shown` into the capture's `routing.json`, beside what was seen.
+pub fn record_shown(dir: &Path, shown: &Shown) -> Result<()> {
+    let path = dir.join(RECORD);
+    let mut body: serde_json::Value = std::fs::read(&path)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+        .filter(serde_json::Value::is_object)
+        .unwrap_or_else(|| serde_json::json!({}));
+    body["shown"] = serde_json::to_value(shown)?;
+    std::fs::write(path, serde_json::to_vec_pretty(&body)?)?;
+    Ok(())
+}
+
+/// What [`record_shown`] saved for the capture in `dir`.
+pub fn read_shown(dir: &Path) -> Option<Shown> {
+    let value: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(dir.join(RECORD)).ok()?).ok()?;
+    serde_json::from_value(value.get("shown")?.clone()).ok()
+}
+
 /// Counts Kit's pick of `session` for the capture in `dir` (a chip, or a send left to stand)
 /// toward a `routing.sites` or `routing.apps` rule, with Jev routing on. Once two agree, the
 /// rule to offer is saved in its `routing.json` as `offerRule` and returned.
@@ -836,12 +897,13 @@ pub fn learn_capture(dir: &Path, session: &str) -> Option<policy::OfferRule> {
         return None;
     }
     let evidence: smart::Evidence = serde_json::from_value(body.get("evidence")?.clone()).ok()?;
-    // A rule, port or dev build that sent it already says where it goes.
+    // A saved rule that sent it already says where it goes; anything else was a guess, so
+    // picking it counts toward offering one.
     if let Some(smart::Decision::Send { to, .. }) = body
         .get("decision")
         .and_then(|d| serde_json::from_value(d.clone()).ok())
         && to.candidate.id == session
-        && policy::obeyed(&to)
+        && policy::saved_rule(&to)
     {
         return None;
     }
@@ -1192,11 +1254,11 @@ mod tests {
 
         // Every request shares one budget, counted from the first: reading pages stops when
         // it's spent instead of waiting out each request in turn.
-        let budget = Duration::from_millis(500);
+        let budget = Duration::from_millis(550);
         let mut requests = 0;
         let mut api = within(slow, budget);
         let started = Instant::now();
-        let result = crate::routing::look::read_candidates(
+        let read = crate::routing::look::read_candidates(
             &mut |path: &str| {
                 requests += 1;
                 api(path)
@@ -1205,12 +1267,14 @@ mod tests {
             &[],
             look::SESSION_PAGES,
         );
-        assert!(result.is_err());
-        // Two pages answer, the first folder's read gets the last 100 ms and fails, and the
-        // second is never asked: 500 ms, not the 800 ms four requests take.
+        // Two pages answer, the first folder's read gets the last 150 ms and fails, and the
+        // second is refused without asking: 550 ms, not the 800 ms four requests take. The
+        // pages already read are kept, with why the rest weren't.
+        assert_eq!(read.candidates.len(), 200);
+        assert!(read.error.is_some());
         let took = started.elapsed();
-        assert!((2..4).contains(&requests), "{requests}");
-        assert!(took < Duration::from_millis(700), "{took:?}");
+        assert_eq!(requests, 4);
+        assert!(took < Duration::from_millis(800), "{took:?}");
 
         // A server that answers in time routes as usual.
         let hooks = Hooks { api: slow, ..hooks };
@@ -1255,6 +1319,69 @@ mod tests {
             (by_dir.session.as_str(), by_dir.via.as_str()),
             ("ses_app", "sdk")
         );
+    }
+
+    #[test]
+    fn how_a_route_was_shown_is_kept_beside_what_was_seen() {
+        let dir = std::env::temp_dir().join(format!(
+            "scrawl-shown-{}.scrawl",
+            crate::util::make_bundle_id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        assert_eq!(read_shown(&dir), None);
+        std::fs::write(dir.join(RECORD), br#"{"evidence": {"x": 1}}"#).unwrap();
+        record_shown(&dir, &Shown::guess("Jev's pick")).unwrap();
+        assert_eq!(read_shown(&dir), Some(Shown::guess("Jev's pick")));
+        let body: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(dir.join(RECORD)).unwrap()).unwrap();
+        assert_eq!(body["evidence"]["x"], 1);
+        assert_eq!(body["shown"]["as"], "guess");
+        record_shown(&dir, &Shown::rule("routing.sites")).unwrap();
+        assert_eq!(read_shown(&dir), Some(Shown::rule("routing.sites")));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_page_session_routes_when_the_sessions_cannot_be_read() {
+        use smart::{Clue, Pointer, Source};
+        let dir = std::env::temp_dir().join(format!(
+            "scrawl-unread-{}.scrawl",
+            crate::util::make_bundle_id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let bundle: ScrawlBundle = serde_json::from_value(serde_json::json!({
+            "version": 1, "id": "t", "createdAtMs": 0, "durationMs": 1_000,
+            "target": {"mode": "display", "displayId": 1,
+                "frame": {"x": 0.0, "y": 0.0, "width": 10.0, "height": 10.0, "scale": 1.0}},
+            "transcript": {"source": "none", "text": "", "segments": []},
+            "strokes": [], "marks": [], "events": [], "keyframes": [], "contactSheet": "c.png"
+        }))
+        .unwrap();
+        let error = "couldn't list sessions: OpenCode took over 10000 ms to list sessions";
+        let live = look::Live {
+            url: Some("http://localhost:5173/".into()),
+            clues: vec![Clue::new(
+                Source::Page,
+                Pointer::Session {
+                    id: "ses_page".into(),
+                    directory: None,
+                },
+                "http://localhost:5173 registered with data-session",
+            )],
+            candidates: Vec::new(),
+            error: Some(error.into()),
+        };
+        let (judgement, url) = judge_capture(&dir, &bundle, live);
+        assert_eq!(url.as_deref(), Some("http://localhost:5173/"));
+        let smart::Decision::Send { to, .. } = judgement.decision else {
+            panic!("the page named its session: {:?}", judgement.decision);
+        };
+        assert_eq!(to.candidate.id, "ses_page");
+        // The record keeps what was seen, and why the sessions are missing, for a replay.
+        let saved = read_record(&dir).expect("routing.json");
+        assert_eq!(saved.sessions_error.as_deref(), Some(error));
+        assert_eq!(saved.url.as_deref(), Some("http://localhost:5173/"));
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

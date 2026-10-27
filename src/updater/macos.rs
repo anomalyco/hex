@@ -54,6 +54,8 @@ pub fn method() -> Method {
         return Method::Source;
     };
     if replaceable(&bundle) {
+        // The app carries no receipt; `updates.channel` or a dev build's
+        // version picks another channel (`super::channel`).
         Method::Direct {
             channel: "stable".into(),
         }

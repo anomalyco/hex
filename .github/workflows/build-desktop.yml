@@ -8,7 +8,7 @@ name: Build desktop
 #
 # Windows executables compile without credentials; one packaging job then
 # Authenticode-signs both executables through Azure Artifact Signing (when
-# sign-windows is set and the release environment has the Azure values),
+# signing-environment names a GitHub environment that has the Azure values),
 # builds both installers around the signed bytes, and signs the installers.
 # The installers are then tested on native x64 and ARM64 runners.
 on:
@@ -29,10 +29,10 @@ on:
       retention-days:
         type: number
         default: 0
-      sign-windows:
-        description: Authenticode-sign in the release environment when its Azure values exist
-        type: boolean
-        default: false
+      signing-environment:
+        description: The environment to Authenticode-sign in when it has the Azure values (release or release-dev); empty never signs
+        type: string
+        default: ""
     secrets:
       AZURE_CLIENT_ID:
         required: false
@@ -207,7 +207,7 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 30
     # The Azure federated credential trusts only this environment.
-    environment: ${{ inputs.sign-windows && 'release' || '' }}
+    environment: ${{ inputs.signing-environment }}
     permissions:
       contents: read
       id-token: write
@@ -233,7 +233,7 @@ jobs:
         id: signing
         shell: bash
         env:
-          REQUESTED: ${{ inputs.sign-windows }}
+          REQUESTED: ${{ inputs.signing-environment != '' }}
         run: |
           configured=true
           for name in AZURE_CLIENT_ID AZURE_TENANT_ID AZURE_SUBSCRIPTION_ID AZURE_TRUSTED_SIGNING_ENDPOINT \

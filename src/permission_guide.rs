@@ -19,6 +19,7 @@ const fn code(kind: PermissionKind) -> i32 {
         PermissionKind::Accessibility => 1,
         PermissionKind::Microphone => 2,
         PermissionKind::SystemAudio => 3,
+        PermissionKind::ScreenRecording => 4,
     }
 }
 

@@ -73,7 +73,8 @@ substitute for source inspection or a second roadmap.
   (`open_capture_sink`/`close_capture_sink`) that copies the same timeline to
   a Scrawl capture.
 - `recording_environment`: serialized RAII ownership of idle-sleep prevention,
-  output muting, and supported media-player pause/resume behavior.
+  output muting, and supported media-player pause/resume behavior, each held
+  from the first dictation or capture session that wants it to the last.
 - `dictation_processor`: the one OpenCode client and ordered processing policy
   for macOS, Windows, and Linux: context-selected corrections, deadline-bounded
   OpenCode rewrite profiles with corrected-transcript fallback, the ranked
@@ -338,9 +339,18 @@ substitute for source inspection or a second roadmap.
   macOS build with the `capture` Cargo feature, a build option off in every
   public build (`HEX_CAPTURE=1 scripts/build-app.sh` bundles and signs
   `scrawl-helper` beside `hex`). Hex's `Host`,
-  `ConfigSource`, and Parakeet `Transcriber` for the engine, the
-  listener-owned `CaptureHost` behind `hex capture`, and its 16 kHz
-  gap-padded timeline handed to the engine as `AudioIn::External`.
+  `ConfigSource`, and Parakeet or Apple `Transcriber` for the engine, the
+  listener-owned `CaptureHost` behind `hex capture` and the capture shortcut,
+  its 16 kHz gap-padded timeline handed to the engine as `AudioIn::External`,
+  the tap's pointer input forwarded to `Capture::input()`, Scrawl.app
+  coexistence, the retention thread, and the `CaptureSnapshot` every view
+  reads (`capture_host::snapshot`/`watch`, published on each change, so a
+  capsule never reaches into the host), with `last.route` from
+  `capture_host::routing` (Scrawl's `crates/router` in-process: look, decide,
+  undo window, send, Undo and Redirect) and `phone` from a `capture-phone`
+  look for a cabled iPhone. `capture_host::library` reads the captures
+  folder for `hex capture list|show|send|route`. `rune_ui/scrawl.rs` is its pane
+  (Experiments › Scrawl) and `CaptureSettings` its `capture.*` settings.
 - `instance`: the exclusive Application Support lock that prevents concurrent
   command listeners.
 - `process_exit`: how the macOS app ends. Every quit path (menu, `hex quit`
@@ -377,6 +387,18 @@ CoreAudio formats, AppleScript details, or event serialization.
   snapshot is fixed until restart; cached misses must not re-enter TIS/TSM.
   Uncached headless lookups retain live-layout resolution, with all native
   lookup and snapshot construction serialized by the same lock.
+- macOS launch order: `main` calls `rune::prewarm_gpu()` right after parsing
+  the command line, only when it will run the app (`hex app` without Rune's
+  headless flags, or the bundled executable with no command), never for a CLI
+  command. A hidden or login launch prewarms too and Rune drops it: whether
+  the window opens depends on settings, which load after the keyboard layout.
+  `macos_rune` observes AppKit's will-terminate before the loop runs, so a
+  terminate at any point drains workers. It sets up the status item, Dock
+  policy, HUD, main menu, reopen handler, and pump timer once, after the
+  window's first frame (`App::on_ready` queues it as a frameless `update_if`),
+  or at most 1 s after the loop starts if no frame comes; a launch without a
+  window sets them up in the loop's first turn. Nothing the window's first
+  frame needs may wait on them.
 - Another app's global shortcut (Carbon hotkeys, such as Spaceman's Option-1)
   consumes its key before the session taps. A listen-only HID tap reports key
   presses as chord evidence only: it discards an early hold or pending gesture
@@ -400,6 +422,14 @@ CoreAudio formats, AppleScript details, or event serialization.
 - Recording audio behavior and idle-sleep prevention begin only after the
   intentional-hold threshold. Ordinary shortcut chords must not mute output,
   pause media, or prevent sleep.
+- A modifier-only shortcut (not Globe/Fn) passes through, so once Hex owns
+  the press (hold past the threshold, Toggle start after the 40 ms chord
+  grace, lock-finishing press) it posts one marked press of unassigned key
+  code 0x44 at HID while exactly its modifiers are still down, so other
+  apps' modifier-tap hotkeys read a chord. Hex's annotated-session key tap
+  drops it, so the focused app never receives it (and never beeps). Short
+  taps, chords, and presses during voice-delimited dictation never get one,
+  and it never reaches Hex's state machines.
 - The start tone confirms the shortcut press itself, not the hold threshold: it
   is provisional, sounds after a 40 ms chord grace, and a chord, short tap,
   cancel, or Voice Action takeover retracts it (silently inside the grace, else
@@ -456,6 +486,9 @@ CoreAudio formats, AppleScript details, or event serialization.
   fabricate a release timestamp from later physical state.
 - Escape cancels the active capture first, then the newest unfinished dictation.
   Cancelled jobs never paste, update the last result, or block later output.
+- Escape never cancels a programmatic dictation; its owner cancels through the
+  API, and the lease ends an abandoned one. While one records, Hex claims no
+  Escape at all, even with other jobs queued.
 - Model switches activate only after the pinned artifact is checksum-verified,
   loaded on strict Metal, and prewarmed. A failed switch preserves the active
   model and persisted selection.
@@ -472,7 +505,9 @@ CoreAudio formats, AppleScript details, or event serialization.
   device is unavailable at startup, log the failure and fall back through the
   compiled preferred-device order to the macOS default. An explicit CLI
   `--device` remains authoritative for that listener process. A runtime stream
-  failure cancels an incomplete capture, discards stale chunks, and retries the
+  failure cancels an incomplete capture (a programmatic one keeps the audio
+  delivered before the failure for its owner's `/finish`, which answers
+  `microphone-lost` when there is none), discards stale chunks, and retries the
   same selection with bounded backoff; it must not require a settings change or
   process restart. An initial open failure uses the same bounded recovery without
   stopping the listener. Cancellation does not stop warm-microphone retries;
@@ -607,16 +642,46 @@ CoreAudio formats, AppleScript details, or event serialization.
   `release-app.sh` refuses `HEX_CAPTURE` and `validate-app.sh` refuses a
   bundle with `scrawl-helper` or the capture engine. With the experiment
   off, the listener builds no capture host: no engine, sink, thread, bundle
-  folder, or work. Scrawl's engine
+  folder, or work, and the same holds with the experiment on while
+  `capture.enabled` (the Scrawl pane's opt-in, default off) is off. Scrawl's engine
   records the screen, runs with `SharedResources::none()` (Hex never calls
-  `install_shared_resources`: no ingest server, ingest token, delivery
-  retries, or global shortcuts), logs to tracing, and writes only to Hex's
-  captures folder. A capture never opens a
-  microphone, installs a tap, or loads a model: it copies the dictation
+  `install_shared_resources`: no ingest server, ingest token, or global
+  shortcuts), logs to tracing, and writes only to the captures folder
+  (`capture.folder`, Scrawl's own by default) and Scrawl's router folders. A
+  written capture is copied to the clipboard (never pasted) and, with
+  `capture.routing`'s autoSend on, routed by Scrawl's router in Hex's process
+  (`capture_host::routing`): one `capture-look` thread per stop, one
+  `capture-route` thread with a bounded queue, a rule's send held 3 s for
+  Undo, guesses sent only when picked. Queued sends retry only while neither
+  Scrawl.app runs nor anything serves the ingest port, and never in tests.
+  `capture.routing` never holds a Jev key. A cabled iPhone records through
+  `scrawl-helper mirror --no-microphone`, narrated by the dictation timeline;
+  only `HEX_CAPTURE=1` bundles carry `NSCameraUsageDescription`, and
+  `validate-app.sh` refuses a release bundle with it. Hex's capture
+  shortcut (default ⌥⇧S, a key required, never overlapping another binding)
+  is a fresh press: idle, it starts once one of its modifiers comes up (Esc
+  before then records nothing); recording, it stops; with the capsule's
+  picker open, the picker records. A switch chip discards the recording
+  (no outcome) rather than retargeting it; while Scrawl.app
+  (`dev.kitlangton.scrawl`) runs, Hex registers no capture shortcut and runs
+  no retention, and only the pane's "Use Hex for captures" quits Scrawl.
+  Escape never ends a recording capture, and Hex's tap lets it through to
+  the app being recorded; discarding is the capsule's two-step ✕ (✕, then
+  Discard). Pointer
+  events and Shift reach the engine from the one session tap, only while a
+  capture records, through a bounded queue that drops rather than block; they
+  never reach the listener. Scrawl's settings are imported once, read-only;
+  Screen Recording is asked at the first capture or from the pane, never in
+  onboarding. A capture never opens a
+  microphone, installs a tap of its own, or loads a model: it copies the dictation
   timeline through a bounded sink that records a gap rather than block, so a
   stalled capture never stalls dictation, and while a sink is open the
-  release-while-idle close waits for it. One capture engine per process, one
-  capture recording at a time. Its words are foreground requests on the
+  release-while-idle close waits for it. While a capture records it holds a
+  recording-environment session with the same "While dictating" policy
+  (`recording_audio_behavior`, read at each start; no capture setting),
+  released at stop, cancel, or quit; it composes with dictation's,
+  so neither restores what the other still holds. One capture engine per
+  process, one capture recording at a time. Its words are foreground requests on the
   dictation engine's loaded model in 30 s chunks: after dictation already
   sent, before meeting chunks, never a second model, and dictation output is
   unchanged. A chunk waits while dictation captures or transcribes and never
@@ -625,7 +690,7 @@ CoreAudio formats, AppleScript details, or event serialization.
   when the capture is written; one thread writes stopped captures one at a
   time, at most two wait, and a start beyond that is refused `busy`. The
   engine's log goes to tracing from before it is built, and its settings come
-  from Hex (`ConfigSource`), never `~/.config/scrawl`. Bundles are
+  from Hex (`ConfigSource`), never `~/.config/scrawl` after the import. Bundles are
   owner-only. Quitting
   cancels a recording capture, stops transcription between chunks, and waits
   at most 2 s for capture threads.
@@ -689,8 +754,9 @@ CoreAudio formats, AppleScript details, or event serialization.
   parallel helper, and verify visual changes with `--snap` scenes in light and
   dark.
 - Neither Hex nor Rune (`anomalyco/rune`, public MIT) is published to
-  crates.io; never run `cargo publish`. Hex depends on `rune`, `rune-kit`, and
-  `rune-theme-opencode` at one pinned Git rev in `Cargo.toml`; every pin bump
+  crates.io; never run `cargo publish`. Hex depends on `rune`, `rune-kit`,
+  `rune-theme-opencode`, and (with `capture`) `rune-motion` at one pinned Git
+  rev in `Cargo.toml` and `Cargo.lock`; every pin bump
   must also update `cargoLock.outputHashes."rune-0.0.1"` in `nix/package.nix`
   and keep `windows` 0.62.2 for `gpu-allocator` in `Cargo.lock`.
 - At the start of each work round, bump Hex's Rune pin to Rune's `dev` head:
@@ -710,7 +776,7 @@ CoreAudio formats, AppleScript details, or event serialization.
   revoked, the minimum version before rollout, and a rollout bucket drawn once
   from the OS's secure random source, kept in `<support>/update-bucket`, and
   never sent. Requests carry nothing about the install. Checks run 10 seconds
-  after launch, hourly, and on the sidebar footer's Check for updates, backing off on errors; manifests are
+  after launch, hourly (every 10 minutes and on window focus, at most once a minute, on the Dev channel), and on the sidebar footer's Check for updates, backing off on errors; manifests are
   not signed, so nothing runs before the download's size and SHA-256 match
   the manifest and, on macOS and Windows, its code signature passes: macOS
   `app/update-requirement.txt` (Developer ID team `5NZ4Q7NXJ4`, `anomaly.hex`,
@@ -893,8 +959,9 @@ precedence while available; override everything with `--device`. The app bundle
 build requires Xcode 26 for Icon Composer compilation and a Developer ID signing
 identity. `scripts/release-app.sh prepare` builds the notarized and stapled
 DMG and ZIP the Release workflow publishes. Hex publishes every platform to
-the Anomaly release service (`anomalyco/release`; `https://anoma.ly/release`,
-dev `https://dev.anoma.ly/release`) from the Release workflow with curl and its
+the Anomaly release service (`anomalyco/release`, `https://anoma.ly/release`;
+its dev stage, `dev.anoma.ly/release`, only tests the service itself, and Hex
+never publishes to or reads from it) from the Release workflow with curl and its
 GitHub OIDC token, under app `hex`, artifact `desktop`;
 [`docs/plans/release-service.md`](docs/plans/release-service.md) pins the
 target and file names and the direct-install receipt, and
@@ -911,8 +978,8 @@ bucket `hex-dev-files`); `cf deploy --prebuilt --mode <mode>` picks one, and
 only CI deploys: a push to `dev` touching `site/` deploys dev, a stable
 Release deploys production. No subdomains. The site's download links come
 from the service's stable manifest when it builds. After publishing a version,
-bump the explicit GitHub mirror/version link in `README.md` and the Homebrew
-cask. `bun run --cwd site check:downloads` fails until every download link
+bump the explicit GitHub mirror/version link in `README.md`; the Release
+workflow updates the Homebrew cask. `bun run --cwd site check:downloads` fails until every download link
 serves a file; every deploy runs it. Verify the live links afterwards.
 The Rust app is named `Hex`, packaged as `Hex.app`,
 with bundle identifier `anomaly.hex` (deliberately not reverse-DNS) and executable
@@ -960,9 +1027,9 @@ hooks or persist a second launch-at-login flag.
 
 Every platform is built, signed, and published by one run of
 `.github/workflows/release-desktop.yml` ("Release"; see `docs/releasing.md`).
-Run it with `workflow_dispatch` (`ref`, `channel`: `staging` publishes the
-release to the dev service with a draft GitHub release, `stable` to
-production), or push an `app-v<VERSION>` tag, which must match the crate
+Run it with `workflow_dispatch` (`ref`, `channel`: `check` builds and
+verifies without publishing, `dev` publishes the dev channel, `stable` the
+public release), or push an `app-v<VERSION>` tag, which must match the crate
 version. It builds Linux x86_64 in an Arch container (`scripts/build-linux.sh`)
 and Windows x64 and ARM64 on native runners (`scripts/build-windows.sh`)
 through the reusable `.github/workflows/build-desktop.yml`, and macOS through
@@ -977,9 +1044,13 @@ runtime imports, and (stable) Authenticode signatures; `publish` uploads each
 target and then the release with `scripts/release-service.sh`, the only job
 holding `id-token: write` for the service, with no other secrets and actions
 pinned by SHA. The GitHub release mirror, the AUR package (built from the
-published Linux file), and the AUR/brew/nix distribution records follow.
-The `release` environment is limited to `dev` (dev site and staging),
-`production`, and `app-v*` tags; stable runs only from `production` or a tag. Rerunning
+published Linux file), the Homebrew cask (pushed to `anomalyco/homebrew-tap`
+with its own deploy key), and the AUR/brew/nix distribution records follow.
+Every push to `dev` (except docs/site-only changes) publishes a dev-channel
+build in the `release-dev` environment (branch `dev`, no approval; the service
+lets it publish only the `dev` channel, and only signed platforms are
+published). Stable runs only from `production` or an `app-v*` tag in the
+`release` environment, which waits for Dax's approval. Rerunning
 after an interruption is safe: the service stores files by hash and accepts
 the same version again.
 

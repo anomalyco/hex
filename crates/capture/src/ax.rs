@@ -201,8 +201,9 @@ fn element_at(root: AxElement, x: f64, y: f64) -> Option<Owned> {
     (status == 0 && !out.is_null()).then_some(Owned(out))
 }
 
-/// The topmost element at a global top-left point, looking past Scrawl's own windows. Blocking;
-/// call it off the main thread.
+/// The topmost element at a global top-left point, looking past the host's chrome
+/// ([`is_own_chrome`](crate::windows::is_own_chrome)) but not its normal windows. Blocking; call
+/// it off the main thread.
 #[cfg(target_os = "macos")]
 pub fn hit_test(x: f64, y: f64) -> Option<Hit> {
     let started = Instant::now();
@@ -215,12 +216,22 @@ pub fn hit_test(x: f64, y: f64) -> Option<Hit> {
             .into_iter()
             .find(|w| {
                 let [wx, wy, ww, wh] = w.bounds;
-                w.pid != own && w.alpha > 0.01 && x >= wx && x <= wx + ww && y >= wy && y <= wy + wh
+                !crate::windows::is_own_chrome(w, own, &[])
+                    && w.alpha > 0.01
+                    && x >= wx
+                    && x <= wx + ww
+                    && y >= wy
+                    && y <= wy + wh
             })?
             .pid;
-        let app = Owned(unsafe { AXUIElementCreateApplication(pid) });
-        unsafe { AXUIElementSetMessagingTimeout(app.0, MESSAGE_TIMEOUT_S) };
-        element = element_at(app.0, x, y)?;
+        // Over the host's own normal window (Hex's Settings), `element` may still be its
+        // chrome's (the capsule panel above it): AX finds elements by position per app, not
+        // per window. Unused in Hex, whose agent context is off.
+        if pid != own {
+            let app = Owned(unsafe { AXUIElementCreateApplication(pid) });
+            unsafe { AXUIElementSetMessagingTimeout(app.0, MESSAGE_TIMEOUT_S) };
+            element = element_at(app.0, x, y)?;
+        }
     }
     let over = || started.elapsed() > LOOKUP_BUDGET;
 

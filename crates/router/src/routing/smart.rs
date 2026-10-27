@@ -36,6 +36,10 @@ pub struct Evidence {
     /// The browser tab's URL, when there was one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
+    /// Why OpenCode's sessions couldn't all be read, when they couldn't: `candidates` holds
+    /// what was read before it failed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sessions_error: Option<String>,
 }
 
 /// A destination someone stated. Obeyed, never weighed.
@@ -318,10 +322,8 @@ impl Naming {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Policy {
-    /// Today's ladder (the app still calls `routing::route_capture` when smart routing is off;
-    /// this reproduces it, which the tests check).
-    /// The first source with a clue decides, and its newest session wins.
-    #[cfg_attr(not(test), allow(dead_code))]
+    /// Smart routing off: `routing::route_capture`'s ladder, which the tests check this
+    /// reproduces. The first source with a clue decides, and its newest session wins.
     Ladder,
     /// Weigh every clue and send only when one candidate is clearly ahead.
     Weigh,
@@ -409,7 +411,7 @@ impl Scored {
     }
 
     /// The reason that gave the most points (the first on a tie), which names how it was found.
-    pub(crate) fn lead(&self) -> Option<&Reason> {
+    pub fn lead(&self) -> Option<&Reason> {
         self.reasons
             .iter()
             .filter(|r| r.basis != Basis::Recent)
@@ -1249,6 +1251,7 @@ mod tests {
             candidates: sessions(),
             now_ms: NOW,
             url: None,
+            sessions_error: None,
         }
     }
 

@@ -332,8 +332,8 @@ pub(crate) fn run(
                 ListenerUpdate::SuspendShortcuts(suspended) => next_suspended = Some(suspended),
             }
         }
-        if let Some(error) = model.poll() {
-            events.dictation(DictationPhase::Failed(error), "")?;
+        if let Some(failed) = model.poll() {
+            events.dictation(DictationPhase::Failed(failed.error), "")?;
         }
         if !capture.is_recording() && !start_pending && finishing.is_none() {
             let mut register = next_suspended.take().is_some_and(|suspended| {

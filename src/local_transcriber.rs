@@ -144,7 +144,7 @@ impl LocalTranscriber {
             &path,
             &ModelOptions {
                 backend: Backend::Auto,
-                device: None,
+                ..Default::default()
             },
         )
         .wrap_err_with(|| format!("could not load transcription model from {}", path.display()))?;
@@ -312,7 +312,7 @@ impl ModelSwap {
     }
 
     /// Collects a finished load; a failure keeps the current model.
-    pub(crate) fn poll(&mut self) -> Option<String> {
+    pub(crate) fn poll(&mut self) -> Option<SwapFailed> {
         let (_, receiver) = self.loading.as_ref()?;
         let result = match receiver.try_recv() {
             Ok(result) => result,
@@ -327,7 +327,11 @@ impl ModelSwap {
                 self.ready = Some((selection, transcriber));
                 None
             }
-            Err(error) => Some(format!("could not switch the transcription model: {error}")),
+            Err(error) => Some(SwapFailed {
+                wanted: selection,
+                kept: self.loaded.clone(),
+                error: format!("could not switch the transcription model: {error}"),
+            }),
         }
     }
 
@@ -337,6 +341,17 @@ impl ModelSwap {
         self.loaded = selection;
         Some(transcriber)
     }
+}
+
+/// A model change that failed to load; the listener still runs `kept`.
+/// Windows hands it to the host, which puts settings back on `kept`; Linux
+/// only reports the error.
+#[derive(Debug)]
+#[cfg_attr(target_os = "linux", allow(dead_code))]
+pub(crate) struct SwapFailed {
+    pub(crate) wanted: TranscriptionSelection,
+    pub(crate) kept: TranscriptionSelection,
+    pub(crate) error: String,
 }
 
 /// `selection` without recognition hints a model cannot use, which

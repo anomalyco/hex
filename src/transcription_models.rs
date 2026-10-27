@@ -710,12 +710,17 @@ fn remove_installed_at(path: &Path) -> Result<()> {
         }
         Err(error) => return Err(error.into()),
     }
+    delete_set_aside_in(directory);
     for file in [
         path.to_path_buf(),
         verification_receipt_path(path),
         path.with_extension("gguf.partial"),
     ] {
-        match fs::remove_file(&file) {
+        let removed = match fs::remove_file(&file) {
+            Err(error) if is_mapped(&error) => set_aside(&file),
+            removed => removed,
+        };
+        match removed {
             Ok(()) => {}
             Err(error) if error.kind() == ErrorKind::NotFound => {}
             Err(error) => {
@@ -725,6 +730,59 @@ fn remove_installed_at(path: &Path) -> Result<()> {
     }
     sync_directory(directory)?;
     Ok(())
+}
+
+/// Windows refuses to delete or replace a file while any view of it is
+/// mapped, and transcribe.cpp maps the loaded model's weights. The file can
+/// still be renamed, so it is set aside and deleted once nothing maps it.
+fn is_mapped(error: &std::io::Error) -> bool {
+    cfg!(windows) && error.kind() == ErrorKind::PermissionDenied
+}
+
+const SET_ASIDE_SUFFIX: &str = ".set-aside";
+
+fn set_aside(file: &Path) -> std::io::Result<()> {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_nanos());
+    let mut name = file.file_name().unwrap_or_default().to_os_string();
+    name.push(format!(".{nanos}{SET_ASIDE_SUFFIX}"));
+    fs::rename(file, file.with_file_name(name))
+}
+
+/// Moves `from` over `to`, setting a mapped `to` aside first.
+fn replace_file(from: &Path, to: &Path) -> std::io::Result<()> {
+    match fs::rename(from, to) {
+        Err(error) if is_mapped(&error) && to.exists() => {
+            set_aside(to)?;
+            fs::rename(from, to)
+        }
+        renamed => renamed,
+    }
+}
+
+/// Deletes models set aside while they were loaded; one still mapped stays
+/// for a later sweep.
+#[cfg(target_os = "windows")]
+pub fn delete_set_aside() {
+    if let Ok(directory) = models_dir() {
+        delete_set_aside_in(&directory);
+    }
+}
+
+fn delete_set_aside_in(directory: &Path) {
+    let Ok(entries) = fs::read_dir(directory) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        if entry
+            .file_name()
+            .to_string_lossy()
+            .ends_with(SET_ASIDE_SUFFIX)
+        {
+            let _ = fs::remove_file(entry.path());
+        }
+    }
 }
 
 fn lock_downloads(directory: &Path, canceled: &AtomicBool) -> Result<File> {
@@ -832,6 +890,7 @@ fn download_artifact(
     fs::create_dir_all(&directory)?;
     let _lock = lock_downloads(&directory, canceled)?;
     check_canceled(canceled)?;
+    delete_set_aside_in(&directory);
     let destination = directory.join(artifact.filename);
     if destination.exists() {
         if artifact_receipt_matches(&destination, artifact) {
@@ -964,7 +1023,7 @@ fn verify_and_promote_partial(
     ModelPreparationStage::Verifying.store(stage);
     verify_artifact(partial, artifact, name, canceled)?;
     sync_file(partial)?;
-    fs::rename(partial, destination)?;
+    replace_file(partial, destination)?;
     sync_directory(directory)?;
     write_artifact_receipt(destination, artifact)?;
     downloaded_bytes.store(artifact.bytes, Ordering::Relaxed);
@@ -1612,6 +1671,111 @@ mod tests {
         assert!(artifacts.iter().all(|artifact| !artifact.exists()));
         remove_installed_at(&path).unwrap();
         remove_installed_at(&directory.join("missing").join("fixture.gguf")).unwrap();
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    fn set_aside_count(directory: &Path) -> usize {
+        fs::read_dir(directory)
+            .unwrap()
+            .filter(|entry| {
+                entry
+                    .as_ref()
+                    .unwrap()
+                    .file_name()
+                    .to_string_lossy()
+                    .ends_with(SET_ASIDE_SUFFIX)
+            })
+            .count()
+    }
+
+    #[test]
+    fn set_aside_models_are_swept_and_replacing_keeps_the_new_file() {
+        let directory = std::env::temp_dir().join(format!(
+            "hex-set-aside-{}-{}",
+            std::process::id(),
+            NEXT_TEMP_FILE.fetch_add(1, Ordering::Relaxed),
+        ));
+        fs::create_dir(&directory).unwrap();
+        let path = directory.join("fixture.gguf");
+        let other = directory.join("other.gguf");
+        fs::write(&path, b"old").unwrap();
+        fs::write(&other, b"other").unwrap();
+        set_aside(&path).unwrap();
+        assert!(!path.exists());
+        assert_eq!(set_aside_count(&directory), 1);
+        delete_set_aside_in(&directory);
+        assert_eq!(set_aside_count(&directory), 0);
+        assert!(other.exists());
+
+        let partial = path.with_extension("gguf.partial");
+        fs::write(&path, b"old").unwrap();
+        fs::write(&partial, b"new").unwrap();
+        replace_file(&partial, &path).unwrap();
+        assert_eq!(fs::read(&path).unwrap(), b"new");
+        assert!(!partial.exists());
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    /// The loaded model's weights are memory-mapped; Windows still lets the
+    /// picker delete it and a download replace it.
+    #[cfg(windows)]
+    #[test]
+    fn a_mapped_model_can_be_deleted_or_replaced_and_is_swept_once_unmapped() {
+        use std::os::windows::io::AsRawHandle;
+        use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
+        use windows_sys::Win32::System::Memory::{
+            CreateFileMappingW, FILE_MAP_READ, MEMORY_MAPPED_VIEW_ADDRESS, MapViewOfFile,
+            PAGE_READONLY, UnmapViewOfFile,
+        };
+        fn map(path: &Path) -> (HANDLE, MEMORY_MAPPED_VIEW_ADDRESS) {
+            let file = File::open(path).unwrap();
+            // SAFETY: `file` is open for reading; the mapping keeps its own
+            // reference to the file after `file` closes.
+            let mapping = unsafe {
+                CreateFileMappingW(
+                    file.as_raw_handle(),
+                    std::ptr::null(),
+                    PAGE_READONLY,
+                    0,
+                    0,
+                    std::ptr::null(),
+                )
+            };
+            assert!(!mapping.is_null());
+            // SAFETY: `mapping` is a valid read-only file mapping.
+            let view = unsafe { MapViewOfFile(mapping, FILE_MAP_READ, 0, 0, 0) };
+            assert!(!view.Value.is_null());
+            (mapping, view)
+        }
+        let directory = std::env::temp_dir().join(format!(
+            "hex-mapped-model-{}-{}",
+            std::process::id(),
+            NEXT_TEMP_FILE.fetch_add(1, Ordering::Relaxed),
+        ));
+        fs::create_dir(&directory).unwrap();
+        let path = directory.join("fixture.gguf");
+        fs::write(&path, b"model").unwrap();
+        let deleted = map(&path);
+        remove_installed_at(&path).unwrap();
+        assert!(!path.exists());
+
+        fs::write(&path, b"model").unwrap();
+        let replaced = map(&path);
+        let partial = path.with_extension("gguf.partial");
+        fs::write(&partial, b"fresh").unwrap();
+        replace_file(&partial, &path).unwrap();
+        assert_eq!(fs::read(&path).unwrap(), b"fresh");
+
+        for (mapping, view) in [deleted, replaced] {
+            // SAFETY: each view and mapping came from `map` and is released once.
+            unsafe {
+                UnmapViewOfFile(view);
+                CloseHandle(mapping);
+            }
+        }
+        delete_set_aside_in(&directory);
+        assert_eq!(set_aside_count(&directory), 0);
+        assert_eq!(fs::read(&path).unwrap(), b"fresh");
         fs::remove_dir_all(directory).unwrap();
     }
 

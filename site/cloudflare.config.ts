@@ -12,6 +12,8 @@ export default defineConfig(({ mode }) => {
     worker: {
       name: dev ? "hex-dev-site" : "hex-production-site",
       compatibilityDate: "2026-10-13",
+      // /hex/download/dev fetches the release service, another Worker on this zone.
+      compatibilityFlags: ["global_fetch_strictly_public"],
       entrypoint: "./worker.ts",
       assets: { runWorkerFirst: true },
       env: {

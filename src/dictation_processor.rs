@@ -1496,6 +1496,13 @@ fn read_bounded_output(mut output: impl Read, max_bytes: u64) -> Result<Vec<u8>>
 }
 
 fn opencode_executable() -> PathBuf {
+    installed_opencode_executable().unwrap_or_else(|| "opencode2".into())
+}
+
+/// The `opencode2` Hex runs, found as a GUI app finds it: launchd's `PATH`
+/// lacks the usual install folders, so they are searched too.
+#[cfg_attr(not(hex_capture), allow(dead_code))]
+pub(crate) fn installed_opencode_executable() -> Option<PathBuf> {
     let current_directory = std::env::current_dir().ok();
     find_opencode_executable(
         std::env::var_os("VOICE_CONTROL_OPENCODE_CLI").map(PathBuf::from),
@@ -1503,7 +1510,6 @@ fn opencode_executable() -> PathBuf {
         dirs::home_dir().as_deref(),
         current_directory.as_deref(),
     )
-    .unwrap_or_else(|| "opencode2".into())
 }
 
 #[cfg(not(target_os = "windows"))]

@@ -72,6 +72,8 @@ pub struct WindowsDictationConfig {
     pub transformations: Arc<crate::personal_commands::TransformationClient>,
     pub voice_action_model: Arc<RwLock<Option<crate::dictation_processor::Model>>>,
     pub fallback_to_default_device: bool,
+    /// Where the listener reports a model change that failed to load.
+    pub swap_failures: Option<mpsc::Sender<crate::local_transcriber::SwapFailed>>,
 }
 
 impl WindowsDictationConfig {
@@ -105,6 +107,7 @@ impl WindowsDictationConfig {
             transformations: Arc::new(crate::personal_commands::TransformationClient::default()),
             voice_action_model: Arc::new(RwLock::new(voice_action_model(settings))),
             fallback_to_default_device: true,
+            swap_failures: None,
         }
     }
 }
@@ -150,6 +153,7 @@ pub fn run(
         transformations,
         voice_action_model,
         fallback_to_default_device,
+        swap_failures,
     } = config;
     let _indicator_guard = IndicatorGuard(indicator.clone());
     crate::feedback::set_enabled(feedback_volume > 0);
@@ -257,8 +261,11 @@ pub fn run(
     );
 
     while !shutdown.load(Ordering::Relaxed) {
-        if let Some(error) = model.poll() {
-            events.dictation(DictationPhase::Failed(error), "")?;
+        if let Some(failed) = model.poll() {
+            events.dictation(DictationPhase::Failed(failed.error.clone()), "")?;
+            if let Some(swap_failures) = &swap_failures {
+                let _ = swap_failures.send(failed);
+            }
         }
         // Only the newest saved settings matter; they wait for a moment
         // without a recording.

@@ -118,6 +118,38 @@ impl RecordedAudio {
         Ok(std::borrow::Cow::Owned(encode_wav_16k(&padded)?))
     }
 
+    /// The same audio on a clock that starts `ms` later (a phone movie's first frame): what came
+    /// before is dropped, and the gaps move with the clock.
+    pub fn since(self, ms: u64) -> Result<Self> {
+        if ms == 0 {
+            return Ok(self);
+        }
+        let (mut samples, rate) = if self.samples.is_empty() {
+            (self.samples_16k()?.into_owned(), SAMPLE_RATE)
+        } else {
+            let rate = if self.sample_rate == 0 {
+                SAMPLE_RATE
+            } else {
+                self.sample_rate
+            };
+            (self.samples, rate)
+        };
+        let start_offset_ms = self.start_offset_ms.saturating_sub(ms);
+        let skip_ms = ms.saturating_sub(self.start_offset_ms);
+        let skip = usize::try_from(skip_ms * u64::from(rate) / 1_000).unwrap_or(usize::MAX);
+        samples.drain(..skip.min(samples.len()));
+        let gaps = self
+            .gaps
+            .iter()
+            .filter(|gap| gap.end_ms > ms)
+            .map(|gap| GapSpan {
+                start_ms: gap.start_ms.saturating_sub(ms),
+                end_ms: gap.end_ms - ms,
+            })
+            .collect();
+        Ok(Self::new(samples, rate, start_offset_ms, gaps))
+    }
+
     pub fn set_live(&self, live: Option<crate::live_transcribe::Live>) {
         self.live.set(live);
     }
@@ -661,6 +693,35 @@ mod tests {
                 .unwrap(),
             vec![-32_768, -16_384, 0, 16_384, 32_767, 0]
         );
+    }
+
+    #[test]
+    fn since_moves_audio_and_gaps_onto_a_later_clock() {
+        let gaps = vec![
+            GapSpan {
+                start_ms: 20,
+                end_ms: 40,
+            },
+            GapSpan {
+                start_ms: 90,
+                end_ms: 120,
+            },
+        ];
+        let audio = RecordedAudio::new(vec![0.25; 3_200], 16_000, 50, gaps);
+        let later = audio.clone().since(100).unwrap();
+        assert_eq!(later.start_offset_ms, 0);
+        assert_eq!(later.samples.len(), 3_200 - 800);
+        assert_eq!(
+            later.gaps,
+            vec![GapSpan {
+                start_ms: 0,
+                end_ms: 20
+            }]
+        );
+        assert_eq!(later.duration_ms(), 150);
+        let earlier = audio.since(30).unwrap();
+        assert_eq!(earlier.start_offset_ms, 20);
+        assert_eq!(earlier.samples.len(), 3_200);
     }
 
     #[test]

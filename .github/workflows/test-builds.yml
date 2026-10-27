@@ -33,13 +33,13 @@ jobs:
           {
             echo "sha=$(git rev-parse HEAD)"
             echo "short=$(git rev-parse --short=7 HEAD)"
-            echo "version=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')"
+            echo "version=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "voice-control") | .version')"
           } >> "$GITHUB_OUTPUT"
 
   desktop:
     needs: resolve
     # Build desktop's Windows packaging job can sign for releases; test
-    # builds never set sign-windows, so this token goes unused.
+    # builds never set signing-environment, so this token goes unused.
     permissions:
       contents: read
       id-token: write

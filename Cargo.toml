@@ -31,7 +31,7 @@ onnx-benchmark = ["dep:transcribe-rs"]
 # The `capture` experiment's engine (Scrawl's `scrawl-capture`, macOS only): a
 # build option (`HEX_CAPTURE=1 scripts/build-app.sh`), off by default and in
 # every public build, which never compile it or its Swift helper.
-capture = ["dep:scrawl-capture", "dep:anyhow"]
+capture = ["dep:scrawl-capture", "dep:anyhow", "dep:rune-motion"]
 
 [profile.moonshine-lab]
 inherits = "release"
@@ -57,7 +57,7 @@ serde_json = "1.0.151"
 sha2 = "0.11.0"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
-transcribe-cpp = "=0.4.0"
+transcribe-cpp = "=0.4.1"
 transcribe-rs = { git = "https://github.com/cjpais/transcribe-rs", rev = "e37c66b6df43af51fde8dec34f98a07aaf09564c", features = ["onnx"], optional = true }
 unicode-segmentation = "1.13.3"
 url = "2.5.8"
@@ -92,15 +92,19 @@ unicode-normalization = "0.1.25"
 ctrlc = { version = "3.5.2", features = ["termination"] }
 gio = "0.18.4"
 glib = "0.18.5"
-transcribe-cpp = { version = "=0.4.0", features = ["vulkan"] }
+transcribe-cpp = { version = "=0.4.1", features = ["vulkan"] }
 x11-clipboard = "0.9.3"
 x11rb = { version = "0.14.0", features = ["xtest"] }
 
 # The desktop UI.
 [target.'cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))'.dependencies]
-rune = { git = "https://github.com/anomalyco/rune.git", rev = "028d08d5570d6f0415532b41ec3518e943c67ad0" }
-rune-kit = { git = "https://github.com/anomalyco/rune.git", rev = "028d08d5570d6f0415532b41ec3518e943c67ad0" }
-rune-theme-opencode = { git = "https://github.com/anomalyco/rune.git", rev = "028d08d5570d6f0415532b41ec3518e943c67ad0" }
+rune = { git = "https://github.com/anomalyco/rune.git", rev = "cf6677e26b58e588c2764c43c5bbc1a15f17a63b" }
+rune-kit = { git = "https://github.com/anomalyco/rune.git", rev = "cf6677e26b58e588c2764c43c5bbc1a15f17a63b" }
+# The capture capsule's motion-lint trace (`capture` only).
+rune-motion = { git = "https://github.com/anomalyco/rune.git", rev = "cf6677e26b58e588c2764c43c5bbc1a15f17a63b", optional = true }
+rune-theme-opencode = { git = "https://github.com/anomalyco/rune.git", rev = "cf6677e26b58e588c2764c43c5bbc1a15f17a63b" }
+# The welcome hero's own GPU pass (`rune_ui::hero`); Rune's version.
+wgpu = { version = "30", default-features = false, features = ["std", "parking_lot", "metal", "wgsl"] }
 
 [target.'cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))'.dev-dependencies]
 png = "0.18"
@@ -119,6 +123,7 @@ windows-sys = { version = "0.61.2", features = [
   "Win32_System_Console",
   "Win32_System_DataExchange",
   "Win32_System_JobObjects",
+  "Win32_System_Memory",
   "Win32_System_SystemInformation",
   "Win32_System_Threading",
   "Win32_UI_Input_KeyboardAndMouse",
@@ -132,4 +137,4 @@ windows-future = "0.3.2"
 # as Handy ships it: ggml's ARM CPU backend needs clang-cl, and Vulkan drivers
 # on Windows-on-ARM are not a dependable target yet.
 [target.'cfg(all(target_os = "windows", target_arch = "x86_64"))'.dependencies]
-transcribe-cpp = { version = "=0.4.0", features = ["vulkan"] }
+transcribe-cpp = { version = "=0.4.1", features = ["vulkan"] }

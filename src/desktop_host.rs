@@ -98,6 +98,8 @@ pub(crate) enum DesktopAction {
     /// Opens the download an install cannot apply itself.
     OpenUpdate,
     RestartIntoUpdate,
+    /// The window opened or gained focus; the Dev channel checks then.
+    WindowFocused,
     SetDictationShortcut(DesktopShortcut),
     StartListening,
     StopListening,

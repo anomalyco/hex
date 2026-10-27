@@ -1,10 +1,11 @@
 name: Windows installer
 
 # Builds and silently tests Hex-Setup-<version>-windows-<x64|arm64>.exe
-# around the executables the release service publishes (the stable manifest
-# on anoma.ly/release, or dev.anoma.ly/release before the first release), so
+# around the executables of the stable release on anoma.ly/release, so
 # installer changes are tested on real Windows runners without a full
-# release. Release builds the installers for new releases itself.
+# release. Before the first stable release on the service there is nothing to
+# wrap, and the run says so. Release builds and tests the installers for
+# every build itself.
 on:
   pull_request:
     paths:
@@ -28,6 +29,7 @@ jobs:
     runs-on: ubuntu-24.04
     outputs:
       version: ${{ steps.fetch.outputs.version }}
+      available: ${{ steps.fetch.outputs.available }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -35,12 +37,14 @@ jobs:
       - id: fetch
         name: Download the published Windows executables and check them against the manifest
         run: |
-          for release in https://anoma.ly/release https://dev.anoma.ly/release; do
-            manifest="$release/hex/desktop/stable.json"
-            curl --fail --silent --show-error --proto '=https' "$manifest" -o manifest.json && break
-            rm -f manifest.json
-          done
-          test -f manifest.json
+          release=https://anoma.ly/release
+          manifest="$release/hex/desktop/stable.json"
+          if ! curl --fail --silent --show-error --proto '=https' "$manifest" -o manifest.json; then
+            echo "::notice::$manifest has no stable Hex release yet; nothing to test."
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "available=true" >> "$GITHUB_OUTPUT"
           version=$(jq -er .release.version manifest.json)
           mkdir -p dist
           for label in x64 arm64; do
@@ -52,6 +56,7 @@ jobs:
           echo "Testing installers around Hex $version from $manifest." >> "$GITHUB_STEP_SUMMARY"
           echo "version=$version" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@v7
+        if: steps.fetch.outputs.available == 'true'
         with:
           name: published
           path: dist/
@@ -60,6 +65,7 @@ jobs:
   installer:
     name: Installer ${{ matrix.arch }}
     needs: published
+    if: needs.published.outputs.available == 'true'
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     strategy:

@@ -7,8 +7,8 @@
 //! `scrawl.json`: they never go into `summary.md` or the clipboard.
 
 use std::collections::HashMap;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
@@ -124,10 +124,26 @@ pub fn panel_front(
         .then_some(focused)
 }
 
+/// Whether the topmost normal window on screen (in `raw`, front to back) is this process's, such
+/// as Hex's Settings. Its overlays, HUDs and panels sit above the normal level and don't count.
+pub fn own_window_in_front(raw: &[RawWindow], own_pid: i32) -> bool {
+    raw.iter()
+        .find(|w| w.layer == 0 && w.alpha > 0.01 && w.bounds[2] >= 80.0 && w.bounds[3] >= 80.0)
+        .is_some_and(|w| w.pid == own_pid)
+}
+
+/// Whether `w` is the host's capture chrome rather than one of its app windows: a window the
+/// host named (`excluded`, its capsule, ink and picker), or any window of this process above
+/// the normal level (overlays, HUDs and panels). The host's normal windows, such as Hex's
+/// Settings, are windows like any other app's: a capture can be about them.
+pub fn is_own_chrome(w: &RawWindow, own_pid: i32, excluded: &[u32]) -> bool {
+    excluded.contains(&w.id) || (w.pid == own_pid && w.layer != 0)
+}
+
 /// Keeps normal windows (plus regular apps' panels and menus, and the frontmost app's even when
 /// it's a menu bar app), the menu bar and the Dock that overlap the capture, converts them to
 /// capture points and marks the frontmost app's window: its first normal one, else its largest
-/// panel (a launcher's).
+/// panel (a launcher's). The host's own chrome ([`is_own_chrome`]) is left out.
 ///
 /// The Dock's own window covers the whole display, so it is replaced by `dock` (the strip the
 /// Dock reserves, in global points) or dropped when the Dock hides.
@@ -135,6 +151,7 @@ pub fn filter_windows(
     raw: &[RawWindow],
     frame: TargetFrame,
     own_pid: i32,
+    excluded: &[u32],
     frontmost_pid: Option<i32>,
     dock: Option<[f64; 4]>,
     app_meta: &mut dyn FnMut(i32) -> AppMeta,
@@ -152,7 +169,11 @@ pub fn filter_windows(
             && x + width > frame.x
             && y < frame.y + frame.height
             && y + height > frame.y;
-        w.pid != own_pid && w.alpha > 0.01 && width >= 24.0 && height >= 16.0 && overlaps
+        !is_own_chrome(w, own_pid, excluded)
+            && w.alpha > 0.01
+            && width >= 24.0
+            && height >= 16.0
+            && overlaps
     };
     let front_id = frontmost_pid.and_then(|pid| {
         let own = || raw.iter().filter(|w| w.pid == pid && visible(w));
@@ -257,15 +278,15 @@ pub fn system_prompt_at(raw: &[RawWindow], x: f64, y: f64) -> bool {
     })
 }
 
-/// Whether the topmost window under a global point (in `raw`, front to back) belongs to a process
-/// `ours` accepts, looking through `passthrough` windows, which let clicks fall to whatever is
-/// below them.
+/// Whether the topmost window under a global point (in `raw`, front to back) is one `ours`
+/// accepts, looking through `passthrough` windows, which let clicks fall to whatever is below
+/// them.
 pub fn owned_window_at(
     raw: &[RawWindow],
     x: f64,
     y: f64,
     passthrough: &[u32],
-    ours: impl Fn(i32) -> bool,
+    ours: impl Fn(&RawWindow) -> bool,
 ) -> bool {
     raw.iter()
         .filter(|w| {
@@ -273,7 +294,7 @@ pub fn owned_window_at(
             w.alpha > 0.01 && x >= wx && x <= wx + ww && y >= wy && y <= wy + wh
         })
         .find(|w| !passthrough.contains(&w.id))
-        .is_some_and(|w| ours(w.pid))
+        .is_some_and(ours)
 }
 
 /// Reads the on-screen window list (front to back) from the window server.
@@ -440,6 +461,7 @@ pub fn dock_rect(frame: TargetFrame) -> Option<[f64; 4]> {
 pub fn snapshot(
     frame: TargetFrame,
     dock: Option<[f64; 4]>,
+    excluded: &[u32],
     cache: &mut HashMap<i32, AppMeta>,
 ) -> Vec<WindowEntry> {
     let raw = raw_windows();
@@ -448,6 +470,7 @@ pub fn snapshot(
         &raw,
         frame,
         std::process::id() as i32,
+        excluded,
         front,
         dock,
         &mut |pid| cache.entry(pid).or_insert_with(|| app_meta_of(pid)).clone(),
@@ -516,6 +539,7 @@ pub fn dock_rect(frame: TargetFrame) -> Option<[f64; 4]> {
 pub fn snapshot(
     frame: TargetFrame,
     dock: Option<[f64; 4]>,
+    excluded: &[u32],
     cache: &mut HashMap<i32, AppMeta>,
 ) -> Vec<WindowEntry> {
     objc2::rc::autoreleasepool(|_| {
@@ -525,6 +549,7 @@ pub fn snapshot(
             &raw,
             frame,
             std::process::id() as i32,
+            excluded,
             front,
             dock,
             &mut |pid| cache.entry(pid).or_insert_with(|| app_meta_of(pid)).clone(),
@@ -543,14 +568,20 @@ pub struct WindowLogger {
 }
 
 impl WindowLogger {
-    /// Call on the main thread, so the Dock's strip can be read from `NSScreen`.
-    pub fn start(frame: TargetFrame, started_at: Instant, request: Arc<AtomicBool>) -> Self {
+    /// Call on the main thread, so the Dock's strip can be read from `NSScreen`. `excluded`
+    /// is the host's chrome by window id (`OwnWindows::excluded`), left out of every snapshot.
+    pub fn start(
+        frame: TargetFrame,
+        started_at: Instant,
+        request: Arc<AtomicBool>,
+        excluded: Arc<Mutex<Vec<u32>>>,
+    ) -> Self {
         let stopping = Arc::new(AtomicBool::new(false));
         let stop = Arc::clone(&stopping);
         let dock = dock_rect(frame);
         let worker = thread::Builder::new()
             .name("scrawl-window-log".into())
-            .spawn(move || run(frame, dock, started_at, &request, &stop))
+            .spawn(move || run(frame, dock, started_at, &request, &excluded, &stop))
             .ok();
         Self { stopping, worker }
     }
@@ -592,6 +623,7 @@ fn run(
     dock: Option<[f64; 4]>,
     started_at: Instant,
     request: &AtomicBool,
+    excluded: &Mutex<Vec<u32>>,
     stopping: &AtomicBool,
 ) -> ActivityLog {
     let mut log = ActivityLog::default();
@@ -601,7 +633,11 @@ fn run(
     let mut cursor_at_snapshot: Option<[f32; 2]> = None;
     let mut take = |log: &mut ActivityLog, t: u64| {
         let began = Instant::now();
-        let windows = snapshot(frame, dock, &mut cache);
+        let excluded = excluded
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        let windows = snapshot(frame, dock, &excluded, &mut cache);
         log.snapshot_calls += 1;
         log.snapshot_time += began.elapsed();
         log.push_windows(t, windows);
@@ -674,7 +710,7 @@ mod tests {
             alpha: 1.0,
         };
         let own = 7;
-        let ours = |pid| pid == own;
+        let ours = |w: &RawWindow| w.pid == own;
         let raw = [
             window(1, own, [0.0, 0.0, 1728.0, 1117.0]), // the ink overlay, click-through
             window(2, own, [700.0, 6.0, 320.0, 44.0]),  // the recording control
@@ -719,7 +755,12 @@ mod tests {
     #[test]
     fn logger_snapshots_at_start_and_right_after_a_request() {
         let request = Arc::new(AtomicBool::new(false));
-        let logger = WindowLogger::start(frame(), Instant::now(), Arc::clone(&request));
+        let logger = WindowLogger::start(
+            frame(),
+            Instant::now(),
+            Arc::clone(&request),
+            Arc::default(),
+        );
         request.store(true, Ordering::Release);
         // A slow window list (a loaded CI runner) can hold the worker for a while, so wait for
         // the request to be taken instead of sleeping a fixed time. Once it's taken, the snapshot
@@ -768,7 +809,7 @@ mod tests {
             alpha: 1.0,
         };
         let windows = [
-            raw(1, 9, "Scrawl", "", [1000.0, 0.0, 300.0, 300.0], 0),
+            raw(1, 9, "Scrawl", "", [1000.0, 0.0, 300.0, 300.0], 25),
             raw(
                 2,
                 10,
@@ -789,7 +830,7 @@ mod tests {
         ];
         let mut lookups = Vec::new();
         let dock = Some([1000.0, 440.0, 1000.0, 60.0]);
-        let out = filter_windows(&windows, capture, 9, Some(13), dock, &mut |pid| {
+        let out = filter_windows(&windows, capture, 9, &[], Some(13), dock, &mut |pid| {
             lookups.push(pid);
             AppMeta {
                 bundle_id: Some(format!("pid.{pid}")),
@@ -818,11 +859,62 @@ mod tests {
         assert!(!out[3].regular);
         assert_eq!(lookups, vec![10, 11, 12, 13, 14, 13, 13, 14]);
         // A hidden Dock has no strip, so its full-screen window is dropped.
-        let hidden = filter_windows(&windows, capture, 9, Some(13), None, &mut |_| AppMeta {
-            bundle_id: None,
-            regular: true,
+        let hidden = filter_windows(&windows, capture, 9, &[], Some(13), None, &mut |_| {
+            AppMeta {
+                bundle_id: None,
+                regular: true,
+            }
         });
         assert!(hidden.iter().all(|w| w.id != 3));
+    }
+
+    /// Hosted in an app (Hex), the capture keeps the host's normal windows, which a capture can
+    /// be about, and leaves out only its chrome: the windows it named and its overlays and panels.
+    #[test]
+    fn the_hosts_normal_windows_count_and_its_chrome_does_not() {
+        let raw = |id, title: &str, layer| RawWindow {
+            id,
+            pid: 9,
+            owner: "Hex".into(),
+            title: title.into(),
+            bounds: [100.0, 50.0, 600.0, 400.0],
+            layer,
+            alpha: 1.0,
+        };
+        let windows = [
+            raw(1, "", 27),        // the capsule
+            raw(2, "", 25),        // the ink overlay, or a HUD
+            raw(3, "", 3),         // a floating panel
+            raw(4, "Picker", 0),   // a normal-level window the host named
+            raw(5, "Settings", 0), // its Settings window
+            RawWindow {
+                pid: 13,
+                owner: "Safari".into(),
+                ..raw(6, "Docs", 0)
+            },
+        ];
+        let out = filter_windows(&windows, frame(), 9, &[4], Some(9), None, &mut |_| {
+            AppMeta {
+                bundle_id: Some("anomaly.hex".into()),
+                regular: true,
+            }
+        });
+        assert_eq!(out.iter().map(|w| w.id).collect::<Vec<_>>(), vec![5, 6]);
+        assert!(out[0].frontmost, "the host's own window can be the front");
+        assert_eq!(out[0].title, "Settings");
+        assert!(!is_own_chrome(&windows[5], 9, &[4]), "another app's window");
+        assert!(is_own_chrome(&windows[0], 9, &[]), "an overlay, unnamed");
+        assert!(
+            own_window_in_front(&windows, 9),
+            "Settings is the top normal window"
+        );
+        let chrome = [windows[0].clone(), windows[1].clone(), windows[5].clone()];
+        assert!(
+            !own_window_in_front(&chrome, 9),
+            "with only its chrome over Safari, the host isn't in front"
+        );
+        let behind = [windows[5].clone(), windows[4].clone()];
+        assert!(!own_window_in_front(&behind, 9), "Settings behind Safari");
     }
 
     #[test]
@@ -857,9 +949,11 @@ mod tests {
             "an app with the keys but nothing on screen"
         );
 
-        let out = filter_windows(&windows, frame(), 9, Some(20), None, &mut |pid| AppMeta {
-            bundle_id: None,
-            regular: pid == 13,
+        let out = filter_windows(&windows, frame(), 9, &[], Some(20), None, &mut |pid| {
+            AppMeta {
+                bundle_id: None,
+                regular: pid == 13,
+            }
         });
         assert_eq!(
             out.iter().map(|w| w.id).collect::<Vec<_>>(),

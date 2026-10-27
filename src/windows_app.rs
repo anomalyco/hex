@@ -40,6 +40,7 @@ struct RunningListener {
     worker: JoinHandle<()>,
     /// Saved settings the listener applies in place.
     updates: mpsc::Sender<Box<AppSettings>>,
+    swap_failures: Receiver<crate::local_transcriber::SwapFailed>,
 }
 
 impl RunningListener {
@@ -187,6 +188,7 @@ impl WindowsDesktopHost {
             preparation: TranscriptionPreparation::default(),
             updater: crate::updater::Updater::start(),
         };
+        crate::transcription_models::delete_set_aside();
         host.refresh_personal_commands_host();
         host.adopt_default_voice_action_model();
         // The microphone stays cold until first-run setup finishes.
@@ -232,7 +234,8 @@ impl WindowsDesktopHost {
             DesktopAction::ClearError => self.error = None,
             DesktopAction::CheckForUpdates
             | DesktopAction::OpenUpdate
-            | DesktopAction::RestartIntoUpdate => match self.updater.act(&action) {
+            | DesktopAction::RestartIntoUpdate
+            | DesktopAction::WindowFocused => match self.updater.act(&action) {
                 // Ends the app so the new version can take the named event.
                 Ok(quit) if quit => {
                     self.stop();
@@ -283,9 +286,11 @@ impl WindowsDesktopHost {
         let worker_stop = stop.clone();
         let (result_sender, result_receiver) = mpsc::channel();
         let (updates, update_receiver) = mpsc::channel();
+        let (swap_failure_sender, swap_failures) = mpsc::channel();
         let event_path = self.event_path.clone();
         let selection = self.runtime_selection();
         let config = crate::windows_dictation::WindowsDictationConfig {
+            swap_failures: Some(swap_failure_sender),
             history: self.history.clone(),
             last_dictation: self.last_dictation.clone(),
             indicator: Some(self.indicator.clone()),
@@ -315,6 +320,7 @@ impl WindowsDesktopHost {
                     result: result_receiver,
                     worker,
                     updates,
+                    swap_failures,
                 });
                 self.session_before_start = self.activity.session_started_at;
                 self.awaiting_session_start = true;
@@ -454,6 +460,23 @@ impl WindowsDesktopHost {
         selection
     }
 
+    /// The listener could not load a newly chosen model and still runs the
+    /// previous one. Settings go back to it, so they never name a model that
+    /// is not running and the picker never offers to delete the one in use.
+    fn keep_running_model(&mut self, failed: crate::local_transcriber::SwapFailed) {
+        // A choice made after the failed one stands.
+        if self.runtime_selection() != failed.wanted {
+            return;
+        }
+        let mut candidate = self.settings.clone();
+        candidate.remember_transcription(failed.kept);
+        match candidate.save() {
+            Ok(()) => self.apply_settings(&candidate),
+            Err(error) => tracing::warn!(%error, "could not restore the running model setting"),
+        }
+        self.preparation.set_error(Some(failed.error));
+    }
+
     /// Hosts the personal transformations workspace while any mode uses a
     /// transformation or the workspace exists.
     fn refresh_personal_commands_host(&mut self) {
@@ -485,6 +508,14 @@ impl WindowsDesktopHost {
             if let Err(error) = result {
                 self.preparation.set_error(Some(error));
             }
+        }
+        let swap_failures = self
+            .listener
+            .as_ref()
+            .map(|listener| listener.swap_failures.try_iter().collect::<Vec<_>>())
+            .unwrap_or_default();
+        for failed in swap_failures {
+            self.keep_running_model(failed);
         }
         if self.listen_after_setup && crate::onboarding::completion_recorded() {
             self.listen_after_setup = false;

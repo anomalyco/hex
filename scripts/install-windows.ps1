@@ -22,7 +22,10 @@ $ErrorActionPreference = 'Stop'
 
 $origin = if ($env:HEX_RELEASE_BASE_URL) { $env:HEX_RELEASE_BASE_URL.TrimEnd('/') } else { 'https://anoma.ly/release' }
 if (-not $origin.StartsWith('https://')) { throw 'HEX_RELEASE_BASE_URL must be an https:// URL.' }
-$channel = 'stable'
+# HEX_INSTALL_CHANNEL=dev installs the newest dev build and keeps the
+# install on the Dev update channel.
+$channel = if ($env:HEX_INSTALL_CHANNEL) { $env:HEX_INSTALL_CHANNEL } else { 'stable' }
+if ($channel -notin @('stable', 'dev')) { throw 'HEX_INSTALL_CHANNEL must be stable or dev.' }
 $manifestUrl = "$origin/hex/desktop/$channel.json"
 $support = Join-Path $env:APPDATA 'voice-control'
 $versions = Join-Path $support 'versions'
@@ -69,10 +72,10 @@ Write-Output "Fetching $manifestUrl..."
 $manifest = (Invoke-WebRequest -Uri $manifestUrl -UseBasicParsing -TimeoutSec 30).Content | ConvertFrom-Json
 if ($manifest.schema -ne 1) { throw "Unsupported manifest schema $($manifest.schema)." }
 if ($manifest.app -ne 'hex' -or $manifest.artifact -ne 'desktop' -or $manifest.channel -ne $channel) {
-    throw 'The manifest is not Hex desktop on the stable channel.'
+    throw "The manifest is not Hex desktop on the $channel channel."
 }
 $version = $manifest.release.version
-if ($version -notmatch '^\d+\.\d+\.\d+$') { throw "Unexpected version $version." }
+if ($version -notmatch '^\d+\.\d+\.\d+(-(beta|dev)\.\d+)?$') { throw "Unexpected version $version." }
 $file = $manifest.release.targets.$target
 if (-not $file) { throw "Hex $version has no $target build." }
 if ($file.sha256 -notmatch '^[0-9a-f]{64}$' -or $file.size -le 0) { throw "The manifest's $target entry is invalid." }

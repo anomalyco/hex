@@ -12,7 +12,8 @@ anoma.ly/hex                               the one site: platform-aware download
 └── files/…                                hex-production-files, frozen at 2.3.1 for old clients:
     ├── linux-update.json, windows-update.json, windows-aarch64-update.json, appcast.xml
     └── releases/HEX-2.3.1-…, install-linux.sh, install-windows.ps1 (the 2.3.1 installers)
-dev.anoma.ly/release/hex/, dev.anoma.ly/hex       dev service (staging releases) and dev site
+dev.anoma.ly/hex                           the dev site (reads anoma.ly/release; the service's dev stage
+                                           is only for testing the service)
 hex.kitlangton.com, .dev                   Kit's old site; should redirect to anoma.ly/hex
 downloads.hex.kitlangton.dev, .com         Kit's old bucket; releases up to 2.3.1 compiled it;
                                            redirects to anoma.ly/hex/files (keep forever)
@@ -35,7 +36,8 @@ download.
 
 The site reads the stable manifest when it builds, so the production deploy
 that follows a stable release updates every link. Bump the README's explicit
-app mirror link and `anomalyco/homebrew-tap/Casks/hex.rb` by hand.
+app mirror link by hand; the Release workflow pushes
+`anomalyco/homebrew-tap/Casks/hex.rb`.
 `bun run --cwd site check:downloads` must pass; then verify the live links.
 
 ## Network Recovery

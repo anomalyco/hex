@@ -79,6 +79,10 @@ cp "$root/sdk/commands/package.json" "$bundle/Contents/Resources/commands-sdk/"
 /usr/libexec/PlistBuddy -c "Set :CFBundleExecutable $executable_name" "$bundle/Contents/Info.plist"
 plutil -replace CFBundleName -string "$app_name" "$bundle/Contents/Info.plist"
 plutil -replace CFBundleDisplayName -string "$app_name" "$bundle/Contents/Info.plist"
+if [ -n "$capture" ]; then
+  # The helper mirrors a cabled iPhone as a camera; macOS asks on Hex's behalf.
+  plutil -replace NSCameraUsageDescription -string "Hex mirrors and records a cabled iPhone's screen for a capture." "$bundle/Contents/Info.plist"
+fi
 rm -rf "$icon_output"
 mkdir -p "$icon_output"
 xcrun actool "$root/app/AppIcon.icon" \

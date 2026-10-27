@@ -1,7 +1,7 @@
 pub use scrawl_router::{
     Action, AutoSend, Decision, DeliverRequest, Delivered, DeliveryMode, OfferRule, Router,
-    RouterConfig, RouterDirs, RuleKind, Sent, Target as RouterTarget, UndoReport, Undone, delivery,
-    model, routing,
+    RouterConfig, RouterDirs, RuleKind, Sent, Target as RouterTarget, UndoReport, Undone, bundle,
+    delivery, model, router_config_from_scrawl, routing,
 };
 
 pub mod agent_context;
@@ -22,6 +22,7 @@ pub mod handoff;
 pub mod helper;
 #[cfg(feature = "hex-client")]
 pub mod hex;
+pub mod hosted_input;
 pub mod ingest_http;
 pub mod keyframes;
 pub mod live_transcribe;

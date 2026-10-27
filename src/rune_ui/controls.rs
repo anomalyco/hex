@@ -23,6 +23,8 @@ const SELECT_WIDTH: f32 = 220.0;
 /// squeezing the description to a word per line (tiling desktops ignore
 /// the window's 860 px minimum width).
 const COPY_MIN_WIDTH: f32 = 100.0;
+/// An [`icon_row`]'s icon and the gap after it.
+const ICON_LEAD: f32 = 28.0;
 
 /// Everything a control needs to paint itself.
 #[derive(Clone, Copy)]
@@ -195,18 +197,38 @@ pub(super) fn described_row(
             .color(color)
             .wrap()
     });
-    copy_row(p, key, title, description, control, false)
+    copy_row(p, key, None, title, description, control, false)
+}
+
+/// A [`setting_row`] led by an icon in the icon colour.
+pub(super) fn icon_row(
+    p: Paint,
+    key: &str,
+    glyph: &'static rune::Icon,
+    title: &str,
+    description: Option<&str>,
+    control: El,
+) -> El {
+    let description = description.map(|copy| {
+        text(copy)
+            .key("description")
+            .font(DESCRIPTION)
+            .color(p.muted())
+            .wrap()
+    });
+    copy_row(p, key, Some(glyph), title, description, control, false)
 }
 
 /// A [`setting_row`] with a one-line link under its title, as tight as a
 /// row without one so General still fits the window.
 pub(super) fn link_row(p: Paint, key: &str, title: &str, link: El, control: El) -> El {
-    copy_row(p, key, title, Some(link), control, true)
+    copy_row(p, key, None, title, Some(link), control, true)
 }
 
 fn copy_row(
     p: Paint,
     key: &str,
+    glyph: Option<&'static rune::Icon>,
     title: &str,
     description: Option<El>,
     control: El,
@@ -217,6 +239,14 @@ fn copy_row(
     } else {
         ROW_HEIGHT
     };
+    let copy = col()
+        .key("copy")
+        .w(COPY_MIN_WIDTH)
+        .min_w(COPY_MIN_WIDTH)
+        .grow(1.0)
+        .gap(if compact { 0.0 } else { 2.0 })
+        .child(text(title).key("label").font(p.k.ty.ui).color(p.text()))
+        .children(description);
     row()
         .key(key)
         .min_h(height)
@@ -228,16 +258,18 @@ fn copy_row(
         .flex_wrap()
         .radius(p.k.radius.md)
         .label(title)
-        .child(
-            col()
-                .key("copy")
-                .w(COPY_MIN_WIDTH)
-                .min_w(COPY_MIN_WIDTH)
+        .child(match glyph {
+            None => copy,
+            Some(glyph) => row()
+                .key("lead")
+                .w(COPY_MIN_WIDTH + ICON_LEAD)
+                .min_w(COPY_MIN_WIDTH + ICON_LEAD)
                 .grow(1.0)
-                .gap(if compact { 0.0 } else { 2.0 })
-                .child(text(title).key("label").font(p.k.ty.ui).color(p.text()))
-                .children(description),
-        )
+                .gap(ICON_LEAD - 16.0)
+                .center_y()
+                .child(rune::icon(glyph, 16.0).key("icon").color(p.k.c.icon_base))
+                .child(copy),
+        })
         .child(control)
 }
 
@@ -256,12 +288,21 @@ pub(super) fn toggle_row<'a>(
     on: bool,
     flip: impl Fn(&mut Ui) + 'static,
 ) -> El {
-    setting_row(p, key, title, description.into(), row_switch(p, on))
-        .role("toggle")
-        .focusable(true)
-        .hover(p.k.c.hover)
-        .press(p.k.c.pressed)
-        .on_press(flip)
+    pressable_row(setting_row(
+        p,
+        key,
+        title,
+        description.into(),
+        row_switch(p, on),
+    ))
+    .on_press(flip)
+}
+
+/// A settings row that toggles when pressed anywhere. Only its switch
+/// reacts to the pointer; the row itself never paints a hover or press
+/// fill.
+pub(super) fn pressable_row(row: El) -> El {
+    row.role("toggle").focusable(true)
 }
 
 /// A few exclusive choices: equal segments sized for the longest label.
@@ -487,11 +528,40 @@ impl KeySize {
         }
     }
 
-    fn legend(self) -> TextStyle {
+    pub(super) fn legend(self) -> TextStyle {
         match self {
             Self::Small => TextStyle::new(11.0, 400.0).lh(14.0),
             Self::Large => TextStyle::new(13.0, 400.0).lh(16.0),
         }
+    }
+
+    /// Beside the legend on the face.
+    const fn face_padding(self) -> f32 {
+        match self {
+            Self::Small => 6.0,
+            Self::Large => 8.0,
+        }
+    }
+
+    /// A key's width, rims included, for a legend this many points wide.
+    fn key_width(self, legend: f32) -> f32 {
+        (legend + 2.0 * self.face_padding()).max(self.min_width() - 2.0 * KEY_RIM) + 2.0 * KEY_RIM
+    }
+
+    /// A tray's width around keys with legends this many points wide, as
+    /// [`key_tray`] lays them out.
+    #[cfg_attr(
+        not(hex_capture),
+        expect(
+            dead_code,
+            reason = "only the capture capsule sizes a tray before layout"
+        )
+    )]
+    pub(super) fn tray_width(self, legends: impl IntoIterator<Item = f32>) -> f32 {
+        let (sum, count) = legends.into_iter().fold((0.0, 0), |(sum, count), legend| {
+            (sum + self.key_width(legend), count + 1)
+        });
+        sum + KEY_GAP * (count.max(1) - 1) as f32 + 2.0 * TRAY_PADDING
     }
 }
 
@@ -649,10 +719,7 @@ pub(super) fn keycap(p: Paint, index: usize, label: &str, size: KeySize, down: b
                 .key("face")
                 .min_w(size.min_width() - 2.0 * KEY_RIM)
                 .h(face_height)
-                .px(match size {
-                    KeySize::Small => 6.0,
-                    KeySize::Large => 8.0,
-                })
+                .px(size.face_padding())
                 .center()
                 .radius(size.face_radius())
                 .continuous_corners()

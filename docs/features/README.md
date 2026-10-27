@@ -30,8 +30,9 @@ have detailed maps.
 Agents can [read retained transcripts](transcript-cli.md) and
 [control the running app](control-cli.md) with the release CLI.
 [Experiments](experiments.md) turn unfinished features on per person with a flag;
-the [vocabulary](vocabulary.md) is one, and debug builds add
-[Captures](capture.md), Scrawl's capture engine hosted in Hex.
+the [vocabulary](vocabulary.md) is one, and macOS builds with the `capture`
+build option add [Captures](capture.md): Scrawl's capture engine hosted in Hex,
+with its shortcut, input, and Settings › Experiments › Scrawl pane.
 The other capabilities stay here until they need their own verification recipe.
 
 ## Get Ready
@@ -120,8 +121,13 @@ Launch Hex, setup incomplete              // setup.tour; full-window, own column
 │   └── Change or delete the model later in Settings      // setup.delete-model
 ├── macOS: opens centred at one fixed size, so tiling managers float it
 ├── Quit part-way -> next launch resumes at the saved step  // setup.resume
-├── Welcome -> Get started                // looping keycap + listening rings
+├── Welcome -> Get started                // setup.welcome-hero
+│   ├── The Hex glyph backlit by a cool corona, drawn live on the GPU
+│   │   (`rune_ui/hero.rs`); core, middle ring, outer ring light in turn,
+│   │   then the lamp breathes. Light theme: ink rings over a pale blue glow
+│   └── Reduce Motion -> the settled frame, lamp at rest
 ├── Setup: one screen, every permission   // setup.checklist; skipped when granted
+│   ├── Each row leads with its glyph: mic, keyboard, text cursor, sparkle (model)
 │   ├── Every row -> Allow; asked -> pulse + Allow; granted -> Allowed  // setup.permission-control
 │   │   └── Grant: the pill narrows into the green label, the dot shrinks into
 │   │       the check as it draws on (0.3 s, no bounce; Reduce Motion: no travel)
@@ -233,7 +239,11 @@ download, practice hints, one-relaunch guard) drawn by
 [rune_ui/onboarding.rs](../../src/rune_ui/onboarding.rs); `permission_control`
 in [rune_ui/lists.rs](../../src/rune_ui/lists.rs) is the one Allow / dot /
 Allowed control Settings and the tour share (`a_grant_gathers_then_releases_into_allowed`,
-`reduce_motion_swaps_allow_for_allowed_at_once`; scene `meetings-allow`). The guide
+`reduce_motion_swaps_allow_for_allowed_at_once`; scene `meetings-allow`). The
+welcome hero is a compositor pass after the UI, so goldens show its stage
+empty; `hex app -- --scene onboarding-hero` (`-still` for Reduce Motion) runs
+it live, and `--video` records it. Its springs passed motion-lint as level
+channels; native visual review is still by eye. The guide
 beside System Settings is [permission_guide.m](../../native/permission_guide.m).
 Unit tests (`onboarding::tests`) cover step order, the download starting on the
 welcome screen and retrying from any step, permissions-only setup with the
@@ -720,7 +730,12 @@ failed; no visual or installed-app startup verification is claimed.
 
 ```ts
 Hex checks the release service            // maintain.updates
-├── 10 s after launch, hourly, and sidebar Check for updates -> anoma.ly/release/hex/desktop/<channel>.json
+├── 10 s after launch, hourly (Dev channel: every 10 min and on window focus), and Check for updates -> anoma.ly/release/hex/desktop/<channel>.json
+│   └── <channel> -> updates.channel (General › Application › Update channel: Stable | Dev,
+│       or `hex settings set updates.channel`), else dev for an X.Y.Z-dev.N build,
+│       else the installer receipt's channel, else stable; package managers always stable
+│       └── Choosing a channel -> checks now; a staged update stays staged
+├── Dev -> stable -> nothing until stable is strictly newer (never a downgrade)
 ├── Protocol client rules (shared vectors) -> newer, required (minimum), revoked, or none
 │   └── Rollout -> device-local bucket in <support>/update-bucket, never sent
 ├── Direct install -> download (resumable) -> size + SHA-256 -> code signature -> stage
@@ -754,8 +769,13 @@ window, menu bar, and tray show; `updater/protocol.rs` passes the release
 service's shared test vectors (`tests/fixtures/release-protocol`), and the
 per-OS modules have tests for activation, the macOS bundle swap and
 signature checks (ad-hoc fixtures against the real requirement), the rollout
-bucket, receipts, and Windows Authenticode (a Microsoft-signed system file).
-Not yet observed: a real update on any OS from the release service, the macOS
+bucket, receipts, the channel choice, a dev-to-stable switch that does not
+downgrade, and Windows Authenticode (a Microsoft-signed system file). The
+Update channel row shows only while this install updates itself (not test,
+source, managed, or package-manager installs); the `mac-settings-dev-channel`
+scene renders it, and `rune_ui` tests cover saving and hiding it.
+Not yet observed: a published dev channel release, a switch between channels on
+a real install, a real update on any OS from the release service, the macOS
 swap and relaunch of a Developer ID build, a Windows update of a signed build.
 Manifests are unsigned; on Linux a compromised HTTPS origin could serve any
 executable with a matching manifest, which Linux code signing cannot catch.

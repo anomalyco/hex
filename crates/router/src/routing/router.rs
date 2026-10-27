@@ -379,7 +379,8 @@ fn decide_with(
         .map(|id| id.trim().to_owned())
         .filter(|id| !id.is_empty())
         .collect();
-    let (mut candidates, error) = look::read_with(&clues, None, &pinned, senses);
+    let (mut candidates, error) =
+        look::read_with(&clues, None, &pinned, super::SESSIONS_BUDGET, senses);
     look::look_at_page(url, &mut clues, &mut candidates, senses);
     clues.extend(look::named_clue(
         &item.text,
@@ -392,6 +393,7 @@ fn decide_with(
         candidates,
         now_ms,
         url: url.map(str::to_owned),
+        sessions_error: error.clone(),
     };
     let smart = smart::decide(&evidence, Policy::Weigh);
     let mut capture = serde_json::Map::new();
@@ -1786,6 +1788,7 @@ mod tests {
                 listener_dir: no_dir,
                 api: sessions,
             },
+            tab: |_, _| None,
             own_port: no_port,
             terminal: no_terminal,
             servers: nothing,

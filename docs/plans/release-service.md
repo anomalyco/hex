@@ -7,7 +7,7 @@ Contract between Hex's release workflow (publishing) and Hex's in-app updater
 ## Names
 
 ```ts
-https://anoma.ly/release/hex/              production (dev: https://dev.anoma.ly/release/hex/)
+https://anoma.ly/release/hex/              the service (its dev stage, dev.anoma.ly/release, only tests the service)
 ├─ index.json                              download page and installers
 └─ desktop/<channel>.json                  the manifest the app polls; channels stable, beta, dev
    └─ release.targets
@@ -20,9 +20,9 @@ https://anoma.ly/release/hex/              production (dev: https://dev.anoma.ly
       └─ linux-x64            hex-<v>-linux-x64                bare executable (updater, installer, AUR)
 ```
 
-- App `hex`, artifact `desktop`. `stable` is the public channel; Release's
-  `staging` runs publish `<version>-dev.<run number>` on the dev service's
-  `dev` channel. `beta` is registered for later use.
+- App `hex`, artifact `desktop`. `stable` is the public channel; every push
+  to `dev` publishes `<next>-dev.<run number>` on the `dev` channel. `beta` is
+  registered for later use.
 - Every executable and archive is signed before upload (Developer ID +
   notarization on macOS, Authenticode on Windows); the service stores bytes and
   their size and SHA-256, and manifests are not signed. Linux relies on HTTPS
@@ -57,8 +57,9 @@ it is present and the root is writable by this user alone:
 - macOS: the client decides from the bundle's location (a writable,
   non-translocated `Hex.app` is direct).
 
-`HEX_RELEASE_BASE_URL` (HTTPS only) points a build at another service origin,
-e.g. `https://dev.anoma.ly/release`, for dry runs.
+`HEX_RELEASE_BASE_URL` (HTTPS only) points a build at another service origin
+for local tests against a fixture service; nothing defaults to another
+origin.
 
 ## Old clients (2.3.1 and earlier)
 
@@ -70,7 +71,7 @@ https://anoma.ly/hex (see `docs/releasing.md`).
 ## Client
 
 `src/updater.rs` (all three OSes) polls `<origin>/hex/desktop/<channel>.json`
-10 seconds after launch, hourly, and on Check now, with `If-None-Match`, and
+10 seconds after launch, hourly (the Dev channel every 10 minutes and when the window gains focus, at most once a minute), and on Check now, with `If-None-Match`, and
 decides with the protocol's client rules (`updater/protocol.rs`, which passes
 the service's `test-vectors/` copied to `tests/fixtures/release-protocol`).
 

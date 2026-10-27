@@ -12,6 +12,7 @@ typedef NS_ENUM(NSInteger, HexPermission) {
     HexPermissionAccessibility = 1,
     HexPermissionMicrophone = 2,
     HexPermissionSystemAudio = 3,
+    HexPermissionScreenRecording = 4,
 };
 
 static NSPanel *guidePanel;
@@ -67,6 +68,8 @@ const char *hex_permission_list_name(int permission) {
             return "Microphone";
         case HexPermissionSystemAudio:
             return "System Audio Recording Only";
+        case HexPermissionScreenRecording:
+            return "Screen & System Audio Recording";
     }
     return "Privacy & Security";
 }
@@ -233,6 +236,8 @@ static BOOL permissionGranted(void) {
                    AVAuthorizationStatusAuthorized;
         case HexPermissionSystemAudio:
             return systemAudioGranted();
+        case HexPermissionScreenRecording:
+            return CGPreflightScreenCaptureAccess();
     }
     return NO;
 }
@@ -449,6 +454,9 @@ void hex_show_permission_guide(int permission) {
             break;
         case HexPermissionSystemAudio:
             pane = @"Privacy_AudioCapture";
+            break;
+        case HexPermissionScreenRecording:
+            pane = @"Privacy_ScreenCapture";
             break;
     }
     // The Microphone list only holds apps that asked, so a refused

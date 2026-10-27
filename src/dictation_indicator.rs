@@ -432,9 +432,11 @@ impl MetalIndicator {
             IndicatorPosition::Bottom => {
                 visible.origin.y + BOTTOM_OFFSET - capsule_margin + f64::from(WINDOW_HEIGHT)
             }
-            IndicatorPosition::Top | IndicatorPosition::Hidden => {
-                visible.origin.y + visible.size.height + capsule_margin - TOP_OFFSET
-            }
+            IndicatorPosition::Top | IndicatorPosition::Hidden => top_window_edge(
+                screen_frame.origin.y + screen_frame.size.height,
+                visible.origin.y + visible.size.height,
+                screen.safeAreaInsets().top,
+            ),
         };
         let top_left = NSPoint::new(
             screen_frame.origin.x + (screen_frame.size.width - f64::from(WINDOW_WIDTH)) / 2.0,
@@ -448,6 +450,14 @@ impl MetalIndicator {
         }
         self.renderer.set_scale(screen.backingScaleFactor() as f32);
     }
+}
+
+/// The window's top edge for the top position: the capsule sits under the
+/// menu bar, or under the notch where a fullscreen space hides the menu bar
+/// and `visibleFrame` reaches the top of a notched screen.
+fn top_window_edge(screen_top: f64, visible_top: f64, safe_area_top: f64) -> f64 {
+    let capsule_margin = f64::from((WINDOW_HEIGHT - CAPSULE_HEIGHT) / 2.0);
+    visible_top.min(screen_top - safe_area_top) + capsule_margin - TOP_OFFSET
 }
 
 impl Drop for MetalIndicator {
@@ -1056,6 +1066,37 @@ mod tests {
         };
         assert!((average - 0.5).abs() < f32::EPSILON);
         assert!((peak - 0.5).abs() < f32::EPSILON);
+    }
+
+    /// The capsule's top edge for a window whose top edge is `window_top`.
+    fn capsule_top(window_top: f64) -> f64 {
+        window_top - f64::from((WINDOW_HEIGHT - CAPSULE_HEIGHT) / 2.0)
+    }
+
+    // Geometry measured on a 14" MacBook Air: frame height 956, menu bar
+    // bottom 923, 32 pt notch.
+    #[test]
+    fn top_capsule_clears_the_notch_in_a_fullscreen_space() {
+        let edge = top_window_edge(956.0, 956.0, 32.0);
+        assert_eq!(capsule_top(edge), 924.0 - TOP_OFFSET);
+    }
+
+    #[test]
+    fn top_capsule_stays_under_the_menu_bar_on_a_notched_screen() {
+        let edge = top_window_edge(956.0, 923.0, 32.0);
+        assert_eq!(capsule_top(edge), 923.0 - TOP_OFFSET);
+    }
+
+    #[test]
+    fn top_capsule_is_unchanged_on_a_screen_without_a_notch() {
+        assert_eq!(
+            capsule_top(top_window_edge(1080.0, 1055.0, 0.0)),
+            1055.0 - TOP_OFFSET
+        );
+        assert_eq!(
+            capsule_top(top_window_edge(1080.0, 1080.0, 0.0)),
+            1080.0 - TOP_OFFSET
+        );
     }
 
     #[test]

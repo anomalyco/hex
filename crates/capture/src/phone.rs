@@ -103,17 +103,20 @@ impl PhoneSession {
         hidden: bool,
         telemetry: Option<Arc<SharedCaptureTelemetry>>,
     ) -> Result<Self> {
-        Self::spawn_mirror(None, hidden, device_id, telemetry)
+        Self::spawn_mirror(None, hidden, device_id, telemetry, true)
     }
 
     /// `telemetry` (when capturing through the app) receives the mirror's on-screen rect as the
-    /// capture target, and hears when the helper ends the capture on its own.
+    /// capture target, and hears when the helper ends the capture on its own. Without
+    /// `narration` the movie has no audio and the mirror never opens a microphone: the host
+    /// records the narration itself.
     pub fn start(
         movie: &Path,
         device_id: Option<&str>,
         telemetry: Option<Arc<SharedCaptureTelemetry>>,
+        narration: bool,
     ) -> Result<Self> {
-        Self::spawn_mirror(Some(movie), false, device_id, telemetry)
+        Self::spawn_mirror(Some(movie), false, device_id, telemetry, narration)
     }
 
     fn spawn_mirror(
@@ -121,6 +124,7 @@ impl PhoneSession {
         hidden: bool,
         device_id: Option<&str>,
         telemetry: Option<Arc<SharedCaptureTelemetry>>,
+        narration: bool,
     ) -> Result<Self> {
         let session_epoch_ms = crate::pipeline::now_epoch_ms();
         let recording = movie.map(|_| crate::retention::Recording::start());
@@ -140,7 +144,9 @@ impl PhoneSession {
             command.arg("--device").arg(id);
         }
         // Narration comes from the Mac's microphone: the chosen one, if any.
-        if let Some(choice) = crate::mic::choice() {
+        if !narration {
+            command.arg("--no-microphone");
+        } else if let Some(choice) = crate::mic::choice() {
             command.args([
                 "--microphone",
                 &choice.id,
@@ -270,6 +276,12 @@ impl PhoneSession {
         })
     }
 
+    /// Puts the session's clock origin at `epoch_ms` (a host's capture start) rather than when
+    /// the mirror was spawned, so the recording's `offset_ms` is measured from there.
+    pub fn clock_from(&mut self, epoch_ms: u64) {
+        self.session_epoch_ms = epoch_ms;
+    }
+
     /// Transitions an open preview session into active movie recording.
     pub fn begin_recording(&mut self, movie: &Path) {
         self.started_at = Instant::now();
@@ -379,6 +391,9 @@ impl PhoneSession {
 
     /// Stops recording and waits for the helper to finalize the movie.
     pub fn stop(mut self) -> Result<PhoneRecording> {
+        // Asked to end, so its end is no `PhoneEnded`.
+        self.cancelled
+            .store(true, std::sync::atomic::Ordering::Release);
         self.send("stop");
         self.wait(Duration::from_secs(15));
         let state = std::mem::take(&mut *self.lock());
@@ -430,6 +445,13 @@ pub struct MovieCapture {
     pub screens: Vec<ScreenSpan>,
 }
 
+/// Narration the host recorded itself, for a mirror started without it.
+pub struct HostNarration<'a> {
+    /// On the movie's clock ([`crate::audio::RecordedAudio::since`] its first frame).
+    pub audio: Option<crate::audio::RecordedAudio>,
+    pub transcriber: Option<&'a dyn crate::transcribe::Transcriber>,
+}
+
 /// `app` is the display name and `bundle_id` the identifier; an old timeline without a bundle
 /// ID falls back to the name for both.
 pub fn phone_target(
@@ -464,13 +486,14 @@ pub fn build_movie_bundle(
     bundle_dir: &Path,
     capture: MovieCapture,
 ) -> Result<(PathBuf, ScrawlBundle, String)> {
-    build_movie_bundle_with(bundle_dir, capture, None)
+    build_movie_bundle_with(bundle_dir, capture, None, None)
 }
 
 fn build_movie_bundle_with(
     bundle_dir: &Path,
     mut capture: MovieCapture,
     agent_context: Option<bool>,
+    narration: Option<HostNarration<'_>>,
 ) -> Result<(PathBuf, ScrawlBundle, String)> {
     let started_at = Instant::now();
     let wav = bundle_dir.join("audio.wav");
@@ -481,6 +504,7 @@ fn build_movie_bundle_with(
         .collect();
     mark_times.sort_unstable();
     mark_times.dedup();
+    let hosted = narration.is_some();
     let ((transcript, audio_ms, transcribe_ms, audio_err), joined) = std::thread::scope(|scope| {
         let base_target = capture.target.clone();
         let strokes_ref = &capture.strokes;
@@ -556,16 +580,35 @@ fn build_movie_bundle_with(
             Ok((probe, res, t0.elapsed().as_millis() as u64, false, None))
         });
         let audio_started = Instant::now();
-        let exported = helper::export_audio(&capture.movie, &wav)
-            .and_then(|()| crate::audio::recorded_audio_from_wav(std::fs::read(&wav)?));
+        let (transcriber, exported) = match narration {
+            Some(HostNarration { audio, transcriber }) => {
+                let written = audio.map(|audio| -> Result<_> {
+                    let bytes = audio.wav_bytes_16k()?;
+                    crate::routing::undo::write_private(&wav, &bytes)?;
+                    Ok(audio)
+                });
+                (transcriber, written.transpose())
+            }
+            None => (
+                None,
+                helper::export_audio(&capture.movie, &wav)
+                    .and_then(|()| crate::audio::recorded_audio_from_wav(std::fs::read(&wav)?))
+                    .map(Some),
+            ),
+        };
         let audio_ms = audio_started.elapsed().as_millis() as u64;
         let (audio, audio_err) = match exported {
-            Ok(a) => (Some(a), None),
+            Ok(a) => (a, None),
             Err(e) => (None, Some(e)),
         };
         let t0 = Instant::now();
-        let transcript =
-            crate::transcribe::transcribe(audio.as_ref().map(|_| wav.as_path()), audio.as_ref());
+        let wav_path = audio.as_ref().map(|_| wav.as_path());
+        let transcript = match transcriber {
+            Some(transcriber) => {
+                crate::transcribe::transcribe_with(wav_path, audio.as_ref(), transcriber)
+            }
+            None => crate::transcribe::transcribe(wav_path, audio.as_ref()),
+        };
         let transcribe_ms = t0.elapsed().as_millis() as u64;
         (
             (transcript, audio_ms, transcribe_ms, audio_err),
@@ -574,7 +617,7 @@ fn build_movie_bundle_with(
     });
     let (probe, frames, candidates_ms, already_full, prepared) =
         joined.map_err(|_| anyhow::anyhow!("Frame decoding panicked"))??;
-    if probe.audio_tracks > 0
+    if (hosted || probe.audio_tracks > 0)
         && let Some(error) = audio_err
     {
         scrawl_log(format!("Phone audio export failed: {error:#}"));
@@ -632,7 +675,7 @@ pub fn finalize_live_capture(
     strokes: Vec<Stroke>,
     note: Option<String>,
 ) -> Result<(PathBuf, ScrawlBundle, String)> {
-    finalize_live_capture_for_config(bundle_dir, recording, events, strokes, note, None)
+    finalize_live_capture_for_config(bundle_dir, recording, events, strokes, note, None, None)
 }
 
 pub fn finalize_live_capture_for_config(
@@ -642,6 +685,7 @@ pub fn finalize_live_capture_for_config(
     mut strokes: Vec<Stroke>,
     note: Option<String>,
     engine_cfg: Option<&crate::handoff::EngineConfig>,
+    narration: Option<HostNarration<'_>>,
 ) -> Result<(PathBuf, ScrawlBundle, String)> {
     events.retain_mut(|event| event.rebase(recording.offset_ms));
     strokes.retain_mut(|stroke| stroke.rebase(recording.offset_ms));
@@ -671,6 +715,7 @@ pub fn finalize_live_capture_for_config(
             screens: Vec::new(),
         },
         engine_cfg.map(|cfg| cfg.experiment(crate::handoff::AGENT_CONTEXT)),
+        narration,
     )?;
     // The native video is ~18 Mbps; re-encode it a minute from now (in the app).
     crate::retention::after_phone_capture(&built.0);
