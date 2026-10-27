@@ -374,19 +374,6 @@ pub(super) fn toggle_menu(ui: &mut Ui, menu: Menu) {
     }
 }
 
-/// How the microphone field names System default. Scenes compare the
-/// alternatives; the window uses [`MicrophoneLabel::DeviceFirst`].
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(super) enum MicrophoneLabel {
-    /// "Kit Pods", then a faint "System default".
-    #[default]
-    DeviceFirst,
-    /// "System default", then a faint "Kit Pods".
-    ModeFirst,
-    /// "Kit Pods" alone, with the row saying it follows the system.
-    DeviceOnly,
-}
-
 /// Lists the microphones again, and what System default resolves to, on a
 /// worker thread; [`poll_microphones`] adopts the result. A change during a
 /// listing in flight is listed again after it.
@@ -851,23 +838,13 @@ fn dictation_section(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
             !devices.names.is_empty() && !devices.names.iter().any(|name| name == saved)
         })
     });
-    let style = ui.microphone_label;
-    // System default's choice, named with the input it resolves to.
-    let (system_label, system_detail) = match (style, default_name) {
-        (_, None) => (tr("System default").to_owned(), None),
-        (MicrophoneLabel::DeviceFirst, Some(name)) => {
-            (name.to_owned(), Some(tr("System default").to_owned()))
-        }
-        (MicrophoneLabel::ModeFirst | MicrophoneLabel::DeviceOnly, Some(name)) => {
-            (tr("System default").to_owned(), Some(name.to_owned()))
-        }
-    };
+    // System default's choice, with the input it resolves to in faint text.
+    let system_detail = default_name.map(str::to_owned);
     // The field always names the input in use, so a missing saved
-    // microphone shows what stands in for it.
-    let (microphone, microphone_detail) = match (&settings.microphone, missing, default_name) {
-        (Some(saved), None, _) => (saved.clone(), None),
-        (_, _, Some(name)) if style == MicrophoneLabel::DeviceOnly => (name.to_owned(), None),
-        _ => (system_label.clone(), system_detail.clone()),
+    // microphone shows the system default standing in for it.
+    let (microphone, microphone_detail) = match (&settings.microphone, missing) {
+        (Some(saved), None) => (saved.clone(), None),
+        _ => (tr("System default").to_owned(), system_detail.clone()),
     };
     let mac = ui.platform.caps.os == super::platform::Os::Macos;
     let microphone_note = listed.and_then(|devices| match &settings.microphone {
@@ -884,18 +861,10 @@ fn dictation_section(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
                 name,
             )
         }),
-        None if style == MicrophoneLabel::DeviceOnly => Some(
-            if mac {
-                tr("Follows your Mac's input")
-            } else {
-                tr("Follows the system input")
-            }
-            .to_owned(),
-        ),
         None => None,
     });
     let mut devices = vec![Choice {
-        label: system_label,
+        label: tr("System default").to_owned(),
         detail: system_detail,
         selected: settings.microphone.is_none(),
         choose: Box::new(|ui: &mut Ui| {

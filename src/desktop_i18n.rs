@@ -420,8 +420,6 @@ const TRANSLATIONS: &[(&str, [&str; 5])] = &[
     ("not connected", ["niepodłączony", "未连接", "未接続", "nicht verbunden", "no conectado"]),
     ("{} isn't connected; using your Mac's input", ["{} nie jest podłączony; używany jest mikrofon Maca", "{} 未连接；正在使用 Mac 的输入设备", "{} は接続されていません。Mac の入力を使用中", "{} ist nicht verbunden; der Eingang des Mac wird verwendet", "{} no está conectado; se usa la entrada del Mac"]),
     ("{} isn't connected; using the system input", ["{} nie jest podłączony; używane jest wejście systemowe", "{} 未连接；正在使用系统输入设备", "{} は接続されていません。システムの入力を使用中", "{} ist nicht verbunden; der Systemeingang wird verwendet", "{} no está conectado; se usa la entrada del sistema"]),
-    ("Follows your Mac's input", ["Podąża za wejściem Maca", "跟随 Mac 的输入设备", "Mac の入力に従います", "Folgt dem Eingang des Mac", "Sigue la entrada del Mac"]),
-    ("Follows the system input", ["Podąża za wejściem systemowym", "跟随系统输入设备", "システムの入力に従います", "Folgt dem Systemeingang", "Sigue la entrada del sistema"]),
     ("24 hours", ["24 godziny", "24 小时", "24 時間", "24 Stunden", "24 horas"]),
     ("7 days", ["7 dni", "7 天", "7 日間", "7 Tage", "7 días"]),
     ("30 days", ["30 dni", "30 天", "30 日間", "30 Tage", "30 días"]),

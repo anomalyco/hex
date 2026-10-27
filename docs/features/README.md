@@ -397,7 +397,7 @@ General                                  // settings
 │   └── A row that hides or shows (Double-tap to lock, Advanced, a microphone error)
 │       -> Folds under a clip as the rows below slide over it; no fade in place
 ├── Microphone -> Field always names the input in use            // settings.microphone
-│   ├── "KIT PODS" + faint "System default", or a saved device     // scenes mic-label-{a,b,c}*
+│   ├── "System default" + faint "KIT PODS", or a saved device
 │   ├── Re-listed on a device or default change while General shows (Windows: also every 3 s)
 │   ├── System default -> The OS default input, followed live      // a Bluetooth default is kept
 │   │   ├── Default changes -> Switch once capture is idle; new stream opens before the old drops

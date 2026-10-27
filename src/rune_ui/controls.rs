@@ -19,8 +19,8 @@ pub(super) const DESCRIPTION: TextStyle = TextStyle::new(12.0, 440.0).lh(16.0);
 const ROW_HEIGHT: f32 = 44.0;
 const ROW_HEIGHT_DESCRIBED: f32 = 56.0;
 const SELECT_WIDTH: f32 = 220.0;
-/// The microphone field, wide enough for "Studio Display Microphone" and
-/// a faint "System default".
+/// The microphone field, wide enough for "System default" and a faint
+/// "Studio Display Microphone".
 pub(super) const DEVICE_SELECT_WIDTH: f32 = 320.0;
 /// Narrower than this, a row moves its control below the copy instead of
 /// squeezing the description to a word per line (tiling desktops ignore

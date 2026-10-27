@@ -1186,10 +1186,10 @@ fn recognition_hints_save_when_typing_pauses() {
 fn the_microphone_field_names_the_input_in_use() {
     let field = |rt: &Runtime<Ui>| element(rt, "microphone-control-field-trigger").label;
     let rt = runtime("mac-settings", true, PANE_SIZE);
-    assert_eq!(field(&rt).as_deref(), Some("Kit Pods, System default"));
+    assert_eq!(field(&rt).as_deref(), Some("System default, Kit Pods"));
 
     let rt = runtime("mac-microphone-missing", true, PANE_SIZE);
-    assert_eq!(field(&rt).as_deref(), Some("Kit Pods, System default"));
+    assert_eq!(field(&rt).as_deref(), Some("System default, Kit Pods"));
     let texts = texts(&rt);
     assert!(texts.contains(&"not connected".to_owned()), "{texts:?}");
     assert!(texts.contains(&"Shure MV7 isn't connected; using your Mac's input".to_owned()));
