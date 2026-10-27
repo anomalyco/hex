@@ -682,6 +682,7 @@ const TRANSLATIONS: &[(&str, [&str; 5])] = &[
     ("{} min", ["{} min", "{} 分钟", "{} 分", "{} Min.", "{} min"]),
     ("{hours} h {minutes} min", ["{hours} godz. {minutes} min", "{hours} 小时 {minutes} 分钟", "{hours} 時間 {minutes} 分", "{hours} Std. {minutes} Min.", "{hours} h {minutes} min"]),
     ("{} pause", ["{} pauzy", "暂停 {}", "{} の休止", "{} Pause", "{} de pausa"]),
+    ("Accuracy", ["Dokładność", "准确率", "精度", "Genauigkeit", "Precisión"]),
     ("Size", ["Rozmiar", "大小", "サイズ", "Größe", "Tamaño"]),
     ("Speed", ["Szybkość", "速度", "速度", "Geschwindigkeit", "Velocidad"]),
     ("Model could not be deleted.", ["Nie udało się usunąć modelu.", "无法删除模型。", "モデルを削除できませんでした。", "Das Modell konnte nicht gelöscht werden.", "No se pudo eliminar el modelo."]),

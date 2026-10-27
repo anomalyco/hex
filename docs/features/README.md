@@ -182,7 +182,7 @@ Settings picker or setup > model card     // setup.model-card; shared by every d
 │                  coverage when it differs, benchmark, timestamps, Installed
 ├── Trailing edge -> Active as dot + label; Cancel while preparing; else Use/Download
 ├── Preparing -> Progress bar with its "Downloading 37%" / "Loading model" label
-└── Speed · Size · WER
+└── Speed · Size · Accuracy -> 100% minus the benchmark word error rate
 ```
 
 Only Parakeet Unified English is marked `streams`

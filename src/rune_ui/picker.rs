@@ -473,7 +473,11 @@ fn model_card(
                 .gap(20.0)
                 .child(metric("speed", tr("Speed"), tr(model.realtime).into()))
                 .child(metric("size", tr("Size"), model.size_label()))
-                .child(metric("wer", "WER", model.quality.into())),
+                .child(metric(
+                    "accuracy",
+                    tr("Accuracy"),
+                    model.accuracy_label().unwrap_or_else(|| "System".into()),
+                )),
         );
     if model.id == TranscriptionModelId::ParakeetV3 {
         card = card.child(
