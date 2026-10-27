@@ -67,53 +67,53 @@ const WINDOW_TICK: Duration = Duration::from_millis(250);
 
 static SETTINGS_ICON: Icon = Icon {
     name: "hex-settings",
-    view: 16.0,
+    view: 24.0,
     body: include_str!("../assets/icons/settings.svg"),
 };
 static MODES_ICON: Icon = Icon {
     name: "hex-modes",
-    view: 16.0,
+    view: 24.0,
     body: include_str!("../assets/icons/modes.svg"),
 };
 static VOICE_ACTION_ICON: Icon = Icon {
     name: "hex-voice-action",
-    view: 16.0,
+    view: 24.0,
     body: include_str!("../assets/icons/voice-action.svg"),
 };
 static HISTORY_ICON: Icon = Icon {
     name: "hex-history",
-    view: 16.0,
+    view: 24.0,
     body: include_str!("../assets/icons/history.svg"),
 };
 static COMMANDS_ICON: Icon = Icon {
     name: "hex-commands",
-    view: 16.0,
+    view: 24.0,
     body: include_str!("../assets/icons/commands.svg"),
 };
 static ACTIVITY_ICON: Icon = Icon {
     name: "hex-activity",
-    view: 16.0,
+    view: 24.0,
     body: include_str!("../assets/icons/activity.svg"),
 };
 static HUD_LAB_ICON: Icon = Icon {
     name: "hex-hud-lab",
-    view: 16.0,
+    view: 24.0,
     body: include_str!("../assets/icons/hud-lab.svg"),
 };
 static VOICE_FILTER_ICON: Icon = Icon {
     name: "hex-voice-filter",
-    view: 16.0,
+    view: 24.0,
     body: include_str!("../assets/icons/voice-filter.svg"),
 };
 static MEETINGS_ICON: Icon = Icon {
     name: "hex-meetings",
-    view: 16.0,
+    view: 24.0,
     body: include_str!("../assets/icons/meetings.svg"),
 };
 #[cfg(hex_capture)]
 static SCRAWL_ICON: Icon = Icon {
     name: "hex-scrawl",
-    view: 16.0,
+    view: 24.0,
     body: include_str!("../assets/icons/scrawl.svg"),
 };
 

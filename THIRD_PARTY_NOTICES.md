@@ -3,37 +3,16 @@
 HEX's own source is covered by the root `LICENSE`. The following notices cover
 vendored icon assets. Dependencies retain their respective upstream licenses.
 
-## Heroicons
-
-`assets/icons/settings.svg` is derived from Heroicons' `adjustments-horizontal`
-16px solid icon: https://github.com/tailwindlabs/heroicons
-
-MIT License
-
-Copyright (c) Tailwind Labs, Inc.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-
 ## Lucide And Feather
 
+The settings sidebar icons in `assets/icons/` (`settings`, `modes`,
+`commands`, `meetings`, `history`, `voice-filter`, `scrawl`, `hud-lab`,
+`activity`) are Lucide 1.62.0's `sliders-horizontal`, `layers`,
+`square-terminal`, `users`, `history`, `audio-waveform`, `scan-line`,
+`flask-conical`, and `activity`, with stroke attributes moved onto each element
+and a 1.75 stroke. `voice-action.svg` combines Lucide's `mic` with a sparkle.
 The `assets/icons/lucide/*.svg` assets in the Windows development branch are
-from Lucide: https://github.com/lucide-icons/lucide
+also from Lucide: https://github.com/lucide-icons/lucide
 
 Upstream license: https://github.com/lucide-icons/lucide/blob/23f9abc4ed0146cffededd3d7f94c1018bfdf693/LICENSE
 
