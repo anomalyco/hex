@@ -16,8 +16,6 @@ use super::Ui;
 
 /// Row descriptions and secondary copy.
 pub(super) const DESCRIPTION: TextStyle = TextStyle::new(12.0, 440.0).lh(16.0);
-const ROW_HEIGHT: f32 = 44.0;
-const ROW_HEIGHT_DESCRIBED: f32 = 56.0;
 const SELECT_WIDTH: f32 = 220.0;
 /// The microphone field, wide enough for "System default" and a faint
 /// "Studio Display Microphone".
@@ -28,6 +26,47 @@ pub(super) const DEVICE_SELECT_WIDTH: f32 = 320.0;
 const COPY_MIN_WIDTH: f32 = 100.0;
 /// An [`icon_row`]'s icon and the gap after it.
 const ICON_LEAD: f32 = 28.0;
+
+/// A settings page's measurements: raised cards of rows under muted
+/// labels. The title, section labels, and row text share the gutter; cards
+/// hang outward by `row_px` on both sides, so row controls end where the
+/// title bar's actions do.
+#[derive(Clone, Copy)]
+pub(super) struct Metrics {
+    /// The page's text edge: the title's, section labels', and rows'.
+    pub(super) gutter: f32,
+    pub(super) section_gap: f32,
+    /// From a section label to its card.
+    pub(super) label_gap: f32,
+    /// A row's text inset inside its card, and how far cards hang past the
+    /// gutter.
+    pub(super) row_px: f32,
+    pub(super) row_h: f32,
+    pub(super) row_h_described: f32,
+}
+
+pub(super) const METRICS: Metrics = Metrics {
+    gutter: 32.0,
+    section_gap: 24.0,
+    label_gap: 8.0,
+    row_px: 16.0,
+    row_h: 48.0,
+    row_h_described: 60.0,
+};
+
+/// A settings page's column of sections: cards hang `row_px` past the
+/// gutter, so their rows' text lands on it.
+pub(super) fn page(key: &str) -> El {
+    col()
+        .key(key)
+        .px(METRICS.gutter - METRICS.row_px)
+        .gap(METRICS.section_gap)
+}
+
+/// A page of free-standing content with no cards, on the gutter itself.
+pub(super) fn bare_page(key: &str) -> El {
+    col().key(key).px(METRICS.gutter).gap(METRICS.section_gap)
+}
 
 /// Everything a control needs to paint itself.
 #[derive(Clone, Copy)]
@@ -42,6 +81,13 @@ impl Paint {
             k: rune_theme_opencode::kit(dark),
             hair: 1.0 / scale,
         }
+    }
+    /// A section label: above its card, on the page's text edge.
+    pub(super) fn section_label(self, title: &str) -> El {
+        text(title)
+            .key("header")
+            .font(self.k.ty.ui_medium.lh(SECTION_LABEL_LINE))
+            .color(self.k.c.text_muted)
     }
     pub(super) fn text(self) -> Color {
         self.k.c.text_base
@@ -96,25 +142,44 @@ pub(super) fn folding<R: Into<CardRow>>(
 pub(super) fn section(p: Paint, key: &str, title: &str, rows: Vec<impl Into<CardRow>>) -> El {
     col()
         .key(key)
-        .gap(8.0)
+        .gap(METRICS.label_gap)
+        .child(p.section_label(title).mx(METRICS.row_px))
+        .child(card(p, "card", rows))
+}
+
+/// A [`section`] with a control on its label's line (Advanced, Add). The
+/// line keeps the label's height, so a taller control overhangs it rather
+/// than pushing the card down, and the control ends where the rows'
+/// controls do.
+pub(super) fn section_with(
+    p: Paint,
+    key: &str,
+    title: &str,
+    accessory: El,
+    rows: Vec<impl Into<CardRow>>,
+) -> El {
+    col()
+        .key(key)
+        .gap(METRICS.label_gap)
         .child(
-            text(title)
-                .key("header")
-                .font(p.k.ty.ui_medium.lh(16.0))
-                .color(p.k.c.text_muted)
-                .ml(12.0),
+            row()
+                .key("header-row")
+                .h(SECTION_LABEL_LINE)
+                .mx(METRICS.row_px)
+                .gap(8.0)
+                .center_y()
+                .child(p.section_label(title).grow(1.0))
+                .child(accessory),
         )
         .child(card(p, "card", rows))
 }
 
+const SECTION_LABEL_LINE: f32 = 16.0;
+
 /// A raised card of rows with hairline separators between them.
 pub(super) fn card(p: Paint, key: &str, rows: Vec<impl Into<CardRow>>) -> El {
     let c = &p.k.c;
-    let mut card = col()
-        .key(key)
-        .padding(4.0)
-        .fill(c.bg_base)
-        .radius(p.k.radius.lg);
+    let mut card = col().key(key).fill(c.bg_base).radius(p.k.radius.lg);
     for shadow in &p.k.elevation.raised {
         card = card.box_shadow(*shadow);
     }
@@ -162,8 +227,8 @@ pub(super) fn folds() -> Transition {
 fn separator(p: Paint, key: String) -> El {
     el().key(key)
         .h(p.hair)
-        .ml(12.0)
-        .mr(12.0)
+        .ml(METRICS.row_px)
+        .mr(METRICS.row_px)
         .fill(p.k.c.border_muted)
 }
 
@@ -223,7 +288,7 @@ pub(super) fn icon_row(
 }
 
 /// A [`setting_row`] with a one-line link under its title, as tight as a
-/// row without one so General still fits the window.
+/// row without one.
 pub(super) fn link_row(p: Paint, key: &str, title: &str, link: El, control: El) -> El {
     copy_row(p, key, None, title, Some(link), control, true)
 }
@@ -237,10 +302,11 @@ fn copy_row(
     control: El,
     compact: bool,
 ) -> El {
+    let m = METRICS;
     let height = if description.is_some() && !compact {
-        ROW_HEIGHT_DESCRIBED
+        m.row_h_described
     } else {
-        ROW_HEIGHT
+        m.row_h
     };
     let copy = col()
         .key("copy")
@@ -253,7 +319,7 @@ fn copy_row(
     row()
         .key(key)
         .min_h(height)
-        .px(12.0)
+        .px(m.row_px)
         .py(if compact { 4.0 } else { 8.0 })
         .gaps(8.0, 24.0)
         .center_y()
@@ -874,7 +940,7 @@ pub(super) fn pulsing_dot(color: Color) -> El {
 
 /// A one-line note inside a card, between rows.
 pub(super) fn note(key: &str, copy: &str, color: Color) -> El {
-    row().key(key).px(12.0).py(8.0).child(
+    row().key(key).px(METRICS.row_px).py(8.0).child(
         text(copy)
             .key("copy")
             .font(DESCRIPTION)

@@ -7,10 +7,10 @@ use std::time::{Duration, Instant};
 use rune::{Edge, El, Key, KeyEvent, Transition, Tx, col, row, spacer, text};
 
 use super::controls::{
-    ButtonKind, CardRow, Choice, DESCRIPTION, DEVICE_SELECT_WIDTH, KEY_GAP, KeySize, Paint, button,
-    described_row, folding, icon_button, key_tray, keycap, keycaps, link_row, note, pulsing_dot,
-    section, segmented, select, select_sized, setting_row, sheet_button, status_dot, text_field,
-    toggle_row, tray_roll,
+    ButtonKind, CardRow, Choice, DESCRIPTION, DEVICE_SELECT_WIDTH, KEY_GAP, KeySize, METRICS, Paint,
+    button, described_row, folding, icon_button, key_tray, keycap, keycaps, link_row, note, page,
+    pulsing_dot, section, section_with, segmented, select, select_sized, setting_row, sheet_button,
+    status_dot, text_field, toggle_row, tray_roll,
 };
 use super::{Menu, Request, Service, ShortcutTarget, Ui};
 use super::{explainer, host};
@@ -429,10 +429,7 @@ pub(super) fn error_notes(p: Paint, error: &str) -> [El; 2] {
 /// the sidebar's version.
 pub(super) fn pane(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
     use super::platform_settings as os;
-    let mut content = col()
-        .key("content")
-        .px(24.0)
-        .gap(16.0)
+    let mut content = page("content")
         .children(os::permissions_section(ui, p))
         .children(os::error_section(ui, p));
     if ui.platform.caps.listener_control {
@@ -507,8 +504,8 @@ fn listener_card(ui: &Ui, p: Paint) -> El {
     };
     let summary = row()
         .key("listener")
-        .min_h(64.0)
-        .px(12.0)
+        .min_h(METRICS.row_h_described)
+        .px(METRICS.row_px)
         .py(8.0)
         .gap(12.0)
         .center_y()
@@ -953,24 +950,14 @@ fn dictation_section(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
             Vec::new()
         },
     ));
-    col()
-        .key("dictation")
-        .gap(6.0)
-        .child(
-            row()
-                .key("header-row")
-                .center_y()
-                .child(
-                    text(tr("Dictation"))
-                        .key("header")
-                        .font(p.k.ty.ui_medium.lh(16.0))
-                        .color(p.k.c.text_muted)
-                        .ml(12.0)
-                        .grow(1.0),
-                )
-                .child(advanced_toggle(ui, p, pinned)),
-        )
-        .child(super::controls::card(p, "card", rows))
+    // The toggle's word ends on the box's edge, its hover reaching past it.
+    section_with(
+        p,
+        "dictation",
+        tr("Dictation"),
+        advanced_toggle(ui, p, pinned).mr(-6.0),
+        rows,
+    )
 }
 
 /// The speech model row's description: preparation progress or its error.

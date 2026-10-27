@@ -6,7 +6,7 @@ use rune::{El, TextEdit, edit_access, row};
 use rune_kit::{ControlSize, IconButton, IconButtonVariant, TextInput};
 
 use super::Ui;
-use super::controls::{Paint, note, section, setting_row};
+use super::controls::{METRICS, Paint, note, section, setting_row};
 use super::lists::{remove_button, small_button};
 use crate::desktop_i18n::tr;
 use crate::vocabulary::{self, VocabularyEntry};
@@ -117,7 +117,7 @@ pub(super) fn section_view(ui: &Ui, p: Paint) -> El {
         rows.push(
             row()
                 .key(format!("term{index}"))
-                .px(12.0)
+                .px(METRICS.row_px)
                 .py(6.0)
                 .gap(8.0)
                 .center_y()

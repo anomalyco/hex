@@ -506,6 +506,6 @@ pub(super) fn unavailable(ui: &Ui, p: Paint, feature: OpenCodeFeature) -> Option
             Some((description, color)),
             actions,
         )
-        .min_h(64.0),
+        .min_h(super::controls::METRICS.row_h_described),
     )
 }

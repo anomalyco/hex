@@ -4,12 +4,12 @@
 //! captures are kept, and Scrawl's own app, which keeps the shortcut while
 //! it runs until "Use Hex for captures" asks it to quit.
 
-use rune::{El, col, row};
+use rune::{El, row};
 use scrawl_capture::retention::{Policy, Preset};
 
 use super::controls::{
-    ButtonKind, Choice, Paint, card, described_row, folding, note, section, segmented, select,
-    setting_row, toggle_row,
+    ButtonKind, Choice, Paint, card, described_row, folding, note, page, section, segmented,
+    select, setting_row, toggle_row,
 };
 use super::lists::{PermissionControl, permission_control};
 use super::platform::{PlatformRequest, ScrawlRequest, ScrawlView};
@@ -328,7 +328,7 @@ fn storage_rows(ui: &Ui, p: Paint, view: &ScrawlView, layer: &mut Vec<El>) -> Ve
 pub(super) fn pane(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
     let view = ui.platform.scrawl.clone().unwrap_or_default();
     let enabled = ui.settings.capture.enabled;
-    let mut content = col().key("content").px(24.0).pt(4.0).gap(24.0);
+    let mut content = page("content");
     content = content.child(card(
         p,
         "enable",

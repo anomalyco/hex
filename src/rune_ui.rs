@@ -54,7 +54,7 @@ use crate::desktop_host::{
 };
 use crate::desktop_i18n::{tr, tr_fill};
 use crate::transcription_models::TranscriptionModelId;
-use controls::Paint;
+use controls::{METRICS, Paint};
 use host::{Backend, Request, ShortcutTarget};
 use settings::Capture;
 
@@ -1287,70 +1287,94 @@ fn sidebar(ui: &Ui, p: Paint) -> El {
         .child(el().key("spacer").grow(1.0))
         .children(update)
         .children(host::QUIT_IN_WINDOW.then(|| quit_item(p)))
-        .child(
-            text(version_label())
-                .key("version")
-                .font(p.k.ty.small)
-                .color(p.faint())
-                .pl(6.0)
-                .pt(8.0),
-        )
-        .children(update_status(ui, p))
+        .child(footer(ui, p))
 }
 
-/// Under the version: a manual check, or what the updater is doing. An
-/// available update is the Update button above.
-fn update_status(ui: &Ui, p: Paint) -> Option<El> {
-    let status = |label: &str| {
-        text(label)
-            .key("update-status")
-            .font(p.k.ty.small)
-            .color(p.faint())
-            .pl(6.0)
-            .pt(2.0)
+/// The version and, under it, a manual check or what the updater is doing.
+/// Both lines keep their place in every state, so a check never moves the
+/// version, and the status line is one element whose words change in place
+/// rather than two that cross-fade over each other. An available update is
+/// the Update button above.
+fn footer(ui: &Ui, p: Paint) -> El {
+    let c = &p.k.c;
+    let line = |key: &str, words: &str, color| {
+        row()
+            .key(key)
+            .h(FOOTER_LINE)
+            .px(6.0)
+            .center_y()
+            .self_start()
+            .radius(p.k.radius.sm)
+            .child(
+                text(words)
+                    .key("label")
+                    .font(p.k.ty.small)
+                    .color(color)
+                    .truncate(),
+            )
     };
-    Some(match &ui.view.as_ref()?.update_status {
-        DesktopUpdateStatus::Unavailable
-        | DesktopUpdateStatus::Available
-        | DesktopUpdateStatus::ReadyToRestart
-        | DesktopUpdateStatus::SwitchAvailable { .. } => return None,
-        DesktopUpdateStatus::Managed => status(tr("Managed by your organization")),
-        DesktopUpdateStatus::Checking => status(tr("Checking for updates…")),
-        DesktopUpdateStatus::Downloading => status(tr("Downloading update")),
-        DesktopUpdateStatus::Current | DesktopUpdateStatus::Failed => {
-            let c = &p.k.c;
-            row()
-                .key("check-for-updates")
+    let status = ui.view.as_ref().map(|view| &view.update_status);
+    let status = match status {
+        None
+        | Some(
+            DesktopUpdateStatus::Unavailable
+            | DesktopUpdateStatus::Available
+            | DesktopUpdateStatus::ReadyToRestart
+            | DesktopUpdateStatus::SwitchAvailable { .. },
+        ) => None,
+        Some(DesktopUpdateStatus::Current | DesktopUpdateStatus::Failed) => Some(
+            line("update-status", tr("Check for updates"), c.text_muted)
                 .role("button")
                 .label(tr("Check for updates"))
-                .h(20.0)
-                .px(6.0)
-                .center_y()
-                .radius(p.k.radius.sm)
                 .hover(c.hover)
                 .press(c.pressed)
                 .focusable(true)
                 .focus_ring(2.0, -2.0, c.border_focus)
-                .on_press(|ui: &mut Ui| ui.send(Request::Desktop(DesktopAction::CheckForUpdates)))
-                .child(
-                    text(tr("Check for updates"))
-                        .key("label")
-                        .font(p.k.ty.small)
-                        .color(c.text_muted)
-                        .truncate(),
-                )
+                .on_press(|ui: &mut Ui| ui.send(Request::Desktop(DesktopAction::CheckForUpdates))),
+        ),
+        // The same words, quieter, while it checks: the hourly check and a
+        // pressed one read the same and never swap the line's words.
+        Some(DesktopUpdateStatus::Checking) => Some(
+            line("update-status", tr("Check for updates"), p.faint())
+                .label(tr("Checking for updates…")),
+        ),
+        Some(DesktopUpdateStatus::Managed) => Some(line(
+            "update-status",
+            tr("Managed by your organization"),
+            p.faint(),
+        )),
+        Some(DesktopUpdateStatus::Downloading) => {
+            Some(line("update-status", tr("Downloading update"), p.faint()))
         }
-        DesktopUpdateStatus::SourceBuild => status(tr("Updated from your source checkout")),
-        DesktopUpdateStatus::PackageManager => status(tr("Updated by your package manager")),
-        DesktopUpdateStatus::PackageUpdate { command } => text(command)
-            .key("update-command")
-            .font(p.k.ty.small)
-            .color(p.faint())
-            .wrap()
-            .pl(6.0)
-            .pt(2.0),
-    })
+        Some(DesktopUpdateStatus::SourceBuild) => Some(line(
+            "update-status",
+            tr("Updated from your source checkout"),
+            p.faint(),
+        )),
+        Some(DesktopUpdateStatus::PackageManager) => Some(line(
+            "update-status",
+            tr("Updated by your package manager"),
+            p.faint(),
+        )),
+        Some(DesktopUpdateStatus::PackageUpdate { command }) => Some(
+            text(command.clone())
+                .key("update-command")
+                .font(p.k.ty.small)
+                .color(p.faint())
+                .wrap()
+                .px(6.0)
+                .py(2.0),
+        ),
+    };
+    col()
+        .key("footer")
+        .mt(8.0)
+        .child(line("version", &version_label(), p.faint()))
+        .children(status)
 }
+
+/// The footer's lines: as tall as each other, so a check moves nothing.
+const FOOTER_LINE: f32 = 20.0;
 
 /// Test builds also name their commit: main moves past a release without
 /// changing the version.
@@ -1462,7 +1486,7 @@ fn pane_header(p: Paint, title: &str, switch: Option<El>, actions: Vec<El>) -> E
     title_bar(row())
         .key("pane-header")
         .h(52.0)
-        .px(24.0)
+        .px(METRICS.gutter)
         .gap(8.0)
         .center_y()
         .child(
@@ -1722,6 +1746,18 @@ const SCENES: &[Scene] = &[
         *ui = mac_fixture();
         if let Some(view) = &mut ui.view {
             view.update_status = DesktopUpdateStatus::ReadyToRestart;
+        }
+    }),
+    ("mac-update-checking", |ui| {
+        *ui = mac_fixture();
+        if let Some(view) = &mut ui.view {
+            view.update_status = DesktopUpdateStatus::Checking;
+        }
+    }),
+    ("mac-update-downloading", |ui| {
+        *ui = mac_fixture();
+        if let Some(view) = &mut ui.view {
+            view.update_status = DesktopUpdateStatus::Downloading;
         }
     }),
     ("windows-settings", |ui| {

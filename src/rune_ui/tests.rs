@@ -657,7 +657,7 @@ fn a_settings_row_shows_no_hover_or_press_of_its_own() {
 fn hover_leaves_at_once() {
     let mut rt = runtime("mac-settings", true, PANE_SIZE);
     for key in [
-        "check-for-updates",
+        "update-status",
         "dictation-hotkey",
         "microphone-control-field-trigger",
     ] {

@@ -5,7 +5,7 @@
 use rune::{El, TextEdit, Tx, col, row, text};
 use rune_kit::{Select, SelectAppearance, TextInput};
 
-use super::controls::{ButtonKind, DESCRIPTION, Paint, button};
+use super::controls::{ButtonKind, DESCRIPTION, METRICS, Paint, button};
 use super::lists::{message, placeholder, section_label, source_item, source_list, split};
 use super::{Menu, Ui};
 use crate::desktop_i18n::{event_age, tr, tr_fill, tr_named};
@@ -410,7 +410,7 @@ fn detail(ui: &Ui, p: Paint) -> El {
         .key("history-detail")
         .grow(1.0)
         .shrink()
-        .px(24.0)
+        .px(METRICS.gutter)
         .child(header)
         .child(super::scroll_body("detail-scroll", body))
 }

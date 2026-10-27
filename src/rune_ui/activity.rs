@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use rune::{El, col, row, text};
 
 use super::Ui;
-use super::controls::{ButtonKind, DESCRIPTION, Paint, button, status_dot};
+use super::controls::{ButtonKind, DESCRIPTION, METRICS, Paint, button, status_dot};
 use super::lists::{
     detail_header, detail_title, fact, message, placeholder, section_label, source_item,
     source_list, split,
@@ -227,7 +227,7 @@ pub(super) fn pane(ui: &Ui, p: Paint) -> (Vec<El>, El) {
                 .key("activity-detail")
                 .grow(1.0)
                 .shrink()
-                .px(24.0)
+                .px(METRICS.gutter)
                 .child(detail_header(
                     detail_title(p, &crate::desktop_activity::event_summary(event)),
                     Vec::new(),

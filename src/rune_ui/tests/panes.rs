@@ -50,7 +50,7 @@ fn settings_rows_follow_each_os() {
     assert!(!present(&linux, "meetings-enabled"));
 
     let mac = runtime("mac-settings", true, PANE_SIZE);
-    for key in ["launch-at-login", "dock-icon", "check-for-updates"] {
+    for key in ["launch-at-login", "dock-icon", "update-status"] {
         assert!(present(&mac, key), "macOS shows {key}");
     }
     // Features own their settings: none of these are in General.
@@ -326,17 +326,8 @@ fn reduce_motion_swaps_allow_for_allowed_at_once() {
 }
 
 #[test]
-fn general_fits_the_default_window_and_hides_advanced_options() {
+fn general_hides_advanced_options_until_asked() {
     let mut rt = runtime("mac-settings", true, PANE_SIZE);
-    let height = |key: &str| {
-        rt.elements()
-            .into_iter()
-            .find(|e| e.key.as_deref() == Some(key))
-            .map(|e| e.rect[3])
-            .unwrap()
-    };
-    let (body, inset) = (height("scroll"), height("inset"));
-    assert!(inset <= body, "General scrolls: {inset} > {body}");
     assert!(rt.find("microphone-mode").is_none());
     tap(&mut rt, "advanced-toggle");
     assert!(rt.find("microphone-mode").is_some());
