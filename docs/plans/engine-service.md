@@ -8,6 +8,61 @@
 - **Is there any problem with it being a background service?** **One real OS trap, with a verified fix:** macOS clamps default background daemons (`TASK_BACKGROUND_APPLICATION` / `taskpolicy -b`) to E-cores even when the inference thread sets `QOS_CLASS_USER_INTERACTIVE`, slowing quiet transcription **1.7–2.1×** (`46.5 ms → 76.7–105.5 ms`) and contended transcription **up to 15.7×** (`106 ms → 1,852 ms`). Running the service with interactive process policy (`ProcessType = Interactive` in `launchd` or inherited from a GUI parent + `NSProcessInfo.beginActivity(.userInitiatedAllowingIdleSystemSleep)`) keeps Metal + CPU decoder speed identical to in-process (**47.4 ms** short, **121.6 ms** long).
 - **Is that dangerous?** **No.** The engine owns **no microphone**, **no Accessibility/Input Monitoring taps**, **no Screen Recording**, **no clipboard**, and **no network sockets** outside `127.0.0.1`. It triggers zero TCC prompts, stores no audio or history on disk, and exposes only authenticated loopback inference over caller-pushed PCM/WAV bytes.
 
+## Sharing the Engine and the Models: the Guide
+
+There are two ways for Hex, Seer, Rune Desktop and OpenCode Desktop to share
+speech recognition. Either each app links the engine as a library, or one
+engine process serves them all.
+
+```ts
+library in every app                    one engine process
+├── 4 copies of the scheduler            ├── 1 scheduler: dictation first, always
+├── ~150 MiB Metal + weights per app     ├── ~250 MiB once (model file pages are shared either way)
+├── apps fight over the GPU, no order    ├── one queue across apps
+├── 4 builds to update for a fix         ├── 1 binary to update
+└── each app can download models         └── 1 writer for the model folder
+```
+
+The library route can't keep dictation first, because priority only exists
+inside one process. **One engine process is the right shape.** It's how macOS
+runs its own speech service and how Ollama serves local models. Each app links
+only a thin client (`@kitlangton/hex`, Seer's `hex-client`).
+
+**Who owns what**
+
+- **Hex.app ships the engine.** The `hex engine` binary exists once, inside
+  `Hex.app`, signed and updated with it. Other apps don't bundle a copy: they
+  find Hex by its bundle id `anomaly.hex`, and without it they say "Install
+  Hex for transcription" (Seer already falls back like this). Bundling copies
+  in every app means four signatures, version handoffs and newest-wins rules;
+  revisit only if a Seer-only install becomes a real need.
+- **The engine owns the models.** One folder,
+  `~/Library/Application Support/hex/models/`, checksum-pinned. Only the engine
+  downloads, verifies, loads or deletes models. Apps never open model files;
+  they ask (`GET /models`, `POST /models/:id/prepare`) and send audio.
+- **Each app owns its microphone, permissions and UI.** The engine records
+  nothing, so it never asks for a permission.
+
+**Which model runs:** the engine keeps one model loaded, the one the user
+picked in Hex. A request that names no model uses it. A request that names
+another model waits until the engine is idle, loads it beside the current one,
+then switches (the `ModelSwap` that Linux and Windows already use). Dictation
+always uses the user's pick.
+
+**Making it interactive** is two small, fixed steps, not an ongoing risk.
+macOS throttles a process only when it's marked as background. The engine
+clears that mark when it starts (`setpriority(PRIO_DARWIN_PROCESS, 0, 0)`)
+and holds a "user-initiated" activity so App Nap leaves it alone. Under
+launchd the same thing is one plist key, `ProcessType = Interactive`. A test
+asserts the engine isn't background, and `/health` reports it, so a regression
+shows up immediately.
+
+**Starting it:** the first app that needs the engine launches
+`Hex.app/Contents/MacOS/hex engine`. The engine takes `engine.lock`, so a
+second launch exits, then writes `local-api.json`. Every app reads that file
+to find the port and token. Hex.app starts it at launch, so it's normally
+already running. There's no login item and no "Background item added" notice.
+
 ## Measured Spike (Mac Studio M5 Max, 36 GiB, `parakeet-unified-en-0.6b-Q8_0.gguf`)
 
 Fixtures: `term-hex-3.wav` (**2.64 s**, 84.5 KB) and 5 concatenated vocabulary clips (**13.08 s**, 418.6 KB).
@@ -51,7 +106,7 @@ client.connectOrStartEngine()
     └── client polls local-api.json until healthy (budget: 2 s)
 ```
 
-- **Seer-only / non-Hex installs:** `@kitlangton/hex` (and Seer/Rune/OpenCode bundles) ships the `hex` (`hex-service`) binary inside its own app bundle (`Contents/Helpers/hex`). Because locking and discovery live in `~/Library/Application Support/hex/`, whichever app starts first becomes the single engine for the user session; if `Hex.app` launches later, it discovers and shares the already-running engine.
+- **Seer-only / non-Hex installs:** for now the engine ships only in `Hex.app` (see the guide above); other apps launch it from there and fall back to "Install Hex" without it. If a Seer-only install becomes a real need, the same lock and discovery let an app bundle its own `hex engine`: whichever app starts first becomes the single engine for the user session, and `Hex.app` shares it when it launches later.
 - **`RENAME_SWAP` self-updates:** On macOS, `renamex_np(RENAME_SWAP)` swaps the directory entry of `Hex.app` while the running engine's open executable inode and `mmap`ed GGUF file descriptor remain valid. `local-api.json` carries `engineVersion` (crate version + git SHA); when an updated `Hex.app` launches and sees an older `engineVersion` in `/health`, it posts `POST /control {"command":"shutdown-when-idle"}` (which drains any in-flight `/streams` or `/transcriptions` job and exits 0) and spawns its newer bundled `hex engine`.
 
 ## 2. Transport and Authentication
