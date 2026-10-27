@@ -224,9 +224,9 @@ pub struct AudioInput {
     chunks: Receiver<(Vec<f32>, CaptureInstant)>,
     pub sample_rate: u32,
     pub device_name: String,
-    /// The saved microphone is missing or failed to open, so this input
-    /// stands in for it until it can be opened again.
-    pub selection_missing: bool,
+    /// Whether this input stands in for the saved microphone until it can
+    /// be opened again.
+    pub selection: Selection,
     stream_errors: Receiver<String>,
     watch_service_restarts: bool,
     restart_generation: u64,
@@ -242,12 +242,24 @@ pub enum AudioInputEvent {
     StreamFailed(String),
 }
 
+/// Whether an input stands in for the saved microphone, and why.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum Selection {
+    /// Nothing is saved, or the input is the saved microphone.
+    #[default]
+    InUse,
+    /// The saved microphone is not listed.
+    Unlisted,
+    /// The saved microphone is listed but would not open.
+    Unopenable,
+}
+
 /// What resolving and opening the configured input found.
 pub enum Opened {
     Input(AudioInput),
     /// The input resolved to the device already open, which was kept.
     Unchanged {
-        selection_missing: bool,
+        selection: Selection,
     },
 }
 
@@ -275,8 +287,19 @@ pub struct RecoveringAudioInput {
     route_generation: u64,
     /// The wait before looking again for a missing saved microphone.
     selection_retry: Duration,
+    /// The OS reports devices arriving, so an unlisted saved microphone's
+    /// return arrives as a route change and needs no timed look.
+    reports_new_devices: bool,
     opener: Opener,
     route_generation_source: fn() -> u64,
+}
+
+/// Whether a listener's capture is idle, so [`RecoveringAudioInput`] may
+/// switch devices. A pending start or a release's tail still needs the
+/// open stream: replacing it would discard the capture.
+#[cfg(any(target_os = "linux", target_os = "windows", test))]
+pub fn capture_idle(recording: bool, start_pending: bool, finishing: bool) -> bool {
+    !recording && !start_pending && !finishing
 }
 
 pub enum RecoveringAudioInputEvent {
@@ -404,7 +427,7 @@ impl AudioInput {
                 stream_errors,
                 sample_rate: 48_000,
                 device_name: "Test microphone".into(),
-                selection_missing: false,
+                selection: Selection::InUse,
                 watch_service_restarts: false,
                 restart_generation: audio_service_restart_generation(),
                 hex_microphone: crate::hex_microphone::capture_feed(48_000).1,
@@ -518,7 +541,7 @@ impl AudioInput {
             chunks,
             sample_rate,
             device_name,
-            selection_missing: false,
+            selection: Selection::InUse,
             stream_errors,
             watch_service_restarts: true,
             restart_generation,
@@ -615,6 +638,7 @@ impl RecoveringAudioInput {
             replacement: None,
             route_generation: input_route_generation(),
             selection_retry: MICROPHONE_RETRY_INITIAL,
+            reports_new_devices: cfg!(target_os = "macos"),
             opener: Arc::new(open_configured_input),
             route_generation_source: input_route_generation,
         }
@@ -744,9 +768,9 @@ impl RecoveringAudioInput {
                 return RecoveringAudioInputEvent::Timeout;
             }
             match result {
-                Ok(Opened::Unchanged { selection_missing }) => {
+                Ok(Opened::Unchanged { selection }) => {
                     if let Some(input) = &mut self.input {
-                        input.selection_missing = selection_missing;
+                        input.selection = selection;
                     }
                     self.active_revision = opened_revision;
                     self.recovery.recovered();
@@ -858,14 +882,16 @@ impl RecoveringAudioInput {
         self.replacement = Some(receiver);
     }
 
-    /// While the open input stands in for a missing saved microphone, looks
-    /// for it again with bounded backoff; a device change looks at once.
+    /// While the open input stands in for a saved microphone that would not
+    /// open, or that is not listed where the OS doesn't report new devices,
+    /// looks for it again with bounded backoff. A device change looks at once.
     fn after_resolving(&mut self, now: Instant) {
-        if self
-            .input
-            .as_ref()
-            .is_some_and(|input| input.selection_missing)
-        {
+        let look_again = match self.input.as_ref().map(|input| input.selection) {
+            Some(Selection::Unopenable) => true,
+            Some(Selection::Unlisted) => !self.reports_new_devices,
+            Some(Selection::InUse) | None => false,
+        };
+        if look_again {
             self.recovery
                 .request_route_check(now + self.selection_retry);
             self.selection_retry = self
@@ -906,8 +932,7 @@ enum InputTarget {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct InputPlan {
     target: InputTarget,
-    /// A saved microphone is not listed, so this stands in for it.
-    selection_missing: bool,
+    selection: Selection,
 }
 
 /// Resolves the input Hex captures from: `--device` exactly as named, else
@@ -932,26 +957,27 @@ fn resolve_input(
         return position(name)
             .map(|index| InputPlan {
                 target: InputTarget::Named(index),
-                selection_missing: false,
+                selection: Selection::InUse,
             })
             .ok_or_else(|| format!("microphone is unavailable: {name}"));
     }
-    let selection_missing = match selected.filter(|name| !is_hex(name)) {
+    let selection = match selected.filter(|name| !is_hex(name)) {
         Some(name) => match position(name) {
             Some(index) => {
                 return Ok(InputPlan {
                     target: InputTarget::Named(index),
-                    selection_missing: false,
+                    selection: Selection::InUse,
                 });
             }
-            None => true,
+            None => Selection::Unlisted,
         },
-        None => false,
+        None => Selection::InUse,
     };
-    if default.is_some_and(|name| !is_hex(name)) {
+    // ALSA names a default even with no devices listed.
+    if !names.is_empty() && default.is_some_and(|name| !is_hex(name)) {
         return Ok(InputPlan {
             target: InputTarget::SystemDefault,
-            selection_missing,
+            selection,
         });
     }
     let real = || (0..names.len()).filter(|&index| !is_hex(&names[index]));
@@ -960,7 +986,7 @@ fn resolve_input(
         .or_else(|| real().next())
         .map(|index| InputPlan {
             target: InputTarget::StandIn(index),
-            selection_missing,
+            selection,
         })
         .ok_or_else(|| "no microphone is available".into())
 }
@@ -995,15 +1021,11 @@ fn open_configured_input(request: &OpenRequest) -> Result<Opened> {
         )
         .map_err(|error| eyre!(error))
     };
+    // Keeping the open device returns before logging, so a periodic look
+    // for a missing microphone logs only when the input changes.
     let open = |plan: InputPlan| -> Result<Opened> {
         let (device, follows_default) = match plan.target {
-            InputTarget::Named(index) => (devices[index].clone(), false),
-            InputTarget::StandIn(index) => {
-                tracing::warn!(
-                    default = default_name.as_deref().unwrap_or("none"),
-                    using = %names[index],
-                    "the system default input is Hex Microphone or missing; using a real microphone"
-                );
+            InputTarget::Named(index) | InputTarget::StandIn(index) => {
                 (devices[index].clone(), false)
             }
             InputTarget::SystemDefault => (default.clone().expect("resolved default"), true),
@@ -1011,20 +1033,32 @@ fn open_configured_input(request: &OpenRequest) -> Result<Opened> {
         let name = device.to_string();
         if request.keep.as_deref() == Some(name.as_str()) {
             return Ok(Opened::Unchanged {
-                selection_missing: plan.selection_missing,
+                selection: plan.selection,
             });
         }
+        if let InputTarget::StandIn(_) = plan.target {
+            tracing::warn!(
+                default = default_name.as_deref().unwrap_or("none"),
+                using = %name,
+                "the system default input is Hex Microphone or missing; using a real microphone"
+            );
+        }
+        match plan.selection {
+            Selection::InUse => {}
+            Selection::Unlisted => tracing::info!(
+                selected = request.selected_device.as_deref(),
+                "the saved microphone is not connected; using the system default"
+            ),
+            Selection::Unopenable => tracing::warn!(
+                selected = request.selected_device.as_deref(),
+                "the saved microphone would not open; using the system default"
+            ),
+        }
         let mut input = AudioInput::open_device(device, follows_default)?;
-        input.selection_missing = plan.selection_missing;
+        input.selection = plan.selection;
         Ok(Opened::Input(input))
     };
     let plan = resolve(request.selected_device.as_deref())?;
-    if plan.selection_missing {
-        tracing::info!(
-            selected = request.selected_device.as_deref(),
-            "the saved microphone is not connected; using the system default"
-        );
-    }
     let (Some(selected), InputTarget::Named(_), None) = (
         request.selected_device.as_deref(),
         plan.target,
@@ -1038,7 +1072,7 @@ fn open_configured_input(request: &OpenRequest) -> Result<Opened> {
         || open(plan),
         || {
             let mut fallback = resolve(None)?;
-            fallback.selection_missing = true;
+            fallback.selection = Selection::Unopenable;
             open(fallback)
         },
         std::thread::sleep,
@@ -1075,13 +1109,13 @@ fn open_selected<T>(
             Ok(input) => return Ok(input),
             Err(error) if attempt >= attempts => break error,
             Err(error) => {
-                tracing::warn!(%error, device, attempt, "could not open the selected microphone; retrying");
+                tracing::debug!(%error, device, attempt, "could not open the selected microphone; retrying");
                 attempt += 1;
                 sleep(SELECTED_MICROPHONE_RETRY_DELAY);
             }
         }
     };
-    tracing::warn!(%error, device, "selected microphone would not open; using the system default");
+    tracing::debug!(%error, device, "the saved microphone would not open");
     open_default()
 }
 
@@ -1316,39 +1350,40 @@ mod tests {
         ]);
         let built_in = |index: usize| index == 2;
         let plan = |selected, default| resolve_input(None, selected, &names, default, built_in);
-        let found = |target, selection_missing| {
-            Ok(InputPlan {
-                target,
-                selection_missing,
-            })
-        };
+        let found = |target, selection| Ok(InputPlan { target, selection });
 
         // A listed saved microphone wins over the default.
         assert_eq!(
             plan(Some("USB Mic"), Some("KIT PODS")),
-            found(Named(3), false)
+            found(Named(3), Selection::InUse)
         );
         // System default follows the OS default, even a Bluetooth headset.
-        assert_eq!(plan(None, Some("KIT PODS")), found(SystemDefault, false));
+        assert_eq!(
+            plan(None, Some("KIT PODS")),
+            found(SystemDefault, Selection::InUse)
+        );
         // A missing saved microphone stands in with the default.
         assert_eq!(
             plan(Some("Studio Display Microphone"), Some("KIT PODS")),
-            found(SystemDefault, true)
+            found(SystemDefault, Selection::Unlisted)
         );
         // A Hex Microphone default never loops back: the built-in mic stands in.
-        assert_eq!(plan(None, Some("Hex Microphone")), found(StandIn(2), false));
+        assert_eq!(
+            plan(None, Some("Hex Microphone")),
+            found(StandIn(2), Selection::InUse)
+        );
         assert_eq!(
             plan(Some("Gone"), Some("Hex Microphone")),
-            found(StandIn(2), true)
+            found(StandIn(2), Selection::Unlisted)
         );
         // Without a built-in mic or any default, the first real input stands in.
         let no_built_in = resolve_input(None, None, &names, Some("Hex Microphone"), |_| false);
-        assert_eq!(no_built_in, found(StandIn(1), false));
-        assert_eq!(plan(None, None), found(StandIn(2), false));
+        assert_eq!(no_built_in, found(StandIn(1), Selection::InUse));
+        assert_eq!(plan(None, None), found(StandIn(2), Selection::InUse));
         // A saved Hex Microphone is never captured from.
         assert_eq!(
             plan(Some("Hex Microphone"), Some("KIT PODS")),
-            found(SystemDefault, false)
+            found(SystemDefault, Selection::InUse)
         );
         // No real inputs at all.
         assert_eq!(
@@ -1363,6 +1398,10 @@ mod tests {
         );
         assert_eq!(
             resolve_input(None, Some("USB Mic"), &[], None, built_in),
+            Err("no microphone is available".into())
+        );
+        assert_eq!(
+            resolve_input(None, None, &[], Some("Default Audio Device"), built_in),
             Err("no microphone is available".into())
         );
     }
@@ -1384,7 +1423,7 @@ mod tests {
             plan(Some("USB Mic")),
             Ok(InputPlan {
                 target: InputTarget::Named(2),
-                selection_missing: false,
+                selection: Selection::InUse,
             })
         );
         assert_eq!(
@@ -1434,7 +1473,7 @@ mod tests {
                 let name = opener_default.lock().unwrap().clone();
                 if request.keep.as_deref() == Some(name.as_str()) {
                     return Ok(Opened::Unchanged {
-                        selection_missing: false,
+                        selection: Selection::InUse,
                     });
                 }
                 Ok(Opened::Input(named_input(&name)))
@@ -1469,31 +1508,47 @@ mod tests {
         assert_eq!(input.device_name(), "MacBook Pro Microphone");
     }
 
-    #[test]
-    fn a_missing_selection_uses_the_default_until_it_returns() {
+    /// An input saved as "USB Mic" that opens once `connected` is set and
+    /// until then stands in with "KIT PODS" for the given reason.
+    fn standing_in(
+        missing: Selection,
+        reports_new_devices: bool,
+        route_generation: fn() -> u64,
+    ) -> (
+        RecoveringAudioInput,
+        Arc<std::sync::atomic::AtomicBool>,
+        Instant,
+    ) {
         let connected = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let opener_connected = connected.clone();
         let mut input = RecoveringAudioInput::with_opener_for_test(
             Some("USB Mic"),
-            || 0,
+            route_generation,
             move |request| {
-                let (name, selection_missing) = if opener_connected.load(Ordering::Acquire) {
-                    ("USB Mic", false)
+                let (name, selection) = if opener_connected.load(Ordering::Acquire) {
+                    ("USB Mic", Selection::InUse)
                 } else {
-                    ("KIT PODS", true)
+                    ("KIT PODS", missing)
                 };
                 if request.keep.as_deref() == Some(name) {
-                    return Ok(Opened::Unchanged { selection_missing });
+                    return Ok(Opened::Unchanged { selection });
                 }
                 let mut opened = named_input(name);
-                opened.selection_missing = selection_missing;
+                opened.selection = selection;
                 Ok(Opened::Input(opened))
             },
         );
-        let mut standing_in = named_input("KIT PODS");
-        standing_in.selection_missing = true;
+        input.reports_new_devices = reports_new_devices;
+        let mut stand_in = named_input("KIT PODS");
+        stand_in.selection = missing;
         let started = Instant::now();
-        input.finish_initial_open(Ok(standing_in), started);
+        input.finish_initial_open(Ok(stand_in), started);
+        (input, connected, started)
+    }
+
+    #[test]
+    fn a_missing_selection_uses_the_default_until_it_returns() {
+        let (mut input, connected, started) = standing_in(Selection::Unlisted, false, || 0);
         assert_eq!(
             input.recovery.next_attempt,
             Some(started + MICROPHONE_RETRY_INITIAL)
@@ -1515,9 +1570,48 @@ mod tests {
             RecoveringAudioInputEvent::Reopened
         ));
         assert_eq!(input.device_name(), "USB Mic");
-        assert!(!input.input.as_ref().unwrap().selection_missing);
+        assert_eq!(input.input.as_ref().unwrap().selection, Selection::InUse);
         assert!(input.recovery.next_attempt.is_none());
         assert_eq!(input.selected_device.as_deref(), Some("USB Mic"));
+    }
+
+    static DEVICE_ARRIVALS: AtomicU64 = AtomicU64::new(0);
+
+    #[test]
+    fn where_the_os_reports_new_devices_only_a_failed_open_is_retried() {
+        let arrivals = || DEVICE_ARRIVALS.load(Ordering::Acquire);
+
+        // An unlisted microphone waits for the OS to report a device.
+        let (mut input, connected, _) = standing_in(Selection::Unlisted, true, arrivals);
+        assert!(input.recovery.next_attempt.is_none());
+        assert!(matches!(
+            settle(&mut input, true),
+            RecoveringAudioInputEvent::Timeout
+        ));
+        assert!(!input.is_opening());
+        connected.store(true, Ordering::Release);
+        DEVICE_ARRIVALS.fetch_add(1, Ordering::AcqRel);
+        assert!(matches!(
+            settle(&mut input, true),
+            RecoveringAudioInputEvent::Reopened
+        ));
+        assert_eq!(input.device_name(), "USB Mic");
+
+        // A listed microphone that would not open is looked at again.
+        let (input, _, started) = standing_in(Selection::Unopenable, true, arrivals);
+        assert_eq!(
+            input.recovery.next_attempt,
+            Some(started + MICROPHONE_RETRY_INITIAL)
+        );
+    }
+
+    #[test]
+    fn only_an_idle_capture_lets_the_microphone_switch() {
+        assert!(capture_idle(false, false, false));
+        // Recording, a press waiting for its stream, or a release's tail.
+        assert!(!capture_idle(true, false, false));
+        assert!(!capture_idle(false, true, false));
+        assert!(!capture_idle(false, false, true));
     }
 
     #[cfg(target_os = "macos")]

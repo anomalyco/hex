@@ -173,12 +173,14 @@ listener restart, even after cancellation.
 initial open fails OR stream interrupts
   -> cancel incomplete capture + discard stale audio  // interrupted audio cannot return
   -> bounded backoff -> reopen the resolved input     // warm microphone retries
-saved microphone missing or will not open
-  -> system default stands in, setting unchanged      // selection_missing
-  -> look again with bounded backoff, at once on a device-list change
-  -> found -> switch back once capture is idle
   -> replacement delivers new audio
   -> fresh capture -> release -> expected output
+saved microphone missing or will not open
+  -> system default stands in, setting unchanged      // audio::Selection
+  ├── listed but will not open -> look again with bounded backoff
+  └── not listed -> look again on a device-list change // macOS reports arrivals
+                    └── Windows, Linux: bounded backoff, logged only on a switch
+  -> found -> switch back once capture is idle        // not during a pending start or tail
 
 programmatic dictation (local API) when the stream interrupts or gaps
   ├── audio delivered before the loss -> kept under its id // recover.programmatic-loss
@@ -189,7 +191,10 @@ programmatic dictation (local API) when the stream interrupts or gaps
 ```
 Checks in [audio.rs](../../src/audio.rs):
 `microphone_recovery_retries_with_bounded_backoff_and_resets`,
-`startup_retry_recovers_metadata_and_audio_without_restarting`;
+`startup_retry_recovers_metadata_and_audio_without_restarting`,
+`a_missing_selection_uses_the_default_until_it_returns`,
+`where_the_os_reports_new_devices_only_a_failed_open_is_retried`,
+`only_an_idle_capture_lets_the_microphone_switch`;
 [dictation_audio.rs](../../src/dictation_audio.rs):
 `recovered_owner_delivers_audio_and_accepts_a_new_capture`,
 `microphone_loss_keeps_only_a_programmatic_captures_delivered_audio`,

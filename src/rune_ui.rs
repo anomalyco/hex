@@ -573,6 +573,10 @@ pub(crate) struct Ui {
     microphones_route: Option<u64>,
     /// The poll clock `microphones` was last listed at.
     microphones_listed_at: f64,
+    /// A listing in flight. Listing reads CoreAudio or COM endpoint
+    /// properties, which can block, so it runs off the UI thread.
+    microphones_listing:
+        Option<std::sync::mpsc::Receiver<Result<crate::audio::InputDevices, String>>>,
     confirm_release: bool,
     /// General's Advanced disclosure is open.
     advanced: bool,
@@ -654,6 +658,7 @@ impl Ui {
             microphones: Ok(Default::default()),
             microphones_route: None,
             microphones_listed_at: 0.0,
+            microphones_listing: None,
             confirm_release: false,
             advanced: false,
             capture: Capture::Idle,
@@ -1034,6 +1039,7 @@ fn poll(ui: &mut Ui, clock: f64, tx: &mut Tx) -> bool {
     changed |= ui.modes.poll(ui.live());
     changed |= modes::poll_chooser(ui);
     let login_unknown = ui.platform.login_item.is_none();
+    changed |= settings::poll_microphones(ui);
     // General names the input in use; list again when the OS reports an
     // input change. Windows reports a default change only to an open
     // default stream, so there the list is also refreshed every few seconds.
@@ -1043,10 +1049,8 @@ fn poll(ui: &mut Ui, clock: f64, tx: &mut Tx) -> bool {
         && (ui.microphones_route != Some(crate::audio::input_route_generation())
             || (cfg!(target_os = "windows") && clock >= ui.microphones_listed_at + 3.0))
     {
-        let before = ui.microphones.clone();
         settings::refresh_microphones(ui);
         ui.microphones_listed_at = clock;
-        changed |= ui.microphones != before;
     }
     changed |= ui.host.poll(&mut ui.platform);
     // macOS reports the login item moments after launch; its switch replaces

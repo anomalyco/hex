@@ -535,7 +535,10 @@ pub(crate) fn run(
         }
 
         indicator.update(capture.is_recording() || start_pending, pending);
-        match input.recv_timeout(UPDATE_INTERVAL, !capture.is_recording()) {
+        match input.recv_timeout(
+            UPDATE_INTERVAL,
+            crate::audio::capture_idle(capture.is_recording(), start_pending, finishing.is_some()),
+        ) {
             RecoveringAudioInputEvent::Chunk {
                 samples,
                 captured_through: chunk_captured_through,
@@ -589,6 +592,11 @@ pub(crate) fn run(
             RecoveringAudioInputEvent::Reopened => {
                 audio_ready = false;
                 device_label = input.device_name().to_string();
+                emit_state(
+                    &mut events,
+                    active_state(capture.is_recording(), pending),
+                    &device_label,
+                )?;
             }
             RecoveringAudioInputEvent::OpenFailed(error) => {
                 if !release_while_idle {

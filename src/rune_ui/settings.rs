@@ -374,13 +374,42 @@ pub(super) fn toggle_menu(ui: &mut Ui, menu: Menu) {
     }
 }
 
-/// Lists the microphones again and what System default resolves to.
+/// Lists the microphones again, and what System default resolves to, on a
+/// worker thread; [`poll_microphones`] adopts the result. A change during a
+/// listing in flight is listed again after it.
 pub(super) fn refresh_microphones(ui: &mut Ui) {
-    if matches!(ui.service, Service::Fixture(_)) {
+    if matches!(ui.service, Service::Fixture(_)) || ui.microphones_listing.is_some() {
         return;
     }
     ui.microphones_route = Some(crate::audio::input_route_generation());
-    ui.microphones = crate::audio::input_devices().map_err(|error| error.to_string());
+    let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+    let spawned = std::thread::Builder::new()
+        .name("hex-microphones".into())
+        .spawn(move || {
+            let _ = sender.send(crate::audio::input_devices().map_err(|error| error.to_string()));
+        });
+    match spawned {
+        Ok(_) => ui.microphones_listing = Some(receiver),
+        Err(error) => ui.microphones = Err(error.to_string()),
+    }
+}
+
+/// Adopts a finished listing. Returns whether the microphones changed.
+pub(super) fn poll_microphones(ui: &mut Ui) -> bool {
+    let Some(listing) = &ui.microphones_listing else {
+        return false;
+    };
+    let listed = match listing.try_recv() {
+        Ok(listed) => listed,
+        Err(std::sync::mpsc::TryRecvError::Empty) => return false,
+        Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+            Err("the microphone list stopped".to_owned())
+        }
+    };
+    ui.microphones_listing = None;
+    let changed = ui.microphones != listed;
+    ui.microphones = listed;
+    changed
 }
 
 pub(super) fn error_notes(p: Paint, error: &str) -> [El; 2] {
