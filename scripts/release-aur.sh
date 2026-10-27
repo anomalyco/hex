@@ -30,7 +30,7 @@ case "$mode" in
     [ $# -eq 4 ] || usage
     version=$1 executable=$2 url=$3 dir=$4
     printf '%s\n' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-beta\.[0-9]+)?$'
-    printf '%s\n' "$url" | grep -Eq '^https://(dev\.)?anoma\.ly/release/hex/files/[0-9a-f]{64}/hex-[0-9a-z.-]+-linux-x64$'
+    printf '%s\n' "$url" | grep -Eq '^https://anoma\.ly/release/hex/files/[0-9a-f]{64}/hex$'
     # pkgver may not contain hyphens: 2.4.0-beta.3 is 2.4.0_beta.3.
     pkgver=$(printf '%s' "$version" | tr - _)
     test "$(head -c 4 "$executable" | od -An -tx1 | tr -d ' ')" = 7f454c46

@@ -100,11 +100,12 @@ sha256_of() {
   sha256sum < "$1" | awk '{ print $1 }'
 }
 
-# upload <file>: stores the file under its own name, refused unless the
-# service computes the same SHA-256.
+# upload <file> <name>: stores the file as <name> (the service's path is
+# files/<sha256>/<name>, and downloads are saved as <name>), refused unless
+# the service computes the same SHA-256.
 upload() {
   file=$1
-  name=$(basename "$file")
+  name=$2
   sha256=$(sha256_of "$file")
   size=$(wc -c < "$file" | tr -d ' ')
   if [ "$size" -le "$single_limit" ]; then
@@ -130,31 +131,36 @@ publish() {
   notes_url=$2
   version=$HEX_VERSION
   manifest_url="$RELEASE/$app/$artifact/$channel.json"
-  # target=file, the names docs/plans/release-service.md pins. A staging
-  # run without the macOS build publishes the others.
+  # target=local file=published name, as docs/plans/release-service.md pins.
+  # Published names carry no version or target: the sha256 in the path
+  # already tells files apart, and a download is saved under that name. A
+  # run without a platform's signed build publishes the others.
   pinned='{}'
-  for pair in \
-    "macos-arm64=Hex-$version-macos-arm64.zip" \
-    "macos-arm64-dmg=Hex-$version-macos-arm64.dmg" \
-    "windows-x64=Hex-$version-windows-x64.exe" \
-    "windows-x64-setup=Hex-Setup-$version-windows-x64.exe" \
-    "windows-arm64=Hex-$version-windows-arm64.exe" \
-    "windows-arm64-setup=Hex-Setup-$version-windows-arm64.exe" \
-    "linux-x64=hex-$version-linux-x64"
+  for entry in \
+    "macos-arm64=Hex-$version-macos-arm64.zip=Hex.zip" \
+    "macos-arm64-dmg=Hex-$version-macos-arm64.dmg=Hex.dmg" \
+    "windows-x64=Hex-$version-windows-x64.exe=hex.exe" \
+    "windows-x64-setup=Hex-Setup-$version-windows-x64.exe=HexSetup.exe" \
+    "windows-arm64=Hex-$version-windows-arm64.exe=hex.exe" \
+    "windows-arm64-setup=Hex-Setup-$version-windows-arm64.exe=HexSetup.exe" \
+    "linux-x64=hex-$version-linux-x64=hex"
   do
-    target=${pair%%=*}
-    name=${pair#*=}
-    [ -f "$dist/$name" ] || continue
-    upload "$dist/$name"
-    pinned=$(printf '%s' "$pinned" | jq --arg target "$target" --arg file "$name" --arg sha256 "$(sha256_of "$dist/$name")" \
-      '.[$target] = {file: $file, sha256: $sha256}')
+    target=${entry%%=*}
+    rest=${entry#*=}
+    local_name=${rest%%=*}
+    name=${rest#*=}
+    [ -f "$dist/$local_name" ] || continue
+    upload "$dist/$local_name" "$name"
+    pinned=$(printf '%s' "$pinned" | jq --arg target "$target" --arg file "$name" \
+      --arg local "$local_name" --arg sha256 "$(sha256_of "$dist/$local_name")" \
+      '.[$target] = {file: $file, sha256: $sha256, local: $local}')
   done
   test "$(printf '%s' "$pinned" | jq 'length')" -gt 0
   jq -n \
     --arg channel "$channel" \
     --arg version "$release_version" \
     --arg notes_url "$notes_url" \
-    --argjson targets "$pinned" \
+    --argjson targets "$(printf '%s' "$pinned" | jq 'map_values({file, sha256})')" \
     --argjson distributions "$distributions" \
     '{channel: $channel, version: $version, notes_url: $notes_url, targets: $targets,
       distributions: ([{kind: "direct"}] + $distributions)}' > "$temporary/release.json"
@@ -181,7 +187,7 @@ publish() {
   # The service must serve exactly these bytes at the URLs it published.
   test "$(jq -r '"\(.app) \(.artifact) \(.channel) \(.release.version)"' "$dist/manifest.json")" = "$app $artifact $channel $release_version"
   for target in $(printf '%s' "$pinned" | jq -r 'keys[]'); do
-    name=$(printf '%s' "$pinned" | jq -r --arg target "$target" '.[$target].file')
+    name=$(printf '%s' "$pinned" | jq -r --arg target "$target" '.[$target].local')
     expected=$(sha256_of "$dist/$name")
     entry=$(jq -c --arg target "$target" '.release.targets[$target]' "$dist/manifest.json")
     test "$(printf '%s' "$entry" | jq -r .sha256)" = "$expected"
