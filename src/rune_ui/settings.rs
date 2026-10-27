@@ -7,9 +7,10 @@ use std::time::{Duration, Instant};
 use rune::{Edge, El, Key, KeyEvent, Transition, Tx, col, row, spacer, text};
 
 use super::controls::{
-    ButtonKind, CardRow, Choice, DESCRIPTION, KEY_GAP, KeySize, Paint, button, described_row,
-    folding, icon_button, key_tray, keycap, keycaps, link_row, note, pulsing_dot, section,
-    segmented, select, setting_row, sheet_button, status_dot, text_field, toggle_row, tray_roll,
+    ButtonKind, CardRow, Choice, DESCRIPTION, DEVICE_SELECT_WIDTH, KEY_GAP, KeySize, Paint, button,
+    described_row, folding, icon_button, key_tray, keycap, keycaps, link_row, note, pulsing_dot,
+    section, segmented, select, select_sized, setting_row, sheet_button, status_dot, text_field,
+    toggle_row, tray_roll,
 };
 use super::{Menu, Request, Service, ShortcutTarget, Ui};
 use super::{explainer, host};
@@ -805,13 +806,26 @@ fn dictation_section(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
         Some(name) => tr_fill("System default ({})", name),
         None => tr("System default").into(),
     };
-    let microphone = settings
-        .microphone
-        .clone()
-        .unwrap_or_else(|| system_default.clone());
     // Only a list that names inputs can tell a saved microphone is missing.
+    let missing = settings.microphone.as_deref().filter(|saved| {
+        listed.is_some_and(|devices| {
+            !devices.names.is_empty() && !devices.names.iter().any(|name| name == saved)
+        })
+    });
+    // The field always names the input in use, so a missing saved
+    // microphone shows what stands in for it.
+    let microphone = match (&settings.microphone, missing) {
+        (None, _) => system_default.clone(),
+        (Some(saved), Some(_)) => {
+            match listed.and_then(|devices| devices.system_default.as_deref()) {
+                Some(using) => format!("{saved} → {using}"),
+                None => format!("{saved} → {}", tr("System default")),
+            }
+        }
+        (Some(saved), None) => saved.clone(),
+    };
     let microphone_note = listed.and_then(|devices| match &settings.microphone {
-        Some(saved) if !devices.names.is_empty() && !devices.names.contains(saved) => {
+        Some(_) if missing.is_some() => {
             Some(tr("Not connected, so Hex uses the system default").to_owned())
         }
         None if devices.default_is_hex_microphone => {
@@ -846,13 +860,20 @@ fn dictation_section(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
             }
         }));
     }
+    if let Some(saved) = missing {
+        devices.push(Choice {
+            label: tr_fill("{} (not connected)", saved),
+            selected: true,
+            choose: Box::new(|ui: &mut Ui| ui.open = None),
+        });
+    }
     rows.push(
         setting_row(
             p,
             "microphone",
             tr("Microphone"),
             microphone_note.as_deref(),
-            select(
+            select_sized(
                 p,
                 "microphone-control",
                 &microphone,
@@ -860,6 +881,7 @@ fn dictation_section(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
                 devices,
                 |ui: &mut Ui| toggle_menu(ui, Menu::Microphone),
                 layer,
+                DEVICE_SELECT_WIDTH,
             ),
         )
         .into(),

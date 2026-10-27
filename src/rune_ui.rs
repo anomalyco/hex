@@ -571,6 +571,8 @@ pub(crate) struct Ui {
     microphones: Result<crate::audio::InputDevices, String>,
     /// The [`crate::audio::input_route_generation`] `microphones` was listed at.
     microphones_route: Option<u64>,
+    /// The poll clock `microphones` was last listed at.
+    microphones_listed_at: f64,
     confirm_release: bool,
     /// General's Advanced disclosure is open.
     advanced: bool,
@@ -651,6 +653,7 @@ impl Ui {
             open: None,
             microphones: Ok(Default::default()),
             microphones_route: None,
+            microphones_listed_at: 0.0,
             confirm_release: false,
             advanced: false,
             capture: Capture::Idle,
@@ -1031,15 +1034,19 @@ fn poll(ui: &mut Ui, clock: f64, tx: &mut Tx) -> bool {
     changed |= ui.modes.poll(ui.live());
     changed |= modes::poll_chooser(ui);
     let login_unknown = ui.platform.login_item.is_none();
-    // General names what System default resolves to; list again when the
-    // OS reports an input change.
+    // General names the input in use; list again when the OS reports an
+    // input change. Windows reports a default change only to an open
+    // default stream, so there the list is also refreshed every few seconds.
     if ui.pane == Pane::General
         && ui.live()
         && ui.window.as_ref().is_some_and(rune::AppHandle::is_visible)
-        && ui.microphones_route != Some(crate::audio::input_route_generation())
+        && (ui.microphones_route != Some(crate::audio::input_route_generation())
+            || (cfg!(target_os = "windows") && clock >= ui.microphones_listed_at + 3.0))
     {
+        let before = ui.microphones.clone();
         settings::refresh_microphones(ui);
-        changed = true;
+        ui.microphones_listed_at = clock;
+        changed |= ui.microphones != before;
     }
     changed |= ui.host.poll(&mut ui.platform);
     // macOS reports the login item moments after launch; its switch replaces
@@ -1662,6 +1669,11 @@ const SCENES: &[Scene] = &[
     }),
     // macOS and Windows surfaces, from preview data (see `platform`).
     ("mac-settings", |ui| *ui = mac_fixture()),
+    ("mac-microphone-missing", |ui| {
+        *ui = mac_fixture();
+        ui.settings.microphone = Some("Shure MV7".into());
+        ui.open = Some(Menu::Microphone);
+    }),
     ("mac-settings-vocabulary", |ui| {
         *ui = mac_fixture();
         vocabulary::fixture(ui, true);
@@ -1943,6 +1955,15 @@ fn mac_fixture() -> Ui {
         },
     ];
     ui.settings.experimental.hex_microphone = true;
+    ui.microphones = Ok(crate::audio::InputDevices {
+        names: vec![
+            "Kit Pods".into(),
+            "MacBook Pro Microphone".into(),
+            "Studio Display Microphone".into(),
+        ],
+        system_default: Some("Kit Pods".into()),
+        default_is_hex_microphone: false,
+    });
     ui.meetings = meetings::MeetingsPane::fixture();
     ui
 }

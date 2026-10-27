@@ -19,6 +19,9 @@ pub(super) const DESCRIPTION: TextStyle = TextStyle::new(12.0, 440.0).lh(16.0);
 const ROW_HEIGHT: f32 = 44.0;
 const ROW_HEIGHT_DESCRIBED: f32 = 56.0;
 const SELECT_WIDTH: f32 = 220.0;
+/// The microphone field, wide enough for "System default (Studio Display
+/// Microphone)".
+pub(super) const DEVICE_SELECT_WIDTH: f32 = 320.0;
 /// Narrower than this, a row moves its control below the copy instead of
 /// squeezing the description to a word per line (tiling desktops ignore
 /// the window's 860 px minimum width).
@@ -352,9 +355,25 @@ pub(super) fn select(
     toggle: impl Fn(&mut Ui) + 'static,
     layer: &mut Vec<El>,
 ) -> El {
+    select_sized(p, key, label, open, choices, toggle, layer, SELECT_WIDTH)
+}
+
+/// A [`select`] `width` points wide, for labels such as device names that
+/// would truncate at the usual width.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn select_sized(
+    p: Paint,
+    key: &str,
+    label: &str,
+    open: bool,
+    choices: Vec<Choice>,
+    toggle: impl Fn(&mut Ui) + 'static,
+    layer: &mut Vec<El>,
+    width: f32,
+) -> El {
     let trigger = Select::new::<&str>(format!("{key}-field"), &[])
         .appearance(SelectAppearance::Field)
-        .width(SELECT_WIDTH)
+        .width(width)
         .current(Some(label))
         .open(open)
         .on_toggle(toggle)
@@ -363,7 +382,7 @@ pub(super) fn select(
         .trigger(trigger)
         .placement(Placement::BottomEnd)
         .gutter(4.0)
-        .min_width(SELECT_WIDTH)
+        .min_width(width)
         .open(open)
         .on_close(|ui: &mut Ui| ui.open = None);
     for choice in choices {

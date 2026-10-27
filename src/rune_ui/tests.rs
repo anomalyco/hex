@@ -1182,6 +1182,21 @@ fn recognition_hints_save_when_typing_pauses() {
     );
 }
 
+#[test]
+fn the_microphone_field_names_the_input_in_use() {
+    let rt = runtime("mac-settings", true, PANE_SIZE);
+    assert!(texts(&rt).contains(&"System default (Kit Pods)".to_owned()));
+
+    let rt = runtime("mac-microphone-missing", true, PANE_SIZE);
+    let texts = texts(&rt);
+    assert!(
+        texts.contains(&"Shure MV7 → Kit Pods".to_owned()),
+        "{texts:?}"
+    );
+    assert!(texts.contains(&"Shure MV7 (not connected)".to_owned()));
+    assert!(texts.contains(&"Not connected, so Hex uses the system default".to_owned()));
+}
+
 // ---------------------------------------------------------------------------
 // Goldens: offscreen GPU renders compared with checked-in PNGs. Set
 // HEX_UPDATE_GOLDENS=1 to rewrite them. Without a GPU adapter they skip.

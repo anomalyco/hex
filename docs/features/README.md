@@ -396,11 +396,14 @@ General                                  // settings
 │   ├── Shortcut mode > How it works -> Hold/Toggle explainer modal (dictation.md)
 │   └── A row that hides or shows (Double-tap to lock, Advanced, a microphone error)
 │       -> Folds under a clip as the rows below slide over it; no fade in place
-├── Microphone -> "System default (KIT PODS)" or a saved device   // settings.microphone
+├── Microphone -> Field always names the input in use            // settings.microphone
+│   ├── "System default (KIT PODS)", a saved device, or "SHURE MV7 → KIT PODS" while KIT PODS stands in
+│   ├── Re-listed on a device or default change while General shows (Windows: also every 3 s)
 │   ├── System default -> The OS default input, followed live      // a Bluetooth default is kept
 │   │   ├── Default changes -> Switch once capture is idle; new stream opens before the old drops
 │   │   └── Default is Hex Microphone -> Built-in mic, else first real input; row says so
 │   ├── Saved device missing -> System default stands in; row says "Not connected…"
+│   │   ├── Menu keeps it checked as "SHURE MV7 (not connected)"
 │   │   └── Device returns -> Switch back once idle; the setting never changes
 │   ├── Menu lists real inputs only                                // never Hex Microphone
 │   └── Open menu covers the controls beneath it; click elsewhere dismisses
