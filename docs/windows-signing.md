@@ -8,7 +8,7 @@ installing an update.
 
 ## Pipeline
 
-`.github/workflows/release-desktop.yml`, split like OpenCode's release:
+`.github/workflows/release.yml`, split like OpenCode's release:
 
 ```ts
 build (build-desktop.yml; x64 and ARM64 runners)   // compiles; no environment or secrets

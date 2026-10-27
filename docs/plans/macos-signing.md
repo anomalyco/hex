@@ -57,7 +57,7 @@ scripts/release-app.sh     // clean pushed tree → notarized, stapled app and D
                            // and .zip (root Hex.app, the updater's archive)
 scripts/validate-app.sh    // bundle id anomaly.hex, team, Developer ID, entitlements,
                            // no Sparkle left
-release-desktop.yml        // build-macos: HEX_RELEASE_UNSIGNED=1 build-app.sh, no secrets
+release.yml        // build-macos: HEX_RELEASE_UNSIGNED=1 build-app.sh, no secrets
                            // sign-macos (release env, .github/release only):
                            // macos-credentials.sh imports APPLE_SIGNING_CERTIFICATE and
                            // APPLE_NOTARY_KEY; sign-macos.sh signs inside-out,

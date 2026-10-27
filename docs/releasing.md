@@ -1,6 +1,6 @@
 # Releasing Hex
 
-One run of the **Release** workflow (`.github/workflows/release-desktop.yml`)
+One run of the **Release** workflow (`.github/workflows/release.yml`)
 builds, signs, and publishes every platform from one commit to the Anomaly
 release service (`anomalyco/release`, `https://anoma.ly/release`). Hex's
 names on the service are in [`plans/release-service.md`](plans/release-service.md).
@@ -9,7 +9,7 @@ the release service itself: Hex never publishes to it or reads from it. Builds
 are tested before stable on the production service's `dev` channel.
 
 Like OpenCode's release, building is split from everything that holds a
-secret. `.github/workflows/release-desktop.yml` and `.github/release/` are the
+secret. `.github/workflows/release.yml` and `.github/release/` are the
 security boundary:
 
 - **Build jobs** run repository code (cargo, build.rs, bun, makepkg, brew)
@@ -78,7 +78,7 @@ Repository admins can still change rulesets.
 
 The service authorizes the publish jobs by their GitHub OIDC token alone:
 `registry/hex.json` in `anomalyco/release` admits repository `anomalyco/hex`
-(by name and id) and workflow `.github/workflows/release-desktop.yml` running
+(by name and id) and workflow `.github/workflows/release.yml` running
 from the same ref it was triggered on, for artifact `desktop` on both the dev
 and production services, as two publishers:
 
@@ -125,7 +125,7 @@ secrets; the `homebrew` job pushes that verified file with the tap deploy key
   set to the Dev update channel follow and `https://anoma.ly/hex/download/dev`
   links. Every push to `dev` runs it, except pushes that change only `docs/`,
   `site/`, or Markdown; a newer push cancels a dev run still in progress, and
-  `gh workflow run release-desktop.yml --ref dev -f channel=dev -f ref=dev`
+  `gh workflow run release.yml --ref dev -f channel=dev -f ref=dev`
   runs it by hand. It runs in `release`, which needs no approval. The
   version is `0.0.0-dev-<run number>`, as OpenCode numbers its dev builds.
   Versions are display text that nothing compares: each channel has one
@@ -147,7 +147,7 @@ secrets; the `homebrew` job pushes that verified file with the tap deploy key
   the Dev channel check every 10 minutes and when the window opens or gains
   focus (at most once a minute), so a push reaches them within minutes of its
   run finishing.
-- `stable`, dispatched from `production` (`gh workflow run release-desktop.yml
+- `stable`, dispatched from `production` (`gh workflow run release.yml
   --ref production -f channel=stable -f ref=production`), publishes the crate
   version from `Cargo.toml` to `https://anoma.ly/release`, the AUR, and
   Homebrew. It needs every platform signed and `docs/releases/<version>.md`,

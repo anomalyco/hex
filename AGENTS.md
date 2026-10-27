@@ -1066,7 +1066,7 @@ the user's original login-item state after the test. Do not add release test
 hooks or persist a second launch-at-login flag.
 
 Every platform is built, signed, and published by one run of
-`.github/workflows/release-desktop.yml` ("Release"; see `docs/releasing.md`).
+`.github/workflows/release.yml` ("Release"; see `docs/releasing.md`).
 Run it with `workflow_dispatch` (`ref`, `channel`: `check` builds and
 verifies without publishing, `dev` publishes the dev channel, `stable` the
 public release; dispatched from `production` only). Tags never start a
