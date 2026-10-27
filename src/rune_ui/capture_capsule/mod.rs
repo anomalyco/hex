@@ -630,7 +630,7 @@ impl CaptureCapsule {
                 }),
                 display: DisplayTarget::UnderPointer,
                 level: OverlayLevel::AboveOverlays,
-                exclude_from_capture: true,
+                exclude_from_capture: !crate::capture_host::own_windows_recorded(),
                 input: OverlayInput::Regions,
                 prewarm: true,
                 ..Default::default()
@@ -662,6 +662,11 @@ impl CaptureCapsule {
             s.picker = Some(picker);
             tx.wake_after(Duration::ZERO);
         });
+    }
+
+    /// Lets screen recordings see the capsule, or keeps it out.
+    pub(crate) fn show_in_recordings(&self, shown: bool) {
+        self.overlay.set_exclude_from_capture(!shown);
     }
 
     /// Moves the capsule; safe from any thread.

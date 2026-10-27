@@ -181,6 +181,10 @@ pub struct OwnWindows {
     /// Click-through window IDs (such as the ink overlay) ignored when checking whether a click
     /// landed on the host's own UI.
     pub passthrough: Vec<u32>,
+    /// Set, the recording shows the host's own windows: neither `excluded` nor the host's
+    /// other non-layer-0 windows are left out. Read while recording, so the host can flip it
+    /// mid-capture (a demo that shows the host's overlays).
+    pub recorded: Arc<AtomicBool>,
 }
 
 /// What the host provides. Every method has a default except `emit`; `emit` and `log` must return
@@ -760,6 +764,9 @@ pub(crate) struct Sampler {
     /// Scrawl's own windows to leave out of the recording.
     #[cfg_attr(target_os = "windows", allow(dead_code))]
     pub excluded_window_ids: Arc<Mutex<Vec<u32>>>,
+    /// [`OwnWindows::recorded`]: while set, nothing of the host's is left out.
+    #[cfg_attr(target_os = "windows", allow(dead_code))]
+    pub own_windows_recorded: Arc<AtomicBool>,
     pub started_at: Instant,
     pub stopping: Arc<AtomicBool>,
     pub urgent: Arc<AtomicBool>,
@@ -789,6 +796,7 @@ impl ScreenCaptureSession {
             target,
             video_output_path,
             excluded_window_ids,
+            Arc::default(),
             CANDIDATE_BUDGET_BYTES,
         )
     }
@@ -797,6 +805,7 @@ impl ScreenCaptureSession {
         target: TargetInfo,
         video_output_path: Option<PathBuf>,
         excluded_window_ids: Arc<Mutex<Vec<u32>>>,
+        own_windows_recorded: Arc<AtomicBool>,
         budget_bytes: usize,
     ) -> Self {
         let started_at = Instant::now();
@@ -817,6 +826,7 @@ impl ScreenCaptureSession {
                     target: sampler_target,
                     video_output_path,
                     excluded_window_ids,
+                    own_windows_recorded,
                     started_at,
                     stopping: thread_stopping,
                     urgent: thread_urgent,
@@ -2617,6 +2627,7 @@ impl Engine {
                     target.clone(),
                     Some(video_path),
                     Arc::clone(&telemetry.excluded_window_ids),
+                    Arc::clone(&own.recorded),
                     engine_cfg.candidate_budget_bytes(),
                 );
                 self.host

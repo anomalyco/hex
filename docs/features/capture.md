@@ -42,6 +42,9 @@ Settings › Experiments › Scrawl          // capture.pane
 │       Settings' list (PermissionKind::ScreenRecording), as for Input
 │       Monitoring; flips to Allowed on the next read. Never part of onboarding
 │       (macOS also asks at the first capture). Check: rune_ui::scrawl tests
+├── Show in screen recordings (capture.show_overlays_in_recordings, default
+│   off; also the menu bar's Show Hex in Screen Recordings checkmark) -> see
+│   capture.own-windows; applies at once, to open windows and a recording capture
 ├── Transcriber (capture.transcriber) -> Parakeet (default) | Apple
 ├── Captures folder (capture.folder, default Scrawl's) -> Reveal | choose another
 ├── Keep (capture.media_days / bundle_days) -> Scrawl's presets, or imported days
@@ -269,6 +272,14 @@ Hex's own windows                        // capture.own-windows
 ├── Chrome (the capsule, ink, picker, HUDs, meeting capsules: Hex's named
 │   windows and any of its windows above the normal level) -> never recorded,
 │   never in the window log, never the target, clicks on it not logged
+│   ├── Other recorders -> the capsule, picker, and ink are left out
+│   │   (sharingType none); the dictation HUD and meeting capsules show
+│   ├── Show in screen recordings on -> every recorder, Hex's captures
+│   │   included, shows all of it (sharingType readOnly, no SCK exclusions);
+│   │   still never in the window log or the target. Rune's
+│   │   OverlayHandle::set_exclude_from_capture flips open windows, and the
+│   │   sampler rebuilds its filter mid-recording (OwnWindows::recorded)
+│   └── Not proven natively end to end yet
 │   └── Click-through chrome (the full-screen ink overlay, the capsule's
 │       640×424 panel outside its pill) -> clicks there count for the app
 │       beneath; only the pill's (capture_host::set_capsule_pill) are Hex's

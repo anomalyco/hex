@@ -1107,6 +1107,10 @@ pub struct CaptureSettings {
     /// Where a written capture is sent among OpenCode sessions: Scrawl's
     /// router settings, imported once from Scrawl.
     pub routing: CaptureRouting,
+    /// Lets screen recordings, Hex's own captures included, show Hex's
+    /// overlays: the capture capsule, picker, and ink, the dictation HUD,
+    /// and the meeting capsules. Off keeps them out (`capture_host`).
+    pub show_overlays_in_recordings: bool,
 }
 
 #[cfg(hex_capture)]
@@ -1122,6 +1126,7 @@ impl Default for CaptureSettings {
             media_days: week.media_days,
             bundle_days: week.bundle_days,
             routing: CaptureRouting::default(),
+            show_overlays_in_recordings: false,
         }
     }
 }
@@ -1692,6 +1697,7 @@ impl AppSettings {
                 .write()
                 .unwrap_or_else(|error| error.into_inner()) = self.capture.clone();
             CAPTURE_ON.store(self.capture_on(), Ordering::Release);
+            crate::capture_host::record_own_windows(self.capture.show_overlays_in_recordings);
         }
         HEX_MICROPHONE_ENABLED.store(self.experimental.hex_microphone, Ordering::Release);
         crate::hex_microphone::sync_from_settings(

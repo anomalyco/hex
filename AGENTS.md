@@ -688,7 +688,12 @@ CoreAudio formats, AppleScript details, or event serialization.
   capture records, through a bounded queue that drops rather than block; they
   never reach the listener. Scrawl's settings are imported once, read-only;
   Screen Recording is asked at the first capture or from the pane, never in
-  onboarding. A capture never opens a
+  onboarding. The capsule, picker, and ink are left out of every screen
+  recording, and a capture leaves out all of Hex's chrome, unless
+  `capture.show_overlays_in_recordings` (default off; the pane's Show in
+  screen recordings or the menu bar's checkmark) is on; it applies at once
+  to open overlays and a recording capture, never recreating a window. A
+  capture never opens a
   microphone, installs a tap of its own, or loads a model: it copies the dictation
   timeline through a bounded sink that records a gap rather than block, so a
   stalled capture never stalls dictation, and while a sink is open the

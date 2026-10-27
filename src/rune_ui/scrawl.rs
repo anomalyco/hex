@@ -204,8 +204,27 @@ fn shortcut_rows(ui: &Ui, p: Paint, view: &ScrawlView) -> Vec<El> {
                 },
             ),
         ));
+        rows.push(recordings_row(ui, p));
     }
     rows
+}
+
+/// Lets screen recordings, captures included, show Hex's overlays, for
+/// showing someone how captures work.
+fn recordings_row(ui: &Ui, p: Paint) -> El {
+    toggle_row(
+        p,
+        "capture-show-in-recordings",
+        tr("Show in screen recordings"),
+        tr("Lets recordings, captures included, show Hex's capsule, ink, and HUD, for demos"),
+        ui.settings.capture.show_overlays_in_recordings,
+        |ui: &mut Ui| {
+            ui.update(|settings| {
+                settings.capture.show_overlays_in_recordings =
+                    !settings.capture.show_overlays_in_recordings;
+            });
+        },
+    )
 }
 
 fn transcriber_row(ui: &Ui, p: Paint) -> El {

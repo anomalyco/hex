@@ -276,6 +276,10 @@ const TRANSLATIONS: &[(&str, [&str; 5])] = &[
     #[cfg(hex_capture)]
     ("Required to record your screen. macOS asks at your first capture, or allow it here.", ["Wymagane do nagrywania ekranu. macOS zapyta przy pierwszym nagraniu albo zezwól tutaj.", "录制屏幕所必需。macOS 会在首次捕获时询问，也可以在这里允许。", "画面の記録に必要です。最初のキャプチャ時に macOS が確認します。ここで許可することもできます。", "Nötig, um deinen Bildschirm aufzunehmen. macOS fragt bei der ersten Aufnahme, oder erlaube es hier.", "Necesario para grabar tu pantalla. macOS lo pide en la primera captura, o permítelo aquí."]),
     #[cfg(hex_capture)]
+    ("Show in screen recordings", ["Pokazuj w nagraniach ekranu", "在屏幕录制中显示", "画面収録に表示", "In Bildschirmaufnahmen zeigen", "Mostrar en grabaciones de pantalla"]),
+    #[cfg(hex_capture)]
+    ("Lets recordings, captures included, show Hex's capsule, ink, and HUD, for demos", ["Pozwala nagraniom, także nagraniom Hex, pokazywać kapsułę, rysunki i wskaźnik Hex, na potrzeby pokazów", "让录屏（包括捕获）显示 Hex 的胶囊、标注和 HUD，便于演示", "キャプチャを含む画面収録に Hex のカプセル、インク、HUD を映します（デモ用）", "Lässt Aufnahmen, auch Hex-Aufnahmen, Hex' Kapsel, Zeichnungen und HUD zeigen, für Demos", "Deja que las grabaciones, capturas incluidas, muestren la cápsula, la tinta y el HUD de Hex, para demos"]),
+    #[cfg(hex_capture)]
     ("Transcriber", ["Transkrypcja", "转写引擎", "文字起こし", "Transkription", "Transcriptor"]),
     #[cfg(hex_capture)]
     ("Transcription", ["Transkrypcja", "转写", "文字起こし", "Transkription", "Transcripción"]),

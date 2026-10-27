@@ -32,7 +32,7 @@ use std::os::unix::fs::DirBuilderExt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, SyncSender, TrySendError};
-use std::sync::{Arc, Mutex, OnceLock, Weak};
+use std::sync::{Arc, LazyLock, Mutex, OnceLock, Weak};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
@@ -369,7 +369,23 @@ fn own_windows_of(own: &[Option<u32>; 3]) -> OwnWindows {
             .into_iter()
             .filter_map(|role| own[role as usize])
             .collect(),
+        recorded: Arc::clone(&OWN_WINDOWS_RECORDED),
     }
+}
+
+/// `capture.show_overlays_in_recordings`: while set, a capture records every
+/// window of Hex's, its overlays included. A recording capture follows a
+/// change at once.
+static OWN_WINDOWS_RECORDED: LazyLock<Arc<AtomicBool>> = LazyLock::new(Arc::default);
+
+/// Lets captures record Hex's own windows, or leaves them out again.
+pub fn record_own_windows(recorded: bool) {
+    OWN_WINDOWS_RECORDED.store(recorded, Ordering::Release);
+}
+
+/// Whether screen recordings may show Hex's overlays, as last saved.
+pub fn own_windows_recorded() -> bool {
+    OWN_WINDOWS_RECORDED.load(Ordering::Acquire)
 }
 
 /// The capsule's pill `[x, y, w, h]` in its panel's points while it shows.
@@ -2924,6 +2940,7 @@ mod tests {
         let OwnWindows {
             excluded,
             passthrough,
+            ..
         } = own_windows_of(&roles);
         assert_eq!(excluded, [capsule, ink]);
         let engine_says_hex = |x, y| {

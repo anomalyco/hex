@@ -1151,22 +1151,33 @@ pub(super) fn run_sampler(sampler: Sampler) -> Option<PathBuf> {
         target: sampler_target,
         video_output_path,
         excluded_window_ids,
+        own_windows_recorded,
         started_at,
         stopping: thread_stopping,
         urgent: thread_urgent,
         frames: thread_frames,
         video_offset_ms: thread_offset,
     } = sampler;
-    let initial_excluded = excluded_window_ids
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .clone();
+    // While the host's own windows are recorded, nothing of its is left out.
+    let hidden = |shown: bool| {
+        if shown {
+            Vec::new()
+        } else {
+            excluded_window_ids
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clone()
+        }
+    };
+    let mut last_shown = own_windows_recorded.load(Ordering::Acquire);
+    let initial_excluded = hidden(last_shown);
     // Keep SCK initialization, capture and teardown on the owning worker.
     // stop() joins even if it arrives while setup is still in progress.
     let (stream, recording_output, video_path, filter) = setup_sck_capture(
         &sampler_target,
         video_output_path,
         &initial_excluded,
+        !last_shown,
         started_at,
         &thread_offset,
     );
@@ -1185,10 +1196,8 @@ pub(super) fn run_sampler(sampler: Sampler) -> Option<PathBuf> {
     let mut last_excluded = initial_excluded.clone();
     let mut prompts = SystemPrompts::new(&sampler_target);
     while !thread_stopping.load(Ordering::Acquire) {
-        let mut cur_excluded = excluded_window_ids
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .clone();
+        let shown = own_windows_recorded.load(Ordering::Acquire);
+        let mut cur_excluded = hidden(shown);
         if prompts.check(started_at) {
             // Frames since the last look may show the prompt.
             thread_frames
@@ -1197,11 +1206,12 @@ pub(super) fn run_sampler(sampler: Sampler) -> Option<PathBuf> {
                 .drop_since(prompts.clear_until_ms);
         }
         cur_excluded.extend(&prompts.ids);
-        if cur_excluded != last_excluded {
+        if cur_excluded != last_excluded || shown != last_shown {
             last_excluded.clone_from(&cur_excluded);
+            last_shown = shown;
             prompts.hidden = sck_lists_windows(&prompts.ids);
             if let Some((new_filter, _)) =
-                build_sck_filter_and_config(&sampler_target, &cur_excluded)
+                build_sck_filter_and_config(&sampler_target, &cur_excluded, !shown)
             {
                 // The recording must hide the same windows as the candidates, or
                 // keyframes decoded from it could show Scrawl's own overlays.
@@ -1253,9 +1263,11 @@ pub(super) fn run_sampler(sampler: Sampler) -> Option<PathBuf> {
     video_path
 }
 
+/// `own_chrome` also leaves out this process's non-layer-0 windows (the host's HUDs and panels).
 fn build_sck_filter_and_config(
     target: &TargetInfo,
     excluded_window_ids: &[u32],
+    own_chrome: bool,
 ) -> Option<(SCContentFilter, SCStreamConfiguration)> {
     let content = match SCShareableContent::get() {
         Ok(c) => c,
@@ -1290,10 +1302,10 @@ fn build_sck_filter_and_config(
             .into_iter()
             .filter(|w| {
                 excluded_window_ids.contains(&w.window_id())
-                    || (w
-                        .owning_application()
-                        .as_ref()
-                        .is_some_and(|a| a.process_id() == our_pid)
+                    || (own_chrome
+                        && w.owning_application()
+                            .as_ref()
+                            .is_some_and(|a| a.process_id() == our_pid)
                         && w.window_layer() != 0)
             })
             .collect();
@@ -1349,6 +1361,7 @@ fn setup_sck_capture(
     target: &TargetInfo,
     video_output_path: Option<PathBuf>,
     excluded_window_ids: &[u32],
+    own_chrome: bool,
     started_at: Instant,
     video_offset_ms: &AtomicU64,
 ) -> (
@@ -1357,7 +1370,9 @@ fn setup_sck_capture(
     Option<PathBuf>,
     Option<SCContentFilter>,
 ) {
-    let Some((filter, config)) = build_sck_filter_and_config(target, excluded_window_ids) else {
+    let Some((filter, config)) =
+        build_sck_filter_and_config(target, excluded_window_ids, own_chrome)
+    else {
         return (None, None, None, None);
     };
 

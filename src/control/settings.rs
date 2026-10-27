@@ -371,6 +371,11 @@ const CAPTURE_KEYS: &[Key] = &[
         Kind::Json,
         "Where captures go among OpenCode sessions: Scrawl's router settings (autoSend, sites, apps, smartRouting, …) as a JSON object",
     ),
+    key(
+        "capture.show_overlays_in_recordings",
+        Kind::Bool,
+        "Let screen recordings, captures included, show Hex's capsules, ink, and HUD (for demos)",
+    ),
 ];
 #[cfg(hex_capture)]
 const RETENTION_DAYS: Kind = Kind::Integer { min: 1, max: 3650 };
