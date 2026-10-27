@@ -1142,6 +1142,23 @@ mod tests {
     }
 
     #[test]
+    fn every_language_has_exactly_one_recommended_model() {
+        for (language, _) in LANGUAGES {
+            let recommended: Vec<_> = choices_for_runtime(language)
+                .into_iter()
+                .filter(|choice| choice.recommendation == Recommendation::Recommended)
+                .map(|choice| choice.model.id)
+                .collect();
+            assert_eq!(recommended.len(), 1, "{language}: {recommended:?}");
+            assert_eq!(
+                recommended_selection(language).model,
+                recommended[0],
+                "{language}"
+            );
+        }
+    }
+
+    #[test]
     fn only_the_buffered_parakeet_artifact_is_marked_streaming() {
         // transcribe.cpp advertises streaming for Parakeet's chunked-attention
         // variants; Whisper, Qwen3-ASR, SenseVoice, Cohere, and the offline
