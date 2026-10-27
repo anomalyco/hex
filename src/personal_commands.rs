@@ -2575,6 +2575,12 @@ fn live_hosts() -> std::sync::MutexGuard<'static, std::collections::BTreeSet<u32
 }
 
 fn spawn_host(command: &mut Command) -> std::io::Result<Child> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
     let mut hosts = live_hosts();
     let child = command.spawn()?;
     hosts.insert(child.id());
