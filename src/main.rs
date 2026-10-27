@@ -244,7 +244,7 @@ enum Command {
     },
     /// Run the desktop app with local dictation.
     App {
-        /// Override the configured microphone preference order.
+        /// Capture from this microphone instead of the saved one or the system default.
         #[arg(long)]
         device: Option<String>,
         /// Arguments for a headless render, such as `--snap out.png --scene modes`.
@@ -253,7 +253,7 @@ enum Command {
     },
     /// Listen and transcribe until interrupted.
     Listen {
-        /// Override the configured microphone preference order.
+        /// Capture from this microphone instead of the saved one or the system default.
         #[arg(long)]
         device: Option<String>,
     },
@@ -328,7 +328,7 @@ enum Command {
         /// Corpus directory containing manifest.json and audio/*.wav.
         #[arg(default_value = "perf/moonshine-corpus")]
         directory: PathBuf,
-        /// Override the configured microphone preference order.
+        /// Capture from this microphone instead of the saved one or the system default.
         #[arg(long)]
         device: Option<String>,
         /// Evaluate every recorded fixture across every Moonshine profile.

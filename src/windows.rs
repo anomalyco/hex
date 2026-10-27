@@ -374,7 +374,7 @@ fn capture(
     let mut transcriber = LocalTranscriber::load(selection)?;
     let input = match device {
         Some(name) => AudioInput::open_matching(name)?,
-        None => AudioInput::open(&[])?,
+        None => AudioInput::open_system_default()?,
     };
     let sample_rate = input.sample_rate;
     let device_name = input.device_name.clone();

@@ -119,7 +119,7 @@ const KEYS: &[Key] = &[
     optional(
         "microphone",
         Kind::Text,
-        "Preferred microphone by name; none picks one automatically",
+        "Microphone by name; system-default (or none) follows the system's default input",
     ),
     key(
         "recording_audio_behavior",
@@ -675,6 +675,9 @@ fn parse(key: &Key, raw: &str, shortcuts: &ShortcutRules) -> Result<Value, Contr
     if key.optional && matches!(trimmed.to_ascii_lowercase().as_str(), "none" | "null" | "") {
         return Ok(Value::Null);
     }
+    if name == "microphone" && trimmed.eq_ignore_ascii_case("system-default") {
+        return Ok(Value::Null);
+    }
     match key.kind {
         Kind::Bool => match trimmed.to_ascii_lowercase().as_str() {
             "on" | "true" | "yes" | "1" => Ok(Value::Bool(true)),
@@ -1025,6 +1028,10 @@ mod tests {
         assert_eq!(change.settings.meetings.calendar.lead_minutes, 5);
         let change = apply(&settings, "ui_language", "none", false, &rules()).unwrap();
         assert_eq!(change.settings.ui_language, None);
+        let mut saved = settings.clone();
+        saved.microphone = Some("USB Mic".into());
+        let change = apply(&saved, "microphone", "system-default", false, &rules()).unwrap();
+        assert_eq!(change.settings.microphone, None);
         let change = apply(&settings, "history_retention", "month", false, &rules()).unwrap();
         assert_eq!(
             change.effects,

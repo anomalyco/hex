@@ -55,8 +55,10 @@ substitute for source inspection or a second roadmap.
 
 ## Architecture
 
-- `audio`: `cpal` device enumeration and timestamped mono float PCM delivery,
-  live selection, and bounded stream recovery.
+- `audio`: `cpal` device enumeration, input resolution (`--device`, the saved
+  microphone, else the system default, never Hex Microphone), the CoreAudio
+  default-input and device-list listeners, timestamped mono float PCM
+  delivery, live selection, and bounded stream recovery.
 - `moonshine`, `moonshine_lab`: the only Moonshine C adapter, the streaming
   recognizer, and the debug interactive/batch command-fixture evaluator.
 - `suppression`: the macOS event taps, shortcut suppression, and the
@@ -161,7 +163,7 @@ substitute for source inspection or a second roadmap.
   only.
 - `text_replacements`: phrase-boundary-aware compilation of configured text
   replacements applied longest-match-first to transcripts.
-- `config`: compiled commands, preferred input devices, and dictation profiles.
+- `config`: compiled commands and dictation profiles.
 - `context`: the foreground context snapshot and selectors shared by commands
   and modes, plus native macOS capture. Browser host is the domain concept;
   Brave AppleScript is the first macOS adapter and `windows_context` reads any
@@ -516,18 +518,28 @@ CoreAudio formats, AppleScript details, or event serialization.
 - Cohere's advertised encoder input capacity is not its recommended inference
   window. Both GGUF adapters cap Cohere chunks at the reference processor's
   35 seconds (or a stricter advertised bound); capture duration remains unlimited.
-- A selected microphone switches live only while capture is idle. Opening the
-  replacement must succeed before the old stream is dropped. If the persisted
-  device is unavailable at startup, log the failure and fall back through the
-  compiled preferred-device order to the macOS default. An explicit CLI
-  `--device` remains authoritative for that listener process. A runtime stream
-  failure cancels an incomplete capture (a programmatic one keeps the audio
-  delivered before the failure for its owner's `/finish`, which answers
-  `microphone-lost` when there is none), discards stale chunks, and retries the
-  same selection with bounded backoff; it must not require a settings change or
-  process restart. An initial open failure uses the same bounded recovery without
-  stopping the listener. Cancellation does not stop warm-microphone retries;
-  enabling release-while-idle stops them once capture is idle.
+- The microphone is either System default (`microphone` unset) or one saved
+  device. System default follows the OS default input live: macOS through
+  CoreAudio listeners on the default input and the device list (their callbacks
+  only bump a counter, never on the audio callback), Windows through the
+  default-input stream's change report, and Linux at the next stream open
+  (ALSA's default resolves when it opens). Hex never captures from Hex
+  Microphone: a Hex Microphone default stands in with the built-in microphone,
+  else the first real input, logged and shown in Settings. A saved microphone
+  that is missing or will not open falls back to the system default without
+  changing the setting, and Hex switches back when it returns. Any switch
+  (selection, default, or device list) happens only while capture is idle,
+  after the current capture, and opening the replacement must succeed before
+  the old stream is dropped; a device that resolves to the one already open is
+  kept. An explicit CLI `--device` remains authoritative for that listener
+  process and never falls back. A runtime stream failure cancels an incomplete
+  capture (a programmatic one keeps the audio delivered before the failure for
+  its owner's `/finish`, which answers `microphone-lost` when there is none),
+  discards stale chunks, and retries with bounded backoff; it must not
+  require a settings change or process restart. An initial open failure uses
+  the same bounded recovery without stopping the listener. Cancellation does
+  not stop warm-microphone retries; enabling release-while-idle stops them once
+  capture is idle.
 - Feedback volume is persisted from zero through one; zero disables tones.
   Volume changes apply immediately and preview one recording-start tone.
 - Launch at Login uses `SMAppService` for the signed main app. Treat both
@@ -977,11 +989,10 @@ optional Home Manager autostart. Native Linux PR checks do not replace real
 X11/Wayland, portal or keybinding shortcuts, microphone, and target-application
 smoke tests.
 
-Automatic microphone selection follows the compiled preference order in
-`src/config.rs`, then falls back to the macOS default. A saved microphone takes
-precedence while available; override everything with `--device`. The app bundle
-build requires Xcode 26 for Icon Composer compilation and a Developer ID signing
-identity. `scripts/release-app.sh prepare` builds the notarized and stapled
+Microphone selection is System default (the OS default input, live) unless a
+saved microphone is connected; override everything with `--device`. The app
+bundle build requires Xcode 26 for Icon Composer compilation and a Developer ID
+signing identity. `scripts/release-app.sh prepare` builds the notarized and stapled
 DMG and ZIP the Release workflow publishes. Hex publishes every platform to
 the Anomaly release service (`anomalyco/release`, `https://anoma.ly/release`;
 its dev stage, `dev.anoma.ly/release`, only tests the service itself, and Hex

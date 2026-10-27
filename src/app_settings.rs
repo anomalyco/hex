@@ -2930,6 +2930,20 @@ mod tests {
     }
 
     #[test]
+    fn an_unset_microphone_is_system_default_and_a_saved_one_is_kept() {
+        let automatic: AppSettings = serde_json::from_str(r#"{"microphone":null}"#).unwrap();
+        assert_eq!(automatic.microphone, None);
+        let absent: AppSettings = serde_json::from_str("{}").unwrap();
+        assert_eq!(absent.microphone, None);
+        let saved: AppSettings =
+            serde_json::from_str(r#"{"microphone":"Studio Display Microphone"}"#).unwrap();
+        assert_eq!(
+            saved.microphone.as_deref(),
+            Some("Studio Display Microphone")
+        );
+    }
+
+    #[test]
     fn microphone_policy_requires_explicit_combined_transitions() {
         let mut settings = AppSettings::default();
         settings.set_release_microphone_while_idle(true).unwrap();

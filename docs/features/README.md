@@ -396,9 +396,13 @@ General                                  // settings
 │   ├── Shortcut mode > How it works -> Hold/Toggle explainer modal (dictation.md)
 │   └── A row that hides or shows (Double-tap to lock, Advanced, a microphone error)
 │       -> Folds under a clip as the rows below slide over it; no fade in place
-├── Microphone -> Automatic or saved device
-│   ├── Automatic -> Compiled preferences, then the macOS default
-│   │   └── Default is a Bluetooth headset -> Built-in mic when present // avoids the call profile
+├── Microphone -> "System default (KIT PODS)" or a saved device   // settings.microphone
+│   ├── System default -> The OS default input, followed live      // a Bluetooth default is kept
+│   │   ├── Default changes -> Switch once capture is idle; new stream opens before the old drops
+│   │   └── Default is Hex Microphone -> Built-in mic, else first real input; row says so
+│   ├── Saved device missing -> System default stands in; row says "Not connected…"
+│   │   └── Device returns -> Switch back once idle; the setting never changes
+│   ├── Menu lists real inputs only                                // never Hex Microphone
 │   └── Open menu covers the controls beneath it; click elsewhere dismisses
 ├── Advanced ▸ (Dictation header) -> rows at the end of the Dictation card
 │   ├── Open while Release when idle or Double-tap only (Hold) is on
@@ -441,15 +445,21 @@ The script check does not prove subprocess avoidance or exercise Music, Spotify,
 or VLC through Automation. An opt-in native
 assertion smoke exercises IOKit without starting microphone capture.
 
-**Fixed after 2.1.22:** Automatic selection opened a Bluetooth headset when it was
-the macOS default input, which switches AirPods and similar headsets into a
-low-quality call profile for all audio, including music
-([#106](https://github.com/anomalyco/hex/issues/106),
-[#88](https://github.com/anomalyco/hex/issues/88)). It now prefers a built-in
-microphone and keeps the headset only when none exists; an explicitly saved
-headset is still opened. `automatic_input_prefers_built_in_over_a_bluetooth_default`
-in [audio.rs](../../src/audio.rs) covers the choice, not CoreAudio's transport
-report or a connected headset.
+**Changed after 2.3.1:** Automatic was a compiled preference list (Universal
+Audio Thunderbolt, Studio Display Microphone), then the macOS default with a
+Bluetooth default swapped for the built-in microphone (the 2.1.22 fix for
+[#106](https://github.com/anomalyco/hex/issues/106) and
+[#88](https://github.com/anomalyco/hex/issues/88)). That skipped a user's
+AirPods default, and Hex Microphone then passed the wrong microphone on to
+calls. Automatic is now System default: exactly the OS default input, followed
+live, so a Bluetooth default does open the headset (and its call profile); pick
+the built-in microphone to avoid that. Checks in [audio.rs](../../src/audio.rs):
+`inputs_resolve_to_the_selection_then_the_system_default`,
+`device_override_wins_and_never_falls_back`,
+`a_default_change_switches_only_while_capture_is_idle`, and
+`a_missing_selection_uses_the_default_until_it_returns`, with injected device
+lists and opens. Not verified: the CoreAudio listeners against a real default
+change, or Windows' default-change report on a real PC.
 
 **Fixed after 2.1.20:** through 2.1.20 the microphone menu was painted without
 occluding the panel, so hovering or clicking a device also reached the setting
@@ -570,7 +580,7 @@ or the driver installed                  // fun.hex-microphone; macOS
 │       ├── Dual waveform -> You vs Call hears with highlighted dictation span
 │       └── Explicit playback -> Play what call hears | Play your voice
 ├── Live microphone capture -> Raw audio to Hex transcription (unmodified)
-│   ├── Source -> Hex's dictation microphone (Automatic skips a Bluetooth headset), never a meeting's second stream
+│   ├── Source -> Hex's dictation microphone (System default follows the OS default, never Hex Microphone itself), never a meeting's second stream
 │   ├── Lock-free ring -> 48 kHz virtual sink -> Raised-cosine fade on intentional hold
 │   │   └── Not dictating -> bit-exact pass-through; non-48 kHz inputs resample continuously
 │   └── Ring underflows/overflows -> process.log each minute while an app reads it, and on sink stop
@@ -834,6 +844,8 @@ Linux beta                               // not macOS feature parity
 │       ├── No layer-shell -> `hex status` reports the HUD limitation
 │       └── No window loop (no GPU or display, `hex dictate`) -> no HUD
 ├── X11 -> No tray; status and sounds remain available
+├── Microphone -> System default or a saved device; `--device` overrides
+│   └── System default -> ALSA's default, resolved at each stream open // no live follow
 ├── Microphone failure -> Listener exits, not macOS automatic recovery
 │   └── Overload (Xrun) glitch -> Logged; not a failure
 └── Paste -> Retain transcript clipboard, not restore previous contents
@@ -846,6 +858,8 @@ Windows beta                             // x64 (Vulkan GPU) and ARM64 (CPU)
 ├── Launch again -> Running app shows its window; hidden (login) launch -> no-op
 ├── Ctrl+Space -> Hold or Toggle -> Capture -> Stream (GPU) -> Paste
 ├── Escape -> Cancel; a held modifier alone never ends or cancels a capture
+├── Microphone -> System default or a saved device
+│   └── Windows default input changes -> Switch once capture is idle // cpal's default-device report
 ├── Paste -> Waits for Shift, Alt, and Win; a held Ctrl is kept and harmless
 ├── Update staged (managed install) -> Tray, sidebar footer: Restart to update
 ├── Another release (unmanaged install) -> Tray, sidebar footer: Download update

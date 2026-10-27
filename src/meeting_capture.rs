@@ -217,11 +217,18 @@ struct MicrophoneSource {
     input: crate::audio::AudioInput,
     resample: To16k,
     last_audio: Instant,
+    selected: Option<String>,
+    /// The [`crate::audio::input_route_generation`] the input was resolved at.
+    route_generation: u64,
 }
 
 impl MicrophoneSource {
     fn open(selected: Option<&str>) -> Result<Self> {
-        let input = crate::audio::open_meeting_input(selected)?;
+        let route_generation = crate::audio::input_route_generation();
+        let crate::audio::Opened::Input(input) = crate::audio::open_meeting_input(selected, None)?
+        else {
+            unreachable!("nothing to keep");
+        };
         let resample = To16k::new(input.sample_rate)?;
         tracing::info!(
             device = input.device_name,
@@ -232,12 +239,57 @@ impl MicrophoneSource {
             input,
             resample,
             last_audio: Instant::now(),
+            selected: selected.map(str::to_owned),
+            route_generation,
         })
+    }
+
+    /// Follows a change of the system default, or the saved microphone
+    /// returning, by opening the input it now resolves to before dropping the
+    /// old one. A failed open keeps the current input.
+    fn follow_route(&mut self) {
+        let generation = crate::audio::input_route_generation();
+        if generation == self.route_generation {
+            return;
+        }
+        self.route_generation = generation;
+        let opened = crate::audio::open_meeting_input(
+            self.selected.as_deref(),
+            Some(&self.input.device_name),
+        );
+        let input = match opened {
+            Ok(crate::audio::Opened::Input(input)) => input,
+            Ok(crate::audio::Opened::Unchanged { selection_missing }) => {
+                self.input.selection_missing = selection_missing;
+                return;
+            }
+            Err(error) => {
+                tracing::warn!(%error, "could not switch the meeting microphone; keeping it");
+                return;
+            }
+        };
+        if input.sample_rate != self.resample.rate {
+            match To16k::new(input.sample_rate) {
+                Ok(resample) => self.resample = resample,
+                Err(error) => {
+                    tracing::warn!(%error, "could not switch the meeting microphone; keeping it");
+                    return;
+                }
+            }
+        }
+        tracing::info!(
+            from = %self.input.device_name,
+            to = %input.device_name,
+            "meeting microphone switched"
+        );
+        self.input = input;
+        self.last_audio = Instant::now();
     }
 }
 
 impl LiveSource for MicrophoneSource {
     fn poll(&mut self, sink: &PacketSink) -> std::result::Result<(), String> {
+        self.follow_route();
         match self.input.recv_timeout(POLL_INTERVAL) {
             crate::audio::AudioInputEvent::Chunk { samples, .. } => {
                 self.last_audio = Instant::now();

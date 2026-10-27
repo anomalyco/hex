@@ -172,7 +172,11 @@ listener restart, even after cancellation.
 ```ts
 initial open fails OR stream interrupts
   -> cancel incomplete capture + discard stale audio  // interrupted audio cannot return
-  -> bounded backoff -> reopen selected input         // warm microphone retries
+  -> bounded backoff -> reopen the resolved input     // warm microphone retries
+saved microphone missing or will not open
+  -> system default stands in, setting unchanged      // selection_missing
+  -> look again with bounded backoff, at once on a device-list change
+  -> found -> switch back once capture is idle
   -> replacement delivers new audio
   -> fresh capture -> release -> expected output
 
@@ -212,7 +216,7 @@ release-when-idle enabled + capture idle -> stop retries
 warm mode enabled during pending capture -> preserve capture; retry after cancellation
 
 cold open -> selected microphone fails to open
-  -> retry it twice, 100 ms apart -> then automatic selection (logged)
+  -> retry it twice, 100 ms apart -> then the system default (logged)
 ready stream fails while the press is held
   ├── before the 300 ms hold threshold -> back to pending, reopen for the same press
   │     ├── release before ready -> discard

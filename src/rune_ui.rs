@@ -568,7 +568,9 @@ pub(crate) struct Ui {
     pane: Pane,
     open: Option<Menu>,
     // General
-    microphones: Result<Vec<String>, String>,
+    microphones: Result<crate::audio::InputDevices, String>,
+    /// The [`crate::audio::input_route_generation`] `microphones` was listed at.
+    microphones_route: Option<u64>,
     confirm_release: bool,
     /// General's Advanced disclosure is open.
     advanced: bool,
@@ -647,7 +649,8 @@ impl Ui {
             service_settings: None,
             pane: Pane::General,
             open: None,
-            microphones: Ok(Vec::new()),
+            microphones: Ok(Default::default()),
+            microphones_route: None,
             confirm_release: false,
             advanced: false,
             capture: Capture::Idle,
@@ -1028,6 +1031,16 @@ fn poll(ui: &mut Ui, clock: f64, tx: &mut Tx) -> bool {
     changed |= ui.modes.poll(ui.live());
     changed |= modes::poll_chooser(ui);
     let login_unknown = ui.platform.login_item.is_none();
+    // General names what System default resolves to; list again when the
+    // OS reports an input change.
+    if ui.pane == Pane::General
+        && ui.live()
+        && ui.window.as_ref().is_some_and(rune::AppHandle::is_visible)
+        && ui.microphones_route != Some(crate::audio::input_route_generation())
+    {
+        settings::refresh_microphones(ui);
+        changed = true;
+    }
     changed |= ui.host.poll(&mut ui.platform);
     // macOS reports the login item moments after launch; its switch replaces
     // "Checking…" at once instead of fading in and reflowing the row.
@@ -1520,10 +1533,11 @@ const SCENES: &[Scene] = &[
     ("menus", |ui| {
         *ui = portal_fixture();
         ui.open = Some(Menu::Microphone);
-        ui.microphones = Ok(vec![
-            "Built-in Audio Analog Stereo".into(),
-            "Shure MV7".into(),
-        ]);
+        ui.microphones = Ok(crate::audio::InputDevices {
+            names: vec!["Built-in Audio Analog Stereo".into(), "Shure MV7".into()],
+            system_default: Some("Shure MV7".into()),
+            default_is_hex_microphone: false,
+        });
         ui.confirm_release = true;
     }),
     ("voice-action", |ui| {

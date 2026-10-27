@@ -98,14 +98,14 @@ fn shortcuts(settings: &AppSettings) -> (LinuxHotkey, HotkeyOptions) {
     (LinuxHotkey::from(&settings.dictation_hotkey), options)
 }
 
-/// Opens the microphone `settings` select, or keeps it released until a
-/// dictation starts.
+/// Opens `--device`, else the microphone `settings` select, else the system
+/// default, or keeps it released until a dictation starts.
 fn microphone_input(settings: &AppSettings, device: Option<&str>) -> RecoveringAudioInput {
-    let microphone = device.or(settings.microphone.as_deref());
+    let microphone = settings.microphone.as_deref();
     if settings.release_microphone_while_idle {
-        RecoveringAudioInput::closed(None, 0, microphone)
+        RecoveringAudioInput::closed(device, 0, microphone)
     } else {
-        RecoveringAudioInput::open(None, 0, microphone)
+        RecoveringAudioInput::open(device, 0, microphone)
     }
 }
 
@@ -293,7 +293,7 @@ pub(crate) fn run(
     let released_label = |settings: &AppSettings| {
         device
             .or(settings.microphone.as_deref())
-            .unwrap_or("microphone")
+            .unwrap_or("System default")
             .to_string()
     };
     let mut device_label = if audio_ready {

@@ -1,12 +1,13 @@
 use std::ops::Add;
-use std::sync::Mutex;
 #[cfg(target_os = "macos")]
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, SyncSender, TryRecvError};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 static AUDIO_SERVICE_RESTART_GENERATION: AtomicU64 = AtomicU64::new(0);
+static INPUT_ROUTE_GENERATION: AtomicU64 = AtomicU64::new(0);
 static STREAM_GLITCHED_AT: Mutex<Option<Instant>> = Mutex::new(None);
 
 /// How long ago a microphone stream last reported an overload it continued
@@ -26,8 +27,24 @@ pub fn audio_service_restart_generation() -> u64 {
     AUDIO_SERVICE_RESTART_GENERATION.load(Ordering::Acquire)
 }
 
+/// Advances when the OS's default input or its list of inputs changes, so
+/// an input following the system default, or standing in for a missing
+/// saved microphone, resolves again. macOS reports both through CoreAudio
+/// listeners; Windows reports a default change through its stream.
+pub fn input_route_generation() -> u64 {
+    INPUT_ROUTE_GENERATION.load(Ordering::Acquire)
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+fn notify_input_route_changed() {
+    INPUT_ROUTE_GENERATION.fetch_add(1, Ordering::AcqRel);
+}
+
+/// Registers the CoreAudio listeners behind [`audio_service_restart_generation`]
+/// and [`input_route_generation`]. Their callbacks run on CoreAudio's
+/// notification thread, never the audio callback, and only bump a counter.
 #[cfg(target_os = "macos")]
-fn ensure_coreaudio_restart_listener() {
+pub fn watch_input_devices() {
     use std::ffi::c_void;
     use std::sync::Once;
 
@@ -61,35 +78,47 @@ fn ensure_coreaudio_restart_listener() {
         0
     }
 
+    unsafe extern "C" fn on_inputs_changed(
+        _in_object_id: u32,
+        _in_number_addresses: u32,
+        _in_addresses: *const AudioObjectPropertyAddress,
+        _in_client_data: *mut c_void,
+    ) -> i32 {
+        notify_input_route_changed();
+        0
+    }
+
     static REGISTER: Once = Once::new();
     REGISTER.call_once(|| {
         const SYSTEM_OBJECT: u32 = 1;
         const SERVICE_RESTARTED_SELECTOR: u32 = u32::from_be_bytes(*b"srst");
+        const DEFAULT_INPUT_SELECTOR: u32 = u32::from_be_bytes(*b"dIn ");
+        const DEVICES_SELECTOR: u32 = u32::from_be_bytes(*b"dev#");
         const GLOBAL_SCOPE: u32 = u32::from_be_bytes(*b"glob");
-        let addr = AudioObjectPropertyAddress {
-            m_selector: SERVICE_RESTARTED_SELECTOR,
-            m_scope: GLOBAL_SCOPE,
-            m_element: 0,
-        };
-        let _ = unsafe {
-            AudioObjectAddPropertyListener(
-                SYSTEM_OBJECT,
-                &addr,
-                on_service_restarted,
-                std::ptr::null_mut(),
-            )
-        };
+        let listeners: [(u32, PropertyListenerProc); 3] = [
+            (SERVICE_RESTARTED_SELECTOR, on_service_restarted),
+            (DEFAULT_INPUT_SELECTOR, on_inputs_changed),
+            (DEVICES_SELECTOR, on_inputs_changed),
+        ];
+        for (selector, listener) in listeners {
+            let addr = AudioObjectPropertyAddress {
+                m_selector: selector,
+                m_scope: GLOBAL_SCOPE,
+                m_element: 0,
+            };
+            let status = unsafe {
+                AudioObjectAddPropertyListener(SYSTEM_OBJECT, &addr, listener, std::ptr::null_mut())
+            };
+            if status != 0 {
+                tracing::warn!(status, "could not watch CoreAudio input devices");
+            }
+        }
     });
 }
 
 use color_eyre::eyre::{Result, WrapErr, eyre};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{Device, SampleFormat, SizedSample, Stream, StreamConfig};
-
-#[cfg(target_os = "macos")]
-const AUTOMATIC_INPUT_DEVICE_PREFERENCES: &[&str] = crate::config::INPUT_DEVICES;
-#[cfg(any(target_os = "linux", target_os = "windows"))]
-const AUTOMATIC_INPUT_DEVICE_PREFERENCES: &[&str] = &[];
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub struct CaptureInstant(u64);
@@ -195,6 +224,9 @@ pub struct AudioInput {
     chunks: Receiver<(Vec<f32>, CaptureInstant)>,
     pub sample_rate: u32,
     pub device_name: String,
+    /// The saved microphone is missing or failed to open, so this input
+    /// stands in for it until it can be opened again.
+    pub selection_missing: bool,
     stream_errors: Receiver<String>,
     watch_service_restarts: bool,
     restart_generation: u64,
@@ -210,7 +242,27 @@ pub enum AudioInputEvent {
     StreamFailed(String),
 }
 
-type InputOpenResult = (u64, Result<AudioInput, String>);
+/// What resolving and opening the configured input found.
+pub enum Opened {
+    Input(AudioInput),
+    /// The input resolved to the device already open, which was kept.
+    Unchanged {
+        selection_missing: bool,
+    },
+}
+
+type InputOpenResult = (u64, Result<Opened, String>);
+
+/// What an open resolves: `--device`, the saved microphone, and the open
+/// device's name, which is kept rather than reopened when it resolves again.
+struct OpenRequest {
+    device_override: Option<String>,
+    selected_device: Option<String>,
+    fallback: SelectedFallback,
+    keep: Option<String>,
+}
+
+type Opener = Arc<dyn Fn(&OpenRequest) -> Result<Opened> + Send + Sync>;
 
 pub struct RecoveringAudioInput {
     input: Option<AudioInput>,
@@ -219,6 +271,12 @@ pub struct RecoveringAudioInput {
     active_revision: u64,
     recovery: MicrophoneRecovery,
     replacement: Option<Receiver<InputOpenResult>>,
+    /// The [`input_route_generation`] the open input was resolved at.
+    route_generation: u64,
+    /// The wait before looking again for a missing saved microphone.
+    selection_retry: Duration,
+    opener: Opener,
+    route_generation_source: fn() -> u64,
 }
 
 pub enum RecoveringAudioInputEvent {
@@ -239,19 +297,22 @@ const MICROPHONE_RETRY_MAX: Duration = Duration::from_secs(5);
 const SELECTED_MICROPHONE_ATTEMPTS: usize = 3;
 const SELECTED_MICROPHONE_RETRY_DELAY: Duration = Duration::from_millis(100);
 
-/// How an open treats a selected microphone that cannot be opened.
+/// How an open treats a saved microphone that is listed but cannot be
+/// opened. Either way the system default stands in, and the saved
+/// microphone is tried again with backoff.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum SelectedFallback {
-    /// Warm recovery keeps retrying the selection with backoff.
-    Never,
-    /// Startup falls back to automatic selection immediately.
+    /// Startup and meetings fall back at once.
     Immediate,
-    /// An on-demand cold open retries the selection, then falls back.
+    /// Other opens retry briefly first.
     AfterRetries,
 }
 
-#[derive(Clone, Copy, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum MicrophoneRecoveryReason {
+    /// The default input or the list of inputs changed, or a missing saved
+    /// microphone is due another look. The open input keeps running.
+    RouteChanged,
     SelectionChanged,
     StreamFailed,
 }
@@ -283,6 +344,22 @@ impl MicrophoneRecovery {
             if self.reason != Some(MicrophoneRecoveryReason::StreamFailed) {
                 self.reason = Some(MicrophoneRecoveryReason::SelectionChanged);
             }
+        }
+    }
+
+    /// Resolves the input again at `at`. A pending reopen or selection
+    /// change resolves it anyway, so it is left alone.
+    fn request_route_check(&mut self, at: Instant) {
+        match self.reason {
+            None => {
+                self.reason = Some(MicrophoneRecoveryReason::RouteChanged);
+                self.next_attempt = Some(at);
+                self.delay = MICROPHONE_RETRY_INITIAL;
+            }
+            Some(MicrophoneRecoveryReason::RouteChanged) => {
+                self.next_attempt = Some(self.next_attempt.map_or(at, |next| next.min(at)));
+            }
+            Some(_) => {}
         }
     }
 
@@ -327,6 +404,7 @@ impl AudioInput {
                 stream_errors,
                 sample_rate: 48_000,
                 device_name: "Test microphone".into(),
+                selection_missing: false,
                 watch_service_restarts: false,
                 restart_generation: audio_service_restart_generation(),
                 hex_microphone: crate::hex_microphone::capture_feed(48_000).1,
@@ -341,25 +419,30 @@ impl AudioInput {
         self.restart_generation = audio_service_restart_generation();
     }
 
-    pub fn open(device_queries: &[&str]) -> Result<Self> {
-        let host = cpal::default_host();
-        let device = find_device(&host, device_queries)?;
-        Self::open_device(device)
+    /// The OS's default input, or a real one standing in when the default is
+    /// Hex Microphone or missing.
+    pub fn open_system_default() -> Result<Self> {
+        match open_configured_input(&OpenRequest {
+            device_override: None,
+            selected_device: None,
+            fallback: SelectedFallback::Immediate,
+            keep: None,
+        })? {
+            Opened::Input(input) => Ok(input),
+            Opened::Unchanged { .. } => unreachable!("nothing to keep"),
+        }
     }
 
     pub fn open_named(name: &str) -> Result<Self> {
-        if crate::hex_microphone::is_hex_virtual_device_name(name) {
-            return Err(eyre!(
-                "Hex cannot capture from its own virtual microphone: {name}"
-            ));
-        }
         let host = cpal::default_host();
-        let device = host
-            .input_devices()
-            .wrap_err("could not enumerate input devices")?
-            .find(|device| device.to_string() == name)
-            .ok_or_else(|| eyre!("microphone is unavailable: {name}"))?;
-        Self::open_device(device)
+        let devices = input_devices_of(&host)?;
+        let names = device_names(&devices);
+        let plan =
+            resolve_input(Some(name), None, &names, None, |_| false).map_err(|e| eyre!(e))?;
+        let InputTarget::Named(index) = plan.target else {
+            unreachable!("an override resolves by name");
+        };
+        Self::open_device(devices[index].clone(), false)
     }
 
     #[cfg(any(target_os = "linux", target_os = "windows"))]
@@ -370,12 +453,15 @@ impl AudioInput {
             .wrap_err("could not enumerate input devices")?
             .find(|device| device_matches(device, query))
             .ok_or_else(|| eyre!("microphone is unavailable: {query}"))?;
-        Self::open_device(device)
+        Self::open_device(device, false)
     }
 
-    fn open_device(device: Device) -> Result<Self> {
+    /// Opens `device`. `follows_default` marks cpal's default-input handle,
+    /// whose Windows stream reports a default change as invalidation while
+    /// it keeps running on the old device.
+    fn open_device(device: Device, follows_default: bool) -> Result<Self> {
         #[cfg(target_os = "macos")]
-        ensure_coreaudio_restart_listener();
+        watch_input_devices();
         let restart_generation = audio_service_restart_generation();
         let device_name = device.to_string();
         let supported = device
@@ -387,6 +473,10 @@ impl AudioInput {
         let channels = usize::from(config.channels);
         let (sender, chunks) = mpsc::channel();
         let (error_sender, stream_errors) = mpsc::sync_channel(1);
+        let reporter = StreamErrorReporter {
+            sender: error_sender,
+            default_name: follows_default.then(|| device_name.clone()),
+        };
         let (feed, hex_microphone) = crate::hex_microphone::capture_feed(sample_rate);
 
         let stream = match sample_format {
@@ -395,7 +485,7 @@ impl AudioInput {
                 &config,
                 channels,
                 sender,
-                error_sender,
+                reporter.clone(),
                 feed,
                 |sample: f32| sample,
             )?,
@@ -404,7 +494,7 @@ impl AudioInput {
                 &config,
                 channels,
                 sender,
-                error_sender,
+                reporter.clone(),
                 feed,
                 |sample: i16| sample as f32 / i16::MAX as f32,
             )?,
@@ -413,7 +503,7 @@ impl AudioInput {
                 &config,
                 channels,
                 sender,
-                error_sender,
+                reporter.clone(),
                 feed,
                 |sample: u16| sample as f32 / 32768.0 - 1.0,
             )?,
@@ -428,6 +518,7 @@ impl AudioInput {
             chunks,
             sample_rate,
             device_name,
+            selection_missing: false,
             stream_errors,
             watch_service_restarts: true,
             restart_generation,
@@ -482,18 +573,26 @@ impl RecoveringAudioInput {
         selected_device: Option<&str>,
     ) -> Self {
         let mut input = Self::closed(device_override, selection_revision, selected_device);
-        let opened = open_configured_input(
-            device_override,
-            selected_device,
-            SelectedFallback::Immediate,
-        );
+        let opened = open_configured_input(&OpenRequest {
+            device_override: device_override.map(str::to_owned),
+            selected_device: selected_device.map(str::to_owned),
+            fallback: SelectedFallback::Immediate,
+            keep: None,
+        })
+        .and_then(|opened| match opened {
+            Opened::Input(input) => Ok(input),
+            Opened::Unchanged { .. } => Err(eyre!("nothing was open to keep")),
+        });
         input.finish_initial_open(opened, Instant::now());
         input
     }
 
     fn finish_initial_open(&mut self, opened: Result<AudioInput>, now: Instant) {
         match opened {
-            Ok(opened) => self.install(opened),
+            Ok(opened) => {
+                self.install(opened);
+                self.after_resolving(now);
+            }
             Err(error) => {
                 tracing::warn!(%error, "could not open dictation microphone at startup; retrying");
                 self.recovery.request_stream_recovery(now);
@@ -514,7 +613,25 @@ impl RecoveringAudioInput {
             active_revision: selection_revision,
             recovery: MicrophoneRecovery::default(),
             replacement: None,
+            route_generation: input_route_generation(),
+            selection_retry: MICROPHONE_RETRY_INITIAL,
+            opener: Arc::new(open_configured_input),
+            route_generation_source: input_route_generation,
         }
+    }
+
+    /// An input whose opens and route changes come from the test.
+    #[cfg(test)]
+    fn with_opener_for_test(
+        selected_device: Option<&str>,
+        route_generation: fn() -> u64,
+        opener: impl Fn(&OpenRequest) -> Result<Opened> + Send + Sync + 'static,
+    ) -> Self {
+        let mut input = Self::closed(None, 0, selected_device);
+        input.route_generation_source = route_generation;
+        input.route_generation = route_generation();
+        input.opener = Arc::new(opener);
+        input
     }
 
     /// An input whose startup open failed, without touching CoreAudio.
@@ -627,14 +744,23 @@ impl RecoveringAudioInput {
                 return RecoveringAudioInputEvent::Timeout;
             }
             match result {
-                Ok(replacement) if capture_idle || self.input.is_none() => {
+                Ok(Opened::Unchanged { selection_missing }) => {
+                    if let Some(input) = &mut self.input {
+                        input.selection_missing = selection_missing;
+                    }
+                    self.active_revision = opened_revision;
+                    self.recovery.recovered();
+                    self.after_resolving(now);
+                }
+                Ok(Opened::Input(replacement)) if capture_idle || self.input.is_none() => {
                     self.install(replacement);
                     self.active_revision = opened_revision;
                     self.recovery.recovered();
+                    self.after_resolving(now);
                     tracing::info!(device = %self.device_name(), "dictation microphone reopened");
                     return RecoveringAudioInputEvent::Reopened;
                 }
-                Ok(_) => {
+                Ok(Opened::Input(_)) => {
                     self.recovery.failed(now);
                 }
                 Err(error) => {
@@ -648,6 +774,14 @@ impl RecoveringAudioInput {
                         "could not reopen dictation microphone; retrying"
                     );
                 }
+            }
+        }
+        // A change while an open is in flight is seen once it finishes.
+        if self.input.is_some() && self.device_override.is_none() && self.replacement.is_none() {
+            let generation = (self.route_generation_source)();
+            if generation != self.route_generation {
+                self.route_generation = generation;
+                self.recovery.request_route_check(now);
             }
         }
         if (capture_idle || self.input.is_none())
@@ -701,24 +835,46 @@ impl RecoveringAudioInput {
             .recovery
             .target_revision
             .unwrap_or(self.active_revision);
-        let device_override = self.device_override.clone();
-        let selected_device = self.selected_device.clone();
-        let fallback = if self.input.is_none() {
-            SelectedFallback::AfterRetries
-        } else {
-            SelectedFallback::Never
+        // A failed stream is replaced even by the same device; a route or
+        // selection change keeps the open device when it resolves again.
+        let keep = self
+            .input
+            .as_ref()
+            .filter(|_| !self.recovery.blocks_audio())
+            .map(|input| input.device_name.clone());
+        let request = OpenRequest {
+            device_override: self.device_override.clone(),
+            selected_device: self.selected_device.clone(),
+            fallback: SelectedFallback::AfterRetries,
+            keep,
         };
+        self.route_generation = (self.route_generation_source)();
+        let opener = self.opener.clone();
         let (sender, receiver) = mpsc::sync_channel(1);
         std::thread::spawn(move || {
-            let result = open_configured_input(
-                device_override.as_deref(),
-                selected_device.as_deref(),
-                fallback,
-            )
-            .map_err(|error| error.to_string());
+            let result = opener(&request).map_err(|error| error.to_string());
             let _ = sender.send((revision, result));
         });
         self.replacement = Some(receiver);
+    }
+
+    /// While the open input stands in for a missing saved microphone, looks
+    /// for it again with bounded backoff; a device change looks at once.
+    fn after_resolving(&mut self, now: Instant) {
+        if self
+            .input
+            .as_ref()
+            .is_some_and(|input| input.selection_missing)
+        {
+            self.recovery
+                .request_route_check(now + self.selection_retry);
+            self.selection_retry = self
+                .selection_retry
+                .saturating_mul(2)
+                .min(MICROPHONE_RETRY_MAX);
+        } else {
+            self.selection_retry = MICROPHONE_RETRY_INITIAL;
+        }
     }
 
     fn poll_replacement(&mut self) -> Option<InputOpenResult> {
@@ -735,38 +891,177 @@ impl RecoveringAudioInput {
     }
 }
 
-fn open_configured_input(
+/// Which input an open resolves to, before anything opens.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum InputTarget {
+    /// `--device` or the saved microphone, by its index in the list.
+    Named(usize),
+    /// The OS's default input.
+    SystemDefault,
+    /// A real input standing in for a default that is Hex Microphone or
+    /// missing: the built-in microphone, else the first one listed.
+    StandIn(usize),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct InputPlan {
+    target: InputTarget,
+    /// A saved microphone is not listed, so this stands in for it.
+    selection_missing: bool,
+}
+
+/// Resolves the input Hex captures from: `--device` exactly as named, else
+/// the saved microphone while it is listed, else the system default. Hex
+/// never captures from its own virtual microphone, so a default that is Hex
+/// Microphone (or none) falls back to a real input.
+fn resolve_input(
     device_override: Option<&str>,
-    selected_device: Option<&str>,
-    fallback: SelectedFallback,
-) -> Result<AudioInput> {
-    if let Some(device) = device_override {
-        return AudioInput::open_named(device);
+    selected: Option<&str>,
+    names: &[String],
+    default: Option<&str>,
+    is_built_in: impl Fn(usize) -> bool,
+) -> std::result::Result<InputPlan, String> {
+    let is_hex = crate::hex_microphone::is_hex_virtual_device_name;
+    let position = |name: &str| names.iter().position(|listed| listed == name);
+    if let Some(name) = device_override {
+        if is_hex(name) {
+            return Err(format!(
+                "Hex cannot capture from its own virtual microphone: {name}"
+            ));
+        }
+        return position(name)
+            .map(|index| InputPlan {
+                target: InputTarget::Named(index),
+                selection_missing: false,
+            })
+            .ok_or_else(|| format!("microphone is unavailable: {name}"));
     }
-    let Some(device) = selected_device else {
-        return AudioInput::open(AUTOMATIC_INPUT_DEVICE_PREFERENCES);
+    let selection_missing = match selected.filter(|name| !is_hex(name)) {
+        Some(name) => match position(name) {
+            Some(index) => {
+                return Ok(InputPlan {
+                    target: InputTarget::Named(index),
+                    selection_missing: false,
+                });
+            }
+            None => true,
+        },
+        None => false,
+    };
+    if default.is_some_and(|name| !is_hex(name)) {
+        return Ok(InputPlan {
+            target: InputTarget::SystemDefault,
+            selection_missing,
+        });
+    }
+    let real = || (0..names.len()).filter(|&index| !is_hex(&names[index]));
+    real()
+        .find(|&index| is_built_in(index))
+        .or_else(|| real().next())
+        .map(|index| InputPlan {
+            target: InputTarget::StandIn(index),
+            selection_missing,
+        })
+        .ok_or_else(|| "no microphone is available".into())
+}
+
+fn input_devices_of(host: &cpal::Host) -> Result<Vec<Device>> {
+    Ok(host
+        .input_devices()
+        .wrap_err("could not enumerate input devices")?
+        .collect())
+}
+
+fn device_names(devices: &[Device]) -> Vec<String> {
+    devices.iter().map(ToString::to_string).collect()
+}
+
+/// Resolves and opens the input, or keeps the open one when it resolves to
+/// the same device. A listed saved microphone that will not open falls back
+/// to the system default.
+fn open_configured_input(request: &OpenRequest) -> Result<Opened> {
+    let host = cpal::default_host();
+    let devices = input_devices_of(&host)?;
+    let names = device_names(&devices);
+    let default = host.default_input_device();
+    let default_name = default.as_ref().map(ToString::to_string);
+    let resolve = |selected: Option<&str>| {
+        resolve_input(
+            request.device_override.as_deref(),
+            selected,
+            &names,
+            default_name.as_deref(),
+            |index| is_built_in(&devices[index]),
+        )
+        .map_err(|error| eyre!(error))
+    };
+    let open = |plan: InputPlan| -> Result<Opened> {
+        let (device, follows_default) = match plan.target {
+            InputTarget::Named(index) => (devices[index].clone(), false),
+            InputTarget::StandIn(index) => {
+                tracing::warn!(
+                    default = default_name.as_deref().unwrap_or("none"),
+                    using = %names[index],
+                    "the system default input is Hex Microphone or missing; using a real microphone"
+                );
+                (devices[index].clone(), false)
+            }
+            InputTarget::SystemDefault => (default.clone().expect("resolved default"), true),
+        };
+        let name = device.to_string();
+        if request.keep.as_deref() == Some(name.as_str()) {
+            return Ok(Opened::Unchanged {
+                selection_missing: plan.selection_missing,
+            });
+        }
+        let mut input = AudioInput::open_device(device, follows_default)?;
+        input.selection_missing = plan.selection_missing;
+        Ok(Opened::Input(input))
+    };
+    let plan = resolve(request.selected_device.as_deref())?;
+    if plan.selection_missing {
+        tracing::info!(
+            selected = request.selected_device.as_deref(),
+            "the saved microphone is not connected; using the system default"
+        );
+    }
+    let (Some(selected), InputTarget::Named(_), None) = (
+        request.selected_device.as_deref(),
+        plan.target,
+        request.device_override.as_deref(),
+    ) else {
+        return open(plan);
     };
     open_selected(
-        device,
-        fallback,
-        || AudioInput::open_named(device),
-        || AudioInput::open(AUTOMATIC_INPUT_DEVICE_PREFERENCES),
+        selected,
+        request.fallback,
+        || open(plan),
+        || {
+            let mut fallback = resolve(None)?;
+            fallback.selection_missing = true;
+            open(fallback)
+        },
         std::thread::sleep,
     )
 }
 
-/// Opens the microphone a meeting records: the saved selection while it is
-/// available, otherwise the automatic preference order.
+/// Opens the microphone a meeting records, resolved like dictation's, or
+/// keeps the open one named `keep` when it resolves to that again.
 #[cfg(target_os = "macos")]
-pub fn open_meeting_input(selected_device: Option<&str>) -> Result<AudioInput> {
-    open_configured_input(None, selected_device, SelectedFallback::Immediate)
+pub fn open_meeting_input(selected_device: Option<&str>, keep: Option<&str>) -> Result<Opened> {
+    open_configured_input(&OpenRequest {
+        device_override: None,
+        selected_device: selected_device.map(str::to_owned),
+        fallback: SelectedFallback::Immediate,
+        keep: keep.map(str::to_owned),
+    })
 }
 
 fn open_selected<T>(
     device: &str,
     fallback: SelectedFallback,
     mut open_selected: impl FnMut() -> Result<T>,
-    open_automatic: impl FnOnce() -> Result<T>,
+    open_default: impl FnOnce() -> Result<T>,
     mut sleep: impl FnMut(Duration),
 ) -> Result<T> {
     let attempts = if fallback == SelectedFallback::AfterRetries {
@@ -786,26 +1081,60 @@ fn open_selected<T>(
             }
         }
     };
-    if fallback == SelectedFallback::Never {
-        return Err(error);
-    }
-    tracing::warn!(%error, device, "selected microphone is unavailable; using automatic selection");
-    open_automatic()
+    tracing::warn!(%error, device, "selected microphone would not open; using the system default");
+    open_default()
 }
 
-pub fn input_device_names() -> Result<Vec<String>> {
+/// The inputs Settings offers, without Hex Microphone, and what System
+/// default currently resolves to.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct InputDevices {
+    pub names: Vec<String>,
+    /// The input System default captures from. Linux's ALSA default has no
+    /// useful name, so it is `None` there.
+    pub system_default: Option<String>,
+    /// The OS default is Hex Microphone, so `system_default` stands in.
+    pub default_is_hex_microphone: bool,
+}
+
+pub fn input_devices() -> Result<InputDevices> {
+    #[cfg(target_os = "macos")]
+    watch_input_devices();
     let host = cpal::default_host();
-    let mut names = host
-        .input_devices()
-        .wrap_err("could not enumerate input devices")?
-        .map(|device| device.to_string())
+    let devices = input_devices_of(&host)?;
+    let listed = device_names(&devices);
+    let default = host.default_input_device().map(|device| device.to_string());
+    let default_is_hex_microphone = default
+        .as_deref()
+        .is_some_and(crate::hex_microphone::is_hex_virtual_device_name);
+    let system_default = resolve_input(None, None, &listed, default.as_deref(), |index| {
+        is_built_in(&devices[index])
+    })
+    .ok()
+    .and_then(|plan| match plan.target {
+        InputTarget::SystemDefault => default.clone(),
+        InputTarget::Named(index) | InputTarget::StandIn(index) => Some(listed[index].clone()),
+    })
+    .filter(|_| cfg!(not(target_os = "linux")));
+    let mut names = listed
+        .into_iter()
         .filter(|name| !crate::hex_microphone::is_hex_virtual_device_name(name))
         .collect::<Vec<_>>();
     names.sort_by_key(|name| name.to_lowercase());
     names.dedup();
-    Ok(names)
+    Ok(InputDevices {
+        names,
+        system_default,
+        default_is_hex_microphone,
+    })
 }
 
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+pub fn input_device_names() -> Result<Vec<String>> {
+    input_devices().map(|devices| devices.names)
+}
+
+#[cfg(any(target_os = "linux", target_os = "windows"))]
 fn device_matches(device: &Device, query: &str) -> bool {
     device
         .to_string()
@@ -813,86 +1142,21 @@ fn device_matches(device: &Device, query: &str) -> bool {
         .contains(&query.to_lowercase())
 }
 
-fn find_device(host: &cpal::Host, queries: &[&str]) -> Result<Device> {
-    let devices: Vec<_> = host
-        .input_devices()
-        .wrap_err("could not enumerate input devices")?
-        .filter(|device| !crate::hex_microphone::is_hex_virtual_device_name(&device.to_string()))
-        .collect();
-    for query in queries {
-        if let Some(device) = devices.iter().find(|device| device_matches(device, query)) {
-            return Ok(device.clone());
-        }
-    }
-    let default = host
-        .default_input_device()
-        .filter(|device| !crate::hex_microphone::is_hex_virtual_device_name(&device.to_string()))
-        .or_else(|| devices.first().cloned())
-        .ok_or_else(|| {
-            eyre!(
-                "no preferred or default input device is available (preferred: {})",
-                queries.join(", ")
-            )
-        })?;
-    Ok(avoid_bluetooth_input(default, &devices))
-}
-
-#[cfg(target_os = "macos")]
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum InputTransport {
-    BuiltIn,
-    Bluetooth,
-    Other,
-}
-
-/// Opening a Bluetooth headset's microphone switches it into a low-quality
-/// call profile for all audio, so automatic selection prefers a built-in mic.
-#[cfg(target_os = "macos")]
-fn automatic_input_index(default: usize, transports: &[InputTransport]) -> usize {
-    if transports.get(default) != Some(&InputTransport::Bluetooth) {
-        return default;
-    }
-    transports
-        .iter()
-        .position(|transport| *transport == InputTransport::BuiltIn)
-        .unwrap_or(default)
-}
-
-#[cfg(target_os = "macos")]
-fn avoid_bluetooth_input(default: Device, devices: &[Device]) -> Device {
-    let default_id = default.id().ok();
-    let Some(default_index) = devices
-        .iter()
-        .position(|device| device.id().ok() == default_id)
-    else {
-        return default;
-    };
-    let transports = devices.iter().map(input_transport).collect::<Vec<_>>();
-    let index = automatic_input_index(default_index, &transports);
-    if index != default_index {
-        tracing::info!(
-            bluetooth = %devices[default_index],
-            selected = %devices[index],
-            "automatic microphone selection skipped a Bluetooth headset"
-        );
-    }
-    devices[index].clone()
-}
-
 #[cfg(any(target_os = "linux", target_os = "windows"))]
-fn avoid_bluetooth_input(default: Device, _devices: &[Device]) -> Device {
-    default
+fn is_built_in(_device: &Device) -> bool {
+    false
 }
 
+/// Whether CoreAudio reports `device` as built in, such as a MacBook's
+/// microphone.
 #[cfg(target_os = "macos")]
-fn input_transport(device: &Device) -> InputTransport {
+fn is_built_in(device: &Device) -> bool {
     use std::ffi::c_void;
     use std::ptr::NonNull;
 
     use objc2_core_audio::{
         AudioObjectGetPropertyData, AudioObjectID, AudioObjectPropertyAddress,
         AudioObjectPropertySelector, kAudioDevicePropertyTransportType,
-        kAudioDeviceTransportTypeBluetooth, kAudioDeviceTransportTypeBluetoothLE,
         kAudioDeviceTransportTypeBuiltIn, kAudioHardwarePropertyTranslateUIDToDevice,
         kAudioObjectPropertyElementMain, kAudioObjectPropertyScopeGlobal, kAudioObjectSystemObject,
     };
@@ -925,7 +1189,7 @@ fn input_transport(device: &Device) -> InputTransport {
     }
 
     let Ok(id) = device.id() else {
-        return InputTransport::Other;
+        return false;
     };
     let uid = CFString::from_str(id.id());
     let uid_ref: *const CFString = &*uid;
@@ -936,18 +1200,10 @@ fn input_transport(device: &Device) -> InputTransport {
         std::mem::size_of::<*const CFString>() as u32,
     )
     .filter(|device_id| *device_id != 0) else {
-        return InputTransport::Other;
+        return false;
     };
-    match read_u32(device_id, kAudioDevicePropertyTransportType, None, 0) {
-        Some(transport) if transport == kAudioDeviceTransportTypeBuiltIn => InputTransport::BuiltIn,
-        Some(transport)
-            if transport == kAudioDeviceTransportTypeBluetooth
-                || transport == kAudioDeviceTransportTypeBluetoothLE =>
-        {
-            InputTransport::Bluetooth
-        }
-        _ => InputTransport::Other,
-    }
+    read_u32(device_id, kAudioDevicePropertyTransportType, None, 0)
+        == Some(kAudioDeviceTransportTypeBuiltIn)
 }
 
 fn mono<T>(samples: &[T], channels: usize, convert: impl Fn(&T) -> f32) -> Vec<f32> {
@@ -955,6 +1211,37 @@ fn mono<T>(samples: &[T], channels: usize, convert: impl Fn(&T) -> f32) -> Vec<f
         .chunks(channels)
         .map(|frame| frame.iter().map(&convert).sum::<f32>() / channels as f32)
         .collect()
+}
+
+/// Where a stream reports errors to the audio owner.
+#[derive(Clone)]
+struct StreamErrorReporter {
+    sender: SyncSender<String>,
+    /// The device's name when the stream was opened on cpal's default-input
+    /// handle.
+    default_name: Option<String>,
+}
+
+impl StreamErrorReporter {
+    fn report(&self, error: cpal::Error) {
+        // WASAPI reports a default-input change as invalidation, yet the
+        // stream keeps capturing the old device. Hex switches once capture is
+        // idle rather than failing a recording.
+        #[cfg(target_os = "windows")]
+        if error.kind() == cpal::ErrorKind::StreamInvalidated
+            && let Some(name) = &self.default_name
+            && cpal::default_host()
+                .default_input_device()
+                .is_some_and(|device| device.to_string() != *name)
+        {
+            tracing::info!(from = %name, "the default microphone changed");
+            notify_input_route_changed();
+            return;
+        }
+        #[cfg(not(target_os = "windows"))]
+        let _ = &self.default_name;
+        report_stream_error(&self.sender, error);
+    }
 }
 
 fn report_stream_error(sender: &SyncSender<String>, error: cpal::Error) {
@@ -980,7 +1267,7 @@ fn build_stream<T: SizedSample>(
     config: &StreamConfig,
     channels: usize,
     sender: Sender<(Vec<f32>, CaptureInstant)>,
-    error_sender: SyncSender<String>,
+    reporter: StreamErrorReporter,
     mut feed: crate::hex_microphone::CaptureFeed,
     convert: impl Fn(T) -> f32 + Send + 'static,
 ) -> Result<Stream> {
@@ -994,7 +1281,7 @@ fn build_stream<T: SizedSample>(
                 feed.push(&mono_samples);
                 let _ = sender.send((mono_samples, captured_through));
             },
-            move |error| report_stream_error(&error_sender, error),
+            move |error| reporter.report(error),
             None,
         )
         .wrap_err_with(|| format!("could not open {} microphone stream", T::FORMAT))
@@ -1014,17 +1301,223 @@ fn captured_through(
 mod tests {
     use super::*;
 
-    #[cfg(target_os = "macos")]
-    #[test]
-    fn automatic_input_prefers_built_in_over_a_bluetooth_default() {
-        use InputTransport::{Bluetooth, BuiltIn, Other};
+    fn listed(names: &[&str]) -> Vec<String> {
+        names.iter().map(|name| (*name).to_owned()).collect()
+    }
 
-        assert_eq!(automatic_input_index(1, &[BuiltIn, Bluetooth]), 0);
-        assert_eq!(automatic_input_index(0, &[Bluetooth, Other, BuiltIn]), 2);
-        // Non-Bluetooth defaults, such as USB microphones, are kept.
-        assert_eq!(automatic_input_index(1, &[BuiltIn, Other]), 1);
-        // Without a built-in microphone the Bluetooth default is still used.
-        assert_eq!(automatic_input_index(0, &[Bluetooth, Other]), 0);
+    #[test]
+    fn inputs_resolve_to_the_selection_then_the_system_default() {
+        use InputTarget::{Named, StandIn, SystemDefault};
+        let names = listed(&[
+            "Hex Microphone",
+            "KIT PODS",
+            "MacBook Pro Microphone",
+            "USB Mic",
+        ]);
+        let built_in = |index: usize| index == 2;
+        let plan = |selected, default| resolve_input(None, selected, &names, default, built_in);
+        let found = |target, selection_missing| {
+            Ok(InputPlan {
+                target,
+                selection_missing,
+            })
+        };
+
+        // A listed saved microphone wins over the default.
+        assert_eq!(
+            plan(Some("USB Mic"), Some("KIT PODS")),
+            found(Named(3), false)
+        );
+        // System default follows the OS default, even a Bluetooth headset.
+        assert_eq!(plan(None, Some("KIT PODS")), found(SystemDefault, false));
+        // A missing saved microphone stands in with the default.
+        assert_eq!(
+            plan(Some("Studio Display Microphone"), Some("KIT PODS")),
+            found(SystemDefault, true)
+        );
+        // A Hex Microphone default never loops back: the built-in mic stands in.
+        assert_eq!(plan(None, Some("Hex Microphone")), found(StandIn(2), false));
+        assert_eq!(
+            plan(Some("Gone"), Some("Hex Microphone")),
+            found(StandIn(2), true)
+        );
+        // Without a built-in mic or any default, the first real input stands in.
+        let no_built_in = resolve_input(None, None, &names, Some("Hex Microphone"), |_| false);
+        assert_eq!(no_built_in, found(StandIn(1), false));
+        assert_eq!(plan(None, None), found(StandIn(2), false));
+        // A saved Hex Microphone is never captured from.
+        assert_eq!(
+            plan(Some("Hex Microphone"), Some("KIT PODS")),
+            found(SystemDefault, false)
+        );
+        // No real inputs at all.
+        assert_eq!(
+            resolve_input(
+                None,
+                None,
+                &listed(&["Hex Microphone"]),
+                Some("Hex Microphone"),
+                built_in
+            ),
+            Err("no microphone is available".into())
+        );
+        assert_eq!(
+            resolve_input(None, Some("USB Mic"), &[], None, built_in),
+            Err("no microphone is available".into())
+        );
+    }
+
+    #[test]
+    fn device_override_wins_and_never_falls_back() {
+        let names = listed(&["Hex Microphone", "KIT PODS", "USB Mic"]);
+        let plan = |device_override| {
+            resolve_input(
+                device_override,
+                Some("KIT PODS"),
+                &names,
+                Some("KIT PODS"),
+                |_| false,
+            )
+        };
+
+        assert_eq!(
+            plan(Some("USB Mic")),
+            Ok(InputPlan {
+                target: InputTarget::Named(2),
+                selection_missing: false,
+            })
+        );
+        assert_eq!(
+            plan(Some("Missing Mic")),
+            Err("microphone is unavailable: Missing Mic".into())
+        );
+        assert!(
+            plan(Some("Hex Microphone"))
+                .unwrap_err()
+                .contains("its own virtual microphone")
+        );
+    }
+
+    static TEST_ROUTE_GENERATION: AtomicU64 = AtomicU64::new(0);
+
+    fn test_route_generation() -> u64 {
+        TEST_ROUTE_GENERATION.load(Ordering::Acquire)
+    }
+
+    /// Polls until any open the input starts has finished, returning the
+    /// last event.
+    fn settle(input: &mut RecoveringAudioInput, capture_idle: bool) -> RecoveringAudioInputEvent {
+        let mut event = input.recv_timeout(Duration::ZERO, capture_idle);
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while input.is_opening() && Instant::now() < deadline {
+            event = input.recv_timeout(Duration::from_millis(1), capture_idle);
+        }
+        event
+    }
+
+    fn named_input(name: &str) -> AudioInput {
+        let (mut input, samples) = AudioInput::channel_for_test();
+        // A dropped sender reads as a failed stream.
+        std::mem::forget(samples);
+        input.device_name = name.into();
+        input
+    }
+
+    #[test]
+    fn a_default_change_switches_only_while_capture_is_idle() {
+        let default = Arc::new(Mutex::new("KIT PODS".to_owned()));
+        let opener_default = default.clone();
+        let mut input = RecoveringAudioInput::with_opener_for_test(
+            None,
+            test_route_generation,
+            move |request| {
+                let name = opener_default.lock().unwrap().clone();
+                if request.keep.as_deref() == Some(name.as_str()) {
+                    return Ok(Opened::Unchanged {
+                        selection_missing: false,
+                    });
+                }
+                Ok(Opened::Input(named_input(&name)))
+            },
+        );
+        input.finish_initial_open(Ok(named_input("KIT PODS")), Instant::now());
+
+        // The OS default changes during a recording: nothing opens yet.
+        *default.lock().unwrap() = "MacBook Pro Microphone".into();
+        TEST_ROUTE_GENERATION.fetch_add(1, Ordering::AcqRel);
+        assert!(matches!(
+            settle(&mut input, false),
+            RecoveringAudioInputEvent::Timeout
+        ));
+        assert!(!input.is_opening());
+        assert_eq!(input.device_name(), "KIT PODS");
+
+        // Once capture is idle, the new default replaces the old one.
+        assert!(matches!(
+            settle(&mut input, true),
+            RecoveringAudioInputEvent::Reopened
+        ));
+        assert_eq!(input.device_name(), "MacBook Pro Microphone");
+
+        // A device change that leaves the default alone keeps the stream.
+        TEST_ROUTE_GENERATION.fetch_add(1, Ordering::AcqRel);
+        assert!(matches!(
+            settle(&mut input, true),
+            RecoveringAudioInputEvent::Timeout
+        ));
+        assert!(input.recovery.reason.is_none());
+        assert_eq!(input.device_name(), "MacBook Pro Microphone");
+    }
+
+    #[test]
+    fn a_missing_selection_uses_the_default_until_it_returns() {
+        let connected = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let opener_connected = connected.clone();
+        let mut input = RecoveringAudioInput::with_opener_for_test(
+            Some("USB Mic"),
+            || 0,
+            move |request| {
+                let (name, selection_missing) = if opener_connected.load(Ordering::Acquire) {
+                    ("USB Mic", false)
+                } else {
+                    ("KIT PODS", true)
+                };
+                if request.keep.as_deref() == Some(name) {
+                    return Ok(Opened::Unchanged { selection_missing });
+                }
+                let mut opened = named_input(name);
+                opened.selection_missing = selection_missing;
+                Ok(Opened::Input(opened))
+            },
+        );
+        let mut standing_in = named_input("KIT PODS");
+        standing_in.selection_missing = true;
+        let started = Instant::now();
+        input.finish_initial_open(Ok(standing_in), started);
+        assert_eq!(
+            input.recovery.next_attempt,
+            Some(started + MICROPHONE_RETRY_INITIAL)
+        );
+
+        // Still missing: the default keeps running and the next look backs off.
+        input.recovery.next_attempt = Some(Instant::now());
+        assert!(matches!(
+            settle(&mut input, true),
+            RecoveringAudioInputEvent::Timeout
+        ));
+        assert_eq!(input.device_name(), "KIT PODS");
+        assert_eq!(input.selection_retry, MICROPHONE_RETRY_INITIAL * 4);
+
+        connected.store(true, Ordering::Release);
+        input.recovery.next_attempt = Some(Instant::now());
+        assert!(matches!(
+            settle(&mut input, true),
+            RecoveringAudioInputEvent::Reopened
+        ));
+        assert_eq!(input.device_name(), "USB Mic");
+        assert!(!input.input.as_ref().unwrap().selection_missing);
+        assert!(input.recovery.next_attempt.is_none());
+        assert_eq!(input.selected_device.as_deref(), Some("USB Mic"));
     }
 
     #[cfg(target_os = "macos")]
@@ -1095,10 +1588,6 @@ mod tests {
         assert_eq!(
             open(SelectedFallback::Immediate, 1),
             (Ok("automatic"), 1, 0)
-        );
-        assert_eq!(
-            open(SelectedFallback::Never, 1),
-            (Err("device is waking".into()), 1, 0)
         );
     }
 
@@ -1176,7 +1665,7 @@ mod tests {
 
         let (sender, receiver) = mpsc::channel();
         input.replacement = Some(receiver);
-        sender.send((3, Ok(replacement))).unwrap();
+        sender.send((3, Ok(Opened::Input(replacement)))).unwrap();
         assert!(matches!(
             input.recv_timeout(Duration::ZERO, true),
             RecoveringAudioInputEvent::Reopened
@@ -1195,7 +1684,7 @@ mod tests {
         let (sender, receiver) = mpsc::channel();
         input.replacement = Some(receiver);
         let (opened, samples) = AudioInput::channel_for_test();
-        sender.send((3, Ok(opened))).unwrap();
+        sender.send((3, Ok(Opened::Input(opened)))).unwrap();
 
         assert!(matches!(
             input.recv_timeout(Duration::ZERO, true),
@@ -1308,7 +1797,7 @@ mod tests {
         let (sender, receiver) = mpsc::channel();
         input.replacement = Some(receiver);
         let (reopened, samples_after) = AudioInput::channel_for_test();
-        sender.send((1, Ok(reopened))).unwrap();
+        sender.send((1, Ok(Opened::Input(reopened)))).unwrap();
 
         assert!(matches!(
             input.recv_timeout(Duration::ZERO, true),

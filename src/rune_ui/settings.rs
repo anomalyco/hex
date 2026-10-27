@@ -368,9 +368,18 @@ fn sound_volume_index(settings: &AppSettings) -> usize {
 
 pub(super) fn toggle_menu(ui: &mut Ui, menu: Menu) {
     ui.open = (ui.open != Some(menu)).then_some(menu);
-    if ui.open == Some(Menu::Microphone) && !matches!(ui.service, Service::Fixture(_)) {
-        ui.microphones = crate::audio::input_device_names().map_err(|error| error.to_string());
+    if ui.open == Some(Menu::Microphone) {
+        refresh_microphones(ui);
     }
+}
+
+/// Lists the microphones again and what System default resolves to.
+pub(super) fn refresh_microphones(ui: &mut Ui) {
+    if matches!(ui.service, Service::Fixture(_)) {
+        return;
+    }
+    ui.microphones_route = Some(crate::audio::input_route_generation());
+    ui.microphones = crate::audio::input_devices().map_err(|error| error.to_string());
 }
 
 pub(super) fn error_notes(p: Paint, error: &str) -> [El; 2] {
@@ -791,20 +800,40 @@ fn dictation_section(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
         )
         .into(),
     );
+    let listed = ui.microphones.as_ref().ok();
+    let system_default = match listed.and_then(|devices| devices.system_default.as_deref()) {
+        Some(name) => tr_fill("System default ({})", name),
+        None => tr("System default").into(),
+    };
     let microphone = settings
         .microphone
         .clone()
-        .unwrap_or_else(|| tr("Automatic").into());
+        .unwrap_or_else(|| system_default.clone());
+    // Only a list that names inputs can tell a saved microphone is missing.
+    let microphone_note = listed.and_then(|devices| match &settings.microphone {
+        Some(saved) if !devices.names.is_empty() && !devices.names.contains(saved) => {
+            Some(tr("Not connected, so Hex uses the system default").to_owned())
+        }
+        None if devices.default_is_hex_microphone => {
+            devices.system_default.as_deref().map(|name| {
+                tr_fill(
+                    "Hex Microphone is the system default, so Hex listens to {}",
+                    name,
+                )
+            })
+        }
+        _ => None,
+    });
     let mut devices = vec![Choice {
-        label: tr("Automatic").into(),
+        label: system_default,
         selected: settings.microphone.is_none(),
         choose: Box::new(|ui: &mut Ui| {
             ui.open = None;
             ui.update(|settings| settings.microphone = None);
         }),
     }];
-    if let Ok(names) = &ui.microphones {
-        devices.extend(names.iter().map(|device| {
+    if let Ok(listed) = &ui.microphones {
+        devices.extend(listed.names.iter().map(|device| {
             let name = device.clone();
             Choice {
                 label: device.clone(),
@@ -822,7 +851,7 @@ fn dictation_section(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
             p,
             "microphone",
             tr("Microphone"),
-            None,
+            microphone_note.as_deref(),
             select(
                 p,
                 "microphone-control",

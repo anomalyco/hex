@@ -298,6 +298,8 @@ an unsaved edit.
 
 - Booleans take `on`/`off`, `true`/`false`, `yes`/`no`, or `1`/`0`.
 - Optional settings take `none` to clear them.
+- `microphone` takes a device name exactly as Settings lists it, or
+  `system-default` (or `none`) to follow the OS default input.
 - Shortcuts take text such as `option`, `right-command`, `option+shift+v`,
   `control+space`, `fn`, or `f5`. Key names resolve on the active keyboard
   layout, the OS's rules for Settings' recorder apply, and a binding another
