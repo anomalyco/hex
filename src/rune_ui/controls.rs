@@ -19,8 +19,8 @@ pub(super) const DESCRIPTION: TextStyle = TextStyle::new(12.0, 440.0).lh(16.0);
 const ROW_HEIGHT: f32 = 44.0;
 const ROW_HEIGHT_DESCRIBED: f32 = 56.0;
 const SELECT_WIDTH: f32 = 220.0;
-/// The microphone field, wide enough for "System default (Studio Display
-/// Microphone)".
+/// The microphone field, wide enough for "Studio Display Microphone" and
+/// a faint "System default".
 pub(super) const DEVICE_SELECT_WIDTH: f32 = 320.0;
 /// Narrower than this, a row moves its control below the copy instead of
 /// squeezing the description to a word per line (tiling desktops ignore
@@ -341,6 +341,8 @@ pub(super) fn segmented_tx(
 /// One choice of a [`select`].
 pub(super) struct Choice {
     pub(super) label: String,
+    /// Faint text after the label, such as what a choice resolves to.
+    pub(super) detail: Option<String>,
     pub(super) selected: bool,
     pub(super) choose: Box<dyn Fn(&mut Ui)>,
 }
@@ -355,29 +357,44 @@ pub(super) fn select(
     toggle: impl Fn(&mut Ui) + 'static,
     layer: &mut Vec<El>,
 ) -> El {
-    select_sized(p, key, label, open, choices, toggle, layer, SELECT_WIDTH)
+    select_sized(
+        p,
+        key,
+        label,
+        None,
+        open,
+        choices,
+        toggle,
+        layer,
+        SELECT_WIDTH,
+    )
 }
 
 /// A [`select`] `width` points wide, for labels such as device names that
-/// would truncate at the usual width.
+/// would truncate at the usual width. A `detail` follows the field's label
+/// in faint text.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn select_sized(
     p: Paint,
     key: &str,
     label: &str,
+    detail: Option<&str>,
     open: bool,
     choices: Vec<Choice>,
     toggle: impl Fn(&mut Ui) + 'static,
     layer: &mut Vec<El>,
     width: f32,
 ) -> El {
-    let trigger = Select::new::<&str>(format!("{key}-field"), &[])
-        .appearance(SelectAppearance::Field)
-        .width(width)
-        .current(Some(label))
-        .open(open)
-        .on_toggle(toggle)
-        .trigger(p.k);
+    let trigger = match detail {
+        None => Select::new::<&str>(format!("{key}-field"), &[])
+            .appearance(SelectAppearance::Field)
+            .width(width)
+            .current(Some(label))
+            .open(open)
+            .on_toggle(toggle)
+            .trigger(p.k),
+        Some(detail) => detailed_field(p, key, label, detail, open, width).on_press(toggle),
+    };
     let mut menu = Menu::new(key)
         .trigger(trigger)
         .placement(Placement::BottomEnd)
@@ -386,13 +403,93 @@ pub(super) fn select_sized(
         .open(open)
         .on_close(|ui: &mut Ui| ui.open = None);
     for choice in choices {
-        menu = menu.item(
-            MenuItem::new(choice.label)
-                .checked(choice.selected)
-                .on_select(move |ui: &mut Ui| (choice.choose)(ui)),
-        );
+        let mut item = MenuItem::new(choice.label).checked(choice.selected);
+        if let Some(detail) = choice.detail {
+            item = item.shortcut(detail);
+        }
+        menu = menu.item(item.on_select(move |ui: &mut Ui| (choice.choose)(ui)));
     }
     menu.build(p.k, layer)
+}
+
+/// The kit's Field select trigger with a faint `detail` after its label,
+/// which the kit's `Select` cannot show.
+fn detailed_field(p: Paint, key: &str, label: &str, detail: &str, open: bool, width: f32) -> El {
+    let c = &p.k.c;
+    let chevron = if open {
+        p.k.glyph.chevron_up
+    } else {
+        p.k.glyph.chevron_down
+    };
+    let mut field = row()
+        .key(format!("{key}-field-trigger"))
+        .role("combobox")
+        .label(format!("{label}, {detail}"))
+        .center_y()
+        .focusable(true)
+        .focus_ring(1.0, 0.0, c.border_focus)
+        .w(width)
+        .h(28.0)
+        .pr(6.0)
+        .gap(8.0)
+        .radius(p.k.radius.md)
+        .fill(if open {
+            source_over(c.hover, c.bg_base)
+        } else {
+            c.bg_base
+        })
+        .gradient(p.k.light(0.02), p.k.light(0.0))
+        .child(
+            row()
+                .key("value")
+                .grow(1.0)
+                .shrink()
+                .pl(8.0)
+                .gap(6.0)
+                .center_y()
+                .child(
+                    text(label)
+                        .key("label")
+                        .font(p.k.ty.ui_compact)
+                        .color(c.text_base)
+                        .truncate(),
+                )
+                .child(
+                    text(detail)
+                        .key("detail")
+                        .font(p.k.ty.ui_compact)
+                        .color(p.faint())
+                        .shrink()
+                        .truncate(),
+                ),
+        )
+        .child(
+            el().size(20.0, 20.0)
+                .center()
+                .child(rune::icon(chevron, 16.0).key("chevron").color(c.icon_muted)),
+        );
+    for shadow in p.k.shadow_layers(&p.k.elevation.button_neutral) {
+        field = field.box_shadow(shadow);
+    }
+    if !open {
+        field = field.hover(c.hover);
+    }
+    field
+}
+
+/// Source-over of straight-alpha colours, for a forced hover fill.
+fn source_over(top: Color, bottom: Color) -> Color {
+    let a = top.a + bottom.a * (1.0 - top.a);
+    if a <= 0.0 {
+        return Color::TRANSPARENT;
+    }
+    let mix = |t: f32, b: f32| (t * top.a + b * bottom.a * (1.0 - top.a)) / a;
+    Color {
+        r: mix(top.r, bottom.r),
+        g: mix(top.g, bottom.g),
+        b: mix(top.b, bottom.b),
+        a,
+    }
 }
 
 #[derive(Clone, Copy, PartialEq)]

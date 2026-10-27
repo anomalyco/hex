@@ -577,6 +577,8 @@ pub(crate) struct Ui {
     /// properties, which can block, so it runs off the UI thread.
     microphones_listing:
         Option<std::sync::mpsc::Receiver<Result<crate::audio::InputDevices, String>>>,
+    /// How the field names System default; only scenes change it.
+    microphone_label: settings::MicrophoneLabel,
     confirm_release: bool,
     /// General's Advanced disclosure is open.
     advanced: bool,
@@ -659,6 +661,7 @@ impl Ui {
             microphones_route: None,
             microphones_listed_at: 0.0,
             microphones_listing: None,
+            microphone_label: settings::MicrophoneLabel::default(),
             confirm_release: false,
             advanced: false,
             capture: Capture::Idle,
@@ -1678,6 +1681,27 @@ const SCENES: &[Scene] = &[
         ui.settings.microphone = Some("Shure MV7".into());
         ui.open = Some(Menu::Microphone);
     }),
+    // The microphone label alternatives: a, b, c by `MicrophoneLabel`,
+    // following the default or with a saved microphone unplugged, closed
+    // or with the menu open.
+    ("mic-label-a", |ui| mic_label(ui, 0, false, false)),
+    ("mic-label-a-menu", |ui| mic_label(ui, 0, false, true)),
+    ("mic-label-a-missing", |ui| mic_label(ui, 0, true, false)),
+    ("mic-label-a-missing-menu", |ui| {
+        mic_label(ui, 0, true, true)
+    }),
+    ("mic-label-b", |ui| mic_label(ui, 1, false, false)),
+    ("mic-label-b-menu", |ui| mic_label(ui, 1, false, true)),
+    ("mic-label-b-missing", |ui| mic_label(ui, 1, true, false)),
+    ("mic-label-b-missing-menu", |ui| {
+        mic_label(ui, 1, true, true)
+    }),
+    ("mic-label-c", |ui| mic_label(ui, 2, false, false)),
+    ("mic-label-c-menu", |ui| mic_label(ui, 2, false, true)),
+    ("mic-label-c-missing", |ui| mic_label(ui, 2, true, false)),
+    ("mic-label-c-missing-menu", |ui| {
+        mic_label(ui, 2, true, true)
+    }),
     ("mac-settings-vocabulary", |ui| {
         *ui = mac_fixture();
         vocabulary::fixture(ui, true);
@@ -1937,6 +1961,21 @@ fn scrawl_fixture(ui: &mut Ui, enabled: bool, adjust: fn(&mut platform::ScrawlVi
     adjust(&mut view);
     ui.platform.scrawl = Some(view);
     ui.pane = Pane::Scrawl;
+}
+
+fn mic_label(ui: &mut Ui, style: usize, missing: bool, open: bool) {
+    *ui = mac_fixture();
+    ui.microphone_label = [
+        settings::MicrophoneLabel::DeviceFirst,
+        settings::MicrophoneLabel::ModeFirst,
+        settings::MicrophoneLabel::DeviceOnly,
+    ][style];
+    if missing {
+        ui.settings.microphone = Some("Shure MV7".into());
+    }
+    if open {
+        ui.open = Some(Menu::Microphone);
+    }
 }
 
 fn mac_fixture() -> Ui {

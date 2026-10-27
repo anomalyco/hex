@@ -239,6 +239,7 @@ fn storage_rows(ui: &Ui, p: Paint, view: &ScrawlView, layer: &mut Vec<El>) -> Ve
         .into_iter()
         .map(|preset| Choice {
             label: retention_label(preset.policy()),
+            detail: None,
             selected: preset.policy() == policy,
             choose: Box::new(move |ui: &mut Ui| {
                 ui.open = None;
@@ -249,6 +250,7 @@ fn storage_rows(ui: &Ui, p: Paint, view: &ScrawlView, layer: &mut Vec<El>) -> Ve
     if !choices.iter().any(|choice| choice.selected) {
         choices.push(Choice {
             label: retention_label(policy),
+            detail: None,
             selected: true,
             choose: Box::new(|ui: &mut Ui| ui.open = None),
         });
