@@ -2,11 +2,12 @@
 # DMG with these only to take its .DS_Store; the release DMG copies that file
 # and background.tiff in beside Hex.app and the Applications link.
 # The .DS_Store finds the background by the volume name, Hex, and its path,
-# /.background.tiff. Finder measures window_rect from the bottom of the screen.
+# /.background.tiff. Finder measures window_rect from the bottom of the
+# screen, and its height includes the title bar.
 files = [defines["app"]]
 symlinks = {"Applications": "/Applications"}
 background = defines["background"]
-window_rect = ((200, 400), (660, 400))
+window_rect = ((200, 368), (660, 432))
 default_view = "icon-view"
 show_status_bar = False
 show_tab_view = False
