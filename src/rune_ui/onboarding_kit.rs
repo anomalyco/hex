@@ -9,6 +9,8 @@
 //! - [`words`]: live words with a caret, and shout words.
 //! - [`mic`]: the microphone's level.
 //! - [`landing`]: the language pick and the Ready landing.
+//! - [`mic_slot`]: where the microphone picker (t421) goes on the try
+//!   screen, held until that piece lands.
 //!
 //! Each reads only what the running app already reports (see
 //! [`fixture`]): download bytes from `transcription_preparation`, the
@@ -21,6 +23,7 @@ mod flows;
 mod hex_meter;
 mod landing;
 mod mic;
+mod mic_slot;
 mod pill;
 mod stories;
 mod words;

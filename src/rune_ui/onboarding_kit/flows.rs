@@ -10,6 +10,7 @@ use super::fixture::Download;
 use super::hex_meter::hex_meter;
 use super::landing::{LEAD, arrives, heading, keys, language_pick, ready};
 use super::mic::mic_level;
+use super::mic_slot::mic_slot;
 use super::pill::{FLY, PILL, pill, slot};
 use super::stories::{Flow, Onboard, Step};
 use super::words::shout;
@@ -140,7 +141,8 @@ fn pill_flow(p: Paint, s: &Onboard) -> Vec<El> {
             ))
             .children(parked.then(|| {
                 notice(p, &JAY, jay_reply(s, "to answer Jay"), false).transition(arrives())
-            }));
+            }))
+            .child(mic_slot(p, parked && s.can_hear()));
     let words = if s.can_hear() {
         "Hold a key and talk. Hex types it wherever your cursor is."
     } else {
@@ -271,7 +273,15 @@ fn fill_flow(p: Paint, s: &Onboard) -> Vec<El> {
             .gap(24.0)
             .child(meter)
             .child(head)
-            .child(cards),
+            .child(
+                col()
+                    .key("try")
+                    .w_full()
+                    .gap(12.0)
+                    .items_center()
+                    .child(cards)
+                    .child(mic_slot(p, s.can_hear())),
+            ),
     ]
 }
 
@@ -352,6 +362,13 @@ fn shout_flow(p: Paint, s: &Onboard) -> Vec<El> {
             .gap(28.0)
             .child(col().key("stage").h(150.0).w_full().center().child(stage))
             .child(below)
-            .child(action(act)),
+            .child(
+                col()
+                    .key("try")
+                    .gap(12.0)
+                    .items_center()
+                    .child(action(act))
+                    .child(mic_slot(p, parked && s.can_hear() && s.step < Step::Ready)),
+            ),
     ]
 }
