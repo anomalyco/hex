@@ -81,8 +81,8 @@ fn lock_state() -> MutexGuard<'static, State> {
     STATE.lock().unwrap_or_else(|error| error.into_inner())
 }
 
-/// The loaded session, loading it on first use. A missing detector starts one
-/// download per process and stays unloaded, so it loads once the file lands.
+/// The loaded session, loading it on first use. A missing detector starts a
+/// background download and stays unloaded, so it loads once the file lands.
 #[cfg_attr(test, allow(dead_code))]
 fn loaded_session(state: &mut State) -> Option<&mut VadSession> {
     if matches!(state, State::Unloaded) {
@@ -104,8 +104,8 @@ fn loaded_session(state: &mut State) -> Option<&mut VadSession> {
     }
 }
 
-/// Starts one background download of the detector per process. Tests only
-/// count the request.
+/// Starts a background download of the detector unless one is running.
+/// Tests only count the request.
 pub(crate) fn start_download() {
     #[cfg(test)]
     DOWNLOAD_REQUESTS.with(|requests| requests.set(requests.get() + 1));
@@ -125,6 +125,8 @@ fn start_download_once() {
                 transcription_models::download_speech_detector(&AtomicBool::new(false))
             {
                 tracing::warn!(%error, "could not download the speech detector");
+                // The next dictation or meeting chunk tries again.
+                DOWNLOAD_STARTED.store(false, Ordering::Relaxed);
             }
         });
 }

@@ -188,6 +188,7 @@ pub(crate) fn run(
     let mut settings = settings.clone();
     let transcriber =
         transcriber.map_or_else(|| LocalTranscriber::load(&settings.transcription), Ok)?;
+    crate::speech_detector::prewarm();
     // The engine outlives the output worker, which waits on its transcripts.
     let mut engine = TranscriptionEngine::start(transcriber)?;
     // Drop audio/hotkeys and close the job queue before joining slow output on

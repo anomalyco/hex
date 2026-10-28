@@ -691,8 +691,9 @@ which discards them when it finds no speech. The detector (1.2 MB, pinned
 revision and checksum in [transcription_models.rs](../../src/transcription_models.rs))
 downloads in the background whenever a transcription model is downloaded or
 activated, and at the first dictation, so an installed model still activates at
-once offline. On macOS, launch-time preparation loads it when present and never
-downloads it. It runs on the CPU with a speech threshold of 0.4 instead of
+once offline; a failed download is retried at the next dictation. Model
+preparation (macOS, Windows) and the Linux listener load it when present and
+never download it. It runs on the CPU with a speech threshold of 0.4 instead of
 Silero's 0.5, which misses a whisper at -43 dBFS. While it is missing or fails to
 load, captures above the threshold still reach the model, as before.
 Whisper output that only repeats the recognition hints is dropped as well
