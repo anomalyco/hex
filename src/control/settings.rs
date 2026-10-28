@@ -127,6 +127,11 @@ const KEYS: &[Key] = &[
         "What other audio does while you dictate",
     ),
     key(
+        "pause_browser_media",
+        Kind::Bool,
+        "Also pause a playing browser tab while dictating (macOS, with Pause media)",
+    ),
+    key(
         "double_tap_lock",
         Kind::Bool,
         "Double-tap the dictation shortcut to keep recording hands-free",
