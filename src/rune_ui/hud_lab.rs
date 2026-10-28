@@ -131,24 +131,23 @@ fn preset(t: &HudTuning) -> String {
 }
 
 /// Applies a change and shows it on the indicator. A tuning-only change
-/// applies live to whatever the HUD shows; anything else restarts the demo.
+/// applies live to whatever the HUD shows; a new demo state restarts the
+/// demo.
 fn configure(ui: &mut Ui, change: impl FnOnce(&mut HudLab)) {
     let old = ui.platform.hud;
     let mut lab = old;
     change(&mut lab);
-    let tuned = lab.tuning != old.tuning || lab.dot_scope != old.dot_scope;
-    if tuned {
-        ui.hud_copied = false;
-        ui.hud_saved = false;
+    if lab == old {
+        return;
     }
+    ui.hud_copied = false;
+    ui.hud_saved = false;
     ui.platform.hud = lab;
-    ui.ask(
-        if tuned && lab.demo == old.demo && lab.queued == old.queued {
-            PlatformRequest::TuneHud(lab)
-        } else {
-            PlatformRequest::ConfigureHud(lab)
-        },
-    );
+    ui.ask(if lab.demo == old.demo && lab.queued == old.queued {
+        PlatformRequest::TuneHud(lab)
+    } else {
+        PlatformRequest::ConfigureHud(lab)
+    });
 }
 
 /// Dot scope's sliders, grouped as HUD Lab shows them, by `KNOBS` key.
