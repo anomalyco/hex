@@ -113,10 +113,81 @@ impl CandidateBuffer {
 pub struct ScreenRecording {
     /// Small candidate frames for keyframe selection (see `CANDIDATE_EDGE`).
     pub frames: Vec<RgbaFrame>,
-    pub video: Option<PathBuf>,
+    /// The movie, which may still be finishing: only what reads it waits ([`Movie::wait`]).
+    pub video: Option<Movie>,
     pub duration_ms: u64,
-    /// The capture time (on the frames' clock) of the video's start.
-    pub video_offset_ms: u64,
+}
+
+impl ScreenRecording {
+    /// Blocks until nothing writes the movie any more, so its bundle can be removed.
+    pub fn discard(self) {
+        if let Some(movie) = self.video {
+            let _ = movie.wait();
+        }
+    }
+}
+
+/// A screen capture's movie. On macOS its file is still being finished when the capture stops:
+/// the recording output closes it and its final frame is held to the stop.
+pub struct Movie {
+    path: PathBuf,
+    state: MovieState,
+}
+
+enum MovieState {
+    Written {
+        offset_ms: u64,
+    },
+    #[cfg(target_os = "macos")]
+    Finishing(platform::FinishingMovie),
+}
+
+impl Movie {
+    /// A movie already written, starting `offset_ms` into the capture (on the frames' clock).
+    pub fn written(path: PathBuf, offset_ms: u64) -> Self {
+        Self {
+            path,
+            state: MovieState::Written { offset_ms },
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    pub(crate) fn finishing(path: PathBuf, finishing: platform::FinishingMovie) -> Self {
+        Self {
+            path,
+            state: MovieState::Finishing(finishing),
+        }
+    }
+
+    /// Where the movie is, finished or not.
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    /// When the movie starts on the frames' clock, before it finishes: exact once written, an
+    /// estimate from when its recording started while it finishes.
+    pub fn offset_hint_ms(&self) -> u64 {
+        match &self.state {
+            MovieState::Written { offset_ms } => *offset_ms,
+            #[cfg(target_os = "macos")]
+            MovieState::Finishing(finishing) => finishing.offset_hint_ms(),
+        }
+    }
+
+    /// Blocks until the movie is finished. Returns its path and when it starts on the frames'
+    /// clock, or `None` when nothing playable was left.
+    pub fn wait(self) -> Option<(PathBuf, u64)> {
+        let offset_ms = match self.state {
+            MovieState::Written { offset_ms } => Some(offset_ms),
+            #[cfg(target_os = "macos")]
+            MovieState::Finishing(finishing) => finishing.wait(),
+        }?;
+        let written = self
+            .path
+            .metadata()
+            .is_ok_and(|m| m.is_file() && m.len() > 0);
+        written.then_some((self.path, offset_ms))
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -756,8 +827,7 @@ pub fn capture_size(target: &TargetInfo, long_edge: f64) -> (u32, u32) {
 }
 
 /// What the platform's sampler thread records into. It runs until `stopping`, pushes candidate
-/// frames (at once when `urgent`), stores when the movie started into `video_offset_ms`, and
-/// returns the movie it wrote.
+/// frames (at once when `urgent`), and returns the movie it recorded.
 pub(crate) struct Sampler {
     pub target: TargetInfo,
     pub video_output_path: Option<PathBuf>,
@@ -768,9 +838,14 @@ pub(crate) struct Sampler {
     #[cfg_attr(target_os = "windows", allow(dead_code))]
     pub own_windows_recorded: Arc<AtomicBool>,
     pub started_at: Instant,
+    /// `started_at` on the host clock, which places the movie's start on the frames' clock.
+    #[cfg(target_os = "macos")]
+    pub started_host: capture_core::HostTime,
     pub stopping: Arc<AtomicBool>,
     pub urgent: Arc<AtomicBool>,
     pub frames: Arc<Mutex<CandidateBuffer>>,
+    /// Where the Windows recorder stores when its movie started (ms since `started_at`).
+    #[cfg(target_os = "windows")]
     pub video_offset_ms: Arc<AtomicU64>,
 }
 
@@ -781,8 +856,7 @@ pub struct ScreenCaptureSession {
     stopping: Arc<AtomicBool>,
     urgent_snapshot: Arc<AtomicBool>,
     frames: Arc<Mutex<CandidateBuffer>>,
-    video_offset_ms: Arc<AtomicU64>,
-    sampler_thread: Option<JoinHandle<Option<PathBuf>>>,
+    sampler_thread: Option<JoinHandle<Option<Movie>>>,
     _recording: crate::retention::Recording,
 }
 
@@ -809,15 +883,15 @@ impl ScreenCaptureSession {
         budget_bytes: usize,
     ) -> Self {
         let started_at = Instant::now();
+        #[cfg(target_os = "macos")]
+        let started_host = capture_core::HostTime::now();
         let stopping = Arc::new(AtomicBool::new(false));
         let urgent_snapshot = Arc::new(AtomicBool::new(true));
         let frames = Arc::new(Mutex::new(CandidateBuffer::new(budget_bytes)));
-        let video_offset_ms = Arc::new(AtomicU64::new(0));
 
         let thread_stopping = Arc::clone(&stopping);
         let thread_urgent = Arc::clone(&urgent_snapshot);
         let thread_frames = Arc::clone(&frames);
-        let thread_offset = Arc::clone(&video_offset_ms);
         let sampler_target = target;
         let sampler_thread = thread::Builder::new()
             .name("scrawl-frame-sampler".into())
@@ -828,10 +902,13 @@ impl ScreenCaptureSession {
                     excluded_window_ids,
                     own_windows_recorded,
                     started_at,
+                    #[cfg(target_os = "macos")]
+                    started_host,
                     stopping: thread_stopping,
                     urgent: thread_urgent,
                     frames: thread_frames,
-                    video_offset_ms: thread_offset,
+                    #[cfg(target_os = "windows")]
+                    video_offset_ms: Arc::new(AtomicU64::new(0)),
                 })
             })
             .ok();
@@ -841,7 +918,6 @@ impl ScreenCaptureSession {
             stopping,
             urgent_snapshot,
             frames,
-            video_offset_ms,
             sampler_thread,
             _recording: crate::retention::Recording::start(),
         }
@@ -858,10 +934,11 @@ impl ScreenCaptureSession {
         self.started_at.elapsed().as_millis() as u64
     }
 
+    /// Stops at once: the movie keeps finishing on its own (see [`Movie`]).
     pub fn stop(mut self) -> ScreenRecording {
         let duration_ms = self.elapsed_ms();
         self.stopping.store(true, Ordering::Release);
-        let video_path = self
+        let video = self
             .sampler_thread
             .take()
             .and_then(|handle| {
@@ -880,13 +957,10 @@ impl ScreenCaptureSession {
         if collected.is_empty() {
             collected.push(crate::render::render_synthetic_demo_frame(1280, 800, 0, 0));
         }
-        let valid_video =
-            video_path.filter(|path| path.exists() && path.metadata().is_ok_and(|m| m.len() > 0));
         ScreenRecording {
             frames: collected,
-            video: valid_video,
+            video,
             duration_ms: duration_ms.max(100),
-            video_offset_ms: self.video_offset_ms.load(Ordering::Acquire),
         }
     }
 }
@@ -2863,13 +2937,14 @@ impl Capture {
                 audio,
                 windows,
             } => {
-                let _ = session.stop();
+                let recording = session.stop();
                 if let Some(audio) = audio {
                     let _ = audio.stop();
                 }
                 if let Some(windows) = windows {
                     let _ = windows.stop();
                 }
+                recording.discard();
             }
             InnerSource::Phone(session) => session.cancel(),
         }
@@ -2971,6 +3046,9 @@ impl SealedCapture {
     }
 
     pub fn cancel(self) {
+        if let SealedSource::Screen { recording, .. } = self.source {
+            recording.discard();
+        }
         if let Err(error) = std::fs::remove_dir_all(&self.dir) {
             self.host
                 .log(&format!("could not remove {}: {error}", self.dir.display()));
@@ -3137,14 +3215,13 @@ mod tests {
                 .unwrap()
                 .push(RgbaFrame::new(42, 1, 1, vec![1, 2, 3, 255]), false);
             std::fs::write(&worker_path, b"finalized media").unwrap();
-            Some(worker_path)
+            Some(Movie::written(worker_path, 120))
         });
         let session = ScreenCaptureSession {
             started_at: Instant::now(),
             stopping,
             urgent_snapshot: Arc::new(AtomicBool::new(false)),
             frames,
-            video_offset_ms: Arc::new(AtomicU64::new(120)),
             sampler_thread: Some(worker),
             _recording: crate::retention::Recording::start(),
         };
@@ -3153,8 +3230,10 @@ mod tests {
         assert_eq!(frames.len(), 1);
         assert_eq!(frames[0].t_ms, 42);
         assert_eq!(frames[0].rgba, vec![1, 2, 3, 255]);
-        assert_eq!(recording.video.as_ref(), Some(&path));
-        assert_eq!(recording.video_offset_ms, 120);
+        assert_eq!(
+            recording.video.and_then(Movie::wait),
+            Some((path.clone(), 120))
+        );
         std::fs::remove_file(path).unwrap();
     }
 
@@ -3703,7 +3782,6 @@ mod tests {
             stopping: Arc::new(AtomicBool::new(false)),
             urgent_snapshot: Arc::new(AtomicBool::new(false)),
             frames: Arc::new(Mutex::new(buf)),
-            video_offset_ms: Arc::new(AtomicU64::new(0)),
             sampler_thread: None,
             _recording: crate::retention::Recording::start(),
         };
@@ -3827,7 +3905,6 @@ mod tests {
                     stopping: Arc::clone(&stopping1),
                     urgent_snapshot: Arc::new(AtomicBool::new(false)),
                     frames: Arc::new(Mutex::new(buf1)),
-                    video_offset_ms: Arc::new(AtomicU64::new(0)),
                     sampler_thread: None,
                     _recording: crate::retention::Recording::start(),
                 },
@@ -3866,7 +3943,6 @@ mod tests {
                     stopping: Arc::new(AtomicBool::new(false)),
                     urgent_snapshot: Arc::new(AtomicBool::new(false)),
                     frames: Arc::new(Mutex::new(CandidateBuffer::new(1 << 20))),
-                    video_offset_ms: Arc::new(AtomicU64::new(0)),
                     sampler_thread: None,
                     _recording: crate::retention::Recording::start(),
                 },

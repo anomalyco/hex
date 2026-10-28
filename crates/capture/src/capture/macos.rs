@@ -4,16 +4,12 @@
 use std::ffi::c_void;
 use std::path::PathBuf;
 use std::ptr;
-use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
 use screencapturekit::prelude::*;
-use screencapturekit::recording_output::{
-    SCRecordingOutput, SCRecordingOutputCodec, SCRecordingOutputConfiguration,
-    SCRecordingOutputFileType,
-};
 use screencapturekit::screenshot_manager::{CGImageExt, SCScreenshotManager};
 
 use super::{
@@ -27,6 +23,9 @@ use crate::model::{CaptureMode, RgbaFrame, TargetInfo};
 
 /// Recordings may hold up to twice a frame's size in points (Retina pixels).
 pub const MAX_CAPTURE_SCALE: f64 = 2.0;
+
+/// ScreenCaptureKit records a frame only when the screen changes, at most this often.
+const RECORDING_FPS: u32 = 60;
 
 /// Where a session's clicks and keys come from, for the log.
 pub(super) const MOUSE_SOURCE: &str = "the mouse monitor";
@@ -1144,19 +1143,19 @@ pub fn frontmost_app_info() -> Option<(i32, String, Option<String>)> {
     None
 }
 
-/// The ScreenCaptureKit sampler: the recording stream writes `recording.mp4` while candidate
+/// The ScreenCaptureKit sampler: `capture_core` records `recording.mp4` while candidate
 /// screenshots are taken every `buffer.interval()` (or at once when urgent).
-pub(super) fn run_sampler(sampler: Sampler) -> Option<PathBuf> {
+pub(super) fn run_sampler(sampler: Sampler) -> Option<super::Movie> {
     let Sampler {
         target: sampler_target,
         video_output_path,
         excluded_window_ids,
         own_windows_recorded,
         started_at,
+        started_host,
         stopping: thread_stopping,
         urgent: thread_urgent,
         frames: thread_frames,
-        video_offset_ms: thread_offset,
     } = sampler;
     // While the host's own windows are recorded, nothing of its is left out.
     let hidden = |shown: bool| {
@@ -1171,24 +1170,29 @@ pub(super) fn run_sampler(sampler: Sampler) -> Option<PathBuf> {
     };
     let mut last_shown = own_windows_recorded.load(Ordering::Acquire);
     let initial_excluded = hidden(last_shown);
-    // Keep SCK initialization, capture and teardown on the owning worker.
+    // Keep ScreenCaptureKit setup, capture and stop on the owning worker.
     // stop() joins even if it arrives while setup is still in progress.
-    let (stream, recording_output, video_path, filter) = setup_sck_capture(
-        &sampler_target,
-        video_output_path,
-        &initial_excluded,
-        !last_shown,
-        started_at,
-        &thread_offset,
-    );
+    let content = shareable_content();
+    let recording = content
+        .as_ref()
+        .zip(video_output_path)
+        .and_then(|(content, path)| {
+            let exclude = exclusions(content, &initial_excluded, !last_shown);
+            start_recording(content, &sampler_target, path, exclude)
+        });
     crate::log::start_metric("sck_ready_ms", started_at);
-    let shot_edge = if video_path.is_some() {
+    let shot_edge = if recording.is_some() {
         CANDIDATE_EDGE
     } else {
         CANDIDATE_EDGE_NO_VIDEO
     };
-    let shot_config = sck_config(&sampler_target, shot_edge);
-    let mut filter_and_config = filter.map(|f| (f, shot_config));
+    let mut filter_and_config = content
+        .as_ref()
+        .and_then(|content| {
+            screenshot_filter(content, &sampler_target, &initial_excluded, !last_shown)
+        })
+        .map(|filter| (filter, sck_config(&sampler_target, shot_edge)));
+    drop(content);
     let mut last_sample = Instant::now()
         .checked_sub(FRAME_SAMPLE_INTERVAL)
         .unwrap_or_else(Instant::now);
@@ -1210,15 +1214,17 @@ pub(super) fn run_sampler(sampler: Sampler) -> Option<PathBuf> {
             last_excluded.clone_from(&cur_excluded);
             last_shown = shown;
             prompts.hidden = sck_lists_windows(&prompts.ids);
-            if let Some((new_filter, _)) =
-                build_sck_filter_and_config(&sampler_target, &cur_excluded, !shown)
+            if let Some(content) = shareable_content()
+                && let Some(new_filter) =
+                    screenshot_filter(&content, &sampler_target, &cur_excluded, !shown)
             {
                 // The recording must hide the same windows as the candidates, or
                 // keyframes decoded from it could show Scrawl's own overlays.
-                if let Some(ref stream) = stream
-                    && let Err(error) = stream.update_content_filter(&new_filter)
+                if let Some((ref recording, _)) = recording
+                    && let Err(error) =
+                        recording.set_exclusions(&exclusions(&content, &cur_excluded, !shown))
                 {
-                    scrawl_log(format!("Recording filter update failed: {error:?}"));
+                    scrawl_log(format!("Recording filter update failed: {error}"));
                 }
                 filter_and_config = Some((new_filter, sck_config(&sampler_target, shot_edge)));
             }
@@ -1254,35 +1260,201 @@ pub(super) fn run_sampler(sampler: Sampler) -> Option<PathBuf> {
         }
         thread::park_timeout(Duration::from_millis(30));
     }
-    if let Some(stream) = stream {
-        let _ = stream.stop_capture();
-        if let Some(ref output) = recording_output {
-            let _ = stream.remove_recording_output(output);
-        }
-    }
-    video_path
+    // The core detaches the movie before it stops the stream, and finishes it on its own thread.
+    recording.map(|(recording, path)| {
+        let hint_ms = offset_ms(started_host, recording.anchor().as_nanos());
+        super::Movie::finishing(
+            path,
+            FinishingMovie {
+                finishing: recording.stop(),
+                started_host,
+                hint_ms,
+            },
+        )
+    })
 }
 
-/// `own_chrome` also leaves out this process's non-layer-0 windows (the host's HUDs and panels).
-fn build_sck_filter_and_config(
-    target: &TargetInfo,
-    excluded_window_ids: &[u32],
-    own_chrome: bool,
-) -> Option<(SCContentFilter, SCStreamConfiguration)> {
-    let content = match SCShareableContent::get() {
-        Ok(c) => c,
-        Err(err) => {
+/// A stopped screen recording whose movie the core is still finishing.
+pub(crate) struct FinishingMovie {
+    finishing: capture_core::Finishing,
+    /// The frames' clock's zero on the host clock.
+    started_host: capture_core::HostTime,
+    hint_ms: u64,
+}
+
+impl FinishingMovie {
+    /// When the recording started on the frames' clock: the movie starts at its first frame,
+    /// a little later.
+    pub(crate) fn offset_hint_ms(&self) -> u64 {
+        self.hint_ms
+    }
+
+    /// Blocks until the movie is finished (the core bounds this). Returns when its first frame
+    /// was shown on the frames' clock, or `None` when finishing was lost.
+    pub(crate) fn wait(self) -> Option<u64> {
+        let finished = match self.finishing.wait() {
+            Ok(finished) => finished,
+            Err(error) => {
+                scrawl_log(format!("The screen recording was lost: {error}"));
+                return None;
+            }
+        };
+        if let Some(error) = finished.error() {
+            scrawl_log(format!(
+                "The screen recording finished with an error: {error}"
+            ));
+        }
+        let source = finished.manifest.sources.first()?;
+        Some(offset_ms(self.started_host, source.start_ns))
+    }
+}
+
+/// Milliseconds from `started` to `at_ns` on the host clock, rounded: where a host time falls on
+/// the frames' clock. Zero for a time before it.
+fn offset_ms(started: capture_core::HostTime, at_ns: u64) -> u64 {
+    at_ns
+        .saturating_sub(started.as_nanos())
+        .saturating_add(500_000)
+        / 1_000_000
+}
+
+fn shareable_content() -> Option<SCShareableContent> {
+    SCShareableContent::get()
+        .inspect_err(|err| {
             // Screen Recording is asked for in onboarding, never mid-capture.
             scrawl_log(format!(
                 "SCShareableContent::get() failed: {err:?} (screen recording granted: {})",
                 screen_capture_granted()
             ));
-            return None;
-        }
-    };
-    let our_pid = std::process::id() as i32;
+        })
+        .ok()
+}
 
-    let filter = if let Some(window_id) = target.window_id
+/// The windows a display capture leaves out: `excluded_window_ids` and, with `own_chrome`, this
+/// process's non-layer-0 windows (the host's HUDs and panels), while Scrawl's normal Review
+/// window stays visible.
+fn excluded_windows(
+    content: &SCShareableContent,
+    excluded_window_ids: &[u32],
+    own_chrome: bool,
+) -> Vec<SCWindow> {
+    let our_pid = std::process::id() as i32;
+    content
+        .windows()
+        .into_iter()
+        .filter(|w| {
+            excluded_window_ids.contains(&w.window_id())
+                || (own_chrome
+                    && w.owning_application()
+                        .as_ref()
+                        .is_some_and(|a| a.process_id() == our_pid)
+                    && w.window_layer() != 0)
+        })
+        .collect()
+}
+
+fn exclusions(
+    content: &SCShareableContent,
+    excluded_window_ids: &[u32],
+    own_chrome: bool,
+) -> capture_core::Exclusions {
+    capture_core::Exclusions {
+        windows: excluded_windows(content, excluded_window_ids, own_chrome)
+            .iter()
+            .map(SCWindow::window_id)
+            .collect(),
+        apps: Vec::new(),
+    }
+}
+
+/// What a capture of `target` records: its window while it's listed, else its display (or the
+/// first one), as the area for a region.
+fn recording_source(
+    content: &SCShareableContent,
+    target: &TargetInfo,
+) -> Option<capture_core::Source> {
+    if let Some(window_id) = target.window_id
+        && content.windows().iter().any(|w| w.window_id() == window_id)
+    {
+        return Some(capture_core::Source::Window(window_id));
+    }
+    let display = content
+        .displays()
+        .into_iter()
+        .find(|d| d.display_id() == target.display_id)
+        .or_else(|| content.displays().into_iter().next())?
+        .display_id();
+    if target.mode != CaptureMode::Region {
+        return Some(capture_core::Source::Display(display));
+    }
+    let [x, y, width, height] = region_rect(target);
+    Some(capture_core::Source::Region {
+        display,
+        rect: capture_core::Rect {
+            x,
+            y,
+            width,
+            height,
+        },
+    })
+}
+
+/// Full-screen captures get auto-cropped to a window or region afterwards (`scrawl autocrop`),
+/// so they need enough pixels for a crop to a quarter of the screen to stay sharp.
+fn recording_long_edge(mode: CaptureMode) -> u32 {
+    if mode == CaptureMode::Display {
+        2560
+    } else {
+        1280
+    }
+}
+
+/// Starts recording `target` into `path` (`recording.mp4` in its bundle).
+fn start_recording(
+    content: &SCShareableContent,
+    target: &TargetInfo,
+    path: PathBuf,
+    exclude: capture_core::Exclusions,
+) -> Option<(capture_core::Recording, PathBuf)> {
+    let source = recording_source(content, target)?;
+    let (Some(dir), Some(name)) = (path.parent(), path.file_name()) else {
+        return None;
+    };
+    let plan = capture_core::Plan {
+        sources: vec![capture_core::SourcePlan {
+            source,
+            long_edge: Some(recording_long_edge(target.mode)),
+        }],
+        cursor: capture_core::CursorDrawing::Baked,
+        audio: capture_core::AudioPlan::default(),
+        input: capture_core::Input::None,
+        frames: None,
+        exclude,
+        fps: RECORDING_FPS,
+        dir: dir.to_path_buf(),
+        names: capture_core::Names {
+            videos: vec![name.to_string_lossy().into_owned()],
+            ..capture_core::Names::default()
+        },
+    };
+    match capture_core::Recorder::start(plan) {
+        Ok(recording) => Some((recording, path)),
+        Err(error) => {
+            scrawl_log(format!("Could not start the screen recording: {error}"));
+            None
+        }
+    }
+}
+
+/// The filter for candidate screenshots: `target`'s window while it's listed, else its display
+/// (or the first one) without `excluded_window_ids` and, with `own_chrome`, the host's chrome.
+fn screenshot_filter(
+    content: &SCShareableContent,
+    target: &TargetInfo,
+    excluded_window_ids: &[u32],
+    own_chrome: bool,
+) -> Option<SCContentFilter> {
+    if let Some(window_id) = target.window_id
         && let Some(window) = content
             .windows()
             .into_iter()
@@ -1295,20 +1467,7 @@ fn build_sck_filter_and_config(
         .find(|d| d.display_id() == target.display_id)
         .or_else(|| content.displays().into_iter().next())
     {
-        // Exclude Scrawl's floating HUD pill and Metal overlay windows by explicit window ID
-        // (and any non-layer-0 Scrawl panels), while keeping Scrawl's normal Review window visible.
-        let excluded_overlays: Vec<SCWindow> = content
-            .windows()
-            .into_iter()
-            .filter(|w| {
-                excluded_window_ids.contains(&w.window_id())
-                    || (own_chrome
-                        && w.owning_application()
-                            .as_ref()
-                            .is_some_and(|a| a.process_id() == our_pid)
-                        && w.window_layer() != 0)
-            })
-            .collect();
+        let excluded_overlays = excluded_windows(content, excluded_window_ids, own_chrome);
         let excluded_refs: Vec<&SCWindow> = excluded_overlays.iter().collect();
         SCContentFilter::create()
             .with_display(&display)
@@ -1317,16 +1476,24 @@ fn build_sck_filter_and_config(
             .ok()
     } else {
         None
-    }?;
+    }
+}
 
-    // Full-screen captures get auto-cropped to a window or region afterwards (`scrawl autocrop`),
-    // so they need enough pixels for a crop to a quarter of the screen to stay sharp.
-    let long_edge = if target.mode == CaptureMode::Display {
-        2560.0
+/// A region's `sourceRect`: in its display's own points, not global ones.
+fn region_rect(target: &TargetInfo) -> [f64; 4] {
+    let b = core_graphics::display::CGDisplay::new(target.display_id).bounds();
+    let display = [b.origin.x, b.origin.y, b.size.width, b.size.height];
+    let area = [
+        target.frame.x,
+        target.frame.y,
+        target.frame.width,
+        target.frame.height,
+    ];
+    if display[2] > 0.0 && display[3] > 0.0 {
+        crate::screens::source_rect(area, display)
     } else {
-        1280.0
-    };
-    Some((filter, sck_config(target, long_edge)))
+        area
+    }
 }
 
 fn sck_config(target: &TargetInfo, long_edge: f64) -> SCStreamConfiguration {
@@ -1336,72 +1503,10 @@ fn sck_config(target: &TargetInfo, long_edge: f64) -> SCStreamConfiguration {
         .with_height(height)
         .with_shows_cursor(true);
     if target.mode == CaptureMode::Region {
-        // `sourceRect` is in the display's own points, not global ones.
-        let b = core_graphics::display::CGDisplay::new(target.display_id).bounds();
-        let display = [b.origin.x, b.origin.y, b.size.width, b.size.height];
-        let area = [
-            target.frame.x,
-            target.frame.y,
-            target.frame.width,
-            target.frame.height,
-        ];
-        let [x, y, w, h] = if display[2] > 0.0 && display[3] > 0.0 {
-            crate::screens::source_rect(area, display)
-        } else {
-            area
-        };
+        let [x, y, w, h] = region_rect(target);
         config.set_source_rect(CGRect::new(x, y, w, h));
     }
     config
-}
-
-/// Starts the recording stream; returns it with the filter for candidate screenshots. Stores
-/// when the recording started (ms since `started_at`) into `video_offset_ms`.
-fn setup_sck_capture(
-    target: &TargetInfo,
-    video_output_path: Option<PathBuf>,
-    excluded_window_ids: &[u32],
-    own_chrome: bool,
-    started_at: Instant,
-    video_offset_ms: &AtomicU64,
-) -> (
-    Option<SCStream>,
-    Option<SCRecordingOutput>,
-    Option<PathBuf>,
-    Option<SCContentFilter>,
-) {
-    let Some((filter, config)) =
-        build_sck_filter_and_config(target, excluded_window_ids, own_chrome)
-    else {
-        return (None, None, None, None);
-    };
-
-    if let Some(video_path) = video_output_path
-        && let Ok(rec_cfg_builder) = SCRecordingOutputConfiguration::new()
-        && let Ok(rec_cfg) = rec_cfg_builder.with_output_url(&video_path).map(|c| {
-            c.with_video_codec(SCRecordingOutputCodec::H264)
-                .with_output_file_type(SCRecordingOutputFileType::MP4)
-        })
-        && let Some(rec_output) = SCRecordingOutput::new(&rec_cfg)
-        && let Ok(stream) = SCStream::new(&filter, &config)
-        && stream.add_recording_output(&rec_output).is_ok()
-    {
-        // The movie's clock starts while `start_capture` runs; its midpoint is the closest
-        // estimate this side of the recording delegate.
-        let before = started_at.elapsed();
-        if stream.start_capture().is_ok() {
-            let after = started_at.elapsed();
-            video_offset_ms.store(((before + after) / 2).as_millis() as u64, Ordering::Release);
-            return (
-                Some(stream),
-                Some(rec_output),
-                Some(video_path),
-                Some(filter),
-            );
-        }
-    }
-
-    (None, None, None, Some(filter))
 }
 
 fn capture_sck_frame(
@@ -1942,6 +2047,29 @@ fn shortcut_key_name(keycode: u16) -> Option<String> {
 mod tests {
     use super::*;
     use crate::model::{InteractionEvent, TargetFrame};
+
+    /// The movie's first frame is placed on the frames' clock by the host time captured beside
+    /// `started_at`, to the nearest millisecond.
+    #[test]
+    fn the_movie_starts_where_its_first_frame_falls_on_the_frames_clock() {
+        let started = capture_core::HostTime::now();
+        let zero = started.as_nanos();
+        assert_eq!(offset_ms(started, zero), 0);
+        assert_eq!(offset_ms(started, zero + 249_400_000), 249);
+        assert_eq!(offset_ms(started, zero + 249_600_000), 250);
+        assert_eq!(
+            offset_ms(started, zero.saturating_sub(5_000_000)),
+            0,
+            "never before"
+        );
+    }
+
+    #[test]
+    fn displays_record_at_2560_and_windows_and_regions_at_1280() {
+        assert_eq!(recording_long_edge(CaptureMode::Display), 2560);
+        assert_eq!(recording_long_edge(CaptureMode::Window), 1280);
+        assert_eq!(recording_long_edge(CaptureMode::Region), 1280);
+    }
 
     /// A paste never goes to the host, even with its Settings window in front: it goes to the
     /// last external app instead.

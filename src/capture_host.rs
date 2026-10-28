@@ -3247,7 +3247,6 @@ mod tests {
                 frames: Vec::new(),
                 video: None,
                 duration_ms,
-                video_offset_ms: 0,
             };
             let (_, bundle, _) = scrawl_capture::pipeline::finalize_capture_bundle_with_flags(
                 &self.dir,

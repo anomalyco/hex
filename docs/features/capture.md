@@ -340,7 +340,8 @@ Hex's own windows                        // capture.own-windows
 │   │   included, shows all of it (sharingType readOnly, no SCK exclusions);
 │   │   still never in the window log or the target. Rune's
 │   │   OverlayHandle::set_exclude_from_capture flips open windows, and the
-│   │   sampler rebuilds its filter mid-recording (OwnWindows::recorded)
+│   │   sampler rebuilds its filter mid-recording (OwnWindows::recorded) and
+│   │   the recording's (capture-core's Recording::set_exclusions)
 │   └── Not proven natively end to end yet
 │   └── Click-through chrome (the full-screen ink overlay, the capsule's
 │       640×424 panel outside its pill) -> clicks there count for the app
@@ -398,6 +399,10 @@ Retention                                // capture.retention
 hex capture stop                         // capture.stop
 ├── Closes the sink (≤ 100 ms wait) -> reply: idle + the bundle path, at once
 ├── The screen recording, window log, and input stop at once (Capture::stop)
+├── recording.mp4 finishes after that on capture-core's own thread: detached
+│   before its stream stops, its final frame held to the stop, capture.json
+│   written beside it; only the steps that read the movie wait for it, and it
+│   starts where its first frame was shown (video_offset_ms)
 └── In the background, on one capture-finish thread, one capture at a time:
     ├── 16 kHz audio with its start offset and gaps -> SealedCapture::finish
     ├── Words: 30 s chunks, each a foreground job on the dictation engine's model,
@@ -407,8 +412,8 @@ hex capture stop                         // capture.stop
     │   English: starts −280 ms, −520 ms after a ≥ 250 ms pause; ends −195 ms);
     │   other models and Apple keep their own times
     ├── Past 20 min -> audio kept to 20 min, the rest one gap
-    ├── recording.mp4, audio.wav, frames/, scrawl.json, summary.md; then every
-    │   file 0600 and folder 0700
+    ├── recording.mp4, capture.json, audio.wav, frames/, scrawl.json,
+    │   summary.md; then every file 0600 and folder 0700
     ├── Keyframes decoded from recording.mp4 by scrawl-helper (beside `hex`: in
     │   Hex.app's Contents/MacOS or target/<profile>; or $SCRAWL_HELPER); helper
     │   missing -> the 480 px sampled frames

@@ -366,7 +366,11 @@ substitute for source inspection or a second roadmap.
   capsule never reaches into the host), with `last.route` from
   `capture_host::routing` (Scrawl's `crates/router` in-process: look, decide,
   undo window, send, Undo and Redirect) and `phone` from a `capture-phone`
-  look for a cabled iPhone. `capture_host::library` reads the captures
+  look for a cabled iPhone. The engine records the screen on macOS through
+  `crates/capture-core` (`Recorder`, one source per target, also outside the
+  workspace), which writes `recording.mp4` and its `capture.json` manifest
+  and changes what a recording leaves out with `Recording::set_exclusions`.
+  `capture_host::library` reads the captures
   folder for `hex capture list|show|send|route`. `rune_ui/scrawl.rs` is its pane
   (Experiments › Scrawl) and `CaptureSettings` its `capture.*` settings.
 - `instance`: the exclusive Application Support lock that prevents concurrent
@@ -735,13 +739,17 @@ CoreAudio formats, AppleScript details, or event serialization.
   unchanged. A chunk waits while dictation captures or transcribes and never
   interrupts a live stream; the engine holds it until the stream ends. `stop`
   replies at once and the screen recording stops then (`Capture::stop`), not
-  when the capture is written; one thread writes stopped captures one at a
+  when the capture is written. The movie finishes after the stop on the
+  core's own bounded thread (detached before its stream stops, its final
+  frame held to the stop); only the steps that read `recording.mp4` wait
+  for it, and a discarded capture's bundle is removed only once it is done.
+  One thread writes stopped captures one at a
   time, at most two wait, and a start beyond that is refused `busy`. The
   engine's log goes to tracing from before it is built, and its settings come
   from Hex (`ConfigSource`), never `~/.config/scrawl` after the import. Bundles are
   owner-only. Quitting
   cancels a recording capture, stops transcription between chunks, and waits
-  at most 2 s for capture threads.
+  at most 2 s for capture threads, leaving a movie still finishing behind.
 - `hex mcp` is read-only and available in release builds regardless of the
   Meetings opt-in. It dispatches before process logging, the instance lock,
   GUI, or permission setup; never writes, recovers, or indexes on disk inside

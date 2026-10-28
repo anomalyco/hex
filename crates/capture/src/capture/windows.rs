@@ -6,7 +6,6 @@
 //! `TargetFrame` holds pixels too, so a recording is never upscaled (`MAX_CAPTURE_SCALE`).
 
 use std::collections::HashSet;
-use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicIsize, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
@@ -1075,6 +1074,10 @@ fn run_key_poller(telemetry: Arc<SharedCaptureTelemetry>) {
 
 // MARK: Recording
 
-pub(super) fn run_sampler(sampler: Sampler) -> Option<PathBuf> {
+/// The recorder writes its movie before it returns, so the movie is never left finishing.
+pub(super) fn run_sampler(sampler: Sampler) -> Option<super::Movie> {
+    let offset = Arc::clone(&sampler.video_offset_ms);
     crate::win::media::run_sampler(sampler)
+        .filter(|path| path.metadata().is_ok_and(|m| m.len() > 0))
+        .map(|path| super::Movie::written(path, offset.load(Ordering::Acquire)))
 }
