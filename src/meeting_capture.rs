@@ -267,6 +267,7 @@ impl MicrophoneSource {
         else {
             unreachable!("nothing to keep");
         };
+        let input = *input;
         let resample = To16k::new(input.sample_rate)?;
         tracing::info!(
             device = input.device_name,
@@ -311,7 +312,7 @@ impl MicrophoneSource {
             Some(&self.input.device_name),
         );
         let input = match opened {
-            Ok(crate::audio::Opened::Input(input)) => input,
+            Ok(crate::audio::Opened::Input(input)) => *input,
             Ok(crate::audio::Opened::Unchanged { selection }) => {
                 self.input.selection = selection;
                 self.retry.resolved(selection, now);

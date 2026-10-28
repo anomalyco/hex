@@ -256,7 +256,7 @@ pub enum Selection {
 
 /// What resolving and opening the configured input found.
 pub enum Opened {
-    Input(AudioInput),
+    Input(Box<AudioInput>),
     /// The input resolved to the device already open, which was kept.
     Unchanged {
         selection: Selection,
@@ -451,7 +451,7 @@ impl AudioInput {
             fallback: SelectedFallback::Immediate,
             keep: None,
         })? {
-            Opened::Input(input) => Ok(input),
+            Opened::Input(input) => Ok(*input),
             Opened::Unchanged { .. } => unreachable!("nothing to keep"),
         }
     }
@@ -603,7 +603,7 @@ impl RecoveringAudioInput {
             keep: None,
         })
         .and_then(|opened| match opened {
-            Opened::Input(input) => Ok(input),
+            Opened::Input(input) => Ok(*input),
             Opened::Unchanged { .. } => Err(eyre!("nothing was open to keep")),
         });
         input.finish_initial_open(opened, Instant::now());
@@ -777,7 +777,7 @@ impl RecoveringAudioInput {
                     self.after_resolving(now);
                 }
                 Ok(Opened::Input(replacement)) if capture_idle || self.input.is_none() => {
-                    self.install(replacement);
+                    self.install(*replacement);
                     self.active_revision = opened_revision;
                     self.recovery.recovered();
                     self.after_resolving(now);
@@ -1056,7 +1056,7 @@ fn open_configured_input(request: &OpenRequest) -> Result<Opened> {
         }
         let mut input = AudioInput::open_device(device, follows_default)?;
         input.selection = plan.selection;
-        Ok(Opened::Input(input))
+        Ok(Opened::Input(Box::new(input)))
     };
     let plan = resolve(request.selected_device.as_deref())?;
     let (Some(selected), InputTarget::Named(_), None) = (
@@ -1476,7 +1476,7 @@ mod tests {
                         selection: Selection::InUse,
                     });
                 }
-                Ok(Opened::Input(named_input(&name)))
+                Ok(Opened::Input(Box::new(named_input(&name))))
             },
         );
         input.finish_initial_open(Ok(named_input("KIT PODS")), Instant::now());
@@ -1535,7 +1535,7 @@ mod tests {
                 }
                 let mut opened = named_input(name);
                 opened.selection = selection;
-                Ok(Opened::Input(opened))
+                Ok(Opened::Input(Box::new(opened)))
             },
         );
         input.reports_new_devices = reports_new_devices;
@@ -1759,7 +1759,9 @@ mod tests {
 
         let (sender, receiver) = mpsc::channel();
         input.replacement = Some(receiver);
-        sender.send((3, Ok(Opened::Input(replacement)))).unwrap();
+        sender
+            .send((3, Ok(Opened::Input(Box::new(replacement)))))
+            .unwrap();
         assert!(matches!(
             input.recv_timeout(Duration::ZERO, true),
             RecoveringAudioInputEvent::Reopened
@@ -1778,7 +1780,9 @@ mod tests {
         let (sender, receiver) = mpsc::channel();
         input.replacement = Some(receiver);
         let (opened, samples) = AudioInput::channel_for_test();
-        sender.send((3, Ok(Opened::Input(opened)))).unwrap();
+        sender
+            .send((3, Ok(Opened::Input(Box::new(opened)))))
+            .unwrap();
 
         assert!(matches!(
             input.recv_timeout(Duration::ZERO, true),
@@ -1891,7 +1895,9 @@ mod tests {
         let (sender, receiver) = mpsc::channel();
         input.replacement = Some(receiver);
         let (reopened, samples_after) = AudioInput::channel_for_test();
-        sender.send((1, Ok(Opened::Input(reopened)))).unwrap();
+        sender
+            .send((1, Ok(Opened::Input(Box::new(reopened)))))
+            .unwrap();
 
         assert!(matches!(
             input.recv_timeout(Duration::ZERO, true),

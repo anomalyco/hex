@@ -1241,7 +1241,7 @@ mod tests {
         let (mut input, opened) = RecoveringAudioInput::pending_for_test();
         let (replacement, samples) = crate::audio::AudioInput::channel_for_test();
         opened
-            .send((0, Ok(crate::audio::Opened::Input(replacement))))
+            .send((0, Ok(crate::audio::Opened::Input(Box::new(replacement)))))
             .unwrap();
         if open {
             assert!(matches!(
@@ -1545,7 +1545,7 @@ mod tests {
             let (late_input, late_samples) = crate::audio::AudioInput::channel_for_test();
             assert!(
                 first_opened
-                    .send((0, Ok(crate::audio::Opened::Input(late_input))))
+                    .send((0, Ok(crate::audio::Opened::Input(Box::new(late_input)))))
                     .is_err()
             );
             assert!(late_samples.send((vec![0.75; 480], second_press)).is_err());
@@ -1563,7 +1563,7 @@ mod tests {
             }));
             let (replacement, samples) = crate::audio::AudioInput::channel_for_test();
             second_opened
-                .send((0, Ok(crate::audio::Opened::Input(replacement))))
+                .send((0, Ok(crate::audio::Opened::Input(Box::new(replacement)))))
                 .unwrap();
             let event = owner.input.recv_timeout(Duration::ZERO, false);
             assert!(matches!(event, RecoveringAudioInputEvent::Reopened));
@@ -1971,7 +1971,7 @@ mod tests {
         assert!(!input.start(capture_time()).unwrap());
         let (replacement, samples) = crate::audio::AudioInput::channel_for_test();
         opened
-            .send((0, Ok(crate::audio::Opened::Input(replacement))))
+            .send((0, Ok(crate::audio::Opened::Input(Box::new(replacement)))))
             .unwrap();
         assert!(matches!(
             input.events.recv_timeout(Duration::from_secs(2)).unwrap(),
@@ -2054,7 +2054,7 @@ mod tests {
             }));
             let (second_stream, samples) = crate::audio::AudioInput::channel_for_test();
             second_opened
-                .send((0, Ok(crate::audio::Opened::Input(second_stream))))
+                .send((0, Ok(crate::audio::Opened::Input(Box::new(second_stream)))))
                 .unwrap();
             let event = owner.input.recv_timeout(Duration::ZERO, false);
             owner.handle_input(event);
