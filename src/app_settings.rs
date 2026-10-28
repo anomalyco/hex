@@ -2100,11 +2100,12 @@ pub fn microphone_policy() -> MicrophonePolicy {
 
 /// Whether the global mode or any mode runs a transformation.
 pub fn transformations_used(processing: &DictationProcessingSettings) -> bool {
-    !processing.default_mode.transformations.is_empty()
-        || processing
-            .modes
-            .iter()
-            .any(|mode| !mode.transformations.is_empty())
+    crate::experiments::enabled(crate::experiments::Experiment::Modes)
+        && (!processing.default_mode.transformations.is_empty()
+            || processing
+                .modes
+                .iter()
+                .any(|mode| !mode.transformations.is_empty()))
 }
 
 /// Where the recording HUD appears, as last saved.

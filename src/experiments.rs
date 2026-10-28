@@ -31,6 +31,7 @@ pub const ENV: &str = "HEX_EXPERIMENTS";
 pub enum Experiment {
     Capture,
     LiveChapters,
+    Modes,
     Playground,
     SmartTurn,
     Vocabulary,
@@ -40,9 +41,10 @@ pub enum Experiment {
 impl Experiment {
     /// Every experiment, including those behind a build option;
     /// [`Self::available`] lists the ones this build offers.
-    const ALL: [Self; 6] = [
+    const ALL: [Self; 7] = [
         Self::Capture,
         Self::LiveChapters,
+        Self::Modes,
         Self::Playground,
         Self::SmartTurn,
         Self::Vocabulary,
@@ -68,6 +70,7 @@ impl Experiment {
         match self {
             Self::Capture => "capture",
             Self::LiveChapters => "live-chapters",
+            Self::Modes => "modes",
             Self::Playground => "playground",
             Self::SmartTurn => "smart-turn",
             Self::Vocabulary => "vocabulary",
@@ -81,6 +84,9 @@ impl Experiment {
                 "Scrawl's capture engine (`hex capture`; macOS, the `capture` build option)."
             }
             Self::LiveChapters => "Chapter a meeting's transcript live while it records.",
+            Self::Modes => {
+                "Modes: the pane, per-app corrections, OpenCode rewriting, and transformations."
+            }
             Self::Playground => {
                 "Rune's playground in the window (⇧⌘D, Ctrl+Shift+D off macOS): every fixture scene and story."
             }
@@ -677,6 +683,12 @@ mod tests {
                     {
                         "name": "live-chapters",
                         "description": Experiment::LiveChapters.description(),
+                        "enabled": false,
+                        "sources": [],
+                    },
+                    {
+                        "name": "modes",
+                        "description": Experiment::Modes.description(),
                         "enabled": false,
                         "sources": [],
                     },

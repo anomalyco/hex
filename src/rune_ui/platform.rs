@@ -333,6 +333,9 @@ pub(super) struct PlatformState {
     /// The `vocabulary` experiment: the Vocabulary card under Dictation
     /// (`crate::vocabulary::enabled` on a native host).
     pub(super) vocabulary: bool,
+    /// The `modes` experiment: the Modes pane and its tour tip
+    /// (`crate::experiments::enabled` on a native host; on in fixtures).
+    pub(super) modes: bool,
     /// The `voice-filter` experiment: the Voice Filter pane even before the
     /// Hex Microphone is on (`crate::experiments::enabled` on a native host).
     pub(super) voice_filter: bool,
@@ -444,6 +447,7 @@ impl PlatformState {
             relaunch_failed: false,
             developer: false,
             vocabulary: false,
+            modes: true,
             voice_filter: false,
             accessibility_renamed: false,
             tuning: TunedFilterConfig::default(),

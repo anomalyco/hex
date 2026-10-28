@@ -18,7 +18,7 @@ HEX                                      // macOS release
 ├── Dictate                              // hold OR double-tap lock
 ├── Use the result                       // paste, Send, paste-last, History
 ├── Adjust behavior                      // shortcut, microphone, recording preferences
-├── Process text                         // context-selected Modes
+├── Process text                         // context-selected Modes (experiment `modes`, off by default)
 ├── Opt in                               // Voice Action, Commands, Meetings: separately off
 ├── Recover                              // prove the next attempt works
 └── Maintain the app                     // menu bar, login, updates, quit
@@ -479,6 +479,17 @@ Commands still needs open input; it is not Release when idle.
 ## Process Text With Modes
 
 ```ts
+Experiment `modes` off (the default)     // experiments.md; modes.experiment
+├── Sidebar -> No Modes pane; onboarding -> No Modes tip
+├── `window show --pane modes` -> Stays on the current pane
+├── Processing -> Global replacements only    // literal, cheap, still applied
+│   └── No per-app mode, corrections, OpenCode rewrite, or transformations
+├── Transformations host -> Not started for modes; a hex.config.ts workspace still starts it
+├── Voice Action and the OpenCode catalog -> Unchanged // the catalog is Voice Action's too
+├── History -> No processing profile, since nothing processed
+└── Saved modes, `hex settings dictation_processing.*` -> Untouched and working
+    // `hex experiments enable modes` + restart -> everything below, as saved
+
 Modes                                    // modes
 ├── Select a row -> Edit that mode        // does NOT manually activate it
 └── Foreground context -> Select processing

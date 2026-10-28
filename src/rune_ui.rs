@@ -454,6 +454,7 @@ impl Pane {
     fn shown(self, ui: &Ui) -> bool {
         let caps = ui.platform.caps;
         match self {
+            Pane::Modes => ui.platform.modes,
             Pane::Commands => caps.commands,
             Pane::Meetings => caps.meetings,
             Pane::VoiceFilter => {
@@ -633,9 +634,12 @@ impl Ui {
         ui.error = error;
         ui.history = history::HistoryPane::shared(store);
         ui.models = models::Models::load();
-        ui.modes.load_personal_commands();
+        if crate::experiments::enabled(crate::experiments::Experiment::Modes) {
+            ui.modes.load_personal_commands();
+        }
         ui.platform.developer = crate::DEVELOPER_FEATURES_ENABLED;
         ui.platform.vocabulary = crate::vocabulary::enabled();
+        ui.platform.modes = crate::experiments::enabled(crate::experiments::Experiment::Modes);
         ui.platform.voice_filter =
             crate::experiments::enabled(crate::experiments::Experiment::VoiceFilter);
         ui.tour = onboarding::Tour::start(&ui.settings, &ui.platform);
@@ -1647,6 +1651,11 @@ const SCENES: &[Scene] = &[
         *ui = portal_fixture();
         modes::fixture(ui);
         ui.pane = Pane::Modes;
+    }),
+    ("modes-off", |ui| {
+        *ui = portal_fixture();
+        ui.platform.modes = false;
+        ui.pane = Pane::General;
     }),
     ("modes-global", |ui| {
         *ui = portal_fixture();
