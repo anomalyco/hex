@@ -467,14 +467,16 @@ General                                  // settings
 
 Pause media + Also pause the browser     // browser_media
 ├── A browser uses the microphone (a call) -> leave it alone
-├── Listen 300 ms to the browsers' own output (private process tap)
-│   └── Peak at or below -60 dBFS, or no level -> leave it alone
+├── No browser process has its audio output open -> leave it alone (no tap)
+├── Listen to those processes' own output (private process tap), 3 windows of 100 ms
+│   └── Any window at or below -60 dBFS, or no level -> leave it alone
 ├── Send the system pause command (MediaRemote 1; never the toggle)
-├── Poll 100 ms windows for up to 1 s
-│   ├── A window below -90 dBFS -> Hex paused it
-│   └── Still sounding (another tab, or the pause went elsewhere) -> no play later
-└── Dictation ends and Hex paused it -> listen 300 ms again
+├── Poll 5 windows of 100 ms
+│   ├── 2 windows in a row below -90 dBFS -> Hex paused it
+│   └── Otherwise (another tab, a sound that ended later, or the pause went elsewhere) -> no play later
+└── Dictation ends and Hex paused it -> listen 300 ms to every browser process
     ├── Above -60 dBFS (you started it again) -> no play
+    ├── No level (browser quit, tap failed) -> no play
     └── Otherwise -> send the system play command (MediaRemote 0)
 
 Intentional recording                    // recording.environment
