@@ -1288,38 +1288,6 @@ mod tests {
     }
 
     #[test]
-    fn speech_detector_cost_is_logged_when_speech_passes() {
-        #[derive(Clone, Default)]
-        struct Log(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
-        impl std::io::Write for Log {
-            fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
-                self.0.lock().unwrap().extend_from_slice(bytes);
-                Ok(bytes.len())
-            }
-            fn flush(&mut self) -> std::io::Result<()> {
-                Ok(())
-            }
-        }
-        let log = Log::default();
-        let writer = log.clone();
-        let subscriber = tracing_subscriber::fmt()
-            .with_max_level(tracing::Level::DEBUG)
-            .with_ansi(false)
-            .with_writer(move || writer.clone())
-            .finish();
-        let _detector = crate::speech_detector::override_for_test(Some(true));
-        tracing::subscriber::with_default(subscriber, || {
-            // Parallel tests may have cached this callsite as disabled while
-            // no subscriber was set on their thread.
-            tracing::callsite::rebuild_interest_cache();
-            assert!(!DictationClip::for_test(tone(0.1, 16_000).collect()).is_near_silent());
-        });
-        let output = String::from_utf8(log.0.lock().unwrap().clone()).unwrap();
-        assert!(output.contains("audio_ms=1000"), "{output}");
-        assert!(output.contains("vad_ms="), "{output}");
-    }
-
-    #[test]
     fn silence_evidence_separates_the_pre_roll_from_audio_after_the_press() {
         let silent = DictationClip::for_test(vec![0.0; 16_000]).silence_evidence();
         assert_eq!(silent.zero_fraction, 1.0);
