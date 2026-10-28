@@ -64,6 +64,8 @@ pub(crate) struct Playground {
     /// The latest actions and cues, newest last.
     log: Vec<String>,
     copied: bool,
+    /// The screens the notch story shows.
+    screens: stories::Screens,
 }
 
 /// Opens the playground and runs it until its window closes.
@@ -115,6 +117,7 @@ fn init() -> CapsuleState {
         actions,
         log: Vec::new(),
         copied: false,
+        screens: stories::Screens::Both,
     }));
     state
 }
