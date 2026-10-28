@@ -533,10 +533,13 @@ CoreAudio formats, AppleScript details, or event serialization.
   default-input stream's change report, and Linux at the next stream open
   (ALSA's default resolves when it opens). Hex never captures from Hex
   Microphone: a Hex Microphone default stands in with the built-in microphone,
-  else the first real input, logged and shown in Settings. A saved microphone
+  else the first real input, logged and shown in Settings. With a MacBook's
+  lid closed (`AppleClamshellState`), the built-in microphone is off in
+  hardware but still listed, so it is passed over the same way, and with no
+  other input Hex reports why instead of recording silence. A saved microphone
   that is missing or will not open falls back to the system default without
   changing the setting, and Hex switches back when it returns. Any switch
-  (selection, default, or device list) happens only while capture is idle,
+  (selection, default, device list, or lid) happens only while capture is idle,
   after the current capture, and opening the replacement must succeed before
   the old stream is dropped; a device that resolves to the one already open is
   kept. An explicit CLI `--device` remains authoritative for that listener

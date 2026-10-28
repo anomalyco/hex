@@ -1200,6 +1200,33 @@ fn the_microphone_field_names_the_input_in_use() {
     assert!(texts.contains(&"Shure MV7 isn't connected; using your Mac's input".to_owned()));
 }
 
+#[test]
+fn a_closed_lid_names_the_input_standing_in_for_the_built_in_microphone() {
+    let note = "MacBook Pro Microphone is off while the lid is closed, so Hex listens to Studio Display Microphone";
+    let field = |rt: &Runtime<Ui>| element(rt, "microphone-control-field-trigger").label;
+    let mut rt = runtime("mac-microphone-lid-closed", true, PANE_SIZE);
+    assert_eq!(
+        field(&rt).as_deref(),
+        Some("System default, Studio Display Microphone")
+    );
+    let shown = texts(&rt);
+    assert!(shown.contains(&note.to_owned()), "{shown:?}");
+    assert!(shown.contains(&"off while the lid is closed".to_owned()));
+
+    // A saved built-in microphone shows the default standing in, too.
+    rt.state.settings.microphone = Some("MacBook Pro Microphone".into());
+    if let Ok(devices) = &mut rt.state.microphones {
+        devices.default_is_off_with_lid_closed = false;
+    }
+    rt.invalidate();
+    settle(&mut rt);
+    assert_eq!(
+        field(&rt).as_deref(),
+        Some("System default, Studio Display Microphone")
+    );
+    assert!(texts(&rt).contains(&note.to_owned()));
+}
+
 // ---------------------------------------------------------------------------
 // Goldens: offscreen GPU renders compared with checked-in PNGs. Set
 // HEX_UPDATE_GOLDENS=1 to rewrite them. Without a GPU adapter they skip.
