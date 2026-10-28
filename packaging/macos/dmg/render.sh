@@ -16,7 +16,7 @@ done
 work=$(mktemp -d "${TMPDIR:-/tmp}/hex-dmg.XXXXXX")
 trap 'hdiutil detach -quiet "$work/mnt" 2>/dev/null || true; rm -rf "$work"' EXIT HUP INT TERM
 
-(cd "$root" && cargo test --locked --bin voice-control \
+(cd "$root" && cargo test --locked --bin hex \
   rune_ui::dmg_keycap::render -- --ignored --exact)
 
 for scale in 1 2; do

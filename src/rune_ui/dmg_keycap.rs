@@ -59,8 +59,10 @@ fn draw(gpu: &Gpu, view: fn(&Ui, &mut Cx<Ui>) -> El, scale: f32) -> (u32, u32, V
 /// Recovers each pixel's alpha from the key drawn over black and over white.
 fn matte(black: &[u8], white: &[u8]) -> Vec<u8> {
     black
-        .chunks_exact(4)
-        .zip(white.chunks_exact(4))
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .zip(white.as_chunks::<4>().0)
         .flat_map(|(b, w)| {
             let spread = (0..3)
                 .map(|i| i32::from(w[i]) - i32::from(b[i]))
