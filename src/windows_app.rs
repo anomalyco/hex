@@ -359,6 +359,7 @@ impl WindowsDesktopHost {
         let current = settings;
         crate::feedback::set_enabled(current.sound_effects);
         crate::feedback::set_volume(current.sound_effect_volume.clamp(0.0, 1.0));
+        crate::feedback::set_theme(current.sound_theme);
         if previous.indicator_position != current.indicator_position {
             self.indicator.set_position(current.indicator_position);
         }

@@ -34,6 +34,10 @@ const SOUND_VOLUME_STEPS: [(&str, f32); 5] = [
     ("75%", 0.75),
     ("100%", 1.0),
 ];
+const SOUND_THEMES: [(&str, crate::feedback::SoundTheme); 2] = [
+    ("Signature", crate::feedback::SoundTheme::Signature),
+    ("Classic", crate::feedback::SoundTheme::Classic),
+];
 /// How long a newly saved shortcut shows "Saved".
 const SAVED_FOR: Duration = Duration::from_secs(1);
 /// How long to wait for the service to start a requested shortcut edit.
@@ -1515,6 +1519,28 @@ fn application_section(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
                     }
                 });
                 if saved && volume > 0.0 && ui.live() {
+                    crate::feedback::play(crate::feedback::Tone::DictationStart);
+                }
+            },
+        ),
+    ));
+    rows.push(setting_row(
+        p,
+        "sound-theme",
+        tr("Sounds"),
+        None,
+        segmented(
+            p,
+            "sound-theme-control",
+            &SOUND_THEMES.map(|(label, _)| tr(label)),
+            SOUND_THEMES
+                .iter()
+                .position(|(_, theme)| *theme == settings.sound_theme)
+                .unwrap_or(0),
+            |ui, index| {
+                let theme = SOUND_THEMES[index].1;
+                let saved = ui.update(|settings| settings.sound_theme = theme);
+                if saved && ui.settings.sound_effects && ui.live() {
                     crate::feedback::play(crate::feedback::Tone::DictationStart);
                 }
             },
