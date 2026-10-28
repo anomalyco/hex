@@ -6,12 +6,13 @@
 
 use crate::dot_scope::Placement;
 
-/// The plate's gap under the menu bar.
-const TOP_OFFSET: f64 = 12.0;
+/// The plate's gap under the menu bar: as close as it sits and still
+/// reads as its own thing.
+pub const TOP_OFFSET: f64 = 6.0;
 /// The plate's gap above the Dock or the screen's bottom edge.
 const BOTTOM_OFFSET: f64 = 24.0;
 /// The space the in-bar plate leaves above and below itself.
-const BAR_INSET: f64 = 3.0;
+pub const BAR_INSET: f64 = 3.0;
 /// The in-bar plate's gap from the notch it sits beside.
 const NOTCH_GAP: f64 = 10.0;
 /// The island's room around the plate below the notch.
@@ -291,9 +292,9 @@ mod tests {
     }
 
     #[test]
-    fn below_hangs_12_points_under_the_menu_bar_or_above_the_dock() {
+    fn below_hangs_6_points_under_the_menu_bar_or_above_the_dock() {
         let placed = place(Placement::Below, &flat(), CONTENT, false);
-        assert_eq!(plate(&placed), (-1280.0, 1416.0 - 12.0 - 13.0));
+        assert_eq!(plate(&placed), (-1280.0, 1416.0 - 6.0 - 13.0));
         assert!(!placed.over_menu_bar);
         assert_eq!(placed.layout, Layout::default());
         let placed = place(Placement::Below, &notched(), CONTENT, true);
@@ -307,7 +308,7 @@ mod tests {
             ..notched()
         };
         let placed = place(Placement::Below, &fullscreen, CONTENT, false);
-        assert_eq!(plate(&placed).1, 982.0 - 32.0 - 12.0 - 13.0);
+        assert_eq!(plate(&placed).1, 982.0 - 32.0 - 6.0 - 13.0);
     }
 
     #[test]

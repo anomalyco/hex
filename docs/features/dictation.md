@@ -909,7 +909,7 @@ behaviors. The cross-application flag explicitly allows the overlay to join
 another application's fullscreen Space (#75); panel style flags on an ordinary
 `NSWindow` were not sufficient.
 
-At the top position the capsule sits 12 pt below the menu bar, or below the
+At the top position the capsule sits 6 pt below the menu bar (`hud_placement::TOP_OFFSET`), or below the
 notch (`NSScreen.safeAreaInsets`) where a fullscreen Space hides the menu bar
 and `visibleFrame` reaches the top of a notched screen. Screens without a notch
 and normal Spaces keep their position. Check: `scripts/check

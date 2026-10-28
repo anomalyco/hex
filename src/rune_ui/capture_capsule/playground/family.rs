@@ -25,7 +25,7 @@ use super::super::surface::{MEDIUM, SMALL, STRONG, TIMER, corner, measure};
 use super::super::tuning;
 use super::Paint;
 use crate::dot_scope::{self, Frame, Scope, Stage, demo_level, demo_loudness, palette};
-use crate::hud_placement::{ISLAND_PAD, Rect, Screen};
+use crate::hud_placement::{self, ISLAND_PAD, Rect, Screen};
 
 /// The plate's height at full size, one line: both siblings'.
 const H: f32 = 28.0;
@@ -41,11 +41,10 @@ const TIMER_W: f32 = 34.0;
 const CARD_W: f32 = 264.0;
 const ROW_H: f32 = 30.0;
 const CARD_PAD: f32 = 6.0;
-/// The in-bar plate's room above and below it, as `hud_placement` has it.
-const BAR_INSET: f32 = 3.0;
-/// The floating capsule's gap under the menu bar: as close as it can sit
-/// and still read as its own thing.
-const FLOAT_GAP: f32 = 6.0;
+/// The in-bar plate's room above and below it.
+const BAR_INSET: f32 = hud_placement::BAR_INSET as f32;
+/// The floating capsule's gap under the menu bar.
+const FLOAT_GAP: f32 = hud_placement::TOP_OFFSET as f32;
 /// The island's room under the notch.
 const ISLAND: f32 = ISLAND_PAD as f32;
 
