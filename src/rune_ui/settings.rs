@@ -369,7 +369,7 @@ fn sound_volume_index(settings: &AppSettings) -> usize {
 
 pub(super) fn toggle_menu(ui: &mut Ui, menu: Menu) {
     ui.open = (ui.open != Some(menu)).then_some(menu);
-    if ui.open == Some(Menu::Microphone) {
+    if matches!(ui.open, Some(Menu::Microphone | Menu::TourMicrophone)) {
         refresh_microphones(ui);
     }
 }
@@ -410,6 +410,60 @@ pub(super) fn poll_microphones(ui: &mut Ui) -> bool {
     let changed = ui.microphones != listed;
     ui.microphones = listed;
     changed
+}
+
+/// A saved microphone the input list no longer names. Only a list that
+/// names inputs can tell.
+pub(super) fn missing_microphone(ui: &Ui) -> Option<&str> {
+    let listed = ui.microphones.as_ref().ok();
+    ui.settings.microphone.as_deref().filter(|saved| {
+        listed.is_some_and(|devices| {
+            !devices.names.is_empty() && !devices.names.iter().any(|name| name == saved)
+        })
+    })
+}
+
+/// The microphone menu's choices, shared by General and the tour: System
+/// default with the input it resolves to, every listed input, and a saved
+/// one that is missing. Choosing saves through `Ui::update`.
+pub(super) fn microphone_choices(ui: &Ui) -> Vec<Choice> {
+    let settings = &ui.settings;
+    let listed = ui.microphones.as_ref().ok();
+    let off = listed.and_then(|devices| devices.off_with_lid_closed.as_deref());
+    let mut devices = vec![Choice {
+        label: tr("System default").to_owned(),
+        detail: listed.and_then(|devices| devices.system_default.clone()),
+        selected: settings.microphone.is_none(),
+        choose: Box::new(|ui: &mut Ui| {
+            ui.open = None;
+            ui.update(|settings| settings.microphone = None);
+        }),
+    }];
+    if let Some(listed) = listed {
+        devices.extend(listed.names.iter().map(|device| {
+            let name = device.clone();
+            Choice {
+                label: device.clone(),
+                detail: (off == Some(device.as_str()))
+                    .then(|| tr("off while the lid is closed").to_owned()),
+                selected: settings.microphone.as_deref() == Some(device),
+                choose: Box::new(move |ui: &mut Ui| {
+                    ui.open = None;
+                    let name = name.clone();
+                    ui.update(|settings| settings.microphone = Some(name));
+                }),
+            }
+        }));
+    }
+    if let Some(saved) = missing_microphone(ui) {
+        devices.push(Choice {
+            label: saved.to_owned(),
+            detail: Some(tr("not connected").to_owned()),
+            selected: true,
+            choose: Box::new(|ui: &mut Ui| ui.open = None),
+        });
+    }
+    devices
 }
 
 pub(super) fn error_notes(p: Paint, error: &str) -> [El; 2] {
@@ -821,12 +875,7 @@ fn dictation_section(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
     rows.push(super::picker::language_row(ui, p, layer).into());
     let listed = ui.microphones.as_ref().ok();
     let default_name = listed.and_then(|devices| devices.system_default.as_deref());
-    // Only a list that names inputs can tell a saved microphone is missing.
-    let missing = settings.microphone.as_deref().filter(|saved| {
-        listed.is_some_and(|devices| {
-            !devices.names.is_empty() && !devices.names.iter().any(|name| name == saved)
-        })
-    });
+    let missing = missing_microphone(ui);
     // A MacBook's built-in microphone is off while its lid is closed.
     let off = listed.and_then(|devices| devices.off_with_lid_closed.as_deref());
     let saved_off = settings
@@ -839,7 +888,7 @@ fn dictation_section(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
     // microphone shows the system default standing in for it.
     let (microphone, microphone_detail) = match (&settings.microphone, missing.or(saved_off)) {
         (Some(saved), None) => (saved.clone(), None),
-        _ => (tr("System default").to_owned(), system_detail.clone()),
+        _ => (tr("System default").to_owned(), system_detail),
     };
     let mac = ui.platform.caps.os == super::platform::Os::Macos;
     let lid_note = |built_in: &str| match default_name {
@@ -867,39 +916,7 @@ fn dictation_section(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
         None if devices.default_is_off_with_lid_closed => off.map(lid_note),
         None => None,
     });
-    let mut devices = vec![Choice {
-        label: tr("System default").to_owned(),
-        detail: system_detail,
-        selected: settings.microphone.is_none(),
-        choose: Box::new(|ui: &mut Ui| {
-            ui.open = None;
-            ui.update(|settings| settings.microphone = None);
-        }),
-    }];
-    if let Ok(listed) = &ui.microphones {
-        devices.extend(listed.names.iter().map(|device| {
-            let name = device.clone();
-            Choice {
-                label: device.clone(),
-                detail: (off == Some(device.as_str()))
-                    .then(|| tr("off while the lid is closed").to_owned()),
-                selected: settings.microphone.as_deref() == Some(device),
-                choose: Box::new(move |ui: &mut Ui| {
-                    ui.open = None;
-                    let name = name.clone();
-                    ui.update(|settings| settings.microphone = Some(name));
-                }),
-            }
-        }));
-    }
-    if let Some(saved) = missing {
-        devices.push(Choice {
-            label: saved.to_owned(),
-            detail: Some(tr("not connected").to_owned()),
-            selected: true,
-            choose: Box::new(|ui: &mut Ui| ui.open = None),
-        });
-    }
+    let devices = microphone_choices(ui);
     rows.push(
         setting_row(
             p,

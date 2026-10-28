@@ -546,6 +546,8 @@ impl Pane {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Menu {
     Microphone,
+    /// The microphone under the tour's practice field.
+    TourMicrophone,
     Language,
     /// The speech model's language.
     TranscriptionLanguage,
@@ -1070,7 +1072,7 @@ fn poll(ui: &mut Ui, clock: f64, tx: &mut Tx) -> bool {
     // General names the input in use; list again when the OS reports an
     // input change. Windows reports a default change only to an open
     // default stream, so there the list is also refreshed every few seconds.
-    if ui.pane == Pane::General
+    if (ui.pane == Pane::General || onboarding::shows_microphone(ui))
         && ui.live()
         && ui.window.as_ref().is_some_and(rune::AppHandle::is_visible)
         && (ui.microphones_route != Some(crate::audio::input_route_generation())
@@ -1194,8 +1196,10 @@ fn view(ui: &Ui, cx: &mut Cx<Ui>) -> El {
     if let Some(modal) = explainer::modal(ui, cx, p) {
         layer.extend(modal);
     }
-    if let Some(tour) = onboarding::overlay(ui, p) {
+    let mut tour_layer = Vec::new();
+    if let Some(tour) = onboarding::overlay(ui, p, &mut tour_layer) {
         layer.push(tour);
+        layer.extend(tour_layer);
     }
     rune_kit::root(window, layer).on_window_focus(window_focused)
 }
@@ -2121,6 +2125,30 @@ const SCENES: &[Scene] = &[
     ("mac-onboarding-done", |ui| {
         mac_tour(ui, onboarding::MacStep::Done)
     }),
+    ("mac-onboarding-mic-glyph", |ui| {
+        mic_tour(ui, onboarding::MicStyle::Glyph, MicScene::Hearing)
+    }),
+    ("mac-onboarding-mic-glyph-open", |ui| {
+        mic_tour(ui, onboarding::MicStyle::Glyph, MicScene::Open)
+    }),
+    ("mac-onboarding-mic-glyph-silent", |ui| {
+        mic_tour(ui, onboarding::MicStyle::Glyph, MicScene::Silent)
+    }),
+    ("mac-onboarding-mic-glyph-lid", |ui| {
+        mic_tour(ui, onboarding::MicStyle::Glyph, MicScene::LidClosed)
+    }),
+    ("mac-onboarding-mic-bars", |ui| {
+        mic_tour(ui, onboarding::MicStyle::Bars, MicScene::Hearing)
+    }),
+    ("mac-onboarding-mic-bars-open", |ui| {
+        mic_tour(ui, onboarding::MicStyle::Bars, MicScene::Open)
+    }),
+    ("mac-onboarding-mic-bars-silent", |ui| {
+        mic_tour(ui, onboarding::MicStyle::Bars, MicScene::Silent)
+    }),
+    ("mac-onboarding-mic-bars-lid", |ui| {
+        mic_tour(ui, onboarding::MicStyle::Bars, MicScene::LidClosed)
+    }),
     // The welcome hero animating (`--video`, or a live window), and settled as
     // Reduce Motion shows it.
     ("onboarding-hero", |ui| hero_tour(ui, false)),
@@ -2206,6 +2234,63 @@ fn listening(message: Option<&'static str>, held: HotkeyModifiers) -> Capture {
 fn mac_tour(ui: &mut Ui, step: onboarding::MacStep) {
     *ui = mac_fixture();
     onboarding::mac_fixture(ui, step);
+}
+
+/// What the tour's practice microphone shows in a scene.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum MicScene {
+    /// Recording, and Hex hears the person.
+    Hearing,
+    /// Its menu of inputs open.
+    Open,
+    /// Recording, and Hex hears nothing.
+    Silent,
+    /// The lid closed and no other input.
+    LidClosed,
+}
+
+fn mic_tour(ui: &mut Ui, style: onboarding::MicStyle, scene: MicScene) {
+    let recording = matches!(scene, MicScene::Hearing | MicScene::Silent);
+    mac_tour(
+        ui,
+        if recording {
+            onboarding::MacStep::TryItListening
+        } else {
+            onboarding::MacStep::TryIt
+        },
+    );
+    let built_in = "MacBook Pro Microphone".to_owned();
+    ui.microphones = Ok(if scene == MicScene::LidClosed {
+        crate::audio::InputDevices {
+            names: vec![built_in.clone()],
+            system_default: None,
+            off_with_lid_closed: Some(built_in),
+            default_is_off_with_lid_closed: true,
+            ..Default::default()
+        }
+    } else {
+        crate::audio::InputDevices {
+            names: vec![
+                "Kit Pods".into(),
+                built_in.clone(),
+                "Studio Display Microphone".into(),
+            ],
+            system_default: Some(built_in),
+            ..Default::default()
+        }
+    });
+    if scene == MicScene::Open {
+        ui.open = Some(Menu::TourMicrophone);
+    }
+    let microphone = ui.settings.microphone.clone();
+    if let Some(tour) = &mut ui.tour {
+        tour.mic_style = style;
+        match scene {
+            MicScene::Hearing => tour.mic.level = 0.6,
+            MicScene::Silent => tour.mic.silent = Some(microphone),
+            _ => {}
+        }
+    }
 }
 
 fn portal_fixture() -> Ui {

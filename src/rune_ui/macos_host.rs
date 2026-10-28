@@ -842,6 +842,10 @@ impl NativeHost for MacHost {
         }
         inputs
     }
+
+    fn practice_level(&self) -> f32 {
+        crate::dictation_indicator::recent_peak()
+    }
 }
 
 /// The Calendar card's state. EventKit is touched only on the reader thread,

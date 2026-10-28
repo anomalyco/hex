@@ -146,6 +146,10 @@ Launch Hex, setup incomplete              // setup.tour; full-window, own column
 │   ├── Started -> "Listening…" ; Transcribing -> "Transcribing…"
 │   ├── Discarded before transcribing -> quick-tap hint
 │   ├── Discarded after transcribing -> nothing-heard hint (mic, distance)
+│   ├── Microphone line under the hint: input in use + live level while recording
+│   │   ├── Click -> General's microphone menu; a choice saves the same setting
+│   │   ├── 1.5 s of silence while recording -> "No sound. Pick another mic?"
+│   │   └── Lid closed, no other input -> "The lid is closed, so the built-in mic is off."
 │   ├── Pasted -> words land in the field + success -> Continue
 │   └── Skip -> Done                      // practice is never required
 ├── Listener cannot start after setup     // setup.relaunch; event tap refused

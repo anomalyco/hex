@@ -711,6 +711,11 @@ pub(super) trait NativeHost {
     /// What the tour hears from the runtime: practice dictation outcomes
     /// while `practicing`, and a shortcut listener that failed to start.
     fn tour_inputs(&mut self, practicing: bool) -> Vec<Input>;
+    /// The microphone's latest peak, 0 to 1, while a dictation records;
+    /// silence when no audio arrived lately.
+    fn practice_level(&self) -> f32 {
+        0.0
+    }
 }
 
 pub(super) enum PlatformHost {
@@ -752,6 +757,13 @@ impl PlatformHost {
         match self {
             Self::Native(host) => host.tour_inputs(practicing),
             _ => Vec::new(),
+        }
+    }
+
+    pub(super) fn practice_level(&self) -> f32 {
+        match self {
+            Self::Native(host) => host.practice_level(),
+            _ => 0.0,
         }
     }
 
