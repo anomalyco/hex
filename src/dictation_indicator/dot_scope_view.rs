@@ -158,7 +158,9 @@ impl DotScopeView {
         if layout.anchor_left {
             center[0] += pose.width * layout.fit / 2.0;
         }
-        let island = layout.island.map_or([0.0; 4], |island| island_shape(island, &pose));
+        let island = layout
+            .island
+            .map_or([0.0; 4], |island| island_shape(island, &pose));
         let rgba = |c: [f32; 3]| [c[0], c[1], c[2], 1.0];
         let uniforms = DotUniforms {
             resolution,

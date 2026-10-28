@@ -44,8 +44,6 @@ mod dictation_audio;
 mod dictation_diagnostics;
 #[cfg(target_os = "macos")]
 mod dictation_indicator;
-#[cfg(target_os = "macos")]
-mod hud_placement;
 #[cfg_attr(target_os = "macos", allow(dead_code))]
 mod dictation_modes;
 #[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
@@ -63,6 +61,8 @@ mod gguf_session;
 #[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
 mod hex_microphone;
 mod history;
+#[cfg(target_os = "macos")]
+mod hud_placement;
 mod instance;
 #[cfg(target_os = "macos")]
 mod keyboard;

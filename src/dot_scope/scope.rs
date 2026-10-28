@@ -207,7 +207,9 @@ fn bump(d: f32, w: f32) -> f32 {
 fn hermite(start: f32, speed: f32, end: f32, t: f32) -> f32 {
     let t = t.clamp(0.0, 1.0);
     let (t2, t3) = (t * t, t * t * t);
-    (2.0 * t3 - 3.0 * t2 + 1.0) * start + (t3 - 2.0 * t2 + t) * WIPE * speed + (3.0 * t2 - 2.0 * t3) * end
+    (2.0 * t3 - 3.0 * t2 + 1.0) * start
+        + (t3 - 2.0 * t2 + t) * WIPE * speed
+        + (3.0 * t2 - 2.0 * t3) * end
 }
 
 fn pass_position(p: f32) -> f32 {
@@ -459,6 +461,7 @@ impl Scope {
     }
 
     /// The 0–1 level the voice follows now, before the gain.
+    #[cfg(test)]
     pub fn level(&self) -> f32 {
         self.level
     }
@@ -540,12 +543,8 @@ impl Scope {
         let recording = self.stage == Stage::Recording && frame.visible;
         let level = if recording {
             self.level = if tuning.auto_level {
-                self.auto.step(
-                    frame.loudness,
-                    h,
-                    tuning.auto_release,
-                    tuning.noise_floor,
-                )
+                self.auto
+                    .step(frame.loudness, h, tuning.auto_release, tuning.noise_floor)
             } else {
                 fixed_level(frame.loudness)
             };
@@ -569,7 +568,8 @@ impl Scope {
         let energy = self.voices[0].energy.max(self.voices[1].energy);
         let working = matches!(self.stage, Stage::Processing | Stage::Done);
         let flowing = working && tuning.processing == Processing::Flow;
-        self.flow_turn += (if flowing { 1.0 } else { 0.0 } - self.flow_turn) * (1.0 - (-h / 0.25).exp());
+        self.flow_turn +=
+            (if flowing { 1.0 } else { 0.0 } - self.flow_turn) * (1.0 - (-h / 0.25).exp());
         if working {
             self.flow_offset += self.flow_speed() * h;
         }
@@ -1142,7 +1142,10 @@ mod tests {
         }
         assert!(rightward >= 10, "rightward {rightward} of 12");
         let helix = scope.flow_turn_hz() * scope.width.x / scope.tuning.helix_cycles;
-        assert!((helix - scope.flow_speed()).abs() < 0.5, "the braid keeps pace");
+        assert!(
+            (helix - scope.flow_speed()).abs() < 0.5,
+            "the braid keeps pace"
+        );
         assert!(scope.pose().cool > 0.99);
     }
 
@@ -1175,7 +1178,11 @@ mod tests {
                     ..processing()
                 };
                 run(&mut scope, 0.5, done);
-                assert!(lit(&scope) < 1.0, "{look:?} after {processed}s: lit {}", lit(&scope));
+                assert!(
+                    lit(&scope) < 1.0,
+                    "{look:?} after {processed}s: lit {}",
+                    lit(&scope)
+                );
                 run(
                     &mut scope,
                     0.6,
@@ -1206,7 +1213,10 @@ mod tests {
         assert!(start <= scope.width.x / 2.0 - 4.0 && start > -scope.width.x / 2.0 - 5.0);
         let step = 0.004;
         let early = (hermite(start, speed, 50.0, step / WIPE) - start) / step;
-        assert!((early - speed).abs() < 0.15 * speed + 3.0, "{early} vs {speed}");
+        assert!(
+            (early - speed).abs() < 0.15 * speed + 3.0,
+            "{early} vs {speed}"
+        );
         assert_eq!(hermite(start, speed, 50.0, 1.0), 50.0);
     }
 

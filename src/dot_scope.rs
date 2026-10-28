@@ -233,7 +233,14 @@ pub const KNOBS: [Knob; 21] = [
     knob(16, "dot-shimmer", "Shimmer brightness", 0.0, 2.5, "x"),
     knob(17, "dot-transition", "Transition", 0.1, 0.8, " s"),
     knob(18, "dot-bounce", "Bounce", 0.0, 0.6, ""),
-    knob(19, "dot-auto-release", "Auto-level release", 0.5, 10.0, " s"),
+    knob(
+        19,
+        "dot-auto-release",
+        "Auto-level release",
+        0.5,
+        10.0,
+        " s",
+    ),
     knob(20, "dot-noise-floor", "Noise floor", -80.0, -30.0, " dB"),
 ];
 
@@ -431,6 +438,7 @@ impl AutoLevel {
     }
 
     /// The speaker's recent peak and the room, dBFS.
+    #[cfg(test)]
     pub fn levels(&self) -> (f32, f32) {
         (self.peak, self.room)
     }

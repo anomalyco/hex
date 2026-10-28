@@ -17,8 +17,7 @@ use objc2::MainThreadMarker;
 use objc2::rc::Retained;
 use objc2_app_kit::{
     NSBackingStoreType, NSColor, NSEvent, NSPanel, NSScreen, NSStatusBar, NSStatusWindowLevel,
-    NSView,
-    NSWindowCollectionBehavior, NSWindowStyleMask,
+    NSView, NSWindowCollectionBehavior, NSWindowStyleMask,
 };
 use objc2_foundation::{NSPoint, NSRect, NSSize};
 use objc2_quartz_core::CALayer;

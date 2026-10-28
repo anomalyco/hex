@@ -169,10 +169,7 @@ pub fn place(placement: Placement, screen: &Screen, content: Content, bottom: bo
     let hanging = |x: f64, depth: f64, layout: Layout| Placed {
         top_left: (x - window_width / 2.0, screen_top),
         layout: Layout {
-            center: [
-                layout.center[0],
-                (depth - window_height / 2.0) as f32,
-            ],
+            center: [layout.center[0], (depth - window_height / 2.0) as f32],
             ..layout
         },
         over_menu_bar: true,
