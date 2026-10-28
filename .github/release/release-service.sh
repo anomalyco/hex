@@ -45,24 +45,31 @@ done
 temporary=$(mktemp -d)
 trap 'rm -rf "$temporary"' EXIT HUP INT TERM
 
-# The token stays in a curl config file, never in argv or the log.
-token_config="$temporary/token.curl"
-(
-  umask 077
-  token=$(curl -fsS -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
-    "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=$RELEASE" | jq -er .value)
-  printf 'header = "Authorization: Bearer %s"\n' "$token" > "$token_config"
-)
-
 # request <curl arguments>: an authenticated request; prints the body and
-# sets $status.
+# sets $status and $response (the body's file). Every request mints its own
+# OIDC token: GitHub's expire within minutes, and a publish's uploads can
+# outlast one. The token stays in a curl config file, never in argv or the
+# log.
 request() {
-  status=$(curl -sS --config "$token_config" --retry 3 --retry-all-errors \
-    -o "$temporary/response" -w '%{http_code}' "$@") || {
+  config=$(mktemp "$temporary/token.XXXXXX")
+  response=$(mktemp "$temporary/response.XXXXXX")
+  (
+    umask 077
+    token=$(curl -fsS --retry 3 -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+      "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=$RELEASE" | jq -er .value)
+    printf 'header = "Authorization: Bearer %s"\n' "$token" > "$config"
+  ) || {
+    echo "Could not get a GitHub OIDC token." >&2
+    exit 1
+  }
+  status=$(curl -sS --config "$config" --retry 3 --retry-all-errors \
+    -o "$response" -w '%{http_code}' "$@") || {
+    rm -f "$config"
     echo "Request to the release service failed: $*" >&2
     exit 1
   }
-  cat "$temporary/response"
+  rm -f "$config"
+  cat "$response"
 }
 
 # api <curl arguments>: a request that must succeed.
@@ -71,7 +78,7 @@ api() {
   case "$status" in
     2??) ;;
     *)
-      echo "The release service answered $status: $(cat "$temporary/response")" >&2
+      echo "The release service answered $status: $(cat "$response")" >&2
       exit 1
       ;;
   esac
@@ -112,22 +119,28 @@ upload() {
   name=$2
   sha256=$(sha256_of "$file")
   size=$(wc -c < "$file" | tr -d ' ')
+  started=$(date +%s)
+  # Files are content-addressed and never replaced: one already stored (a
+  # rerun, or an unchanged build) needs no upload.
+  if curl -fsSI --retry 3 "${RELEASE}/$app/files/$sha256/$name" > /dev/null 2>&1; then
+    echo "Already stored: $name ($sha256)." >&2
+    return
+  fi
   if [ "$size" -le "$single_limit" ]; then
     api -X PUT -H "x-checksum-sha256: $sha256" --data-binary @"$file" \
       "$RELEASE/$app/files/$name" > /dev/null
   else
     upload_id=$(api -X POST "$RELEASE/$app/files/$name?uploads" | jq -er .upload)
-    rm -rf "$temporary/parts"
-    mkdir "$temporary/parts"
-    split -b "$part_size" "$file" "$temporary/parts/part."
+    parts=$(mktemp -d "$temporary/parts.XXXXXX")
+    split -b "$part_size" "$file" "$parts/part."
     part=1
-    for chunk in "$temporary"/parts/part.*; do
+    for chunk in "$parts"/part.*; do
       api -X PUT --data-binary @"$chunk" "$RELEASE/$app/files/$name?upload=$upload_id&part=$part" > /dev/null
       part=$((part + 1))
     done
     api -X POST -H "x-checksum-sha256: $sha256" "$RELEASE/$app/files/$name?upload=$upload_id" > /dev/null
   fi
-  echo "Uploaded $name ($size bytes, $sha256)." >&2
+  echo "Uploaded $name ($size bytes, $sha256) in $(($(date +%s) - started)) s." >&2
 }
 
 publish() {
@@ -140,6 +153,7 @@ publish() {
   # already tells files apart, and a download is saved under that name. A
   # run without a platform's signed build publishes the others.
   pinned='{}'
+  uploads=
   for entry in \
     "macos-arm64=Hex-$version-macos-arm64.zip=Hex.zip" \
     "macos-arm64-dmg=Hex-$version-macos-arm64.dmg=Hex.dmg" \
@@ -159,11 +173,21 @@ publish() {
     local_name=${rest%%=*}
     name=${rest#*=}
     [ -f "$dist/$local_name" ] || continue
-    upload "$dist/$local_name" "$name"
+    # Uploads run in parallel; each waits on its own requests and tokens.
+    upload "$dist/$local_name" "$name" &
+    uploads="$uploads $!"
     pinned=$(printf '%s' "$pinned" | jq --arg target "$target" --arg file "$name" \
       --arg local "$local_name" --arg sha256 "$(sha256_of "$dist/$local_name")" \
       '.[$target] = {file: $file, sha256: $sha256, local: $local}')
   done
+  failed=0
+  for pid in $uploads; do
+    wait "$pid" || failed=1
+  done
+  [ "$failed" = 0 ] || {
+    echo "An upload to the release service failed." >&2
+    exit 1
+  }
   test "$(printf '%s' "$pinned" | jq 'length')" -gt 0
   jq -n \
     --arg channel "$channel" \
