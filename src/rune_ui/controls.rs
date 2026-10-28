@@ -104,6 +104,9 @@ impl Paint {
     pub(super) fn success(self) -> Color {
         self.k.c.success.fg
     }
+    pub(super) fn warning(self) -> Color {
+        self.k.c.warning.fg
+    }
     pub(super) fn accent(self) -> Color {
         self.k.c.text_accent
     }

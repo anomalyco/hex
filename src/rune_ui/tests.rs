@@ -137,6 +137,25 @@ fn a_refused_note_sits_with_the_shortcut_the_desktop_kept() {
 }
 
 #[test]
+fn a_shortcut_without_a_key_says_so() {
+    let rt = runtime("portal-unbound", true, GOLDEN_SIZE);
+    let shown = texts(&rt);
+    assert!(
+        shown
+            .iter()
+            .any(|text| text == "F12 won't work until you add it to your desktop's keybindings")
+    );
+    assert!(
+        !shown
+            .iter()
+            .any(|text| text.starts_with("Your desktop granted"))
+    );
+    assert!(shown.iter().any(|text| text == "Waiting for a keybinding"));
+    assert!(!shown.iter().any(|text| text.starts_with("Ready anywhere")));
+    assert!(rt.find("dictation/card/refused").is_none());
+}
+
+#[test]
 fn advanced_opens_while_in_use_and_always_closes() {
     let mut rt = runtime("portal", true, GOLDEN_SIZE);
     assert!(rt.find("microphone-mode").is_none());

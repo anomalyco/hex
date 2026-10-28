@@ -253,6 +253,19 @@ dictation rules:
   a setgid wrapper such as `newgrp`, once used to grant input-device access,
   makes the portal refuse Hex. The desktop delivers the keys to Hex, not to the
   focused application.
+- **Hyprland** has the portal but takes every shortcut without a key, so
+  nothing happens until you bind one in your config. Settings marks each
+  shortcut with no key in red, and Status reads "Waiting for a keybinding".
+  For example:
+
+```lua
+hl.bind("ALT + Z", hl.dsp.global("hex:dictation"))
+hl.bind("CTRL + ALT + V", hl.dsp.global("hex:paste-last"))
+```
+
+  Older Hyprland configs write `bind = ALT, Z, global, hex:dictation`.
+  Escape-cancel can't be bound this way; bind `hex dictation cancel` to a key
+  instead.
 - **Wayland without the portal** (for example Sway): nothing registers global
   shortcuts. Settings lists these commands; bind them in your desktop's own
   keyboard configuration:

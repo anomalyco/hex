@@ -51,7 +51,8 @@ pub(crate) enum DesktopShortcuts {
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct DesktopGrantedShortcut {
     pub(crate) name: String,
-    /// The trigger the desktop granted; `None` when it refused.
+    /// The trigger the desktop granted; `None` when it refused, and empty
+    /// when it took the shortcut without a key (Hyprland).
     pub(crate) trigger: Option<String>,
 }
 
