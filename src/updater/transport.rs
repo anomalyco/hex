@@ -7,6 +7,7 @@ use std::fs::{self, File, OpenOptions};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::time::Duration;
 
 use color_eyre::eyre::{Result, WrapErr, bail};
 
@@ -46,7 +47,7 @@ fn curl() -> Command {
 impl ManifestCache {
     /// Fetches `url` into `scratch`, returning the manifest text: the cached
     /// one when the service answers 304.
-    pub fn fetch(&mut self, url: &str, scratch: &Path) -> Result<String> {
+    pub fn fetch(&mut self, url: &str, scratch: &Path, max_time: Duration) -> Result<String> {
         let body = scratch.join("manifest.json.partial");
         let headers = scratch.join("manifest.headers");
         let _ = fs::remove_file(&body);
@@ -57,7 +58,10 @@ impl ManifestCache {
             };
         }
         let mut command = curl();
-        command.args(["--max-time", "60", "--max-filesize"]);
+        command
+            .arg("--max-time")
+            .arg(max_time.as_secs().max(1).to_string())
+            .arg("--max-filesize");
         command.arg(MAX_MANIFEST_BYTES.to_string());
         if let (Some(etag), Some(_)) = (&self.etag, &self.body) {
             command

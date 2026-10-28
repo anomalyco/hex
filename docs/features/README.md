@@ -871,7 +871,12 @@ Hex checks the release service            // maintain.updates
 │   ├── macOS -> unpack beside Hex.app -> Developer ID 5NZ4Q7NXJ4, anomaly.hex, notarized
 │   ├── Windows -> Authenticode valid, signer AUTHENTICODE_SIGNER -> new version directory
 │   ├── Linux -> SHA-256 only -> new version directory, `current` switched
+│   ├── Staged -> checks continue; Restart to update stays offered meanwhile
+│   │   ├── Another release this install takes (update, required) -> download -> replaces the staged one
+│   │   └── Same release, rollout deferred, unconfirmed switch, rollback, failure -> keep the staged one
 │   └── Sidebar Update, menu bar / tray: Restart to update
+│       ├── One more check first (manifest within 15 s) -> Checking / Downloading -> newest staged
+│       │   └── A release published after the relaunch -> the next launch's check
 │       └── macOS -> renamex_np swap (also at quit) -> relaunch -> old bundle removed at launch
 ├── macOS location not replaceable (read-only, translocated, root-owned) -> Download update (DMG)
 ├── Package manager (pacman, Nix) -> its command, once it serves another version
@@ -900,7 +905,14 @@ per-OS modules have tests for activation, the macOS bundle swap and
 signature checks (ad-hoc fixtures against the real requirement), the rollout
 bucket, receipts, the channel choice, never comparing versions (a legacy
 2.3.2-dev.29 follows 0.0.0-dev-N; dev to stable is a switch), the switch
-waiting for confirmation, and Windows Authenticode (a Microsoft-signed system file). The
+waiting for confirmation, only a different self-taken release replacing a staged
+update (`only_a_different_release_this_install_takes_replaces_a_staged_update`),
+Restart to update's final check and one-time report
+(`restart_to_update_checks_once_more_and_reports_once`), Linux re-staging keeping
+the running version (`replacing_a_staged_update_keeps_the_running_version`), and
+Windows Authenticode (a Microsoft-signed system file). No test drives the worker
+through a real re-stage and restart; a channel rolled back while an update is
+staged still restarts into the staged release. The
 Update channel row shows only while this install updates itself (not test,
 source, managed, or package-manager installs); the `mac-settings-dev-channel`
 scene renders it, and `rune_ui` tests cover saving and hiding it.

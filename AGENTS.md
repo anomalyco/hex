@@ -887,7 +887,11 @@ CoreAudio formats, AppleScript details, or event serialization.
   Windows `SOFTWARE\Policies\Anomaly\Hex` in HKLM or HKCU) turns checks off.
   Never escalate privileges, and never overwrite development, root, or
   package-manager-owned files.
-- A staged update waits for Restart to update. Linux and Windows activate a
+- A staged update waits for Restart to update, and checks continue while it
+  waits: another release this install would take by itself (update or
+  required) replaces it, and Restart to update runs one more bounded check
+  first, so the restart lands on the newest release. Staging never removes
+  the running version. Linux and Windows activate a
   new version directory and switch `current`/`current-version` atomically at
   staging; macOS unpacks beside the bundle and swaps it in with
   `renamex_np(RENAME_SWAP)` at restart or quit, and the new version removes

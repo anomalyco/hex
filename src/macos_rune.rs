@@ -217,16 +217,13 @@ pub(crate) fn runtime() -> Option<RuntimeHandle> {
     RUNTIME.get().cloned()
 }
 
-/// Carries out an update control from the window, a menu, or `hex`;
-/// switching to a staged update quits so it can start.
+/// Carries out an update control from the window, a menu, or `hex`. Restart
+/// to update finishes on the updater's worker; the pump then quits.
 pub(crate) fn update_action(action: &crate::desktop_host::DesktopAction) -> Result<()> {
-    let updater = UPDATER
+    UPDATER
         .get()
-        .ok_or_else(|| eyre!("the updater is not running"))?;
-    if updater.act(action)? {
-        quit();
-    }
-    Ok(())
+        .ok_or_else(|| eyre!("the updater is not running"))?
+        .act(action)
 }
 
 pub(crate) fn update_status() -> DesktopUpdateStatus {
@@ -924,6 +921,20 @@ impl Pump {
             self.runtime_cancel();
             self.window.quit();
             return;
+        }
+        // Restart to update swapped in the new version after its final check.
+        match UPDATER
+            .get()
+            .and_then(crate::updater::Updater::take_restart)
+        {
+            Some(Ok(())) => {
+                self.window.quit();
+                return;
+            }
+            Some(Err(error)) => {
+                tracing::warn!(error = %format!("{error:#}"), "could not restart into the update");
+            }
+            None => {}
         }
         while let Ok(event) = self.indicator_events.try_recv() {
             indicator.handle(event);

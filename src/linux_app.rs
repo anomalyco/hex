@@ -586,6 +586,11 @@ impl LinuxDesktopHost {
     }
 
     fn refresh(&mut self) {
+        // Restart to update asks systemd to restart Hex after the updater's
+        // final check; only a failure needs showing.
+        if let Some(Err(error)) = self.updater.take_restart() {
+            self.error = Some(format!("Could not restart Hex: {error:#}"));
+        }
         // Settings may set up the transformations workspace at any time.
         if self.personal_commands_checked_at.elapsed() >= Duration::from_secs(2) {
             self.personal_commands_checked_at = Instant::now();
