@@ -42,7 +42,7 @@ pub enum Experiment {
 impl Experiment {
     /// Every experiment, including those behind a build option;
     /// [`Self::available`] lists the ones this build offers.
-    const ALL: [Self; 7] = [
+    const ALL: [Self; 8] = [
         Self::Capture,
         Self::DotScope,
         Self::LiveChapters,
