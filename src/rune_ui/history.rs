@@ -298,7 +298,7 @@ pub(super) fn pane(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> (Vec<El>, El) {
         if selected {
             item = item.fill(c.layer_02);
         }
-        list = list.child(source_item(p, item, selected));
+        list = list.child(source_item(item, selected));
     }
     let body = split(
         p,

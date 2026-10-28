@@ -149,7 +149,7 @@ pub(super) fn modal(ui: &Ui, p: Paint) -> Option<[El; 2]> {
         if selected {
             item = item.fill(c.layer_02);
         }
-        languages = languages.child(source_item(p, item, selected));
+        languages = languages.child(source_item(item, selected));
     }
     let mut models = col().key("models").gap(8.0);
     let transcription = ui.view.as_ref().map(|view| &view.transcription);

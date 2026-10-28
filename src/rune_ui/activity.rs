@@ -216,7 +216,7 @@ pub(super) fn pane(ui: &Ui, p: Paint) -> (Vec<El>, El) {
         if selected {
             item = item.fill(c.layer_02);
         }
-        list = list.child(source_item(p, item, selected));
+        list = list.child(source_item(item, selected));
     }
     let list = super::scroll_body("activity-scroll", source_list(list));
     let detail = match pane.selected.and_then(|index| pane.events.get(index)) {

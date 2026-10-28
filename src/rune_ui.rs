@@ -1455,7 +1455,7 @@ fn nav_item(p: Paint, pane: Pane, on: bool) -> El {
     if on {
         item = item.fill(c.layer_02);
     }
-    lists::source_item(p, item, on)
+    lists::source_item(item, on)
 }
 
 /// Linux has no tray: the window's way to stop Hex. Closing the window
@@ -1597,6 +1597,13 @@ const SCENES: &[Scene] = &[
     }),
     ("voice-action-models", |ui| {
         *ui = portal_fixture();
+        ui.settings.voice_action.enabled = true;
+        ui.pane = Pane::VoiceAction;
+        ui.open = Some(Menu::Model);
+    }),
+    ("voice-action-models-long", |ui| {
+        *ui = portal_fixture();
+        ui.models = models::Models::fixture_long();
         ui.settings.voice_action.enabled = true;
         ui.pane = Pane::VoiceAction;
         ui.open = Some(Menu::Model);
