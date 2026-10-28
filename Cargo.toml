@@ -110,11 +110,11 @@ x11rb = { version = "0.14.0", features = ["xtest"] }
 
 # The desktop UI.
 [target.'cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))'.dependencies]
-rune = { git = "https://github.com/anomalyco/rune.git", rev = "13a7ad18e0bf9912236099fcbdeb08d092260c95" }
-rune-kit = { git = "https://github.com/anomalyco/rune.git", rev = "13a7ad18e0bf9912236099fcbdeb08d092260c95" }
+rune = { git = "https://github.com/anomalyco/rune.git", rev = "fa489b2c6f7eb86f88dfbdd109ceceb05b0500bf" }
+rune-kit = { git = "https://github.com/anomalyco/rune.git", rev = "fa489b2c6f7eb86f88dfbdd109ceceb05b0500bf" }
 # The capture capsule's motion-lint trace (`capture` only).
-rune-motion = { git = "https://github.com/anomalyco/rune.git", rev = "13a7ad18e0bf9912236099fcbdeb08d092260c95", optional = true }
-rune-theme-opencode = { git = "https://github.com/anomalyco/rune.git", rev = "13a7ad18e0bf9912236099fcbdeb08d092260c95" }
+rune-motion = { git = "https://github.com/anomalyco/rune.git", rev = "fa489b2c6f7eb86f88dfbdd109ceceb05b0500bf", optional = true }
+rune-theme-opencode = { git = "https://github.com/anomalyco/rune.git", rev = "fa489b2c6f7eb86f88dfbdd109ceceb05b0500bf" }
 # The welcome hero's own GPU pass (`rune_ui::hero`); Rune's version.
 wgpu = { version = "30", default-features = false, features = ["std", "parking_lot", "metal", "wgsl"] }
 
