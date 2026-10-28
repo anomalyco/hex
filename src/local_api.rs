@@ -16,6 +16,8 @@ use serde::{Deserialize, Serialize};
 use crate::events::{EventLog, VoiceEvent, now_ms};
 use crate::recognition::RecognitionControl;
 
+mod streams;
+
 const API_VERSION: &str = "2";
 const LIVE_PROBE_TIMEOUT: Duration = Duration::from_millis(150);
 const ACCEPT_INTERVAL: Duration = Duration::from_millis(10);
@@ -83,6 +85,7 @@ struct HttpRequest {
     path: String,
     authorization: Option<String>,
     dictation_token: Option<String>,
+    stream_token: Option<String>,
     content_type: Option<String>,
     content_length: Option<usize>,
     body_prefix: Vec<u8>,
@@ -117,6 +120,8 @@ struct HttpContext {
     control: Option<SyncSender<crate::control::ControlCall>>,
     dictation_control: Option<SyncSender<RecognitionControl>>,
     dictation_levels: Arc<Mutex<HashMap<u64, DictationLevels>>>,
+    streams: Arc<crate::transcription_stream::Streams>,
+    stream_engine: crate::transcription_stream::EngineSource,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -132,6 +137,8 @@ struct CapabilitiesResponse {
     audio_formats: [&'static str; 1],
     partial_transcripts: bool,
     service_capture: bool,
+    /// `/streams` (`docs/streams.md`).
+    streams: bool,
     developer_control: bool,
     control: bool,
 }
@@ -143,6 +150,9 @@ pub struct LocalApiOptions {
     /// The `hex` control commands (`POST /control`).
     pub control: Option<SyncSender<crate::control::ControlCall>>,
     pub dictation_control: Option<SyncSender<RecognitionControl>>,
+    /// Where `/streams` finds its engine; the running app's shared engine
+    /// when unset.
+    pub(crate) stream_engine: Option<crate::transcription_stream::EngineSource>,
 }
 
 impl LocalApi {
@@ -221,6 +231,10 @@ impl LocalApi {
             control: options.control,
             dictation_control: options.dictation_control,
             dictation_levels: Arc::new(Mutex::new(HashMap::new())),
+            streams: Arc::default(),
+            stream_engine: options
+                .stream_engine
+                .unwrap_or_else(|| Arc::new(crate::transcription_stream::shared_engine)),
         };
         let (ready, readiness) = mpsc::sync_channel(1);
         let worker = thread::Builder::new()
@@ -277,7 +291,7 @@ impl LocalApi {
         let Some(worker) = self.worker.take() else {
             return;
         };
-        // Retract discovery before draining so a replacement HEX can publish
+        // Retract discovery before draining so a replacement Hex can publish
         // while this listener is still bound and finishing in-flight requests.
         if let Some(discovery) = &self.discovery {
             discovery.remove_if_owned();
@@ -376,6 +390,22 @@ fn serve(listener: TcpListener, context: HttpContext, ready: mpsc::SyncSender<bo
                 Err(TrySendError::Disconnected(_)) => break,
             },
             Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                #[cfg(unix)]
+                {
+                    use std::os::fd::AsRawFd;
+                    let mut pfd = libc::pollfd {
+                        fd: listener.as_raw_fd(),
+                        events: libc::POLLIN,
+                        revents: 0,
+                    };
+                    // Waking on the next connection instead of sleeping took
+                    // a loopback request from 12.5 ms to 0.12 ms.
+                    // SAFETY: `pfd` is one valid pollfd for the listener's fd.
+                    unsafe {
+                        libc::poll(&raw mut pfd, 1, ACCEPT_INTERVAL.as_millis() as libc::c_int);
+                    }
+                }
+                #[cfg(not(unix))]
                 thread::sleep(ACCEPT_INTERVAL);
             }
             Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
@@ -402,6 +432,7 @@ fn http_worker(pending: Arc<Mutex<Receiver<TcpStream>>>, context: Arc<HttpContex
         let Ok(mut stream) = stream else {
             return;
         };
+        let _ = stream.set_nodelay(true);
         if let Err(error) = stream.set_read_timeout(Some(CONNECTION_TIMEOUT)) {
             tracing::debug!(%error, "could not set local API read timeout");
             continue;
@@ -504,6 +535,7 @@ fn http_worker(pending: Arc<Mutex<Receiver<TcpStream>>>, context: Arc<HttpContex
             } => {
                 handle_dictation(&mut stream, id, owner_token, action, &context);
             }
+            RequestAction::Stream(action) => streams::handle(&mut stream, action, &context),
         }
     }
 }
@@ -534,6 +566,13 @@ fn handle_request(request: HttpRequest, context: &HttpContext) -> RequestAction 
                 body_prefix,
             },
         );
+    }
+    if request.method == "POST" && path == "/streams" {
+        return streams::create_action(request);
+    }
+    if let Some((id, action)) = streams::stream_path(path) {
+        let action = action.to_owned();
+        return streams::route(request, id, &action, context);
     }
     if request.method == "POST" && path == "/dictations" {
         return dictation_start_action(request, context.dictation_control.is_some());
@@ -568,6 +607,7 @@ fn handle_request(request: HttpRequest, context: &HttpContext) -> RequestAction 
                 audio_formats: ["audio/wav"],
                 partial_transcripts: false,
                 service_capture: context.dictation_control.is_some(),
+                streams: true,
                 developer_control: context.developer_control.is_some(),
                 control: context.control.is_some(),
             },
@@ -1692,6 +1732,7 @@ enum RequestAction {
         owner_token: String,
         action: DictationAction,
     },
+    Stream(streams::StreamAction),
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -1789,6 +1830,7 @@ fn read_request_until(
     }
     let mut authorization = None;
     let mut dictation_token = None;
+    let mut stream_token = None;
     let mut content_type = None;
     let mut content_length = None;
     for (index, line) in lines.enumerate() {
@@ -1803,6 +1845,11 @@ fn read_request_until(
                 return Err(RequestReadError::Invalid);
             }
             dictation_token = Some(value.trim().to_owned());
+        } else if name.eq_ignore_ascii_case("x-hex-stream-token") {
+            if stream_token.is_some() {
+                return Err(RequestReadError::Invalid);
+            }
+            stream_token = Some(value.trim().to_owned());
         } else if name.eq_ignore_ascii_case("content-type") {
             content_type = Some(value.trim().to_owned());
         } else if name.eq_ignore_ascii_case("content-length") {
@@ -1828,6 +1875,7 @@ fn read_request_until(
         path: path.into(),
         authorization,
         dictation_token,
+        stream_token,
         content_type,
         content_length,
         body_prefix,
@@ -1865,11 +1913,11 @@ pub fn call_developer(
     let (status, body) = post_json("/dev/control", &body, DEVELOPER_CONTROL_TIMEOUT, 64 * 1024)?;
     if status != 200 {
         bail!(
-            "HEX developer control failed: {}",
+            "Hex developer control failed: {}",
             error_code(status, &body)
         );
     }
-    serde_json::from_slice(&body).wrap_err("HEX developer response is invalid")
+    serde_json::from_slice(&body).wrap_err("Hex developer response is invalid")
 }
 
 /// Sends one `hex` control request to the running app.
@@ -2705,6 +2753,7 @@ mod tests {
                 path: "/transcriptions?model=parakeet_v2".into(),
                 authorization: None,
                 dictation_token: None,
+                stream_token: None,
                 content_type: Some("audio/webm".into()),
                 content_length: Some(10),
                 body_prefix: Vec::new(),
@@ -2722,6 +2771,7 @@ mod tests {
                 path: "/transcriptions?model=parakeet_v2".into(),
                 authorization: None,
                 dictation_token: None,
+                stream_token: None,
                 content_type: Some("audio/wav".into()),
                 content_length: Some(MAX_AUDIO_BYTES + 1),
                 body_prefix: Vec::new(),
@@ -2754,6 +2804,8 @@ mod tests {
             control: None,
             dictation_control: None,
             dictation_levels: Arc::new(Mutex::new(HashMap::new())),
+            streams: Arc::default(),
+            stream_engine: Arc::new(crate::transcription_stream::shared_engine),
         };
         let action = handle_request(
             HttpRequest {
@@ -2761,6 +2813,7 @@ mod tests {
                 path: "/models/parakeet_v2/prepare".into(),
                 authorization: Some("Bearer test-token".into()),
                 dictation_token: None,
+                stream_token: None,
                 content_type: None,
                 content_length: None,
                 body_prefix: Vec::new(),

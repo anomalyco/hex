@@ -255,7 +255,7 @@ run.
 Built from `9f8fd71` by [Release desktop run 39654195736](https://github.com/anomalyco/hex/actions/runs/39654195736)
 and published from the Pro with `scripts/publish-desktop-release.sh`. The run
 from `c4b3287` failed the x64 Setup.exe test twice: the build's
-`hex.exe --version` check created `%APPDATA%\voice-control` before parsing the
+`hex.exe --version` check created `%APPDATA%\hex` before parsing the
 CLI, so the installer test saw a dirty machine. `9f8fd71` parses first. The
 three feeds serve 2.3.1 and verify; the Setup.exe SHA-256s are
 `f9c04f6e85db256d43f3539a992e674026aa44935fb59d5fd9d1bf6af1fe3952` (x64) and

@@ -1,113 +1,23 @@
 //! The client rules of the Anomaly release protocol (`anomalyco/release`,
-//! `docs/protocol.md`, schema 1) as pure functions: strict SemVer, lenient
-//! manifest parsing, and the update decision. `tests/fixtures/release-protocol`
+//! `docs/protocol.md`, schema 1) as pure functions: lenient manifest parsing
+//! and the update decision. Versions are never compared: the channel's
+//! current release is the build to run. `tests/fixtures/release-protocol`
 //! holds the service's shared test vectors, which these must reproduce.
-
-use std::cmp::Ordering;
 
 use serde_json::Value;
 
-/// Numeric identifiers must fit a JavaScript safe integer so every client
-/// compares them identically.
 const MAX_SAFE_INTEGER: u64 = (1 << 53) - 1;
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-enum Identifier {
-    Number(u64),
-    Text(String),
-}
-
-/// Strict SemVer 2.0.0 without build metadata.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Version {
-    core: [u64; 3],
-    prerelease: Vec<Identifier>,
-}
-
-impl Version {
-    pub fn parse(text: &str) -> Option<Self> {
-        if text.len() > 128 {
-            return None;
-        }
-        let (core, prerelease) = match text.split_once('-') {
-            Some((core, prerelease)) => (core, Some(prerelease)),
-            None => (text, None),
-        };
-        let mut numbers = core.split('.');
-        let mut parsed = [0; 3];
-        for slot in &mut parsed {
-            *slot = numeric(numbers.next()?)?;
-        }
-        if numbers.next().is_some() {
-            return None;
-        }
-        let prerelease = match prerelease {
-            None => Vec::new(),
-            Some(text) => text
-                .split('.')
-                .map(|part| {
-                    if !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit()) {
-                        numeric(part).map(Identifier::Number)
-                    } else if !part.is_empty()
-                        && part
-                            .bytes()
-                            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
-                    {
-                        Some(Identifier::Text(part.to_owned()))
-                    } else {
-                        None
-                    }
-                })
-                .collect::<Option<_>>()?,
-        };
-        Some(Self {
-            core: parsed,
-            prerelease,
-        })
-    }
-}
-
-/// A decimal without leading zeros that fits a safe integer.
-fn numeric(text: &str) -> Option<u64> {
-    if text.is_empty()
-        || !text.bytes().all(|byte| byte.is_ascii_digit())
-        || (text.len() > 1 && text.starts_with('0'))
-    {
-        return None;
-    }
-    text.parse().ok().filter(|value| *value <= MAX_SAFE_INTEGER)
-}
-
-impl Ord for Version {
-    fn cmp(&self, other: &Self) -> Ordering {
-        self.core.cmp(&other.core).then_with(|| {
-            match (self.prerelease.is_empty(), other.prerelease.is_empty()) {
-                (true, true) => Ordering::Equal,
-                (true, false) => Ordering::Greater,
-                (false, true) => Ordering::Less,
-                (false, false) => {
-                    for (left, right) in self.prerelease.iter().zip(&other.prerelease) {
-                        let order = match (left, right) {
-                            (Identifier::Number(a), Identifier::Number(b)) => a.cmp(b),
-                            (Identifier::Number(_), Identifier::Text(_)) => Ordering::Less,
-                            (Identifier::Text(_), Identifier::Number(_)) => Ordering::Greater,
-                            (Identifier::Text(a), Identifier::Text(b)) => a.cmp(b),
-                        };
-                        if order != Ordering::Equal {
-                            return order;
-                        }
-                    }
-                    self.prerelease.len().cmp(&other.prerelease.len())
-                }
-            }
-        })
-    }
-}
-
-impl PartialOrd for Version {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
+/// A version is display text: never ordered, only shown and tested for
+/// equality. It also names the version directory an update is staged into,
+/// so it must be a safe file name: 1–128 ASCII letters, digits, `.`, `-`,
+/// `+`, or `_`, not starting with a dot.
+pub fn is_version_name(text: &str) -> bool {
+    (1..=128).contains(&text.len())
+        && !text.starts_with('.')
+        && text
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'+' | b'_'))
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
@@ -130,8 +40,8 @@ pub struct Release {
     pub version: String,
     pub notes_url: Option<String>,
     rollout_percent: u64,
-    minimum_version: Option<String>,
-    revoked_versions: Vec<String>,
+    /// Install without waiting for the rollout.
+    pub required: bool,
     pub targets: Vec<(String, Target)>,
     distributions: Vec<Distribution>,
 }
@@ -154,7 +64,6 @@ pub struct Manifest {
 }
 
 const MAX_TARGETS: usize = 64;
-const MAX_REVOKED: usize = 256;
 
 fn is_name(text: &str) -> bool {
     let bytes = text.as_bytes();
@@ -196,7 +105,7 @@ fn text(value: &Value, max: usize) -> Option<&str> {
 fn version(value: &Value) -> Option<String> {
     value
         .as_str()
-        .filter(|text| Version::parse(text).is_some())
+        .filter(|text| is_version_name(text))
         .map(str::to_owned)
 }
 
@@ -286,15 +195,15 @@ pub fn parse_manifest(source: &str) -> Option<Manifest> {
             },
         ));
     }
-    let revoked = release.get("revoked_versions")?.as_array()?;
-    if revoked.len() > MAX_REVOKED {
-        return None;
-    }
-    let revoked_versions: Vec<String> = revoked.iter().map(version).collect::<Option<_>>()?;
+    // `revoked_versions` (always empty) and an older manifest's
+    // `minimum_version` are ignored like any unknown field.
     let parsed = Release {
         version: version(release.get("version")?)?,
         rollout_percent: integer(release.get("rollout_percent")?, 0, 100)?,
-        revoked_versions,
+        required: match release.get("required") {
+            None => false,
+            Some(value) => value.as_bool()?,
+        },
         targets,
         distributions: release
             .get("distributions")?
@@ -305,10 +214,6 @@ pub fn parse_manifest(source: &str) -> Option<Manifest> {
         notes_url: match release.get("notes_url") {
             None => None,
             Some(value) => Some(https_url(value)?),
-        },
-        minimum_version: match release.get("minimum_version") {
-            None => None,
-            Some(value) => Some(version(value)?),
         },
     };
     check_release(&parsed)?;
@@ -330,23 +235,6 @@ pub fn parse_manifest(source: &str) -> Option<Manifest> {
 }
 
 fn check_release(release: &Release) -> Option<()> {
-    let current = Version::parse(&release.version)?;
-    if let Some(minimum) = &release.minimum_version
-        && Version::parse(minimum)? > current
-    {
-        return None;
-    }
-    if release.revoked_versions.contains(&release.version) {
-        return None;
-    }
-    let mut seen = std::collections::HashSet::new();
-    if !release
-        .revoked_versions
-        .iter()
-        .all(|item| seen.insert(item))
-    {
-        return None;
-    }
     let mut kinds = std::collections::HashSet::new();
     if !release
         .distributions
@@ -363,6 +251,8 @@ fn check_release(release: &Release) -> Option<()> {
 /// What this install is, as the protocol's client rules see it.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Install {
+    /// The running version, as text: compared only for equality, and only
+    /// when `sha256` is unknown.
     pub version: String,
     /// This build's target, e.g. `macos-arm64`.
     pub target: String,
@@ -370,14 +260,21 @@ pub struct Install {
     pub distribution: String,
     /// 0–99, drawn once per install and never sent anywhere.
     pub rollout_bucket: u64,
+    /// The SHA-256 of the target file this build was installed from, when
+    /// known; it identifies the running build.
+    pub sha256: Option<String>,
+    /// The channel this build was published on; when it differs from the
+    /// channel checked, the user chose another channel.
+    pub channel: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Reason {
-    Newer,
+    Update,
     Required,
-    Revoked,
+    /// The user chose another channel; act only once they confirm.
+    Switch,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
@@ -405,7 +302,8 @@ pub enum Decision {
     },
 }
 
-/// The protocol's client rules; the first that applies wins.
+/// The protocol's client rules; the first that applies wins. Versions are
+/// never ordered: the install follows whatever release is current.
 pub fn decide(
     app: &str,
     artifact: &str,
@@ -413,7 +311,6 @@ pub fn decide(
     manifest: &str,
     install: &Install,
 ) -> Decision {
-    let running = Version::parse(&install.version).expect("the running version is valid SemVer");
     let Some(manifest) = parse_manifest(manifest) else {
         return Decision::Reject {
             reason: "malformed",
@@ -461,12 +358,16 @@ pub fn decide(
             };
         };
         candidate = version.clone();
-        if release.revoked_versions.contains(&candidate) {
-            return Decision::None {
-                reason: "distribution_revoked",
-            };
-        }
         distribution = Some(found.clone());
+    }
+    let running = match (&target, &install.sha256) {
+        (Some(target), Some(sha256)) => *sha256 == target.sha256,
+        _ => candidate == install.version,
+    };
+    if running {
+        return Decision::None {
+            reason: "up_to_date",
+        };
     }
     let act = |reason| match &target {
         Some(target) => Decision::Install {
@@ -482,28 +383,18 @@ pub fn decide(
             notes_url: release.notes_url.clone(),
         },
     };
-    let candidate_version = Version::parse(&candidate).expect("parsed versions are valid");
-    if release.revoked_versions.contains(&install.version) {
-        return if candidate_version == running {
-            Decision::None {
-                reason: "up_to_date",
-            }
-        } else {
-            act(Reason::Revoked)
-        };
-    }
-    if candidate_version <= running {
-        return Decision::None {
-            reason: "up_to_date",
-        };
-    }
-    if let Some(minimum) = &release.minimum_version
-        && running < Version::parse(minimum).expect("parsed versions are valid")
+    if install
+        .channel
+        .as_deref()
+        .is_some_and(|built| built != channel)
     {
+        return act(Reason::Switch);
+    }
+    if release.required {
         return act(Reason::Required);
     }
     if install.rollout_bucket < release.rollout_percent {
-        act(Reason::Newer)
+        act(Reason::Update)
     } else {
         Decision::None {
             reason: "rollout_deferred",
@@ -557,23 +448,15 @@ mod tests {
     const SEMVER: &str = include_str!("../../tests/fixtures/release-protocol/semver.json");
 
     #[test]
-    fn versions_follow_the_shared_vectors() {
+    fn versions_are_safe_names() {
         let vectors: Value = serde_json::from_str(SEMVER).unwrap();
-        for case in vectors["compare"].as_array().unwrap() {
-            let a = Version::parse(case[0].as_str().unwrap()).unwrap();
-            let b = Version::parse(case[1].as_str().unwrap()).unwrap();
-            let expected = match case[2].as_i64().unwrap() {
-                -1 => Ordering::Less,
-                0 => Ordering::Equal,
-                _ => Ordering::Greater,
-            };
-            assert_eq!(a.cmp(&b), expected, "{case}");
-            assert_eq!(b.cmp(&a), expected.reverse(), "{case}");
+        for valid in vectors["valid"].as_array().unwrap() {
+            assert!(is_version_name(valid.as_str().unwrap()), "{valid}");
         }
-        for invalid in vectors["invalid"].as_array().unwrap() {
-            assert_eq!(Version::parse(invalid.as_str().unwrap()), None, "{invalid}");
+        assert!(is_version_name(env!("CARGO_PKG_VERSION")));
+        for unsafe_name in ["", ".", "..", ".hidden", "a/b", "a b", "a\\b", "2.4.0\n"] {
+            assert!(!is_version_name(unsafe_name), "{unsafe_name:?}");
         }
-        assert!(Version::parse(env!("CARGO_PKG_VERSION")).is_some());
     }
 
     #[test]
@@ -592,6 +475,8 @@ mod tests {
                 target: input["install"]["target"].as_str().unwrap().into(),
                 distribution: input["install"]["distribution"].as_str().unwrap().into(),
                 rollout_bucket: input["install"]["rollout_bucket"].as_u64().unwrap(),
+                sha256: input["install"]["sha256"].as_str().map(str::to_owned),
+                channel: input["install"]["channel"].as_str().map(str::to_owned),
             };
             let decision = decide(
                 input["app"].as_str().unwrap(),
@@ -618,6 +503,8 @@ mod tests {
             target: "macos-arm64".into(),
             distribution: "direct".into(),
             rollout_bucket: 0,
+            sha256: None,
+            channel: None,
         };
         for (app, artifact, reason) in [
             ("hex", "desktop", "wrong_app"),

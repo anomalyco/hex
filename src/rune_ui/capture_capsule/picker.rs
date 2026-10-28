@@ -851,7 +851,7 @@ impl PickerOverlay {
                 display: DISPLAY,
                 // Under the capsule, so its chips still take clicks.
                 level: OverlayLevel::AboveStatus,
-                exclude_from_capture: true,
+                exclude_from_capture: !crate::capture_host::own_windows_recorded(),
                 input: OverlayInput::All,
                 prewarm: true,
                 ..Default::default()
@@ -872,6 +872,11 @@ impl PickerOverlay {
         let handle = overlay.clone();
         overlay.update(move |s, _| s.overlay = Some(handle));
         Self { overlay, shortcut }
+    }
+
+    /// Lets screen recordings see the picker, or keeps it out.
+    pub(crate) fn show_in_recordings(&self, shown: bool) {
+        self.overlay.set_exclude_from_capture(!shown);
     }
 
     /// Shows the picker for `mode`, or closes it; safe from any thread.
@@ -1001,7 +1006,7 @@ pub(crate) fn view(s: &PickerState, cx: &mut Cx<PickerState>) -> El {
             .combined(Transition::scale(if reduced { 1.0 } else { 0.96 }))
             .springs(rune::SpringPair::new(
                 FADE,
-                super::tuning::get().presence_exit,
+                super::tuning::get().content_out,
             ));
         let mut pill = row()
             .key("badge")

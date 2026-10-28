@@ -69,7 +69,8 @@ These live in [`rune_ui/controls.rs`](../src/rune_ui/controls.rs) and
 
 | Job | Piece |
 |---|---|
-| Settings card, titled card | `card`, `section` |
+| Settings page (the gutter and the rhythm between sections) | `page` (cards hang `row_px` past the gutter so row text sits on the title's edge) or `bare_page` (free-standing content on the gutter); their numbers are `METRICS`, the one set of layout tokens |
+| Settings card, titled card, a card whose label line carries a control | `card`, `section`, `section_with` (Advanced, a status, an add button) |
 | Settings row (title, description, control) | `setting_row`, `described_row`, `link_row` (a one-line link under the title, at the plain row height), `toggle_row`; a row that toggles shows `row_switch`; any other row pressed as a whole: `pressable_row` |
 | A few exclusive choices / a dropdown | `segmented`, `select` |
 | A value whose choices open in a sheet, not a menu | `sheet_button` (the value and a trailing chevron) |
@@ -99,9 +100,8 @@ missing capability omits the row instead of imitating it.
 - Sentence case for every label, button, title, and section label:
   "Open settings", "Stop & transcribe", "Permissions needed". Proper nouns keep
   their capitals: Hex, OpenCode, Apple Intelligence, Finder, Zoom.
-- One product name: "Hex". Never "HEX" in UI strings, window titles, or menus.
-  File and artifact names (`HEX.app`, `HEX-<version>…`) and `HEX_*` environment
-  variables are identifiers, not copy.
+- One product name: "Hex", in copy, comments, and docs alike. `HEX_*`
+  environment variables are identifiers, not copy.
 - Use "…" (one character) for ellipses, for both progress ("Saving…") and for
   buttons that open a further choice ("Choose a file…").
 - Row descriptions are one phrase with no closing period ("Hold to dictate,
@@ -126,7 +126,7 @@ cargo run -- app -- --snap /tmp/hex-modes.png --scene modes
 cargo run -- app -- --snap /tmp/hex-modes-light.png --scene modes --theme light
 cargo run -- app -- --snap /tmp/hex-mac-settings.png --scene mac-settings
 # Goldens (light and dark) and pane behavior:
-cargo test --bin voice-control rune_ui
+cargo test --bin hex rune_ui
 ```
 
 On a machine without a GPU, render on lavapipe with

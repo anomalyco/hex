@@ -2,13 +2,13 @@
 set -eu
 
 # Builds the release Hex.app from a clean, pushed commit, signs it with the
-# Developer ID of VOICE_CONTROL_TEAM_ID, notarizes and staples the app and
+# Developer ID of HEX_TEAM_ID, notarizes and staples the app and
 # its DMG, and leaves the two release files the Release workflow publishes
 # to the Anomaly release service (docs/plans/release-service.md):
 #   dist/Hex-<version>-macos-arm64.dmg   download (target macos-arm64-dmg)
 #   dist/Hex-<version>-macos-arm64.zip   in-app update, root Hex.app (target macos-arm64)
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-: "${VOICE_CONTROL_TEAM_ID:?Set VOICE_CONTROL_TEAM_ID to the Apple Developer signing team}"
+: "${HEX_TEAM_ID:?Set HEX_TEAM_ID to the Apple Developer signing team}"
 . "$root/scripts/macos-signing.sh"
 version=$(hex_version "$root")
 build_number=$(hex_build_number "$version")

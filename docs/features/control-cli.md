@@ -49,7 +49,7 @@ Agent or terminal                                  // control.cli; macOS release
 Every command except `start`, `restart`, and `logs` talks only to the running
 Hex through the owner-only discovery file and the bearer-authenticated
 `POST /control` route; none of them launch Hex. Commands dispatch in `main`
-before folder migration, logging, and the instance lock, so they never compete
+before logging, and the instance lock, so they never compete
 with the running app for its files. Opt-ins stay explicit settings: no command
 turns Voice Action, Commands, or Meetings on as a side effect.
 

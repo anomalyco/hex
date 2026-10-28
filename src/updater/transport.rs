@@ -24,7 +24,8 @@ pub struct ManifestCache {
 }
 
 fn curl() -> Command {
-    let mut command = Command::new(if cfg!(windows) { "curl.exe" } else { "curl" });
+    let mut command =
+        crate::background_process::command(if cfg!(windows) { "curl.exe" } else { "curl" });
     command.args([
         "--silent",
         "--show-error",
@@ -38,12 +39,6 @@ fn curl() -> Command {
         "--user-agent",
         "hex-updater",
     ]);
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        command.creation_flags(CREATE_NO_WINDOW);
-    }
     command.stdin(Stdio::null());
     command
 }

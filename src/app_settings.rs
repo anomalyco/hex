@@ -41,6 +41,9 @@ static CAPTURE_SETTINGS: OnceLock<RwLock<CaptureSettings>> = OnceLock::new();
 static SCRAWL_APP_RUNNING: AtomicBool = AtomicBool::new(false);
 #[cfg(hex_capture)]
 static CAPTURE_ON: AtomicBool = AtomicBool::new(false);
+/// [`CaptureSettings::capsule_flow`] for the capsule, without a lock.
+#[cfg(hex_capture)]
+static CAPSULE_FLOW: AtomicU8 = AtomicU8::new(0);
 /// The send-to list shortcut's keycaps once settings are applied; empty
 /// while it has none.
 #[cfg(hex_capture)]
@@ -994,9 +997,9 @@ impl UpdateChannel {
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(default)]
 pub struct UpdateSettings {
-    /// `None` follows the build: dev builds (`X.Y.Z-dev.N`) update from
-    /// `dev`, every other build from its install's channel (`stable`
-    /// unless an installer receipt names another).
+    /// `None` follows the build: the channel it was published on (stamped at
+    /// build time), else `dev` for a dev version, else its install's channel.
+    /// Another channel than the build's is a switch the user confirms.
     pub channel: Option<UpdateChannel>,
 }
 
@@ -1107,6 +1110,44 @@ pub struct CaptureSettings {
     /// Where a written capture is sent among OpenCode sessions: Scrawl's
     /// router settings, imported once from Scrawl.
     pub routing: CaptureRouting,
+    /// Lets screen recordings, Hex's own captures included, show Hex's
+    /// overlays: the capture capsule, picker, and ink, the dictation HUD,
+    /// and the meeting capsules. Off keeps them out (`capture_host`).
+    pub show_overlays_in_recordings: bool,
+    /// How the capsule offers where to send a finished capture, while Kit
+    /// compares the directions.
+    pub capsule_flow: CapsuleFlow,
+}
+
+/// The capsule's flow after a capture stops, one of five prototypes.
+#[cfg(hex_capture)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CapsuleFlow {
+    /// (a) "Copied", and the suggestions in a list under the capsule.
+    #[default]
+    List,
+    /// (b) One quiet line, "Send to SEER ⏎"; ⇥ moves to the next guess.
+    Toast,
+    /// (c) A short hint of the guesses in the capsule, which then folds
+    /// into Hex's menu-bar item.
+    MenuBar,
+    /// (d) The guesses in a small card at the pointer.
+    Cursor,
+    /// (e) A pill hanging from the top edge that grows down into the
+    /// guesses.
+    Notch,
+}
+
+#[cfg(hex_capture)]
+impl CapsuleFlow {
+    pub const ALL: [Self; 5] = [
+        Self::List,
+        Self::Toast,
+        Self::MenuBar,
+        Self::Cursor,
+        Self::Notch,
+    ];
 }
 
 #[cfg(hex_capture)]
@@ -1122,6 +1163,8 @@ impl Default for CaptureSettings {
             media_days: week.media_days,
             bundle_days: week.bundle_days,
             routing: CaptureRouting::default(),
+            show_overlays_in_recordings: false,
+            capsule_flow: CapsuleFlow::default(),
         }
     }
 }
@@ -1291,13 +1334,6 @@ pub struct AppSettings {
 
 /// Moves English dictation to the streaming English model once.
 const STREAMING_ENGLISH_MIGRATION: &str = "streaming-english-model";
-/// Hex's macOS data folder moved from `voice-control` to `hex`; recorded once
-/// Hex runs from the new folder. The rename itself is `app_paths`'s.
-#[cfg(target_os = "macos")]
-const DATA_FOLDER_MIGRATION: &str = "macos-data-folder-hex";
-#[cfg(target_os = "macos")]
-const MIGRATIONS: &[&str] = &[STREAMING_ENGLISH_MIGRATION, DATA_FOLDER_MIGRATION];
-#[cfg(not(target_os = "macos"))]
 const MIGRATIONS: &[&str] = &[STREAMING_ENGLISH_MIGRATION];
 /// Scrawl's settings were read into `capture` once. Left out of
 /// `MIGRATIONS` so new settings import them too.
@@ -1372,16 +1408,9 @@ impl AppSettings {
             return selection.clone();
         }
         let model = crate::transcription_models::definition(id);
-        let language = if model.supports_language(&self.transcription.language) {
-            self.transcription.language.clone()
-        } else if model.supports_language("en") {
-            "en".into()
-        } else {
-            model.languages[0].into()
-        };
         TranscriptionSelection {
             model: id,
-            language,
+            language: model.language_for(&self.transcription.language).into(),
             recognition_hints: String::new(),
         }
     }
@@ -1484,20 +1513,8 @@ impl AppSettings {
 
     pub fn load() -> Result<Self> {
         let path = path()?;
-        migrate_legacy_settings(&path)?;
-        #[cfg_attr(not(target_os = "macos"), allow(unused_mut))]
+        #[cfg_attr(not(hex_capture), allow(unused_mut))]
         let mut settings = Self::load_from(&path)?;
-        #[cfg(target_os = "macos")]
-        if !settings.has_migration(DATA_FOLDER_MIGRATION)
-            && crate::app_paths::uses_hex_data_folder()
-        {
-            settings.migrations.push(DATA_FOLDER_MIGRATION.into());
-            if path.exists()
-                && let Err(error) = settings.write_to(&path)
-            {
-                tracing::warn!(%error, "could not record the data folder migration");
-            }
-        }
         #[cfg(hex_capture)]
         if capture_available() {
             let read = |path: PathBuf| fs::read(path).ok();
@@ -1692,6 +1709,12 @@ impl AppSettings {
                 .write()
                 .unwrap_or_else(|error| error.into_inner()) = self.capture.clone();
             CAPTURE_ON.store(self.capture_on(), Ordering::Release);
+            crate::capture_host::record_own_windows(self.capture.show_overlays_in_recordings);
+            let flow = CapsuleFlow::ALL
+                .iter()
+                .position(|flow| *flow == self.capture.capsule_flow)
+                .unwrap_or_default();
+            CAPSULE_FLOW.store(flow as u8, Ordering::Release);
         }
         HEX_MICROPHONE_ENABLED.store(self.experimental.hex_microphone, Ordering::Release);
         crate::hex_microphone::sync_from_settings(
@@ -2051,11 +2074,12 @@ pub fn microphone_policy() -> MicrophonePolicy {
 
 /// Whether the global mode or any mode runs a transformation.
 pub fn transformations_used(processing: &DictationProcessingSettings) -> bool {
-    !processing.default_mode.transformations.is_empty()
-        || processing
-            .modes
-            .iter()
-            .any(|mode| !mode.transformations.is_empty())
+    crate::experiments::enabled(crate::experiments::Experiment::Modes)
+        && (!processing.default_mode.transformations.is_empty()
+            || processing
+                .modes
+                .iter()
+                .any(|mode| !mode.transformations.is_empty()))
 }
 
 /// Where the recording HUD appears, as last saved.
@@ -2265,6 +2289,15 @@ pub fn capture_settings() -> CaptureSettings {
         .clone()
 }
 
+/// The saved [`CapsuleFlow`], without cloning the capture settings.
+#[cfg(hex_capture)]
+pub fn capsule_flow() -> CapsuleFlow {
+    CapsuleFlow::ALL
+        .get(usize::from(CAPSULE_FLOW.load(Ordering::Acquire)))
+        .copied()
+        .unwrap_or_default()
+}
+
 /// Captures are on: [`capture_available`] and `capture.enabled`.
 #[cfg(hex_capture)]
 pub fn capture_on() -> bool {
@@ -2299,7 +2332,7 @@ pub fn set_hotkey_capture_active(active: bool) {
 }
 
 /// The Dock policy while no Settings window is open. An open window always
-/// shows the icon: hiding it deactivates HEX asynchronously, which would drop
+/// shows the icon: hiding it deactivates Hex asynchronously, which would drop
 /// that window behind other applications.
 pub fn dock_icon_visible(show_dock_icon: bool, status_item_available: bool) -> bool {
     show_dock_icon || !status_item_available
@@ -2325,7 +2358,7 @@ pub fn set_dock_icon_visible(visible: bool) {
 #[cfg(target_os = "macos")]
 pub fn hide_application() {
     let Some(marker) = MainThreadMarker::new() else {
-        tracing::warn!("cannot hide HEX outside the main thread");
+        tracing::warn!("cannot hide Hex outside the main thread");
         return;
     };
     NSApplication::sharedApplication(marker).hide(None);
@@ -2335,57 +2368,10 @@ fn path() -> Result<PathBuf> {
     Ok(crate::app_paths::support_dir()?.join("settings.json"))
 }
 
-/// The per-OS settings file that predates `settings.json`.
-const LEGACY_SETTINGS_FILE: Option<&str> = if cfg!(target_os = "windows") {
-    Some("windows-settings.json")
-} else if cfg!(target_os = "linux") {
-    Some("linux-settings.json")
-} else {
-    None
-};
-
-/// Whether settings were ever saved, including a legacy file that the next
-/// load migrates; a first run has neither and onboards.
+/// Whether settings were ever saved; a first run has none and onboards.
 #[cfg_attr(target_os = "macos", allow(dead_code))]
 pub fn exists() -> bool {
-    path().is_ok_and(|path| saved_at(&path))
-}
-
-fn saved_at(path: &std::path::Path) -> bool {
-    path.exists()
-        || LEGACY_SETTINGS_FILE
-            .zip(path.parent())
-            .is_some_and(|(legacy, directory)| directory.join(legacy).exists())
-}
-
-/// Before the first `settings.json`, adopt a legacy per-OS settings file
-/// once: write `settings.json`, then keep the old file as `*.migrated`.
-pub(crate) fn migrate_legacy_settings(path: &std::path::Path) -> Result<()> {
-    if path.exists() {
-        return Ok(());
-    }
-    let Some(directory) = path.parent() else {
-        return Ok(());
-    };
-    #[cfg(target_os = "windows")]
-    let legacy = crate::windows_migration::legacy_settings(directory)?;
-    #[cfg(target_os = "linux")]
-    let legacy = crate::linux_migration::legacy_settings(directory)?;
-    #[cfg(target_os = "macos")]
-    let legacy: Option<(PathBuf, AppSettings)> = {
-        let _ = directory;
-        None
-    };
-    let Some((legacy_path, mut settings)) = legacy else {
-        return Ok(());
-    };
-    settings.migrations.clear();
-    settings.write_to(path)?;
-    let mut migrated = legacy_path.clone().into_os_string();
-    migrated.push(".migrated");
-    fs::rename(&legacy_path, migrated)?;
-    tracing::info!(from = %legacy_path.display(), "migrated legacy settings into settings.json");
-    Ok(())
+    path().is_ok_and(|path| path.exists())
 }
 
 #[cfg(test)]
@@ -2908,25 +2894,26 @@ mod tests {
     }
 
     #[test]
-    fn a_legacy_settings_file_counts_as_saved_settings() {
-        let dir = TestSettingsDir::new("legacy-exists");
-        assert!(!saved_at(&dir.path));
-        if let Some(legacy) = LEGACY_SETTINGS_FILE {
-            fs::write(dir.directory.join(legacy), b"{}").unwrap();
-            assert!(saved_at(&dir.path));
-            fs::remove_file(dir.directory.join(legacy)).unwrap();
-        }
-        fs::write(&dir.path, b"{}").unwrap();
-        assert!(saved_at(&dir.path));
-    }
-
-    #[test]
     fn legacy_sleep_prevention_setting_is_ignored() {
         let settings: AppSettings =
             serde_json::from_str(r#"{"prevent_system_sleep":false}"#).unwrap();
         let serialized = serde_json::to_value(settings).unwrap();
 
         assert!(serialized.get("prevent_system_sleep").is_none());
+    }
+
+    #[test]
+    fn an_unset_microphone_is_system_default_and_a_saved_one_is_kept() {
+        let automatic: AppSettings = serde_json::from_str(r#"{"microphone":null}"#).unwrap();
+        assert_eq!(automatic.microphone, None);
+        let absent: AppSettings = serde_json::from_str("{}").unwrap();
+        assert_eq!(absent.microphone, None);
+        let saved: AppSettings =
+            serde_json::from_str(r#"{"microphone":"Studio Display Microphone"}"#).unwrap();
+        assert_eq!(
+            saved.microphone.as_deref(),
+            Some("Studio Display Microphone")
+        );
     }
 
     #[test]

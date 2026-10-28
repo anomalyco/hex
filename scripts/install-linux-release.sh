@@ -2,15 +2,17 @@
 set -eu
 
 # Installs Hex from the Anomaly release service (docs/plans/release-service.md):
-# the stable manifest names the linux-x64 executable with its size and
-# SHA-256, and install.json marks the install as one Hex updates itself.
+# the stable manifest names the linux-x64 or linux-arm64 executable with its
+# size and SHA-256, and install.json marks the install as one Hex updates itself.
 origin=${HEX_RELEASE_BASE_URL:-https://anoma.ly/release}
 origin=${origin%/}
 # HEX_INSTALL_CHANNEL=dev installs the newest dev build and keeps the
-# install on the Dev update channel.
-channel=${HEX_INSTALL_CHANNEL:-stable}
+# install on the Dev update channel; =stable requires the stable release.
+# Unset, it installs stable, or the newest dev build while the release
+# service has no stable Hex release yet.
+channel=${HEX_INSTALL_CHANNEL:-}
 case "$channel" in
-  stable | dev) ;;
+  '' | stable | dev) ;;
   *)
     echo "HEX_INSTALL_CHANNEL must be stable or dev." >&2
     exit 1
@@ -19,7 +21,7 @@ esac
 install_dir=${HEX_INSTALL_DIR:-"$HOME/.local/bin"}
 data_home=${XDG_DATA_HOME:-$HOME/.local/share}
 config_home=${XDG_CONFIG_HOME:-$HOME/.config}
-support_dir=${HEX_APPLICATION_SUPPORT_DIR:-"$data_home/voice-control"}
+support_dir=${HEX_APPLICATION_SUPPORT_DIR:-"$data_home/hex"}
 applications="$data_home/applications"
 autostart="$config_home/autostart"
 units="$config_home/systemd/user"
@@ -27,7 +29,7 @@ unit="$units/hex.service"
 
 require() {
   if ! command -v "$1" >/dev/null 2>&1; then
-    echo "HEX installation requires $1." >&2
+    echo "Hex installation requires $1." >&2
     exit 1
   fi
 }
@@ -44,10 +46,10 @@ safe_user_directory() {
   fi
   mkdir -p "$path"
   if [ "$(stat -c %u "$path")" != "$(id -u)" ]; then
-    fail "HEX requires a user-owned directory: $path"
+    fail "Hex requires a user-owned directory: $path"
   fi
   if find "$path" -maxdepth 0 -perm /022 -print -quit | grep -q .; then
-    fail "HEX refuses a group- or world-writable directory: $path"
+    fail "Hex refuses a group- or world-writable directory: $path"
   fi
 }
 
@@ -58,13 +60,13 @@ managed_directory() {
   fi
   mkdir -p "$path"
   if [ "$(stat -c %u "$path")" != "$(id -u)" ]; then
-    fail "HEX requires a user-owned directory: $path"
+    fail "Hex requires a user-owned directory: $path"
   fi
   chmod 700 "$path"
 }
 
 uninstall() {
-  if [ -f "$unit" ] && grep -Fxq '# X-HEX-Managed=true' "$unit"; then
+  if [ -f "$unit" ] && grep -Fxq '# X-Hex-Managed=true' "$unit"; then
     if command -v systemctl >/dev/null 2>&1; then
       active_unit=$(systemctl --user show hex.service --property=FragmentPath --value 2>/dev/null || true)
       if [ "$active_unit" = "$unit" ]; then
@@ -84,7 +86,7 @@ uninstall() {
     managed_directory "$support_dir/updates"
     exec 9> "$support_dir/updates/update.lock"
     if ! flock -n 9; then
-      fail "A HEX install or update is already in progress."
+      fail "A Hex install or update is already in progress."
     fi
   fi
   binary="$install_dir/hex"
@@ -94,23 +96,27 @@ uninstall() {
   fi
   for desktop in \
     "$applications/hex.desktop" \
-    "$autostart/HEX.desktop"
+    "$autostart/hex.desktop"
   do
-    if [ -f "$desktop" ] && grep -Fxq 'X-HEX-Managed=true' "$desktop"; then
+    if [ -f "$desktop" ] && grep -Fxq 'X-Hex-Managed=true' "$desktop"; then
       rm -f "$desktop"
     fi
   done
   rm -f "$support_dir/current" "$support_dir/.current.next" "$support_dir/install.json"
   rm -rf "$support_dir/versions"
-  echo "Removed HEX. Logs and settings remain in $support_dir."
+  echo "Removed Hex. Logs and settings remain in $support_dir."
 }
 
-if [ "$(uname -s)" != Linux ] || [ "$(uname -m)" != x86_64 ]; then
-  echo "HEX currently supports x86_64 Linux." >&2
-  exit 1
-fi
+case "$(uname -s) $(uname -m)" in
+  "Linux x86_64") target=linux-x64 ;;
+  "Linux aarch64") target=linux-arm64 ;;
+  *)
+    echo "Hex supports x86_64 and aarch64 Linux." >&2
+    exit 1
+    ;;
+esac
 if [ "$(id -u)" -eq 0 ]; then
-  echo "Install HEX as your desktop user, not root." >&2
+  echo "Install Hex as your desktop user, not root." >&2
   exit 1
 fi
 umask 022
@@ -160,6 +166,7 @@ trap cleanup EXIT
 trap 'exit 1' HUP INT TERM
 manifest="$temporary/manifest.json"
 artifact_path=${HEX_INSTALL_ARTIFACT:-$temporary/hex}
+if [ -n "${HEX_INSTALL_ARTIFACT:-}" ] && [ -z "$channel" ]; then channel=stable; fi
 version=${HEX_INSTALL_VERSION:-}
 
 if [ -z "${HEX_INSTALL_ARTIFACT:-}" ]; then
@@ -173,6 +180,21 @@ if [ -z "${HEX_INSTALL_ARTIFACT:-}" ]; then
     https://*) ;;
     *) fail "HEX_RELEASE_BASE_URL must be an https:// URL." ;;
   esac
+  if [ -z "$channel" ]; then
+    status=$(curl --location --proto '=https' --proto-redir '=https' \
+      --silent --show-error --connect-timeout 10 --max-time 60 \
+      --max-filesize 1048576 --write-out '%{http_code}' \
+      "$origin/hex/desktop/stable.json" -o "$manifest") \
+      || fail "Could not reach $origin."
+    case "$status" in
+      200) channel=stable ;;
+      404)
+        echo "Hex has no stable release yet; installing the newest dev build, which keeps updating from the Dev channel. Set HEX_INSTALL_CHANNEL=stable to require the stable release." >&2
+        channel=dev
+        ;;
+      *) fail "$origin/hex/desktop/stable.json answered $status." ;;
+    esac
+  fi
   manifest_url="$origin/hex/desktop/$channel.json"
   curl --fail --location --proto '=https' --proto-redir '=https' \
     --silent --show-error --connect-timeout 10 --max-time 60 \
@@ -180,10 +202,10 @@ if [ -z "${HEX_INSTALL_ARTIFACT:-}" ]; then
   test "$(jq -r '"\(.schema) \(.app) \(.artifact) \(.channel)"' "$manifest")" = "1 hex desktop $channel" \
     || fail "$manifest_url is not the Hex desktop $channel manifest."
   version=$(jq -er .release.version "$manifest")
-  url=$(jq -er '.release.targets["linux-x64"].url' "$manifest") \
-    || fail "Hex $version has no linux-x64 build."
-  bytes=$(jq -er '.release.targets["linux-x64"].size' "$manifest")
-  sha256=$(jq -er '.release.targets["linux-x64"].sha256' "$manifest")
+  url=$(jq -er --arg target "$target" '.release.targets[$target].url' "$manifest") \
+    || fail "Hex $version has no $target build."
+  bytes=$(jq -er --arg target "$target" '.release.targets[$target].size' "$manifest")
+  sha256=$(jq -er --arg target "$target" '.release.targets[$target].sha256' "$manifest")
   printf '%s\n' "$bytes" | grep -Eq '^[1-9][0-9]*$' \
     || fail "Linux release has an invalid size."
   printf '%s\n' "$sha256" | grep -Eq '^[0-9a-f]{64}$' \
@@ -204,9 +226,10 @@ if [ -z "${HEX_INSTALL_ARTIFACT:-}" ]; then
     || fail "Downloaded Linux release checksum does not match."
   chmod 755 "$artifact_path"
 fi
-printf '%s\n' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-(beta|dev)\.[0-9]+)?$' \
+# The version is display text that names a directory, never compared.
+printf '%s\n' "$version" | grep -Eq '^[0-9A-Za-z][0-9A-Za-z.+_-]{0,127}$' \
   || fail "Linux release has an invalid version."
-test -x "$artifact_path" || fail "HEX executable is missing: $artifact_path"
+test -x "$artifact_path" || fail "Hex executable is missing: $artifact_path"
 
 # Explain why the downloaded executable cannot start: a glibc older than the
 # one it was built against, or the Arch packages behind missing libraries.
@@ -216,7 +239,7 @@ explain_unrunnable() {
   have=$(getconf GNU_LIBC_VERSION 2>/dev/null | awk '{ print $2 }')
   if [ -n "$needed" ] && [ -n "$have" ] &&
     [ "$(printf '%s\n%s\n' "$needed" "$have" | sort -V | head -1)" != "$needed" ]; then
-    fail "HEX $version needs glibc $needed or newer, and this system has glibc $have. The Linux beta targets current x86_64 Arch Linux."
+    fail "Hex $version needs glibc $needed or newer, and this system has glibc $have. The Linux beta needs Ubuntu 24.04, Debian 13, Fedora 40, or a newer or rolling distribution."
   fi
   packages=
   if command -v ldd >/dev/null 2>&1; then
@@ -247,10 +270,10 @@ explain_unrunnable() {
     done
   fi
   if [ -n "$packages" ]; then
-    fail "HEX needs libraries that are not installed. Install them, then run this installer again:
+    fail "Hex needs libraries that are not installed. Install them, then run this installer again:
   sudo pacman -S --needed$packages"
   fi
-  fail "HEX could not run. Install the required Arch runtime libraries."
+  fail "Hex could not run. Install the required Arch runtime libraries."
 }
 
 # The pipeline's status is awk's, so an executable that cannot start shows up
@@ -268,30 +291,18 @@ managed_directory "$support_dir/versions"
 managed_directory "$support_dir/updates"
 exec 9> "$support_dir/updates/update.lock"
 if ! flock -n 9; then
-  echo "A HEX install or update is already in progress." >&2
+  echo "A Hex install or update is already in progress." >&2
   exit 1
 fi
 current="$support_dir/current"
-current_executable=
+# Installs what was asked for, whatever version is installed now: versions
+# are never compared.
 if [ -e "$current" ] || [ -L "$current" ]; then
   if [ ! -L "$current" ]; then
     fail "Refusing unmanaged current version path: $current"
   fi
-  current_target=$(readlink "$current")
-  printf '%s\n' "$current_target" \
-    | grep -Eq '^versions/[0-9]+\.[0-9]+\.[0-9]+(-(beta|dev)\.[0-9]+)?$' \
-    || fail "Installed HEX has an invalid current version link."
-  current_executable="$support_dir/$current_target/hex"
-fi
-if [ -n "$current_executable" ] && [ -x "$current_executable" ]; then
-  current_version=$("$current_executable" --version \
-    | awk 'NF { value=$NF } END { print value }')
-  printf '%s\n' "$current_version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-(beta|dev)\.[0-9]+)?$' \
-    || fail "Installed HEX reports an invalid version."
-  newest=$(printf '%s\n%s\n' "$current_version" "$version" | sort -V | tail -1)
-  if [ "$newest" != "$version" ]; then
-    fail "Refusing to downgrade HEX from $current_version to $version."
-  fi
+  readlink "$current" | grep -Eq '^versions/[0-9A-Za-z][0-9A-Za-z.+_-]{0,127}$' \
+    || fail "Installed Hex has an invalid current version link."
 fi
 version_dir="$support_dir/versions/$version"
 managed_directory "$version_dir"
@@ -302,13 +313,13 @@ safe_user_directory "$autostart"
 safe_user_directory "$units"
 binary="$install_dir/hex"
 if printf '%s' "$binary" | LC_ALL=C grep -Eq '["\\[:cntrl:]]'; then
-  fail "HEX install path contains unsupported characters."
+  fail "Hex install path contains unsupported characters."
 fi
 expected_binary="$support_dir/current/hex"
 if printf '%s' "$support_dir" | LC_ALL=C grep -Eq '["\\[:cntrl:]]'; then
-  fail "HEX service path contains unsupported characters."
+  fail "Hex service path contains unsupported characters."
 fi
-if [ -L "$unit" ] || { [ -e "$unit" ] && ! grep -Fxq '# X-HEX-Managed=true' "$unit"; }; then
+if [ -L "$unit" ] || { [ -e "$unit" ] && ! grep -Fxq '# X-Hex-Managed=true' "$unit"; }; then
   fail "Refusing to replace an unmanaged systemd unit: $unit"
 fi
 if { [ -e "$binary" ] || [ -L "$binary" ]; } \
@@ -320,18 +331,18 @@ if [ -e "$support_dir/current" ] && [ ! -L "$support_dir/current" ]; then
   fail "Refusing to replace an unmanaged file: $support_dir/current"
 fi
 application_entry="$applications/hex.desktop"
-autostart_entry="$autostart/HEX.desktop"
+autostart_entry="$autostart/hex.desktop"
 for desktop in "$application_entry" "$autostart_entry"; do
   if [ -L "$desktop" ]; then
     fail "Refusing to replace a desktop-entry symlink: $desktop"
   fi
-  if [ -e "$desktop" ] && ! grep -Fxq 'X-HEX-Managed=true' "$desktop"; then
+  if [ -e "$desktop" ] && ! grep -Fxq 'X-Hex-Managed=true' "$desktop"; then
     fail "Refusing to replace an unmanaged desktop entry: $desktop"
   fi
 done
 
 application_staged=$(mktemp "$applications/.hex.desktop.XXXXXX")
-autostart_staged=$(mktemp "$autostart/.HEX.desktop.XXXXXX")
+autostart_staged=$(mktemp "$autostart/.hex.desktop.XXXXXX")
 unit_staged=$(mktemp "$units/.hex.service.XXXXXX")
 umask 077
 cat > "$application_staged" <<EOF
@@ -345,7 +356,7 @@ Terminal=false
 Categories=Utility;Accessibility;
 StartupNotify=true
 Actions=quit;
-X-HEX-Managed=true
+X-Hex-Managed=true
 
 [Desktop Action quit]
 Name=Quit Hex
@@ -360,7 +371,7 @@ Exec="$binary" start
 Icon=audio-input-microphone
 Terminal=false
 X-GNOME-Autostart-enabled=true
-X-HEX-Managed=true
+X-Hex-Managed=true
 EOF
 chmod 644 "$application_staged" "$autostart_staged"
 
@@ -368,9 +379,9 @@ chmod 644 "$application_staged" "$autostart_staged"
 unit_binary=$(printf '%s' "$binary" | sed -e 's/%/%%/g' -e 's/\$/$$/g')
 unit_support=$(printf '%s' "$support_dir" | sed 's/%/%%/g')
 cat > "$unit_staged" <<EOF
-# X-HEX-Managed=true
+# X-Hex-Managed=true
 [Unit]
-Description=HEX background dictation
+Description=Hex background dictation
 PartOf=graphical-session.target
 After=graphical-session.target
 StartLimitIntervalSec=60
@@ -441,8 +452,8 @@ if command -v update-desktop-database >/dev/null 2>&1; then
   update-desktop-database "$applications" >/dev/null 2>&1 || true
 fi
 
-printf 'Installed HEX %s to %s\n' "$version" "$binary"
+printf 'Installed Hex %s to %s\n' "$version" "$binary"
 printf 'Install a model: %s model install\n' "$binary"
-printf 'Launch HEX: %s\n' "$binary"
+printf 'Launch Hex: %s\n' "$binary"
 printf 'Start in the background: %s start (quit with %s quit)\n' "$binary" "$binary"
 printf 'Uninstall: sh install-linux.sh uninstall\n'

@@ -685,7 +685,7 @@ mod tests {
     #[test]
     fn reopening_log_preserves_existing_events() {
         let path = std::env::temp_dir().join(format!(
-            "voice-control-events-{}-{}.ndjson",
+            "hex-events-{}-{}.ndjson",
             std::process::id(),
             now_ms()
         ));
@@ -704,7 +704,7 @@ mod tests {
     #[test]
     fn reader_tails_complete_records_and_resets_at_session_boundaries() {
         let path = std::env::temp_dir().join(format!(
-            "voice-control-event-reader-{}-{}.ndjson",
+            "hex-event-reader-{}-{}.ndjson",
             std::process::id(),
             now_ms()
         ));

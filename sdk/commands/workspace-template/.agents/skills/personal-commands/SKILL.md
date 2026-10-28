@@ -14,7 +14,7 @@ Promise-only configs.
 `bun run check` validates TypeScript, not phrase overlaps. A running host watches
 regular `.ts` and `.json` workspace files, excluding `node_modules`, `.git`, and
 symlink targets. Check the Commands pane for runtime reload errors. If missing
-config, Bun, or dependencies prevented host startup, restart HEX after repair.
+config, Bun, or dependencies prevented host startup, restart Hex after repair.
 
 Replace the native voice-dictation phrases declaratively when desired:
 
@@ -32,11 +32,11 @@ export default defineHexConfig({
 })
 ```
 
-`start` is a streaming utterance prefix while HEX is listening. The other
+`start` is a streaming utterance prefix while Hex is listening. The other
 controls are streaming suffixes only during an active voice capture. This block
 replaces the native phrases exactly, not the capture lifecycle, and does not
 define command handlers. Each list must be nonempty and unambiguous. If this
-block is omitted, HEX uses its built-in protocol.
+block is omitted, Hex uses its built-in protocol.
 
 Register named finishing transformations when a dictation mode needs a
 deterministic text rule:
@@ -60,7 +60,7 @@ Select the registered transformation in the mode's Transformations section.
 Selected transformations run in displayed order after that mode's corrections
 and optional AI rewrite for Paste and Send, not Voice Action or meetings.
 Transformations may be async, receive the foreground context as their second
-argument, and must return a string. If the transformation stage fails, HEX keeps
+argument, and must return a string. If the transformation stage fails, Hex keeps
 the text from before that stage, not partial transformation results.
 
 Do not reuse `lowercase`, `spongebob-case`, or `no-trailing-punctuation` as
@@ -94,7 +94,7 @@ URLs are passed unchanged, including their query and fragment. File URLs and
 inline script/data URLs are unsupported; use `openPath` for filesystem paths.
 
 Handlers may issue several calls. Await dependent capability calls to preserve
-their order; unawaited calls can run concurrently even though HEX tracks them
+their order; unawaited calls can run concurrently even though Hex tracks them
 until handler completion:
 
 ```ts

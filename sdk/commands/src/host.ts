@@ -202,7 +202,7 @@ interface PreparedConfig {
 export const prepareConfig = (value: unknown): PreparedConfig => {
   const config = record(value)
   const commands = record(config?.commands)
-  if (commands === undefined) throw new Error("The default export must be a HEX config with a commands object")
+  if (commands === undefined) throw new Error("The default export must be a Hex config with a commands object")
   const entries = Object.entries(commands)
   if (entries.length > MAX_COMMANDS) throw new Error(`A config may register at most ${MAX_COMMANDS} commands`)
 

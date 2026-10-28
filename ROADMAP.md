@@ -1,6 +1,6 @@
 # Roadmap
 
-HEX ships the macOS product loop: configurable hold-to-talk local dictation,
+Hex ships the macOS product loop: configurable hold-to-talk local dictation,
 explicit selected-text voice editing, optional context-aware OpenCode
 post-processing, a Metal HUD, bounded paste workers, settings, and a signed
 app bundle. Streaming commands are a disabled-by-default experimental opt-in,
@@ -67,8 +67,7 @@ with a website-only informational item to install the new app manually, with no
 data import or automatic replacement.
 Follow [`docs/plans/swift-app-handoff.md`](docs/plans/swift-app-handoff.md).
 The new app uses identity `com.kitlangton.hex2`, display name `Hex`, and filename
-`Hex.app`, while retaining the Rust data root (renamed on macOS from `voice-control` to
-`hex`, with a compatibility symlink). Use Kit's approved
+`Hex.app`, with data in `hex`. Use Kit's approved
 Developer ID signing team and validate the new identity before release. The legacy
 S3 feed must never install a Rust payload. Publish
 the updated Rust artifact first, then the separately validated legacy feed notice.
@@ -146,7 +145,7 @@ with cold-microphone capture, before calling #77 done.
 Track the remaining shortcut requests explicitly:
 
 - [#82](https://github.com/anomalyco/hex/issues/82): menu-bar Pause/Resume must
-  remain deferred for now; quitting HEX is sufficient for the current scope.
+  remain deferred for now; quitting Hex is sufficient for the current scope.
   If revisited, it must
   suspend capture shortcuts and command activation, cancel only active capture,
   retain accepted output, and require key release before resuming. Test event-tap
@@ -250,7 +249,7 @@ only if signal-level suppression proves insufficient, with a per-device opt-in.
 with stemming and fuzzy matching, transcripts, stored notes). Next: on-device
 semantic search only when full-text misses real paraphrased queries
 (NaturalLanguage embeddings through a Swift bridge, cached under
-`~/Library/Caches/voice-control/meeting-index`), EventKit attendees in
+`~/Library/Caches/hex/meeting-index`), EventKit attendees in
 `list_meetings`, and a one-shot Granola CSV import
 ([granola-import.md](docs/plans/granola-import.md)). Keep it a CLI subcommand;
 the npm-package guidance above applies only to a developer-control wrapper.
@@ -273,6 +272,15 @@ Settings for users whose saved model is no longer recommended for their
 language, explaining how to switch. Language routing already keeps their model
 and lists it in the picker ([plan](docs/plans/language-recommendations.md)); the
 hint never switches or downloads anything itself.
+
+## Shared Engine Service
+
+Later, not started. Move the engine into a launchd service
+(`anomaly.hex.engine`) serving the same `/streams` and `/transcriptions` API;
+the Hex UI becomes a client. Today the running app serves
+[`/streams`](docs/streams.md) on dictation's loaded model, with dictation
+first; the service keeps that contract, so stream clients such as Seer don't
+change.
 
 ## Deliberate Deferrals
 

@@ -9,7 +9,7 @@ export default defineHexConfig({
   //     transform: (text) => text.trim(),
   //   },
   // },
-  // Uncomment this block to replace HEX's native voice-dictation protocol.
+  // Uncomment this block to replace Hex's native voice-dictation protocol.
   // dictation: {
   //   start: ["begin note"],
   //   stop: ["finish note"],

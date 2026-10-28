@@ -23,6 +23,8 @@ mod history;
 #[cfg_attr(target_os = "macos", path = "rune_ui/macos_host.rs")]
 mod host;
 mod hud_lab;
+#[cfg(target_os = "macos")]
+mod hud_stories;
 mod lists;
 #[cfg(target_os = "macos")]
 pub(crate) mod meeting_capsules;
@@ -30,9 +32,11 @@ mod meetings;
 mod models;
 mod modes;
 mod onboarding;
+mod onboarding_kit;
 mod picker;
 mod platform;
 mod platform_settings;
+pub(crate) mod playground;
 #[cfg(hex_capture)]
 mod scrawl;
 mod settings;
@@ -53,7 +57,7 @@ use crate::desktop_host::{
 };
 use crate::desktop_i18n::{tr, tr_fill};
 use crate::transcription_models::TranscriptionModelId;
-use controls::Paint;
+use controls::{METRICS, Paint};
 use host::{Backend, Request, ShortcutTarget};
 use settings::Capture;
 
@@ -65,53 +69,53 @@ const WINDOW_TICK: Duration = Duration::from_millis(250);
 
 static SETTINGS_ICON: Icon = Icon {
     name: "hex-settings",
-    view: 16.0,
+    view: 24.0,
     body: include_str!("../assets/icons/settings.svg"),
 };
 static MODES_ICON: Icon = Icon {
     name: "hex-modes",
-    view: 16.0,
+    view: 24.0,
     body: include_str!("../assets/icons/modes.svg"),
 };
 static VOICE_ACTION_ICON: Icon = Icon {
     name: "hex-voice-action",
-    view: 16.0,
+    view: 24.0,
     body: include_str!("../assets/icons/voice-action.svg"),
 };
 static HISTORY_ICON: Icon = Icon {
     name: "hex-history",
-    view: 16.0,
+    view: 24.0,
     body: include_str!("../assets/icons/history.svg"),
 };
 static COMMANDS_ICON: Icon = Icon {
     name: "hex-commands",
-    view: 16.0,
+    view: 24.0,
     body: include_str!("../assets/icons/commands.svg"),
 };
 static ACTIVITY_ICON: Icon = Icon {
     name: "hex-activity",
-    view: 16.0,
+    view: 24.0,
     body: include_str!("../assets/icons/activity.svg"),
 };
 static HUD_LAB_ICON: Icon = Icon {
     name: "hex-hud-lab",
-    view: 16.0,
+    view: 24.0,
     body: include_str!("../assets/icons/hud-lab.svg"),
 };
 static VOICE_FILTER_ICON: Icon = Icon {
     name: "hex-voice-filter",
-    view: 16.0,
+    view: 24.0,
     body: include_str!("../assets/icons/voice-filter.svg"),
 };
 static MEETINGS_ICON: Icon = Icon {
     name: "hex-meetings",
-    view: 16.0,
+    view: 24.0,
     body: include_str!("../assets/icons/meetings.svg"),
 };
 #[cfg(hex_capture)]
 static SCRAWL_ICON: Icon = Icon {
     name: "hex-scrawl",
-    view: 16.0,
+    view: 24.0,
     body: include_str!("../assets/icons/scrawl.svg"),
 };
 
@@ -163,12 +167,34 @@ pub(crate) fn run_app(
 }
 
 /// The window as a Rune app whose lifetime the caller chooses, connected to
-/// its host through `connect`.
+/// its host through `connect`, with the playground when its experiment is on.
 pub(crate) fn app(connect: host::Connect) -> rune::App<Ui> {
-    let app = rune::App::new(spec())
+    build(connect, playground::enabled())
+}
+
+/// `hex app -- --snap …`: a headless render of a fixture scene. With the
+/// `playground` experiment on, `--playground [story]` renders the playground.
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+pub(crate) fn render_app(rune_args: Vec<String>) -> rune::App<Ui> {
+    let playground = rune_args.iter().any(|arg| arg == "--playground");
+    build(Default::default(), playground && playground::enabled()).args(rune_args)
+}
+
+fn build(connect: host::Connect, with_playground: bool) -> rune::App<Ui> {
+    let spec = if with_playground {
+        playground::spec(spec())
+    } else {
+        spec()
+    };
+    let app = rune::App::new(spec)
         .init(move || Ui::load_with(connect))
         .on_close(on_close)
         .compositor(hero::HeroCompositor::default());
+    let app = if with_playground {
+        playground::attach(app)
+    } else {
+        app
+    };
     let window = app.handle();
     // Nothing shown reads the handle, so this asks for no frame. The first
     // frame's poll ran without it, so the window's tick starts from here.
@@ -189,8 +215,15 @@ fn on_close(ui: &mut Ui, _: &mut Tx) {
     ui.flush_drafts();
     settings::cancel_capture(ui);
     ui.open = None;
+    models::close(ui);
     picker::close(ui);
     explainer::close(ui);
+    // HUD Lab's demo would otherwise stay on screen; reopening starts at
+    // General, and coming back to HUD Lab starts the demo again.
+    if ui.pane == Pane::HudLab {
+        ui.ask(platform::PlatformRequest::EndHudDemo);
+        ui.pane = Pane::General;
+    }
     if let Service::Live(backend) = &mut ui.service {
         backend.closed();
     }
@@ -230,10 +263,7 @@ pub(crate) fn show(ui: &mut Ui, destination: Destination, tx: &mut Tx) {
         ui.select_pane(pane, tx);
     }
     match destination {
-        Destination::Models => {
-            let language = ui.settings.transcription.language.clone();
-            picker::open(ui, language);
-        }
+        Destination::Models => picker::open(ui),
         Destination::Meetings(Some(id)) => {
             ui.meetings.view = meetings::View::Recordings;
             ui.meetings.select(id);
@@ -310,7 +340,14 @@ pub(crate) fn meeting_failed(ui: &mut Ui, error: String) {
 /// scene, or `live` for the running Hex's `hex status`.
 #[cfg(target_os = "linux")]
 pub(crate) fn render() {
-    rune::run_with(spec(), hero::HeroCompositor::default());
+    let with_playground =
+        std::env::args().any(|arg| arg == "--playground") && playground::enabled();
+    if !with_playground {
+        rune::run_with(spec(), hero::HeroCompositor::default());
+        return;
+    }
+    let app = rune::App::new(playground::spec(spec())).compositor(hero::HeroCompositor::default());
+    playground::attach(app).run();
 }
 
 /// The window's logical size, which every pane and the picker fit.
@@ -319,9 +356,13 @@ const WINDOW_SIZE: (f32, f32) = (980.0, 760.0);
 /// One fixed size the user cannot change. Tiling window managers float such
 /// a window instead of tiling it: sway, Hyprland, niri, and i3 on Linux
 /// (Wayland has no other way to ask for floating), and AeroSpace, yabai, and
-/// Spaceman on macOS, where the first-run tour opens centred this way.
+/// Spaceman on macOS, where the first-run tour opens centred this way. With
+/// the playground, it resizes, so the stage beside its columns has room.
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 pub(crate) fn fixed_window() -> rune::WindowOptions {
+    if playground::enabled() {
+        return rune::WindowOptions::default();
+    }
     rune::WindowOptions {
         min_size: Some(WINDOW_SIZE),
         max_size: Some(WINDOW_SIZE),
@@ -420,6 +461,7 @@ impl Pane {
     fn shown(self, ui: &Ui) -> bool {
         let caps = ui.platform.caps;
         match self {
+            Pane::Modes => ui.platform.modes,
             Pane::Commands => caps.commands,
             Pane::Meetings => caps.meetings,
             Pane::VoiceFilter => {
@@ -432,7 +474,11 @@ impl Pane {
                             .is_some_and(|status| status.driver_bundle_installed),
                     )
             }
-            Pane::HudLab => caps.hud_lab && ui.platform.developer,
+            // Release builds too while the `dot-scope` experiment is on, when
+            // HUD Lab tunes only Dot scope.
+            Pane::HudLab => {
+                caps.hud_lab && (ui.platform.developer || ui.platform.hud.dot_scope.is_some())
+            }
             Pane::Activity => ui.platform.developer,
             #[cfg(hex_capture)]
             Pane::Scrawl => ui.platform.scrawl.is_some(),
@@ -502,10 +548,12 @@ impl Pane {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Menu {
     Microphone,
+    /// The microphone under the tour's practice field.
+    TourMicrophone,
     Language,
+    /// The speech model's language.
+    TranscriptionLanguage,
     HistoryRetention,
-    /// The OpenCode model search for Voice Action or the selected mode.
-    Model,
     /// The OpenCode thinking variant.
     Variant,
     /// The selected meeting's overflow menu.
@@ -534,10 +582,21 @@ pub(crate) struct Ui {
     pane: Pane,
     open: Option<Menu>,
     // General
-    microphones: Result<Vec<String>, String>,
+    microphones: Result<crate::audio::InputDevices, String>,
+    /// The [`crate::audio::input_route_generation`] `microphones` was listed at.
+    microphones_route: Option<u64>,
+    /// The poll clock `microphones` was last listed at.
+    microphones_listed_at: f64,
+    /// A listing in flight. Listing reads CoreAudio or COM endpoint
+    /// properties, which can block, so it runs off the UI thread.
+    microphones_listing:
+        Option<std::sync::mpsc::Receiver<Result<crate::audio::InputDevices, String>>>,
     confirm_release: bool,
-    /// General's Advanced disclosure is open.
-    advanced: bool,
+    /// General's Advanced disclosure, once pressed: open or closed. Until
+    /// then it is open only while an advanced setting is in use.
+    advanced: Option<bool>,
+    /// A scene previewing the badge of a build kind this binary is not.
+    build_preview: Option<BuildKind>,
     capture: Capture,
     hints: TextEdit,
     vocabulary: vocabulary::VocabularyEditor,
@@ -561,6 +620,8 @@ pub(crate) struct Ui {
     activity: activity::ActivityPane,
     /// HUD Lab's preset was copied since it last changed.
     hud_copied: bool,
+    /// HUD Lab saved Dot scope's tuning, until the next change.
+    hud_saved: bool,
     /// Settings saves and Quit Hex a fixture recorded.
     saved: usize,
     quit_requested: bool,
@@ -590,11 +651,17 @@ impl Ui {
         ui.error = error;
         ui.history = history::HistoryPane::shared(store);
         ui.models = models::Models::load();
-        ui.modes.load_personal_commands();
+        if crate::experiments::enabled(crate::experiments::Experiment::Modes) {
+            ui.modes.load_personal_commands();
+        }
         ui.platform.developer = crate::DEVELOPER_FEATURES_ENABLED;
         ui.platform.vocabulary = crate::vocabulary::enabled();
+        ui.platform.modes = crate::experiments::enabled(crate::experiments::Experiment::Modes);
         ui.platform.voice_filter =
             crate::experiments::enabled(crate::experiments::Experiment::VoiceFilter);
+        if crate::experiments::enabled(crate::experiments::Experiment::DotScope) {
+            ui.platform.hud.dot_scope = Some(crate::dot_scope::lab());
+        }
         ui.tour = onboarding::Tour::start(&ui.settings, &ui.platform);
         ui.platform.set_login_item(host::launch_at_login());
         ui
@@ -613,9 +680,13 @@ impl Ui {
             service_settings: None,
             pane: Pane::General,
             open: None,
-            microphones: Ok(Vec::new()),
+            microphones: Ok(Default::default()),
+            microphones_route: None,
+            microphones_listed_at: 0.0,
+            microphones_listing: None,
             confirm_release: false,
-            advanced: false,
+            advanced: None,
+            build_preview: None,
             capture: Capture::Idle,
             hints,
             vocabulary,
@@ -635,6 +706,7 @@ impl Ui {
             fun: fun::FunPane::default(),
             activity: activity::ActivityPane::default(),
             hud_copied: false,
+            hud_saved: false,
             saved: 0,
             quit_requested: false,
             window: None,
@@ -894,8 +966,12 @@ impl Ui {
         self.flush_drafts();
         settings::cancel_capture(self);
         self.open = None;
+        models::close(self);
         picker::close(self);
         explainer::close(self);
+        if self.pane == Pane::HudLab {
+            self.ask(platform::PlatformRequest::EndHudDemo);
+        }
         self.pane = pane;
         match pane {
             Pane::History => self.history.reload(),
@@ -918,7 +994,7 @@ fn on_key(ui: &mut Ui, event: &rune::KeyEvent, tx: &mut Tx) -> bool {
     }
     if let rune::Key::Command(digit @ '1'..='9') = event.key
         && !event.mods.alt
-        && ui.picker.language.is_none()
+        && !ui.picker.open
         && !ui.explainer.open
         && ui.tour.is_none()
     {
@@ -939,7 +1015,7 @@ fn on_key(ui: &mut Ui, event: &rune::KeyEvent, tx: &mut Tx) -> bool {
     if ui.explainer.open {
         explainer::close(ui);
         true
-    } else if ui.picker.language.is_some() {
+    } else if ui.picker.open {
         picker::close(ui);
         true
     } else if ui.open.is_some() {
@@ -994,6 +1070,19 @@ fn poll(ui: &mut Ui, clock: f64, tx: &mut Tx) -> bool {
     changed |= ui.modes.poll(ui.live());
     changed |= modes::poll_chooser(ui);
     let login_unknown = ui.platform.login_item.is_none();
+    changed |= settings::poll_microphones(ui);
+    // General names the input in use; list again when the OS reports an
+    // input change. Windows reports a default change only to an open
+    // default stream, so there the list is also refreshed every few seconds.
+    if (ui.pane == Pane::General || onboarding::shows_microphone(ui))
+        && ui.live()
+        && ui.window.as_ref().is_some_and(rune::AppHandle::is_visible)
+        && (ui.microphones_route != Some(crate::audio::input_route_generation())
+            || (cfg!(target_os = "windows") && clock >= ui.microphones_listed_at + 3.0))
+    {
+        settings::refresh_microphones(ui);
+        ui.microphones_listed_at = clock;
+    }
     changed |= ui.host.poll(&mut ui.platform);
     // macOS reports the login item moments after launch; its switch replaces
     // "Checking…" at once instead of fading in and reflowing the row.
@@ -1055,6 +1144,10 @@ fn poll(ui: &mut Ui, clock: f64, tx: &mut Tx) -> bool {
 
 fn view(ui: &Ui, cx: &mut Cx<Ui>) -> El {
     let p = Paint::new(cx.system_dark(), cx.env().scale);
+    // The native title bar takes the window's background, so it follows a
+    // system theme switch along with the rest of the window.
+    #[cfg(target_os = "windows")]
+    crate::windows_rune::match_title_bar(p.k.c.bg_deep);
     // Menus and popovers mount above the page (rune-kit overlays).
     let mut layer = Vec::new();
     let (actions, body) = match ui.pane {
@@ -1105,8 +1198,10 @@ fn view(ui: &Ui, cx: &mut Cx<Ui>) -> El {
     if let Some(modal) = explainer::modal(ui, cx, p) {
         layer.extend(modal);
     }
-    if let Some(tour) = onboarding::overlay(ui, p) {
+    let mut tour_layer = Vec::new();
+    if let Some(tour) = onboarding::overlay(ui, p, &mut tour_layer) {
         layer.push(tour);
+        layer.extend(tour_layer);
     }
     rune_kit::root(window, layer).on_window_focus(window_focused)
 }
@@ -1187,12 +1282,17 @@ fn sidebar(ui: &Ui, p: Paint) -> El {
         nav = nav.child(slot);
     }
     let action = match ui.view.as_ref().map(|view| &view.update_status) {
-        Some(DesktopUpdateStatus::ReadyToRestart) => {
-            Some((tr("Restart to update"), DesktopAction::RestartIntoUpdate))
-        }
+        Some(DesktopUpdateStatus::ReadyToRestart) => Some((
+            tr("Restart to update").to_owned(),
+            DesktopAction::RestartIntoUpdate,
+        )),
         Some(DesktopUpdateStatus::Available) => {
-            Some((tr("Download update"), DesktopAction::OpenUpdate))
+            Some((tr("Download update").to_owned(), DesktopAction::OpenUpdate))
         }
+        Some(DesktopUpdateStatus::SwitchAvailable { channel, version }) => Some((
+            crate::updater::switch_label(channel, version),
+            DesktopAction::ConfirmUpdateSwitch,
+        )),
         _ => None,
     };
     // An available update is a state, not the screen's main action.
@@ -1206,7 +1306,7 @@ fn sidebar(ui: &Ui, p: Paint) -> El {
             .child(controls::button(
                 p,
                 "sidebar-update",
-                label,
+                &label,
                 controls::ButtonKind::Secondary,
                 move |ui: &mut Ui, _| ui.send(Request::Desktop(action.clone())),
             ))
@@ -1224,76 +1324,172 @@ fn sidebar(ui: &Ui, p: Paint) -> El {
         .child(el().key("spacer").grow(1.0))
         .children(update)
         .children(host::QUIT_IN_WINDOW.then(|| quit_item(p)))
-        .child(
-            text(version_label())
-                .key("version")
-                .font(p.k.ty.small)
-                .color(p.faint())
-                .pl(6.0)
-                .pt(8.0),
-        )
-        .children(update_status(ui, p))
+        .child(footer(ui, p))
 }
 
-/// Under the version: a manual check, or what the updater is doing. An
-/// available update is the Update button above.
-fn update_status(ui: &Ui, p: Paint) -> Option<El> {
-    let status = |label: &str| {
-        text(label)
-            .key("update-status")
-            .font(p.k.ty.small)
-            .color(p.faint())
-            .pl(6.0)
-            .pt(2.0)
+/// The version and, under it, a manual check or what the updater is doing.
+/// Both lines keep their place in every state, so a check never moves the
+/// version, and the status line is one element whose words change in place
+/// rather than two that cross-fade over each other. An available update is
+/// the Update button above.
+fn footer(ui: &Ui, p: Paint) -> El {
+    let c = &p.k.c;
+    let line = |key: &str, words: &str, color| {
+        row()
+            .key(key)
+            .h(FOOTER_LINE)
+            .px(6.0)
+            .center_y()
+            .self_start()
+            .radius(p.k.radius.sm)
+            .child(
+                text(words)
+                    .key("label")
+                    .font(p.k.ty.small)
+                    .color(color)
+                    .truncate(),
+            )
     };
-    Some(match &ui.view.as_ref()?.update_status {
-        DesktopUpdateStatus::Unavailable
-        | DesktopUpdateStatus::Available
-        | DesktopUpdateStatus::ReadyToRestart => return None,
-        DesktopUpdateStatus::Managed => status(tr("Managed by your organization")),
-        DesktopUpdateStatus::Checking => status(tr("Checking for updates…")),
-        DesktopUpdateStatus::Downloading => status(tr("Downloading update")),
-        DesktopUpdateStatus::Current | DesktopUpdateStatus::Failed => {
-            let c = &p.k.c;
-            row()
-                .key("check-for-updates")
+    let status = ui.view.as_ref().map(|view| &view.update_status);
+    let status = match status {
+        None
+        | Some(
+            DesktopUpdateStatus::Unavailable
+            | DesktopUpdateStatus::Available
+            | DesktopUpdateStatus::ReadyToRestart
+            | DesktopUpdateStatus::SwitchAvailable { .. },
+        ) => None,
+        Some(DesktopUpdateStatus::Current | DesktopUpdateStatus::Failed) => Some(
+            line("update-status", tr("Check for updates"), c.text_muted)
                 .role("button")
                 .label(tr("Check for updates"))
-                .h(20.0)
-                .px(6.0)
-                .center_y()
-                .radius(p.k.radius.sm)
                 .hover(c.hover)
                 .press(c.pressed)
                 .focusable(true)
                 .focus_ring(2.0, -2.0, c.border_focus)
-                .on_press(|ui: &mut Ui| ui.send(Request::Desktop(DesktopAction::CheckForUpdates)))
-                .child(
-                    text(tr("Check for updates"))
-                        .key("label")
-                        .font(p.k.ty.small)
-                        .color(c.text_muted)
-                        .truncate(),
-                )
+                .on_press(|ui: &mut Ui| ui.send(Request::Desktop(DesktopAction::CheckForUpdates))),
+        ),
+        // The same words, quieter, while it checks: the hourly check and a
+        // pressed one read the same and never swap the line's words.
+        Some(DesktopUpdateStatus::Checking) => Some(
+            line("update-status", tr("Check for updates"), p.faint())
+                .label(tr("Checking for updates…")),
+        ),
+        Some(DesktopUpdateStatus::Managed) => Some(line(
+            "update-status",
+            tr("Managed by your organization"),
+            p.faint(),
+        )),
+        Some(DesktopUpdateStatus::Downloading) => {
+            Some(line("update-status", tr("Downloading update"), p.faint()))
         }
-        DesktopUpdateStatus::SourceBuild => status(tr("Updated from your source checkout")),
-        DesktopUpdateStatus::PackageManager => status(tr("Updated by your package manager")),
-        DesktopUpdateStatus::PackageUpdate { command } => text(command)
-            .key("update-command")
-            .font(p.k.ty.small)
-            .color(p.faint())
-            .wrap()
-            .pl(6.0)
-            .pt(2.0),
-    })
+        Some(DesktopUpdateStatus::SourceBuild) => Some(line(
+            "update-status",
+            if ui.build_preview.unwrap_or_else(build_kind) == BuildKind::Local {
+                tr("Local build · updates off")
+            } else {
+                tr("Updated from your source checkout")
+            },
+            p.faint(),
+        )),
+        Some(DesktopUpdateStatus::PackageManager) => Some(line(
+            "update-status",
+            tr("Updated by your package manager"),
+            p.faint(),
+        )),
+        Some(DesktopUpdateStatus::PackageUpdate { command }) => Some(
+            text(command.clone())
+                .key("update-command")
+                .font(p.k.ty.small)
+                .color(p.faint())
+                .wrap()
+                .px(6.0)
+                .py(2.0),
+        ),
+    };
+    col()
+        .key("footer")
+        .mt(8.0)
+        .child(version_line(
+            ui,
+            p,
+            line("version", &version_label(), p.faint()),
+        ))
+        .children(status)
 }
 
-/// Test builds also name their commit: main moves past a release without
+/// A local or test build marks itself beside the version, quietly: an outline
+/// pill with a dot, in muted theme tokens.
+fn version_line(ui: &Ui, p: Paint, version: El) -> El {
+    let badge = match ui.build_preview.unwrap_or_else(build_kind) {
+        BuildKind::Release => return version,
+        BuildKind::Local => tr("Local"),
+        BuildKind::Test => tr("Test"),
+    };
+    let c = &p.k.c;
+    row()
+        .key("version-row")
+        .gap(2.0)
+        .center_y()
+        .child(version.key("version"))
+        .child(
+            row()
+                .key("build-badge")
+                .h(16.0)
+                .px(6.0)
+                .gap(4.0)
+                .center_y()
+                .radius(8.0)
+                .border(p.hair.max(0.5), c.border_muted)
+                .child(
+                    controls::status_dot(c.text_faint)
+                        .size(5.0, 5.0)
+                        .radius(2.5),
+                )
+                .child(
+                    text(badge)
+                        .key("label")
+                        .font(p.k.ty.small)
+                        .color(c.text_muted),
+                ),
+        )
+}
+
+/// What kind of build this is, for the footer's badge. The scenes preview
+/// the others on a release build.
+#[derive(Clone, Copy, PartialEq)]
+enum BuildKind {
+    Release,
+    Local,
+    Test,
+}
+
+fn build_kind() -> BuildKind {
+    if crate::app_paths::is_local_build() {
+        BuildKind::Local
+    } else if option_env!("HEX_TEST_BUILD") == Some("1") {
+        BuildKind::Test
+    } else {
+        BuildKind::Release
+    }
+}
+
+/// The footer's lines: as tall as each other, so a check moves nothing.
+const FOOTER_LINE: f32 = 20.0;
+
+/// Test and local builds also name their commit: main moves past a release without
 /// changing the version.
 fn version_label() -> String {
     let version = env!("CARGO_PKG_VERSION");
     match option_env!("HEX_COMMIT") {
-        Some(commit) => tr_fill("Version {}", &format!("{version} (test {commit})")),
+        Some(commit) => {
+            let kind = if crate::app_paths::is_local_build() {
+                "local"
+            } else {
+                "test"
+            };
+            tr_fill("Version {}", &format!("{version} ({kind} {commit})"))
+        }
         None => tr_fill("Version {}", version),
     }
 }
@@ -1362,7 +1558,7 @@ fn nav_item(p: Paint, pane: Pane, on: bool) -> El {
     if on {
         item = item.fill(c.layer_02);
     }
-    lists::source_item(p, item, on)
+    lists::source_item(item, on)
 }
 
 /// Linux has no tray: the window's way to stop Hex. Closing the window
@@ -1398,7 +1594,7 @@ fn pane_header(p: Paint, title: &str, switch: Option<El>, actions: Vec<El>) -> E
     title_bar(row())
         .key("pane-header")
         .h(52.0)
-        .px(24.0)
+        .px(METRICS.gutter)
         .gap(8.0)
         .center_y()
         .child(
@@ -1480,10 +1676,12 @@ const SCENES: &[Scene] = &[
     ("menus", |ui| {
         *ui = portal_fixture();
         ui.open = Some(Menu::Microphone);
-        ui.microphones = Ok(vec![
-            "Built-in Audio Analog Stereo".into(),
-            "Shure MV7".into(),
-        ]);
+        ui.microphones = Ok(crate::audio::InputDevices {
+            names: vec!["Built-in Audio Analog Stereo".into(), "Shure MV7".into()],
+            system_default: Some("Shure MV7".into()),
+            default_is_hex_microphone: false,
+            ..Default::default()
+        });
         ui.confirm_release = true;
     }),
     ("voice-action", |ui| {
@@ -1505,7 +1703,14 @@ const SCENES: &[Scene] = &[
         *ui = portal_fixture();
         ui.settings.voice_action.enabled = true;
         ui.pane = Pane::VoiceAction;
-        ui.open = Some(Menu::Model);
+        ui.models.open_picker();
+    }),
+    ("voice-action-models-long", |ui| {
+        *ui = portal_fixture();
+        ui.models = models::Models::fixture_long();
+        ui.settings.voice_action.enabled = true;
+        ui.pane = Pane::VoiceAction;
+        ui.models.open_picker();
     }),
     ("history", |ui| {
         *ui = portal_fixture();
@@ -1521,6 +1726,20 @@ const SCENES: &[Scene] = &[
         *ui = portal_fixture();
         modes::fixture(ui);
         ui.pane = Pane::Modes;
+    }),
+    ("modes-opencode-v1", |ui| {
+        *ui = portal_fixture();
+        modes::fixture(ui);
+        ui.models = models::Models::fixture_v1();
+        ui.settings.dictation_processing.modes[0]
+            .post_processing
+            .enabled = false;
+        ui.pane = Pane::Modes;
+    }),
+    ("modes-off", |ui| {
+        *ui = portal_fixture();
+        ui.platform.modes = false;
+        ui.pane = Pane::General;
     }),
     ("modes-global", |ui| {
         *ui = portal_fixture();
@@ -1542,6 +1761,29 @@ const SCENES: &[Scene] = &[
     ("picker-downloading", |ui| {
         *ui = portal_fixture();
         picker::fixture(ui, Some(TranscriptionModelId::CohereTranscribe));
+    }),
+    // Japanese saved: the English-only models say they switch the language.
+    ("picker-japanese", |ui| {
+        *ui = portal_fixture();
+        ui.settings.transcription.model = TranscriptionModelId::WhisperLargeV3Turbo;
+        ui.settings.transcription.language = "ja".into();
+        ui.picker.installed = Some(vec![TranscriptionModelId::WhisperLargeV3Turbo]);
+        picker::fixture(ui, None);
+    }),
+    // Parakeet chosen over Japanese: Settings names the language change.
+    ("language-fallback", |ui| {
+        *ui = portal_fixture();
+        ui.picker.fallback = Some(picker::LanguageFallback {
+            model: TranscriptionModelId::ParakeetUnifiedEnglish,
+            from: "ja".into(),
+        });
+    }),
+    // Whisper's languages open below the model.
+    ("language-menu", |ui| {
+        *ui = portal_fixture();
+        ui.settings.transcription.model = TranscriptionModelId::WhisperLargeV3Turbo;
+        ui.picker.installed = Some(vec![TranscriptionModelId::WhisperLargeV3Turbo]);
+        ui.open = Some(Menu::TranscriptionLanguage);
     }),
     ("shortcut-explainer", |ui| {
         *ui = mac_fixture();
@@ -1608,6 +1850,20 @@ const SCENES: &[Scene] = &[
     }),
     // macOS and Windows surfaces, from preview data (see `platform`).
     ("mac-settings", |ui| *ui = mac_fixture()),
+    ("mac-microphone-missing", |ui| {
+        *ui = mac_fixture();
+        ui.settings.microphone = Some("Shure MV7".into());
+        ui.open = Some(Menu::Microphone);
+    }),
+    ("mac-microphone-lid-closed", |ui| {
+        *ui = mac_fixture();
+        if let Ok(devices) = &mut ui.microphones {
+            devices.system_default = Some("Studio Display Microphone".into());
+            devices.off_with_lid_closed = Some("MacBook Pro Microphone".into());
+            devices.default_is_off_with_lid_closed = true;
+        }
+        ui.open = Some(Menu::Microphone);
+    }),
     ("mac-settings-vocabulary", |ui| {
         *ui = mac_fixture();
         vocabulary::fixture(ui, true);
@@ -1642,16 +1898,40 @@ const SCENES: &[Scene] = &[
     }),
     ("mac-settings-advanced", |ui| {
         *ui = mac_fixture();
-        ui.advanced = true;
+        ui.advanced = Some(true);
     }),
     ("mac-settings-dev-channel", |ui| {
         *ui = mac_fixture();
         ui.settings.updates.channel = Some(crate::app_settings::UpdateChannel::Dev);
     }),
+    // A local build: the badge, the quiet status line, no channel row.
+    ("mac-local-build", |ui| {
+        *ui = mac_fixture();
+        ui.build_preview = Some(BuildKind::Local);
+        if let Some(view) = &mut ui.view {
+            view.update_status = DesktopUpdateStatus::SourceBuild;
+        }
+    }),
+    ("mac-test-build", |ui| {
+        *ui = mac_fixture();
+        ui.build_preview = Some(BuildKind::Test);
+    }),
     ("mac-update-ready", |ui| {
         *ui = mac_fixture();
         if let Some(view) = &mut ui.view {
             view.update_status = DesktopUpdateStatus::ReadyToRestart;
+        }
+    }),
+    ("mac-update-checking", |ui| {
+        *ui = mac_fixture();
+        if let Some(view) = &mut ui.view {
+            view.update_status = DesktopUpdateStatus::Checking;
+        }
+    }),
+    ("mac-update-downloading", |ui| {
+        *ui = mac_fixture();
+        if let Some(view) = &mut ui.view {
+            view.update_status = DesktopUpdateStatus::Downloading;
         }
     }),
     ("windows-settings", |ui| {
@@ -1792,6 +2072,12 @@ const SCENES: &[Scene] = &[
         ui.platform.hud.queued = 2;
         ui.pane = Pane::HudLab;
     }),
+    // A release build with the `dot-scope` experiment on.
+    ("mac-hud-lab-dot-scope", |ui| {
+        *ui = mac_fixture();
+        ui.platform.hud.dot_scope = Some(crate::dot_scope::Tuning::default());
+        ui.pane = Pane::HudLab;
+    }),
     ("mac-activity", |ui| {
         *ui = mac_fixture();
         ui.platform.developer = true;
@@ -1841,6 +2127,14 @@ const SCENES: &[Scene] = &[
     ("mac-onboarding-done", |ui| {
         mac_tour(ui, onboarding::MacStep::Done)
     }),
+    ("mac-onboarding-mic", |ui| mic_tour(ui, MicScene::Hearing)),
+    ("mac-onboarding-mic-open", |ui| mic_tour(ui, MicScene::Open)),
+    ("mac-onboarding-mic-silent", |ui| {
+        mic_tour(ui, MicScene::Silent)
+    }),
+    ("mac-onboarding-mic-lid", |ui| {
+        mic_tour(ui, MicScene::LidClosed)
+    }),
     // The welcome hero animating (`--video`, or a live window), and settled as
     // Reduce Motion shows it.
     ("onboarding-hero", |ui| hero_tour(ui, false)),
@@ -1889,6 +2183,16 @@ fn mac_fixture() -> Ui {
         },
     ];
     ui.settings.experimental.hex_microphone = true;
+    ui.microphones = Ok(crate::audio::InputDevices {
+        names: vec![
+            "Kit Pods".into(),
+            "MacBook Pro Microphone".into(),
+            "Studio Display Microphone".into(),
+        ],
+        system_default: Some("Kit Pods".into()),
+        default_is_hex_microphone: false,
+        ..Default::default()
+    });
     ui.meetings = meetings::MeetingsPane::fixture();
     ui
 }
@@ -1916,6 +2220,62 @@ fn listening(message: Option<&'static str>, held: HotkeyModifiers) -> Capture {
 fn mac_tour(ui: &mut Ui, step: onboarding::MacStep) {
     *ui = mac_fixture();
     onboarding::mac_fixture(ui, step);
+}
+
+/// What the tour's practice microphone shows in a scene.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum MicScene {
+    /// Recording, and Hex hears the person.
+    Hearing,
+    /// Its menu of inputs open.
+    Open,
+    /// Recording, and Hex hears nothing.
+    Silent,
+    /// The lid closed and no other input.
+    LidClosed,
+}
+
+fn mic_tour(ui: &mut Ui, scene: MicScene) {
+    let recording = matches!(scene, MicScene::Hearing | MicScene::Silent);
+    mac_tour(
+        ui,
+        if recording {
+            onboarding::MacStep::TryItListening
+        } else {
+            onboarding::MacStep::TryIt
+        },
+    );
+    let built_in = "MacBook Pro Microphone".to_owned();
+    ui.microphones = Ok(if scene == MicScene::LidClosed {
+        crate::audio::InputDevices {
+            names: vec![built_in.clone()],
+            system_default: None,
+            off_with_lid_closed: Some(built_in),
+            default_is_off_with_lid_closed: true,
+            ..Default::default()
+        }
+    } else {
+        crate::audio::InputDevices {
+            names: vec![
+                "Kit Pods".into(),
+                built_in.clone(),
+                "Studio Display Microphone".into(),
+            ],
+            system_default: Some(built_in),
+            ..Default::default()
+        }
+    });
+    if scene == MicScene::Open {
+        ui.open = Some(Menu::TourMicrophone);
+    }
+    let microphone = ui.settings.microphone.clone();
+    if let Some(tour) = &mut ui.tour {
+        match scene {
+            MicScene::Hearing => tour.mic.level = 0.6,
+            MicScene::Silent => tour.mic.silent = Some(microphone),
+            _ => {}
+        }
+    }
 }
 
 fn portal_fixture() -> Ui {

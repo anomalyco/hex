@@ -119,7 +119,7 @@ const KEYS: &[Key] = &[
     optional(
         "microphone",
         Kind::Text,
-        "Preferred microphone by name; none picks one automatically",
+        "Microphone by name; system-default (or none) follows the system's default input",
     ),
     key(
         "recording_audio_behavior",
@@ -367,9 +367,20 @@ const CAPTURE_KEYS: &[Key] = &[
         "Days a capture is kept; none keeps it",
     ),
     key(
+        "capture.capsule_flow",
+        Kind::Choice(&["list", "toast", "menu_bar", "cursor", "notch"]),
+        "How the capture capsule offers where to send a capture (prototypes): a list, a \
+         one-line toast, the menu bar, a card at the pointer, or a notch",
+    ),
+    key(
         "capture.routing",
         Kind::Json,
         "Where captures go among OpenCode sessions: Scrawl's router settings (autoSend, sites, apps, smartRouting, …) as a JSON object",
+    ),
+    key(
+        "capture.show_overlays_in_recordings",
+        Kind::Bool,
+        "Let screen recordings, captures included, show Hex's capsules, ink, and HUD (for demos)",
     ),
 ];
 #[cfg(hex_capture)]
@@ -673,6 +684,9 @@ fn parse(key: &Key, raw: &str, shortcuts: &ShortcutRules) -> Result<Value, Contr
     let name = key.key;
     let trimmed = raw.trim();
     if key.optional && matches!(trimmed.to_ascii_lowercase().as_str(), "none" | "null" | "") {
+        return Ok(Value::Null);
+    }
+    if name == "microphone" && trimmed.eq_ignore_ascii_case("system-default") {
         return Ok(Value::Null);
     }
     match key.kind {
@@ -1025,6 +1039,10 @@ mod tests {
         assert_eq!(change.settings.meetings.calendar.lead_minutes, 5);
         let change = apply(&settings, "ui_language", "none", false, &rules()).unwrap();
         assert_eq!(change.settings.ui_language, None);
+        let mut saved = settings.clone();
+        saved.microphone = Some("USB Mic".into());
+        let change = apply(&saved, "microphone", "system-default", false, &rules()).unwrap();
+        assert_eq!(change.settings.microphone, None);
         let change = apply(&settings, "history_retention", "month", false, &rules()).unwrap();
         assert_eq!(
             change.effects,

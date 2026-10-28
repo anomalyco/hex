@@ -110,7 +110,7 @@ if [[ "${1:-}" == --inside ]]; then
 fi
 
 if [[ $# != 2 || $(id -u) == 0 ]]; then
-  echo "Usage: $0 /path/to/compiled-test /path/to/voice-control (run as an unprivileged user)" >&2
+  echo "Usage: $0 /path/to/compiled-test /path/to/hex (run as an unprivileged user)" >&2
   exit 1
 fi
 for command in cc pkg-config sway swaymsg wtype wl-copy dbus-run-session timeout; do

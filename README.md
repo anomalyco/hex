@@ -1,8 +1,8 @@
 <p align="center">
-  <img src=".github/assets/hex-icon.png" width="96" height="96" alt="HEX app icon" />
+  <img src=".github/assets/hex-icon.png" width="96" height="96" alt="Hex app icon" />
 </p>
 
-<h1 align="center">HEX</h1>
+<h1 align="center">Hex</h1>
 
 <p align="center">
   <strong>Speak. It appears.</strong><br />
@@ -17,8 +17,8 @@
   · <a href="CONTRIBUTING.md">Contributing</a>
 </p>
 
-HEX is local-first voice dictation for Apple silicon Macs running macOS 15 or
-newer. Hold a shortcut, speak, and release. HEX transcribes on your Mac and
+Hex is local-first voice dictation for Apple silicon Macs running macOS 15 or
+newer. Hold a shortcut, speak, and release. Hex transcribes on your Mac and
 pastes the result into the app you are using.
 
 - **On-device transcription.** Download a local speech model during setup;
@@ -34,7 +34,29 @@ ARM64 PCs, and the [Linux beta](#linux-beta) covers x86_64 X11 and compatible
 wlroots Wayland compositors. See [Privacy and local data](#privacy-and-local-data)
 for what stays on your device and what optional features send to a provider.
 
-## Install HEX
+## Install Hex
+
+### Downloads
+
+Builds from the dev channel, published on every change to `dev`:
+
+| Platform | Dev |
+| --- | --- |
+| macOS (Apple silicon) | [DMG](https://anoma.ly/release/hex/desktop/dev/macos-arm64-dmg) |
+| Windows x64 | [Installer](https://anoma.ly/release/hex/desktop/dev/windows-x64-setup) |
+| Windows ARM64 | [Installer](https://anoma.ly/release/hex/desktop/dev/windows-arm64-setup) |
+| Linux x86_64 | [Executable](https://anoma.ly/release/hex/desktop/dev/linux-x64) |
+| Linux x86_64 (Debian, Ubuntu) | [.deb](https://anoma.ly/release/hex/desktop/dev/linux-x64-deb) |
+| Linux x86_64 (Fedora, openSUSE) | [.rpm](https://anoma.ly/release/hex/desktop/dev/linux-x64-rpm) |
+| Linux ARM64 | [Executable](https://anoma.ly/release/hex/desktop/dev/linux-arm64) |
+| Linux ARM64 (Debian, Ubuntu) | [.deb](https://anoma.ly/release/hex/desktop/dev/linux-arm64-deb) |
+| Linux ARM64 (Fedora, openSUSE) | [.rpm](https://anoma.ly/release/hex/desktop/dev/linux-arm64-rpm) |
+
+Updater files: [macOS ZIP](https://anoma.ly/release/hex/desktop/dev/macos-arm64),
+[Windows x64 EXE](https://anoma.ly/release/hex/desktop/dev/windows-x64),
+[Windows ARM64 EXE](https://anoma.ly/release/hex/desktop/dev/windows-arm64).
+Windows links work once Windows signing is configured. On Linux you can also
+use `yay -S hex-bin` or the install script below.
 
 With Homebrew:
 
@@ -54,12 +76,12 @@ Or install manually:
 2. Drag `Hex.app` into Applications, then launch it.
 3. Complete the permission and model steps in setup.
 
-- **Microphone** lets HEX record while you dictate.
-- **Input Monitoring** lets HEX detect its shortcut globally. Drag the HEX tile into the list.
-- **Accessibility** lets HEX paste into the foreground app. Drag the HEX tile into the list.
+- **Microphone** lets Hex record while you dictate.
+- **Input Monitoring** lets Hex detect its shortcut globally. Drag the Hex tile into the list.
+- **Accessibility** lets Hex paste into the foreground app. Drag the Hex tile into the list.
 - **Transcription model** downloads the speech model that runs locally.
 
-HEX checks for signed updates automatically. Use **Hex > Check for Updates…**
+Hex checks for signed updates automatically. Use **Hex > Check for Updates…**
 to check immediately.
 
 Organizations that manage app versions themselves can turn off in-app updates,
@@ -69,19 +91,18 @@ including manual checks, with the `DisableUpdates` Boolean in the
 single Mac run `defaults write anomaly.hex DisableUpdates -bool true`. On
 Windows, set the DWORD `DisableUpdates` to `1` under
 `HKLM\SOFTWARE\Policies\Anomaly\Hex` (Group Policy) or the same path in HKCU.
-Relaunch HEX to apply it. Model downloads still work. Releases through 2.3.1
+Relaunch Hex to apply it. Model downloads still work. Releases through 2.3.1
 used the `com.kitlangton.hex2` domain; profiles for those keep applying only to them.
 
-**Download blocked?** [Alternative download: GitHub — Hex 2.3.1](https://github.com/anomalyco/hex/releases/download/app-v2.3.1/HEX-2.3.1-arm64.dmg)
-contains the identical signed DMG for Apple silicon and macOS 15+. App releases
-use `app-v…` tags; the repository also publishes separate TypeScript SDK releases.
+**Download blocked?** Each app release on [GitHub Releases](https://github.com/anomalyco/hex/releases)
+has the identical signed files. App releases use `v…` tags (`app-v…` through
+2.3.1); the repository also publishes separate TypeScript SDK releases.
 If an older installation cannot check for updates on your network, install the
 DMG manually over the existing Rust app.
 
 On managed networks, ask IT to allow `anoma.ly`: Hex downloads and updates
 from the Anomaly release service at `https://anoma.ly/release` (releases up to
-2.3.1 use `https://anoma.ly/hex/files` and `downloads.hex.kitlangton.dev`,
-which redirects there). Local model setup separately needs `huggingface.co` and its model
+2.3.1 use `https://anoma.ly/hex/files`). Local model setup separately needs `huggingface.co` and its model
 download CDN; optional Voice Commands needs `download.moonshine.ai`. A successful
 app download does not establish that those model hosts are reachable. After
 restoring access, retry model preparation in Settings (or Retry for Commands).
@@ -92,7 +113,7 @@ dictating in the new one so their shortcuts do not compete.
 
 ## Dictate Anywhere
 
-Hold **Option**, speak, then release. HEX transcribes and pastes at the current
+Hold **Option**, speak, then release. Hex transcribes and pastes at the current
 focus.
 
 - Double-tap Option to keep recording; press Option again to finish.
@@ -117,17 +138,17 @@ dictation does not require it.
 
 - **Voice Action:** enable it in the Voice Action pane, then hold
   **Option-Command** and describe what you want. It defaults off, independently
-  of your dictation shortcut. HEX sends
+  of your dictation shortcut. Hex sends
   that instruction, selected text when Accessibility makes it available, and
   the foreground application and Brave website hostname. It pastes the result
   at the current focus.
 - **Post-processing:** enable OpenCode in Modes to rewrite a transcript before
-  paste. HEX sends the transcript, foreground application, and Brave website
+  paste. Hex sends the transcript, foreground application, and Brave website
   hostname to the configured model provider. Modes can target applications and
   websites in Brave Browser.
 
-If OpenCode rewriting fails, HEX keeps the corrected local transcript and still
-runs any selected text transformations. If that transformation stage fails, HEX
+If OpenCode rewriting fails, Hex keeps the corrected local transcript and still
+runs any selected text transformations. If that transformation stage fails, Hex
 keeps the text from before the stage, not partial transformation results. A
 failed Voice Action pastes nothing.
 
@@ -135,20 +156,20 @@ failed Voice Action pastes nothing.
 
 Voice commands are available on macOS and disabled by default. Enabling them
 starts continuous local command recognition and requires a separate local
-command model; HEX prompts to install it when needed. Dictation remains
+command model; Hex prompts to install it when needed. Dictation remains
 available while command recognition is off or asleep.
 
 The Commands pane lists built-in phrases and filters them by global, application,
 and Brave website context. Advanced users can create
 `~/.config/hex/hex.config.ts` for custom TypeScript commands. Custom commands
-require [Bun](https://bun.sh/); HEX provides an Edit Config action and a prompt
+require [Bun](https://bun.sh/); Hex provides an Edit Config action and a prompt
 you can paste into a local coding agent.
 
 Custom command files and dependencies are executable local code with your user
 permissions. Review agent changes and install only dependencies you trust.
 
 To teach a coding agent how to configure personal commands and transformations,
-install the official HEX skill:
+install the official Hex skill:
 
 ```sh
 npx skills add anomalyco/hex --skill hex-personal-commands
@@ -173,7 +194,7 @@ See [flags and the versioned JSON schema](docs/transcript-cli.md).
 ## Privacy And Local Data
 
 - Speech transcription and command recognition run locally.
-- HEX does not save dictation audio by default.
+- Hex does not save dictation audio by default.
 - History retains successfully pasted dictation and Voice Action text
   for seven days by default, including the local transcript, final text, and
   limited application and timing metadata. It never stores audio, full browser
@@ -185,7 +206,7 @@ See [flags and the versioned JSON schema](docs/transcript-cli.md).
 - An explicit `HEX_RETAIN_DICTATION_AUDIO` diagnostic setting can retain a
   bounded number of owner-only WAV files.
 - Local diagnostic logs can contain transcript text, recognized command speech,
-  foreground application names, and Brave URLs. HEX does not upload these logs.
+  foreground application names, and Brave URLs. Hex does not upload these logs.
 - OpenCode features send the data described above to your configured model
   provider.
 - Model installation and software updates require network access.
@@ -196,26 +217,25 @@ Review and redact diagnostics before sharing them.
 
 | Symptom | Check |
 | --- | --- |
-| HEX appears to disappear | Open HEX from its menu-bar hexagon. If the status item could not start, HEX keeps its Dock icon visible. |
-| The shortcut does nothing | Open HEX and verify Microphone and Input Monitoring access. |
+| Hex appears to disappear | Open Hex from its menu-bar hexagon. If the status item could not start, Hex keeps its Dock icon visible. |
+| The shortcut does nothing | Open Hex and verify Microphone and Input Monitoring access. |
 | Recording works but text does not paste | Verify Accessibility access. |
 | Transcription does not start | Confirm that the selected local model is installed. |
 | OpenCode features fail | Verify the separate OpenCode installation and model provider. |
 | Voice commands do not respond | Confirm Commands is enabled and voice control is awake. |
 | Website context does not match | Website-aware modes and commands currently require Brave Browser. |
 
-Permission changes may require quitting and reopening HEX.
+Permission changes may require quitting and reopening Hex.
 
 Still stuck? [Report a bug](https://github.com/anomalyco/hex/issues/new?template=bug_report.yml)
-with your HEX version, operating system, and steps to reproduce. Review and
+with your Hex version, operating system, and steps to reproduce. Review and
 redact any attachments; do not upload private dictation, recordings, or full logs.
 
 Diagnostics are stored at:
 
-- macOS: `~/Library/Application Support/hex/logs/` (older versions used
-  `voice-control`; Hex moves it once and leaves a `voice-control` symlink)
-- Windows: `%APPDATA%\voice-control\logs\`
-- Linux: `~/.local/share/voice-control/logs/`, or under `XDG_DATA_HOME`
+- macOS: `~/Library/Application Support/hex/logs/`
+- Windows: `%APPDATA%\hex\logs\`
+- Linux: `~/.local/share/hex/logs/`, or under `XDG_DATA_HOME`
 
 ## Windows Beta
 
@@ -251,6 +271,10 @@ Install the signed release on x86_64 Arch Linux (glibc 2.44 or later) with:
 curl -fsSL https://anoma.ly/hex/files/install-linux.sh | sh
 ```
 
+Until Hex has a stable release on the release service, this installs the
+newest dev build, which keeps updating from the Dev channel
+(`HEX_INSTALL_CHANNEL=stable` or `=dev` picks one explicitly).
+
 From the next release on, Arch users can instead install the AUR package
 `hex-bin` (for example `yay -S hex-bin`), which pacman updates; it is not on the
 AUR yet.
@@ -268,14 +292,14 @@ workflow. Open the latest green run and download from its summary. The
 [test build guide](docs/test-builds.md) explains how to install and remove each
 one without disturbing an installed Hex.
 
-## Build With HEX
+## Build With Hex
 
 [`@kitlangton/hex`](sdk/typescript/README.md) brings local transcription to your
 own application through Promise and optional Effect APIs. Your app supplies the
-recorded audio; HEX handles model preparation and transcription.
+recorded audio; Hex handles model preparation and transcription.
 
 The SDK is published on [npm](https://www.npmjs.com/package/@kitlangton/hex), but
-a bundled native helper is not yet published. You must supply a compatible HEX
+a bundled native helper is not yet published. You must supply a compatible Hex
 executable. Follow the [SDK guide](sdk/typescript/README.md) for requirements and
 examples.
 
@@ -287,5 +311,5 @@ indexed in [`docs/README.md`](docs/README.md). Start with
 the native application. Report vulnerabilities through the process in
 [`SECURITY.md`](SECURITY.md).
 
-HEX is available under the [MIT License](LICENSE).
+Hex is available under the [MIT License](LICENSE).
 Vendored icon licenses are listed in [Third-Party Notices](THIRD_PARTY_NOTICES.md).

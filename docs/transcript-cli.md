@@ -195,15 +195,13 @@ type MeetingChapters = {
 
 ## Reads never start or change the app
 
-These commands dispatch before data-folder migration, logging, instance locking,
+These commands dispatch before logging, instance locking,
 local API startup, permissions, GUI, and Hex Microphone. They open no microphone,
 load no model, make no network request, and create no files or directories.
 History reads one file descriptor, so an atomic replacement yields a complete
 old or new snapshot. Malformed history produces an error without recovery writes.
 
-Data comes from `~/Library/Application Support/hex`. Read-only resolution also
-supports the `voice-control` legacy folder and compatibility symlink, using the
-same conflict policy as the app. `HEX_APPLICATION_SUPPORT_DIR` overrides the
+Data comes from `~/Library/Application Support/hex`. `HEX_APPLICATION_SUPPORT_DIR` overrides the
 root for fixtures or a mirrored copy. These CLI commands currently target macOS;
 Linux and Windows retain their existing command surfaces.
 

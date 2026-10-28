@@ -96,8 +96,7 @@ pub(super) struct SourceSupervisor {
 impl SourceSupervisor {
     pub(super) fn microphone(sink: PacketSink) -> Self {
         Self::spawn(sink, || {
-            let (_, selected) = crate::app_settings::microphone_selection();
-            MicrophoneSource::open(selected.as_deref())
+            MicrophoneSource::open(crate::app_settings::microphone_selection())
                 .map(|source| Box::new(source) as Box<dyn LiveSource>)
         })
     }
@@ -213,31 +212,142 @@ impl To16k {
     }
 }
 
+/// Looks again, a bounded number of times, for a saved microphone that is
+/// listed but would not open, while the system default stands in for it.
+#[derive(Debug, Default)]
+struct UnopenableRetry {
+    due: Option<Instant>,
+    tries: u32,
+}
+
+impl UnopenableRetry {
+    const TRIES: u32 = 8;
+    const FIRST: Duration = Duration::from_secs(1);
+    const MAX: Duration = Duration::from_secs(30);
+
+    /// Schedules the next look after resolving to `selection` at `now`.
+    fn resolved(&mut self, selection: crate::audio::Selection, now: Instant) {
+        if selection != crate::audio::Selection::Unopenable {
+            *self = Self::default();
+            return;
+        }
+        if self.tries >= Self::TRIES {
+            self.due = None;
+            return;
+        }
+        let delay = Self::FIRST
+            .saturating_mul(1 << self.tries.min(16))
+            .min(Self::MAX);
+        self.due = Some(now + delay);
+        self.tries += 1;
+    }
+
+    fn is_due(&self, now: Instant) -> bool {
+        self.due.is_some_and(|due| now >= due)
+    }
+}
+
 struct MicrophoneSource {
     input: crate::audio::AudioInput,
     resample: To16k,
     last_audio: Instant,
+    selected: Option<String>,
+    /// The [`crate::app_settings::microphone_selection`] revision of `selected`.
+    selection_revision: u64,
+    /// The [`crate::audio::input_route_generation`] the input was resolved at.
+    route_generation: u64,
+    retry: UnopenableRetry,
 }
 
 impl MicrophoneSource {
-    fn open(selected: Option<&str>) -> Result<Self> {
-        let input = crate::audio::open_meeting_input(selected)?;
+    fn open((selection_revision, selected): (u64, Option<String>)) -> Result<Self> {
+        let route_generation = crate::audio::input_route_generation();
+        let crate::audio::Opened::Input(input) =
+            crate::audio::open_meeting_input(selected.as_deref(), None)?
+        else {
+            unreachable!("nothing to keep");
+        };
+        let input = *input;
         let resample = To16k::new(input.sample_rate)?;
         tracing::info!(
             device = input.device_name,
             rate = resample.rate,
             "meeting microphone opened"
         );
+        let mut retry = UnopenableRetry::default();
+        retry.resolved(input.selection, Instant::now());
         Ok(Self {
             input,
             resample,
             last_audio: Instant::now(),
+            selected,
+            selection_revision,
+            route_generation,
+            retry,
         })
+    }
+
+    /// Follows a change of the system default or of the saved microphone in
+    /// Settings, the saved microphone returning, or a due look at one that
+    /// would not open, by opening the input it now resolves to before
+    /// dropping the old one. A failed open keeps the current input.
+    fn follow_route(&mut self) {
+        let now = Instant::now();
+        let generation = crate::audio::input_route_generation();
+        let (revision, selected) = crate::app_settings::microphone_selection();
+        if generation == self.route_generation
+            && revision == self.selection_revision
+            && !self.retry.is_due(now)
+        {
+            return;
+        }
+        self.route_generation = generation;
+        if revision != self.selection_revision {
+            self.selection_revision = revision;
+            self.selected = selected;
+            self.retry = UnopenableRetry::default();
+        }
+        let opened = crate::audio::open_meeting_input(
+            self.selected.as_deref(),
+            Some(&self.input.device_name),
+        );
+        let input = match opened {
+            Ok(crate::audio::Opened::Input(input)) => *input,
+            Ok(crate::audio::Opened::Unchanged { selection }) => {
+                self.input.selection = selection;
+                self.retry.resolved(selection, now);
+                return;
+            }
+            Err(error) => {
+                tracing::warn!(%error, "could not switch the meeting microphone; keeping it");
+                self.retry.resolved(self.input.selection, now);
+                return;
+            }
+        };
+        if input.sample_rate != self.resample.rate {
+            match To16k::new(input.sample_rate) {
+                Ok(resample) => self.resample = resample,
+                Err(error) => {
+                    tracing::warn!(%error, "could not switch the meeting microphone; keeping it");
+                    self.retry.resolved(self.input.selection, now);
+                    return;
+                }
+            }
+        }
+        tracing::info!(
+            from = %self.input.device_name,
+            to = %input.device_name,
+            "meeting microphone switched"
+        );
+        self.retry.resolved(input.selection, now);
+        self.input = input;
+        self.last_audio = Instant::now();
     }
 }
 
 impl LiveSource for MicrophoneSource {
     fn poll(&mut self, sink: &PacketSink) -> std::result::Result<(), String> {
+        self.follow_route();
         match self.input.recv_timeout(POLL_INTERVAL) {
             crate::audio::AudioInputEvent::Chunk { samples, .. } => {
                 self.last_audio = Instant::now();
@@ -819,4 +929,38 @@ pub fn request_system_audio_access() -> bool {
         );
     }
     true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::audio::Selection;
+
+    #[test]
+    fn a_microphone_that_would_not_open_is_tried_a_bounded_number_of_times() {
+        let start = Instant::now();
+        let mut retry = UnopenableRetry::default();
+        let mut now = start;
+        let mut delays = Vec::new();
+        retry.resolved(Selection::Unopenable, now);
+        while let Some(due) = retry.due {
+            assert!(!retry.is_due(due - Duration::from_millis(1)));
+            assert!(retry.is_due(due));
+            delays.push(due - now);
+            now = due;
+            retry.resolved(Selection::Unopenable, now);
+        }
+        assert_eq!(
+            delays,
+            [1, 2, 4, 8, 16, 30, 30, 30].map(Duration::from_secs)
+        );
+
+        // Opening it, or a microphone that is merely unlisted, stops looking.
+        let mut retry = UnopenableRetry::default();
+        retry.resolved(Selection::Unopenable, start);
+        retry.resolved(Selection::InUse, start);
+        assert!(retry.due.is_none());
+        retry.resolved(Selection::Unlisted, start);
+        assert!(retry.due.is_none());
+    }
 }

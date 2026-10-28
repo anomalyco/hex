@@ -82,8 +82,8 @@ pub struct RouteDest {
 pub enum RouteAnswer {
     /// Written; the router is still working.
     Looking,
-    /// A rule the person saved (`routing.sites` or `routing.apps`, an
-    /// "Always send … here" among them) says where it goes: sent to `to`
+    /// A rule the person saved (`routing.sites` or `routing.apps`, a
+    /// Shift pick's among them) says where it goes: sent to `to`
     /// at once, and the capsule's Undo takes it back. `site` is what the
     /// rule matches, for an always-rule sending it elsewhere instead.
     Rule {
@@ -352,6 +352,16 @@ struct Routed {
     sent: Option<Sent>,
     /// The rule offered after the send ([`CaptureRoute::offer`]).
     offered: Option<scrawl_capture::OfferRule>,
+    /// The rule a Shift pick saved with this send, which Undo takes back.
+    saved: Option<SavedRule>,
+}
+
+/// A rule saved with a send, and what its key held before.
+struct SavedRule {
+    kind: RuleKind,
+    key: String,
+    before: Option<String>,
+    was_refused: bool,
 }
 
 struct Sent {
@@ -564,6 +574,7 @@ impl Worker {
             route: CaptureRoute::of(answer),
             sent: None,
             offered: None,
+            saved: None,
         });
         self.publish();
         // A saved rule sends at once; the capsule's Undo takes it back.
@@ -613,6 +624,13 @@ impl Worker {
     fn undo(&mut self) {
         if !self.acting_on_last() {
             return;
+        }
+        if let Some(saved) = self
+            .current
+            .as_mut()
+            .and_then(|current| current.saved.take())
+        {
+            forget_rule(&saved);
         }
         if self.take_back() {
             self.publish();
@@ -712,27 +730,29 @@ impl Worker {
     /// Saves an always-rule from the current capture's site or app to
     /// `session`'s project (or the session itself), on top of what
     /// `settings.json` holds now.
-    fn save_rule(&self, session: &str) {
+    fn save_rule(&mut self, session: &str) {
         let Some((kind, key, target)) = self.rule_for(session) else {
             tracing::info!("no rule can be made for this capture");
             return;
         };
-        let saved = crate::app_settings::AppSettings::load().and_then(|mut settings| {
-            let next = settings
-                .capture
-                .routing
-                .config()
-                .with_rule(kind, &key, &target)
-                .map_err(|error| color_eyre::eyre::eyre!("{error:#}"))?;
-            settings.capture.routing = next.into();
-            settings.save()
+        let mut saved = None;
+        let result = edit_routing(|config| {
+            let key = key.trim();
+            saved = Some(SavedRule {
+                kind,
+                key: key.to_owned(),
+                before: rules_of(config, kind).get(key).cloned(),
+                was_refused: config.refused_rules.iter().any(|k| k == key),
+            });
+            config
+                .with_rule(kind, key, &target)
+                .map_err(|error| color_eyre::eyre::eyre!("{error:#}"))
         });
-        match saved {
+        match result {
             Ok(()) => {
                 tracing::info!("saved a capture routing rule");
-                #[cfg(target_os = "macos")]
-                if let Some(runtime) = crate::macos_rune::runtime() {
-                    let _ = runtime.send(crate::macos_rune::Request::ReloadSettings);
+                if let Some(current) = self.current.as_mut() {
+                    current.saved = saved;
                 }
             }
             Err(error) => tracing::warn!(%error, "could not save a capture routing rule"),
@@ -934,7 +954,7 @@ fn unreachable_why(error: &str) -> String {
 
 /// A send to an OpenCode server on another Mac, with no agent host to copy
 /// the bundle there first.
-const FILES_UNSEEN: &str = "OpenCode can't see this Mac's files";
+const FILES_UNSEEN: &str = "OpenCode can't see files";
 
 /// A failed send (`{err:#}`, outer context first) in the few words the
 /// capsule shows under "Copied". What OpenCode said comes first: it was
@@ -963,6 +983,57 @@ fn send_why(error: &str, agent_host: bool) -> String {
         "opencode2 not found".into()
     } else {
         fit(&delivery::short(error))
+    }
+}
+
+/// `routing.sites` or `routing.apps`, as `kind` says.
+fn rules_of(
+    config: &scrawl_capture::RouterConfig,
+    kind: RuleKind,
+) -> &std::collections::BTreeMap<String, String> {
+    match kind {
+        RuleKind::Site => &config.sites,
+        RuleKind::App => &config.apps,
+    }
+}
+
+/// Saves `settings.json`'s routing as `edit` makes it, then has the app
+/// reload its settings.
+fn edit_routing(
+    edit: impl FnOnce(&scrawl_capture::RouterConfig) -> color_eyre::Result<scrawl_capture::RouterConfig>,
+) -> color_eyre::Result<()> {
+    let mut settings = crate::app_settings::AppSettings::load()?;
+    let next = edit(settings.capture.routing.config())?;
+    settings.capture.routing = next.into();
+    settings.save()?;
+    #[cfg(target_os = "macos")]
+    if let Some(runtime) = crate::macos_rune::runtime() {
+        let _ = runtime.send(crate::macos_rune::Request::ReloadSettings);
+    }
+    Ok(())
+}
+
+/// Undo of a Shift pick: the rule it saved goes, and what its key held
+/// before comes back.
+fn forget_rule(saved: &SavedRule) {
+    let result = edit_routing(|config| {
+        let mut next = config.clone();
+        let rules = match saved.kind {
+            RuleKind::Site => &mut next.sites,
+            RuleKind::App => &mut next.apps,
+        };
+        match &saved.before {
+            Some(before) => rules.insert(saved.key.clone(), before.clone()),
+            None => rules.remove(&saved.key),
+        };
+        if saved.was_refused && !next.refused_rules.contains(&saved.key) {
+            next.refused_rules.push(saved.key.clone());
+        }
+        Ok(next)
+    });
+    match result {
+        Ok(()) => tracing::info!("took back a capture routing rule"),
+        Err(error) => tracing::warn!(%error, "could not take back a capture routing rule"),
     }
 }
 
@@ -1086,20 +1157,24 @@ fn recent(candidates: &[smart::Candidate], shown: &[&str], now_ms: u64) -> Vec<R
         .collect()
 }
 
-/// A destination's `via` as a quiet word.
+/// A destination's `via` as a quiet word: a real reason in plain words,
+/// or nothing (a pick with no reason behind it, such as Jev's).
 fn why(via: &str) -> &str {
     match via {
         "rule" | "app-rule" => "rule",
-        "named" => "you said it",
-        "sdk" | "page" => "this page",
+        "named" | "speech" => "mentioned",
+        "sdk" | "page" => "same page",
+        "viewed" => "you were just in it",
         "localhost" | "port" => "dev server",
-        "recorded" => "sent before",
+        "recorded" | "chosen" => "sent before",
         "publisher" => "published it",
         "dev-build" => "dev build",
-        "jev" => "Jev's pick",
-        "jev-home" => "Jev's fallback",
+        "terminal" => "same terminal",
+        "document" => "same file",
+        "app" => "same app",
+        "title" => "same window",
         "weighed" => "recent",
-        other => other,
+        _ => "",
     }
 }
 
@@ -1337,12 +1412,8 @@ mod tests {
     fn only_a_saved_rule_sends_on_its_own() {
         use smart::{Basis, Source};
         for (basis, why, shown) in [
-            (
-                Basis::JevHome,
-                "Jev couldn't tell, so HOME",
-                "Jev's fallback",
-            ),
-            (Basis::Jev, "Jev's pick", "Jev's pick"),
+            (Basis::JevHome, "Jev couldn't tell, so HOME", ""),
+            (Basis::Jev, "Jev's pick", ""),
             (
                 Basis::Clue(Source::Port),
                 "port 5173 is Alpha's",
@@ -1351,14 +1422,14 @@ mod tests {
             (
                 Basis::Clue(Source::Page),
                 "the page registered with data-session",
-                "this page",
+                "same page",
             ),
             (
                 Basis::Clue(Source::Publisher),
                 "Alpha published the file",
                 "published it",
             ),
-            (Basis::Clue(Source::Named), "you said alpha", "you said it"),
+            (Basis::Clue(Source::Named), "you said alpha", "mentioned"),
         ] {
             let answered = sent_by(basis, why);
             assert!(answered.send.is_none(), "{why}: nothing sends until picked");
@@ -1520,7 +1591,7 @@ mod tests {
                 to: "SEER".into(),
                 why: FILES_UNSEEN.into()
             }),
-            "Queued for SEER: OpenCode can't see this Mac's files"
+            "Queued for SEER: OpenCode can't see files"
         );
     }
 

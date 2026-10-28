@@ -30,7 +30,10 @@ pub const ENV: &str = "HEX_EXPERIMENTS";
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Experiment {
     Capture,
+    DotScope,
     LiveChapters,
+    Modes,
+    Playground,
     SmartTurn,
     Vocabulary,
     VoiceFilter,
@@ -39,9 +42,12 @@ pub enum Experiment {
 impl Experiment {
     /// Every experiment, including those behind a build option;
     /// [`Self::available`] lists the ones this build offers.
-    const ALL: [Self; 5] = [
+    const ALL: [Self; 8] = [
         Self::Capture,
+        Self::DotScope,
         Self::LiveChapters,
+        Self::Modes,
+        Self::Playground,
         Self::SmartTurn,
         Self::Vocabulary,
         Self::VoiceFilter,
@@ -65,7 +71,10 @@ impl Experiment {
     pub const fn name(self) -> &'static str {
         match self {
             Self::Capture => "capture",
+            Self::DotScope => "dot-scope",
             Self::LiveChapters => "live-chapters",
+            Self::Modes => "modes",
+            Self::Playground => "playground",
             Self::SmartTurn => "smart-turn",
             Self::Vocabulary => "vocabulary",
             Self::VoiceFilter => "voice-filter",
@@ -77,7 +86,16 @@ impl Experiment {
             Self::Capture => {
                 "Scrawl's capture engine (`hex capture`; macOS, the `capture` build option)."
             }
+            Self::DotScope => {
+                "Dot scope: the recording indicator as a braided dot oscilloscope, tuned in HUD Lab (macOS)."
+            }
             Self::LiveChapters => "Chapter a meeting's transcript live while it records.",
+            Self::Modes => {
+                "Modes: the pane, per-app corrections, OpenCode rewriting, and transformations."
+            }
+            Self::Playground => {
+                "Rune's playground in the window (⇧⌘D, Ctrl+Shift+D off macOS): every fixture scene and story."
+            }
             Self::SmartTurn => {
                 "Stop hands-free dictation when Smart Turn hears you finish (macOS)."
             }
@@ -669,8 +687,26 @@ mod tests {
                 "file": "/home/kit/.config/hex/experiments",
                 "experiments": [
                     {
+                        "name": "dot-scope",
+                        "description": Experiment::DotScope.description(),
+                        "enabled": false,
+                        "sources": [],
+                    },
+                    {
                         "name": "live-chapters",
                         "description": Experiment::LiveChapters.description(),
+                        "enabled": false,
+                        "sources": [],
+                    },
+                    {
+                        "name": "modes",
+                        "description": Experiment::Modes.description(),
+                        "enabled": false,
+                        "sources": [],
+                    },
+                    {
+                        "name": "playground",
+                        "description": Experiment::Playground.description(),
                         "enabled": false,
                         "sources": [],
                     },

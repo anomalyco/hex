@@ -32,7 +32,7 @@ use std::os::unix::fs::DirBuilderExt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, SyncSender, TrySendError};
-use std::sync::{Arc, Mutex, OnceLock, Weak};
+use std::sync::{Arc, LazyLock, Mutex, OnceLock, Weak};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
@@ -369,7 +369,23 @@ fn own_windows_of(own: &[Option<u32>; 3]) -> OwnWindows {
             .into_iter()
             .filter_map(|role| own[role as usize])
             .collect(),
+        recorded: Arc::clone(&OWN_WINDOWS_RECORDED),
     }
+}
+
+/// `capture.show_overlays_in_recordings`: while set, a capture records every
+/// window of Hex's, its overlays included. A recording capture follows a
+/// change at once.
+static OWN_WINDOWS_RECORDED: LazyLock<Arc<AtomicBool>> = LazyLock::new(Arc::default);
+
+/// Lets captures record Hex's own windows, or leaves them out again.
+pub fn record_own_windows(recorded: bool) {
+    OWN_WINDOWS_RECORDED.store(recorded, Ordering::Release);
+}
+
+/// Whether screen recordings may show Hex's overlays, as last saved.
+pub fn own_windows_recorded() -> bool {
+    OWN_WINDOWS_RECORDED.load(Ordering::Acquire)
 }
 
 /// The capsule's pill `[x, y, w, h]` in its panel's points while it shows.
@@ -649,13 +665,21 @@ fn private_dirs(dir: &Path) -> Result<()> {
 }
 
 /// A fresh owner-only `<captures>/<unix ms>.scrawl` folder; never adopts one
-/// that exists.
+/// that exists. Stamps never repeat within the process: a discarded capture's
+/// folder is removed on its collector's thread, so a switch in the same
+/// millisecond could otherwise reuse its path while it is still unfinished.
 fn new_bundle_dir(captures_dir: &Path) -> Result<PathBuf> {
+    static LAST_STAMP: Mutex<u128> = Mutex::new(0);
     private_dirs(captures_dir)?;
-    let stamp = std::time::SystemTime::now()
+    let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis();
+    let stamp = {
+        let mut last = LAST_STAMP.lock().unwrap_or_else(|error| error.into_inner());
+        *last = now.max(*last + 1);
+        *last
+    };
     for attempt in 0..100 {
         let name = match attempt {
             0 => format!("{stamp}.scrawl"),
@@ -2228,8 +2252,9 @@ pub enum CapsuleKeys {
     List,
     /// A capture's suggestions: the send-to list shortcut (search every
     /// session), 1 to `rows` with no modifier ([`CapsuleKey::Digit`]), and
-    /// a mouse press ([`CapsuleKey::Press`]) that may fold them.
-    Suggest { rows: u8 },
+    /// a mouse press ([`CapsuleKey::Press`]) that may fold them. `cycle`:
+    /// Return and Tab too, for the toast that offers one guess at a time.
+    Suggest { rows: u8, cycle: bool },
 }
 
 /// A key the capsule gets from Hex's tap.
@@ -2249,8 +2274,15 @@ pub enum CapsuleKey {
     Return {
         shift: bool,
     },
-    /// 1 to 9 typed in the list (otherwise text).
+    /// Tab, ⇧ for back: the toast's next guess.
+    Tab {
+        shift: bool,
+    },
+    /// 1 to 9 typed in the list (otherwise text), with Shift too: a
+    /// Shift pick also saves a rule.
     Digit(u8),
+    /// Shift went down (true) or up while the list or suggestions show.
+    Shift(bool),
     /// A mouse button went down anywhere, while the list is open. The click
     /// still reaches the app under it.
     Press,
@@ -2351,7 +2383,11 @@ pub fn list_key_wanted() -> bool {
 
 /// Whether the capsule's suggestions take their digit keys at the tap.
 pub fn suggesting() -> bool {
-    GRAB_KEYS.load(Ordering::Acquire) == keys_code(Some(CapsuleKeys::Suggest { rows: 0 }))
+    GRAB_KEYS.load(Ordering::Acquire)
+        == keys_code(Some(CapsuleKeys::Suggest {
+            rows: 0,
+            cycle: false,
+        }))
 }
 
 /// Hands `key` to the capsule if its keys include it; false otherwise.
@@ -2370,8 +2406,12 @@ fn takes(keys: CapsuleKeys, key: &CapsuleKey) -> bool {
             CapsuleKeys::Route | CapsuleKeys::List | CapsuleKeys::Suggest { .. },
             CapsuleKey::OpenList,
         ) => true,
-        (CapsuleKeys::Suggest { rows }, CapsuleKey::Digit(digit)) => (1..=rows).contains(digit),
-        (CapsuleKeys::Suggest { .. }, CapsuleKey::Press) => true,
+        (CapsuleKeys::Suggest { rows, .. }, CapsuleKey::Digit(digit)) => (1..=rows).contains(digit),
+        (CapsuleKeys::Suggest { .. }, CapsuleKey::Press | CapsuleKey::Shift(_)) => true,
+        (
+            CapsuleKeys::Suggest { cycle: true, .. },
+            CapsuleKey::Return { shift: false } | CapsuleKey::Tab { .. },
+        ) => true,
         (CapsuleKeys::List, key) => !matches!(key, CapsuleKey::Shortcut),
         _ => false,
     }
@@ -2402,9 +2442,16 @@ pub fn list_key(code: u16, flags: u64, typed: &str) -> ListTap {
         36 | 76 => CapsuleKey::Return {
             shift: flags & SHIFT != 0,
         },
+        48 => CapsuleKey::Tab {
+            shift: flags & SHIFT != 0,
+        },
         126 => CapsuleKey::Up,
         125 => CapsuleKey::Down,
         51 => CapsuleKey::Backspace,
+        // Shift's digits type symbols, so the digit row reads by position.
+        _ if flags & (SHIFT | OPTION) == SHIFT && shifted_digit(code).is_some() => {
+            CapsuleKey::Digit(shifted_digit(code).unwrap_or(1))
+        }
         _ => match typed.chars().next() {
             Some(digit @ '1'..='9') if typed.len() == 1 && flags & OPTION == 0 => {
                 CapsuleKey::Digit(digit as u8 - b'0')
@@ -2414,6 +2461,14 @@ pub fn list_key(code: u16, flags: u64, typed: &str) -> ListTap {
         },
     };
     ListTap::Key(key)
+}
+
+/// 1 to 9 for the ANSI digit row's key codes.
+fn shifted_digit(code: u16) -> Option<u8> {
+    [18, 19, 20, 21, 23, 22, 26, 28, 25]
+        .iter()
+        .position(|row| *row == code)
+        .map(|i| i as u8 + 1)
 }
 
 /// The ANSI Z key, when the layout has none.
@@ -2924,6 +2979,7 @@ mod tests {
         let OwnWindows {
             excluded,
             passthrough,
+            ..
         } = own_windows_of(&roles);
         assert_eq!(excluded, [capsule, ink]);
         let engine_says_hex = |x, y| {
@@ -3199,7 +3255,6 @@ mod tests {
                 frames: Vec::new(),
                 video: None,
                 duration_ms,
-                video_offset_ms: 0,
             };
             let (_, bundle, _) = scrawl_capture::pipeline::finalize_capture_bundle_with_flags(
                 &self.dir,
@@ -4068,10 +4123,10 @@ mod tests {
         .unwrap();
         let closed = CaptureCommand::Start(CaptureTarget::Window { id: 0 });
         let bundle = report(host.command(closed, &audio)).bundle.unwrap();
-        assert_eq!(
-            lock(&host.outcomes).snapshot().recording.unwrap().target,
-            TargetKind::Window
-        );
+        // The failed start can clear the recording before this reads it.
+        if let Some(recording) = lock(&host.outcomes).snapshot().recording {
+            assert_eq!(recording.target, TargetKind::Window);
+        }
         let last = wait_for_last(&mut host, &audio, &bundle, true);
         assert_eq!(last.stage, "failed");
         assert!(!bundle.exists());
@@ -4296,13 +4351,28 @@ mod tests {
         assert!(!wants_escape() && !capsule_key(CapsuleKey::Escape));
         // Suggestions: the list shortcut and only their own digits, never
         // Escape.
-        second.set(CapsuleKeys::Suggest { rows: 2 });
+        second.set(CapsuleKeys::Suggest {
+            rows: 2,
+            cycle: false,
+        });
         assert!(suggesting() && !wants_escape() && list_key_wanted() && !list_open());
         assert!(!capsule_key(CapsuleKey::Escape));
         assert!(capsule_key(CapsuleKey::Press), "a press may fold them");
+        assert!(capsule_key(CapsuleKey::Shift(true)), "Shift shows the rule");
         assert!(capsule_key(CapsuleKey::Digit(2)));
         assert!(!capsule_key(CapsuleKey::Digit(3)), "no third row");
         assert!(!capsule_key(CapsuleKey::Text("h".into())));
+        assert!(!capsule_key(CapsuleKey::Tab { shift: false }));
+        assert!(!capsule_key(CapsuleKey::Return { shift: false }));
+        // The toast's one guess at a time: Return sends it, Tab moves on.
+        second.set(CapsuleKeys::Suggest {
+            rows: 2,
+            cycle: true,
+        });
+        assert!(suggesting());
+        assert!(capsule_key(CapsuleKey::Tab { shift: false }));
+        assert!(capsule_key(CapsuleKey::Return { shift: false }));
+        assert!(!capsule_key(CapsuleKey::Return { shift: true }));
         second.set(CapsuleKeys::List);
         assert!(!suggesting());
         assert!(list_open() && !wants_escape() && list_key_wanted());
@@ -4318,7 +4388,10 @@ mod tests {
                 (2, CapsuleKey::Escape),
                 (2, CapsuleKey::OpenList),
                 (2, CapsuleKey::Press),
+                (2, CapsuleKey::Shift(true)),
                 (2, CapsuleKey::Digit(2)),
+                (2, CapsuleKey::Tab { shift: false }),
+                (2, CapsuleKey::Return { shift: false }),
                 (2, CapsuleKey::Text("ho".into())),
                 (2, CapsuleKey::Press),
             ]
@@ -4338,15 +4411,18 @@ mod tests {
             list_key(76, shift, "\u{3}"),
             key(CapsuleKey::Return { shift: true })
         );
+        assert_eq!(list_key(48, 0, "\t"), key(CapsuleKey::Tab { shift: false }));
         assert_eq!(list_key(126, 0, ""), key(CapsuleKey::Up));
         assert_eq!(list_key(125, 0, ""), key(CapsuleKey::Down));
         assert_eq!(list_key(51, 0, "\u{7f}"), key(CapsuleKey::Backspace));
         assert_eq!(list_key(18, 0, "1"), key(CapsuleKey::Digit(1)));
+        // Shift's digits type symbols; the row reads by position.
+        assert_eq!(list_key(19, shift, "@"), key(CapsuleKey::Digit(2)));
+        assert_eq!(list_key(25, shift, "("), key(CapsuleKey::Digit(9)));
         assert_eq!(list_key(29, 0, "0"), key(CapsuleKey::Text("0".into())));
         assert_eq!(list_key(18, option, "¡"), key(CapsuleKey::Text("¡".into())));
         assert_eq!(list_key(4, shift, "H"), key(CapsuleKey::Text("H".into())));
         assert_eq!(list_key(123, 0, ""), ListTap::Swallow);
-        assert_eq!(list_key(48, 0, "\t"), ListTap::Swallow);
         assert_eq!(list_key(9, command, "v"), ListTap::Pass);
         assert_eq!(list_key(53, control, "\u{1b}"), ListTap::Pass);
     }

@@ -2,11 +2,7 @@
 set -eu
 
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-# Match Hex: an unmigrated voice-control folder (not its symlink to hex) stays in use.
-support="$HOME/Library/Application Support/voice-control"
-if [ ! -e "$support" ] || [ "$(readlink "$support" 2>/dev/null)" = hex ]; then
-  support="$HOME/Library/Application Support/hex"
-fi
+support="$HOME/Library/Application Support/hex"
 discovery="$support/local-api.json"
 model=${HEX_SMOKE_MODEL:-parakeet_unified_en}
 audio="${TMPDIR:-/tmp}/hex-transcription-smoke.wav"
@@ -42,7 +38,7 @@ if [ -e "$discovery" ]; then
 fi
 
 cargo build --manifest-path "$root/Cargo.toml"
-"$root/target/debug/voice-control" service >/dev/null 2>&1 &
+"$root/target/debug/hex" service >/dev/null 2>&1 &
 service_pid=$!
 
 attempts=100
@@ -63,7 +59,7 @@ curl --fail --silent --show-error --no-buffer \
   "http://127.0.0.1:$port/models/$model/prepare" > "$events"
 grep -Fq '"type":"ok"' "$events"
 
-/usr/bin/say "Hello from the local HEX transcription service." -o "$audio.aiff"
+/usr/bin/say "Hello from the local Hex transcription service." -o "$audio.aiff"
 /usr/bin/afconvert -f WAVE -d LEI16@16000 "$audio.aiff" "$audio"
 rm -f "$audio.aiff"
 

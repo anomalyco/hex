@@ -17,7 +17,7 @@ use super::{CapsuleState, poll, trace_channels, view};
 fn guess() -> Route {
     Route::Guess {
         suggested: vec![
-            Dest::new("SEER", "guess · problems.kitlangton.com"),
+            Dest::new("SEER", "same page"),
             Dest::new("HEX", "last sent"),
         ],
         recent: vec![
@@ -44,11 +44,17 @@ fn rule() -> Route {
 }
 
 /// An ask with more sessions than it has chips for.
-fn guess_four() -> Route {
+fn guess_five() -> Route {
     Route::Guess {
-        suggested: ["SEER", "HEX", "HOME", "OPENCODE IOS", "RUNE"]
-            .map(|name| Dest::new(name, "guess"))
-            .to_vec(),
+        suggested: [
+            ("SEER", "you were just in it"),
+            ("HEX", "same page"),
+            ("HOME", "mentioned"),
+            ("OPENCODE IOS", "2 min ago"),
+            ("RUNE", "an hour ago"),
+        ]
+        .map(|(name, why)| Dest::new(name, why))
+        .to_vec(),
         recent: Vec::new(),
         site: None,
     }
@@ -164,12 +170,19 @@ fn stills() -> Vec<(&'static str, Pres)> {
             flow.pres(undo_s() + 1.0)
         }),
         ("guess", after(&routed(guess()))),
-        ("guess-always", {
+        ("shift", {
             let mut beats = routed(guess());
-            beats.push(Click(Id::Always));
+            beats.push(In(Input::Shift(true)));
             after(&beats)
         }),
-        ("guess-four", after(&routed(guess_four()))),
+        ("sent-rule", {
+            let mut beats = routed(guess());
+            beats.push(In(Input::Shift(true)));
+            beats.push(In(Input::SendRow(0)));
+            beats.push(In(Input::Shift(false)));
+            after(&beats)
+        }),
+        ("guess-five", after(&routed(guess_five()))),
         (
             "guess-long",
             after(&routed(Route::Guess {
@@ -179,7 +192,7 @@ fn stills() -> Vec<(&'static str, Pres)> {
                     "CAPTURE CAPSULE",
                     "HOME",
                 ]
-                .map(|name| Dest::new(name, "guess"))
+                .map(|name| Dest::new(name, ""))
                 .to_vec(),
                 recent: Vec::new(),
                 site: None,
@@ -226,7 +239,7 @@ fn stills() -> Vec<(&'static str, Pres)> {
             "queued",
             after(&[In(Input::Delivered(Delivered::Queued {
                 to: "SEER".into(),
-                why: "OpenCode can't see this Mac's files".into(),
+                why: "OpenCode can't see files".into(),
             }))]),
         ),
         ("taken-back", {
@@ -253,9 +266,24 @@ fn env(dark: bool) -> rune::Env {
     }
 }
 
+/// Every scene's first frame: a real capture's keyframe (an OpenCode
+/// settings screen), cropped and scaled to the thumbnail's 2× size.
+fn thumb() -> Option<rune::Image> {
+    static IMAGES: std::sync::OnceLock<rune::ImageCache> = std::sync::OnceLock::new();
+    let images = IMAGES.get_or_init(|| rune::ImageCache::new(Arc::new(|| {})));
+    let image =
+        images.load(include_bytes!("../../../tests/fixtures/capture-thumbnail.png").to_vec());
+    image.wait().ok()?;
+    // Decoding marks the image ready a moment before its pixels hold it.
+    while image.pixels().size() == (0, 0) {
+        std::thread::yield_now();
+    }
+    Some(image)
+}
+
 /// `pres` at rest.
 fn runtime(pres: Pres, dark: bool) -> Runtime<CapsuleState> {
-    let state = CapsuleState::still(pres, "0:07");
+    let state = CapsuleState::still(pres, "0:07", thumb());
     let mut rt = Runtime::with_text(state, view, (PANEL_W, PANEL_H), env(dark), text());
     rt.settle_all();
     rt.frame(0.0);
@@ -295,37 +323,35 @@ fn every_state_draws_its_pieces() {
         ("processing", &["processing"]),
         ("saved", &["done", "paste", "inspect", "close"]),
         ("failed", &["done", "close"]),
-        ("rule-sent", &["done", "why", "undo", "paste", "inspect"]),
-        ("rule-final", &["done", "why", "paste", "inspect"]),
-        (
-            "guess",
-            &["done", "paste", "inspect", "list", "row-SEER", "always"],
-        ),
-        (
-            "guess-four",
-            &["done", "paste", "inspect", "list", "row-SEER"],
-        ),
-        ("no-answer", &["done", "why", "paste", "inspect", "list"]),
+        ("rule-sent", &["done", "why", "undo", "close"]),
+        ("rule-final", &["done", "why", "paste", "inspect", "close"]),
+        ("guess", &["done", "paste", "inspect", "list", "row-SEER"]),
+        ("guess-five", &["done", "paste", "list", "row-SEER"]),
+        ("no-answer", &["done", "why", "paste", "list"]),
         (
             "list-guess",
             &["done", "field", "list", "row-SEER", "footer"],
         ),
-        ("sent", &["done", "undo", "paste", "inspect"]),
+        ("sent", &["done", "undo", "close"]),
         // Taken back, the suggestions again, the wrong one last.
         (
             "taken-back",
             &["done", "list", "row-HOME", "row-RUNE", "row-SEER"],
         ),
-        ("queued", &["done", "why", "paste", "inspect"]),
+        ("queued", &["done", "why", "paste", "close"]),
     ];
     // Paste and Inspect are for a written capture, and the open list's
-    // field takes their place.
+    // field takes their place. The top line holds one action at most: Undo
+    // before Paste and Inspect.
     let without: &[(&str, &[&str])] = &[
         ("recording-discard", &["cancel", "finish"]),
         ("failed", &["paste", "inspect"]),
         ("failed-start", &["paste", "inspect"]),
-        ("list-guess", &["paste", "inspect", "route0"]),
-        ("guess", &["field", "route0", "ask"]),
+        ("list-guess", &["paste", "inspect"]),
+        ("guess", &["field", "ask"]),
+        ("rule-sent", &["paste", "ask", "inspect"]),
+        ("rule-final", &["ask"]),
+        ("sent", &["paste", "inspect"]),
     ];
     let all = stills();
     for (name, pieces) in expect {
@@ -393,77 +419,35 @@ fn the_widest_states_fit_the_panel() {
             shell[0] >= 0.0 && shell[0] + shell[2] <= PANEL_W,
             "{shell:?} for {pres:?}"
         );
-        // Long names give way before Paste and Inspect do.
+        // Long names give way before the one action does.
         if matches!(pres, Pres::Done(_)) {
-            for id in [Id::Paste, Id::Inspect] {
-                assert!(
-                    items.iter().any(|item| item.id == id),
-                    "{id:?} for {pres:?}"
-                );
-            }
+            assert!(
+                items
+                    .iter()
+                    .any(|item| matches!(item.id, Id::Paste | Id::Undo)),
+                "no action for {pres:?}"
+            );
         }
     }
 }
 
-/// Every key of every hint sits wholly inside its tray, as far from its
-/// left edge as the last is from its right: the tray's width is worked out
-/// before Rune lays it out, and a short guess clips the keys.
+/// The capsule says its shortcuts in quiet text ("1–5", "esc"), a hint's
+/// keys in one small rect at most;
+/// keycaps are for Settings.
 #[test]
-fn the_hints_keys_stay_inside_their_trays() {
-    let mut checked = 0;
+fn the_capsule_draws_no_keycaps() {
     for (name, pres) in stills() {
         let rt = runtime(pres, false);
-        let elements = rt.elements();
-        for tray in elements
-            .iter()
-            .filter(|e| !e.exiting && e.key.as_deref() == Some("keys"))
-        {
-            let [tx, ty, tw, th] = tray.rect;
-            let prefix = format!("{}/", tray.path);
-            let caps: Vec<_> = elements
-                .iter()
-                .filter(|e| {
-                    e.path.starts_with(&prefix)
-                        && !e.path[prefix.len()..].contains('/')
-                        && e.key.as_deref().is_some_and(|k| k.starts_with("keycap"))
-                })
-                .collect();
-            assert!(!caps.is_empty(), "{name}: {} has no keys", tray.path);
-            for cap in &caps {
-                let [x, y, w, h] = cap.rect;
-                assert!(
-                    x >= tx - 0.01
-                        && y >= ty - 0.01
-                        && x + w <= tx + tw + 0.01
-                        && y + h <= ty + th + 0.01,
-                    "{name}: {} pokes out of its tray {:?}: {:?}",
-                    cap.path,
-                    tray.rect,
-                    cap.rect
-                );
-                assert!(
-                    cap.visible[2] >= w - 0.01,
-                    "{name}: {} is clipped: {:?} of {:?}",
-                    cap.path,
-                    cap.visible,
-                    cap.rect
-                );
-            }
-            let left = caps.iter().map(|c| c.rect[0]).fold(f32::INFINITY, f32::min) - tx;
-            let right = tx + tw
-                - caps
-                    .iter()
-                    .map(|c| c.rect[0] + c.rect[2])
-                    .fold(f32::NEG_INFINITY, f32::max);
+        for e in rt.elements() {
             assert!(
-                (left - right).abs() < 0.5,
-                "{name}: {} is lopsided, {left} pt left and {right} pt right",
-                tray.path
+                !e.key
+                    .as_deref()
+                    .is_some_and(|k| k == "keys" || k.starts_with("keycap")),
+                "{name}: {} is a keycap",
+                e.path
             );
-            checked += 1;
         }
     }
-    assert!(checked >= 6, "only {checked} trays drawn");
 }
 
 /// Pixels of the panel's top `height` points, at 2×.
@@ -474,13 +458,19 @@ fn render(gpu: &rune::render::Gpu, pres: Pres, dark: bool) -> (u32, u32, Vec<u8>
             open: Some((_, list)),
             ..
         }) => super::surface::LIST_Y + super::list_height(list) + 28.0,
-        _ => TOP + 40.0 + 36.0,
+        _ => {
+            // A card's guesses hang under the line.
+            use super::surface::{Anchor, anchor_for, layout_at};
+            let (shell, _) = layout_at(&pres, "0:00", anchor_for(&pres, Anchor::Top));
+            (shell[1] + shell[3] + 36.0).max(TOP + 40.0 + 36.0)
+        }
     };
     let rt = runtime(pres, dark);
     let (w, h) = ((PANEL_W * 2.0) as u32, (PANEL_H * 2.0) as u32);
     let mut renderer = Renderer::new(&gpu.device, OFFSCREEN_FORMAT);
     let target = Offscreen::new(&gpu.device, w, h);
     let mut rt = rt;
+    renderer.upload_images(&gpu.device, &gpu.queue, &mut rt.images);
     renderer.prepare(
         &gpu.device,
         &gpu.queue,
@@ -520,8 +510,9 @@ const GOLDENS: &[&str] = &[
     "rule-sent",
     "rule-final",
     "guess",
-    "guess-always",
-    "guess-four",
+    "shift",
+    "sent-rule",
+    "guess-five",
     "no-answer",
     "list-guess",
     "sent",
@@ -575,12 +566,50 @@ fn capture_capsule_goldens() {
     assert!(misses.is_empty(), "{}", misses.join("\n"));
 }
 
+/// `HEX_CAPSULE_TOP_LINE=quiet|icons` draws the finished capsule's top
+/// line that way and `HEX_CAPSULE_FOOTER=band|well` the list's footer, to
+/// compare them.
+fn top_line_from_env() {
+    let mut tuning = super::tuning::DEFAULT;
+    if let Ok(name) = std::env::var("HEX_CAPSULE_TOP_LINE") {
+        tuning.top_line = super::tuning::TopLine::ALL
+            .into_iter()
+            .find(|m| format!("{m:?}").eq_ignore_ascii_case(&name))
+            .expect("HEX_CAPSULE_TOP_LINE is quiet or icons");
+    }
+    if let Ok(name) = std::env::var("HEX_CAPSULE_FOOTER") {
+        tuning.list_footer = super::tuning::ListFooter::ALL
+            .into_iter()
+            .find(|m| format!("{m:?}").eq_ignore_ascii_case(&name))
+            .expect("HEX_CAPSULE_FOOTER is band or well");
+    }
+    // `HEX_CAPSULE_FLOW=list|toast|menu_bar|cursor|notch` plays that flow,
+    // and `HEX_CAPSULE_UNDO_S` shortens Undo's window for a short clip.
+    if let Ok(name) = std::env::var("HEX_CAPSULE_FLOW") {
+        tuning.flow = super::tuning::CapsuleFlow::ALL
+            .into_iter()
+            .find(|f| {
+                format!("{f:?}")
+                    .replace('_', "")
+                    .eq_ignore_ascii_case(&name.replace('_', ""))
+            })
+            .expect("HEX_CAPSULE_FLOW is list, toast, menu_bar, cursor or notch");
+    }
+    if let Ok(secs) = std::env::var("HEX_CAPSULE_UNDO_S") {
+        tuning.undo_s = secs.parse().expect("HEX_CAPSULE_UNDO_S is seconds");
+    }
+    if tuning != super::tuning::DEFAULT {
+        super::tuning::set(tuning);
+    }
+}
+
 /// `HEX_CAPSULE_SNAPS=<folder>` writes every state, light and dark.
 #[test]
 fn capture_capsule_snapshots() {
     let Some(folder) = std::env::var_os("HEX_CAPSULE_SNAPS") else {
         return;
     };
+    top_line_from_env();
     let Ok(gpu) = rune::render::Gpu::try_new(rune::render::Gpu::instance(), None) else {
         eprintln!("skipping capture capsule snapshots: no GPU adapter");
         return;
@@ -686,14 +715,28 @@ fn scripts() -> Vec<Script> {
             ],
             end: 8.8,
         },
-        // The main path: the suggestions, "Always" ticked, then a digit.
+        // A new capture over a sent one: the finished capsule's content
+        // gives way to the recording's, then the picker's.
+        Script {
+            name: "sent-then-record",
+            beats: vec![
+                (0.2, stage(Stage::Transcribing)),
+                (1.2, In(Input::Routed(rule()))),
+                (2.4, stage(Stage::Recording)),
+                (2.6, In(Input::Chips)),
+                (3.4, Click(Id::Mode(Mode::Area))),
+            ],
+            end: 5.0,
+        },
+        // The main path: the suggestions, Shift down, then a digit.
         Script {
             name: "suggest-pick",
             beats: vec![
                 (0.2, stage(Stage::Transcribing)),
                 (1.2, In(Input::Routed(guess()))),
-                (2.2, Click(Id::Always)),
+                (2.2, In(Input::Shift(true))),
                 (2.8, In(Input::SendRow(1))),
+                (3.0, In(Input::Shift(false))),
             ],
             end: 6.4,
         },
@@ -701,7 +744,7 @@ fn scripts() -> Vec<Script> {
             name: "suggest-escape",
             beats: vec![
                 (0.2, stage(Stage::Transcribing)),
-                (1.2, In(Input::Routed(guess_four()))),
+                (1.2, In(Input::Routed(guess_five()))),
                 (2.6, In(Input::Escape)),
             ],
             end: 4.4,
@@ -740,12 +783,46 @@ fn scripts() -> Vec<Script> {
             ],
             end: 5.4,
         },
+        // Every flow's whole path (`HEX_CAPSULE_FLOW`): a recording that
+        // ⌥⇧S stops (the host's stages), the guesses come, one is picked (the toast's ⇥ then ⏎,
+        // the rest a digit), Sent with Undo, gone; then a saved rule sends
+        // on its own and leaves by itself.
+        Script {
+            name: "flow",
+            beats: flow_beats(),
+            end: 9.6,
+        },
         Script {
             name: "failed",
             beats: vec![(0.2, stage(Stage::Transcribing)), (1.2, In(failed()))],
             end: 6.0,
         },
     ]
+}
+
+fn flow_beats() -> Vec<(f64, Beat)> {
+    let stage = |s| In(Input::Stage(s));
+    let toast = super::tuning::get().flow == super::tuning::CapsuleFlow::Toast;
+    let mut beats = vec![
+        (0.2, stage(Stage::Recording)),
+        (1.6, stage(Stage::Stopping)),
+        (1.8, stage(Stage::Transcribing)),
+        (2.4, stage(Stage::Done)),
+        (2.4, In(Input::Routed(guess()))),
+    ];
+    if toast {
+        beats.push((3.1, In(Input::Cycle(1))));
+        beats.push((3.8, In(Input::Send { always: false })));
+    } else {
+        beats.push((3.8, In(Input::SendRow(0))));
+    }
+    beats.extend([
+        (6.4, stage(Stage::Transcribing)),
+        (7.0, stage(Stage::Done)),
+        (7.0, In(Input::Routed(rule()))),
+        (7.2, In(Input::Settled)),
+    ]);
+    beats
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -800,8 +877,16 @@ fn play(
         let t = index as f64 / FPS;
         while next < script.beats.len() && script.beats[next].0 <= t + 1e-9 {
             let beat = script.beats[next].1.clone();
+            // As the feed does, the first frame lands just ahead of
+            // "Copied".
+            let frame = matches!(beat, In(Input::Stage(Stage::Done)))
+                .then(thumb)
+                .flatten();
             rt.update(move |s, tx| match beat {
                 In(input) => {
+                    if frame.is_some() {
+                        s.live.thumb = frame;
+                    }
                     s.inbox.push(input);
                     tx.wake_after(std::time::Duration::ZERO);
                 }
@@ -947,7 +1032,7 @@ fn presses_reach_the_host() {
 /// `<folder>/runs/<script>-<variant>/trace.jsonl` (`motion-lint analyze
 /// <folder>`), and with `HEX_CAPSULE_FRAMES=1` each frame as a PNG in
 /// `<folder>/frames/<script>-<variant>-<theme>/`. `HEX_CAPSULE_SCRIPTS`
-/// picks scripts by name.
+/// picks scripts by name, and `HEX_CAPSULE_FLOW` the flow they play.
 #[test]
 fn capture_capsule_motion() {
     let Some(folder) = std::env::var_os("HEX_CAPSULE_MOTION") else {
@@ -969,6 +1054,9 @@ fn capture_capsule_motion() {
         )
     });
     let only = std::env::var("HEX_CAPSULE_SCRIPTS").ok();
+    // `HEX_CAPSULE_FRAMES=all` writes Reduce Motion's frames too.
+    let reduced_frames = std::env::var("HEX_CAPSULE_FRAMES").is_ok_and(|v| v == "all");
+    top_line_from_env();
     let mut report = Vec::new();
     for script in scripts() {
         if only
@@ -978,10 +1066,16 @@ fn capture_capsule_motion() {
             continue;
         }
         for variant in [Variant::Calm, Variant::Reduced] {
-            // Frames show the calm motion; Reduce Motion is checked by its trace.
-            let frames = frames && matches!(variant, Variant::Calm);
+            // Frames show the calm motion; Reduce Motion is checked by its
+            // trace, unless asked for.
+            let frames = frames && (reduced_frames || matches!(variant, Variant::Calm));
             for dark in [true, false] {
                 let theme = if dark { "dark" } else { "light" };
+                // `HEX_CAPSULE_THEME=light|dark` writes one theme's frames.
+                let frames = frames
+                    && std::env::var("HEX_CAPSULE_THEME")
+                        .ok()
+                        .is_none_or(|t| t == theme);
                 // One trace per script and variant: the motion is the same
                 // in either theme.
                 let trace = dark.then(|| {
@@ -1019,6 +1113,7 @@ fn capture_capsule_motion() {
                     else {
                         return;
                     };
+                    renderer.upload_images(&gpu.device, &gpu.queue, &mut rt.images);
                     renderer.prepare(
                         &gpu.device,
                         &gpu.queue,

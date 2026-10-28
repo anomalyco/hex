@@ -12,10 +12,14 @@ for command in curl jq python3 sha256sum; do
     exit 1
   fi
 done
-if [ "$(uname -s)" != Linux ] || [ "$(uname -m)" != x86_64 ]; then
-  echo "Installer test requires x86_64 Linux." >&2
-  exit 1
-fi
+case "$(uname -s) $(uname -m)" in
+  "Linux x86_64") target=linux-x64 ;;
+  "Linux aarch64") target=linux-arm64 ;;
+  *)
+    echo "Installer test requires x86_64 or aarch64 Linux." >&2
+    exit 1
+    ;;
+esac
 if [ "$(id -u)" -eq 0 ]; then
   echo "Installer test must run as an unprivileged user." >&2
   exit 1
@@ -47,18 +51,18 @@ sed \
   "$root/scripts/install-linux-release.sh" > "$installer"
 
 unsigned="$temporary/hex"
-printf '#!/bin/sh\necho "voice-control %s"\n' "$version" > "$unsigned"
+printf '#!/bin/sh\necho "hex %s"\n' "$version" > "$unsigned"
 chmod 755 "$unsigned"
 sha256=$(sha256sum "$unsigned" | awk '{ print $1 }')
 bytes=$(wc -c < "$unsigned" | tr -d ' ')
-file="hex-$version-linux-x64"
+file="hex-$version-$target"
 mkdir -p "$server/release/hex/desktop" "$server/release/hex/files/$sha256"
 cp "$unsigned" "$server/release/hex/files/$sha256/$file"
-jq -n --arg version "$version" --arg url "/release/hex/files/$sha256/$file" --arg sha256 "$sha256" --argjson size "$bytes" \
+jq -n --arg version "$version" --arg target "$target" --arg url "/release/hex/files/$sha256/$file" --arg sha256 "$sha256" --argjson size "$bytes" \
   '{schema: 1, app: "hex", artifact: "desktop", channel: "stable", sequence: 1,
     published_at: "2026-10-24T00:00:00Z",
     release: {version: $version, rollout_percent: 100, revoked_versions: [],
-      targets: {"linux-x64": {url: $url, size: $size, sha256: $sha256}},
+      targets: {($target): {url: $url, size: $size, sha256: $sha256}},
       distributions: [{kind: "direct"}]}}' > "$server/release/hex/desktop/stable.json"
 cp "$server/release/hex/desktop/stable.json" "$temporary/manifest.json"
 
@@ -80,7 +84,7 @@ home="$temporary/home"
 export XDG_DATA_HOME="$home/.local/share"
 export XDG_CONFIG_HOME="$home/.config"
 install_dir="$home/.local/bin"
-support_dir="$home/.local/share/voice-control"
+support_dir="$home/.local/share/hex"
 mkdir -p "$support_dir"
 printf 'preserve me\n' > "$support_dir/settings.json"
 
@@ -102,11 +106,11 @@ refuses() {
 
 install
 test -L "$install_dir/hex"
-test "$("$install_dir/hex" --version)" = "voice-control $version"
-grep -Fq 'X-HEX-Managed=true' "$home/.local/share/applications/hex.desktop"
-grep -Fq 'X-HEX-Managed=true' "$home/.config/autostart/HEX.desktop"
-grep -Fq '" start' "$home/.config/autostart/HEX.desktop"
-grep -Fq '# X-HEX-Managed=true' "$home/.config/systemd/user/hex.service"
+test "$("$install_dir/hex" --version)" = "hex $version"
+grep -Fq 'X-Hex-Managed=true' "$home/.local/share/applications/hex.desktop"
+grep -Fq 'X-Hex-Managed=true' "$home/.config/autostart/hex.desktop"
+grep -Fq '" start' "$home/.config/autostart/hex.desktop"
+grep -Fq '# X-Hex-Managed=true' "$home/.config/systemd/user/hex.service"
 grep -Fq '" service' "$home/.config/systemd/user/hex.service"
 grep -Fxq 'Type=notify' "$home/.config/systemd/user/hex.service"
 grep -Fxq 'NotifyAccess=main' "$home/.config/systemd/user/hex.service"
@@ -134,8 +138,8 @@ install uninstall
 jq '.app = "other"' "$temporary/manifest.json" > "$server/release/hex/desktop/stable.json"
 refuses "another app's manifest"
 jq '.release.targets = {}' "$temporary/manifest.json" > "$server/release/hex/desktop/stable.json"
-refuses "a release without a linux-x64 build"
-jq '.release.targets["linux-x64"].url = "https://example.com/hex"' "$temporary/manifest.json" > "$server/release/hex/desktop/stable.json"
+refuses "a release without a $target build"
+jq --arg target "$target" '.release.targets[$target].url = "https://example.com/hex"' "$temporary/manifest.json" > "$server/release/hex/desktop/stable.json"
 refuses "a file outside the service"
 printf 'X' | dd of="$server/release/hex/files/$sha256/$file" bs=1 seek=0 conv=notrunc >/dev/null 2>&1
 refuses "a same-size corrupted download"
@@ -143,7 +147,7 @@ refuses "a same-size corrupted download"
 HOME="$home" HEX_INSTALL_DIR="$install_dir" HEX_APPLICATION_SUPPORT_DIR="$support_dir" \
   HEX_INSTALL_ARTIFACT="$unsigned" HEX_INSTALL_VERSION="$version" HEX_INSTALL_SOURCE=1 \
   sh "$installer"
-test "$("$install_dir/hex" --version)" = "voice-control $version"
+test "$("$install_dir/hex" --version)" = "hex $version"
 test -e "$support_dir/versions/$version/source-build"
 test ! -e "$support_dir/install.json"
 install uninstall

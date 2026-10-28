@@ -42,11 +42,46 @@ The known experiments are compiled into
   default off) is the second gate. Check:
   `capture_exists_only_with_its_build_option` in
   [experiments.rs](../../src/experiments.rs).
+- `dot-scope`: the macOS recording HUD as Dot scope, a plate of dots lit
+  by a braided pair of oscilloscope traces that follow the microphone level
+  (auto-levelled), with a choice of processing looks and of placement below
+  the menu bar, in it, or out of the notch (see
+  [Dot scope](dictation.md#dot-scope-experiment-dot-scope)). The gate is
+  where the work starts: the HUD builds no Dot scope pipeline or simulation
+  and keeps today's window size while it is off. On, HUD Lab tunes Dot scope
+  instead of the capsule's styles, and release builds show HUD Lab too
+  (only its Dot scope section); with `playground` on, ⇧⌘D lists HUD stories.
 - `live-chapters`: chapter a meeting's transcript live while it records
   (macOS, Apple Intelligence; see
   [Live Chapters](meetings.md#live-chapters-experiment-live-chapters)). The
   gate is where the work starts: the recorder's chapter worker, recording
   chapters in the manifest, and the boundary pass after Stop.
+- `modes`: Modes ([Process Text With Modes](README.md#process-text-with-modes)),
+  every OS. Off by default (Kit, 2026-10-27): no Modes pane or onboarding tip,
+  and processing runs only the global replacements, so no per-app mode,
+  OpenCode rewrite, mode correction, or transformation ever touches a
+  transcript, and the transformations host starts only for the user's own
+  `hex.config.ts` workspace. The gate is where the work starts:
+  `ModeRuntime::with_modes` (Windows and Linux), `config::build_dictation_profiles`
+  (macOS), and `app_settings::transformations_used`. Saved modes stay in
+  `settings.json` and keep their `hex settings` keys; turning the experiment
+  on and restarting brings them back unchanged. Checks:
+  `without_the_experiment_only_global_replacements_run`,
+  `without_the_modes_experiment_the_profile_is_global_replacements_only`,
+  `the_sidebar_has_no_modes_without_the_experiment`; scene `modes-off`.
+- `playground`: Rune's playground in the window (every OS). ⇧⌘D (View ›
+  Playground on macOS) or Ctrl+Shift+D swaps the window for every fixture
+  scene, grouped by pane (the tour, the model picker, and the shortcut
+  explainer each get their own group), and, in builds with captures, the
+  capture capsule's states as stories with its flow, tuning, and log. Each
+  story starts from a fresh fixture; the real window keeps running
+  underneath. While it is on, the window resizes everywhere (Linux and the
+  macOS tour otherwise keep one fixed size), so the stage beside the
+  playground's columns has room. Off, nothing is attached: no shortcut, menu item, or scene list.
+  Headless renders take `--playground [story]` while it is on, e.g.
+  `HEX_EXPERIMENTS=playground hex app -- --snap out.png --playground
+  "General/mac-settings"`. Check: `every_scene_but_live_lists_under_its_pane`
+  in [playground.rs](../../src/rune_ui/playground.rs).
 - `smart-turn`: finish hands-free dictation when Pipecat's Smart Turn model
   hears the end of a turn (macOS; see
   [Smart Turn](dictation.md#smart-turn-auto-stop-experiment-smart-turn)). The

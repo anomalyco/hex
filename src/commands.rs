@@ -462,7 +462,7 @@ pub fn execute(action: Action) -> Result<()> {
         | Action::StartMeeting
         | Action::StopMeeting
         | Action::InvokeHandler { .. } => {
-            return Err(eyre!("interactive actions require the HEX app"));
+            return Err(eyre!("interactive actions require the Hex app"));
         }
         Action::OpenApplication(application) => {
             command.arg("-a").arg(application);
@@ -498,7 +498,7 @@ pub fn execute(action: Action) -> Result<()> {
         Action::StartDictation
         | Action::StartMeeting
         | Action::StopMeeting
-        | Action::InvokeHandler { .. } => Err(eyre!("interactive actions require the HEX app")),
+        | Action::InvokeHandler { .. } => Err(eyre!("interactive actions require the Hex app")),
         Action::OpenApplication(target) | Action::OpenUrl(target) | Action::OpenPath(target) => {
             shell_open(&target)
         }
@@ -523,7 +523,7 @@ pub fn execute(action: Action) -> Result<()> {
         Action::StartDictation
         | Action::StartMeeting
         | Action::StopMeeting
-        | Action::InvokeHandler { .. } => Err(eyre!("interactive actions require the HEX app")),
+        | Action::InvokeHandler { .. } => Err(eyre!("interactive actions require the Hex app")),
         Action::OpenApplication(_)
         | Action::TypeText(_)
         | Action::Keystroke { .. }

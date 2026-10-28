@@ -48,7 +48,7 @@ can notarize Mac apps, so Hex can use the same key as OpenCode desktop.
 ```ts
 scripts/build-app.sh       // cargo build → Hex.app; signs Moonshine and ONNX dylibs,
                            // HexMicrophone.driver, then the app with --options runtime
-                           // and app/VoiceControl.entitlements (audio-input,
+                           // and .github/release/hex.entitlements (audio-input,
                            // apple-events; not sandboxed)
                            // HEX_TEST_BUILD=1: ad-hoc "Hex Test.app" (anomaly.hex.test)
 scripts/macos-signing.sh   // identity must be "Developer ID Application: … (TEAM)"
@@ -57,10 +57,14 @@ scripts/release-app.sh     // clean pushed tree → notarized, stapled app and D
                            // and .zip (root Hex.app, the updater's archive)
 scripts/validate-app.sh    // bundle id anomaly.hex, team, Developer ID, entitlements,
                            // no Sparkle left
-build-macos.yml            // the Release workflow's macOS job: the above in CI with
-                           // APPLE_* secrets, plus staples, Gatekeeper, and the
-                           // updater's requirement (app/update-requirement.txt)
-macos-signed.yml           // manual signed candidate DMG; publishes nothing
+release.yml        // build-macos: HEX_RELEASE_UNSIGNED=1 build-app.sh, no secrets
+                           // sign-macos (release env, .github/release only):
+                           // macos-credentials.sh imports APPLE_SIGNING_CERTIFICATE and
+                           // APPLE_NOTARY_KEY; sign-macos.sh signs inside-out,
+                           // notarizes, staples, makes the ZIP and DMG
+                           // verify-macos: Gatekeeper, staples, validate-app.sh, the
+                           // updater's requirement (app/update-requirement.txt), launch
+                           // A check run is the signed candidate; publishes nothing
 test-builds.yml            // per-push ad-hoc Hex Test DMG (unsigned)
 ```
 
@@ -73,14 +77,14 @@ is the integrity check beyond HTTPS and the manifest's SHA-256; there is no
 separate update-signing key (as with OpenCode's electron-updater).
 
 Next: once the `APPLE_*` secrets exist, run a staging Release and check the
-signed build against the updater's requirement (build-macos.yml does); then
+signed build against the updater's requirement (verify-macos does); then
 optionally sign `Hex Test.app` with the same Developer ID so testers grant
 permissions once (needs `build-app.sh` to accept a team with
 `HEX_TEST_BUILD=1`).
 
 ## Secrets for `anomalyco/hex`
 
-Add to the `release` environment (limited to `dev`, `production`, and `app-v*` tags).
+Add to the `release` environment (limited to `dev` and `production`).
 Names mirror OpenCode; GitHub cannot copy secret values, so an admin
 re-enters them from the source (1Password):
 

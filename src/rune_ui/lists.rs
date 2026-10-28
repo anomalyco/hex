@@ -10,10 +10,17 @@ use rune::{
 };
 
 use super::Ui;
-use super::controls::{ButtonKind, DESCRIPTION, Paint, PushSize, button, pulsing_dot, status_dot};
+use super::controls::{
+    ButtonKind, DESCRIPTION, METRICS, Paint, PushSize, button, pulsing_dot, status_dot,
+};
 use crate::desktop_i18n::tr;
 
 const LIST_WIDTH: f32 = 320.0;
+/// A [`list_row`]'s text inset.
+const LIST_ROW_PX: f32 = 10.0;
+/// A list column's leading padding, which puts its rows' text on the pane
+/// title's edge.
+pub(super) const LIST_COLUMN_PL: f32 = METRICS.gutter - LIST_ROW_PX;
 static CLOSE: &rune::Icon = &rune_theme_opencode::icons::CLOSE;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -80,12 +87,11 @@ pub(super) fn source_list(list: El) -> El {
     list.role("list").focus_group().focus_follows()
 }
 
-/// A row of a [`source_list`]. Its ring is inset because rows touch and
-/// their scroll view clips.
-pub(super) fn source_item(p: Paint, item: El, selected: bool) -> El {
-    item.focusable(true)
-        .focus_selected(selected)
-        .focus_ring(2.0, -2.0, p.k.c.border_focus)
+/// A row of a [`source_list`]. It draws no focus ring: focus follows the
+/// selection, so the selected fill shows where focus is, as in a native
+/// sidebar.
+pub(super) fn source_item(item: El, selected: bool) -> El {
+    item.focusable(true).focus_selected(selected)
 }
 
 /// A selectable list row: title (with trailing pieces) over a meta line.
@@ -103,7 +109,7 @@ pub(super) fn list_row(
         .key(key)
         .role("button")
         .label(title)
-        .px(10.0)
+        .px(LIST_ROW_PX)
         .py(8.0)
         .gap(2.0)
         .radius(p.k.radius.md)
@@ -136,7 +142,7 @@ pub(super) fn list_row(
     if selected {
         item = item.fill(c.layer_02);
     }
-    source_item(p, item, selected)
+    source_item(item, selected)
 }
 
 /// A quiet message in a list or detail (empty, no matches, failed load).
@@ -194,7 +200,7 @@ pub(super) fn split(p: Paint, key: &str, list: El, detail: El) -> El {
                 .key("list-column")
                 .w(LIST_WIDTH)
                 .h_full()
-                .pl(16.0)
+                .pl(LIST_COLUMN_PL)
                 .pr(8.0)
                 .child(list),
         )

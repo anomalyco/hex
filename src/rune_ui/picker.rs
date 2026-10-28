@@ -1,46 +1,58 @@
-//! The local transcription picker: a modal with languages on the left and
-//! that language's recommended models on the right. Choosing a model asks
-//! the service to download, verify, and load it (`ChooseModel`); its
-//! progress comes back in the service snapshot, and the service saves the
-//! selection when it is ready. Downloaded models other than the active one can be deleted after a
+//! The speech model: the local transcription picker, a modal listing every
+//! model with the saved language's recommendations first, and the Language
+//! select below the model in Settings. Choosing a model asks the service to
+//! download, verify, and load it (`ChooseModel`) with the saved language, or
+//! the model's default language when it does not support that one; changing
+//! only the language prepares the same model again. Progress comes back in
+//! the service snapshot, and the service saves the selection when it is
+//! ready. Downloaded models other than the active one can be deleted after a
 //! confirmation.
 
 use rune::{El, col, el, row, text};
 use rune_kit::{Badge, ControlSize, IconButton, IconButtonVariant, Progress};
 
-use super::Request;
-use super::Ui;
-use super::controls::{ButtonKind, Paint, button, modal_scrim_transition, modal_transition};
-use super::lists::{error_panel, source_item, source_list};
+use super::controls::{
+    ButtonKind, Choice, Paint, button, fixed_select, modal_scrim_transition, modal_transition,
+    select, setting_row,
+};
+use super::lists::error_panel;
+use super::{Menu, Request, Ui};
 use crate::app_settings::AppSettings;
-use crate::desktop_i18n::{tr, tr_fill};
+use crate::desktop_i18n::{tr, tr_fill, tr_named};
 use crate::transcription_models::{
     self, ModelDefinition, ModelPreparationStage, ModelRuntime, TranscriptionModelId,
-    TranscriptionSelection,
+    TranscriptionSelection, language_name,
 };
 
-const MODAL_WIDTH: f32 = 780.0;
+const MODAL_WIDTH: f32 = 620.0;
 const MODAL_HEIGHT: f32 = 520.0;
 
-/// A model and language is the active selection only once it is installed.
+/// A model is the active selection only once it is installed.
 fn transcription_selection_is_active(
     selection: &TranscriptionSelection,
     model: &ModelDefinition,
-    language: &str,
     installed: bool,
 ) -> bool {
-    installed && selection.model == model.id && selection.language == language
+    installed && selection.model == model.id
+}
+
+/// The language a model choice replaced because the model does not support
+/// it; Settings names the change until the next choice.
+#[derive(Clone, Debug, PartialEq)]
+pub(super) struct LanguageFallback {
+    pub(super) model: TranscriptionModelId,
+    pub(super) from: String,
 }
 
 #[derive(Default)]
 pub(super) struct Picker {
-    /// The language the open picker shows; `None` when closed.
-    pub(super) language: Option<String>,
+    pub(super) open: bool,
     /// The model whose Delete is armed.
     deletion: Option<TranscriptionModelId>,
     deletion_error: Option<String>,
     /// Installed models for fixtures; live windows ask the filesystem.
     pub(super) installed: Option<Vec<TranscriptionModelId>>,
+    pub(super) fallback: Option<LanguageFallback>,
 }
 
 impl Picker {
@@ -56,32 +68,22 @@ impl Picker {
             .is_ok_and(|model| self.installed(model, &settings.transcription.language))
     }
 
-    fn set_language(&mut self, language: Option<String>) {
-        self.language = language;
-        self.clear_deletion();
-    }
-
     fn clear_deletion(&mut self) {
         self.deletion = None;
         self.deletion_error = None;
     }
 }
 
-pub(super) fn open(ui: &mut Ui, language: String) {
+pub(super) fn open(ui: &mut Ui) {
     super::explainer::close(ui);
     ui.open = None;
-    ui.picker.set_language(Some(language));
+    ui.picker.open = true;
+    ui.picker.clear_deletion();
 }
 
 pub(super) fn close(ui: &mut Ui) {
-    ui.picker.set_language(None);
-}
-
-fn select_language(ui: &mut Ui, language: String) {
-    if ui.picker.language.as_deref() != Some(&language) {
-        cancel(ui);
-        ui.picker.set_language(Some(language));
-    }
+    ui.picker.open = false;
+    ui.picker.clear_deletion();
 }
 
 fn cancel(ui: &mut Ui) {
@@ -90,17 +92,97 @@ fn cancel(ui: &mut Ui) {
     }
 }
 
-fn choose(ui: &mut Ui, model: &'static ModelDefinition, language: String) {
+/// Asks for `model` with the saved language when it supports it, else with
+/// its default language, which Settings then names.
+fn choose(ui: &mut Ui, model: &'static ModelDefinition) {
     ui.picker.clear_deletion();
-    let installed = ui.picker.installed(model, &language);
-    if transcription_selection_is_active(&ui.settings.transcription, model, &language, installed) {
+    let current = &ui.settings.transcription;
+    let installed = ui.picker.installed(model, &current.language);
+    if transcription_selection_is_active(current, model, installed) {
         close(ui);
         return;
     }
+    let language = model.language_for(&current.language).to_owned();
+    ui.picker.fallback = (language != current.language).then(|| LanguageFallback {
+        model: model.id,
+        from: current.language.clone(),
+    });
     ui.send(Request::ChooseModel {
         model: model.id,
         language,
     });
+}
+
+/// Prepares the saved model again for `language`, which installs or loads
+/// whatever that language needs (Apple Speech's locales).
+fn choose_language(ui: &mut Ui, language: &str) {
+    ui.open = None;
+    let current = &ui.settings.transcription;
+    if current.language == language {
+        return;
+    }
+    ui.picker.fallback = None;
+    ui.send(Request::ChooseModel {
+        model: current.model,
+        language: language.to_owned(),
+    });
+}
+
+/// The fallback's note, once the service saved the model it was chosen for.
+fn fallback_note(ui: &Ui) -> Option<String> {
+    let fallback = ui.picker.fallback.as_ref()?;
+    let selection = &ui.settings.transcription;
+    (selection.model == fallback.model && selection.language != fallback.from).then(|| {
+        tr_named(
+            "{model} doesn't support {previous}, so the language changed to {language}",
+            &[
+                (
+                    "model",
+                    transcription_models::definition(fallback.model).name,
+                ),
+                ("previous", language_name(&fallback.from)),
+                ("language", language_name(&selection.language)),
+            ],
+        )
+    })
+}
+
+/// The Language row below the speech model: the saved model's languages, or
+/// its one language fixed.
+pub(super) fn language_row(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
+    let selection = &ui.settings.transcription;
+    let model = transcription_models::definition(selection.model);
+    let current = language_name(&selection.language);
+    let codes = model.language_choices();
+    let control = if codes.len() <= 1 {
+        fixed_select(p, "transcription-language-control", current)
+    } else {
+        let choices = codes
+            .into_iter()
+            .map(|code| Choice {
+                label: language_name(code).to_owned(),
+                detail: None,
+                selected: code == selection.language,
+                choose: Box::new(move |ui: &mut Ui| choose_language(ui, code)),
+            })
+            .collect();
+        select(
+            p,
+            "transcription-language-control",
+            current,
+            ui.open == Some(Menu::TranscriptionLanguage),
+            choices,
+            |ui: &mut Ui| super::settings::toggle_menu(ui, Menu::TranscriptionLanguage),
+            layer,
+        )
+    };
+    setting_row(
+        p,
+        "transcription-language",
+        tr("Language"),
+        fallback_note(ui).as_deref(),
+        control,
+    )
 }
 
 fn delete(ui: &mut Ui, model: &'static ModelDefinition) {
@@ -122,35 +204,11 @@ fn delete(ui: &mut Ui, model: &'static ModelDefinition) {
 /// The picker's scrim and panel over the window, when open: the scrim fades
 /// and the panel scales in as one surface ([`modal_transition`]).
 pub(super) fn modal(ui: &Ui, p: Paint) -> Option<[El; 2]> {
-    let language = ui.picker.language.clone()?;
-    let c = &p.k.c;
-    let mut languages = source_list(col().key("languages"));
-    for (index, (code, name)) in transcription_models::LANGUAGES.iter().enumerate() {
-        let selected = *code == language;
-        let code = code.to_string();
-        let mut item = row()
-            .key(format!("language{index}"))
-            .role("button")
-            .label(*name)
-            .h(28.0)
-            .px(8.0)
-            .center_y()
-            .radius(p.k.radius.md)
-            .hover(c.hover)
-            .press(c.pressed)
-            .on_press(move |ui: &mut Ui| select_language(ui, code.clone()))
-            .child(
-                text(*name)
-                    .key("name")
-                    .font(p.k.ty.ui)
-                    .color(if selected { c.text_base } else { c.text_muted })
-                    .truncate(),
-            );
-        if selected {
-            item = item.fill(c.layer_02);
-        }
-        languages = languages.child(source_item(p, item, selected));
+    if !ui.picker.open {
+        return None;
     }
+    let c = &p.k.c;
+    let language = ui.settings.transcription.language.clone();
     let mut models = col().key("models").gap(8.0);
     let transcription = ui.view.as_ref().map(|view| &view.transcription);
     if let Some(error) = transcription.and_then(|t| t.error.clone()) {
@@ -169,16 +227,10 @@ pub(super) fn modal(ui: &Ui, p: Paint) -> Option<[El; 2]> {
             error,
         ));
     }
-    let recommended = transcription_models::choices_for_runtime(&language)
+    for (index, (model, recommendation)) in transcription_models::picker_models(&language)
         .into_iter()
-        .map(|choice| (choice.model, Some(choice.recommendation)));
-    let retained =
-        transcription_models::retained_models(&language, &ui.settings.transcription, |model| {
-            ui.picker.installed(model, &language)
-        })
-        .into_iter()
-        .map(|model| (model, None));
-    for (index, (model, recommendation)) in recommended.chain(retained).enumerate() {
+        .enumerate()
+    {
         models = models.child(model_card(ui, p, index, model, recommendation, &language));
     }
     let header = row()
@@ -219,32 +271,13 @@ pub(super) fn modal(ui: &Ui, p: Paint) -> Option<[El; 2]> {
         .child(header)
         .child(el().key("rule").h(p.hair).w_full().fill(c.border_weak))
         .child(
-            row()
-                .key("picker-body")
+            col()
+                .key("model-column")
                 .grow(1.0)
                 .shrink()
-                .child(
-                    // The deep fill follows the panel's rounded bottom-left
-                    // corner: Rune clips children to a rectangle, not to
-                    // their parent's radius.
-                    col()
-                        .key("language-column")
-                        .w(220.0)
-                        .h_full()
-                        .pt(8.0)
-                        .corners([0.0, 0.0, 0.0, (p.k.radius.xl - p.hair).max(0.0)])
-                        .fill(c.bg_deep)
-                        .child(super::scroll_body("language-scroll", languages.px(12.0))),
-                )
-                .child(
-                    col()
-                        .key("model-column")
-                        .grow(1.0)
-                        .shrink()
-                        .h_full()
-                        .pt(12.0)
-                        .child(super::scroll_body("model-scroll", models.px(16.0))),
-                ),
+                .w_full()
+                .pt(12.0)
+                .child(super::scroll_body("model-scroll", models.px(16.0))),
         );
     for shadow in &p.k.elevation.overlay {
         panel = panel.box_shadow(*shadow);
@@ -290,11 +323,10 @@ fn model_card(
     language: &str,
 ) -> El {
     let c = &p.k.c;
-    let installed = ui.picker.installed(model, language);
+    let installed = ui.picker.installed(model, model.language_for(language));
     let transcription = ui.view.as_ref().map(|view| &view.transcription);
     let preparing = transcription.and_then(|t| t.preparing) == Some(model.id);
-    let active =
-        transcription_selection_is_active(&ui.settings.transcription, model, language, installed);
+    let active = transcription_selection_is_active(&ui.settings.transcription, model, installed);
     let status = if preparing {
         let transcription = transcription.expect("preparing comes from the snapshot");
         match transcription.preparation_stage {
@@ -335,11 +367,11 @@ fn model_card(
         .streams
         .then(|| tr("Transcribes while you speak on a GPU"))
         .into_iter()
-        .chain(
-            (model.coverage != transcription_models::language_name(language))
-                .then(|| tr(model.coverage)),
-        )
-        .chain([tr(model.quality_context), tr(model.timestamps)])
+        .chain([
+            tr(model.coverage),
+            tr(model.quality_context),
+            tr(model.timestamps),
+        ])
         .chain((installed && !active).then(|| tr("Installed")))
         .collect::<Vec<_>>()
         .join(" · ");
@@ -384,7 +416,6 @@ fn model_card(
                     delete_button
                 });
             }
-            let lang = language.to_string();
             actions = actions.child(button(
                 p,
                 "choose-model",
@@ -394,7 +425,7 @@ fn model_card(
                     tr("Download")
                 },
                 ButtonKind::Secondary,
-                move |ui: &mut Ui, _| choose(ui, model, lang.clone()),
+                move |ui: &mut Ui, _| choose(ui, model),
             ));
         }
         Status::Preparing { .. } => {
@@ -473,8 +504,27 @@ fn model_card(
                 .gap(20.0)
                 .child(metric("speed", tr("Speed"), tr(model.realtime).into()))
                 .child(metric("size", tr("Size"), model.size_label()))
-                .child(metric("wer", "WER", model.quality.into())),
+                .child(metric(
+                    "accuracy",
+                    tr("Accuracy"),
+                    model.accuracy_label().unwrap_or_else(|| "System".into()),
+                )),
         );
+    if !model.supports_language(language) {
+        card = card.child(
+            text(tr_named(
+                "Doesn't support {language}; switches the language to {fallback}",
+                &[
+                    ("language", language_name(language)),
+                    ("fallback", language_name(model.default_language())),
+                ],
+            ))
+            .key("language-switch")
+            .font(p.k.ty.small)
+            .color(p.warning())
+            .wrap(),
+        );
+    }
     if model.id == TranscriptionModelId::ParakeetV3 {
         card = card.child(
             text(
@@ -499,20 +549,19 @@ fn model_card(
         card = card.child(bar.build(p.k).key("progress"));
     }
     if !active && !preparing {
-        let lang = language.to_string();
         card = card
             .role("button")
             .hover(c.hover)
             .press(c.pressed)
-            .on_press(move |ui: &mut Ui| choose(ui, model, lang.clone()));
+            .on_press(move |ui: &mut Ui| choose(ui, model));
     }
     card
 }
 
-/// The picker open on English, with Parakeet active; `downloading` shows a
+/// The picker open with English and Parakeet saved; `downloading` shows a
 /// model mid-download.
 pub(super) fn fixture(ui: &mut Ui, downloading: Option<TranscriptionModelId>) {
-    ui.picker.language = Some("en".into());
+    ui.picker.open = true;
     if let (Some(model), Some(view)) = (downloading, ui.view.as_mut()) {
         let bytes = transcription_models::definition(model)
             .download_bytes()
@@ -533,17 +582,7 @@ mod tests {
         let selection = TranscriptionSelection::default();
         let model = transcription_models::definition(selection.model);
 
-        assert!(!transcription_selection_is_active(
-            &selection,
-            model,
-            &selection.language,
-            false
-        ));
-        assert!(transcription_selection_is_active(
-            &selection,
-            model,
-            &selection.language,
-            true
-        ));
+        assert!(!transcription_selection_is_active(&selection, model, false));
+        assert!(transcription_selection_is_active(&selection, model, true));
     }
 }

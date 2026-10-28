@@ -97,6 +97,7 @@ impl Backend {
                 action @ (DesktopAction::CheckForUpdates
                 | DesktopAction::OpenUpdate
                 | DesktopAction::RestartIntoUpdate
+                | DesktopAction::ConfirmUpdateSwitch
                 | DesktopAction::WindowFocused),
             ) => crate::macos_rune::update_action(&action),
             request => match &self.runtime {
@@ -659,6 +660,13 @@ impl NativeHost for MacHost {
                 DemoRequest::StopPlayback => crate::hex_microphone::stop_demo_playback(),
             },
             PlatformRequest::ConfigureHud(lab) => configure_hud(&self.runtime()?, lab),
+            PlatformRequest::TuneHud(lab) => tune_hud(&self.runtime()?, lab),
+            PlatformRequest::EndHudDemo => self
+                .runtime()?
+                .indicator(crate::dictation_indicator::DictationIndicatorEvent::Reset),
+            PlatformRequest::SaveDotScope(tuning) => {
+                tuning.save().map_err(|error| format!("{error:#}"))?;
+            }
             #[cfg(hex_capture)]
             PlatformRequest::Scrawl(request) => self.scrawl.send(request),
         }
@@ -669,6 +677,14 @@ impl NativeHost for MacHost {
 
     fn poll(&mut self, state: &mut PlatformState) -> bool {
         let mut changed = false;
+        // The playground's HUD stories change the tuning HUD Lab shows.
+        if let Some(tuning) = state.hud.dot_scope {
+            let shared = crate::dot_scope::lab();
+            if shared != tuning {
+                state.hud.dot_scope = Some(shared);
+                changed = true;
+            }
+        }
         if let Some(login) = &mut self.login {
             match login.poll() {
                 Ok(Some(answer)) => {
@@ -833,6 +849,10 @@ impl NativeHost for MacHost {
             inputs.extend(practice.observations().into_iter().map(Input::Dictation));
         }
         inputs
+    }
+
+    fn practice_level(&self) -> f32 {
+        crate::dictation_indicator::recent_peak()
     }
 }
 
@@ -1394,19 +1414,8 @@ fn save_meetings_folder(folder: PathBuf) -> Result<(), String> {
 
 /// Shows HUD Lab's tuning and demonstrated state on the dictation HUD.
 fn configure_hud(runtime: &RuntimeHandle, lab: HudLab) {
-    use crate::dictation_indicator::{DictationIndicatorEvent as Event, HudTuning};
-    let t = lab.tuning;
-    runtime.indicator(Event::Configure(HudTuning {
-        style: t.style,
-        line_count: t.line_count,
-        curvature: t.curvature,
-        speed: t.speed,
-        sharpness: t.sharpness,
-        glow: t.glow,
-        depth: t.depth,
-        light_angle: t.light_angle,
-        outline: t.outline,
-    }));
+    use crate::dictation_indicator::DictationIndicatorEvent as Event;
+    tune_hud(runtime, lab);
     runtime.indicator(Event::Reset);
     match lab.demo {
         HudDemo::Recording => {
@@ -1419,6 +1428,9 @@ fn configure_hud(runtime: &RuntimeHandle, lab: HudLab) {
                 average: 0.08,
                 peak: 0.42,
             });
+            if lab.dot_scope.is_some() {
+                runtime.indicator(Event::DemoVoice);
+            }
         }
         HudDemo::Transcribing | HudDemo::Processing => {
             runtime.indicator(Event::Submitted { job_id: 0 });
@@ -1432,6 +1444,26 @@ fn configure_hud(runtime: &RuntimeHandle, lab: HudLab) {
                 runtime.indicator(Event::Transcribing { job_id });
             }
         }
+    }
+}
+
+/// Applies HUD Lab's tuning to whatever the HUD shows.
+fn tune_hud(runtime: &RuntimeHandle, lab: HudLab) {
+    use crate::dictation_indicator::{DictationIndicatorEvent as Event, HudTuning};
+    let t = lab.tuning;
+    runtime.indicator(Event::Configure(HudTuning {
+        style: t.style,
+        line_count: t.line_count,
+        curvature: t.curvature,
+        speed: t.speed,
+        sharpness: t.sharpness,
+        glow: t.glow,
+        depth: t.depth,
+        light_angle: t.light_angle,
+        outline: t.outline,
+    }));
+    if let Some(tuning) = lab.dot_scope {
+        runtime.indicator(Event::ConfigureDotScope(tuning));
     }
 }
 

@@ -6,13 +6,24 @@ root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 # HEX_TEST_BUILD=1 builds the CI test app: ad-hoc signed, under its own
 # name and bundle ID so it installs beside the released Hex and never
 # touches its permissions; it never checks for updates.
-if [ "${HEX_TEST_BUILD:-}" = 1 ]; then
+# HEX_LOCAL_BUILD=1 marks a build made from a checkout for its owner's own
+# machine (Developer ID signed as usual): it shows "Local build · updates off"
+# with its commit and never checks for or offers updates.
+# HEX_RELEASE_UNSIGNED=1 builds the release app (Hex, anomaly.hex) ad-hoc
+# signed: the Release workflow's build job, which holds no credentials. Its
+# sign-macos job signs it with the Developer ID (.github/release/sign-macos.sh).
+if [ "${HEX_RELEASE_UNSIGNED:-}" = 1 ]; then
+  team_id=
+  identity=-
+  app_name=Hex
+  bundle_id=anomaly.hex
+elif [ "${HEX_TEST_BUILD:-}" = 1 ]; then
   team_id=
   identity=-
   app_name="Hex Test"
   bundle_id=anomaly.hex.test
 else
-  team_id=${VOICE_CONTROL_TEAM_ID:?Set VOICE_CONTROL_TEAM_ID to the Apple Developer signing team}
+  team_id=${HEX_TEAM_ID:?Set HEX_TEAM_ID to the Apple Developer signing team}
   identity=$(hex_codesign_identity "$team_id")
   app_name=Hex
   bundle_id=anomaly.hex
@@ -51,22 +62,37 @@ sign() {
 }
 
 export MACOSX_DEPLOYMENT_TARGET=15.0
+# Cargo may run through a wrapper that does not forward the environment (Kit's
+# HiveMind-backed cargo), so build-time variables also travel as --config.
+env_args=()
+if [ -z "${HEX_COMMIT:-}" ] && { [ "${HEX_LOCAL_BUILD:-}" = 1 ] || [ "${HEX_TEST_BUILD:-}" = 1 ]; }; then
+  HEX_COMMIT=$(git -C "$root" rev-parse --short=7 HEAD 2>/dev/null || true)
+fi
+for name in HEX_LOCAL_BUILD HEX_TEST_BUILD HEX_COMMIT HEX_BUILD_CHANNEL; do
+  value=${!name:-}
+  if [ -n "$value" ]; then
+    case "$value" in
+      *\'*) echo "$name must not contain a single quote" >&2; exit 1 ;;
+    esac
+    env_args+=(--config "env.$name='$value'")
+  fi
+done
 if [ -n "$capture" ]; then
   # The helper's embedded Info.plist names Hex, not Scrawl.
   SCRAWL_HELPER_PLIST="$root/packaging/macos/scrawl-helper-Info.plist" \
-    cargo build --locked --release --features capture --manifest-path "$root/Cargo.toml"
+    cargo build --locked --release --features capture ${env_args[@]+"${env_args[@]}"} --manifest-path "$root/Cargo.toml"
 else
-  cargo build --locked --release --manifest-path "$root/Cargo.toml"
+  cargo build --locked --release ${env_args[@]+"${env_args[@]}"} --manifest-path "$root/Cargo.toml"
 fi
 rm -rf "$bundle"
 mkdir -p "$bundle/Contents/MacOS" "$bundle/Contents/Resources" "$bundle/Contents/Library" "$frameworks"
-cp "$root/target/release/voice-control" "$executable"
+cp "$root/target/release/hex" "$executable"
 if [ -n "$capture" ]; then
   cp "$root/target/release/scrawl-helper" "$bundle/Contents/MacOS/scrawl-helper"
 fi
 cp "$root/app/Info.plist" "$bundle/Contents/Info.plist"
 cp "$root/LICENSE" "$root/THIRD_PARTY_NOTICES.md" "$bundle/Contents/Resources/"
-HEX_VERSION="$version" HEX_BUILD_NUMBER="$build_number" VOICE_CONTROL_TEAM_ID="$team_id" VOICE_CONTROL_CODESIGN_IDENTITY="${identity#-}" HEX_SKIP_INSTALL_SCRIPT=1 \
+HEX_VERSION="$version" HEX_BUILD_NUMBER="$build_number" HEX_TEAM_ID="$team_id" HEX_CODESIGN_IDENTITY="${identity#-}" HEX_SKIP_INSTALL_SCRIPT=1 \
   "$root/scripts/build-hex-microphone-driver.sh" "$bundle/Contents/Library" >&2
 (cd "$root/sdk/commands" && bun run build)
 mkdir -p "$bundle/Contents/Resources/commands-sdk"
@@ -114,6 +140,6 @@ if [ -n "$capture" ]; then
   # process.
   sign --identifier "$bundle_id.scrawl-helper" "$bundle/Contents/MacOS/scrawl-helper"
 fi
-sign --entitlements "$root/app/VoiceControl.entitlements" "$bundle"
+sign --entitlements "$root/.github/release/hex.entitlements" "$bundle"
 codesign --verify --deep --strict --verbose=2 "$bundle"
 echo "$bundle"

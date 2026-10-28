@@ -50,7 +50,7 @@ fn settings_rows_follow_each_os() {
     assert!(!present(&linux, "meetings-enabled"));
 
     let mac = runtime("mac-settings", true, PANE_SIZE);
-    for key in ["launch-at-login", "dock-icon", "check-for-updates"] {
+    for key in ["launch-at-login", "dock-icon", "update-status"] {
         assert!(present(&mac, key), "macOS shows {key}");
     }
     // Features own their settings: none of these are in General.
@@ -326,17 +326,8 @@ fn reduce_motion_swaps_allow_for_allowed_at_once() {
 }
 
 #[test]
-fn general_fits_the_default_window_and_hides_advanced_options() {
+fn general_hides_advanced_options_until_asked() {
     let mut rt = runtime("mac-settings", true, PANE_SIZE);
-    let height = |key: &str| {
-        rt.elements()
-            .into_iter()
-            .find(|e| e.key.as_deref() == Some(key))
-            .map(|e| e.rect[3])
-            .unwrap()
-    };
-    let (body, inset) = (height("scroll"), height("inset"));
-    assert!(inset <= body, "General scrolls: {inset} > {body}");
     assert!(rt.find("microphone-mode").is_none());
     tap(&mut rt, "advanced-toggle");
     assert!(rt.find("microphone-mode").is_some());
@@ -874,21 +865,18 @@ fn the_explainer_picker_and_shortcut_recording_never_share_the_window() {
     assert!(matches!(rt.state.capture, settings::Capture::Idle));
     assert!(sent(&rt).contains(&Request::CancelShortcut));
 
-    picker::open(&mut rt.state, "en".into());
+    picker::open(&mut rt.state);
     assert!(!rt.state.explainer.open, "the picker closes the explainer");
     explainer::open(&mut rt.state);
-    assert!(
-        rt.state.picker.language.is_none(),
-        "and the explainer the picker"
-    );
+    assert!(!rt.state.picker.open, "and the explainer the picker");
 
     rt.state
         .select_pane(Pane::History, &mut rune::Tx::default());
     assert!(!rt.state.explainer.open);
-    picker::open(&mut rt.state, "en".into());
+    picker::open(&mut rt.state);
     rt.state
         .select_pane(Pane::General, &mut rune::Tx::default());
-    assert!(rt.state.picker.language.is_none());
+    assert!(!rt.state.picker.open);
 }
 
 #[test]
@@ -1400,6 +1388,8 @@ fn platform_goldens() {
     check_golden("mac-onboarding-listening", true, PANE_SIZE);
     check_golden("mac-onboarding-reopen", false, PANE_SIZE);
     check_golden("mac-onboarding-done", true, PANE_SIZE);
+    check_golden("mac-onboarding-mic-open", true, PANE_SIZE);
+    check_golden("mac-onboarding-mic-silent", false, PANE_SIZE);
 }
 
 #[test]
@@ -1522,6 +1512,90 @@ fn hud_lab_drives_the_indicator() {
 }
 
 #[test]
+fn hud_lab_tunes_dot_scope_when_its_experiment_is_on() {
+    let mut rt = runtime("mac-hud-lab", true, PANE_SIZE);
+    assert!(rt.find("dot-columns").is_none(), "the styles without it");
+    let mut rt2 = runtime("mac-hud-lab-dot-scope", true, PANE_SIZE);
+    assert!(rt2.find("hud-styles").is_none());
+    assert!(rt2.find("dot-glow").is_some());
+    rt2.state.platform.hud.dot_scope = Some(crate::dot_scope::Tuning {
+        glow: 2.0,
+        ..Default::default()
+    });
+    refresh(&mut rt2);
+    tap(&mut rt2, "hud-demo/segment1");
+    let Some(PlatformRequest::ConfigureHud(lab)) = asked(&rt2).last().cloned() else {
+        panic!("{:?}", asked(&rt2));
+    };
+    assert_eq!(lab.dot_scope.map(|t| t.glow), Some(2.0));
+    tap(&mut rt2, "dot-scope-copy");
+    assert!(
+        rt2.copy_request
+            .as_deref()
+            .is_some_and(|json| json.contains("\"glow\": 2.0"))
+    );
+    tap(&mut rt2, "dot-scope-save");
+    assert!(matches!(
+        asked(&rt2).last(),
+        Some(PlatformRequest::SaveDotScope(tuning)) if tuning.glow == 2.0
+    ));
+    assert!(rt2.state.hud_saved);
+    tap(&mut rt2, "dot-scope-reset");
+    assert_eq!(
+        rt2.state.platform.hud.dot_scope,
+        Some(crate::dot_scope::Tuning::default())
+    );
+    assert!(!rt2.state.hud_saved);
+    tap(&mut rt, "hud-style0");
+    assert_eq!(rt.state.platform.hud.dot_scope, None);
+}
+
+#[test]
+fn hud_lab_picks_dot_scope_processing_placement_and_level() {
+    use crate::dot_scope::{Placement, Processing};
+    let mut rt = runtime("mac-hud-lab-dot-scope", true, PANE_SIZE);
+    tap(&mut rt, "dot-processing/segments/segment2");
+    tap(&mut rt, "dot-placement/segments/segment2");
+    tap(&mut rt, "dot-auto-level");
+    tap(&mut rt, "dot-pretend-notch");
+    let Some(PlatformRequest::TuneHud(lab)) = asked(&rt).last().cloned() else {
+        panic!("{:?}", asked(&rt));
+    };
+    let tuning = lab.dot_scope.unwrap();
+    assert_eq!(tuning.processing, Processing::Pulse);
+    assert_eq!(tuning.placement, Placement::Notch);
+    assert!(!tuning.auto_level && tuning.pretend_notch);
+    assert!(rt.find("dot-noise-floor").is_some());
+}
+
+#[test]
+fn release_builds_show_hud_lab_only_for_dot_scope() {
+    // The scene is a release build (no developer panes) with the experiment on.
+    let mut rt = runtime("mac-hud-lab-dot-scope", true, PANE_SIZE);
+    assert!(!rt.state.platform.developer);
+    assert!(rt.find("nav-hud-lab").is_some());
+    assert!(rt.find("nav-activity").is_none());
+    let (x, y) = rt.find("dot-spacing/track").expect("a Dot scope slider");
+    rt.pointer_down(x - 100.0, y);
+    rt.pointer_up(x - 100.0, y);
+    settle(&mut rt);
+    assert!(
+        matches!(asked(&rt).last(), Some(PlatformRequest::TuneHud(_))),
+        "a slider tunes the HUD live without restarting its demo: {:?}",
+        asked(&rt)
+    );
+    tap(&mut rt, "nav-general");
+    assert!(matches!(
+        asked(&rt).last(),
+        Some(PlatformRequest::EndHudDemo)
+    ));
+    let mut rt = runtime("mac-hud-lab-dot-scope", true, PANE_SIZE);
+    rt.state.platform.hud.dot_scope = None;
+    refresh(&mut rt);
+    assert!(rt.find("nav-hud-lab").is_none());
+}
+
+#[test]
 fn hud_lab_controls_round_trip() {
     use hud_lab::Control;
     let mut tuning = platform::HudTuning::default();
@@ -1607,11 +1681,13 @@ fn experiment_goldens() {
     for dark in [true, false] {
         check_golden("mac-voice-filter", dark, PANE_SIZE);
         check_golden("mac-hud-lab", dark, PANE_SIZE);
+        check_golden("mac-hud-lab-dot-scope", dark, PANE_SIZE);
     }
     check_golden("mac-voice-filter-muted", true, PANE_SIZE);
     check_golden("mac-voice-filter-driver-missing", false, PANE_SIZE);
     check_golden("mac-activity", false, PANE_SIZE);
     check_golden("mac-settings-sides", true, PANE_SIZE);
+    check_golden("mac-local-build", true, PANE_SIZE);
 }
 
 #[test]

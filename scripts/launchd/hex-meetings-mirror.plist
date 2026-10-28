@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  Template: refreshes a local mirror of another Mac's HEX meetings every two
+  Template: refreshes a local mirror of another Mac's Hex meetings every two
   minutes at background priority, for `hex mcp --meetings-dir`.
 
-  Replace @REPO@ with the HEX checkout and @HOME@ with your home folder, then:
+  Replace @REPO@ with the Hex checkout and @HOME@ with your home folder, then:
     sed -e "s|@REPO@|$PWD|g" -e "s|@HOME@|$HOME|g" scripts/launchd/hex-meetings-mirror.plist \
       > ~/Library/LaunchAgents/com.kitlangton.hex.meetings-mirror.plist
     launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.kitlangton.hex.meetings-mirror.plist

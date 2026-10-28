@@ -7,7 +7,10 @@ use std::time::{Duration, Instant};
 use clap::{Args, Parser, Subcommand};
 use color_eyre::Result;
 use color_eyre::eyre::{WrapErr, bail};
-use windows_sys::Win32::System::Console::FreeConsole;
+use windows_sys::Win32::System::Console::{
+    FreeConsole, GetConsoleMode, GetStdHandle, STD_ERROR_HANDLE, STD_INPUT_HANDLE,
+    STD_OUTPUT_HANDLE, SetStdHandle,
+};
 
 use crate::audio::{AudioInput, AudioInputEvent};
 use crate::events::{DictationPhase, EventLog, TranscriptPhase, VoiceEvent, VoiceState, now_ms};
@@ -20,7 +23,7 @@ const DEFAULT_MODEL: &str = "parakeet_unified_en";
 const DEFAULT_LANGUAGE: &str = "en";
 
 #[derive(Parser)]
-#[command(version, about = "Local HEX dictation for Windows")]
+#[command(version, about = "Local Hex dictation for Windows")]
 struct Cli {
     #[command(subcommand)]
     command: Option<Command>,
@@ -93,7 +96,7 @@ enum ModelCommand {
         #[command(flatten)]
         selection: SelectionArgs,
     },
-    /// List transcribe.cpp compute devices available to HEX.
+    /// List transcribe.cpp compute devices available to Hex.
     Devices,
     /// Load and prewarm an installed model.
     Check {
@@ -165,9 +168,7 @@ pub fn run(shutdown: &'static AtomicBool) -> Result<()> {
             // A headless render (`--snap`) draws fixtures without starting
             // the runtime and prints to the terminal that ran it.
             if !rune_args.is_empty() {
-                crate::rune_ui::app(Default::default())
-                    .args(rune_args)
-                    .run();
+                crate::rune_ui::render_app(rune_args).run();
                 return Ok(());
             }
             detach_from_console();
@@ -231,8 +232,22 @@ fn detach_from_console() {
     // The binary also exposes terminal-oriented subcommands, so it cannot use a
     // crate-wide Windows GUI subsystem. Detach only for the native app: an
     // Explorer-launched console disappears, while a parent terminal remains.
+    // FreeConsole leaves the standard handles holding closed console handle
+    // values that Windows soon reuses for unrelated objects, so a later print
+    // panics (a read-only file) or writes into whatever file took the value.
+    // Null handles make std discard the output; redirected handles are kept.
     unsafe {
+        let console_handles: Vec<_> = [STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, STD_ERROR_HANDLE]
+            .into_iter()
+            .filter(|&id| {
+                let mut mode = 0;
+                GetConsoleMode(GetStdHandle(id), &mut mode) != 0
+            })
+            .collect();
         FreeConsole();
+        for id in console_handles {
+            SetStdHandle(id, std::ptr::null_mut());
+        }
     }
 }
 
@@ -376,7 +391,7 @@ fn capture(
     let mut transcriber = LocalTranscriber::load(selection)?;
     let input = match device {
         Some(name) => AudioInput::open_matching(name)?,
-        None => AudioInput::open(&[])?,
+        None => AudioInput::open_system_default()?,
     };
     let sample_rate = input.sample_rate;
     let device_name = input.device_name.clone();

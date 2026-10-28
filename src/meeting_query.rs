@@ -478,7 +478,7 @@ impl Library {
             if meeting.in_progress {
                 let _ = writeln!(
                     output,
-                    "No notes yet: the meeting is still {}. HEX writes a title and summary after it is transcribed.",
+                    "No notes yet: the meeting is still {}. Hex writes a title and summary after it is transcribed.",
                     status_name(meeting.status)
                 );
             } else {

@@ -812,6 +812,7 @@ fn status(
             DesktopUpdateStatus::Checking | DesktopUpdateStatus::Downloading => "checking",
             DesktopUpdateStatus::Available
             | DesktopUpdateStatus::ReadyToRestart
+            | DesktopUpdateStatus::SwitchAvailable { .. }
             | DesktopUpdateStatus::PackageUpdate { .. } => "available",
             DesktopUpdateStatus::Unavailable
             | DesktopUpdateStatus::Managed

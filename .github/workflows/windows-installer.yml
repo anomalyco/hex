@@ -94,7 +94,7 @@ jobs:
           $exe = (Resolve-Path "published/Hex-$env:HEX_VERSION-windows-${{ matrix.label }}.exe").Path
           "HEX_EXE=$exe" | Out-File -FilePath $env:GITHUB_ENV -Append
           scripts/build-windows-installer.ps1 -Executable $exe -Version $env:HEX_VERSION -Arch ${{ matrix.arch }} -OutDir installers
-      - name: Install, reinstall, refuse a downgrade, and uninstall silently
+      - name: Install, reinstall, install over another version, and uninstall silently
         shell: pwsh
         run: scripts/test-windows-installer.ps1 -Installer "installers/Hex-Setup-$env:HEX_VERSION-windows-${{ matrix.label }}.exe" -Executable $env:HEX_EXE -Version $env:HEX_VERSION
       - name: Upload installer logs

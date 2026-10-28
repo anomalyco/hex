@@ -118,7 +118,7 @@ enum ModelCommand {
     Status,
     /// Download and checksum-verify the default dictation model.
     Install,
-    /// List transcribe.cpp compute devices available to HEX.
+    /// List transcribe.cpp compute devices available to Hex.
     Devices,
     /// Load and prewarm the installed model.
     Check,
@@ -309,7 +309,7 @@ fn listen(event_path: &Path, device: Option<&str>, shutdown: &AtomicBool) -> Res
     let mut recognizer = Moonshine::load(Path::new(env!("CARGO_MANIFEST_DIR")))?;
     let input = match device {
         Some(name) => AudioInput::open_matching(name)?,
-        None => AudioInput::open(&[])?,
+        None => AudioInput::open_system_default()?,
     };
     let events = EventLog::create(event_path)?;
     events.emit(&VoiceEvent::SessionStarted {

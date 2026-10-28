@@ -98,14 +98,14 @@ fn shortcuts(settings: &AppSettings) -> (LinuxHotkey, HotkeyOptions) {
     (LinuxHotkey::from(&settings.dictation_hotkey), options)
 }
 
-/// Opens the microphone `settings` select, or keeps it released until a
-/// dictation starts.
+/// Opens `--device`, else the microphone `settings` select, else the system
+/// default, or keeps it released until a dictation starts.
 fn microphone_input(settings: &AppSettings, device: Option<&str>) -> RecoveringAudioInput {
-    let microphone = device.or(settings.microphone.as_deref());
+    let microphone = settings.microphone.as_deref();
     if settings.release_microphone_while_idle {
-        RecoveringAudioInput::closed(None, 0, microphone)
+        RecoveringAudioInput::closed(device, 0, microphone)
     } else {
-        RecoveringAudioInput::open(None, 0, microphone)
+        RecoveringAudioInput::open(device, 0, microphone)
     }
 }
 
@@ -293,7 +293,7 @@ pub(crate) fn run(
     let released_label = |settings: &AppSettings| {
         device
             .or(settings.microphone.as_deref())
-            .unwrap_or("microphone")
+            .unwrap_or("System default")
             .to_string()
     };
     let mut device_label = if audio_ready {
@@ -318,7 +318,7 @@ pub(crate) fn run(
     })?;
     emit_state(&mut events, VoiceState::Listening, &device_label)?;
     println!(
-        "HEX dictation is ready on {device_label}. Hold {hotkey_label} to dictate; Ctrl-C stops."
+        "Hex dictation is ready on {device_label}. Hold {hotkey_label} to dictate; Ctrl-C stops."
     );
 
     while !shutdown.load(Ordering::Relaxed) {
@@ -517,6 +517,7 @@ pub(crate) fn run(
             pending = pending.saturating_sub(1);
             match result {
                 Ok(text) => {
+                    feedback::play(Tone::DictationDone);
                     events.emit(&VoiceEvent::Transcript {
                         timestamp_ms: now_ms(),
                         phase: TranscriptPhase::Completed,
@@ -535,7 +536,10 @@ pub(crate) fn run(
         }
 
         indicator.update(capture.is_recording() || start_pending, pending);
-        match input.recv_timeout(UPDATE_INTERVAL, !capture.is_recording()) {
+        match input.recv_timeout(
+            UPDATE_INTERVAL,
+            crate::audio::capture_idle(capture.is_recording(), start_pending, finishing.is_some()),
+        ) {
             RecoveringAudioInputEvent::Chunk {
                 samples,
                 captured_through: chunk_captured_through,
@@ -589,6 +593,11 @@ pub(crate) fn run(
             RecoveringAudioInputEvent::Reopened => {
                 audio_ready = false;
                 device_label = input.device_name().to_string();
+                emit_state(
+                    &mut events,
+                    active_state(capture.is_recording(), pending),
+                    &device_label,
+                )?;
             }
             RecoveringAudioInputEvent::OpenFailed(error) => {
                 if !release_while_idle {

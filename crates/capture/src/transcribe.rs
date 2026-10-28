@@ -37,22 +37,15 @@ const MAX_FORCED_MERGE_MS: u64 = 8 * 60_000;
 pub const MAX_CLIPS: usize = 24;
 
 /// Hex's support folder, as Hex's `app_paths::support_dir` resolves it: `~/Library/Application
-/// Support/hex` on macOS (`voice-control` before Hex moved it), `%APPDATA%\voice-control` on Windows.
+/// Support/hex` on macOS, `%APPDATA%\hex` on Windows.
 pub fn hex_support_dir() -> PathBuf {
     std::env::var_os("HEX_APPLICATION_SUPPORT_DIR")
         .map(PathBuf::from)
         .filter(|dir| !dir.as_os_str().is_empty())
         .unwrap_or_else(|| {
-            let data = dirs::data_dir().unwrap_or_else(|| PathBuf::from("."));
-            let legacy = data.join("voice-control");
-            if cfg!(target_os = "macos")
-                && (std::fs::read_link(&legacy).is_ok_and(|target| target.ends_with("hex"))
-                    || !legacy.exists())
-            {
-                data.join("hex")
-            } else {
-                legacy
-            }
+            dirs::data_dir()
+                .unwrap_or_else(|| PathBuf::from("."))
+                .join("hex")
         })
 }
 

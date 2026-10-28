@@ -13,8 +13,9 @@
 //! login launch (`windowless`), and opens or quits from other threads
 //! through its `AppHandle`.
 
+use std::ffi::c_void;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU32, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
@@ -24,6 +25,7 @@ use color_eyre::eyre::eyre;
 use tray_icon::menu::{Menu, MenuEvent, MenuItem};
 use tray_icon::{MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
 use windows_sys::Win32::Foundation::{HINSTANCE, HWND};
+use windows_sys::Win32::Graphics::Dwm::{DWMWA_CAPTION_COLOR, DwmSetWindowAttribute};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     GWLP_HINSTANCE, GetSystemMetrics, GetWindowLongPtrW, ICON_BIG, ICON_SMALL, IMAGE_ICON,
     LR_DEFAULTCOLOR, LoadImageW, SM_CXICON, SM_CXSMICON, SM_CYICON, SM_CYSMICON, SendMessageW,
@@ -167,7 +169,9 @@ pub fn open(event_path: PathBuf, shutdown: &'static AtomicBool, start_hidden: bo
         .on_window(|window| {
             let _ = window.with_raw_handle(|handle| {
                 if let rune::raw_window_handle::RawWindowHandle::Win32(handle) = handle.as_raw() {
-                    apply_window_icon(handle.hwnd.get() as HWND);
+                    let hwnd = handle.hwnd.get() as HWND;
+                    apply_window_icon(hwnd);
+                    blend_title_bar(hwnd);
                 }
             });
         });
@@ -309,12 +313,15 @@ fn show_update_in_tray(status: DesktopUpdateStatus) {
     TRAY.with(|slot| {
         let mut slot = slot.borrow_mut();
         let Some(tray) = slot.as_mut() else { return };
-        let label = match status {
-            DesktopUpdateStatus::ReadyToRestart => Some(tr("Restart to update")),
-            DesktopUpdateStatus::Available => Some(tr("Download update")),
+        let label = match &status {
+            DesktopUpdateStatus::ReadyToRestart => Some(tr("Restart to update").to_owned()),
+            DesktopUpdateStatus::Available => Some(tr("Download update").to_owned()),
+            DesktopUpdateStatus::SwitchAvailable { channel, version } => {
+                Some(crate::updater::switch_label(channel, version))
+            }
             _ => None,
         };
-        if let Some(label) = label {
+        if let Some(label) = &label {
             tray.update.set_text(label);
         }
         let shown = match (label.is_some(), tray.update_shown) {
@@ -364,6 +371,52 @@ fn apply_window_icon(hwnd: HWND) {
     }
 }
 
+/// The settings window Rune created last, for [`match_title_bar`].
+static TITLED_WINDOW: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
+/// The caption's COLORREF (`0x00bbggrr`), or [`NO_CAPTION_COLOR`] before the
+/// first frame names one.
+static CAPTION_COLOR: AtomicU32 = AtomicU32::new(NO_CAPTION_COLOR);
+const NO_CAPTION_COLOR: u32 = u32::MAX;
+
+/// Blends the native title bar into the window: DWM paints the caption the
+/// window's background color once a frame has named it. The caption keeps
+/// its icon and title, the frame, its resize edges, and the caption buttons.
+fn blend_title_bar(hwnd: HWND) {
+    TITLED_WINDOW.store(hwnd, Ordering::Relaxed);
+    let color = CAPTION_COLOR.load(Ordering::Relaxed);
+    if color != NO_CAPTION_COLOR {
+        set_caption_color(hwnd, color);
+    }
+}
+
+/// Paints the settings window's caption `background`, so the title bar reads
+/// as part of the window. Called every frame with the current theme's
+/// background; DWM is asked only when the color changes (the system theme
+/// switched). Windows 10 has no caption color and keeps its own.
+pub(crate) fn match_title_bar(background: rune::Color) {
+    let [r, g, b, _] = background.premul_srgb(1.0);
+    let byte = |channel: f32| (channel.clamp(0.0, 1.0) * 255.0).round() as u32;
+    let color = byte(r) | byte(g) << 8 | byte(b) << 16;
+    if CAPTION_COLOR.swap(color, Ordering::Relaxed) == color {
+        return;
+    }
+    let hwnd = TITLED_WINDOW.load(Ordering::Relaxed);
+    if !hwnd.is_null() {
+        set_caption_color(hwnd, color);
+    }
+}
+
+fn set_caption_color(hwnd: HWND, color: u32) {
+    unsafe {
+        DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_CAPTION_COLOR as u32,
+            (&raw const color).cast(),
+            size_of::<u32>() as u32,
+        );
+    }
+}
+
 fn create_tray(window: rune::AppHandle<Ui>) -> Result<Tray> {
     let menu = Menu::new();
     menu.append(&MenuItem::with_id("show", tr("Show Hex"), true, None))?;
@@ -386,6 +439,9 @@ fn create_tray(window: rune::AppHandle<Ui>) -> Result<Tray> {
             {
                 Some(DesktopUpdateStatus::ReadyToRestart) => DesktopAction::RestartIntoUpdate,
                 Some(DesktopUpdateStatus::Available) => DesktopAction::OpenUpdate,
+                Some(DesktopUpdateStatus::SwitchAvailable { .. }) => {
+                    DesktopAction::ConfirmUpdateSwitch
+                }
                 _ => return,
             };
             let _ = runtime.send(Request::Desktop(action));

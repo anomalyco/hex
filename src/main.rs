@@ -10,6 +10,7 @@ mod apple_speech;
 mod application_catalog;
 #[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
 mod audio;
+mod background_process;
 #[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
 mod calendar;
 #[cfg(hex_capture)]
@@ -47,6 +48,8 @@ mod dictation_indicator;
 mod dictation_modes;
 #[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
 mod dictation_processor;
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+mod dot_scope;
 #[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
 mod events;
 mod experiments;
@@ -58,6 +61,8 @@ mod gguf_session;
 #[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
 mod hex_microphone;
 mod history;
+#[cfg(target_os = "macos")]
+mod hud_placement;
 mod instance;
 #[cfg(target_os = "macos")]
 mod keyboard;
@@ -78,8 +83,6 @@ mod linux_file_chooser;
 #[cfg(target_os = "linux")]
 mod linux_input;
 #[cfg(target_os = "linux")]
-mod linux_migration;
-#[cfg(target_os = "linux")]
 mod linux_paste;
 #[cfg(target_os = "linux")]
 mod linux_portal;
@@ -89,6 +92,8 @@ mod linux_rune_hud;
 mod linux_service;
 #[cfg(target_os = "linux")]
 mod linux_session;
+#[cfg(target_os = "linux")]
+mod linux_tray;
 #[cfg(target_os = "macos")]
 mod local_api;
 #[cfg(any(target_os = "linux", target_os = "windows"))]
@@ -156,6 +161,8 @@ mod transcription_models;
 mod transcription_preparation;
 #[cfg(target_os = "macos")]
 mod transcription_service;
+#[cfg(target_os = "macos")]
+mod transcription_stream;
 mod updater;
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 mod vocabulary;
@@ -175,8 +182,6 @@ mod windows_dictation;
 mod windows_input;
 #[cfg(target_os = "windows")]
 mod windows_login_item;
-#[cfg(target_os = "windows")]
-mod windows_migration;
 #[cfg(target_os = "windows")]
 mod windows_paste;
 #[cfg(target_os = "windows")]
@@ -243,7 +248,7 @@ enum Command {
     },
     /// Run the desktop app with local dictation.
     App {
-        /// Override the configured microphone preference order.
+        /// Capture from this microphone instead of the saved one or the system default.
         #[arg(long)]
         device: Option<String>,
         /// Arguments for a headless render, such as `--snap out.png --scene modes`.
@@ -252,7 +257,7 @@ enum Command {
     },
     /// Listen and transcribe until interrupted.
     Listen {
-        /// Override the configured microphone preference order.
+        /// Capture from this microphone instead of the saved one or the system default.
         #[arg(long)]
         device: Option<String>,
     },
@@ -327,7 +332,7 @@ enum Command {
         /// Corpus directory containing manifest.json and audio/*.wav.
         #[arg(default_value = "perf/moonshine-corpus")]
         directory: PathBuf,
-        /// Override the configured microphone preference order.
+        /// Capture from this microphone instead of the saved one or the system default.
         #[arg(long)]
         device: Option<String>,
         /// Evaluate every recorded fixture across every Moonshine profile.
@@ -724,11 +729,7 @@ fn main() -> Result<()> {
         );
     }
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let data_folder = app_paths::migrate_data_folder();
     let log_dir = app_paths::init_process_logging(&SHUTDOWN)?;
-    if let Some(outcome) = &data_folder {
-        app_paths::log_data_folder_migration(outcome);
-    }
 
     let event_path = log_dir.join("live.ndjson");
     let bundled_service = executable_name.as_deref() == Some(std::ffi::OsStr::new("hex-service"));
@@ -1038,9 +1039,7 @@ fn open_app(
     rune_args: Vec<String>,
 ) -> Result<()> {
     if !rune_args.is_empty() {
-        crate::rune_ui::app(Default::default())
-            .args(rune_args)
-            .run();
+        crate::rune_ui::render_app(rune_args).run();
         return Ok(());
     }
     let _instance = instance::acquire("listener")?;
@@ -1090,7 +1089,7 @@ fn mcp_alias_arguments(mut arguments: Vec<std::ffi::OsString>) -> Vec<std::ffi::
 
 #[cfg(target_os = "macos")]
 fn is_bundled_app_executable(name: Option<&std::ffi::OsStr>) -> bool {
-    name.is_some_and(|name| name == "voice-control-watch" || name == "hex")
+    name.is_some_and(|name| name == "hex")
 }
 
 /// Whether this launch runs the app: `hex app` without Rune's own (headless)
@@ -1279,12 +1278,8 @@ mod tests {
     }
 
     #[test]
-    fn both_packaged_executable_names_launch_the_app() {
-        assert!(is_bundled_app_executable(Some(
-            "voice-control-watch".as_ref()
-        )));
+    fn the_packaged_executable_launches_the_app() {
         assert!(is_bundled_app_executable(Some("hex".as_ref())));
-        assert!(!is_bundled_app_executable(Some("voice-control".as_ref())));
         assert!(!is_bundled_app_executable(Some("hex-service".as_ref())));
     }
 
@@ -1298,21 +1293,9 @@ mod tests {
         };
         assert!(opens(&["hex"]));
         assert!(opens(&["/Applications/Hex.app/Contents/MacOS/hex"]));
-        assert!(opens(&["voice-control", "app"]));
-        assert!(opens(&[
-            "voice-control",
-            "app",
-            "--device",
-            "MacBook Pro Microphone"
-        ]));
-        assert!(!opens(&[
-            "voice-control",
-            "app",
-            "--",
-            "--snap",
-            "/tmp/a.png"
-        ]));
-        assert!(!opens(&["voice-control"]));
+        assert!(opens(&["hex", "app"]));
+        assert!(opens(&["hex", "app", "--device", "MacBook Pro Microphone"]));
+        assert!(!opens(&["hex", "app", "--", "--snap", "/tmp/a.png"]));
         assert!(!opens(&["hex-service"]));
         assert!(!opens(&["hex-meetings-mcp"]));
         for command in [

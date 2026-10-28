@@ -2904,7 +2904,7 @@ fn handle_command(
                 _ => unreachable!(),
             };
             let outcome = meeting_requests
-                .ok_or("meeting controls require the HEX app")
+                .ok_or("meeting controls require the Hex app")
                 .and_then(|requests| {
                     requests.try_send(request).map_err(|error| match error {
                         TrySendError::Full(_) => "meeting controller is busy",
@@ -3256,6 +3256,7 @@ fn handle_dictation_event(
                 TranscriptionTarget::Paste | TranscriptionTarget::Send => DictationPhase::Pasted,
                 TranscriptionTarget::Service => return Ok(()),
             };
+            feedback::play(Tone::DictationDone);
             events.processed_dictation(phase, text, processing)?;
             if let Some(indicator) = indicator {
                 indicator.send(DictationIndicatorEvent::JobCompleted {

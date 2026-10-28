@@ -179,7 +179,7 @@ invalid descriptors. Rust independently validates registration;
 ### Spoken Dictation Controls
 
 ```ts
-Commands enabled + command model ready + awake         // dictate.voice-controls
+Commands enabled + command model ready + awake         // dictate.hexs
   -> "dictate start" -> Voice-delimited capture
      // wake first if sleeping; up to one second of available pre-roll
 

@@ -186,16 +186,12 @@ pub const MEDIA_PENDING: &str = ".media-pending";
 /// Present in a bundle on this Mac while its heavy media is being copied to the agent host.
 pub const MEDIA_SENDING: &str = ".media-sending";
 
-/// Copies a bundle to the same path on `host`, so the agent there can open its files.
-/// Syncs the contact sheet, keyframe PNGs, manifest, and summary synchronously so the session
-/// can be queued immediately, then streams heavy media (`recording.mp4`/`.mov`, `frames-full`)
-/// in the background for `scrawl zoom`, marked by [`MEDIA_PENDING`] until it lands.
-pub fn sync_bundle_to(host: &str, bundle_dir: &Path) -> Result<()> {
-    use std::process::Stdio;
-    let parent = bundle_dir.parent().context("Bundle has no parent")?;
-    let name = bundle_dir.file_name().context("Bundle has no name")?;
-    let mut tar = Command::new(system_tool("tar"))
-        .arg("-C")
+/// A tar of everything in bundle `name` but its heavy media and this Mac's own markers, to
+/// stdout. The recording's `capture.json` goes with it: it describes `recording.mp4`, which
+/// follows.
+fn light_files_tar(parent: &Path, name: &std::ffi::OsStr) -> Command {
+    let mut tar = Command::new(system_tool("tar"));
+    tar.arg("-C")
         .arg(parent)
         .args([
             "--exclude=*/recording.mp4",
@@ -210,7 +206,19 @@ pub fn sync_bundle_to(host: &str, bundle_dir: &Path) -> Result<()> {
         ])
         .arg("-cf")
         .arg("-")
-        .arg(name)
+        .arg(name);
+    tar
+}
+
+/// Copies a bundle to the same path on `host`, so the agent there can open its files.
+/// Syncs the contact sheet, keyframe PNGs, manifest, and summary synchronously so the session
+/// can be queued immediately, then streams heavy media (`recording.mp4`/`.mov`, `frames-full`)
+/// in the background for `scrawl zoom`, marked by [`MEDIA_PENDING`] until it lands.
+pub fn sync_bundle_to(host: &str, bundle_dir: &Path) -> Result<()> {
+    use std::process::Stdio;
+    let parent = bundle_dir.parent().context("Bundle has no parent")?;
+    let name = bundle_dir.file_name().context("Bundle has no name")?;
+    let mut tar = light_files_tar(parent, name)
         .stdout(Stdio::piped())
         .spawn()
         .context("Could not start tar")?;
@@ -1083,6 +1091,58 @@ pub mod fake_api {
         Ok(serde_json::to_vec(
             &serde_json::json!({ "data": page, "cursor": { "next": next } }),
         )?)
+    }
+}
+
+#[cfg(test)]
+mod light_files {
+    use std::process::{Command, Stdio};
+
+    #[test]
+    fn the_first_copy_leaves_heavy_media_and_markers_and_keeps_the_recording_manifest() {
+        let parent =
+            std::env::temp_dir().join(format!("scrawl-light-{}", crate::util::make_bundle_id()));
+        let bundle = parent.join("a.scrawl");
+        std::fs::create_dir_all(bundle.join("frames-full")).unwrap();
+        for file in [
+            "scrawl.json",
+            "summary.md",
+            "capture.json",
+            "recording.mp4",
+            "audio.wav",
+            "frames-full/0001.png",
+            ".deliver.json",
+            ".media-sending",
+        ] {
+            std::fs::write(bundle.join(file), b"x").unwrap();
+        }
+        let mut tar = super::light_files_tar(&parent, bundle.file_name().unwrap())
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let listed = Command::new("tar")
+            .arg("-tf")
+            .arg("-")
+            .stdin(tar.stdout.take().unwrap())
+            .output()
+            .unwrap();
+        assert!(tar.wait().unwrap().success());
+        let _ = std::fs::remove_dir_all(&parent);
+        let mut files: Vec<String> = String::from_utf8(listed.stdout)
+            .unwrap()
+            .lines()
+            .filter(|line| !line.ends_with('/'))
+            .map(str::to_owned)
+            .collect();
+        files.sort();
+        assert_eq!(
+            files,
+            [
+                "a.scrawl/capture.json",
+                "a.scrawl/scrawl.json",
+                "a.scrawl/summary.md"
+            ]
+        );
     }
 }
 

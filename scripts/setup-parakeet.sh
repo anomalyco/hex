@@ -1,11 +1,7 @@
 #!/bin/sh
 set -eu
 
-# Match Hex: an unmigrated voice-control folder (not its symlink to hex) stays in use.
-support="$HOME/Library/Application Support/voice-control"
-if [ ! -e "$support" ] || [ "$(readlink "$support" 2>/dev/null)" = hex ]; then
-  support="$HOME/Library/Application Support/hex"
-fi
+support="$HOME/Library/Application Support/hex"
 model_dir="$support/models"
 model="$model_dir/parakeet-unified-en-0.6b-Q8_0.gguf"
 partial="$model.partial"

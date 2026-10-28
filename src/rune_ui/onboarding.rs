@@ -12,10 +12,9 @@
 
 use std::time::{Duration, Instant};
 
-use rune::{El, TextEdit, TextStyle, col, el, row, text};
+use rune::{Color, El, TextEdit, TextStyle, col, el, row, text};
 use rune_kit::{Button, ButtonVariant, Progress, TextInput, glyphs};
 
-use super::Request;
 use super::Ui;
 use super::controls::{
     ButtonKind, DESCRIPTION, KeySize, Paint, PushSize, TRAY_PADDING, button, card, icon_row,
@@ -23,6 +22,7 @@ use super::controls::{
 };
 use super::lists::{PermissionControl, allowed, permission_control};
 use super::platform::{Os, PlatformRequest, PlatformState};
+use super::{Menu, Request};
 use crate::app_settings::AppSettings;
 use crate::desktop_i18n::{tr, tr_fill};
 use crate::dictation::ShortcutMode;
@@ -51,6 +51,58 @@ pub(super) struct Tour {
     practice: TextEdit,
     /// The welcome hero's settled frame, as Reduce Motion shows it (fixtures).
     pub(super) hero_still: bool,
+    /// What the practice dictation's microphone hears.
+    pub(super) mic: MicMeter,
+}
+
+/// The practice dictation's level, and whether Hex heard nothing from the
+/// microphone it records from.
+#[derive(Default)]
+pub(super) struct MicMeter {
+    /// 0 to 1, shown in `LEVEL_STEPS` steps.
+    pub(super) level: f32,
+    quiet_since: Option<Instant>,
+    /// The microphone setting Hex heard nothing from. The warning stays
+    /// until that microphone is heard or another is picked.
+    pub(super) silent: Option<Option<String>>,
+}
+
+/// A peak this loud is sound; a switched-off microphone delivers zeros
+/// and a quiet room stays well under it.
+const HEARD_PEAK: f32 = 0.02;
+/// Silence this long while recording means Hex hears nothing.
+const QUIET_FOR: Duration = Duration::from_millis(1500);
+const LEVEL_STEPS: f32 = 6.0;
+
+impl MicMeter {
+    /// Takes the latest `peak` from `microphone`; true when what shows changed.
+    fn hear(
+        &mut self,
+        listening: bool,
+        peak: f32,
+        microphone: &Option<String>,
+        now: Instant,
+    ) -> bool {
+        let before = (self.step(), self.silent.clone());
+        if listening {
+            if peak >= HEARD_PEAK {
+                self.quiet_since = None;
+                self.silent = None;
+            } else if now.duration_since(*self.quiet_since.get_or_insert(now)) >= QUIET_FOR {
+                self.silent = Some(microphone.clone());
+            }
+            // Rises at once, falls over a few frames.
+            self.level = (peak * 3.0).clamp(0.0, 1.0).max(self.level - 0.12);
+        } else {
+            self.quiet_since = None;
+            self.level = 0.0;
+        }
+        before != (self.step(), self.silent.clone())
+    }
+
+    fn step(&self) -> u8 {
+        (self.level * LEVEL_STEPS).round() as u8
+    }
 }
 
 impl Tour {
@@ -61,6 +113,7 @@ impl Tour {
             completed,
             practice: TextEdit::default(),
             hero_still: false,
+            mic: MicMeter::default(),
         }
     }
 
@@ -138,9 +191,18 @@ pub(super) fn poll(ui: &mut Ui) -> bool {
     let practicing = tour.flow.step() == Step::TryIt;
     apply(ui, effect);
     let heard = ui.host.tour_inputs(practicing);
-    let changed = refocused || !heard.is_empty();
+    let mut changed = refocused || !heard.is_empty();
     for heard in heard {
         input(ui, heard);
+    }
+    let peak = ui.host.practice_level();
+    // Fixtures set the level they show.
+    if let Some(tour) = ui.tour.as_mut().filter(|_| live) {
+        let listening =
+            tour.flow.step() == Step::TryIt && tour.flow.view().practice == Practice::Listening;
+        changed |= tour
+            .mic
+            .hear(listening, peak, &ui.settings.microphone, Instant::now());
     }
     remember_step(ui, step);
     let after = ui.tour.as_ref().map(|tour| tour.flow.view());
@@ -159,13 +221,17 @@ pub(super) fn input(ui: &mut Ui, input: Input) {
     remember_step(ui, step);
 }
 
-/// Saves a new step so a tour quit part-way resumes there.
+/// Saves a new step so a tour quit part-way resumes there, and sounds the
+/// success chime on reaching the last one.
 fn remember_step(ui: &Ui, before: Step) {
     if let Some(tour) = &ui.tour
         && tour.flow.step() != before
         && ui.live()
     {
         crate::onboarding::record_step(tour.flow.step());
+        if tour.flow.step() == Step::Done {
+            crate::feedback::play(crate::feedback::Tone::OnboardingSuccess);
+        }
     }
 }
 
@@ -210,14 +276,23 @@ fn apply(ui: &mut Ui, effect: Effect) {
     }
 }
 
-/// The tour over the whole window, while it shows.
-pub(super) fn overlay(ui: &Ui, p: Paint) -> Option<El> {
+/// Whether the tour shows the practice microphone, so the window keeps its
+/// input list current.
+pub(super) fn shows_microphone(ui: &Ui) -> bool {
+    ui.tour
+        .as_ref()
+        .is_some_and(|tour| tour.flow.step() == Step::TryIt)
+}
+
+/// The tour over the whole window, while it shows. Its menus go in `layer`,
+/// above it.
+pub(super) fn overlay(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Option<El> {
     let tour = ui.tour.as_ref()?;
     let view = tour.flow.view();
     let page = match view.step {
         Step::Welcome => welcome(ui, p),
         Step::Setup => setup(ui, p, &view),
-        Step::TryIt => try_it(ui, p, tour, &view),
+        Step::TryIt => try_it(ui, p, tour, &view, layer),
         Step::Done => done(ui, p),
     };
     let primary = match view.step {
@@ -564,7 +639,7 @@ fn holds(ui: &Ui) -> bool {
     ui.settings.shortcut_mode == ShortcutMode::Hold
 }
 
-fn try_it(ui: &Ui, p: Paint, tour: &Tour, view: &View) -> El {
+fn try_it(ui: &Ui, p: Paint, tour: &Tour, view: &View, layer: &mut Vec<El>) -> El {
     let shortcut = ui.settings.dictation_hotkey.keycaps().join("");
     let field = TextInput::new(&tour.practice)
         .placeholder(tr("Your words will appear here"))
@@ -589,12 +664,139 @@ fn try_it(ui: &Ui, p: Paint, tour: &Tour, view: &View) -> El {
         .gap(28.0)
         .child(title(p, tr("Give it a try"), Some(&body)))
         .child(
-            col()
-                .key("practice")
-                .gap(12.0)
-                .child(field)
-                .child(practice_hint(ui, p, view, &shortcut)),
+            col().key("practice").gap(12.0).child(field).child(
+                col()
+                    .key("practice-status")
+                    .gap(6.0)
+                    .child(practice_hint(ui, p, view, &shortcut))
+                    .child(microphone(ui, p, tour, layer)),
+            ),
         )
+}
+
+/// One quiet line under the practice field: the microphone Hex records
+/// from, as a small menu of every input, with its live level, and a short
+/// warning when that microphone gives Hex nothing.
+fn microphone(ui: &Ui, p: Paint, tour: &Tour, layer: &mut Vec<El>) -> El {
+    let listed = ui.microphones.as_ref().ok();
+    let off = listed.and_then(|devices| devices.off_with_lid_closed.as_deref());
+    let saved =
+        ui.settings.microphone.as_deref().filter(|saved| {
+            off != Some(*saved) && super::settings::missing_microphone(ui).is_none()
+        });
+    let in_use = saved
+        .or(listed.and_then(|devices| devices.system_default.as_deref()))
+        .or(off);
+    // With nothing else to fall back to, Hex records the closed lid's
+    // switched-off microphone.
+    let lid_closed = off.is_some() && in_use == off;
+    let silent = tour.mic.silent.as_ref() == Some(&ui.settings.microphone);
+    let warning = if lid_closed {
+        Some(tr("The lid is closed, so the built-in mic is off."))
+    } else if silent {
+        Some(tr("No sound. Pick another mic?"))
+    } else {
+        None
+    };
+    let open = ui.open == Some(Menu::TourMicrophone);
+    let name = in_use.unwrap_or(tr("System default"));
+    let level = if warning.is_some() {
+        0.0
+    } else {
+        tour.mic.level
+    };
+    let tint = if warning.is_some() {
+        p.warning()
+    } else {
+        p.faint()
+    };
+    let meter = mic_bars(p, level, tint);
+    let c = &p.k.c;
+    let chevron = if open {
+        p.k.glyph.chevron_up
+    } else {
+        p.k.glyph.chevron_down
+    };
+    let mut trigger = row()
+        .key("tour-mic-field")
+        .role("button")
+        .label(tr_fill("Microphone, {}", name))
+        .focusable(true)
+        .focus_ring(1.0, 0.0, c.border_focus)
+        .h(24.0)
+        // The pill bleeds past the line's edge so the level sits on it.
+        .ml(-6.0)
+        .px(6.0)
+        .gap(6.0)
+        .center_y()
+        .radius(p.k.radius.md)
+        .child(meter)
+        .child(
+            text(name)
+                .key("name")
+                .font(DESCRIPTION)
+                .color(if open { p.text() } else { p.muted() })
+                .truncate()
+                .shrink(),
+        )
+        .child(rune::icon(chevron, 12.0).key("chevron").color(c.icon_muted))
+        .on_press(|ui: &mut Ui| super::settings::toggle_menu(ui, Menu::TourMicrophone));
+    trigger = if open {
+        trigger.fill(c.hover)
+    } else {
+        trigger.hover(c.hover)
+    };
+    let mut menu = rune_kit::Menu::new("tour-mic")
+        .trigger(trigger)
+        .placement(rune_kit::Placement::BottomStart)
+        .gutter(4.0)
+        .min_width(super::controls::DEVICE_SELECT_WIDTH)
+        .open(open)
+        .on_close(|ui: &mut Ui| ui.open = None);
+    for choice in super::settings::microphone_choices(ui) {
+        let mut item = rune_kit::MenuItem::new(choice.label).checked(choice.selected);
+        if let Some(detail) = choice.detail {
+            item = item.shortcut(detail);
+        }
+        menu = menu.item(item.on_select(move |ui: &mut Ui| (choice.choose)(ui)));
+    }
+    row()
+        .key("tour-mic")
+        .h(24.0)
+        .gap(6.0)
+        .center_y()
+        .child(menu.build(p.k, layer))
+        .children(warning.map(|warning| {
+            text(warning)
+                .key("warning")
+                .font(DESCRIPTION)
+                .color(p.muted())
+                .truncate()
+                .shrink()
+        }))
+}
+
+const MIC_LEVEL: f32 = 14.0;
+
+/// Three short bars, as tall as Hex hears it.
+fn mic_bars(p: Paint, level: f32, tint: Color) -> El {
+    const WEIGHTS: [f32; 3] = [0.6, 1.0, 0.75];
+    let mut bars = row()
+        .key("level")
+        .size(MIC_LEVEL, MIC_LEVEL)
+        .gap(2.0)
+        .center();
+    for (index, weight) in WEIGHTS.into_iter().enumerate() {
+        // Uneven at rest too, so the bars never read as an ellipsis.
+        let height = (2.0 + weight * 4.0 + level * weight * 8.0).round();
+        bars = bars.child(
+            el().key(format!("bar{index}"))
+                .size(2.0, height)
+                .radius(1.0)
+                .fill(if level > 0.0 { p.text() } else { tint }),
+        );
+    }
+    bars
 }
 
 fn practice_hint(ui: &Ui, p: Paint, view: &View, shortcut: &str) -> El {
@@ -669,7 +871,7 @@ fn practice_hint(ui: &Ui, p: Paint, view: &View, shortcut: &str) -> El {
         ),
         Practice::NothingHeard => (
             false,
-            tr("Hex did not catch any words. Speak a little closer, or pick another microphone in Settings.").into(),
+            tr("Hex did not catch any words. Speak a little closer, or pick another microphone below.").into(),
             p.muted(),
         ),
         Practice::Failed => (
@@ -728,13 +930,15 @@ fn done(ui: &Ui, p: Paint) -> El {
         )),
         keycaps(p, "keys", &ui.settings.edit_hotkey.keycaps()),
     ));
-    tips.push(setting_row(
-        p,
-        "tip-modes",
-        tr("Modes"),
-        Some(tr("Fix names, tone, and formatting per app.")),
-        el().key("none"),
-    ));
+    if ui.platform.modes {
+        tips.push(setting_row(
+            p,
+            "tip-modes",
+            tr("Modes"),
+            Some(tr("Fix names, tone, and formatting per app.")),
+            el().key("none"),
+        ));
+    }
     let send_off = match ui.platform.caps.os {
         Os::Macos => tr_fill(
             "Hex waits in the menu bar. Use {} in any app to dictate.",
@@ -778,13 +982,13 @@ fn done(ui: &Ui, p: Paint) -> El {
         .child(
             col()
                 .key("more")
-                .gap(8.0)
+                .gap(super::controls::METRICS.label_gap)
                 .child(
                     text(tr("When you want more"))
                         .key("label")
                         .font(DESCRIPTION)
                         .color(p.muted())
-                        .ml(12.0),
+                        .ml(super::controls::METRICS.row_px),
                 )
                 .child(card(p, "tips-card", tips)),
         )

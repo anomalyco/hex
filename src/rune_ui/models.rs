@@ -1,24 +1,26 @@
 //! The OpenCode model catalog and the model and thinking pickers that Voice
 //! Action and each mode's rewriting share: the catalog loads off the UI
-//! thread, a missing `opencode2` is retried at a coarse interval, failures
+//! thread, a missing or V1-only OpenCode is retried at a coarse interval, failures
 //! wait for an explicit retry, and choosing a model also picks its
 //! recommended thinking variant.
 
 use std::sync::mpsc::Receiver;
 use std::time::Instant;
 
-use rune::{El, TextEdit, Tx, col, row, text};
-use rune_kit::{Badge, Placement, Popover, Select, SelectAppearance, TextInput};
+use rune::{El, row, text};
+use rune_kit::{
+    Badge, Combobox, ComboboxOption, ComboboxState, Placement, Select, SelectAppearance,
+};
 
-use super::controls::{ButtonKind, DESCRIPTION, Highlight, Paint, button, setting_row};
+use super::controls::{ButtonKind, Paint, button, setting_row};
 use super::modes::Selection;
 use super::{Menu, Ui};
 use crate::app_settings::AppSettings;
 use crate::desktop_i18n::{tr, tr_fill};
 use crate::dictation_processor::{ModelCatalog, ModelChoice};
 use crate::opencode_catalog::{
-    ModelCatalogState, OPENCODE_INSTALL_RETRY_INTERVAL, OpenCodeFeature, filtered_model_keys,
-    model_presentation, model_variants, open_opencode_beta_docs, opencode_unavailable_copy,
+    ModelCatalogState, OPENCODE_INSTALL_RETRY_INTERVAL, OpenCodeFeature, model_presentation,
+    model_variants, open_opencode_beta_docs, opencode_unavailable_copy, provider_label,
     start_model_catalog_load,
 };
 
@@ -35,9 +37,8 @@ pub(super) struct Models {
     state: ModelCatalogState,
     receiver: Option<Receiver<ModelCatalogState>>,
     retry_at: Instant,
-    /// The open model popover's search field.
-    search: TextEdit,
-    highlight: Highlight,
+    /// The model popover: open, its search, and its highlight.
+    pub(super) picker: ComboboxState,
 }
 
 impl Default for Models {
@@ -46,8 +47,7 @@ impl Default for Models {
             state: ModelCatalogState::Loading,
             receiver: None,
             retry_at: Instant::now(),
-            search: TextEdit::default(),
-            highlight: Highlight::default(),
+            picker: ComboboxState::default(),
         }
     }
 }
@@ -64,11 +64,15 @@ impl Models {
         self.receiver = Some(start_model_catalog_load());
     }
 
-    fn query(&self) -> String {
-        self.search.text.trim().to_lowercase()
+    /// Opens the model popover with its search focused, as pressing the
+    /// field does.
+    pub(super) fn open_picker(&mut self) {
+        self.picker.open = true;
+        self.picker.search.focused = true;
     }
 
-    /// Adopts a finished load; retries a missing `opencode2` now and then.
+    /// Adopts a finished load; retries a missing or V1-only OpenCode now
+    /// and then.
     pub(super) fn poll(&mut self, live: bool) -> bool {
         if let Some(receiver) = &self.receiver {
             let Ok(state) = receiver.try_recv() else {
@@ -79,7 +83,10 @@ impl Models {
             return true;
         }
         if live
-            && matches!(self.state, ModelCatalogState::Missing)
+            && matches!(
+                self.state,
+                ModelCatalogState::Missing | ModelCatalogState::NeedsV2
+            )
             && Instant::now() >= self.retry_at
         {
             self.start_load();
@@ -93,6 +100,10 @@ impl Models {
         }
         self.state = ModelCatalogState::Loading;
         self.start_load();
+    }
+
+    pub(super) fn checking(&self) -> bool {
+        matches!(self.state, ModelCatalogState::Loading)
     }
 
     pub(super) fn available(&self) -> bool {
@@ -144,9 +155,39 @@ impl Models {
         }
     }
 
+    /// [`Models::fixture`] with as many models as OpenCode lists with
+    /// several providers signed in, more than fit in the window.
+    pub(super) fn fixture_long() -> Self {
+        let mut models = Self::fixture();
+        if let ModelCatalogState::Loaded(catalog) = &mut models.state {
+            for (provider, family) in [
+                ("anthropic", "Claude"),
+                ("openai", "GPT"),
+                ("google", "Gemini"),
+            ] {
+                for version in 1..=16 {
+                    catalog.models.push(ModelChoice {
+                        key: format!("{provider}/{}-{version}", family.to_lowercase()),
+                        name: format!("{family} {version}"),
+                        provider: provider.into(),
+                        variants: Vec::new(),
+                    });
+                }
+            }
+        }
+        models
+    }
+
     pub(super) fn fixture_missing() -> Self {
         Self {
             state: ModelCatalogState::Missing,
+            ..Self::default()
+        }
+    }
+
+    pub(super) fn fixture_v1() -> Self {
+        Self {
+            state: ModelCatalogState::NeedsV2,
             ..Self::default()
         }
     }
@@ -213,28 +254,12 @@ fn choose_variant(ui: &mut Ui, target: Target, variant: Option<String>) {
     });
 }
 
-fn open_model_picker(ui: &mut Ui) {
-    if ui.open == Some(Menu::Model) {
-        ui.open = None;
-        return;
-    }
-    ui.models.search = TextEdit::default();
-    ui.models.search.focused = true;
-    ui.models.highlight = Highlight::default();
-    ui.open = Some(Menu::Model);
+/// Closes the model popover, as leaving the pane or window does.
+pub(super) fn close(ui: &mut Ui) {
+    ui.models.picker.close();
 }
 
-/// Up and Down in the search field move the model popover's highlight.
-fn move_highlight(ui: &mut Ui, event: &rune::KeyEvent) -> bool {
-    let query = ui.models.query();
-    let count = ui
-        .models
-        .catalog()
-        .map_or(0, |catalog| filtered_model_keys(catalog, &query).len());
-    ui.models.highlight.key(&event.key, &query, count)
-}
-
-fn close(ui: &mut Ui) {
+fn close_menu(ui: &mut Ui) {
     ui.open = None;
 }
 
@@ -243,6 +268,7 @@ fn status(models: &Models) -> String {
     match &models.state {
         ModelCatalogState::Loading => tr("Loading OpenCode…").into(),
         ModelCatalogState::Missing => tr("OpenCode beta required").into(),
+        ModelCatalogState::NeedsV2 => tr("Requires OpenCode V2").into(),
         ModelCatalogState::Failed(error) => tr_fill("OpenCode models unavailable: {}", error),
         ModelCatalogState::Loaded(catalog) => {
             tr_fill("{} available models", &catalog.models.len().to_string())
@@ -265,8 +291,7 @@ pub(super) fn rows(ui: &Ui, p: Paint, target: Target, layer: &mut Vec<El>) -> Ve
         .radius(p.k.radius.md)
         .fill(c.bg_base)
         .hover(c.hover)
-        .press(c.pressed)
-        .on_press(|ui: &mut Ui| open_model_picker(ui));
+        .press(c.pressed);
     for shadow in &p.k.elevation.button_neutral {
         field = field.box_shadow(*shadow);
     }
@@ -304,13 +329,7 @@ pub(super) fn rows(ui: &Ui, p: Paint, target: Target, layer: &mut Vec<El>) -> Ve
             .key("chevron")
             .color(c.icon_muted),
     );
-    let picker = Popover::new("model-picker")
-        .trigger(field)
-        .placement(Placement::BottomEnd)
-        .open(ui.open == Some(Menu::Model))
-        .on_close(close)
-        .child(model_list(ui, p, target))
-        .build(p.k, layer);
+    let picker = model_picker(ui, p, target, field, layer);
     let refresh = ui.models.available().then(|| {
         button(
             p,
@@ -357,8 +376,8 @@ pub(super) fn rows(ui: &Ui, p: Paint, target: Target, layer: &mut Vec<El>) -> Ve
             .on_toggle(|ui: &mut Ui| {
                 ui.open = (ui.open != Some(Menu::Variant)).then_some(Menu::Variant);
             })
-            .on_close(close)
-            .on_choose(move |ui: &mut Ui, choice: &str, _: &mut Tx| {
+            .on_close(close_menu)
+            .on_choose(move |ui: &mut Ui, choice: &str, _: &mut rune::Tx| {
                 let variant = (choice != tr("Default")).then(|| choice.to_owned());
                 choose_variant(ui, target, variant);
             })
@@ -374,96 +393,57 @@ pub(super) fn rows(ui: &Ui, p: Paint, target: Target, layer: &mut Vec<El>) -> Ve
     rows
 }
 
-/// The open popover: a search field over the matching models.
-fn model_list(ui: &Ui, p: Paint, target: Target) -> El {
-    let c = &p.k.c;
-    let search = TextInput::new(&ui.models.search)
-        .placeholder(tr("Search available models"))
-        .width(Some(280.0))
-        .leading_icon(p.k.glyph.search)
-        .on_edit(|ui: &mut Ui| &mut ui.models.search)
-        .on_key(|ui: &mut Ui, event: &rune::KeyEvent, _: &mut Tx| move_highlight(ui, event))
-        .on_submit(move |ui: &mut Ui, _: &mut Tx| {
-            let query = ui.models.query();
-            let picked = ui.models.catalog().and_then(|catalog| {
-                let keys = filtered_model_keys(catalog, &query);
-                let index = ui.models.highlight.index(&query, keys.len())?;
-                keys.into_iter().nth(index)
-            });
-            if let Some(model) = picked {
-                choose_model(ui, target, model);
-            }
-        })
-        .build(p.k)
-        .key("model-search");
-    let mut list = col().key("model-results").w(280.0).mt(8.0);
-    let Some(catalog) = ui.models.catalog() else {
-        return col().key("model-picker-body").child(search);
-    };
-    let (current, _) = selected(&ui.settings, target);
-    let query = ui.models.query();
-    let keys = filtered_model_keys(catalog, &query);
-    let highlighted = ui.models.highlight.index(&query, keys.len());
-    if keys.is_empty() {
-        list = list.child(
-            text(tr("No models match"))
-                .key("empty")
-                .font(DESCRIPTION)
-                .color(p.muted())
-                .px(8.0)
-                .py(6.0),
-        );
-    }
-    for (index, key) in keys.into_iter().enumerate() {
-        let (title, detail) = match &key {
-            None => (
-                tr("Use OpenCode default").to_string(),
-                catalog.default_name.clone().unwrap_or_default(),
-            ),
-            Some(key) => (
-                catalog
-                    .models
-                    .iter()
-                    .find(|choice| &choice.key == key)
-                    .map_or_else(|| key.clone(), |choice| choice.name.clone()),
-                key.clone(),
-            ),
-        };
-        let chosen = key.as_deref() == current;
-        let pick = key.clone();
-        let mut entry = col()
-            .key(format!("model{index}"))
-            .role("menuitem")
-            .label(title.clone())
-            .px(8.0)
-            .py(5.0)
-            .gap(1.0)
-            .radius(p.k.radius.sm)
-            .hover(c.hover)
-            .press(c.pressed)
-            .on_press(move |ui: &mut Ui| choose_model(ui, target, pick.clone()))
-            .child(
-                text(title)
-                    .key("name")
-                    .font(p.k.ty.ui_medium)
-                    .color(p.text())
-                    .truncate(),
-            )
-            .child(
-                text(detail)
-                    .key("key")
-                    .font(p.k.ty.small)
-                    .color(p.muted())
-                    .truncate(),
-            );
-        if chosen {
-            entry = entry.fill(c.layer_02);
-        } else if highlighted == Some(index) {
-            entry = entry.fill(c.hover);
+/// The model field's popover: a search over every model, with the OpenCode
+/// default first. Options are keyed by their place in the catalog, since
+/// model keys contain slashes.
+fn model_picker(ui: &Ui, p: Paint, target: Target, field: El, layer: &mut Vec<El>) -> El {
+    let catalog = ui.models.catalog();
+    let mut keys = Vec::new();
+    let mut options = Vec::new();
+    if let Some(catalog) = catalog {
+        if let Some(name) = &catalog.default_name {
+            keys.push(None);
+            let mut option = ComboboxOption::new("0", tr("Use OpenCode default"));
+            option.detail = name.clone();
+            options.push(option);
         }
-        list = list.child(entry);
+        for choice in &catalog.models {
+            let mut option = ComboboxOption::new(keys.len().to_string(), choice.name.clone());
+            option.detail = provider_label(&choice.provider);
+            options.push(option);
+            keys.push(Some(choice.key.clone()));
+        }
     }
-    col().key("model-picker-body").child(search).child(list)
+    let (current, _) = selected(&ui.settings, target);
+    let current = keys
+        .iter()
+        .position(|key| key.as_deref() == current)
+        .map(|index| index.to_string());
+    Combobox::new(
+        "model-picker",
+        &ui.models.picker,
+        &options,
+        |ui: &mut Ui| &mut ui.models.picker,
+    )
+    .trigger(field)
+    .placement(Placement::BottomEnd)
+    .width(320.0)
+    .max_height(400.0)
+    .current(current.as_deref())
+    .search_placeholder(tr("Search available models"))
+    .empty_message(tr("No models match"))
+    .on_choose(move |ui: &mut Ui, id: &str, _| {
+        if let Some(key) = id.parse::<usize>().ok().and_then(|index| keys.get(index)) {
+            choose_model(ui, target, key.clone());
+        }
+    })
+    .build(p.k, layer)
+}
+
+/// Why `feature` is unavailable in a few words, for beside its switch;
+/// `None` once the catalog loads.
+pub(super) fn unavailable_reason(ui: &Ui, feature: OpenCodeFeature) -> Option<&'static str> {
+    opencode_unavailable_copy(&ui.models.state, feature).map(|copy| copy.reason)
 }
 
 /// Why OpenCode features are unavailable, with retry and setup actions;
@@ -506,6 +486,6 @@ pub(super) fn unavailable(ui: &Ui, p: Paint, feature: OpenCodeFeature) -> Option
             Some((description, color)),
             actions,
         )
-        .min_h(64.0),
+        .min_h(super::controls::METRICS.row_h_described),
     )
 }

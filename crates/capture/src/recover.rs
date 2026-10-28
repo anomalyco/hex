@@ -472,6 +472,27 @@ mod tests {
         );
     }
 
+    /// A macOS movie's final frame is held to the recording's stop, a little past the end of the
+    /// capture: the rebuilt bundle has no frame after its end, and the movie stays on its offset.
+    #[test]
+    fn a_movie_held_past_the_capture_s_end_gives_no_frames_after_it() {
+        let captures = temp_dir("held");
+        let dir = orphan(&captures, "held.scrawl");
+        let mut journal = unfinished();
+        (journal.duration_ms, journal.video_offset_ms) = (2_000, 200);
+        write(&dir, &journal);
+        rebuild(&dir, &FAKE).unwrap();
+        let bundle: crate::model::ScrawlBundle =
+            serde_json::from_slice(&std::fs::read(dir.join("scrawl.json")).unwrap()).unwrap();
+        let times: Vec<u64> = bundle.keyframes.iter().map(|k| k.t).collect();
+        assert_eq!((bundle.duration_ms, bundle.video_offset_ms), (2_000, 200));
+        assert!(times.iter().all(|&t| t <= 2_000), "{times:?}");
+        assert!(
+            times.iter().any(|&t| t >= 1_700),
+            "the scene change 1.5 s into the movie is 1.7 s into the capture: {times:?}"
+        );
+    }
+
     #[test]
     fn recover_tries_an_orphan_once_and_retries_only_when_asked() {
         let captures = temp_dir("once");

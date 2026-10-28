@@ -14,7 +14,9 @@
 use rune::{El, TextEdit, Tx, col, el, row, text};
 use rune_kit::{IconButton, IconButtonVariant, Menu as KitMenu, MenuItem, Placement, TextInput};
 
-use super::controls::{ButtonKind, DESCRIPTION, Paint, button, card, pulsing_dot, segmented_tx};
+use super::controls::{
+    ButtonKind, DESCRIPTION, METRICS, Paint, button, card, page, pulsing_dot, segmented_tx,
+};
 use super::lists::{
     Tone, detail_header, detail_title, error_panel, group_label, list_row, message, placeholder,
     section_label, small_button, source_list, split, tone_tag,
@@ -509,7 +511,7 @@ fn status_tag(p: Paint, status: Status, stop_pending: bool, show_ready: bool) ->
 /// switch and Start/Stop, then the recordings or the settings.
 pub(super) fn pane(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> (Vec<El>, El) {
     if !available(ui) {
-        let content = col().key("content").px(24.0).pt(4.0).child(card(
+        let content = page("content").child(card(
             p,
             "enable",
             vec![super::platform_settings::meetings_toggle(ui, p)],
@@ -518,12 +520,8 @@ pub(super) fn pane(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> (Vec<El>, El) {
     }
     let action = recording_action(ui, p);
     if ui.meetings.view == View::Settings {
-        let content = col()
-            .key("content")
-            .px(24.0)
-            .pt(4.0)
-            .gap(24.0)
-            .children(super::platform_settings::meetings_settings(ui, p, layer));
+        let content =
+            page("content").children(super::platform_settings::meetings_settings(ui, p, layer));
         return (vec![action], super::scroll_body("settings-scroll", content));
     }
     recordings(ui, p, layer, vec![search(ui, p), action])
@@ -716,12 +714,18 @@ fn recordings(ui: &Ui, p: Paint, layer: &mut Vec<El>, actions: Vec<El>) -> (Vec<
             .key("meetings-pane")
             .grow(1.0)
             .shrink()
-            .child(col().key("notices").px(24.0).pb(12.0).child(error_panel(
-                p,
-                "meeting-runtime-error",
-                tr("Meeting could not be recorded."),
-                error,
-            )))
+            .child(
+                col()
+                    .key("notices")
+                    .px(METRICS.gutter)
+                    .pb(12.0)
+                    .child(error_panel(
+                        p,
+                        "meeting-runtime-error",
+                        tr("Meeting could not be recorded."),
+                        error,
+                    )),
+            )
             .child(body),
     )
 }
@@ -938,7 +942,7 @@ fn detail(ui: &Ui, p: Paint, meeting: &Meeting, layer: &mut Vec<El>) -> El {
         .key("meeting-detail")
         .grow(1.0)
         .shrink()
-        .px(24.0)
+        .px(METRICS.gutter)
         .child(detail_header(title, meta, actions))
         .child(super::scroll_body("meeting-transcript", body))
 }

@@ -373,9 +373,8 @@ pub fn finalize_capture_bundle_for_config(
     let stop_ms = activity.stop_ms;
     let capture::ScreenRecording {
         frames,
-        video: video_path,
+        video: movie,
         duration_ms,
-        video_offset_ms,
     } = recording;
     if let Some(ref audio) = recorded_audio
         && let Ok(wav_bytes) = audio.wav_bytes_16k()
@@ -387,22 +386,31 @@ pub fn finalize_capture_bundle_for_config(
     }
     let wav_path = bundle_dir.join("audio.wav");
     let has_wav = wav_path.exists();
-    recover::write(
-        bundle_dir,
-        &recover::Unfinished {
-            target: target.clone(),
-            duration_ms,
-            video: video_path
-                .as_ref()
-                .and_then(|v| v.file_name())
-                .map(|name| name.to_string_lossy().into_owned()),
-            video_offset_ms,
-            strokes: strokes.clone(),
-            events: events.clone(),
-            note: note.clone(),
-            windows: activity.windows.clone(),
-            cursor: activity.cursor.clone(),
-        },
+    let journal = |video: Option<&Path>, video_offset_ms: u64| {
+        recover::write(
+            bundle_dir,
+            &recover::Unfinished {
+                target: target.clone(),
+                duration_ms,
+                video: video
+                    .and_then(|v| v.file_name())
+                    .map(|name| name.to_string_lossy().into_owned()),
+                video_offset_ms,
+                strokes: strokes.clone(),
+                events: events.clone(),
+                note: note.clone(),
+                windows: activity.windows.clone(),
+                cursor: activity.cursor.clone(),
+            },
+        );
+    };
+    // The movie may still be finishing: the journal guesses its start until it is done.
+    let hint = movie
+        .as_ref()
+        .map(|m| (m.path().to_path_buf(), m.offset_hint_ms()));
+    journal(
+        hint.as_ref().map(|(path, _)| path.as_path()),
+        hint.as_ref().map_or(0, |h| h.1),
     );
     let crop_settings = (target.mode == CaptureMode::Display)
         .then(|| match engine_cfg {
@@ -411,6 +419,7 @@ pub fn finalize_capture_bundle_for_config(
         })
         .flatten();
     let agent_context = engine_cfg.map(|cfg| cfg.experiment(handoff::AGENT_CONTEXT));
+    let mut finished = None;
     let ((transcript, transcribe_ms), (predecoded, prepared)) = std::thread::scope(|scope| {
         let transcribe_handle = scope.spawn(|| {
             let t0 = std::time::Instant::now();
@@ -427,7 +436,15 @@ pub fn finalize_capture_bundle_for_config(
             };
             (tr, t0.elapsed().as_millis() as u64)
         });
-        let pre = if let Some(ref movie) = video_path
+        // Only what reads the movie waits for it to finish.
+        finished = movie.and_then(capture::Movie::wait);
+        if finished != hint {
+            journal(
+                finished.as_ref().map(|(path, _)| path.as_path()),
+                finished.as_ref().map_or(0, |f| f.1),
+            );
+        }
+        let pre = if let Some((ref movie, video_offset_ms)) = finished
             && !frames.is_empty()
         {
             let mut preview_marks = marks_of(&strokes);
@@ -490,6 +507,10 @@ pub fn finalize_capture_bundle_for_config(
         };
         (transcribe_handle.join().unwrap(), pre)
     });
+    let (video_path, video_offset_ms) = match finished {
+        Some((path, offset_ms)) => (Some(path), offset_ms),
+        None => (None, 0),
+    };
 
     let built = build_bundle_from_parts(
         bundle_dir,
@@ -567,6 +588,9 @@ pub fn rebuild_screen_bundle_with(
     for frame in &mut frames {
         frame.t_ms += offset;
     }
+    // A macOS movie's final frame is held to the recording's stop, which can fall just past the
+    // capture's end: those frames repeat the last one.
+    frames.retain(|frame| frame.t_ms <= old.duration_ms);
     let (decode, movie) = (media.frames, video.clone());
     let full_frames: Option<FullFrames> = Some(Box::new(move |times: &[u64]| {
         movie_frames_at_with(decode, &movie, times, offset, 0)

@@ -2,17 +2,21 @@ name: Check Windows
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
   push:
     branches: [dev]
   workflow_dispatch:
 
+# A new push to a pull request cancels its stale run. Every push and manual run
+# keeps its own group, so each dev commit gets a result.
 concurrency:
-  group: check-windows-${{ github.ref }}
+  group: ${{ github.event_name == 'pull_request' && format('{0}-pr-{1}', github.workflow, github.event.pull_request.number) || format('{0}-run-{1}', github.workflow, github.run_id) }}
   cancel-in-progress: true
 
 jobs:
   x64:
     name: x64 (Vulkan)
+    if: ${{ !github.event.pull_request.draft }}
     runs-on: windows-latest
     timeout-minutes: 90
     env:
@@ -49,16 +53,17 @@ jobs:
         run: |
           $dumpbin = Get-ChildItem "${env:ProgramFiles}\Microsoft Visual Studio" -Recurse -Filter dumpbin.exe -ErrorAction SilentlyContinue |
             Where-Object { $_.FullName -match 'Hostx64\\x64' } | Select-Object -First 1
-          $imports = & $dumpbin.FullName /dependents target\release\voice-control.exe
+          $imports = & $dumpbin.FullName /dependents target\release\hex.exe
           $redist = $imports | Select-String -Pattern 'VCRUNTIME|MSVCP|vcomp'
           if ($redist) { throw "hex.exe imports Visual C++ runtime DLLs: $redist" }
       - uses: actions/upload-artifact@v4
         with:
           name: hex-windows-x86_64
-          path: target/release/voice-control.exe
+          path: target/release/hex.exe
 
   arm64:
     name: ARM64 (CPU)
+    if: ${{ !github.event.pull_request.draft }}
     runs-on: windows-11-arm
     timeout-minutes: 90
     env:
@@ -87,4 +92,4 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: hex-windows-aarch64
-          path: target/release/voice-control.exe
+          path: target/release/hex.exe

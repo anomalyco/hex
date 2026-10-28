@@ -3,7 +3,10 @@
 //! 10 seconds after launch, then hourly or on "Check for updates", decides with the
 //! protocol's client rules, and for a direct install downloads the target,
 //! checks its size, SHA-256, and OS code signature, and stages it until the
-//! user restarts. Package-managed installs only learn the command to run;
+//! user restarts. Versions are display text and never compared: whenever the
+//! channel's current release is not the running build (its target SHA-256,
+//! else its exact version), Hex takes it, and switching channels does so
+//! after the user confirms. Package-managed installs only learn the command to run;
 //! source builds, test builds, and installs whose administrator set
 //! `DisableUpdates` never check. Manifests are not signed: HTTPS, the
 //! manifest's SHA-256, and (macOS, Windows) the code signature are the
@@ -50,7 +53,7 @@ pub enum Method {
     /// A direct install Hex cannot replace (macOS: a read-only or translocated
     /// location); updates link to the download.
     DownloadOnly,
-    /// A package manager (`aur`, `nix`, `brew`, `winget`, `scoop`) updates
+    /// A package manager (`aur`, `deb-x64`, `rpm-arm64`, `nix`, `brew`, …) updates
     /// it; Hex shows its command once it serves a newer version.
     #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
     Package(&'static str),
@@ -78,24 +81,63 @@ impl Method {
     }
 }
 
-/// The channel to check: package managers follow `stable`; everything else
-/// the `updates.channel` setting, else `dev` for a dev build
-/// (`X.Y.Z-dev.N`), else the install's own channel. Switching never
-/// downgrades: the protocol only installs a strictly newer version.
-fn channel(method: &Method, setting: Option<UpdateChannel>, version: &str) -> String {
+/// The channel the Release workflow published this build on, stamped at
+/// build time beside its version (`HEX_BUILD_CHANNEL`).
+const BUILD_CHANNEL: Option<&str> = option_env!("HEX_BUILD_CHANNEL");
+
+/// The channel this build belongs to: the one it was published on, else
+/// (builds from before the stamp) `dev` for a dev version, else the
+/// install's own channel. Package managers follow `stable`.
+fn home_channel(method: &Method, built: Option<&str>, version: &str) -> String {
     if matches!(method, Method::Package(_)) {
         return method.channel().into();
     }
-    match setting {
-        Some(channel) => channel.name().into(),
-        None if is_dev_build(version) => UpdateChannel::Dev.name().into(),
+    match built.filter(|channel| ["stable", "beta", "dev"].contains(channel)) {
+        Some(channel) => channel.into(),
+        None if is_dev_version(version) => UpdateChannel::Dev.name().into(),
         None => method.channel().into(),
     }
 }
 
-/// Builds the Release workflow's dev channel stamps `X.Y.Z-dev.N`.
-pub fn is_dev_build(version: &str) -> bool {
-    version.contains("-dev.")
+/// The channel to check: the `updates.channel` setting, else the build's
+/// own. Package managers follow `stable`. A setting other than the build's
+/// channel makes the decision a switch, which waits for the user.
+fn channel(method: &Method, setting: Option<UpdateChannel>, home: &str) -> String {
+    match setting {
+        Some(channel) if !matches!(method, Method::Package(_)) => channel.name().into(),
+        _ => home.into(),
+    }
+}
+
+/// Dev builds are `0.0.0-dev-<run>` (`X.Y.Z-dev.N` before 2026-10-27).
+fn is_dev_version(version: &str) -> bool {
+    version.contains("-dev")
+}
+
+/// The control that confirms a channel switch, e.g. "Switch to Stable 2.3.1".
+pub fn switch_label(channel: &str, version: &str) -> String {
+    let channel = match channel {
+        "dev" => UpdateChannel::Dev.label(),
+        "stable" => UpdateChannel::Stable.label(),
+        other => other,
+    };
+    crate::desktop_i18n::tr_named(
+        "Switch to {channel} {version}",
+        &[
+            ("channel", crate::desktop_i18n::tr(channel)),
+            ("version", version),
+        ],
+    )
+}
+
+/// The Update channel Settings shows when none is saved: this build's own.
+pub fn build_channel() -> UpdateChannel {
+    let home = home_channel(&Method::Unknown, BUILD_CHANNEL, env!("CARGO_PKG_VERSION"));
+    if home == UpdateChannel::Dev.name() {
+        UpdateChannel::Dev
+    } else {
+        UpdateChannel::Stable
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -112,7 +154,14 @@ enum State {
     Download {
         url: String,
     },
-    /// The package manager serves a newer version.
+    /// The setting names another channel, whose current release waits for
+    /// the user to confirm the switch.
+    Switch {
+        channel: String,
+        version: String,
+        sha256: String,
+    },
+    /// The package manager serves another version.
     Command {
         command: String,
     },
@@ -127,6 +176,8 @@ struct Shared {
     signal: Condvar,
     /// The channel and start of the latest check.
     last: Mutex<Option<(String, std::time::Instant)>>,
+    /// The SHA-256 of the other channel's release the user agreed to switch to.
+    confirmed: Mutex<Option<String>>,
 }
 
 #[derive(Default)]
@@ -145,6 +196,8 @@ impl Updater {
         let method = platform::method();
         let disabled = if option_env!("HEX_TEST_BUILD") == Some("1") {
             Some(DesktopUpdateStatus::Unavailable)
+        } else if crate::app_paths::is_local_build() {
+            Some(DesktopUpdateStatus::SourceBuild)
         } else if managed_by_policy() {
             Some(DesktopUpdateStatus::Managed)
         } else if method == Method::Source {
@@ -162,6 +215,7 @@ impl Updater {
             wake: Mutex::new(Wake::default()),
             signal: Condvar::new(),
             last: Mutex::new(None),
+            confirmed: Mutex::new(None),
         });
         if checks {
             let worker = shared.clone();
@@ -187,6 +241,7 @@ impl Updater {
                 wake: Mutex::new(Wake::default()),
                 signal: Condvar::new(),
                 last: Mutex::new(None),
+                confirmed: Mutex::new(None),
             }),
         }
     }
@@ -201,6 +256,7 @@ impl Updater {
                 wake: Mutex::new(Wake::default()),
                 signal: Condvar::new(),
                 last: Mutex::new(None),
+                confirmed: Mutex::new(None),
             }),
         }
     }
@@ -251,6 +307,12 @@ impl Updater {
             State::Downloading => DesktopUpdateStatus::Downloading,
             State::Ready(_) | State::Applied => DesktopUpdateStatus::ReadyToRestart,
             State::Download { .. } => DesktopUpdateStatus::Available,
+            State::Switch {
+                channel, version, ..
+            } => DesktopUpdateStatus::SwitchAvailable {
+                channel: channel.clone(),
+                version: version.clone(),
+            },
             State::Command { command } => DesktopUpdateStatus::PackageUpdate {
                 command: command.clone(),
             },
@@ -265,6 +327,7 @@ impl Updater {
             DesktopAction::CheckForUpdates => self.check_now(),
             DesktopAction::WindowFocused => self.window_focused(),
             DesktopAction::OpenUpdate => self.open_download(),
+            DesktopAction::ConfirmUpdateSwitch => self.confirm_switch(),
             DesktopAction::RestartIntoUpdate => {
                 self.restart_into_update()?;
                 return Ok(true);
@@ -280,8 +343,19 @@ impl Updater {
         match self.status() {
             DesktopUpdateStatus::ReadyToRestart => DesktopAction::RestartIntoUpdate,
             DesktopUpdateStatus::Available => DesktopAction::OpenUpdate,
+            DesktopUpdateStatus::SwitchAvailable { .. } => DesktopAction::ConfirmUpdateSwitch,
             _ => DesktopAction::CheckForUpdates,
         }
+    }
+
+    /// The user agreed to switch to the other channel's release on offer:
+    /// download and stage it now.
+    fn confirm_switch(&self) {
+        let State::Switch { sha256, .. } = lock(&self.shared.state).clone() else {
+            return;
+        };
+        *lock(&self.shared.confirmed) = Some(sha256);
+        self.check_now();
     }
 
     /// Opens the download an install that cannot update itself needs.
@@ -401,7 +475,8 @@ fn check(shared: &Shared, method: &Method, cache: &mut transport::ManifestCache)
     // Read each check, so a change from the window or `hex settings` applies
     // at the next one.
     let setting = AppSettings::saved_update_channel();
-    let channel = channel(method, setting, env!("CARGO_PKG_VERSION"));
+    let home = home_channel(method, BUILD_CHANNEL, env!("CARGO_PKG_VERSION"));
+    let channel = channel(method, setting, &home);
     *lock(&shared.last) = Some((channel.clone(), std::time::Instant::now()));
     let manifest_url = manifest_url(&channel);
     let manifest = cache.fetch(&manifest_url, &updates)?;
@@ -410,6 +485,11 @@ fn check(shared: &Shared, method: &Method, cache: &mut transport::ManifestCache)
         target: platform::TARGET.into(),
         distribution: method.distribution().into(),
         rollout_bucket: rollout_bucket(&crate::app_paths::support_dir()?)?,
+        sha256: match method {
+            Method::Direct { .. } => running_sha256(),
+            _ => None,
+        },
+        channel: (!matches!(method, Method::Package(_))).then_some(home),
     };
     let decision = protocol::decide(APP, ARTIFACT, &channel, &manifest, &install);
     tracing::info!(?decision, "update decision");
@@ -427,6 +507,19 @@ fn check(shared: &Shared, method: &Method, cache: &mut transport::ManifestCache)
                 url: notes_url.unwrap_or_else(|| "https://anoma.ly/hex".into()),
             },
         }),
+        Decision::Install {
+            reason: protocol::Reason::Switch,
+            version,
+            target,
+        } if *method != Method::DownloadOnly
+            && lock(&shared.confirmed).as_deref() != Some(target.sha256.as_str()) =>
+        {
+            Ok(State::Switch {
+                channel,
+                version,
+                sha256: target.sha256,
+            })
+        }
         Decision::Install {
             version, target, ..
         } => {
@@ -465,6 +558,13 @@ fn manifest_url(channel: &str) -> String {
         "{}/{APP}/{ARTIFACT}/{channel}.json",
         origin.as_deref().unwrap_or(ORIGIN).trim_end_matches('/')
     )
+}
+
+/// This build's target SHA-256, when the platform can tell (the target is
+/// the executable itself); hashed once per launch.
+fn running_sha256() -> Option<String> {
+    static SHA256: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+    SHA256.get_or_init(platform::running_sha256).clone()
 }
 
 fn updates_dir() -> Result<PathBuf> {
@@ -599,6 +699,7 @@ mod tests {
                 wake: Mutex::new(Wake::default()),
                 signal: Condvar::new(),
                 last: Mutex::new(None),
+                confirmed: Mutex::new(None),
             }),
         };
         for state in [State::Checking, State::Current, State::Failed] {
@@ -618,95 +719,134 @@ mod tests {
     }
 
     #[test]
-    fn the_setting_picks_the_channel_unless_a_package_manager_updates_hex() {
+    fn a_build_belongs_to_the_channel_it_was_published_on() {
         let direct = Method::Direct {
             channel: "beta".into(),
         };
-        assert_eq!(channel(&direct, None, "2.4.0"), "beta");
-        assert_eq!(channel(&direct, None, "2.4.0-dev.12"), "dev");
+        assert_eq!(home_channel(&direct, Some("dev"), "0.0.0-dev-40"), "dev");
+        assert_eq!(home_channel(&direct, Some("stable"), "2.4.0"), "stable");
+        // Builds from before the stamp: a dev version, else the receipt.
+        assert_eq!(home_channel(&direct, None, "2.3.2-dev.29"), "dev");
+        assert_eq!(home_channel(&direct, None, "0.0.0-dev-40"), "dev");
+        assert_eq!(home_channel(&direct, None, "2.4.0"), "beta");
+        assert_eq!(home_channel(&direct, Some("nightly"), "2.4.0"), "beta");
         assert_eq!(
-            channel(&direct, Some(UpdateChannel::Stable), "2.4.0-dev.12"),
-            "stable"
-        );
-        assert_eq!(channel(&direct, Some(UpdateChannel::Dev), "2.4.0"), "dev");
-        assert_eq!(channel(&Method::DownloadOnly, None, "2.4.0"), "stable");
-        assert_eq!(
-            channel(&Method::DownloadOnly, Some(UpdateChannel::Dev), "2.4.0"),
-            "dev"
-        );
-        assert_eq!(
-            channel(
-                &Method::Package("aur"),
-                Some(UpdateChannel::Dev),
-                "2.4.0-dev.1"
-            ),
+            home_channel(&Method::Package("aur"), Some("dev"), "0.0.0-dev-40"),
             "stable"
         );
     }
 
     #[test]
-    fn switching_from_dev_to_stable_never_downgrades() {
-        let manifest = |channel: &str, version: &str| {
-            serde_json::json!({
-                "schema": 1,
-                "app": "hex",
-                "artifact": "desktop",
-                "channel": channel,
-                "sequence": 1,
-                "published_at": "2026-10-27T00:00:00Z",
-                "release": {
-                    "version": version,
-                    "rollout_percent": 100,
-                    "revoked_versions": [],
-                    "distributions": [{ "kind": "direct" }],
-                    "targets": {
-                        "macos-arm64": {
-                            "url": "/release/hex/files/aa/Hex.zip",
-                            "sha256": "a".repeat(64),
-                            "size": 1
-                        }
+    fn the_setting_picks_the_channel_unless_a_package_manager_updates_hex() {
+        let direct = Method::Direct {
+            channel: "stable".into(),
+        };
+        assert_eq!(channel(&direct, None, "dev"), "dev");
+        assert_eq!(
+            channel(&direct, Some(UpdateChannel::Stable), "dev"),
+            "stable"
+        );
+        assert_eq!(channel(&direct, Some(UpdateChannel::Dev), "stable"), "dev");
+        assert_eq!(
+            channel(&Method::DownloadOnly, Some(UpdateChannel::Dev), "stable"),
+            "dev"
+        );
+        assert_eq!(
+            channel(&Method::Package("aur"), Some(UpdateChannel::Dev), "stable"),
+            "stable"
+        );
+    }
+
+    fn manifest(channel: &str, version: &str, sha: char) -> String {
+        let sha = sha.to_string().repeat(64);
+        serde_json::json!({
+            "schema": 1,
+            "app": "hex",
+            "artifact": "desktop",
+            "channel": channel,
+            "sequence": 1,
+            "published_at": "2026-10-27T00:00:00Z",
+            "release": {
+                "version": version,
+                "rollout_percent": 100,
+                "revoked_versions": [],
+                "distributions": [{ "kind": "direct" }],
+                "targets": {
+                    "linux-x64": {
+                        "url": format!("/release/hex/files/{sha}/hex"),
+                        "sha256": sha,
+                        "size": 1
                     }
                 }
-            })
-            .to_string()
-        };
-        let install = |version: &str| Install {
+            }
+        })
+        .to_string()
+    }
+
+    fn install(version: &str, sha: char, channel: &str) -> Install {
+        Install {
             version: version.into(),
-            target: "macos-arm64".into(),
+            target: "linux-x64".into(),
             distribution: "direct".into(),
             rollout_bucket: 0,
-        };
-        let running = install("2.4.0-dev.12");
+            sha256: Some(sha.to_string().repeat(64)),
+            channel: Some(channel.into()),
+        }
+    }
+
+    #[test]
+    fn versions_are_never_compared_across_or_within_channels() {
+        let dev = install("0.0.0-dev-40", 'a', "dev");
+        // A legacy dev version above the new numbering still moves to it.
+        let legacy = install("2.3.2-dev.29", 'f', "dev");
+        let next = manifest("dev", "0.0.0-dev-41", 'b');
+        for running in [&dev, &legacy] {
+            assert!(matches!(
+                protocol::decide(APP, ARTIFACT, "dev", &next, running),
+                Decision::Install {
+                    reason: protocol::Reason::Update,
+                    ..
+                }
+            ));
+        }
+        let same = manifest("dev", "0.0.0-dev-40", 'a');
         assert!(matches!(
-            protocol::decide(
-                APP,
-                ARTIFACT,
-                "stable",
-                &manifest("stable", "2.3.1"),
-                &running
-            ),
+            protocol::decide(APP, ARTIFACT, "dev", &same, &dev),
             Decision::None { .. }
         ));
+        // Stable 2.3.1 is a switch from dev, never "older".
+        let stable = manifest("stable", "2.3.1", 'c');
         assert!(matches!(
-            protocol::decide(
-                APP,
-                ARTIFACT,
-                "stable",
-                &manifest("stable", "2.4.0"),
-                &running
-            ),
-            Decision::Install { .. }
+            protocol::decide(APP, ARTIFACT, "stable", &stable, &dev),
+            Decision::Install {
+                reason: protocol::Reason::Switch,
+                ..
+            }
         ));
-        assert!(matches!(
-            protocol::decide(
-                APP,
-                ARTIFACT,
-                "dev",
-                &manifest("dev", "2.4.0-dev.13"),
-                &running
-            ),
-            Decision::Install { .. }
-        ));
+    }
+
+    #[test]
+    fn a_switch_waits_for_the_user_to_confirm() {
+        let updater = Updater::idle_checking();
+        *lock(&updater.shared.state) = State::Switch {
+            channel: "stable".into(),
+            version: "2.3.1".into(),
+            sha256: "c".repeat(64),
+        };
+        assert_eq!(
+            updater.status(),
+            DesktopUpdateStatus::SwitchAvailable {
+                channel: "stable".into(),
+                version: "2.3.1".into()
+            }
+        );
+        assert!(lock(&updater.shared.confirmed).is_none());
+        assert!(!updater.act(&DesktopAction::ConfirmUpdateSwitch).unwrap());
+        assert_eq!(
+            lock(&updater.shared.confirmed).as_deref(),
+            Some("c".repeat(64).as_str())
+        );
+        assert!(lock(&updater.shared.wake).check, "confirming checks now");
     }
 
     #[test]

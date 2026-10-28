@@ -1,16 +1,17 @@
 name: Build desktop
 
-# Builds the Linux x86_64 executable and the Windows x64 and ARM64
-# executables and installers from one commit, named as the release service
-# targets (docs/plans/release-service.md). Release calls it to release; Test
-# builds calls it with test-build so every push to dev has downloadable
-# builds that never update themselves.
+# Builds the unsigned Linux x64 and ARM64 executables with their .deb and
+# .rpm packages, and the Windows x64 and ARM64 executables, from one commit,
+# named as the release service targets
+# (docs/plans/release-service.md). Release calls it for every release, Test
+# builds with test-build so every push to dev has downloadable builds that
+# never update themselves.
 #
-# Windows executables compile without credentials; one packaging job then
-# Authenticode-signs both executables through Azure Artifact Signing (when
-# signing-environment names a GitHub environment that has the Azure values),
-# builds both installers around the signed bytes, and signs the installers.
-# The installers are then tested on native x64 and ARM64 runners.
+# These jobs run repository code (cargo, build.rs, scripts), so they have no
+# environment, no secrets, and no id-token. Each uploads one artifact through
+# .github/release/upload, which writes its SHA256SUMS, and reports that
+# manifest's digest as an output; the jobs that sign or publish the artifact
+# check it (.github/release/verify-artifacts.sh).
 on:
   workflow_call:
     inputs:
@@ -20,141 +21,168 @@ on:
       version:
         required: true
         type: string
+      channel:
+        description: The release channel this build is published on, compiled in as HEX_BUILD_CHANNEL (src/updater.rs); empty for test builds
+        type: string
+        default: ""
       test-build:
         type: boolean
         default: false
       artifact-prefix:
         type: string
-        default: hex
+        default: build
       retention-days:
         type: number
         default: 0
-      signing-environment:
-        description: The environment to Authenticode-sign in when it has the Azure values (release or release-dev); empty never signs
-        type: string
-        default: ""
-    secrets:
-      AZURE_CLIENT_ID:
-        required: false
-      AZURE_TENANT_ID:
-        required: false
-      AZURE_SUBSCRIPTION_ID:
-        required: false
-      AZURE_TRUSTED_SIGNING_ENDPOINT:
-        required: false
-      AZURE_TRUSTED_SIGNING_ACCOUNT_NAME:
-        required: false
-      AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE:
-        required: false
+    outputs:
+      linux-x64-digest:
+        value: ${{ jobs.linux-x64.outputs.digest }}
+      linux-arm64-digest:
+        value: ${{ jobs.linux-arm64.outputs.digest }}
+      windows-x64-digest:
+        value: ${{ jobs.windows-x64.outputs.digest }}
+      windows-arm64-digest:
+        value: ${{ jobs.windows-arm64.outputs.digest }}
 
 permissions:
   contents: read
 
 jobs:
-  linux:
+  # Both architectures build natively on Ubuntu 24.04, so the executable and
+  # packages need glibc 2.39 (Ubuntu 24.04, Debian 13, Fedora 40, Arch) rather
+  # than a rolling distribution's newest. ARM64 decodes on the GPU through
+  # Vulkan like x64 (Mesa's drivers on ARM boards and Asahi), falling back to
+  # the CPU without a Vulkan device.
+  linux-x64:
     name: Linux x86_64
     runs-on: ubuntu-24.04
     timeout-minutes: 90
-    # The supported Linux host is x86_64 Arch, so the release links against
-    # current Arch libraries; the glibc floor is reported in the summary.
-    container: archlinux:base-devel
     env:
       HEX_VERSION: ${{ inputs.version }}
-    steps:
-      - name: Install build dependencies
-        run: |
-          pacman -Syu --noconfirm --needed git rustup python alsa-lib curl jq openssl \
-            xxd file binutils util-linux glib2 \
-            libxkbcommon libxkbcommon-x11 libx11 libxcb libxcursor libxi libxrandr \
-            fontconfig freetype2 wayland systemd-libs openblas vulkan-headers \
-            vulkan-icd-loader shaderc spirv-headers clang cmake pkgconf
-          useradd --create-home builder
-      - uses: actions/checkout@v7
+      HEX_BUILD_CHANNEL: ${{ inputs.channel }}
+      HEX_LINUX_ARCH: x86_64
+      HEX_LINUX_LABEL: x64
+      NFPM_ARCHIVE: nfpm_2.48.0_Linux_x86_64.tar.gz
+      NFPM_SHA256: 6d7f9a28b2f397934403950fcbba83f598b08d02edbe79a0815b3b4897341750
+    outputs:
+      digest: ${{ steps.upload.outputs.digest }}
+    steps: &linux-steps
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.sha }}
-          path: source
           persist-credentials: false
-      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
-          path: tools
-          persist-credentials: false
-      - name: Restore the Cargo cache
+          toolchain: stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         if: inputs.test-build
-        uses: actions/cache@v6
         with:
-          path: |
-            /home/builder/.cargo/registry
-            /home/builder/.cargo/git
-            source/target
-          key: test-build-linux-${{ hashFiles('source/Cargo.lock') }}
-      - name: Build
+          key: test-build
+          cache-on-failure: true
+      - name: Install build dependencies
+        # libopenblas-dev only satisfies build.rs's -lopenblas, which
+        # --as-needed drops: the release links no system BLAS
+        # (scripts/build-linux.sh).
         run: |
-          mkdir -p dist
-          chown -R builder: "$GITHUB_WORKSPACE" /home/builder
-          runuser -u builder -- env HOME=/home/builder \
-            HEX_RELEASE_SOURCE="$GITHUB_WORKSPACE/source" \
-            HEX_RELEASE_DIST="$GITHUB_WORKSPACE/dist" \
-            CARGO_BUILD_JOBS=4 BLA_VENDOR=OpenBLAS OPENSSL_NO_VENDOR=1 \
-            CC=clang CXX=clang++ \
-            sh -c 'rustup default stable && tools/scripts/build-linux.sh'
+          sudo apt-get update
+          sudo apt-get install -y clang cmake pkg-config python3 file jq libasound2-dev \
+            libssl-dev libgtk-3-dev libxkbcommon-x11-dev libx11-xcb-dev libfontconfig1-dev \
+            libfreetype-dev libxcursor-dev libxi-dev libxrandr-dev libopenblas-dev \
+            libvulkan-dev glslc libshaderc-dev
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/nfpm.tar.gz" \
+            "https://github.com/goreleaser/nfpm/releases/download/v2.48.0/$NFPM_ARCHIVE"
+          echo "$NFPM_SHA256  $RUNNER_TEMP/nfpm.tar.gz" | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/bin"
+          tar -xzf "$RUNNER_TEMP/nfpm.tar.gz" -C "$RUNNER_TEMP/bin" nfpm
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+      - name: Build
+        env:
+          HEX_RELEASE_DIST: ${{ runner.temp }}/dist
+          CARGO_BUILD_JOBS: 4
+          OPENSSL_NO_VENDOR: 1
+          CC: clang
+          CXX: clang++
+        run: |
+          executable=$(scripts/build-linux.sh)
+          scripts/package-linux.sh "$executable" "$HEX_VERSION" "$HEX_LINUX_LABEL" "$HEX_RELEASE_DIST"
+      - name: Install the .deb here and the .rpm on Fedora
+        run: |
+          base="$RUNNER_TEMP/dist/hex-$HEX_VERSION-linux-$HEX_LINUX_LABEL"
+          dpkg-deb --info "$base.deb"
+          sudo apt-get install -y "$base.deb"
+          test "$(/usr/bin/hex --version | awk 'NF { value=$NF } END { print value }')" = "$HEX_VERSION"
+          dpkg-query -S /usr/bin/hex /usr/lib/systemd/user/hex.service /usr/share/applications/hex.desktop
+          sudo apt-get remove -y hex
+          docker run --rm -v "$RUNNER_TEMP/dist:/dist:ro" -e HEX_VERSION -e HEX_LINUX_LABEL fedora:42 sh -euc '
+            dnf install -y -q "/dist/hex-$HEX_VERSION-linux-$HEX_LINUX_LABEL.rpm"
+            test "$(hex --version | awk "NF { value=\$NF } END { print value }")" = "$HEX_VERSION"
+            rpm -qf /usr/bin/hex /usr/lib/systemd/user/hex.service /usr/share/applications/hex.desktop'
       - name: Report the glibc floor
         run: |
-          floor=$(objdump -T "dist/hex-$HEX_VERSION-linux-x64" | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -1)
-          ldd --version | head -1
-          echo "Linux artifact requires $floor." | tee -a "$GITHUB_STEP_SUMMARY"
-      - uses: actions/upload-artifact@v7
+          floor=$(objdump -T "$RUNNER_TEMP/dist/hex-$HEX_VERSION-linux-$HEX_LINUX_LABEL" | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -1)
+          echo "Linux $HEX_LINUX_LABEL artifact requires $floor." | tee -a "$GITHUB_STEP_SUMMARY"
+      - id: upload
+        uses: ./.github/release/upload
         with:
-          name: ${{ inputs.artifact-prefix }}-linux-x86_64
-          path: dist/hex-*-linux-x64
+          name: ${{ inputs.artifact-prefix }}-linux-${{ env.HEX_LINUX_ARCH }}
+          path: ${{ runner.temp }}/dist
           retention-days: ${{ inputs.retention-days }}
-          if-no-files-found: error
 
-  windows:
-    name: Windows ${{ matrix.arch }}
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 120
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - arch: x86_64
-            runner: windows-latest
-            dumpbin_host: Hostx64\\x64
-          - arch: aarch64
-            runner: windows-11-arm
-            dumpbin_host: Hostarm64\\arm64
+  linux-arm64:
+    name: Linux aarch64
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 90
     env:
       HEX_VERSION: ${{ inputs.version }}
-      HEX_WINDOWS_ARCH: ${{ matrix.arch }}
-      # Compiled into src/windows_updater.rs: test builds never self-update.
+      HEX_BUILD_CHANNEL: ${{ inputs.channel }}
+      HEX_LINUX_ARCH: aarch64
+      HEX_LINUX_LABEL: arm64
+      NFPM_ARCHIVE: nfpm_2.48.0_Linux_arm64.tar.gz
+      NFPM_SHA256: a9a75213763783b7669719e505474c748c5ad7dc66591a195619deb50f85c2f4
+    outputs:
+      digest: ${{ steps.upload.outputs.digest }}
+    steps: *linux-steps
+
+  windows-x64:
+    name: Windows x86_64
+    runs-on: windows-latest
+    timeout-minutes: 120
+    env:
+      HEX_VERSION: ${{ inputs.version }}
+      HEX_BUILD_CHANNEL: ${{ inputs.channel }}
+      HEX_WINDOWS_ARCH: x86_64
+      HEX_WINDOWS_LABEL: x64
+      DUMPBIN_HOST: Hostx64\\x64
+      # Compiled into src/updater.rs: test builds never self-update.
       HEX_TEST_BUILD: ${{ inputs.test-build && '1' || '' }}
-    steps:
-      - uses: actions/checkout@v7
+    outputs:
+      digest: ${{ steps.upload.outputs.digest }}
+    steps: &windows-steps
+      # In a subdirectory: the Vulkan SDK installs into the workspace, and a
+      # release build needs a clean tree.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.sha }}
           path: source
           persist-credentials: false
-      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
-          path: tools
-          persist-credentials: false
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.arch }}-pc-windows-msvc
-      - uses: Swatinem/rust-cache@v2
+          toolchain: stable
+          targets: ${{ env.HEX_WINDOWS_ARCH }}-pc-windows-msvc
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         if: inputs.test-build
         with:
           workspaces: source -> target
           key: test-build
           cache-on-failure: true
       - name: Install the Vulkan SDK
-        if: matrix.arch == 'x86_64'
-        uses: humbletim/install-vulkan-sdk@v1.2
+        if: env.HEX_WINDOWS_ARCH == 'x86_64'
+        uses: humbletim/install-vulkan-sdk@30ba978f977e81b72d091fc8888feb1fb26f9aff # v1.2
         with:
           version: 1.4.309.0
           cache: true
       - name: Install SPIRV-Headers for the Vulkan backend
-        if: matrix.arch == 'x86_64'
+        if: env.HEX_WINDOWS_ARCH == 'x86_64'
         shell: pwsh
         run: |
           vcpkg install spirv-headers:x64-windows
@@ -163,7 +191,7 @@ jobs:
           $combined = if ($env:CMAKE_PREFIX_PATH) { "$prefix;$env:CMAKE_PREFIX_PATH" } else { $prefix }
           Add-Content $env:GITHUB_ENV "CMAKE_PREFIX_PATH=$combined"
       - name: Configure clang-cl for ARM64
-        if: matrix.arch == 'aarch64'
+        if: env.HEX_WINDOWS_ARCH == 'aarch64'
         shell: pwsh
         run: |
           @(
@@ -179,201 +207,36 @@ jobs:
           # Git Bash would rewrite CL=/EHsc into a path that clang-cl reads as
           # a second source file.
           export MSYS2_ENV_CONV_EXCL=CL
-          export HEX_RELEASE_SOURCE="$(cygpath -u "$GITHUB_WORKSPACE")/source"
-          export HEX_RELEASE_DIST="$(cygpath -u "$GITHUB_WORKSPACE")/dist"
-          tools/scripts/build-windows.sh
+          export HEX_RELEASE_DIST="$(cygpath -u "$RUNNER_TEMP")/dist"
+          source/scripts/build-windows.sh
       - name: Check the executable needs no Visual C++ Redistributable
         shell: pwsh
         run: |
-          $label = if ($env:HEX_WINDOWS_ARCH -eq 'x86_64') { 'x64' } else { 'arm64' }
           $dumpbin = Get-ChildItem "${env:ProgramFiles}\Microsoft Visual Studio" -Recurse -Filter dumpbin.exe -ErrorAction SilentlyContinue |
-            Where-Object { $_.FullName -match '${{ matrix.dumpbin_host }}' } | Select-Object -First 1
+            Where-Object { $_.FullName -match $env:DUMPBIN_HOST } | Select-Object -First 1
           if (-not $dumpbin) { throw "dumpbin.exe was not found" }
-          $imports = & $dumpbin.FullName /dependents "dist/Hex-$env:HEX_VERSION-windows-$label.exe"
+          $imports = & $dumpbin.FullName /dependents "$env:RUNNER_TEMP/dist/Hex-$env:HEX_VERSION-windows-$env:HEX_WINDOWS_LABEL.exe"
           $imports
           $redist = $imports | Select-String -Pattern 'VCRUNTIME|MSVCP|vcomp'
           if ($redist) { throw "hex.exe imports Visual C++ runtime DLLs: $redist" }
-      # Not named after artifact-prefix: Release downloads hex-*-*.
-      - uses: actions/upload-artifact@v7
+      - id: upload
+        uses: ./source/.github/release/upload
         with:
-          name: unsigned-windows-${{ matrix.arch }}
-          path: dist/
-          retention-days: 1
-          if-no-files-found: error
+          name: ${{ inputs.artifact-prefix }}-windows-${{ env.HEX_WINDOWS_ARCH }}
+          path: ${{ runner.temp }}/dist
+          retention-days: ${{ inputs.retention-days }}
 
-  windows-package:
-    name: Windows sign and package
-    needs: windows
-    runs-on: windows-latest
-    timeout-minutes: 30
-    # The Azure federated credential trusts only this environment.
-    environment: ${{ inputs.signing-environment }}
-    permissions:
-      contents: read
-      id-token: write
+  windows-arm64:
+    name: Windows aarch64
+    runs-on: windows-11-arm
+    timeout-minutes: 120
     env:
       HEX_VERSION: ${{ inputs.version }}
-      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
-      AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
-      AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-      AZURE_TRUSTED_SIGNING_ENDPOINT: ${{ secrets.AZURE_TRUSTED_SIGNING_ENDPOINT }}
-      AZURE_TRUSTED_SIGNING_ACCOUNT_NAME: ${{ secrets.AZURE_TRUSTED_SIGNING_ACCOUNT_NAME }}
-      AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE: ${{ secrets.AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE }}
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          path: tools
-          persist-credentials: false
-      - uses: actions/download-artifact@v8
-        with:
-          pattern: unsigned-windows-*
-          path: dist
-          merge-multiple: true
-      - name: Decide whether to sign
-        id: signing
-        shell: bash
-        env:
-          REQUESTED: ${{ inputs.signing-environment != '' }}
-        run: |
-          configured=true
-          for name in AZURE_CLIENT_ID AZURE_TENANT_ID AZURE_SUBSCRIPTION_ID AZURE_TRUSTED_SIGNING_ENDPOINT \
-            AZURE_TRUSTED_SIGNING_ACCOUNT_NAME AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE; do
-            if [ -z "$(printenv "$name")" ]; then
-              configured=false
-            fi
-          done
-          if [ "$REQUESTED" = true ] && [ "$configured" = true ]; then
-            echo "enabled=true" >> "$GITHUB_OUTPUT"
-            echo "Windows executables and installers are Authenticode-signed." >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo "enabled=false" >> "$GITHUB_OUTPUT"
-            if [ "$REQUESTED" = true ]; then
-              echo "::warning::Azure Artifact Signing is not configured in the release environment; the Windows builds are unsigned."
-            fi
-            echo "Windows executables and installers are not Authenticode-signed." >> "$GITHUB_STEP_SUMMARY"
-          fi
-      - name: Sign in to Azure
-        if: steps.signing.outputs.enabled == 'true'
-        uses: azure/login@v3
-        with:
-          client-id: ${{ env.AZURE_CLIENT_ID }}
-          tenant-id: ${{ env.AZURE_TENANT_ID }}
-          subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
-      - name: Sign the executables
-        if: steps.signing.outputs.enabled == 'true'
-        uses: azure/artifact-signing-action@v2
-        with:
-          endpoint: ${{ env.AZURE_TRUSTED_SIGNING_ENDPOINT }}
-          signing-account-name: ${{ env.AZURE_TRUSTED_SIGNING_ACCOUNT_NAME }}
-          certificate-profile-name: ${{ env.AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE }}
-          files-folder: ${{ github.workspace }}\dist
-          files-folder-filter: exe
-          file-digest: SHA256
-          timestamp-rfc3161: http://timestamp.acs.microsoft.com
-          timestamp-digest: SHA256
-          description: Hex
-          description-url: https://github.com/anomalyco/hex
-          exclude-environment-credential: true
-          exclude-workload-identity-credential: true
-          exclude-managed-identity-credential: true
-          exclude-shared-token-cache-credential: true
-          exclude-visual-studio-credential: true
-          exclude-visual-studio-code-credential: true
-          exclude-azure-cli-credential: false
-          exclude-azure-powershell-credential: true
-          exclude-azure-developer-cli-credential: true
-          exclude-interactive-browser-credential: true
-      - name: Build the installers around the executables
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force installers | Out-Null
-          foreach ($arch in 'x86_64', 'aarch64') {
-            $label = if ($arch -eq 'x86_64') { 'x64' } else { 'arm64' }
-            tools/scripts/build-windows-installer.ps1 -Executable "dist/Hex-$env:HEX_VERSION-windows-$label.exe" -Version $env:HEX_VERSION -Arch $arch -OutDir installers
-          }
-      - name: Sign the installers
-        if: steps.signing.outputs.enabled == 'true'
-        uses: azure/artifact-signing-action@v2
-        with:
-          endpoint: ${{ env.AZURE_TRUSTED_SIGNING_ENDPOINT }}
-          signing-account-name: ${{ env.AZURE_TRUSTED_SIGNING_ACCOUNT_NAME }}
-          certificate-profile-name: ${{ env.AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE }}
-          files-folder: ${{ github.workspace }}\installers
-          files-folder-filter: exe
-          file-digest: SHA256
-          timestamp-rfc3161: http://timestamp.acs.microsoft.com
-          timestamp-digest: SHA256
-          description: Hex
-          description-url: https://github.com/anomalyco/hex
-          exclude-environment-credential: true
-          exclude-workload-identity-credential: true
-          exclude-managed-identity-credential: true
-          exclude-shared-token-cache-credential: true
-          exclude-visual-studio-credential: true
-          exclude-visual-studio-code-credential: true
-          exclude-azure-cli-credential: false
-          exclude-azure-powershell-credential: true
-          exclude-azure-developer-cli-credential: true
-          exclude-interactive-browser-credential: true
-      - name: Check the signatures
-        if: steps.signing.outputs.enabled == 'true'
-        shell: pwsh
-        run: tools/scripts/windows-authenticode.ps1 -Folders dist, installers
-      - name: Collect each architecture's files
-        shell: pwsh
-        run: |
-          foreach ($arch in 'x86_64', 'aarch64') {
-            $label = if ($arch -eq 'x86_64') { 'x64' } else { 'arm64' }
-            $out = New-Item -ItemType Directory -Force "out/$arch"
-            Copy-Item "dist/Hex-$env:HEX_VERSION-windows-$label.exe", "installers/Hex-Setup-$env:HEX_VERSION-windows-$label.exe" $out
-          }
-      - uses: actions/upload-artifact@v7
-        with:
-          name: ${{ inputs.artifact-prefix }}-windows-x86_64
-          path: out/x86_64/
-          retention-days: ${{ inputs.retention-days }}
-          if-no-files-found: error
-      - uses: actions/upload-artifact@v7
-        with:
-          name: ${{ inputs.artifact-prefix }}-windows-aarch64
-          path: out/aarch64/
-          retention-days: ${{ inputs.retention-days }}
-          if-no-files-found: error
-
-  windows-installer:
-    name: Windows ${{ matrix.arch }} installer
-    needs: windows-package
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - arch: x86_64
-            label: x64
-            runner: windows-latest
-          - arch: aarch64
-            label: arm64
-            runner: windows-11-arm
-    env:
-      HEX_VERSION: ${{ inputs.version }}
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          path: tools
-          persist-credentials: false
-      - uses: actions/download-artifact@v8
-        with:
-          name: ${{ inputs.artifact-prefix }}-windows-${{ matrix.arch }}
-          path: dist
-      - name: Install, reinstall, refuse a downgrade, and uninstall silently
-        shell: pwsh
-        run: |
-          tools/scripts/test-windows-installer.ps1 -Installer "dist/Hex-Setup-$env:HEX_VERSION-windows-${{ matrix.label }}.exe" -Executable "dist/Hex-$env:HEX_VERSION-windows-${{ matrix.label }}.exe" -Version $env:HEX_VERSION
-      - name: Upload installer logs
-        if: failure()
-        uses: actions/upload-artifact@v7
-        with:
-          name: windows-installer-logs-${{ matrix.label }}
-          path: ${{ runner.temp }}/hex-installer-logs
-          if-no-files-found: ignore
+      HEX_BUILD_CHANNEL: ${{ inputs.channel }}
+      HEX_WINDOWS_ARCH: aarch64
+      HEX_WINDOWS_LABEL: arm64
+      DUMPBIN_HOST: Hostarm64\\arm64
+      HEX_TEST_BUILD: ${{ inputs.test-build && '1' || '' }}
+    outputs:
+      digest: ${{ steps.upload.outputs.digest }}
+    steps: *windows-steps

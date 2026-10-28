@@ -27,18 +27,18 @@
   <key>LSUIElement</key>
   <true/>
   <key>NSAppleEventsUsageDescription</key>
-  <string>HEX uses automation to identify the foreground app and browser and pause supported media while you dictate.</string>
+  <string>Hex uses automation to identify the foreground app and browser and pause supported media while you dictate.</string>
   <key>NSAccessibilityUsageDescription</key>
-  <string>HEX uses Accessibility to paste dictation and read selected text for Voice Action.</string>
+  <string>Hex uses Accessibility to paste dictation and read selected text for Voice Action.</string>
   <key>NSAudioCaptureUsageDescription</key>
-  <string>HEX records the other participants' audio only while you record a meeting, and keeps it on this Mac.</string>
+  <string>Hex records the other participants' audio only while you record a meeting, and keeps it on this Mac.</string>
   <key>NSCalendarsFullAccessUsageDescription</key>
-  <string>HEX reads your calendar on this Mac to remind you before meetings and title their recordings. Nothing leaves your Mac.</string>
+  <string>Hex reads your calendar on this Mac to remind you before meetings and title their recordings. Nothing leaves your Mac.</string>
   <key>NSCalendarsUsageDescription</key>
-  <string>HEX reads your calendar on this Mac to remind you before meetings and title their recordings. Nothing leaves your Mac.</string>
+  <string>Hex reads your calendar on this Mac to remind you before meetings and title their recordings. Nothing leaves your Mac.</string>
   <key>NSInputMonitoringUsageDescription</key>
-  <string>HEX uses Input Monitoring to detect your dictation shortcuts in every app.</string>
+  <string>Hex uses Input Monitoring to detect your dictation shortcuts in every app.</string>
   <key>NSMicrophoneUsageDescription</key>
-  <string>HEX uses your microphone for private local dictation and does not store the captured audio.</string>
+  <string>Hex uses your microphone for private local dictation and does not store the captured audio.</string>
 </dict>
 </plist>

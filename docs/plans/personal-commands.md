@@ -59,7 +59,7 @@ script/data URLs remain unsupported; use `openPath` for filesystem paths.
 The config may register named string transformations. Select them in a mode's
 Transformations section to run them in displayed order after that mode's
 corrections and optional OpenCode rewrite. This pipeline applies to Paste and
-Send, not Voice Action or meetings. If the transformation stage fails, HEX
+Send, not Voice Action or meetings. If the transformation stage fails, Hex
 keeps the text from before that stage, not partially transformed output.
 
 ```ts
@@ -116,7 +116,7 @@ export default defineHexConfig({
 })
 ```
 
-`start` matches an utterance prefix while HEX listens. `stop`, `send`, and
+`start` matches an utterance prefix while Hex listens. `stop`, `send`, and
 `cancel` match suffixes during active voice dictation. Each list must contain at
 least one phrase. Omitting the section uses the native protocol.
 
@@ -140,8 +140,8 @@ Provisioning installs:
 └── .hex-sdk/
 ```
 
-`.hex-sdk` is a bundled local package managed by HEX, not a published npm
-dependency, and must not be edited. When the personal-command host starts, HEX
+`.hex-sdk` is a bundled local package managed by Hex, not a published npm
+dependency, and must not be edited. When the personal-command host starts, Hex
 stages and replaces it from the running app bundle and runs the targeted
 `bun update @hex/commands` when its contents or required workspace dependencies
 change, or the installed host is missing. A plain install can retain stale
@@ -150,7 +150,7 @@ package metadata, scripts, and third-party dependencies are preserved. Existing
 scaffolded instructions and `tsconfig.json` are not overwritten by init or SDK
 refresh.
 
-There is one narrow metadata exception: on init and host startup, HEX adds a
+There is one narrow metadata exception: on init and host startup, Hex adds a
 missing Effect dependency or upgrades the exact legacy pins `4.0.0-beta.97` and
 `4.0.0-beta.107` to the bundled SDK's exact
 `peerDependencies.effect` version (currently `4.0.0`). Effect is required
@@ -163,7 +163,7 @@ Effect overrides/resolutions must be removed rather than automatically rewritten
 use the SDK-required exact version in `dependencies.effect`. Unrelated scoped
 packages such as `@effect/platform` and `@other/effect` are preserved. Bun 1.3.14
 honors `resolutions["**/effect"]`; some other selector forms are currently ignored
-or warned about, but HEX rejects them rather than relying on that behavior.
+or warned about, but Hex rejects them rather than relying on that behavior.
 
 Manifest validation failures leave existing files unchanged and report how to
 repair the manifest. A symlinked `package.json` is retained when already current;
@@ -177,10 +177,10 @@ legacy pin still triggers migration and installation on retry.
 
 Run `bun run check` in `~/.config/hex` after changing the config. This checks
 TypeScript, not Rust's phrase-overlap validation. While the personal-command
-host is running, HEX watches regular `.ts` and `.json` files in the workspace,
+host is running, Hex watches regular `.ts` and `.json` files in the workspace,
 activates valid changes, and reports the last reload error in the Commands pane.
 It does not watch `node_modules`, `.git`, or symlink targets. If host startup
-stopped because the config, Bun, or dependencies were unavailable, restart HEX
+stopped because the config, Bun, or dependencies were unavailable, restart Hex
 after repairing them.
 
 ## Runtime Boundary

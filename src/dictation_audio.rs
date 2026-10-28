@@ -358,7 +358,7 @@ impl DictationAudio {
             .then(|| input.device_name().to_owned())
             .or_else(|| device_override.map(str::to_owned))
             .or_else(|| selected_device.map(str::to_owned))
-            .unwrap_or_else(|| "Default microphone".into());
+            .unwrap_or_else(|| "System default".into());
         Self::with_input(
             input,
             device_name,
@@ -1240,7 +1240,9 @@ mod tests {
     fn owner_for_test(open: bool) -> (Owner, DictationAudio, Sender<(Vec<f32>, CaptureInstant)>) {
         let (mut input, opened) = RecoveringAudioInput::pending_for_test();
         let (replacement, samples) = crate::audio::AudioInput::channel_for_test();
-        opened.send((0, Ok(replacement))).unwrap();
+        opened
+            .send((0, Ok(crate::audio::Opened::Input(Box::new(replacement)))))
+            .unwrap();
         if open {
             assert!(matches!(
                 input.recv_timeout(Duration::ZERO, true),
@@ -1541,7 +1543,11 @@ mod tests {
             assert_ne!(second_generation, first_generation);
 
             let (late_input, late_samples) = crate::audio::AudioInput::channel_for_test();
-            assert!(first_opened.send((0, Ok(late_input))).is_err());
+            assert!(
+                first_opened
+                    .send((0, Ok(crate::audio::Opened::Input(Box::new(late_input)))))
+                    .is_err()
+            );
             assert!(late_samples.send((vec![0.75; 480], second_press)).is_err());
             let event = owner.input.recv_timeout(Duration::ZERO, false);
             assert!(matches!(event, RecoveringAudioInputEvent::Timeout));
@@ -1556,7 +1562,9 @@ mod tests {
                 reply,
             }));
             let (replacement, samples) = crate::audio::AudioInput::channel_for_test();
-            second_opened.send((0, Ok(replacement))).unwrap();
+            second_opened
+                .send((0, Ok(crate::audio::Opened::Input(Box::new(replacement)))))
+                .unwrap();
             let event = owner.input.recv_timeout(Duration::ZERO, false);
             assert!(matches!(event, RecoveringAudioInputEvent::Reopened));
             owner.handle_input(event);
@@ -1862,7 +1870,7 @@ mod tests {
 
     #[test]
     fn startup_microphone_failure_keeps_audio_owner_alive() {
-        let device = "HEX nonexistent microphone for startup recovery test";
+        let device = "Hex nonexistent microphone for startup recovery test";
         let input = DictationAudio::with_input(
             RecoveringAudioInput::failed_for_test(device),
             device.into(),
@@ -1962,7 +1970,9 @@ mod tests {
         .unwrap();
         assert!(!input.start(capture_time()).unwrap());
         let (replacement, samples) = crate::audio::AudioInput::channel_for_test();
-        opened.send((0, Ok(replacement))).unwrap();
+        opened
+            .send((0, Ok(crate::audio::Opened::Input(Box::new(replacement)))))
+            .unwrap();
         assert!(matches!(
             input.events.recv_timeout(Duration::from_secs(2)).unwrap(),
             DictationAudioEvent::Reopened
@@ -2043,7 +2053,9 @@ mod tests {
                 reply,
             }));
             let (second_stream, samples) = crate::audio::AudioInput::channel_for_test();
-            second_opened.send((0, Ok(second_stream))).unwrap();
+            second_opened
+                .send((0, Ok(crate::audio::Opened::Input(Box::new(second_stream)))))
+                .unwrap();
             let event = owner.input.recv_timeout(Duration::ZERO, false);
             owner.handle_input(event);
             assert!(matches!(

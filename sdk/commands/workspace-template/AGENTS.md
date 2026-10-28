@@ -1,11 +1,11 @@
-# HEX Custom Commands
+# Hex Custom Commands
 
 This workspace configures custom voice commands, typed captures, dictation
-control phrases, and text transformations for HEX on macOS. Run `bun run check`
+control phrases, and text transformations for Hex on macOS. Run `bun run check`
 after editing `hex.config.ts`; it checks TypeScript, not runtime phrase overlaps.
 A running host reloads valid `.ts` and `.json` changes and keeps the previous
 registry if evaluation or validation fails. It does not watch `node_modules`,
-`.git`, or symlink targets. Restart HEX after repairing a missing config, Bun,
+`.git`, or symlink targets. Restart Hex after repairing a missing config, Bun,
 or dependencies that prevented host startup.
 
 Spoken commands and dictation controls require the Commands opt-in, which
@@ -16,13 +16,13 @@ Config and dependencies execute as the current user with normal filesystem,
 network, environment, and subprocess access. This host is supervised, not
 sandboxed. Add only trusted packages and review commands before enabling them.
 
-`.hex-sdk` is managed by HEX and provides the local `@hex/commands` package. Do
-not edit it or replace it with an npm dependency. HEX refreshes the managed SDK
+`.hex-sdk` is managed by Hex and provides the local `@hex/commands` package. Do
+not edit it or replace it with an npm dependency. Hex refreshes the managed SDK
 from the running app bundle when the personal-command host starts, preserving
 user config and third-party dependencies. Bun must be installed separately;
 the host requires the exact Effect version in `.hex-sdk/package.json` even for
 Promise-only configs. Init and host startup can add a missing Effect dependency
-or migrate HEX's legacy pins; incompatible custom specifications are rejected,
+or migrate Hex's legacy pins; incompatible custom specifications are rejected,
 not silently replaced. Existing scaffolded instructions are not overwritten on
 SDK upgrades, so consult the installed SDK's exports when they differ.
 

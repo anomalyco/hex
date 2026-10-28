@@ -10,6 +10,7 @@ use scrawl_capture::capture::Stage;
 use super::CaptureCapsule;
 use super::flow::{Action, Delivered, Dest, Failure, Input, Mode, Route, Undone};
 use super::ink::InkOverlay;
+use super::picker::PickerOverlay;
 use crate::capture_host::{
     CaptureCommand, CaptureRoute, CaptureSnapshot, CaptureTarget, RouteAnswer, RouteDelivery,
     RouteDest, TargetKind,
@@ -275,6 +276,48 @@ fn capsule_route(answer: &RouteAnswer) -> Option<Route> {
     })
 }
 
+/// The capsule, its picker, and the ink, installed together.
+pub(crate) struct CaptureOverlays {
+    capsule: CaptureCapsule,
+    picker: PickerOverlay,
+    ink: InkOverlay,
+    /// Whether screen recordings may see them.
+    shown: bool,
+}
+
+impl CaptureOverlays {
+    /// Adds the three overlays, prewarmed and hidden, and starts following
+    /// captures.
+    pub(crate) fn install<S: 'static>(app: &mut rune::App<S>) -> Self {
+        let picker = PickerOverlay::install(app, act);
+        let aim = picker.clone();
+        let capsule = CaptureCapsule::install(app, move |action| act(aim.resolve(action)));
+        capsule.attach(picker.clone());
+        let ink = InkOverlay::install(app);
+        follow(capsule.clone(), ink.clone());
+        Self {
+            capsule,
+            picker,
+            ink,
+            shown: crate::capture_host::own_windows_recorded(),
+        }
+    }
+
+    /// Follows `capture.show_overlays_in_recordings` on windows already
+    /// made; returns the new value when it changed.
+    pub(crate) fn follow_recordings(&mut self) -> Option<bool> {
+        let shown = crate::capture_host::own_windows_recorded();
+        if shown == self.shown {
+            return None;
+        }
+        self.shown = shown;
+        self.capsule.show_in_recordings(shown);
+        self.picker.show_in_recordings(shown);
+        self.ink.show_in_recordings(shown);
+        Some(shown)
+    }
+}
+
 /// Moves `capsule` with every published capture change, and wakes `ink` to
 /// look for a recording capture's strokes, on its own thread for the life
 /// of the process.
@@ -284,12 +327,22 @@ pub(crate) fn follow(capsule: CaptureCapsule, ink: InkOverlay) {
         .spawn(move || {
             let watch = crate::capture_host::watch();
             let mut follow = Follow::default();
+            let images = rune::ImageCache::new(std::sync::Arc::new(|| {}));
             loop {
                 let Some(snapshot) = watch.wait(Duration::from_secs(3600)) else {
                     continue;
                 };
                 ink.wake();
-                for input in follow.next(&snapshot) {
+                let inputs = follow.next(&snapshot);
+                // The first frame goes ahead of "Copied", so the capsule
+                // lands with it rather than swapping its check a moment on.
+                if inputs.contains(&Input::Stage(Stage::Done))
+                    && let Some((bundle, _)) = &follow.shown
+                    && let Some(image) = first_frame(&images, bundle)
+                {
+                    capsule.thumbnail(image);
+                }
+                for input in inputs {
                     capsule.input(match input {
                         // The common first-capture failure: the engine's
                         // own reason for it is a ScreenCaptureKit error.
@@ -306,6 +359,20 @@ pub(crate) fn follow(capsule: CaptureCapsule, ink: InkOverlay) {
     if let Err(error) = spawned {
         tracing::warn!(%error, "could not start the capture capsule's thread");
     }
+}
+
+/// A written capture's first keyframe (or its contact sheet), decoded on
+/// the image cache's worker while this thread waits; `None` when neither
+/// reads or decodes.
+fn first_frame(images: &rune::ImageCache, bundle: &std::path::Path) -> Option<rune::Image> {
+    ["frames/frame-01.png", "contact-sheet.png"]
+        .into_iter()
+        .find_map(|name| {
+            let bytes = std::fs::read(bundle.join(name)).ok()?;
+            let image = images.load(bytes);
+            image.wait().ok()?;
+            Some(image)
+        })
 }
 
 /// Carries out a press or key on the capsule: Finish and Cancel end the
@@ -702,20 +769,20 @@ mod tests {
         let mut follow = Follow::default();
         follow.next(&recording("a"));
         let guess = || RouteAnswer::Guess {
-            suggested: vec![dest("HEX", "guess")],
+            suggested: vec![dest("HEX", "same page")],
             recent: Vec::new(),
             site: None,
         };
         follow.next(&routed("a", guess(), None));
         let queued = Some(RouteDelivery::Queued {
             to: "HEX".into(),
-            why: "OpenCode can't see this Mac's files".into(),
+            why: "OpenCode can't see files".into(),
         });
         assert_eq!(
             follow.next(&routed("a", guess(), queued)),
             [Input::Delivered(Delivered::Queued {
                 to: "HEX".into(),
-                why: "OpenCode can't see this Mac's files".into(),
+                why: "OpenCode can't see files".into(),
             })]
         );
         let sent = Some(RouteDelivery::Sent { to: "HEX".into() });

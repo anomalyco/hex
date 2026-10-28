@@ -81,7 +81,7 @@ artifacts or public integration commitments.
 | Model/inference operations | `src/local_api.rs`, `src/transcription_service.rs`, and `src/transcription_models.rs` implement authenticated preparation and bounded host-audio transcription. Apple Speech is currently unavailable despite its retained SDK identifier. | Consumer-specific real-model acceptance and concurrent-process validation. |
 | SDK | Published `0.3.0` adds model-bound `create({ model })`, raw-WAV transcription, and awaited cancellation cleanup in Promise and Effect. | Preserve low-level `create()`, `connect()`, and explicit-command use while completing native distribution. |
 | Native package | `sdk/service-darwin-arm64` is private at `0.0.0`; the client has no native optional dependency. | Publishable artifact, consumer bundling, and compatible client/helper release. |
-| Build | `scripts/build-service-app.sh` copies `target/release/voice-control` into a service bundle. | A transcription-only executable, not a renamed full desktop executable. |
+| Build | `scripts/build-service-app.sh` copies `target/release/hex` into a service bundle. | A transcription-only executable, not a renamed full desktop executable. |
 | Coupling | `local_api` references recognition/developer control; `transcription` and `parakeet` also contain desktop paths; `build.rs` compiles UI/permission resources. | Make the helper build independent of desktop-only code without duplicating inference. |
 | Platform | `local_api` and `transcription_service` are macOS-gated in `src/main.rs`. | Linux desktop support does not provide embedded service parity. |
 | Validation | `scripts/smoke-embedded-service.sh` and `scripts/smoke-service-app.sh` check API `2`. | Exercise consumer packaging and clean-machine distribution. |

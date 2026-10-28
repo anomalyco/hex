@@ -10,13 +10,13 @@ bundle=$1
 expected_name=$2
 version=$3
 build_number=$4
-team_id=${VOICE_CONTROL_TEAM_ID:?Set VOICE_CONTROL_TEAM_ID to the Apple Developer signing team}
+team_id=${HEX_TEAM_ID:?Set HEX_TEAM_ID to the Apple Developer signing team}
 plist="$bundle/Contents/Info.plist"
 # Logged only by a build with the `capture` feature (src/capture_host.rs).
 capture_marker='capture experiment on: `hex capture` is available'
 
 fail() {
-  echo "Rust HEX bundle validation failed: $*" >&2
+  echo "Rust Hex bundle validation failed: $*" >&2
   exit 1
 }
 

@@ -48,7 +48,7 @@ const data = current
       windowsArm64: fileUrl(current, "windows-arm64-setup", `${legacy}/releases/HEX-Setup-2.3.1-arm64.exe`),
       linuxInstaller: `${site}/install-linux.sh`,
       linuxCommand: `curl -fsSL ${site}/install-linux.sh | sh`,
-      github: `https://github.com/anomalyco/hex/releases/tag/app-v${current.release.version}`,
+      github: `https://github.com/anomalyco/hex/releases/tag/v${current.release.version}`,
       manifest: manifestUrl,
     }
   : {

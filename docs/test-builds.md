@@ -79,5 +79,5 @@ After Ctrl-C, `hex` starts the installed Hex again.
 
 Include the commit from the artifact name, the OS and architecture, and the
 logs: `~/Library/Application Support/hex/logs/` on macOS,
-`%APPDATA%\voice-control\logs\` on Windows, and
-`~/.local/share/voice-control/logs/` on Linux.
+`%APPDATA%\hex\logs\` on Windows, and
+`~/.local/share/hex/logs/` on Linux.

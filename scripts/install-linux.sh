@@ -17,6 +17,6 @@ target_dir=${CARGO_TARGET_DIR:-"$root/target"}
 cargo build --locked --release --manifest-path "$root/Cargo.toml"
 
 HEX_INSTALL_SOURCE=1 \
-HEX_INSTALL_ARTIFACT="$target_dir/release/voice-control" \
+HEX_INSTALL_ARTIFACT="$target_dir/release/hex" \
 HEX_INSTALL_VERSION="$version" \
   exec "$installer"

@@ -1,15 +1,15 @@
 ---
 name: hex-personal-commands
-description: Configure HEX personal voice commands, voice-dictation control phrases, and deterministic transcript transformations. Use when the user wants to add or change commands or transformations for the HEX macOS voice app.
+description: Configure Hex personal voice commands, voice-dictation control phrases, and deterministic transcript transformations. Use when the user wants to add or change commands or transformations for the Hex macOS voice app.
 license: MIT
 ---
 
-# HEX Personal Commands
+# Hex Personal Commands
 
-Use HEX's managed command workspace rather than creating an independent package.
+Use Hex's managed command workspace rather than creating an independent package.
 
 1. Check for `~/.config/hex/hex.config.ts`. If it is missing, ask the user to
-   open HEX's Commands pane and choose Create Config. If the `hex` CLI is
+   open Hex's Commands pane and choose Create Config. If the `hex` CLI is
    available, `hex commands init` performs the same provisioning. Bun must be
    installed separately.
 2. Read `~/.config/hex/AGENTS.md` and
@@ -18,7 +18,7 @@ Use HEX's managed command workspace rather than creating an independent package.
    and exact Effect requirement; scaffolded instructions are not overwritten
    on upgrades and may be older than the SDK.
 3. Edit only user-owned workspace files, normally `hex.config.ts`. Never edit
-   `.hex-sdk`; HEX refreshes that managed SDK from the app bundle.
+   `.hex-sdk`; Hex refreshes that managed SDK from the app bundle.
 4. Use `defineHexConfig` from `@hex/commands` for Promise handlers, dictation
    controls, and transformations. For Effect handlers, import `defineHexConfig`
    and `Hex` from `@hex/commands/effect`, and Effect APIs from `effect`.
@@ -42,7 +42,7 @@ Use HEX's managed command workspace rather than creating an independent package.
    checks TypeScript; runtime validation can still reject phrase overlaps.
    A running host watches workspace `.ts` and `.json` files and reports reload
    failures in the Commands pane. If startup stopped because the config, Bun,
-   or dependencies were unavailable, restart HEX after repairing them. Confirm
+   or dependencies were unavailable, restart Hex after repairing them. Confirm
    runtime activation when the host is enabled, or report that it was not tested.
 
 Completion criterion: the requested behavior is represented in
