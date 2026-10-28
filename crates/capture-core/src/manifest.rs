@@ -21,6 +21,8 @@ pub struct Manifest {
     /// sample 0 sits here.
     pub anchor_ns: u64,
     pub sources: Vec<SourceEntry>,
+    /// The files the recording left on disk. A source whose video failed is still in `sources`,
+    /// with its `error`, but its video is not listed here.
     pub files: Vec<FileEntry>,
     /// Spans of the microphone WAV that are silence because no audio arrived.
     pub audio_gaps: Vec<AudioGap>,

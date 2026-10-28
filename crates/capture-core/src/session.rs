@@ -506,6 +506,7 @@ impl Active {
         let mut files = sources
             .iter()
             .enumerate()
+            .filter(|(_, source)| self.dir.join(&source.file).is_file())
             .map(|(index, source)| FileEntry {
                 name: source.file.clone(),
                 kind: FileKind::Video { source: index },
