@@ -29,7 +29,7 @@ use crate::manifest::{
     Clock, FileEntry, FileKind, MANIFEST_VERSION, Manifest, Permission, SourceEntry, TrackKind,
     write_json,
 };
-use crate::plan::{Exclusions, MANIFEST_NAME, Names, Source};
+use crate::plan::{Exclusions, Names, Source};
 use crate::system_audio::SystemAudioWriter;
 use crate::time::{HostTime, MediaTime, host_delta_millis};
 

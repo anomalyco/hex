@@ -2,7 +2,7 @@ use std::sync::mpsc::Sender;
 
 use super::*;
 use crate::cursor::CursorCollector;
-use crate::plan::{AudioPlan, CursorDrawing, Exclusions, Input, Plan, SourcePlan};
+use crate::plan::{AudioPlan, CursorDrawing, Exclusions, Input, MANIFEST_NAME, Plan, SourcePlan};
 
 /// What the fake stream saw, in order.
 #[derive(Clone, Debug, PartialEq, Eq)]
