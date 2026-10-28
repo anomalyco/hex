@@ -299,6 +299,9 @@ substitute for source inspection or a second roadmap.
   and HUD on the main AppKit loop, and a runtime thread for model
   preparation and the window's state. `rune_ui/macos_host.rs` is the
   window's host and the panes' `NativeHost`.
+- `hud_placement`: pure geometry for where a HUD sits on its screen (below
+  the menu bar, in it, or as an island grown out of the notch), shared by
+  the dictation HUD and, later, the capture capsule.
 - `dictation_indicator`, `spring`: the click-through native Metal/AppKit
   capture and processing HUD (an `NSPanel` driven from `macos_rune`'s main-loop
   timer), with `spring` for its frame-rate-independent springs and Reduce

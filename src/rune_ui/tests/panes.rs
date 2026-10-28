@@ -1549,6 +1549,24 @@ fn hud_lab_tunes_dot_scope_when_its_experiment_is_on() {
 }
 
 #[test]
+fn hud_lab_picks_dot_scope_processing_placement_and_level() {
+    use crate::dot_scope::{Placement, Processing};
+    let mut rt = runtime("mac-hud-lab-dot-scope", true, PANE_SIZE);
+    tap(&mut rt, "dot-processing/segments/segment2");
+    tap(&mut rt, "dot-placement/segments/segment2");
+    tap(&mut rt, "dot-auto-level");
+    tap(&mut rt, "dot-pretend-notch");
+    let Some(PlatformRequest::TuneHud(lab)) = asked(&rt).last().cloned() else {
+        panic!("{:?}", asked(&rt));
+    };
+    let tuning = lab.dot_scope.unwrap();
+    assert_eq!(tuning.processing, Processing::Pulse);
+    assert_eq!(tuning.placement, Placement::Notch);
+    assert!(!tuning.auto_level && tuning.pretend_notch);
+    assert!(rt.find("dot-noise-floor").is_some());
+}
+
+#[test]
 fn release_builds_show_hud_lab_only_for_dot_scope() {
     // The scene is a release build (no developer panes) with the experiment on.
     let mut rt = runtime("mac-hud-lab-dot-scope", true, PANE_SIZE);

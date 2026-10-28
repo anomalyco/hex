@@ -23,6 +23,8 @@ mod history;
 #[cfg_attr(target_os = "macos", path = "rune_ui/macos_host.rs")]
 mod host;
 mod hud_lab;
+#[cfg(target_os = "macos")]
+mod hud_stories;
 mod lists;
 #[cfg(target_os = "macos")]
 pub(crate) mod meeting_capsules;
@@ -656,7 +658,7 @@ impl Ui {
         ui.platform.voice_filter =
             crate::experiments::enabled(crate::experiments::Experiment::VoiceFilter);
         if crate::experiments::enabled(crate::experiments::Experiment::DotScope) {
-            ui.platform.hud.dot_scope = Some(crate::dot_scope::Tuning::load());
+            ui.platform.hud.dot_scope = Some(crate::dot_scope::lab());
         }
         ui.tour = onboarding::Tour::start(&ui.settings, &ui.platform);
         ui.platform.set_login_item(host::launch_at_login());

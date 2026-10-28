@@ -9,7 +9,8 @@ use metal::{
     RenderPipelineDescriptor, RenderPipelineState,
 };
 
-use crate::dot_scope::{Frame, MAX_DOTS, Scope, Stage, Tuning, palette};
+use crate::dot_scope::{Frame, MAX_DOTS, Pose, Scope, Stage, Tuning, palette};
+use crate::hud_placement::{ISLAND_PAD, Island, Layout};
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -34,15 +35,27 @@ struct DotUniforms {
     plate: [f32; 4],
     rim: [f32; 4],
     shadow: [f32; 4],
+    /// The plate's middle from the window's (pt, y down), its fit, and 1
+    /// when it sits in an island.
+    layout: [f32; 4],
+    /// The island's half width, height, top edge (y from the window's
+    /// middle), and bottom corner radius, pt.
+    island: [f32; 4],
 }
 
-const _: () = assert!(std::mem::size_of::<DotUniforms>() == 144);
+const _: () = assert!(std::mem::size_of::<DotUniforms>() == 176);
+
+/// The notch's own bottom corner radius, which the island starts from.
+const NOTCH_RADIUS: f32 = 8.0;
+/// The open island's bottom corner radius.
+const ISLAND_RADIUS: f32 = 18.0;
 
 pub(super) struct DotScopeView {
     pipeline: RenderPipelineState,
     scope: Scope,
     stage: Stage,
     dark: bool,
+    layout: Layout,
     dots: Vec<[u16; 2]>,
 }
 
@@ -74,6 +87,7 @@ impl DotScopeView {
             scope: Scope::new(tuning),
             stage: Stage::Recording,
             dark: true,
+            layout: Layout::default(),
             dots: Vec::with_capacity(MAX_DOTS),
         })
     }
@@ -91,6 +105,10 @@ impl DotScopeView {
         self.dark = dark;
     }
 
+    pub(super) fn set_layout(&mut self, layout: Layout) {
+        self.layout = layout;
+    }
+
     /// Advances the scope. `stage` is `None` while the HUD hides or a
     /// capture was cancelled: the last stage fades out.
     pub(super) fn advance(
@@ -98,7 +116,7 @@ impl DotScopeView {
         dt: f32,
         stage: Option<Stage>,
         visible: bool,
-        level: f32,
+        loudness: f32,
         reduce_motion: bool,
     ) {
         if let Some(stage) = stage {
@@ -109,7 +127,7 @@ impl DotScopeView {
             Frame {
                 stage: self.stage,
                 visible,
-                level,
+                loudness,
                 reduce_motion,
             },
         );
@@ -127,7 +145,20 @@ impl DotScopeView {
     ) {
         let pose = self.scope.pose();
         let tuning = self.scope.tuning();
-        let colors = palette(self.dark, &pose, tuning.saturation);
+        let layout = self.layout;
+        // An island is black in either appearance and draws no plate.
+        let dark = self.dark || layout.island.is_some();
+        let mut colors = palette(dark, &pose, tuning.saturation);
+        if layout.island.is_some() {
+            for color in [&mut colors.plate, &mut colors.rim, &mut colors.shadow] {
+                color[3] = 0.0;
+            }
+        }
+        let mut center = layout.center;
+        if layout.anchor_left {
+            center[0] += pose.width * layout.fit / 2.0;
+        }
+        let island = layout.island.map_or([0.0; 4], |island| island_shape(island, &pose));
         let rgba = |c: [f32; 3]| [c[0], c[1], c[2], 1.0];
         let uniforms = DotUniforms {
             resolution,
@@ -144,12 +175,19 @@ impl DotScopeView {
             grid: pose.grid,
             live: pose.live,
             cool: pose.cool,
-            dark: if self.dark { 1.0 } else { 0.0 },
+            dark: if dark { 1.0 } else { 0.0 },
             base: rgba(colors.base),
             core: rgba(colors.core),
             plate: colors.plate,
             rim: colors.rim,
             shadow: colors.shadow,
+            layout: [
+                center[0],
+                center[1],
+                layout.fit,
+                if layout.island.is_some() { 1.0 } else { 0.0 },
+            ],
+            island,
         };
         self.dots.clear();
         self.dots.extend(
@@ -173,6 +211,24 @@ impl DotScopeView {
     }
 }
 
+/// The island for this pose: the notch itself while hidden, grown to hold
+/// the plate as it shows, bouncing with it.
+fn island_shape(island: Island, pose: &Pose) -> [f32; 4] {
+    let [notch_width, notch_height] = island.notch;
+    let pad = ISLAND_PAD as f32;
+    let grow = pose.reveal;
+    let half_width = notch_width / 2.0;
+    let open_half_width = (pose.width / 2.0 + pad).max(half_width) + 6.0;
+    let open_height = notch_height + 2.0 * pad + pose.height;
+    let height = notch_height + (open_height - notch_height) * grow;
+    [
+        half_width + (open_half_width - half_width) * grow,
+        height,
+        island.top,
+        (NOTCH_RADIUS + (ISLAND_RADIUS - NOTCH_RADIUS) * grow.min(1.0)).min(height / 2.0),
+    ]
+}
+
 /// Whether macOS is in dark mode, from the global `AppleInterfaceStyle`
 /// default. Main thread only.
 pub(super) fn system_is_dark() -> bool {
@@ -191,6 +247,8 @@ mod tests {
         assert_eq!(std::mem::offset_of!(DotUniforms, dark), 60);
         assert_eq!(std::mem::offset_of!(DotUniforms, base), 64);
         assert_eq!(std::mem::offset_of!(DotUniforms, shadow), 128);
+        assert_eq!(std::mem::offset_of!(DotUniforms, layout), 144);
+        assert_eq!(std::mem::offset_of!(DotUniforms, island), 160);
     }
 
     #[test]
@@ -206,6 +264,11 @@ mod tests {
     /// HEX_DOT_SCOPE_FRAMES=/tmp/frames HEX_DOT_SCOPE_THEME=light \
     ///   cargo test --bin hex dot_scope_frames -- --ignored
     /// ```
+    ///
+    /// `HEX_DOT_SCOPE_TUNING` overrides tuning fields as JSON (such as
+    /// `{"processing": "pulse", "auto_level": false}`); its placement
+    /// draws the window over a pretend 14-inch MacBook Pro's menu bar and
+    /// notch. `HEX_DOT_SCOPE_PROCESSING` is how many seconds it processes.
     #[test]
     #[ignore = "writes frames for a review clip"]
     fn dot_scope_frames() {
@@ -237,7 +300,7 @@ mod tests {
             .chunks(per_frame)
             .map(|chunk| {
                 let rms = (chunk.iter().map(|s| s * s).sum::<f32>() / chunk.len() as f32).sqrt();
-                crate::dot_scope::level_from_rms(rms)
+                crate::dot_scope::loudness(rms)
             })
             .collect();
 
@@ -248,10 +311,53 @@ mod tests {
                 "/dictation_indicator.metallib"
             )))
             .unwrap();
-        let mut view = DotScopeView::new(&device, &library, Tuning::default()).unwrap();
+        let mut fields = serde_json::to_value(Tuning::default()).unwrap();
+        if let Ok(json) = std::env::var("HEX_DOT_SCOPE_TUNING") {
+            let overrides: serde_json::Value = serde_json::from_str(&json).unwrap();
+            for (key, value) in overrides.as_object().unwrap() {
+                fields[key] = value.clone();
+            }
+        }
+        let tuning: Tuning = serde_json::from_value(fields).unwrap();
+        let processing: f32 = std::env::var("HEX_DOT_SCOPE_PROCESSING")
+            .map_or(1.2, |seconds| seconds.parse().unwrap());
+        let mut view = DotScopeView::new(&device, &library, tuning).unwrap();
         view.set_dark(dark);
         view.restart(false);
         let geometry = super::super::Geometry::DOT_SCOPE;
+        // A 14-inch MacBook Pro: a 32 pt menu bar around a notch 185 pt wide.
+        let screen = crate::hud_placement::Screen {
+            frame: crate::hud_placement::Rect {
+                x: 0.0,
+                y: 0.0,
+                width: 1512.0,
+                height: 982.0,
+            },
+            visible: crate::hud_placement::Rect {
+                x: 0.0,
+                y: 0.0,
+                width: 1512.0,
+                height: 950.0,
+            },
+            safe_top: 32.0,
+            aux_left: 663.5,
+            aux_right: 663.5,
+            bar: 24.0,
+        };
+        let placed = crate::hud_placement::place(
+            tuning.placement,
+            &screen,
+            crate::hud_placement::Content {
+                window: (f64::from(geometry.width), f64::from(geometry.height)),
+                plate: (
+                    f64::from(geometry.width) - 24.0,
+                    f64::from(geometry.capsule_height),
+                ),
+            },
+            false,
+        );
+        view.set_layout(placed.layout);
+        let window_left = placed.top_left.0 as f32;
         let scale = 2.0;
         let (width, height) = (
             (geometry.width * scale) as u64,
@@ -265,10 +371,27 @@ mod tests {
         descriptor.set_usage(MTLTextureUsage::RenderTarget);
         let texture = device.new_texture(&descriptor);
         let queue = device.new_command_queue();
-        let background: [f32; 3] = if dark {
+        let desktop: [f32; 3] = if dark {
             [0.11, 0.11, 0.13]
         } else {
             [0.93, 0.93, 0.94]
+        };
+        let bar: [f32; 3] = if dark {
+            [0.2, 0.2, 0.22]
+        } else {
+            [0.98, 0.98, 0.98]
+        };
+        // The desktop, and the menu bar and notch over it when the window
+        // hangs from the top edge.
+        let background = |x: u64, y: u64| -> [f32; 3] {
+            let (x, y) = (x as f32 / scale + window_left, y as f32 / scale);
+            if !placed.over_menu_bar || y >= 32.0 {
+                desktop
+            } else if (x - 756.0).abs() < 92.5 {
+                [0.0; 3]
+            } else {
+                bar
+            }
         };
 
         // Recording through the WAV and half a second after, transcribing,
@@ -279,12 +402,14 @@ mod tests {
                 (
                     Some(Stage::Recording),
                     true,
-                    levels.get(i).copied().unwrap_or(0.0),
+                    levels.get(i).copied().unwrap_or(-120.0),
                 )
             })
-            .chain((0..72).map(|_| (Some(Stage::Processing), true, 0.0)))
-            .chain((0..20).map(|_| (Some(Stage::Done), true, 0.0)))
-            .chain((0..30).map(|_| (None, false, 0.0)));
+            .chain(
+                (0..(processing * 60.0) as usize).map(|_| (Some(Stage::Processing), true, -120.0)),
+            )
+            .chain((0..20).map(|_| (Some(Stage::Done), true, -120.0)))
+            .chain((0..30).map(|_| (None, false, -120.0)));
         let mut pixels = vec![0_u8; (width * height * 4) as usize];
         for (frame, (stage, visible, level)) in schedule.enumerate() {
             view.advance(1.0 / 60.0, stage, visible, level, false);
@@ -309,11 +434,13 @@ mod tests {
             // Premultiplied BGRA over the background, as RGB.
             let rgb: Vec<u8> = pixels
                 .chunks(4)
-                .flat_map(|p| {
+                .enumerate()
+                .flat_map(|(n, p)| {
                     let a = f32::from(p[3]) / 255.0;
+                    let n = n as u64;
                     [p[2], p[1], p[0]]
                         .into_iter()
-                        .zip(background)
+                        .zip(background(n % width, n / width))
                         .map(move |(c, b)| {
                             ((f32::from(c) / 255.0 + b * (1.0 - a)) * 255.0).round() as u8
                         })

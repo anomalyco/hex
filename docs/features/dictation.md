@@ -891,10 +891,17 @@ It is the t422 prototype's look A with its values.
 
 ```ts
 Dot scope                                    // dot_scope
-├── Recording -> A scanner unfolds a resting braid; the level (RMS, −40 to −10 dB) widens it
+├── Recording -> A scanner unfolds a resting braid; the voice's level widens it
+│   ├── Auto level (default) -> 24 dB below the recent peak (3 s release),
+│   │   at least 16 dB above the room and the −60 dB noise floor   // AutoLevel
+│   ├── Auto level off -> Fixed RMS window, −40 to −10 dB
 │   └── Warm pearl; history travels out from the centre; phosphor tail 0.6 s
-├── Transcribing / Processing -> Braid irons flat; a cool beam sweeps 76 pt
-├── Completed -> The beam wipes the field dark (0.3 s), then fades
+├── Transcribing / Processing -> Processing look:
+│   ├── Flow (default) -> The braid keeps turning; bands of light travel right
+│   ├── Pulse -> Rings leave the middle
+│   └── Sweep -> Braid irons flat; a cool beam sweeps 76 pt (round 1)
+├── Completed -> Flow carries its last band off the right edge, Pulse clears
+│   from the middle out, Sweep's beam wipes the field (0.3 s); then it fades
 ├── Failed -> Coral, then fades
 ├── Reduce Motion -> A still braid; opacity fades only
 ├── Dark / light -> Read from AppleInterfaceStyle at each capture start
@@ -902,8 +909,25 @@ Dot scope                                    // dot_scope
 ```
 
 The simulation steps at a fixed 240 Hz, so any frame rate draws the same
-picture. Its window is 176×84 pt so the widest plate and its shadow fit; the
-plate's top sits where the capsule's did. HUD Lab tunes it live, in release
+picture. Placement ([hud_placement.rs](../../src/hud_placement.rs), pure
+geometry the capture capsule can reuse) puts it on the screen with the
+pointer:
+
+```ts
+Placement                                     // hud_placement::place
+├── Below the menu bar (default) -> Where the capsule sits, or above the Dock
+├── In the menu bar -> A plate fitted to the bar's height, centred on a flat
+│   screen, just right of the notch on a notched one
+├── From the notch -> A black island grows out of the notch, holding the plate,
+│   and shrinks back into it; In the menu bar on a flat screen
+├── Pretend notch -> Draws the island from a 185 pt notch on a flat screen
+└── Over the menu bar -> Window level NSStatusWindowLevel + 1, click-through
+```
+
+The window is 320×128 pt so the widest plate, its shadow, and the widest
+island fit. Notch metrics come from `safeAreaInsets.top` and
+`auxiliaryTopLeftArea`/`auxiliaryTopRightArea`; the bar's height from
+`NSStatusBar.systemStatusBar.thickness`. HUD Lab tunes it live, in release
 builds too while the experiment is on (Settings › Experiments › HUD Lab,
 showing only Dot scope's section; debug builds alone keep the capsule's
 styles):
@@ -914,20 +938,32 @@ HUD Lab (dot-scope on)
 ├── Move a slider -> Applies live to whatever the HUD shows, a real
 │   dictation included; the demo doesn't restart
 ├── Recording / Transcribing / Processing -> Restarts the demo in that state
+├── Processing, Placement, Pretend notch, Auto level -> Apply live
 ├── Save -> Writes dot-scope.json in Application Support; the HUD loads it at launch
 ├── Copy values -> The same JSON; Reset -> the prototype's values
 └── Leave the pane or close the window -> The demo hides; unsaved values
     stay on the HUD until Hex restarts
 ```
 
+The playground (⇧⌘D, experiment `playground`) lists HUD stories while
+`dot-scope` is on ([hud_stories.rs](../../src/rune_ui/hud_stories.rs)):
+Whole flow, Recording with a canned voice or your own (hold the shortcut),
+Processing, Done, and Cancel, each with a variant per placement. The HUD is
+a Metal panel, not a Rune view, so a story drives the real HUD at the top
+of the screen and its stage only says what it shows. Stories and HUD Lab
+edit one tuning (`dot_scope::lab`).
+
 Hex meters no spectrum, so the prototype's band emphasis is the same for
 every component.
 
 Check: `scripts/check dot_scope` (defaults, knobs, frame-rate independence,
-Reduce Motion, the stages) and
-`dot_scope_view::tests::dot_scope_frames` (ignored; renders the real
-shader offscreen from a WAV into PNG frames). Not yet observed on a real
-display through a real dictation.
+Reduce Motion, the stages, auto level, each processing look settling dark),
+`scripts/check hud_placement` (each placement on flat and notched screens),
+and `dot_scope_view::tests::dot_scope_frames` (ignored; renders the real
+shader offscreen from a WAV into PNG frames, with `HEX_DOT_SCOPE_TUNING`
+for the look and placement over a pretend 14-inch MacBook Pro's menu bar).
+Not yet observed on a real notched display, over a fullscreen app, or with
+a hidden menu bar.
 
 Hex itself never activates on paste. Another app's modifier-tap hotkey once
 switched Spaces before the paste; the [chord breaker](#hold-and-short-taps)
