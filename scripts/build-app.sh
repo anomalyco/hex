@@ -62,12 +62,27 @@ sign() {
 }
 
 export MACOSX_DEPLOYMENT_TARGET=15.0
+# Cargo may run through a wrapper that does not forward the environment (Kit's
+# HiveMind-backed cargo), so build-time variables also travel as --config.
+env_args=()
+if [ -z "${HEX_COMMIT:-}" ] && { [ "${HEX_LOCAL_BUILD:-}" = 1 ] || [ "${HEX_TEST_BUILD:-}" = 1 ]; }; then
+  HEX_COMMIT=$(git -C "$root" rev-parse --short=7 HEAD 2>/dev/null || true)
+fi
+for name in HEX_LOCAL_BUILD HEX_TEST_BUILD HEX_COMMIT HEX_BUILD_CHANNEL; do
+  value=${!name:-}
+  if [ -n "$value" ]; then
+    case "$value" in
+      *\'*) echo "$name must not contain a single quote" >&2; exit 1 ;;
+    esac
+    env_args+=(--config "env.$name='$value'")
+  fi
+done
 if [ -n "$capture" ]; then
   # The helper's embedded Info.plist names Hex, not Scrawl.
   SCRAWL_HELPER_PLIST="$root/packaging/macos/scrawl-helper-Info.plist" \
-    cargo build --locked --release --features capture --manifest-path "$root/Cargo.toml"
+    cargo build --locked --release --features capture ${env_args[@]+"${env_args[@]}"} --manifest-path "$root/Cargo.toml"
 else
-  cargo build --locked --release --manifest-path "$root/Cargo.toml"
+  cargo build --locked --release ${env_args[@]+"${env_args[@]}"} --manifest-path "$root/Cargo.toml"
 fi
 rm -rf "$bundle"
 mkdir -p "$bundle/Contents/MacOS" "$bundle/Contents/Resources" "$bundle/Contents/Library" "$frameworks"
