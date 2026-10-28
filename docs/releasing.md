@@ -131,7 +131,7 @@ secrets; the `homebrew` job pushes that verified file with the tap deploy key
   channel (`https://anoma.ly/release/hex/desktop/dev.json`), which installs
   set to the Dev update channel follow and `https://anoma.ly/hex/download/dev`
   links. Every push to `dev` runs it, except pushes that change only `docs/`,
-  `site/`, or Markdown; a newer push cancels a dev run still in progress, and
+  `site/`, or Markdown; a running dev release always finishes, and only the newest push that lands meanwhile waits to run next (GitHub drops the ones between), and
   `gh workflow run release.yml --ref dev -f channel=dev -f ref=dev`
   runs it by hand. It runs in `release`, which needs no approval. The
   version is `0.0.0-dev-<run number>`, as OpenCode numbers its dev builds.
