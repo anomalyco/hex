@@ -328,6 +328,16 @@ fn a_hung_stream_stop_is_bounded() {
 }
 
 #[test]
+fn a_named_manifest_is_written_under_its_name() {
+    let mut fixture = fixture(|_| {});
+    fixture.active.names.manifest = Some("take-1.capture.json".into());
+    let finished = recording(fixture.active).stop().wait().unwrap();
+    assert!(!finished.dir.join(MANIFEST_NAME).exists());
+    let manifest = Manifest::read_file(&finished.dir.join("take-1.capture.json")).unwrap();
+    assert_eq!(manifest, finished.manifest);
+}
+
+#[test]
 fn an_output_that_never_reports_times_out() {
     let mut fixture = fixture(|stream| stream.outcome = Outcome::Silent);
     fixture.active.timeouts.callback = Duration::from_millis(50);

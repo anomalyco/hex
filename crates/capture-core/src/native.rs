@@ -34,8 +34,7 @@ use crate::frames::FrameSampler;
 use crate::input::{HostInputDrain, InputLog};
 use crate::manifest::{Permission, TrackKind};
 use crate::plan::{
-    CursorDrawing, Exclusions, Input, MANIFEST_NAME, Mic, Plan, Rect, Source, SourcePlan,
-    output_size,
+    CursorDrawing, Exclusions, Input, Mic, Plan, Rect, Source, SourcePlan, output_size,
 };
 use crate::session::{
     Active, Recording, RecordingEvent, RecordingEvents, SourceRun, SourceStream, Stopper,
@@ -47,7 +46,6 @@ use crate::time::{HostTime, MediaTime};
 /// `ScreenCaptureKit` can need over a second to start a selected Core Audio device. The first
 /// source's recording output is attached only after that, so the MP4's audio and video tracks
 /// share an origin instead of opening with a long silent gap.
-const MICROPHONE_WARMUP: Duration = Duration::from_millis(1_500);
 
 /// Starts recordings.
 pub struct Recorder;
@@ -78,8 +76,8 @@ impl Recorder {
         }
         validate_sources(&sources.iter().map(|plan| plan.source).collect::<Vec<_>>())?;
         names.validate(sources.len(), &audio)?;
-        check_dir(&dir, names.all().chain([MANIFEST_NAME]))?;
-        if let Mic::Device(id) = &audio.mic
+        check_dir(&dir, names.all().chain([names.manifest_name()]))?;
+        if let Mic::Device { id, .. } = &audio.mic
             && !AudioInputDevice::list()
                 .iter()
                 .any(|device| &device.id == id)
@@ -141,7 +139,7 @@ impl Recorder {
                     cursor,
                     telemetry,
                     microphone: match (&audio.mic, index) {
-                        (Mic::Device(id), 0) => Some(id.as_str()),
+                        (Mic::Device { id, warmup }, 0) => Some((id.as_str(), *warmup)),
                         _ => None,
                     },
                     system_audio: audio.system && index == 0,
@@ -365,7 +363,8 @@ struct SourceContext<'a> {
     fps: u32,
     cursor: CursorDrawing,
     telemetry: bool,
-    microphone: Option<&'a str>,
+    /// The device and its warm-up.
+    microphone: Option<(&'a str, Duration)>,
     system_audio: bool,
     system_writer: Option<Arc<SystemAudioWriter>>,
     collector: Arc<Mutex<CursorCollector>>,
@@ -397,7 +396,7 @@ fn start_source(target: &Target, context: SourceContext<'_>) -> Result<SourceRun
         // Off unless the plan names a device: the core never opens a microphone on its own.
         .with_captures_microphone(context.microphone.is_some())
         .map_err(configure)?;
-    if let Some(id) = context.microphone {
+    if let Some((id, _)) = context.microphone {
         config = config
             .with_microphone_capture_device_id(id)
             .map_err(configure)?;
@@ -464,7 +463,9 @@ fn start_source(target: &Target, context: SourceContext<'_>) -> Result<SourceRun
     let attached = match attached {
         Some(at) => at,
         None => {
-            thread::sleep(MICROPHONE_WARMUP);
+            if let Some((_, warmup)) = context.microphone {
+                thread::sleep(warmup);
+            }
             match attach(&native) {
                 Ok(at) => at,
                 Err(error) => {

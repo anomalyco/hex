@@ -595,7 +595,7 @@ impl Active {
         };
         if discard {
             self.remove_files();
-        } else if let Err(error) = manifest.write(&self.dir) {
+        } else if let Err(error) = manifest.write(&self.dir, self.names.manifest_name()) {
             errors.push(format!("manifest: {error}"));
         }
         for error in &errors {
@@ -627,7 +627,7 @@ impl Active {
                 .flatten(),
             )
             .map(String::as_str)
-            .chain([MANIFEST_NAME])
+            .chain([names.manifest_name()])
         {
             match fs::remove_file(self.dir.join(name)) {
                 Ok(()) => {}

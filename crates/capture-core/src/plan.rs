@@ -10,8 +10,12 @@ use crate::error::Error;
 use crate::frames::FrameTap;
 use crate::input::HostInputReceiver;
 
-/// The name the core gives its manifest. Every other file name comes from [`Names`].
+/// The manifest's name unless [`Names::manifest`] picks another. Every other file name comes
+/// from [`Names`].
 pub const MANIFEST_NAME: &str = "capture.json";
+
+/// How long a [`Mic::Device`] usually warms up before recording starts.
+pub const MIC_WARMUP: Duration = Duration::from_millis(1_500);
 
 /// Everything one recording does.
 pub struct Plan {
@@ -182,8 +186,10 @@ pub enum Mic {
     #[default]
     None,
     /// `ScreenCaptureKit` opens this Core Audio device (by unique ID) and records it as a track in
-    /// the first source's MP4.
-    Device(String),
+    /// the first source's MP4. The first source's recording starts `warmup` after its stream,
+    /// usually [`MIC_WARMUP`], so the microphone is already delivering audio; `start` blocks for
+    /// it.
+    Device { id: String, warmup: Duration },
     /// The host already owns the microphone and pushes PCM through
     /// [`Recording::external_audio`](crate::Recording::external_audio). The core never opens one.
     External(ExternalMic),
@@ -246,9 +252,18 @@ pub struct Names {
     pub cursor: Option<String>,
     /// The input log, as JSON.
     pub input: Option<String>,
+    /// The manifest, [`MANIFEST_NAME`] when unset. Hosts that share one directory between
+    /// recordings name it per recording.
+    pub manifest: Option<String>,
 }
 
 impl Names {
+    /// The manifest's file name.
+    #[must_use]
+    pub fn manifest_name(&self) -> &str {
+        self.manifest.as_deref().unwrap_or(MANIFEST_NAME)
+    }
+
     pub(crate) fn validate(&self, sources: usize, plan_audio: &AudioPlan) -> Result<(), Error> {
         if self.videos.len() != sources {
             return Err(Error::InvalidNames(format!(
@@ -266,6 +281,12 @@ impl Names {
                 "a system audio file needs system audio in the plan".into(),
             ));
         }
+        let manifest = self.manifest_name();
+        if !is_plain_name(manifest) {
+            return Err(Error::InvalidNames(format!(
+                "{manifest:?} is not a plain file name"
+            )));
+        }
         let mut seen = HashSet::new();
         for name in self.all() {
             if !is_plain_name(name) {
@@ -273,10 +294,8 @@ impl Names {
                     "{name:?} is not a plain file name"
                 )));
             }
-            if name == MANIFEST_NAME {
-                return Err(Error::InvalidNames(format!(
-                    "{MANIFEST_NAME} is the manifest"
-                )));
+            if name == manifest {
+                return Err(Error::InvalidNames(format!("{manifest} is the manifest")));
             }
             if !seen.insert(name) {
                 return Err(Error::InvalidNames(format!("{name:?} is used twice")));
@@ -327,6 +346,22 @@ mod tests {
         assert!(names(&["../a.mp4"]).validate(1, &audio).is_err());
         assert!(names(&[".hidden.mp4"]).validate(1, &audio).is_err());
         assert!(names(&[MANIFEST_NAME]).validate(1, &audio).is_err());
+    }
+
+    #[test]
+    fn a_named_manifest_frees_capture_json_and_takes_its_place() {
+        let audio = AudioPlan::default();
+        let named = |videos: &[&str], manifest: &str| Names {
+            manifest: Some(manifest.to_owned()),
+            ..names(videos)
+        };
+        assert!(
+            named(&[MANIFEST_NAME], "a.capture.json")
+                .validate(1, &audio)
+                .is_ok()
+        );
+        assert!(named(&["a.mp4"], "a.mp4").validate(1, &audio).is_err());
+        assert!(named(&["a.mp4"], "../a.json").validate(1, &audio).is_err());
     }
 
     #[test]

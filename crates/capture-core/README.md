@@ -68,8 +68,10 @@ let finished = finishing.wait()?;   // or poll with finishing.try_wait()
 ### Audio
 
 - `Mic::None`: no microphone. ScreenCaptureKit's microphone capture stays off.
-- `Mic::Device(id)`: ScreenCaptureKit opens the Core Audio device and records it as a track in
-  the first source's MP4, attached after a 1.5 s warm-up so both tracks share an origin.
+- `Mic::Device { id, warmup }`: ScreenCaptureKit opens the Core Audio device and records it as a
+  track in the first source's MP4, attached `warmup` after the stream starts (usually
+  `MIC_WARMUP`, 1.5 s) so both tracks share an origin. `start` blocks for the warm-up; a host
+  that cues playback on the start, like a voiceover, passes zero.
 - `Mic::External(ExternalMic)`: the host owns the microphone and pushes mono PCM (16 kHz by
   default) through an `ExternalAudioSink`. The sink is bounded: when the queue is full, the audio
   is dropped and recorded as a gap instead of blocking. Gaps are padded with silence, so sample 0
@@ -109,7 +111,9 @@ to their `source_time` in the video), input events (`host_ns`) and tapped frames
 
 ## The bundle
 
-The host picks every file name. The core adds only `capture.json`:
+The host picks every file name. The core adds only the manifest, `capture.json` unless
+`Names::manifest` names it (a host that keeps several recordings in one directory names it per
+recording):
 
 ```json
 {
@@ -135,8 +139,8 @@ The host picks every file name. The core adds only `capture.json`:
 `anchor_ns` is taken just before the first source starts; sample 0 of the microphone WAV sits
 there. A media file's `start_ns` is where its time zero sits; the cursor and input logs carry
 `host_ns` per entry instead. A source's `frame` is the captured area in global points, and its
-`error` is set when it did not finish cleanly. `Manifest::read` refuses a manifest newer than it
-understands.
+`error` is set when it did not finish cleanly. `Manifest::read` (or `Manifest::read_file` for a named
+one) refuses a manifest newer than it understands.
 
 ## Seams
 
