@@ -741,17 +741,8 @@ impl Backend {
                     .map(|trigger| crate::linux_portal::readable_trigger(trigger)),
             })
             .collect::<Vec<_>>();
-        for shortcut in &granted {
-            match shortcut.trigger.as_deref() {
-                None => {
-                    tracing::warn!(name = %shortcut.name, "the desktop did not grant a Hex shortcut");
-                }
-                // Hyprland takes every shortcut without a key.
-                Some("") => {
-                    tracing::warn!(name = %shortcut.name, "the desktop gave a Hex shortcut no key");
-                }
-                Some(_) => {}
-            }
+        for shortcut in granted.iter().filter(|shortcut| shortcut.trigger.is_none()) {
+            tracing::warn!(name = %shortcut.name, "the desktop did not grant a Hex shortcut");
         }
         self.mark_ready(DesktopShortcuts::Portal(granted));
         // Escape while the recording shortcut is still held carries its modifiers.

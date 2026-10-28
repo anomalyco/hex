@@ -256,9 +256,9 @@ dictation rules:
   makes the portal refuse Hex. The desktop delivers the keys to Hex, not to the
   focused application.
 - **Hyprland** has the portal but takes every shortcut without a key, so
-  nothing happens until you bind one in your config. Settings marks each
-  shortcut with no key in red, and Status reads "Waiting for a keybinding".
-  For example:
+  nothing happens until you bind one in your config, and the key Settings
+  records is not used. Hex can't tell whether your config binds it. For
+  example:
 
 ```lua
 hl.bind("ALT + Z", hl.dsp.global("hex:dictation"))

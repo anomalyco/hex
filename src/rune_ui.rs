@@ -1647,19 +1647,6 @@ const SCENES: &[Scene] = &[
         poll(ui, 0.0, &mut Tx::default());
     }),
     ("portal", |ui| *ui = portal_fixture()),
-    // Hyprland takes portal shortcuts without a key.
-    ("portal-unbound", |ui| {
-        *ui = fixture(DesktopShortcuts::Portal(vec![
-            DesktopGrantedShortcut {
-                name: "Dictation".into(),
-                trigger: Some(String::new()),
-            },
-            DesktopGrantedShortcut {
-                name: "Paste last dictation".into(),
-                trigger: Some(String::new()),
-            },
-        ]))
-    }),
     ("commands", |ui| *ui = fixture(DesktopShortcuts::Commands)),
     ("disabled", |ui| {
         *ui = portal_fixture();

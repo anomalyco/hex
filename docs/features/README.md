@@ -836,11 +836,9 @@ Linux beta                               // not macOS feature parity
 │   │   │   └── Saved -> New portal session asks for it as preferred_trigger
 │   │   │       // observed on the niri fork: a new session gets it, a rebind in the same one fails
 │   │   ├── Each row: "Your desktop granted <trigger>" (it may assign another)
-│   │   ├── Refused shortcut -> Danger row + how to free it (niri: config.kdl)
-│   │   │   under that shortcut's own row (Dictation, Output, Voice Action pane);
-│   │   │   the rest keep working
-│   │   └── Granted without a key (Hyprland) -> Danger row: "<key> won't work until you add it…"
-│   │       Dictation's: Status shows a warning dot and "Waiting for a keybinding"
+│   │   └── Refused shortcut -> Danger row + how to free it (niri: config.kdl)
+│   │       under that shortcut's own row (Dictation, Output, Voice Action pane);
+│   │       the rest keep working
 │   ├── Wayland without the portal -> Bind `hex` commands in the desktop
 │   │   └── General hides shortcut rows and lists the commands
 │   └── Listener starting or stopped -> `hex status` reports Unregistered,

@@ -464,9 +464,6 @@ fn listener_card(ui: &Ui, p: Paint) -> El {
         _ if !ui.records_shortcuts() => {
             tr("Ready anywhere · Use your desktop's shortcuts to dictate").to_string()
         }
-        (true, _) if has_no_key(ui, ShortcutTarget::Dictation) => {
-            tr("Waiting for a keybinding").to_string()
-        }
         (true, ShortcutMode::Toggle) => tr_fill(
             "Ready anywhere · Press {} to start and stop dictating",
             &shortcut,
@@ -505,13 +502,6 @@ fn listener_card(ui: &Ui, p: Paint) -> El {
             |ui: &mut Ui, _| ui.send(Request::Desktop(DesktopAction::StartListening)),
         )
     };
-    let dot = if !running {
-        p.muted()
-    } else if has_no_key(ui, ShortcutTarget::Dictation) {
-        p.warning()
-    } else {
-        p.success()
-    };
     let summary = row()
         .key("listener")
         .min_h(METRICS.row_h_described)
@@ -519,7 +509,7 @@ fn listener_card(ui: &Ui, p: Paint) -> El {
         .py(8.0)
         .gap(12.0)
         .center_y()
-        .child(status_dot(dot))
+        .child(status_dot(if running { p.success() } else { p.muted() }))
         .child(
             col()
                 .key("copy")
@@ -562,22 +552,6 @@ pub(super) fn granted(ui: &Ui, p: Paint, target: ShortcutTarget) -> Option<(Stri
         DesktopGrantedShortcut {
             trigger: Some(trigger),
             ..
-        } if trigger.is_empty() => {
-            // Hyprland takes the shortcut but leaves its key to the user's config.
-            let key = binding(&ui.settings, target)
-                .map(|binding| binding.keycaps().join("+"))
-                .unwrap_or_default();
-            (
-                tr_fill(
-                    "{} won't work until you add it to your desktop's keybindings",
-                    &key,
-                ),
-                p.danger(),
-            )
-        }
-        DesktopGrantedShortcut {
-            trigger: Some(trigger),
-            ..
         } => (tr_fill("Your desktop granted {}", trigger), p.muted()),
         DesktopGrantedShortcut { trigger: None, .. } => (
             tr("Your desktop did not grant this shortcut").to_string(),
@@ -600,11 +574,6 @@ fn portal_grant(ui: &Ui, target: ShortcutTarget) -> Option<&DesktopGrantedShortc
         ShortcutTarget::CaptureList => "Send-to list",
     };
     granted.iter().find(|shortcut| shortcut.name == name)
-}
-
-/// The desktop took `target`'s shortcut but gave it no key (Hyprland).
-fn has_no_key(ui: &Ui, target: ShortcutTarget) -> bool {
-    portal_grant(ui, target).is_some_and(|shortcut| shortcut.trigger.as_deref() == Some(""))
 }
 
 /// The desktop kept `target`'s shortcut for itself: the note under its row.
