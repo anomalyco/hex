@@ -23,6 +23,7 @@ use super::{CapsuleState, Mode, capsule, tone};
 use crate::rune_ui::controls::{DESCRIPTION, Paint};
 use crate::rune_ui::lists::slider_in;
 
+mod family;
 mod stories;
 pub(crate) use stories::add as stories;
 

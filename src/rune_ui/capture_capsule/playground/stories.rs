@@ -42,6 +42,7 @@ pub(crate) fn add<S: 'static>(playground: rune::Playground<S>) -> rune::Playgrou
         .story(scene::<7>())
         .story(scene::<8>())
         .story(notch_story())
+        .story(super::family::story())
 }
 
 fn scene<const I: usize>() -> Story<CapsuleState> {
@@ -226,7 +227,7 @@ fn desktop(p: Paint, s: &CapsuleState, screen: Screen, cx: &mut Cx<CapsuleState>
             std::f32::consts::PI * 0.75,
             [(0.0, wash("cobalt", 3)), (1.0, wash("lilac", 5))],
         )
-        .child(menu_bar(p, screen))
+        .child(menu_bar(p, screen.size.0, screen.bar))
         .child(notch::notch("notch", k.c.black, w * 0.5, 0.0, screen.notch))
         .child(capsule(p, &s.surface, &s.live, cx).absolute(left, top));
     if at_notch {
@@ -245,15 +246,14 @@ fn desktop(p: Paint, s: &CapsuleState, screen: Screen, cx: &mut Cx<CapsuleState>
 
 /// A menu bar's placeholders: the app's menus at the left, status items
 /// at the right, clear of the notch.
-fn menu_bar(p: Paint, screen: Screen) -> El {
+pub(super) fn menu_bar(p: Paint, w: f32, bar: f32) -> El {
     let k = p.k;
-    let (w, _) = screen.size;
     let ink = k.alpha(k.c.text_base, 0.28);
     let item = |width: f32| el().size(width, 8.0).radius(4.0).fill(ink);
     let menus = row()
         .key("menus")
         .absolute(20.0, 0.0)
-        .h(screen.bar)
+        .h(bar)
         .center_y()
         .gap(20.0)
         .child(el().size(13.0, 13.0).radius(3.0).fill(ink))
@@ -262,7 +262,7 @@ fn menu_bar(p: Paint, screen: Screen) -> El {
         .key("status")
         .absolute(w - 300.0, 0.0)
         .w(280.0)
-        .h(screen.bar)
+        .h(bar)
         .center_y()
         .justify_end()
         .gap(16.0)
@@ -270,7 +270,7 @@ fn menu_bar(p: Paint, screen: Screen) -> El {
         .child(item(90.0));
     el().key("menu-bar")
         .absolute(0.0, 0.0)
-        .size(w, screen.bar)
+        .size(w, bar)
         .fill(k.alpha(k.c.bg_base, 0.35))
         .child(menus)
         .child(status)

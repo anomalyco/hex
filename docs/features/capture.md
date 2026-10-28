@@ -314,6 +314,13 @@ The capsule                              // capture.capsule (rune_ui/capture_cap
         (capture_capsule/notch.rs). The playground's "Capture capsule/notch"
         story plays it on a 14-inch MacBook Pro and a 27-inch display, side
         by side or each whole, at their real sizes
+    The playground's "Capture capsule/family" story (playground/family.rs)
+    plays a dictation and then a capture in one shape on the same springs:
+    from the notch on a 14-inch MacBook Pro, and on a flat 27-inch display
+    inside the menu bar (hud_placement's 3 pt inset) or floating 6 pt under
+    it. Its variants draw the voice as Dot scope's braid (its real
+    simulation), bars, or a line; only the capture adds a red dot or a small
+    screen, the cue alternating each loop
     Gap: only the shapes are prototyped; the menu-bar item's capture list
     is not, the app doesn't read the screen's notch (the overlay still puts
     the pill's content under it), and no flow but list has run live
