@@ -1890,7 +1890,7 @@ dependencies = [
  "log",
  "presser",
  "thiserror 2.0.21",
- "windows 0.62.2",
+ "windows 0.61.3",
 ]
 
 [[package]]
@@ -2027,7 +2027,7 @@ dependencies = [
  "js-sys",
  "log",
  "wasm-bindgen",
- "windows-core 0.62.2",
+ "windows-core 0.61.2",
 ]
 
 [[package]]
@@ -4450,7 +4450,7 @@ dependencies = [
 [[package]]
 name = "rune"
 version = "0.0.1"
-source = "git+https://github.com/anomalyco/rune.git?rev=f605937e4aa246694a7a71fbb671cad5cd3e7d69#f605937e4aa246694a7a71fbb671cad5cd3e7d69"
+source = "git+https://github.com/anomalyco/rune.git?rev=13a7ad18e0bf9912236099fcbdeb08d092260c95#13a7ad18e0bf9912236099fcbdeb08d092260c95"
 dependencies = [
  "arboard",
  "blake3",
@@ -4513,7 +4513,7 @@ dependencies = [
 [[package]]
 name = "rune-kit"
 version = "0.0.1"
-source = "git+https://github.com/anomalyco/rune.git?rev=f605937e4aa246694a7a71fbb671cad5cd3e7d69#f605937e4aa246694a7a71fbb671cad5cd3e7d69"
+source = "git+https://github.com/anomalyco/rune.git?rev=13a7ad18e0bf9912236099fcbdeb08d092260c95#13a7ad18e0bf9912236099fcbdeb08d092260c95"
 dependencies = [
  "rune",
  "rune-motion",
@@ -4523,12 +4523,12 @@ dependencies = [
 [[package]]
 name = "rune-motion"
 version = "0.1.0"
-source = "git+https://github.com/anomalyco/rune.git?rev=f605937e4aa246694a7a71fbb671cad5cd3e7d69#f605937e4aa246694a7a71fbb671cad5cd3e7d69"
+source = "git+https://github.com/anomalyco/rune.git?rev=13a7ad18e0bf9912236099fcbdeb08d092260c95#13a7ad18e0bf9912236099fcbdeb08d092260c95"
 
 [[package]]
 name = "rune-theme-opencode"
 version = "0.0.1"
-source = "git+https://github.com/anomalyco/rune.git?rev=f605937e4aa246694a7a71fbb671cad5cd3e7d69#f605937e4aa246694a7a71fbb671cad5cd3e7d69"
+source = "git+https://github.com/anomalyco/rune.git?rev=13a7ad18e0bf9912236099fcbdeb08d092260c95#13a7ad18e0bf9912236099fcbdeb08d092260c95"
 dependencies = [
  "rune",
  "rune-kit",
