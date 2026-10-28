@@ -768,6 +768,10 @@ Record -> Release -> Transcribing/processing/paste -> Finished // dictate.feedba
   Tone requested -> Playback worker opens the default output, then plays
      -> Output stays open five minutes past the last tone, then releases
      -> Released output holds no macOS idle-sleep assertion
+  Sounds = Signature (default) / Classic                    // dictate.sound-theme
+     -> Change -> Save, apply live, preview the start tone (unless muted)
+     -> Classic -> Previous start clicks, stop swish, cancel thud; macOS
+        errors play Basso; no done tone; onboarding keeps the signature chime
   Feedback volume = 0 -> No tones
      -> Playback worker releases output on its next 250 ms observation
      -> Volume enabled again -> Reopen for the next tone, never capture/UI
@@ -791,6 +795,13 @@ done, and cancel; their failures stay silent as before. Check:
 `bundled_sounds_are_short_and_sound_immediately` (each sound under its length
 budget, audible within 1 ms). The sounds were checked by waveform, spectrum
 and loudness only, never played aloud on a Mac.
+
+The **Sounds** setting (`sound_theme`, next to Sound volume, issue #302)
+switches to **Classic**: the MP3s Hex played before the signature set
+(`startRecording`, `stopRecording`, `cancel` in `resources/audio/`, restored
+byte-for-byte), macOS Basso for errors, and no done tone. The onboarding chime
+and capture tones have no classic counterpart and stay the same. Check:
+`bundled_sounds_decode_without_an_audio_device` covers both sets.
 
 Feedback admission is advisory on every platform: a cold audio stack can exceed
 the two-second preload timeout, so the recognition worker logs a warning and

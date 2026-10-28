@@ -459,6 +459,7 @@ General                                  // settings
 │   ├── Intentional capture only, not ordinary shortcut chords
 │   └── Pause/resume only players already reported running by macOS
 ├── Application card -> Sound volume: immediate feedback; zero suppresses tones
+├── Application card -> Sounds: Signature (default) / Classic; previews start
 └── Voice Action shortcut -> Voice Action pane; Meetings -> Meetings › Settings
 
 Intentional recording                    // recording.environment
@@ -1088,6 +1089,8 @@ Linux General > Sound volume              // dictate.feedback.linux; X11 + Wayla
 ├── Default / older settings -> 50%
 ├── Off -> No recording tones
 └── 25% / 50% / 75% / 100% -> Save and apply live; preview the start sound
+Linux General > Sounds                    // dictate.sound-theme
+└── Signature / Classic -> Save and apply live; preview the start sound
 
 Capture                                  // hex app and hex dictate
 ├── Shortcut starts capture -> Queue start sound immediately, before audio arrives
