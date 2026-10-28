@@ -457,9 +457,25 @@ General                                  // settings
 ├── Output card -> Paste last shortcut, While dictating, Dictation HUD
 ├── While dictating -> Mute / Pause media / Do nothing
 │   ├── Intentional capture only, not ordinary shortcut chords
-│   └── Pause/resume only players already reported running by macOS
+│   ├── Pause/resume only players already reported running by macOS
+│   └── Also pause the browser (macOS, Pause media only; off by default)
+│       ├── Turning it on without System Audio Recording -> ask now, never while dictating
+│       ├── On -> Screen & System Audio Recording row: Allow / waiting / Allowed
+│       └── Dictation -> browser_media sequence below
 ├── Application card -> Sound volume: immediate feedback; zero suppresses tones
 └── Voice Action shortcut -> Voice Action pane; Meetings -> Meetings › Settings
+
+Pause media + Also pause the browser     // browser_media
+├── A browser uses the microphone (a call) -> leave it alone
+├── Listen 300 ms to the browsers' own output (private process tap)
+│   └── Peak at or below -60 dBFS, or no level -> leave it alone
+├── Send the system pause command (MediaRemote 1; never the toggle)
+├── Poll 100 ms windows for up to 1 s
+│   ├── A window below -90 dBFS -> Hex paused it
+│   └── Still sounding (another tab, or the pause went elsewhere) -> no play later
+└── Dictation ends and Hex paused it -> listen 300 ms again
+    ├── Above -60 dBFS (you started it again) -> no play
+    └── Otherwise -> send the system play command (MediaRemote 0)
 
 Intentional recording                    // recording.environment
 ├── Acquire native macOS no-idle-sleep assertion
@@ -485,7 +501,19 @@ not a managed-device policy or native power assertion. The pause-script regressi
 checks that inactive players are absent before AppleScript application resolution;
 when no supported player is running, acquisition skips AppleScript entirely.
 The script check does not prove subprocess avoidance or exercise Music, Spotify,
-or VLC through Automation. An opt-in native
+or VLC through Automation.
+The browser pause runs after the AppleScript players and only when System Audio
+Recording is already granted. macOS 15.4 and later no longer tell other apps
+what is playing, so Hex hears the browsers through a private process tap
+(aggregate `anomaly.hex.browser-tap.<pid>`, apart from the meeting tap) and sends
+play only after it saw the browser go silent right after its own pause. The
+sequence checks in [browser_media.rs](../../src/browser_media.rs) run on fakes:
+`a_confirmed_pause_is_resumed`, `two_sounding_tabs_never_get_play`,
+`a_browser_already_playing_gets_no_play`, `a_call_is_never_paused`,
+`no_level_sends_nothing`; the ignored `native_tap_hears_a_playing_browser`
+heard Brave at -25.4 dBFS on macOS 27.0.1 (2026-10-28). Which app receives the
+system command is macOS's Now Playing choice; Safari is heard only when its
+WebKit process reports Safari's name. An opt-in native
 assertion smoke exercises IOKit without starting microphone capture.
 
 **Changed after 2.3.1:** Automatic was a compiled preference list (Universal
