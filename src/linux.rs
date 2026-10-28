@@ -13,7 +13,7 @@ use crate::linux_service::{Activation, Launch, Request};
 use crate::moonshine::Moonshine;
 
 #[derive(Parser)]
-#[command(version, about = "Local, observable voice recognition (Linux beta)")]
+#[command(version = crate::VERSION, about = "Local, observable voice recognition (Linux beta)")]
 struct Cli {
     #[command(subcommand)]
     command: Option<Command>,
@@ -118,7 +118,7 @@ enum ModelCommand {
     Status,
     /// Download and checksum-verify the default dictation model.
     Install,
-    /// List transcribe.cpp compute devices available to HEX.
+    /// List transcribe.cpp compute devices available to Hex.
     Devices,
     /// Load and prewarm the installed model.
     Check,

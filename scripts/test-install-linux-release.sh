@@ -51,7 +51,7 @@ sed \
   "$root/scripts/install-linux-release.sh" > "$installer"
 
 unsigned="$temporary/hex"
-printf '#!/bin/sh\necho "voice-control %s"\n' "$version" > "$unsigned"
+printf '#!/bin/sh\necho "hex %s"\n' "$version" > "$unsigned"
 chmod 755 "$unsigned"
 sha256=$(sha256sum "$unsigned" | awk '{ print $1 }')
 bytes=$(wc -c < "$unsigned" | tr -d ' ')
@@ -84,7 +84,7 @@ home="$temporary/home"
 export XDG_DATA_HOME="$home/.local/share"
 export XDG_CONFIG_HOME="$home/.config"
 install_dir="$home/.local/bin"
-support_dir="$home/.local/share/voice-control"
+support_dir="$home/.local/share/hex"
 mkdir -p "$support_dir"
 printf 'preserve me\n' > "$support_dir/settings.json"
 
@@ -106,11 +106,11 @@ refuses() {
 
 install
 test -L "$install_dir/hex"
-test "$("$install_dir/hex" --version)" = "voice-control $version"
-grep -Fq 'X-HEX-Managed=true' "$home/.local/share/applications/hex.desktop"
-grep -Fq 'X-HEX-Managed=true' "$home/.config/autostart/HEX.desktop"
-grep -Fq '" start' "$home/.config/autostart/HEX.desktop"
-grep -Fq '# X-HEX-Managed=true' "$home/.config/systemd/user/hex.service"
+test "$("$install_dir/hex" --version)" = "hex $version"
+grep -Fq 'X-Hex-Managed=true' "$home/.local/share/applications/hex.desktop"
+grep -Fq 'X-Hex-Managed=true' "$home/.config/autostart/hex.desktop"
+grep -Fq '" start' "$home/.config/autostart/hex.desktop"
+grep -Fq '# X-Hex-Managed=true' "$home/.config/systemd/user/hex.service"
 grep -Fq '" service' "$home/.config/systemd/user/hex.service"
 grep -Fxq 'Type=notify' "$home/.config/systemd/user/hex.service"
 grep -Fxq 'NotifyAccess=main' "$home/.config/systemd/user/hex.service"
@@ -147,7 +147,7 @@ refuses "a same-size corrupted download"
 HOME="$home" HEX_INSTALL_DIR="$install_dir" HEX_APPLICATION_SUPPORT_DIR="$support_dir" \
   HEX_INSTALL_ARTIFACT="$unsigned" HEX_INSTALL_VERSION="$version" HEX_INSTALL_SOURCE=1 \
   sh "$installer"
-test "$("$install_dir/hex" --version)" = "voice-control $version"
+test "$("$install_dir/hex" --version)" = "hex $version"
 test -e "$support_dir/versions/$version/source-build"
 test ! -e "$support_dir/install.json"
 install uninstall

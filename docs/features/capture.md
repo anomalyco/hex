@@ -308,10 +308,22 @@ The capsule                              // capture.capsule (rune_ui/capture_cap
     │   reaches the capture
     ├── cursor -> recording stays under the menu bar; the "Send to" card
     │   (number, name, reason) opens at the pointer and its Sent stays there
-    └── notch -> the pill hangs from the top edge (only its bottom corners
-        round) and grows down into the same card
+    └── notch -> a black shape grows out of the notch (185 pt wide; on a
+        flat display a pretend one the menu bar's height) into the pill and
+        the same card, its content under the notch, and shrinks back into it
+        (capture_capsule/notch.rs). The playground's "Capture capsule/notch"
+        story plays it on a 14-inch MacBook Pro and a 27-inch display, side
+        by side or each whole, at their real sizes
+    The playground's "Capture capsule/family" story (playground/family.rs)
+    plays a dictation and then a capture in one shape on the same springs:
+    from the notch on a 14-inch MacBook Pro, and on a flat 27-inch display
+    inside the menu bar (hud_placement's 3 pt inset) or floating 6 pt under
+    it. Its variants draw the voice as Dot scope's braid (its real
+    simulation), bars, or a line; only the capture adds a red dot or a small
+    screen, the cue alternating each loop
     Gap: only the shapes are prototyped; the menu-bar item's capture list
-    and a real notch inset are not, and no flow but list has run live
+    is not, the app doesn't read the screen's notch (the overlay still puts
+    the pill's content under it), and no flow but list has run live
 
 The on-screen picker                     // capture.picker (capture_capsule/picker.rs)
 ├── A full-screen Rune overlay on the pointer's display, under the capsule,

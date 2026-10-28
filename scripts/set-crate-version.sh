@@ -22,7 +22,7 @@ awk -v current="$current" -v version="$version" '
 ' "$root/Cargo.toml" > "$root/Cargo.toml.next"
 mv "$root/Cargo.toml.next" "$root/Cargo.toml"
 awk -v current="$current" -v version="$version" '
-  /^name = "voice-control"$/ { package = 1 }
+  /^name = "hex"$/ { package = 1 }
   package && $0 == "version = \"" current "\"" { $0 = "version = \"" version "\""; package = 0 }
   { print }
 ' "$root/Cargo.lock" > "$root/Cargo.lock.next"

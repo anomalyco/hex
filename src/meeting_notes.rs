@@ -606,7 +606,7 @@ pub(super) fn provisional_title(
     Ok(title)
 }
 
-/// Rewrites only HEX's parts of the Markdown: the heading when it still
+/// Rewrites only Hex's parts of the Markdown: the heading when it still
 /// reads `previous_title`, and the notes block between its markers (inserted
 /// above `## Transcript` the first time). Everything else is preserved.
 pub(super) fn apply_notes(

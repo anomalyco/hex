@@ -478,7 +478,7 @@ impl Library {
             if meeting.in_progress {
                 let _ = writeln!(
                     output,
-                    "No notes yet: the meeting is still {}. HEX writes a title and summary after it is transcribed.",
+                    "No notes yet: the meeting is still {}. Hex writes a title and summary after it is transcribed.",
                     status_name(meeting.status)
                 );
             } else {
@@ -1626,7 +1626,7 @@ fn snippet(passage: &Passage, matched: &[usize]) -> String {
         .max_by_key(|start| {
             let count = matched
                 .iter()
-                .filter(|position| (*start..start + window).contains(position))
+                .filter(|&&position| (*start..*start + window).contains(&position))
                 .count();
             // Prefer windows that lead into the first match a little.
             (

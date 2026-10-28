@@ -8,7 +8,7 @@ set -eu
 
 script_root=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 root=${HEX_RELEASE_SOURCE:-$script_root}
-version=${HEX_VERSION:-$(cargo metadata --no-deps --format-version 1 --manifest-path "$root/Cargo.toml" | jq -r '.packages[] | select(.name == "voice-control") | .version')}
+version=${HEX_VERSION:-$(cargo metadata --no-deps --format-version 1 --manifest-path "$root/Cargo.toml" | jq -r '.packages[] | select(.name == "hex") | .version')}
 dist=${HEX_RELEASE_DIST:-"$root/dist"}
 target_dir=${CARGO_TARGET_DIR:-"$root/target"}
 
@@ -46,7 +46,7 @@ mkdir -p "$dist"
 (cd "$root" && TRANSCRIBE_CMAKE_ARGS="-DGGML_NATIVE=OFF -DTRANSCRIBE_USE_SYSTEM_BLAS=OFF${TRANSCRIBE_CMAKE_ARGS:+ $TRANSCRIBE_CMAKE_ARGS}" \
   cargo build --locked --release) >&2
 executable="$dist/hex-$version-linux-$label"
-install -m755 "$target_dir/release/voice-control" "$executable"
+install -m755 "$target_dir/release/hex" "$executable"
 file "$executable" | grep -E "ELF 64-bit.*$elf" >/dev/null
 test "$("$executable" --version | awk 'NF { value=$NF } END { print value }')" = "$version"
 echo "$executable"

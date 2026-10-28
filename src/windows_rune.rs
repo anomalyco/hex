@@ -264,6 +264,7 @@ fn run_runtime(
             quit |= host.handle(request);
             next = requests.try_recv().ok();
         }
+        quit |= host.update_restarted();
         if shutdown.load(Ordering::Relaxed) || quit {
             break;
         }

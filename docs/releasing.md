@@ -131,7 +131,7 @@ secrets; the `homebrew` job pushes that verified file with the tap deploy key
   channel (`https://anoma.ly/release/hex/desktop/dev.json`), which installs
   set to the Dev update channel follow and `https://anoma.ly/hex/download/dev`
   links. Every push to `dev` runs it, except pushes that change only `docs/`,
-  `site/`, or Markdown; a newer push cancels a dev run still in progress, and
+  `site/`, or Markdown; a running dev release always finishes, and only the newest push that lands meanwhile waits to run next (GitHub drops the ones between), and
   `gh workflow run release.yml --ref dev -f channel=dev -f ref=dev`
   runs it by hand. It runs in `release`, which needs no approval. The
   version is `0.0.0-dev-<run number>`, as OpenCode numbers its dev builds.
@@ -197,8 +197,8 @@ refuses force pushes and deletion.
 
 The first Anomaly-signed macOS release also changes the bundle ID to
 `anomaly.hex` (docs/plans/macos-signing.md). Its notes must tell Mac users
-that macOS sees a new app: grant Microphone, Input Monitoring, Accessibility,
-and (for meetings) Screen & System Audio Recording once more, removing any
+that macOS sees a new app: grant Microphone, Accessibility, and (for
+meetings) Screen & System Audio Recording once more, removing any
 stale Hex entry in System Settings first; turn Launch at login on again; and
 point `DisableUpdates` profiles at `anomaly.hex`. Settings, history, and
 models carry over. Decide how 2.3.1 installs reach it first (same doc,
@@ -361,8 +361,9 @@ it. No reviewer is required.
 
 ## Linux packages
 
-- **Direct install** (`curl -fsSL https://anoma.ly/hex/install-linux.sh | sh`
-  once the service has a release): the user-local version layout plus the
+- **Direct install** (`curl -fsSL https://anoma.ly/hex/files/install-linux.sh | sh`,
+  kept current by the Installers workflow; stable, or dev until there is a
+  stable release): the user-local version layout plus the
   `install.json` receipt; it updates itself from the service's manifest and
   the window offers "Update" (restart into the staged version).
 - **AUR** `hex-bin` (`packaging/aur`, staged by `scripts/release-aur.sh`, pushed by `.github/release/push-aur.sh`):

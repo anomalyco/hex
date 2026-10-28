@@ -14,6 +14,7 @@ use std::cell::RefCell;
 use rune::{Spring, TextStyle};
 
 use super::flow::{Done, Lead, Mode, Pres};
+use super::notch;
 use super::tuning::{self, CapsuleFlow, TopLine};
 
 /// The overlay's panel: wide enough for the open list, and tall enough for
@@ -102,7 +103,8 @@ pub(crate) enum Anchor {
     /// Under the menu bar, centred: every flow but the two below.
     #[default]
     Top,
-    /// Hanging from the panel's (the screen's) top edge.
+    /// Hanging from the notch's bottom edge (the panel's top), grown out
+    /// of the notch.
     Notch,
     /// The cursor's card, at [`CURSOR_X`], [`CURSOR_Y`].
     Cursor,
@@ -527,12 +529,14 @@ pub(crate) fn layout_at(pres: &Pres, clock: &str, anchor: Anchor) -> ([f32; 4], 
         });
         shell[3] = hints_y + CARD_HINTS_H + ISLAND_INSET - shell[1];
     }
-    // The notch's walls run up past the top edge, so only its bottom
-    // corners round.
+    // The notch's walls run up past the screen's top edge, so only its
+    // bottom corners round, and it's never narrower than the notch.
     if anchor == Anchor::Notch {
-        let up = corner(ISLAND_H);
-        shell[1] -= up;
-        shell[3] += up;
+        let wider = (notch::MIN_WIDTH - shell[2]).max(0.0);
+        shell[0] -= wider * 0.5;
+        shell[2] += wider;
+        shell[1] -= notch::REACH;
+        shell[3] += notch::REACH;
     }
     (shell, items)
 }
@@ -667,8 +671,11 @@ fn line(pres: &Pres, clock: &str) -> ([f32; 4], Vec<Item>) {
 }
 
 /// Where the capsule enters from and leaves to: its own width,
-/// [`TOP_FROM`] of its height.
-fn pose(rest: [f32; 4]) -> [f32; 4] {
+/// [`TOP_FROM`] of its height, or at the notch, the notch.
+fn pose(rest: [f32; 4], anchor: Anchor) -> [f32; 4] {
+    if anchor == Anchor::Notch {
+        return notch::tucked();
+    }
     [rest[0], rest[1], rest[2], rest[3] * TOP_FROM]
 }
 
@@ -744,7 +751,7 @@ impl Surface {
             pres: Pres::Hidden,
             clock: "0:00".into(),
             reduced: false,
-            shell: pose(shell),
+            shell: pose(shell, Anchor::Top),
             shell_on: false,
             shell_motion: tuning::get().island,
             shell_fade: tuning::get().island_scale,
@@ -769,7 +776,11 @@ impl Surface {
         self.anchor = anchor_for(&pres, self.anchor);
         let (rest, items) = layout_at(&pres, &self.clock, self.anchor);
         self.shell_on = !matches!(pres, Pres::Hidden);
-        self.shell = if self.shell_on { rest } else { pose(rest) };
+        self.shell = if self.shell_on {
+            rest
+        } else {
+            pose(rest, self.anchor)
+        };
         self.items = items
             .iter()
             .map(|item| self.shown(item, tuning::get().island))
@@ -848,7 +859,11 @@ impl Surface {
             // a finished capture folds up into the menu bar instead.
             let exit = Spring::new(tuning::get().island_scale.duration * 0.9, 0.0);
             let fold = tuning::get().flow == CapsuleFlow::MenuBar && matches!(prev, Pres::Done(_));
-            self.shell = if fold { MENU_FOLD } else { pose(self.shell) };
+            self.shell = if fold {
+                MENU_FOLD
+            } else {
+                pose(self.shell, self.anchor)
+            };
             if fold {
                 self.shell_motion = tuning::get().island;
                 self.shell_fade = Spring::new(tuning::get().island.duration, 0.0);
@@ -869,7 +884,7 @@ impl Surface {
         if !self.shell_on || moved || matches!(prev, Pres::Hidden) {
             // Entry: this commit puts the capsule at its origin pose,
             // invisibly and instantly; the next frame springs it to rest.
-            self.shell = pose(rest);
+            self.shell = pose(rest, self.anchor);
             self.shell_on = false;
             self.instant = true;
             self.items.clear();

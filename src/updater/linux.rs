@@ -160,7 +160,9 @@ fn validate_executable(path: &Path, version: &str) -> Result<()> {
 
 /// Stages the executable into its version directory and switches `current`
 /// atomically; the running version's files are never touched, and every
-/// version but the new and previous one is pruned.
+/// version but the new, running, and previous one is pruned. A newer
+/// release can replace a staged one, so the previous one is not always the
+/// one running.
 fn activate(support: &Path, version: &str, staging: &Path) -> Result<PathBuf> {
     let versions = support.join("versions");
     let version_dir = versions.join(version);
@@ -189,6 +191,7 @@ fn activate(support: &Path, version: &str, staging: &Path) -> Result<PathBuf> {
         let entry = entry?;
         let name = entry.file_name();
         if name.to_str() != Some(version)
+            && name.to_str() != Some(crate::VERSION)
             && previous.as_ref() != Some(&name)
             && name.to_str().is_some_and(is_version_name)
             && let Err(error) = fs::remove_dir_all(entry.path())
@@ -219,6 +222,28 @@ mod tests {
         assert_eq!(fs::read(executable).unwrap(), b"new");
         assert_eq!(fs::read(root.join("versions/1.0.0/hex")).unwrap(), b"old");
         assert!(!root.join("versions/0.9.0").exists());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn replacing_a_staged_update_keeps_the_running_version() {
+        let root = std::env::temp_dir().join(format!("hex-linux-restage-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let running = root.join("versions").join(crate::VERSION);
+        fs::create_dir_all(&running).unwrap();
+        fs::write(running.join("hex"), b"running").unwrap();
+        symlink(
+            Path::new("versions").join(crate::VERSION),
+            root.join("current"),
+        )
+        .unwrap();
+        for (version, bytes) in [("1.1.0", b"first"), ("1.2.0", b"newer")] {
+            let staging = root.join("hex.staging");
+            fs::write(&staging, bytes).unwrap();
+            activate(&root, version, &staging).unwrap();
+        }
+        assert_eq!(fs::read(root.join("current/hex")).unwrap(), b"newer");
+        assert_eq!(fs::read(running.join("hex")).unwrap(), b"running");
         let _ = fs::remove_dir_all(root);
     }
 }

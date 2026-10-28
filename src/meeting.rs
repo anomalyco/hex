@@ -114,7 +114,7 @@ pub fn screen_recording_permitted() -> bool {
     unsafe { CGPreflightScreenCaptureAccess() }
 }
 
-/// Asks macOS to list HEX under Screen & System Audio Recording. The system
+/// Asks macOS to list Hex under Screen & System Audio Recording. The system
 /// prompts at most once; later requests return the current state.
 pub fn request_screen_recording() -> bool {
     // SAFETY: A CoreGraphics request without arguments.

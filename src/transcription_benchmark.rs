@@ -572,7 +572,7 @@ mod tests {
             .unwrap()
             .as_nanos();
         let directory = std::env::temp_dir().join(format!(
-            "voice-control-transcription-benchmark-{}-{unique}",
+            "hex-transcription-benchmark-{}-{unique}",
             std::process::id()
         ));
         fs::create_dir(&directory).unwrap();

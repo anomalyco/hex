@@ -1,7 +1,8 @@
 //! The `playground` experiment: Rune's playground in Hex's window. ⇧⌘D
 //! (Ctrl+Shift+D off macOS) swaps the window for every fixture scene in
 //! [`SCENES`], grouped by the pane it shows, the onboarding options'
-//! stories, and, in builds with captures, the capture capsule's stories. Each opens on a fresh fixture state; the
+//! stories, on macOS with `dot-scope` the HUD's stories, and, in builds
+//! with captures, the capture capsule's stories. Each opens on a fresh fixture state; the
 //! real window's state keeps running underneath, untouched. Off, nothing is
 //! attached: no shortcut, menu item, or scene list.
 
@@ -34,6 +35,12 @@ pub(super) fn attach(app: App<Ui>) -> App<Ui> {
         .bar(false)
         .sizes(&[("Hex window", WINDOW_SIZE)]);
     let playground = super::onboarding_kit::stories(playground);
+    #[cfg(target_os = "macos")]
+    let playground = if experiments::enabled(Experiment::DotScope) {
+        super::hud_stories::add(playground)
+    } else {
+        playground
+    };
     #[cfg(hex_capture)]
     let playground = super::capture_capsule::playground::stories(playground);
     app.playground(playground)
@@ -70,7 +77,7 @@ fn group(ui: &Ui) -> (usize, &'static str) {
     if ui.tour.is_some() {
         return (100, "Onboarding");
     }
-    if ui.picker.language.is_some() {
+    if ui.picker.open {
         return (1, "Transcription picker");
     }
     if ui.explainer.open {

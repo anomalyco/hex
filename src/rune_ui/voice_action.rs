@@ -53,13 +53,17 @@ fn toggle(ui: &mut Ui) {
 
 pub(super) fn pane(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
     let enabled = ui.settings.voice_action.enabled;
+    // The switch stays reachable without OpenCode; it says why it won't work.
+    let reason = (!ui.models.checking())
+        .then(|| models::unavailable_reason(ui, OpenCodeFeature::VoiceAction))
+        .flatten();
     let mut content = page("content");
     let enable = vec![
         toggle_row(
             p,
             "voice-action-enabled",
             tr("Enable Voice Action"),
-            description(enabled),
+            reason.unwrap_or_else(|| description(enabled)),
             enabled,
             toggle,
         )

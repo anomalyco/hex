@@ -13,12 +13,12 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 
-$support = Join-Path $env:APPDATA 'voice-control'
+$support = Join-Path $env:APPDATA 'hex'
 $installed = Join-Path $support "versions\$Version\hex.exe"
 $pointer = Join-Path $support 'current-version'
 $receipt = Join-Path $support 'install.json'
 $shortcut = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Hex.lnk'
-$uninstallKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\{8FCF0256-C55C-40C3-865D-5FADB32D13B3}_is1'
+$uninstallKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\{6ED48C92-5177-41F4-B8D6-37B7B02CFDF4}_is1'
 $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
 $logs = Join-Path $env:RUNNER_TEMP 'hex-installer-logs'
 New-Item -ItemType Directory -Force $logs | Out-Null
@@ -48,7 +48,7 @@ Check ($installReceipt.root -eq $support) 'install.json names the install root'
 $link = (New-Object -ComObject WScript.Shell).CreateShortcut($shortcut)
 Check ($link.TargetPath -eq $installed) 'Start Menu shortcut targets the managed executable'
 Check ($link.Arguments -eq 'app') 'Start Menu shortcut launches the app'
-Check ($link.Description -eq 'HEX managed install') 'Start Menu shortcut carries the managed mark the updater repoints'
+Check ($link.Description -eq 'Hex managed install') 'Start Menu shortcut carries the managed mark the updater repoints'
 $entry = Get-ItemProperty $uninstallKey
 Check ($entry.DisplayName -eq 'Hex') 'Apps & Features lists Hex'
 Check ($entry.DisplayVersion -eq $Version) "Apps & Features shows $Version"
@@ -77,7 +77,7 @@ New-Item -ItemType Directory -Force (Split-Path $updated) | Out-Null
 Copy-Item $installed $updated
 New-Item -ItemType Directory -Force (Join-Path $support 'updates') | Out-Null
 if (-not (Test-Path $runKey)) { New-Item -Path $runKey | Out-Null }
-Set-ItemProperty -Path $runKey -Name 'HEX' -Value "`"$updated`" app --hidden"
+Set-ItemProperty -Path $runKey -Name 'Hex' -Value "`"$updated`" app --hidden"
 Set-Content -Path (Join-Path $support 'settings.json') -Value '{}'
 
 $process = Start-Process $uninstaller -Wait -PassThru -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/LOG=$logs\uninstall.log"
@@ -91,7 +91,7 @@ Check (-not (Test-Path (Join-Path $support 'updates'))) 'staged updates are remo
 Check (-not (Test-Path $pointer)) 'current-version is removed'
 Check (-not (Test-Path $receipt)) 'install.json is removed'
 Check (-not (Test-Path $shortcut)) 'Start Menu shortcut is removed'
-Check ($null -eq (Get-ItemProperty -Path $runKey -Name 'HEX' -ErrorAction SilentlyContinue)) 'Launch at login is removed'
+Check ($null -eq (Get-ItemProperty -Path $runKey -Name 'Hex' -ErrorAction SilentlyContinue)) 'Launch at login is removed'
 Check (Test-Path (Join-Path $support 'settings.json')) 'settings are kept'
 Remove-Item $support -Recurse -Force
 Write-Output "Installer $([IO.Path]::GetFileName($Installer)) passed."

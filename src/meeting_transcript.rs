@@ -171,6 +171,32 @@ impl Chunker {
     }
 }
 
+/// Transcribes a chunk unless the speech detector finds no speech in it.
+/// Models invent text for silence and noise, so a speechless chunk becomes an
+/// empty transcript; accepting it still advances the track's coverage.
+fn transcribe_speech(
+    samples: &[f32],
+    transcribe: impl FnOnce() -> Result<Transcript>,
+) -> Result<Transcript> {
+    if speechless(samples) {
+        return Ok(Transcript::default());
+    }
+    transcribe()
+}
+
+/// Whether the speech detector heard no speech in `samples`, so they skip the
+/// model.
+fn speechless(samples: &[f32]) -> bool {
+    let speechless = crate::speech_detector::contains_speech(samples) == Some(false);
+    if speechless {
+        tracing::debug!(
+            audio_ms = samples_ms(samples.len()),
+            "skipped meeting chunk without detected speech"
+        );
+    }
+    speechless
+}
+
 /// One source's entries in capture-clock milliseconds.
 #[derive(Clone)]
 pub(super) struct TrackTranscript {
@@ -683,12 +709,16 @@ impl ChunkModel {
         }
     }
 
-    /// Fails with the chunk's own transcription error.
+    /// Fails with the chunk's own transcription error. A chunk without
+    /// detected speech returns an empty transcript without the model.
     fn transcribe(&mut self, samples: &[f32]) -> Result<Chunked> {
         // Quitting drops the dictation engine; a model loaded now would
         // outlast the drain.
         if crate::process_exit::quitting() {
             return Ok(Chunked::Unavailable(eyre!("Hex is quitting")));
+        }
+        if speechless(samples) {
+            return Ok(Chunked::Done(Transcript::default()));
         }
         let engine = crate::transcription_engine::TranscriptionEngine::shared();
         if let Some(engine) = &engine
@@ -1881,8 +1911,9 @@ pub(super) fn echo_report(
         chunks.extend(chunker.finish());
         if let Some(selection) = &selection {
             for chunk in chunks {
-                let transcript = load_model(&mut model, selection)?
-                    .transcribe_segments(chunk.samples.clone())?;
+                let transcript = transcribe_speech(&chunk.samples, || {
+                    load_model(&mut model, selection)?.transcribe_segments(chunk.samples.clone())
+                })?;
                 old_track.accept(
                     &chunk,
                     Transcript {
@@ -2161,7 +2192,10 @@ pub(super) fn replay_transcribe(model: &mut Transcriber, audio: &[f32]) -> Vec<R
             overlap: chunk.overlap,
             tail: chunk.tail,
             len: chunk.samples.len(),
-            transcript: model.transcribe_segments(chunk.samples).unwrap(),
+            transcript: transcribe_speech(&chunk.samples, || {
+                model.transcribe_segments(chunk.samples.clone())
+            })
+            .unwrap(),
         })
         .collect()
 }
@@ -2327,6 +2361,82 @@ mod tests {
             "a single repeated word is ambiguous and kept"
         );
         assert_eq!(strip_repeated_prefix("", "Hello there"), "Hello there");
+    }
+
+    #[test]
+    fn a_speechless_chunk_skips_the_shared_model() {
+        let _detector = crate::speech_detector::override_for_test(Some(false));
+        let mut model = ChunkModel::new(TranscriptionSelection::default());
+        let Chunked::Done(transcript) = model.transcribe(&[0.1; 16_000]).unwrap() else {
+            panic!("a speechless chunk must not reach the model");
+        };
+        assert!(transcript.text.is_empty() && transcript.segments.is_empty());
+        assert!(model.owned.is_none());
+    }
+
+    #[test]
+    fn speechless_chunks_skip_the_model_and_still_advance_coverage() {
+        let _detector = crate::speech_detector::override_for_test(Some(false));
+        let mut track = TrackTranscript::new(MeetingSource::Microphone, 1_000);
+        let chunk = Chunk {
+            start: 0,
+            overlap: 0,
+            tail: 0,
+            samples: vec![0.1; 30 * RATE],
+        };
+        let result = transcribe_speech(&chunk.samples, || {
+            panic!("a chunk without speech must not reach the model")
+        })
+        .unwrap();
+        track.accept(&chunk, result);
+        assert!(track.entries.is_empty());
+        assert_eq!(track.settled_ms, 31_000);
+    }
+
+    #[test]
+    fn a_speechless_chunk_after_an_overlap_keeps_earlier_entries() {
+        let mut track = TrackTranscript::new(MeetingSource::System, 0);
+        let first = Chunk {
+            start: 0,
+            overlap: 0,
+            tail: 0,
+            samples: vec![0.1; 30 * RATE],
+        };
+        let spoken = Transcript {
+            text: String::new(),
+            segments: vec![TranscriptSegment {
+                start_ms: 28_000,
+                end_ms: 29_900,
+                text: "see you on Friday".into(),
+            }],
+            words: Vec::new(),
+        };
+        track.accept(
+            &first,
+            transcribe_speech(&first.samples, || Ok(spoken)).unwrap(),
+        );
+        let _detector = crate::speech_detector::override_for_test(Some(false));
+        let second = Chunk {
+            start: 28 * RATE,
+            overlap: 2 * RATE,
+            tail: 0,
+            samples: vec![0.1; 10 * RATE],
+        };
+        let result = transcribe_speech(&second.samples, || {
+            panic!("a chunk without speech must not reach the model")
+        })
+        .unwrap();
+        track.accept(&second, result);
+        assert_eq!(
+            track.entries,
+            [entry(
+                MeetingSource::System,
+                28_000,
+                29_900,
+                "see you on Friday"
+            )]
+        );
+        assert_eq!(track.settled_ms, 38_000);
     }
 
     #[test]

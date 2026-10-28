@@ -53,5 +53,5 @@ PY
 cd "$root"
 HEX_APPLICATION_SUPPORT_DIR="$fixtures/support" \
 HEX_COHERE_MODEL="$model" HEX_COHERE_FIXTURES="$fixtures" \
-  cargo test --locked --release --bin voice-control \
+  cargo test --locked --release --bin hex \
     cohere_long_form_keeps_all_sections_with_and_without_pauses -- --ignored --nocapture

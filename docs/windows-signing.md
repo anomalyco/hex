@@ -31,7 +31,7 @@ publish                                       // stable requires the signatures
 - Signing is skipped while any Azure value is missing. The run then warns
   and writes "not Authenticode-signed" to its summary; everything else still
   runs, including the installer tests.
-- The Inno Setup uninstaller (`voice-control\uninstall\unins000.exe`) is
+- The Inno Setup uninstaller (`hex\uninstall\unins000.exe`) is
   written at install time and is not signed. It is created locally with no
   Mark of the Web, so SmartScreen does not check it.
 - Self-updates download `hex.exe` through Hex itself, so SmartScreen is not

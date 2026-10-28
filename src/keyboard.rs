@@ -23,6 +23,9 @@ const OPTION_KEY_CODE: u16 = 58;
 const OPTION_FLAG: u64 = 1 << 19;
 const CONTROL_KEY_CODE: u16 = 59;
 const CONTROL_FLAG: u64 = 1 << 18;
+const RETURN_KEY_CODE: u16 = 36;
+/// Quartz keeps at most 20 UTF-16 units of a keyboard event's Unicode string.
+const MAX_UNICODE_UNITS: usize = 20;
 const EVENT_SOURCE_USER_DATA: u32 = 42;
 /// A hole in the virtual key codes, between keypad `*` (0x43) and keypad `+`
 /// (0x45): no keyboard sends it, and of the 264 layouts macOS ships only
@@ -236,18 +239,69 @@ pub fn post_enter() -> Result<()> {
     post_shortcut(Key::Enter, Modifiers::NONE)
 }
 
+/// Types `text` as synthesized key events, never touching the clipboard. Line
+/// breaks are Shift-Return so chat boxes insert a newline instead of sending.
 pub fn type_text(text: &str) -> Result<()> {
-    for character in text.chars() {
-        let mut encoded = [0; 2];
-        let encoded = character.encode_utf16(&mut encoded);
-        let down = KeyboardEvent::new((0, true, 0))?;
-        let up = KeyboardEvent::new((0, false, 0))?;
-        down.set_unicode(encoded);
-        up.set_unicode(encoded);
-        down.post();
-        up.post();
+    let mut events = Vec::new();
+    for stroke in typing_strokes(text) {
+        match stroke {
+            Stroke::Text(units) => {
+                for down in [true, false] {
+                    let event = KeyboardEvent::new((0, down, 0))?;
+                    event.set_unicode(&units);
+                    events.push(event);
+                }
+            }
+            Stroke::LineBreak => {
+                for spec in
+                    shortcut_event_specs(RETURN_KEY_CODE, &[(SHIFT_FLAG, SHIFT_KEY_CODE)], 1)
+                {
+                    events.push(KeyboardEvent::new(spec)?);
+                }
+            }
+        }
+    }
+    for event in events {
+        event.post();
     }
     Ok(())
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum Stroke {
+    Text(Vec<u16>),
+    LineBreak,
+}
+
+/// Splits text into key events of at most `MAX_UNICODE_UNITS` UTF-16 units,
+/// the most one event carries, without splitting a surrogate pair. `\r\n`,
+/// `\n`, and `\r` each become one line break.
+fn typing_strokes(text: &str) -> Vec<Stroke> {
+    let mut strokes = Vec::new();
+    let mut units = Vec::new();
+    let mut characters = text.chars().peekable();
+    while let Some(character) = characters.next() {
+        if matches!(character, '\r' | '\n') {
+            if character == '\r' {
+                characters.next_if_eq(&'\n');
+            }
+            if !units.is_empty() {
+                strokes.push(Stroke::Text(std::mem::take(&mut units)));
+            }
+            strokes.push(Stroke::LineBreak);
+            continue;
+        }
+        let mut encoded = [0; 2];
+        let encoded = character.encode_utf16(&mut encoded);
+        if units.len() + encoded.len() > MAX_UNICODE_UNITS {
+            strokes.push(Stroke::Text(std::mem::take(&mut units)));
+        }
+        units.extend_from_slice(encoded);
+    }
+    if !units.is_empty() {
+        strokes.push(Stroke::Text(units));
+    }
+    strokes
 }
 
 /// One press of a key that types nothing, under the modifier `flags` held
@@ -290,7 +344,7 @@ pub fn post_repeated_shortcut(key: Key, modifiers: Modifiers, count: u8) -> Resu
         Key::Down => 125,
         Key::Left => 123,
         Key::Right => 124,
-        Key::Enter => 36,
+        Key::Enter => RETURN_KEY_CODE,
         Key::Escape => 53,
     };
     let modifiers = [
@@ -464,6 +518,62 @@ mod tests {
             let mark = unsafe { CGEventGetIntegerValueField(event.0, EVENT_SOURCE_USER_DATA) };
             assert_eq!(mark, SYNTHETIC_EVENT_MARKER);
         }
+    }
+
+    #[test]
+    fn typing_splits_text_into_twenty_unit_events_without_splitting_surrogate_pairs() {
+        let text = |text: &str| Stroke::Text(text.encode_utf16().collect());
+        assert_eq!(typing_strokes(""), []);
+        assert_eq!(typing_strokes("hello"), [text("hello")]);
+        assert_eq!(
+            typing_strokes("abcdefghijklmnopqrstuvwxyz"),
+            [text("abcdefghijklmnopqrst"), text("uvwxyz")]
+        );
+        // 19 units, then a surrogate pair that would make 21, moves whole.
+        assert_eq!(
+            typing_strokes("abcdefghijklmnopqrs😀z"),
+            [text("abcdefghijklmnopqrs"), text("😀z")]
+        );
+        assert_eq!(
+            typing_strokes("😀😀😀😀😀😀😀😀😀😀😀"),
+            [text("😀😀😀😀😀😀😀😀😀😀"), text("😀")]
+        );
+        for stroke in typing_strokes(&"é漢😀a".repeat(40)) {
+            let Stroke::Text(units) = stroke else {
+                panic!("unexpected line break");
+            };
+            assert!(units.len() <= MAX_UNICODE_UNITS);
+            assert!(String::from_utf16(&units).is_ok());
+        }
+    }
+
+    #[test]
+    fn typing_sends_each_line_break_as_one_shift_return() {
+        let text = |text: &str| Stroke::Text(text.encode_utf16().collect());
+        assert_eq!(
+            typing_strokes("one\ntwo\r\nthree\rfour\n\n"),
+            [
+                text("one"),
+                Stroke::LineBreak,
+                text("two"),
+                Stroke::LineBreak,
+                text("three"),
+                Stroke::LineBreak,
+                text("four"),
+                Stroke::LineBreak,
+                Stroke::LineBreak,
+            ]
+        );
+        assert_eq!(
+            shortcut_event_specs(RETURN_KEY_CODE, &[(SHIFT_FLAG, SHIFT_KEY_CODE)], 1)
+                .collect::<Vec<_>>(),
+            [
+                (SHIFT_KEY_CODE, true, SHIFT_FLAG),
+                (RETURN_KEY_CODE, true, SHIFT_FLAG),
+                (RETURN_KEY_CODE, false, SHIFT_FLAG),
+                (SHIFT_KEY_CODE, false, 0),
+            ]
+        );
     }
 
     #[test]

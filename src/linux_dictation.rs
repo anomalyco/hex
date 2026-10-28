@@ -188,6 +188,7 @@ pub(crate) fn run(
     let mut settings = settings.clone();
     let transcriber =
         transcriber.map_or_else(|| LocalTranscriber::load(&settings.transcription), Ok)?;
+    crate::speech_detector::prewarm();
     // The engine outlives the output worker, which waits on its transcripts.
     let mut engine = TranscriptionEngine::start(transcriber)?;
     // Drop audio/hotkeys and close the job queue before joining slow output on
@@ -318,7 +319,7 @@ pub(crate) fn run(
     })?;
     emit_state(&mut events, VoiceState::Listening, &device_label)?;
     println!(
-        "HEX dictation is ready on {device_label}. Hold {hotkey_label} to dictate; Ctrl-C stops."
+        "Hex dictation is ready on {device_label}. Hold {hotkey_label} to dictate; Ctrl-C stops."
     );
 
     while !shutdown.load(Ordering::Relaxed) {
@@ -665,6 +666,7 @@ fn run_voice_action(instruction: &str, paster: &mut LinuxPaster) -> Result<Strin
 pub(crate) fn initialize_feedback(settings: &crate::app_settings::AppSettings) {
     feedback::set_enabled(settings.sound_effects);
     feedback::set_volume(settings.sound_effect_volume.clamp(0.0, 1.0));
+    feedback::set_theme(settings.sound_theme);
     if let Err(error) = feedback::preload() {
         tracing::warn!(%error, "recording sounds are unavailable; continuing without feedback");
     }

@@ -62,6 +62,78 @@ pub struct Tuning {
     /// Enter, exit, and morph duration, s.
     pub transition: f32,
     pub bounce: f32,
+    /// Follows the speaker's recent peak instead of the prototype's fixed
+    /// −40 to −10 dB window ([`AutoLevel`]).
+    pub auto_level: bool,
+    /// How long the auto level takes to forget a loud peak, s.
+    pub auto_release: f32,
+    /// Input below this never lights the scope, and the auto level never
+    /// boosts the room up to full, dBFS.
+    pub noise_floor: f32,
+    /// How transcribing and processing look.
+    pub processing: Processing,
+    /// Where the HUD sits.
+    pub placement: Placement,
+    /// Draws From the notch's island on a screen without a notch, from a
+    /// pretend one in the middle of the menu bar, for trying it on a
+    /// flat display.
+    pub pretend_notch: bool,
+}
+
+/// How Dot scope says "working" while a dictation transcribes and
+/// processes, and how it settles into done.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Processing {
+    /// Round 1: the braid irons flat and a beam sweeps back and forth.
+    Sweep,
+    /// The braid keeps turning and light flows through it left to right;
+    /// done carries the last band off the right edge.
+    #[default]
+    Flow,
+    /// Pulses leave the middle the way the voice did; done is one last
+    /// ring that clears the field from the middle out.
+    Pulse,
+}
+
+impl Processing {
+    pub const ALL: [Self; 3] = [Self::Sweep, Self::Flow, Self::Pulse];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Sweep => "Sweep",
+            Self::Flow => "Flow",
+            Self::Pulse => "Pulse",
+        }
+    }
+}
+
+/// Where the HUD sits on the screen with the pointer.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Placement {
+    /// Under the menu bar (or above the Dock, with the indicator at the
+    /// bottom), as before.
+    #[default]
+    Below,
+    /// A small plate in the menu bar: centred on a flat screen, and just
+    /// right of the notch on a screen with one.
+    MenuBar,
+    /// A black island that grows out of the notch; in the menu bar on a
+    /// screen without one.
+    Notch,
+}
+
+impl Placement {
+    pub const ALL: [Self; 3] = [Self::Below, Self::MenuBar, Self::Notch];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Below => "Below the menu bar",
+            Self::MenuBar => "In the menu bar",
+            Self::Notch => "From the notch",
+        }
+    }
 }
 
 impl Default for Tuning {
@@ -86,6 +158,12 @@ impl Default for Tuning {
             shimmer: 1.0,
             transition: 0.3,
             bounce: 0.15,
+            auto_level: true,
+            auto_release: 3.0,
+            noise_floor: -60.0,
+            processing: Processing::default(),
+            placement: Placement::default(),
+            pretend_notch: false,
         }
     }
 }
@@ -128,7 +206,7 @@ const fn whole(index: usize, key: &'static str, label: &'static str, min: f32, m
     }
 }
 
-pub const KNOBS: [Knob; 19] = [
+pub const KNOBS: [Knob; 21] = [
     whole(0, "dot-columns", "Columns", 11.0, MAX_COLUMNS as f32),
     whole(1, "dot-rows", "Rows", 3.0, MAX_ROWS as f32),
     knob(2, "dot-spacing", "Dot spacing", 1.6, 4.0, " pt"),
@@ -155,6 +233,15 @@ pub const KNOBS: [Knob; 19] = [
     knob(16, "dot-shimmer", "Shimmer brightness", 0.0, 2.5, "x"),
     knob(17, "dot-transition", "Transition", 0.1, 0.8, " s"),
     knob(18, "dot-bounce", "Bounce", 0.0, 0.6, ""),
+    knob(
+        19,
+        "dot-auto-release",
+        "Auto-level release",
+        0.5,
+        10.0,
+        " s",
+    ),
+    knob(20, "dot-noise-floor", "Noise floor", -80.0, -30.0, " dB"),
 ];
 
 impl Knob {
@@ -184,7 +271,7 @@ impl Knob {
         let value = self.get(tuning);
         if self.whole {
             format!("{value:.0}")
-        } else if self.max >= 100.0 {
+        } else if self.max - self.min >= 40.0 {
             format!("{value:.0}{}", self.unit)
         } else {
             format!("{value:.2}{}", self.unit)
@@ -213,7 +300,9 @@ impl Tuning {
             15 => &mut self.shimmer_pass,
             16 => &mut self.shimmer,
             17 => &mut self.transition,
-            _ => &mut self.bounce,
+            18 => &mut self.bounce,
+            19 => &mut self.auto_release,
+            _ => &mut self.noise_floor,
         }
     }
 
@@ -266,9 +355,93 @@ impl Tuning {
     }
 }
 
-/// The prototype's level: RMS in dB, −40 dB silent through −10 dB full.
-pub fn level_from_rms(rms: f32) -> f32 {
-    ((20.0 * (rms.max(0.0) + 1e-6).log10() + 40.0) / 30.0).clamp(0.0, 1.0)
+static LAB: std::sync::Mutex<Option<Tuning>> = std::sync::Mutex::new(None);
+
+/// The tuning the HUD shows now: HUD Lab's latest, else the saved one.
+/// The playground's HUD stories start from it and change it, so HUD Lab
+/// and the stories edit one tuning.
+pub fn lab() -> Tuning {
+    *LAB.lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .get_or_insert_with(Tuning::load)
+}
+
+pub fn set_lab(tuning: Tuning) {
+    *LAB.lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(tuning);
+}
+
+/// A meter's RMS as dBFS.
+pub fn loudness(rms: f32) -> f32 {
+    20.0 * (rms.max(0.0) + 1e-6).log10()
+}
+
+/// The prototype's level: −40 dB silent through −10 dB full. A laptop
+/// microphone at talking distance peaks near −30 dB, so speech rarely
+/// lit a third of it.
+pub fn fixed_level(loudness: f32) -> f32 {
+    ((loudness + 40.0) / 30.0).clamp(0.0, 1.0)
+}
+
+/// The quietest the speaker's peak may be thought to be, above the room.
+const AUTO_MIN_SPAN: f32 = 16.0;
+/// How far below the peak the level starts.
+const AUTO_RANGE: f32 = 24.0;
+/// How far above the room the level starts.
+const AUTO_ROOM_MARGIN: f32 = 5.0;
+const AUTO_ATTACK: f32 = 0.04;
+const ROOM_FALL: f32 = 0.3;
+const ROOM_RISE: f32 = 6.0;
+
+/// A slow auto level: the loudest the speaker has recently been reads as
+/// full and the room as silent, so a quiet microphone and a loud one move
+/// the scope alike. The peak rises within 40 ms and falls back over
+/// `release`; the room level falls to any quieter moment in 0.3 s and
+/// creeps up over 6 s, so speech never becomes the room. The peak never
+/// sits less than 16 dB above the room or `noise_floor`, so silence is
+/// never boosted to full.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct AutoLevel {
+    peak: f32,
+    room: f32,
+}
+
+impl Default for AutoLevel {
+    /// A laptop microphone at talking distance: peaks near −30 dB over a
+    /// room near −55 dB.
+    fn default() -> Self {
+        Self {
+            peak: -30.0,
+            room: -55.0,
+        }
+    }
+}
+
+impl AutoLevel {
+    /// Steps `h` seconds at `loudness` dBFS and returns the 0–1 level.
+    pub fn step(&mut self, loudness: f32, h: f32, release: f32, noise_floor: f32) -> f32 {
+        let db = loudness.max(-120.0);
+        let follow = |value: &mut f32, target: f32, time: f32| {
+            *value += (target - *value) * (1.0 - (-h / time.max(1e-3)).exp());
+        };
+        let room_time = if db < self.room { ROOM_FALL } else { ROOM_RISE };
+        follow(&mut self.room, db, room_time);
+        let lowest = self.room.max(noise_floor) + AUTO_MIN_SPAN;
+        if db > self.peak {
+            follow(&mut self.peak, db, AUTO_ATTACK);
+        } else {
+            follow(&mut self.peak, lowest, release);
+        }
+        self.peak = self.peak.max(lowest);
+        let low = (self.room.max(noise_floor) + AUTO_ROOM_MARGIN).max(self.peak - AUTO_RANGE);
+        ((db - low) / (self.peak - low).max(1.0)).clamp(0.0, 1.0)
+    }
+
+    /// The speaker's recent peak and the room, dBFS.
+    #[cfg(test)]
+    pub fn levels(&self) -> (f32, f32) {
+        (self.peak, self.room)
+    }
 }
 
 #[cfg(test)]
@@ -321,10 +494,82 @@ mod tests {
     }
 
     #[test]
-    fn level_maps_minus_40_to_minus_10_db() {
-        assert_eq!(level_from_rms(0.0), 0.0);
-        assert!((level_from_rms(0.01) - 0.0).abs() < 1e-3);
-        assert!((level_from_rms(0.1) - 2.0 / 3.0).abs() < 1e-3);
-        assert_eq!(level_from_rms(0.5), 1.0);
+    fn fixed_level_maps_minus_40_to_minus_10_db() {
+        let level = |rms| fixed_level(loudness(rms));
+        assert_eq!(level(0.0), 0.0);
+        assert!((level(0.01) - 0.0).abs() < 1e-3);
+        assert!((level(0.1) - 2.0 / 3.0).abs() < 1e-3);
+        assert_eq!(level(0.5), 1.0);
+    }
+
+    /// Syllables peaking at `peak` dB over a room at `room` dB, 4 a second,
+    /// for `seconds` at 240 Hz; returns the levels.
+    fn speak(auto: &mut AutoLevel, peak: f32, room: f32, seconds: f32) -> Vec<f32> {
+        let h = 1.0 / 240.0;
+        (0..(seconds / h) as usize)
+            .map(|i| {
+                let t = i as f32 * h;
+                let syllable = (std::f32::consts::TAU * 4.0 * t).sin().max(0.0);
+                let db = room + (peak - room) * syllable.powf(0.5);
+                auto.step(db, h, 3.0, -60.0)
+            })
+            .collect()
+    }
+
+    fn high(levels: &[f32]) -> f32 {
+        let mut sorted = levels.to_vec();
+        sorted.sort_by(f32::total_cmp);
+        sorted[sorted.len() * 9 / 10]
+    }
+
+    #[test]
+    fn auto_level_moves_a_quiet_microphone_as_far_as_a_loud_one() {
+        let mut quiet = AutoLevel::default();
+        speak(&mut quiet, -36.0, -58.0, 4.0);
+        let quiet = high(&speak(&mut quiet, -36.0, -58.0, 2.0));
+        let mut loud = AutoLevel::default();
+        speak(&mut loud, -14.0, -50.0, 4.0);
+        let loud = high(&speak(&mut loud, -14.0, -50.0, 2.0));
+        assert!(quiet > 0.8 && loud > 0.8, "quiet {quiet} loud {loud}");
+        assert!(fixed_level(-36.0) < 0.2, "the fixed window barely moved");
+    }
+
+    #[test]
+    fn auto_level_never_boosts_the_room() {
+        let mut auto = AutoLevel::default();
+        speak(&mut auto, -30.0, -55.0, 2.0);
+        let h = 1.0 / 240.0;
+        let mut last = 1.0;
+        for _ in 0..(20.0 / h) as usize {
+            last = auto.step(-48.0, h, 3.0, -60.0);
+        }
+        assert!(last < 0.05, "a fan at −48 dB lit {last}");
+        let (peak, room) = auto.levels();
+        assert!(peak >= room + AUTO_MIN_SPAN - 0.01);
+        let mut silent = AutoLevel::default();
+        for _ in 0..(20.0 / h) as usize {
+            last = silent.step(-90.0, h, 3.0, -60.0);
+        }
+        assert_eq!(last, 0.0);
+        assert!(silent.levels().0 >= -60.0 + AUTO_MIN_SPAN - 0.01);
+    }
+
+    #[test]
+    fn new_settings_fill_in_for_an_old_file() {
+        let old: Tuning = serde_json::from_str(r#"{"gain": 2.0}"#).unwrap();
+        assert!(old.auto_level);
+        assert_eq!(old.processing, Processing::Flow);
+        assert_eq!(old.placement, Placement::Below);
+        let notch: Tuning =
+            serde_json::from_str(r#"{"placement": "notch", "processing": "pulse"}"#).unwrap();
+        assert_eq!(
+            (notch.placement, notch.processing),
+            (Placement::Notch, Processing::Pulse)
+        );
+        let bar = Tuning {
+            placement: Placement::MenuBar,
+            ..Tuning::default()
+        };
+        assert!(bar.json().contains("\"placement\": \"menu-bar\""));
     }
 }

@@ -14,11 +14,13 @@
 use rune::{El, Tx, col, row, text};
 
 use super::Ui;
-use super::controls::{ButtonKind, DESCRIPTION, Paint, bare_page, button, segmented};
+use super::controls::{
+    ButtonKind, DESCRIPTION, Paint, bare_page, button, card, segmented, setting_row, toggle_row,
+};
 use super::lists::{group_label, slider};
 use super::platform::{HudDemo, HudLab, HudTuning, PlatformRequest};
 use crate::desktop_i18n::tr;
-use crate::dot_scope::{KNOBS, Tuning};
+use crate::dot_scope::{self, KNOBS, Placement, Processing, Tuning};
 
 /// `dictation_indicator`'s fastest animation speed.
 const MAX_SPEED: f32 = 24.0;
@@ -143,6 +145,9 @@ fn configure(ui: &mut Ui, change: impl FnOnce(&mut HudLab)) {
     ui.hud_copied = false;
     ui.hud_saved = false;
     ui.platform.hud = lab;
+    if let Some(tuning) = lab.dot_scope {
+        dot_scope::set_lab(tuning);
+    }
     ui.ask(if lab.demo == old.demo && lab.queued == old.queued {
         PlatformRequest::TuneHud(lab)
     } else {
@@ -168,6 +173,8 @@ const DOT_SCOPE_GROUPS: [(&str, &[&str]); 5] = [
         "Response",
         &[
             "dot-gain",
+            "dot-auto-release",
+            "dot-noise-floor",
             "dot-response",
             "dot-release",
             "dot-history",
@@ -226,6 +233,73 @@ fn dot_scope_actions(p: Paint, ui: &Ui) -> Vec<El> {
     ]
 }
 
+/// Changes Dot scope's tuning from HUD Lab.
+fn tune(ui: &mut Ui, change: impl FnOnce(&mut Tuning)) {
+    configure(ui, |lab| {
+        if let Some(tuning) = &mut lab.dot_scope {
+            change(tuning);
+        }
+    });
+}
+
+/// Dot scope's choices: how processing looks, where the HUD sits, and how
+/// the voice is levelled.
+fn dot_scope_choices(p: Paint, tuning: &Tuning) -> El {
+    let processing = Processing::ALL
+        .iter()
+        .position(|look| *look == tuning.processing)
+        .unwrap_or(0);
+    let placement = Placement::ALL
+        .iter()
+        .position(|place| *place == tuning.placement)
+        .unwrap_or(0);
+    let rows = vec![
+        setting_row(
+            p,
+            "dot-processing",
+            "Processing",
+            Some("How the HUD shows it is working, and how it settles into done"),
+            segmented(
+                p,
+                "segments",
+                &Processing::ALL.map(Processing::label),
+                processing,
+                |ui, index| tune(ui, |tuning| tuning.processing = Processing::ALL[index]),
+            ),
+        ),
+        setting_row(
+            p,
+            "dot-placement",
+            "Placement",
+            Some(tuning.placement.label()),
+            segmented(
+                p,
+                "segments",
+                &["Below", "Menu bar", "Notch"],
+                placement,
+                |ui, index| tune(ui, |tuning| tuning.placement = Placement::ALL[index]),
+            ),
+        ),
+        toggle_row(
+            p,
+            "dot-pretend-notch",
+            "Pretend notch",
+            "Draws From the notch's island on a screen without one",
+            tuning.pretend_notch,
+            |ui: &mut Ui| tune(ui, |tuning| tuning.pretend_notch = !tuning.pretend_notch),
+        ),
+        toggle_row(
+            p,
+            "dot-auto-level",
+            "Auto level",
+            "Follows the voice's recent peak, so a quiet voice fills the field too",
+            tuning.auto_level,
+            |ui: &mut Ui| tune(ui, |tuning| tuning.auto_level = !tuning.auto_level),
+        ),
+    ];
+    card(p, "dot-scope-choices", rows)
+}
+
 fn dot_scope_sliders(p: Paint, tuning: &Tuning) -> El {
     let mut sliders = col().key("dot-scope-sliders").gap(16.0);
     for (index, (group, keys)) in DOT_SCOPE_GROUPS.into_iter().enumerate() {
@@ -246,13 +320,7 @@ fn dot_scope_sliders(p: Paint, tuning: &Tuning) -> El {
                 knob.fraction(tuning),
                 knob.display(tuning),
                 SLIDER_WIDTH,
-                move |ui, value, _| {
-                    configure(ui, |lab| {
-                        if let Some(tuning) = &mut lab.dot_scope {
-                            knob.set_fraction(tuning, value);
-                        }
-                    })
-                },
+                move |ui, value, _| tune(ui, |tuning| knob.set_fraction(tuning, value)),
             ));
         }
     }
@@ -412,6 +480,7 @@ pub(super) fn pane(ui: &Ui, p: Paint) -> (Vec<El>, El) {
         let content = bare_page("content")
             .child(controls)
             .child(note)
+            .child(dot_scope_choices(p, tuning))
             .child(dot_scope_sliders(p, tuning));
         return (actions, super::scroll_body("hud-lab-scroll", content));
     }

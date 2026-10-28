@@ -63,10 +63,10 @@ The installers write `install.json`
 at the root of the user-owned install, and the client self-updates only when
 it is present and the root is writable by this user alone:
 
-- Linux: `~/.local/share/voice-control/install.json` (`install-linux.sh`;
+- Linux: `~/.local/share/hex/install.json` (`install-linux.sh`;
   `scripts/install-linux.sh` source builds write none and keep their
   `source-build` marker).
-- Windows: `%APPDATA%\voice-control\install.json` (`install-windows.ps1` and
+- Windows: `%APPDATA%\hex\install.json` (`install-windows.ps1` and
   the Setup.exe).
 - macOS: the client decides from the bundle's location (a writable,
   non-translocated `Hex.app` is direct).

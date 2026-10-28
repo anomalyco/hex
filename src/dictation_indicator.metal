@@ -332,15 +332,39 @@ struct DotUniforms {
     float4 plate;
     float4 rim;
     float4 shadow;
+    // The plate's middle from the window's (pt, y down), its fit, and 1 in
+    // an island.
+    float4 layout;
+    // The island's half width, height, top edge, and bottom radius, pt.
+    float4 island;
 };
+
+// The island grown out of the notch: a box hanging from the screen's top
+// edge, rounded below, with concave fillets where it meets the top edge.
+float island_distance(float2 point, float4 island) {
+    float half_width = island.x;
+    float height = island.y;
+    float top = island.z;
+    float radius = max(island.w, 0.0);
+    float fillet = clamp(height * 0.25, 0.0, 6.0);
+    // Reaches `radius` above the top so only the lower corners round.
+    float2 body_center = float2(0.0, top + (height - radius) * 0.5);
+    float body = rounded_box(point - body_center, float2(half_width, (height + radius) * 0.5), radius);
+    float2 q = float2(abs(point.x), point.y);
+    float2 square_center = float2(half_width + fillet * 0.5, top + fillet * 0.5);
+    float square = rounded_box(q - square_center, float2(fillet * 0.5 + 0.5, fillet * 0.5), 0.0);
+    float hollow = fillet - length(q - float2(half_width + fillet, top + fillet));
+    return min(body, max(square, hollow));
+}
 
 fragment float4 dot_scope_fragment(
     VertexOutput input [[stage_in]],
     constant DotUniforms &u [[buffer(0)]],
     constant ushort2 *dots [[buffer(1)]])
 {
-    float scale = max(u.scale, 0.001);
-    float2 point = (input.uv * u.resolution - u.resolution * 0.5) / u.backing_scale / scale;
+    float scale = max(u.scale, 0.001) * max(u.layout.z, 0.01);
+    float2 window_point = (input.uv * u.resolution - u.resolution * 0.5) / u.backing_scale;
+    float2 point = (window_point - u.layout.xy) / scale;
     float pixel = 1.0 / (u.backing_scale * scale);
     float softness = max(u.softness, 0.0);
     float aa = pixel * 0.75 + softness * 0.72;
@@ -349,12 +373,18 @@ fragment float4 dot_scope_fragment(
     float distance = rounded_box(point, half_size, radius);
     bool dark = u.dark > 0.5;
     float4 result = 0.0;
+    bool in_island = u.layout.w > 0.5;
+    float island_shape = 1.0;
+    if (in_island) {
+        float island_aa = 0.75 / u.backing_scale;
+        island_shape = coverage(island_distance(window_point, u.island), island_aa);
+    }
 
     // A soft drop shadow 3 pt below, as the prototype's 16 pt canvas blur.
     float shadow_distance = rounded_box(point - float2(0.0, 3.0), half_size, radius);
     composite(result, u.shadow.rgb, u.shadow.a * (0.5 - 0.5 * tanh(shadow_distance / 6.5)));
 
-    float shape = coverage(distance, aa);
+    float shape = coverage(distance, aa) * island_shape;
     composite(result, u.plate.rgb, u.plate.a * shape);
     composite(result, u.rim.rgb, u.rim.a * coverage(abs(distance) - 0.3, aa));
 
@@ -412,6 +442,11 @@ fragment float4 dot_scope_fragment(
     }
 
     result *= u.opacity;
+    // The island is part of the notch, solid black however faded the
+    // plate's contents are.
+    if (in_island) {
+        result.a += island_shape * (1.0 - result.a);
+    }
     if (result.a > 0.0) {
         float2 pixel_position = floor(input.position.xy);
         float n1 = fract(52.9829189 * fract(dot(pixel_position, float2(0.06711056, 0.00583715))));

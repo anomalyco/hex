@@ -439,6 +439,17 @@ pub(super) fn select(
     )
 }
 
+/// A [`select`]'s field showing its one choice, disabled.
+pub(super) fn fixed_select(p: Paint, key: &str, label: &str) -> El {
+    Select::new::<&str>(format!("{key}-field"), &[])
+        .appearance(SelectAppearance::Field)
+        .width(SELECT_WIDTH)
+        .current(Some(label))
+        .disabled(true)
+        .trigger(p.k)
+        .key(key)
+}
+
 /// A [`select`] `width` points wide, for labels such as device names that
 /// would truncate at the usual width. A `detail` follows the field's label
 /// in faint text.
@@ -744,18 +755,18 @@ pub(super) const TRAY_PADDING: f32 = 3.0;
 /// face (the warning cream warms the neutral layers) on a cap that shades
 /// to warm grey; in dark a space-black face on a cap that falls to the
 /// deepest background.
-struct KeyMaterial {
-    cap_top: Color,
-    cap_bottom: Color,
-    face: Color,
-    ink: Color,
+pub(super) struct KeyMaterial {
+    pub(super) cap_top: Color,
+    pub(super) cap_bottom: Color,
+    pub(super) face: Color,
+    pub(super) ink: Color,
     /// The tight shadow under the cap and the soft one it casts at rest.
-    contact: f32,
-    cast: f32,
+    pub(super) contact: f32,
+    pub(super) cast: f32,
 }
 
 impl KeyMaterial {
-    fn new(k: &Kit) -> Self {
+    pub(super) fn new(k: &Kit) -> Self {
         let c = &k.c;
         if k.dark {
             let face = c.bg_base.mix(c.layer_01, 0.6);

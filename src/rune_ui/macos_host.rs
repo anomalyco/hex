@@ -677,6 +677,14 @@ impl NativeHost for MacHost {
 
     fn poll(&mut self, state: &mut PlatformState) -> bool {
         let mut changed = false;
+        // The playground's HUD stories change the tuning HUD Lab shows.
+        if let Some(tuning) = state.hud.dot_scope {
+            let shared = crate::dot_scope::lab();
+            if shared != tuning {
+                state.hud.dot_scope = Some(shared);
+                changed = true;
+            }
+        }
         if let Some(login) = &mut self.login {
             match login.poll() {
                 Ok(Some(answer)) => {
@@ -745,6 +753,20 @@ impl NativeHost for MacHost {
             return changed;
         }
         self.refresh_at = Instant::now() + PLATFORM_REFRESH;
+        // Input sources are read only while keyboard model switching is on.
+        let switching = crate::macos_rune::runtime()
+            .and_then(|runtime| runtime.published())
+            .is_some_and(|published| published.settings.keyboard_model_switching.enabled);
+        if let Some(mtm) = objc2::MainThreadMarker::new() {
+            changed |= update(
+                &mut state.input_sources,
+                if switching {
+                    crate::keyboard_input_sources::enabled(mtm)
+                } else {
+                    Vec::new()
+                },
+            );
+        }
         changed |= self.calendar.poll(&mut state.calendar);
         changed |= update(
             &mut state.tuning,
@@ -769,9 +791,6 @@ impl NativeHost for MacHost {
         let asked_len = state.permissions_asked.len();
         state.permissions_asked.retain(|kind| match kind {
             PermissionKind::Microphone => permissions.microphone != PermissionState::Ready,
-            PermissionKind::InputMonitoring => {
-                permissions.input_monitoring != PermissionState::Ready
-            }
             PermissionKind::Accessibility => permissions.accessibility != PermissionState::Ready,
             PermissionKind::SystemAudio => !system_audio,
             PermissionKind::ScreenRecording => !crate::meeting::screen_recording_permitted(),
@@ -841,6 +860,10 @@ impl NativeHost for MacHost {
             inputs.extend(practice.observations().into_iter().map(Input::Dictation));
         }
         inputs
+    }
+
+    fn practice_level(&self) -> f32 {
+        crate::dictation_indicator::recent_peak()
     }
 }
 

@@ -19,7 +19,7 @@ Run every command from the repository root.
 
 ## Goal
 
-Compare HEX transcription runtimes on the same M2 Max inputs without changing
+Compare Hex transcription runtimes on the same M2 Max inputs without changing
 the production backend based on published results from other machines.
 
 The primary performance metric is median warm real-time factor (`median_rtf`),
@@ -34,7 +34,7 @@ manifest composition. Optional manifest `vocabulary`, per-clip `expected_terms`
 and `group` fields enable recall and false-insertion scoring. `vocabulary` is a
 scoring list only; it does not change recognition or imply Parakeet hint support.
 
-The corpus is local and ignored by Git because HEX does not retain dictation
+The corpus is local and ignored by Git because Hex does not retain dictation
 audio by default. Create `perf/transcription-corpus/manifest.json` and keep the
 WAV files beside it:
 
@@ -152,7 +152,7 @@ and backend-owned memory are not reliably visible from inside the process:
 
 ```sh
 cargo build --release
-/usr/bin/time -l target/release/voice-control benchmark-transcription \
+/usr/bin/time -l target/release/hex benchmark-transcription \
   perf/transcription-corpus/manifest.json \
   > perf/transcription-corpus/transcribe-cpp-metal-v2-q8.jsonl
 ```

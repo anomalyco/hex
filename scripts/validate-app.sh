@@ -10,13 +10,13 @@ bundle=$1
 expected_name=$2
 version=$3
 build_number=$4
-team_id=${VOICE_CONTROL_TEAM_ID:?Set VOICE_CONTROL_TEAM_ID to the Apple Developer signing team}
+team_id=${HEX_TEAM_ID:?Set HEX_TEAM_ID to the Apple Developer signing team}
 plist="$bundle/Contents/Info.plist"
 # Logged only by a build with the `capture` feature (src/capture_host.rs).
 capture_marker='capture experiment on: `hex capture` is available'
 
 fail() {
-  echo "Rust HEX bundle validation failed: $*" >&2
+  echo "Rust Hex bundle validation failed: $*" >&2
   exit 1
 }
 
@@ -33,6 +33,7 @@ plist_value() {
 [ "$(plist_value CFBundleShortVersionString)" = "$version" ] || fail "wrong version"
 [ "$(plist_value CFBundleVersion)" = "$build_number" ] || fail "wrong build number"
 [ "$(plist_value LSMinimumSystemVersion)" = 15.0 ] || fail "wrong minimum macOS"
+[ "$(plist_value CFBundleURLTypes:0:CFBundleURLSchemes:0)" = hex ] || fail "wrong URL scheme"
 # Hex updates itself through the Anomaly release service; Sparkle is gone.
 ! plist_value SUFeedURL >/dev/null 2>&1 || fail "a Sparkle feed is still configured"
 [ ! -e "$bundle/Contents/Frameworks/Sparkle.framework" ] || fail "Sparkle.framework is still bundled"

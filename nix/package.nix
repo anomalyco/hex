@@ -82,9 +82,6 @@ rustPlatform.buildRustPackage (finalAttrs: {
       ../assets
       ../packaging
       ../macos/HexMicrophoneDriver/Info.plist
-      ../sdk/commands/package.json
-      ../sdk/commands/src
-      ../sdk/commands/workspace-template
     ];
   };
 
@@ -92,7 +89,7 @@ rustPlatform.buildRustPackage (finalAttrs: {
     lockFile = ../Cargo.lock;
     outputHashes = {
       "transcribe-rs-0.3.11" = "sha256-MJJiug3LfbKsuHcL2+LJk95+j5kk/MWzb5ihdBlHLmE=";
-      "rune-0.0.1" = "sha256-ncf65pVzH7pNidv8JxBJtLD2TDUCPgoSghEPCWwWL9s=";
+      "rune-0.0.1" = "sha256-u8PvmsuvIoeyOImEc+pD/0byDRfV7Vvpz1JzkJOpmcM=";
       "transcribe-cpp-sys-0.4.1" = "sha256-lb6Q4e/hq8S84ZtFuPGpL+eEoneBVb2bVIr6yriVLaQ=";
     };
   };
@@ -137,7 +134,6 @@ rustPlatform.buildRustPackage (finalAttrs: {
   '';
 
   postInstall = ''
-    mv $out/bin/voice-control $out/bin/hex
     install -Dm644 ${../packaging/hex.desktop} $out/share/applications/hex.desktop
     substituteInPlace $out/share/applications/hex.desktop \
       --replace-fail '@HEX_BIN@' "$out/bin/hex"

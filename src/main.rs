@@ -1,3 +1,7 @@
+/// The version Hex reports: the release version, or `0.0.0-dev-local-<commit>`
+/// for a build outside the Release workflow (build.rs).
+const VERSION: &str = env!("HEX_BUILD_VERSION");
+
 #[cfg(target_os = "macos")]
 mod accessibility;
 mod app_paths;
@@ -10,6 +14,7 @@ mod apple_speech;
 mod application_catalog;
 #[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
 mod audio;
+mod background_process;
 #[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
 mod calendar;
 #[cfg(hex_capture)]
@@ -60,9 +65,14 @@ mod gguf_session;
 #[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
 mod hex_microphone;
 mod history;
+#[cfg(target_os = "macos")]
+mod hud_placement;
 mod instance;
 #[cfg(target_os = "macos")]
 mod keyboard;
+#[cfg(target_os = "macos")]
+mod keyboard_input_sources;
+mod keyboard_model_switching;
 #[cfg_attr(target_os = "linux", allow(dead_code))]
 mod keys;
 #[cfg(target_os = "linux")]
@@ -79,8 +89,6 @@ mod linux_dictation;
 mod linux_file_chooser;
 #[cfg(target_os = "linux")]
 mod linux_input;
-#[cfg(target_os = "linux")]
-mod linux_migration;
 #[cfg(target_os = "linux")]
 mod linux_paste;
 #[cfg(target_os = "linux")]
@@ -138,6 +146,7 @@ mod recording_environment;
 mod rune_ui;
 #[cfg(target_os = "macos")]
 mod smart_turn;
+mod speech_detector;
 #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
 mod spoken_text;
 #[cfg(target_os = "macos")]
@@ -181,8 +190,6 @@ mod windows_input;
 #[cfg(target_os = "windows")]
 mod windows_login_item;
 #[cfg(target_os = "windows")]
-mod windows_migration;
-#[cfg(target_os = "windows")]
 mod windows_paste;
 #[cfg(target_os = "windows")]
 mod windows_rune;
@@ -209,7 +216,7 @@ use color_eyre::eyre::eyre;
 #[derive(Parser)]
 #[command(
     name = "hex",
-    version,
+    version = crate::VERSION,
     about = "Local, observable voice control",
     long_about = "Local, observable voice control.\n\n\
         Control commands (status, dictation, meetings record, settings, model, window, …) drive \
@@ -351,8 +358,11 @@ enum TranscriptionBenchmarkBackend {
 #[cfg(target_os = "macos")]
 #[derive(Subcommand)]
 enum CommandsCommand {
-    /// Create or refresh ~/.config/hex and install its pinned dependencies.
+    /// Create ~/.config/hex with a starter config, or refresh its typings.
     Init,
+    /// Load ~/.config/hex's config as Hex would and report what it registers
+    /// or why it fails.
+    Check,
     /// Turn voice commands on in the running Hex.
     Enable {
         /// Also turn off release_microphone_while_idle, which commands exclude.
@@ -650,7 +660,7 @@ fn main() -> Result<()> {
                 control::cli::CommandsAction::Retry,
                 output,
             )),
-            CommandsCommand::Init => Cli {
+            CommandsCommand::Init | CommandsCommand::Check => Cli {
                 command: Some(Command::Commands { command }),
             },
         },
@@ -729,11 +739,7 @@ fn main() -> Result<()> {
         );
     }
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let data_folder = app_paths::migrate_data_folder();
     let log_dir = app_paths::init_process_logging(&SHUTDOWN)?;
-    if let Some(outcome) = &data_folder {
-        app_paths::log_data_folder_migration(outcome);
-    }
 
     let event_path = log_dir.join("live.ndjson");
     let bundled_service = executable_name.as_deref() == Some(std::ffi::OsStr::new("hex-service"));
@@ -856,6 +862,15 @@ fn main() -> Result<()> {
         } => {
             let workspace = personal_commands::initialize_workspace()?;
             println!("{}", workspace.display());
+            Ok(())
+        }
+        Command::Commands {
+            command: CommandsCommand::Check,
+        } => {
+            println!(
+                "{}",
+                personal_commands::check_workspace(&config::voice_control())?
+            );
             Ok(())
         }
         Command::Dev { command } => {
@@ -1093,7 +1108,7 @@ fn mcp_alias_arguments(mut arguments: Vec<std::ffi::OsString>) -> Vec<std::ffi::
 
 #[cfg(target_os = "macos")]
 fn is_bundled_app_executable(name: Option<&std::ffi::OsStr>) -> bool {
-    name.is_some_and(|name| name == "voice-control-watch" || name == "hex")
+    name.is_some_and(|name| name == "hex")
 }
 
 /// Whether this launch runs the app: `hex app` without Rune's own (headless)
@@ -1282,12 +1297,8 @@ mod tests {
     }
 
     #[test]
-    fn both_packaged_executable_names_launch_the_app() {
-        assert!(is_bundled_app_executable(Some(
-            "voice-control-watch".as_ref()
-        )));
+    fn the_packaged_executable_launches_the_app() {
         assert!(is_bundled_app_executable(Some("hex".as_ref())));
-        assert!(!is_bundled_app_executable(Some("voice-control".as_ref())));
         assert!(!is_bundled_app_executable(Some("hex-service".as_ref())));
     }
 
@@ -1301,21 +1312,9 @@ mod tests {
         };
         assert!(opens(&["hex"]));
         assert!(opens(&["/Applications/Hex.app/Contents/MacOS/hex"]));
-        assert!(opens(&["voice-control", "app"]));
-        assert!(opens(&[
-            "voice-control",
-            "app",
-            "--device",
-            "MacBook Pro Microphone"
-        ]));
-        assert!(!opens(&[
-            "voice-control",
-            "app",
-            "--",
-            "--snap",
-            "/tmp/a.png"
-        ]));
-        assert!(!opens(&["voice-control"]));
+        assert!(opens(&["hex", "app"]));
+        assert!(opens(&["hex", "app", "--device", "MacBook Pro Microphone"]));
+        assert!(!opens(&["hex", "app", "--", "--snap", "/tmp/a.png"]));
         assert!(!opens(&["hex-service"]));
         assert!(!opens(&["hex-meetings-mcp"]));
         for command in [

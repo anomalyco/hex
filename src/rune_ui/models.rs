@@ -1,6 +1,6 @@
 //! The OpenCode model catalog and the model and thinking pickers that Voice
 //! Action and each mode's rewriting share: the catalog loads off the UI
-//! thread, a missing `opencode2` is retried at a coarse interval, failures
+//! thread, a missing or V1-only OpenCode is retried at a coarse interval, failures
 //! wait for an explicit retry, and choosing a model also picks its
 //! recommended thinking variant.
 
@@ -71,7 +71,8 @@ impl Models {
         self.picker.search.focused = true;
     }
 
-    /// Adopts a finished load; retries a missing `opencode2` now and then.
+    /// Adopts a finished load; retries a missing or V1-only OpenCode now
+    /// and then.
     pub(super) fn poll(&mut self, live: bool) -> bool {
         if let Some(receiver) = &self.receiver {
             let Ok(state) = receiver.try_recv() else {
@@ -82,7 +83,10 @@ impl Models {
             return true;
         }
         if live
-            && matches!(self.state, ModelCatalogState::Missing)
+            && matches!(
+                self.state,
+                ModelCatalogState::Missing | ModelCatalogState::NeedsV2
+            )
             && Instant::now() >= self.retry_at
         {
             self.start_load();
@@ -96,6 +100,10 @@ impl Models {
         }
         self.state = ModelCatalogState::Loading;
         self.start_load();
+    }
+
+    pub(super) fn checking(&self) -> bool {
+        matches!(self.state, ModelCatalogState::Loading)
     }
 
     pub(super) fn available(&self) -> bool {
@@ -176,6 +184,13 @@ impl Models {
             ..Self::default()
         }
     }
+
+    pub(super) fn fixture_v1() -> Self {
+        Self {
+            state: ModelCatalogState::NeedsV2,
+            ..Self::default()
+        }
+    }
 }
 
 fn selected(settings: &AppSettings, target: Target) -> (Option<&str>, Option<&str>) {
@@ -253,6 +268,7 @@ fn status(models: &Models) -> String {
     match &models.state {
         ModelCatalogState::Loading => tr("Loading OpenCode…").into(),
         ModelCatalogState::Missing => tr("OpenCode beta required").into(),
+        ModelCatalogState::NeedsV2 => tr("Requires OpenCode V2").into(),
         ModelCatalogState::Failed(error) => tr_fill("OpenCode models unavailable: {}", error),
         ModelCatalogState::Loaded(catalog) => {
             tr_fill("{} available models", &catalog.models.len().to_string())
@@ -422,6 +438,12 @@ fn model_picker(ui: &Ui, p: Paint, target: Target, field: El, layer: &mut Vec<El
         }
     })
     .build(p.k, layer)
+}
+
+/// Why `feature` is unavailable in a few words, for beside its switch;
+/// `None` once the catalog loads.
+pub(super) fn unavailable_reason(ui: &Ui, feature: OpenCodeFeature) -> Option<&'static str> {
+    opencode_unavailable_copy(&ui.models.state, feature).map(|copy| copy.reason)
 }
 
 /// Why OpenCode features are unavailable, with retry and setup actions;

@@ -465,7 +465,7 @@ fn notes_are_read_and_their_absence_is_explicit() {
 #[test]
 fn a_held_lock_marks_the_meeting_in_progress() {
     let root = std::env::temp_dir().join(format!(
-        "voice-control-meeting-query-{}-{}",
+        "hex-meeting-query-{}-{}",
         std::process::id(),
         crate::events::now_ms()
     ));

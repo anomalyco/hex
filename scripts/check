@@ -17,7 +17,8 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
 packages=(--workspace)
 if [[ "$(uname -s)" == Darwin ]]; then
-    packages=(-p voice-control -p scrawl-router -p scrawl-capture -p capture-core)
+    # zbus depends on the crates.io `hex`, so the root package is named by its ID.
+    packages=(-p "$(cargo pkgid)" -p scrawl-router -p scrawl-capture -p capture-core)
 fi
 
 stage() {

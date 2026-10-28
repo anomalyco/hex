@@ -58,6 +58,8 @@ pub(super) struct Capabilities {
     pub(super) hud_lab: bool,
     /// Modifier-only shortcuts can require the left or right key (macOS).
     pub(super) modifier_sides: bool,
+    /// Input-source changes can operate the installed-model picker (macOS).
+    pub(super) keyboard_model_switching: bool,
 }
 
 impl Capabilities {
@@ -76,6 +78,7 @@ impl Capabilities {
         fun: false,
         hud_lab: false,
         modifier_sides: false,
+        keyboard_model_switching: false,
     };
 
     pub(super) const MACOS: Self = Self {
@@ -93,6 +96,7 @@ impl Capabilities {
         fun: true,
         hud_lab: true,
         modifier_sides: true,
+        keyboard_model_switching: true,
     };
 
     pub(super) const WINDOWS: Self = Self {
@@ -110,6 +114,7 @@ impl Capabilities {
         fun: false,
         hud_lab: false,
         modifier_sides: false,
+        keyboard_model_switching: false,
     };
 
     /// This OS's capabilities, with the rows its window host decides.
@@ -296,7 +301,8 @@ pub(super) enum ScrawlRequest {
 #[derive(Clone, Debug)]
 pub(super) struct PlatformState {
     pub(super) caps: Capabilities,
-    /// Microphone, Input Monitoring, Accessibility, and whether the selected
+    pub(super) input_sources: Vec<crate::keyboard_model_switching::InputSource>,
+    /// Microphone, Accessibility, and whether the selected
     /// speech model is installed. Every permission is ready where the OS has
     /// none.
     pub(super) permissions: SetupStatus,
@@ -431,6 +437,7 @@ impl PlatformState {
     pub(super) fn new(caps: Capabilities) -> Self {
         Self {
             caps,
+            input_sources: Vec::new(),
             permissions: crate::onboarding::status_with_transcription_model(false),
             permissions_asked: Vec::new(),
             system_audio: false,
@@ -552,7 +559,6 @@ impl PlatformState {
         let ready = PermissionState::Ready;
         state.permissions = SetupStatus {
             microphone: ready,
-            input_monitoring: ready,
             accessibility: ready,
             transcription_model: true,
         };
@@ -711,6 +717,11 @@ pub(super) trait NativeHost {
     /// What the tour hears from the runtime: practice dictation outcomes
     /// while `practicing`, and a shortcut listener that failed to start.
     fn tour_inputs(&mut self, practicing: bool) -> Vec<Input>;
+    /// The microphone's latest peak, 0 to 1, while a dictation records;
+    /// silence when no audio arrived lately.
+    fn practice_level(&self) -> f32 {
+        0.0
+    }
 }
 
 pub(super) enum PlatformHost {
@@ -752,6 +763,13 @@ impl PlatformHost {
         match self {
             Self::Native(host) => host.tour_inputs(practicing),
             _ => Vec::new(),
+        }
+    }
+
+    pub(super) fn practice_level(&self) -> f32 {
+        match self {
+            Self::Native(host) => host.practice_level(),
+            _ => 0.0,
         }
     }
 

@@ -1,0 +1,163 @@
+//! A reply laid out by hand in the card's field: wrapped at word breaks,
+//! so a caret can sit mid-line while someone fixes a typo, and words flying
+//! in know the slot they land in.
+
+use rune::{El, el, text};
+
+use super::super::controls::Paint;
+use super::cards::{FIELD_FONT, FIELD_LINE, REPLY_W};
+
+/// How far `run` advances the pen; Rune measures an empty run as a space.
+fn width(run: &str) -> f32 {
+    if run.is_empty() {
+        0.0
+    } else {
+        rune::text::advance(run, FIELD_FONT)
+    }
+}
+
+/// The reply's lines as byte ranges, broken after spaces once a word
+/// would run past the field.
+pub(crate) fn wrap(reply: &str) -> Vec<(usize, usize)> {
+    let mut lines = Vec::new();
+    let mut start = 0;
+    let mut space = None;
+    let bytes = reply.as_bytes();
+    for (i, c) in reply.char_indices() {
+        if c == ' ' {
+            space = Some(i + 1);
+            continue;
+        }
+        let end = i + c.len_utf8();
+        let word_ends = end == reply.len() || bytes[end] == b' ';
+        if !word_ends {
+            continue;
+        }
+        if width(&reply[start..end]) > REPLY_W
+            && let Some(at) = space.filter(|&at| at > start)
+        {
+            lines.push((start, at));
+            start = at;
+        }
+    }
+    lines.push((start, reply.len()));
+    lines
+}
+
+/// Where a caret after byte `caret` goes: its x, and its line.
+pub(crate) fn caret_point(reply: &str, caret: usize) -> (f32, usize) {
+    let lines = wrap(reply);
+    let line = lines
+        .iter()
+        .rposition(|&(start, _)| start <= caret)
+        .unwrap_or(0);
+    let start = lines[line].0;
+    (width(&reply[start..caret]), line)
+}
+
+/// One word's slot: its text, its line, and its box's left and centre
+/// from the field text's top left.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct Slot<'a> {
+    pub(crate) word: &'a str,
+    pub(crate) line: usize,
+    pub(crate) left: f32,
+    pub(crate) right: f32,
+    pub(crate) centre: [f32; 2],
+}
+
+/// Every word of `reply` where it lands.
+pub(crate) fn slots(reply: &str) -> Vec<Slot<'_>> {
+    let mut out = Vec::new();
+    for (line, (start, end)) in wrap(reply).into_iter().enumerate() {
+        let text = &reply[start..end];
+        let mut at = 0;
+        for word in text.split(' ') {
+            if !word.is_empty() {
+                let left = width(&text[..at]);
+                let right = left + width(word);
+                out.push(Slot {
+                    word,
+                    line,
+                    left,
+                    right,
+                    centre: [(left + right) / 2.0, (line as f32 + 0.5) * FIELD_LINE],
+                });
+            }
+            at += word.len() + 1;
+        }
+    }
+    out
+}
+
+/// A text caret at `(x, line)`.
+pub(crate) fn caret(p: Paint, key: &str, x: f32, line: usize) -> El {
+    el().key(key.to_string())
+        .absolute(x, line as f32 * FIELD_LINE + 2.0)
+        .size(1.5, FIELD_LINE - 4.0)
+        .radius(0.75)
+        .fill(p.k.c.text_accent)
+}
+
+/// `reply` as typed so far, with the caret after byte `caret` while it's
+/// being typed, on `lines` lines kept however much there is.
+pub(crate) fn typed(p: Paint, key: &str, reply: &str, caret_at: Option<usize>, lines: usize) -> El {
+    let font = FIELD_FONT.lh(FIELD_LINE);
+    let mut out = el()
+        .key(key.to_string())
+        .w(REPLY_W)
+        .h(lines as f32 * FIELD_LINE)
+        .instant_changes();
+    for (i, (start, end)) in wrap(reply).into_iter().enumerate() {
+        out = out.child(
+            text(reply[start..end].to_string())
+                .key(format!("line{i}"))
+                .font(font)
+                .color(p.text())
+                .absolute(0.0, i as f32 * FIELD_LINE),
+        );
+    }
+    if let Some(at) = caret_at {
+        let (x, line) = caret_point(reply, at);
+        out = out.child(caret(p, "caret", x, line));
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::fixture::ANSWER_JAY;
+    use super::*;
+
+    #[test]
+    fn the_reply_wraps_at_spaces_within_the_field() {
+        let reply = ANSWER_JAY.text();
+        let lines = wrap(reply);
+        assert!(lines.len() >= 2, "{lines:?}");
+        for &(start, end) in &lines {
+            assert!(rune::text::advance(reply[start..end].trim_end(), FIELD_FONT) <= REPLY_W);
+        }
+        assert_eq!(lines.last().unwrap().1, reply.len());
+    }
+
+    #[test]
+    fn every_word_has_a_slot_in_order() {
+        let reply = ANSWER_JAY.text();
+        let slots = slots(reply);
+        assert_eq!(slots.len(), reply.split_whitespace().count());
+        assert_eq!(slots[0].left, 0.0);
+        assert!(
+            slots
+                .windows(2)
+                .all(|w| w[0].line < w[1].line || w[0].right < w[1].left)
+        );
+    }
+
+    #[test]
+    fn a_caret_after_a_break_starts_the_next_line() {
+        let reply = ANSWER_JAY.text();
+        let (start, _) = wrap(reply)[1];
+        assert_eq!(caret_point(reply, start), (0.0, 1));
+        assert_eq!(caret_point(reply, 0), (0.0, 0));
+    }
+}

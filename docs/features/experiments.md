@@ -43,13 +43,14 @@ The known experiments are compiled into
   `capture_exists_only_with_its_build_option` in
   [experiments.rs](../../src/experiments.rs).
 - `dot-scope`: the macOS recording HUD as Dot scope, a plate of dots lit
-  by a braided pair of oscilloscope traces that follow the microphone level,
-  ironed flat into a blue processing beam, and wiped dark when done (see
+  by a braided pair of oscilloscope traces that follow the microphone level
+  (auto-levelled), with a choice of processing looks and of placement below
+  the menu bar, in it, or out of the notch (see
   [Dot scope](dictation.md#dot-scope-experiment-dot-scope)). The gate is
   where the work starts: the HUD builds no Dot scope pipeline or simulation
   and keeps today's window size while it is off. On, HUD Lab tunes Dot scope
   instead of the capsule's styles, and release builds show HUD Lab too
-  (only its Dot scope section).
+  (only its Dot scope section); with `playground` on, ⇧⌘D lists HUD stories.
 - `live-chapters`: chapter a meeting's transcript live while it records
   (macOS, Apple Intelligence; see
   [Live Chapters](meetings.md#live-chapters-experiment-live-chapters)). The
@@ -59,8 +60,8 @@ The known experiments are compiled into
   every OS. Off by default (Kit, 2026-10-27): no Modes pane or onboarding tip,
   and processing runs only the global replacements, so no per-app mode,
   OpenCode rewrite, mode correction, or transformation ever touches a
-  transcript, and the transformations host starts only for the user's own
-  `hex.config.ts` workspace. The gate is where the work starts:
+  transcript, and custom transformations load only for the user's own
+  `hex.config.ts`. The gate is where the work starts:
   `ModeRuntime::with_modes` (Windows and Linux), `config::build_dictation_profiles`
   (macOS), and `app_settings::transformations_used`. Saved modes stay in
   `settings.json` and keep their `hex settings` keys; turning the experiment
@@ -81,6 +82,22 @@ The known experiments are compiled into
   `HEX_EXPERIMENTS=playground hex app -- --snap out.png --playground
   "General/mac-settings"`. Check: `every_scene_but_live_lists_under_its_pane`
   in [playground.rs](../../src/rune_ui/playground.rs).
+  On macOS a story opens from a link or the CLI:
+
+  ```ts
+  open 'hex://story/hud/recording-your-voice?play=1'   // hex-test:// in Hex Test.app
+  hex window story HUD/Processing [--variant 2] [--play]
+  ├── the window opens on the story: its path, name, or slug, `/` or `-` between group and name
+  ├── variant=<n|name> → that variant
+  ├── play=1 → its `r` trigger runs, as pressing R does
+  ├── experiment off → only the window opens; process.log says why, the CLI answers feature-off
+  └── another link, or longer than 2 KiB → ignored and logged
+  ```
+
+  An unknown story opens the list and an unknown variant the story; Rune
+  logs which to stderr. Checks: `reads_story_links`, `ignores_other_links`
+  in [story_link.rs](../../src/rune_ui/story_link.rs); the URL handler and
+  the replay have no automated end-to-end check.
 - `smart-turn`: finish hands-free dictation when Pipecat's Smart Turn model
   hears the end of a turn (macOS; see
   [Smart Turn](dictation.md#smart-turn-auto-stop-experiment-smart-turn)). The

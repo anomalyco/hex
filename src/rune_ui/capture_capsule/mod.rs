@@ -17,6 +17,7 @@
 pub(crate) mod feed;
 pub(crate) mod flow;
 pub(crate) mod ink;
+pub(crate) mod notch;
 pub(crate) mod picker;
 pub(crate) mod playground;
 pub(crate) mod surface;
@@ -875,6 +876,12 @@ fn presence(surface: &Surface, rect: [f32; 4], reduced: bool) -> Transition {
 /// buttons and the list are the only `.hit()` boxes: a click anywhere else
 /// on it reaches the app beneath, and hover still comes from the pointer.
 fn capsule(p: Paint, surface: &Surface, live: &Animated, cx: &mut Cx<CapsuleState>) -> El {
+    // The notch is black in either appearance, so what's on it is dark's.
+    let p = if surface.anchor == surface::Anchor::Notch {
+        Paint::new(true, 1.0 / p.hair)
+    } else {
+        p
+    };
     let reduced = cx.is_reduced_motion() || surface.reduced;
     if surface.reduced {
         cx.reduced_motion(true);
@@ -953,8 +960,17 @@ fn shell(p: Paint, surface: &Surface, meter: &Meter) -> El {
         .trace_name("shell")
         .absolute(x, y)
         .size(w, h)
-        .radius(corner(h))
-        .fill(k.c.bg_base);
+        .radius(corner(h));
+    // At the notch it's the notch: black, with no edge or shadow, and
+    // tucked into the notch rather than gone when hidden.
+    if surface.anchor == surface::Anchor::Notch {
+        return body
+            .fill(k.c.black)
+            .motion(surface.shell_motion)
+            .role("group")
+            .label("Capture");
+    }
+    body = body.fill(k.c.bg_base);
     for shadow in &k.elevation.overlay {
         body = body.box_shadow(*shadow);
     }

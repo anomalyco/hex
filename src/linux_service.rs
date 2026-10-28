@@ -841,7 +841,7 @@ mod tests {
     #[test]
     fn version_one_replies_parse_as_outdated() {
         let reply: Reply = serde_json::from_str(
-            r#"{"version":1,"state":null,"error":"HEX service version mismatch; restart the service"}"#,
+            r#"{"version":1,"state":null,"error":"Hex service version mismatch; restart the service"}"#,
         )
         .unwrap();
         assert_eq!(reply.version, 1);

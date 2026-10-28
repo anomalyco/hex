@@ -1,8 +1,8 @@
 [package]
-name = "voice-control"
-version = "2.3.1"
+name = "hex"
+version = "0.0.0"
 edition = "2024"
-default-run = "voice-control"
+default-run = "hex"
 license = "MIT"
 repository = "https://github.com/anomalyco/hex"
 
@@ -60,10 +60,15 @@ getrandom = "0.4.3"
 hound = "3.5.1"
 libc = "0.2.189"
 libloading = "0.9.0"
+oxc_allocator = "0.156.0"
+oxc_ast = "0.156.0"
+oxc_ast_visit = "0.156.0"
+oxc_parser = "0.156.0"
+oxc_span = "0.156.0"
 regex = "1.13.1"
+rquickjs = { version = "0.14.0", default-features = false, features = ["std", "loader"] }
 rodio = { version = "0.23.0", default-features = false, features = ["playback", "mp3"] }
 rubato = "5.0.1"
-semver = "1.0.28"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 sha2 = "0.11.0"
@@ -110,11 +115,11 @@ x11rb = { version = "0.14.0", features = ["xtest"] }
 
 # The desktop UI.
 [target.'cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))'.dependencies]
-rune = { git = "https://github.com/anomalyco/rune.git", rev = "fa489b2c6f7eb86f88dfbdd109ceceb05b0500bf" }
-rune-kit = { git = "https://github.com/anomalyco/rune.git", rev = "fa489b2c6f7eb86f88dfbdd109ceceb05b0500bf" }
+rune = { git = "https://github.com/anomalyco/rune.git", rev = "917aea36a22ff62f480a27c3fe8acc9eeb688512" }
+rune-kit = { git = "https://github.com/anomalyco/rune.git", rev = "917aea36a22ff62f480a27c3fe8acc9eeb688512" }
 # The capture capsule's motion-lint trace (`capture` only).
-rune-motion = { git = "https://github.com/anomalyco/rune.git", rev = "fa489b2c6f7eb86f88dfbdd109ceceb05b0500bf", optional = true }
-rune-theme-opencode = { git = "https://github.com/anomalyco/rune.git", rev = "fa489b2c6f7eb86f88dfbdd109ceceb05b0500bf" }
+rune-motion = { git = "https://github.com/anomalyco/rune.git", rev = "917aea36a22ff62f480a27c3fe8acc9eeb688512", optional = true }
+rune-theme-opencode = { git = "https://github.com/anomalyco/rune.git", rev = "917aea36a22ff62f480a27c3fe8acc9eeb688512" }
 # The welcome hero's own GPU pass (`rune_ui::hero`); Rune's version.
 wgpu = { version = "30", default-features = false, features = ["std", "parking_lot", "metal", "wgsl"] }
 

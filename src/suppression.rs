@@ -484,7 +484,7 @@ fn run_event_tap(
         Ok(tap) => tap,
         Err(_) => {
             let _ = ready.send(Err(eyre!(
-                "could not create keyboard event tap; grant Input Monitoring and Accessibility permissions"
+                "could not create keyboard event tap; grant Accessibility permission"
             )));
             return;
         }

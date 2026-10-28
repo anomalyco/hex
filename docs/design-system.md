@@ -100,9 +100,8 @@ missing capability omits the row instead of imitating it.
 - Sentence case for every label, button, title, and section label:
   "Open settings", "Stop & transcribe", "Permissions needed". Proper nouns keep
   their capitals: Hex, OpenCode, Apple Intelligence, Finder, Zoom.
-- One product name: "Hex". Never "HEX" in UI strings, window titles, or menus.
-  File and artifact names (`HEX.app`, `HEX-<version>…`) and `HEX_*` environment
-  variables are identifiers, not copy.
+- One product name: "Hex", in copy, comments, and docs alike. `HEX_*`
+  environment variables are identifiers, not copy.
 - Use "…" (one character) for ellipses, for both progress ("Saving…") and for
   buttons that open a further choice ("Choose a file…").
 - Row descriptions are one phrase with no closing period ("Hold to dictate,
@@ -127,7 +126,7 @@ cargo run -- app -- --snap /tmp/hex-modes.png --scene modes
 cargo run -- app -- --snap /tmp/hex-modes-light.png --scene modes --theme light
 cargo run -- app -- --snap /tmp/hex-mac-settings.png --scene mac-settings
 # Goldens (light and dark) and pane behavior:
-cargo test --bin voice-control rune_ui
+cargo test --bin hex rune_ui
 ```
 
 On a machine without a GPU, render on lavapipe with

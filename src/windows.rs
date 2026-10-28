@@ -23,7 +23,7 @@ const DEFAULT_MODEL: &str = "parakeet_unified_en";
 const DEFAULT_LANGUAGE: &str = "en";
 
 #[derive(Parser)]
-#[command(version, about = "Local HEX dictation for Windows")]
+#[command(version = crate::VERSION, about = "Local Hex dictation for Windows")]
 struct Cli {
     #[command(subcommand)]
     command: Option<Command>,
@@ -96,7 +96,7 @@ enum ModelCommand {
         #[command(flatten)]
         selection: SelectionArgs,
     },
-    /// List transcribe.cpp compute devices available to HEX.
+    /// List transcribe.cpp compute devices available to Hex.
     Devices,
     /// Load and prewarm an installed model.
     Check {

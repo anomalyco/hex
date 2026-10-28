@@ -122,16 +122,6 @@ impl From<&WindowsHotkey> for HotkeyBinding {
 }
 
 impl WindowsHotkey {
-    pub fn paste_last_default() -> Self {
-        Self {
-            control: true,
-            windows: false,
-            alt: true,
-            shift: false,
-            key: Some("v".into()),
-        }
-    }
-
     pub fn validate(&self) -> Result<()> {
         let modifier_count = [self.control, self.windows, self.alt, self.shift]
             .into_iter()
@@ -1045,7 +1035,13 @@ mod tests {
     fn hotkeys_round_trip_through_the_portable_binding() {
         for hotkey in [
             WindowsHotkey::default(),
-            WindowsHotkey::paste_last_default(),
+            WindowsHotkey {
+                control: true,
+                windows: false,
+                alt: true,
+                shift: false,
+                key: Some("v".into()),
+            },
             WindowsHotkey {
                 key: Some("pageup".into()),
                 shift: true,

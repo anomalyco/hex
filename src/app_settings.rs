@@ -1283,6 +1283,7 @@ pub struct AppSettings {
     pub release_microphone_while_idle: bool,
     pub sound_effects: bool,
     pub sound_effect_volume: f32,
+    pub sound_theme: crate::feedback::SoundTheme,
     pub microphone: Option<String>,
     pub recording_audio_behavior: RecordingAudioBehavior,
     pub double_tap_lock: bool,
@@ -1298,6 +1299,7 @@ pub struct AppSettings {
     pub show_dock_icon: bool,
     pub transcription: TranscriptionSelection,
     pub transcription_recents: Vec<TranscriptionSelection>,
+    pub keyboard_model_switching: KeyboardModelSwitching,
     pub dictation_processing: DictationProcessingSettings,
     pub voice_action: VoiceActionSettings,
     pub history_retention: crate::history::HistoryRetention,
@@ -1334,13 +1336,6 @@ pub struct AppSettings {
 
 /// Moves English dictation to the streaming English model once.
 const STREAMING_ENGLISH_MIGRATION: &str = "streaming-english-model";
-/// Hex's macOS data folder moved from `voice-control` to `hex`; recorded once
-/// Hex runs from the new folder. The rename itself is `app_paths`'s.
-#[cfg(target_os = "macos")]
-const DATA_FOLDER_MIGRATION: &str = "macos-data-folder-hex";
-#[cfg(target_os = "macos")]
-const MIGRATIONS: &[&str] = &[STREAMING_ENGLISH_MIGRATION, DATA_FOLDER_MIGRATION];
-#[cfg(not(target_os = "macos"))]
 const MIGRATIONS: &[&str] = &[STREAMING_ENGLISH_MIGRATION];
 /// Scrawl's settings were read into `capture` once. Left out of
 /// `MIGRATIONS` so new settings import them too.
@@ -1366,6 +1361,7 @@ impl Default for AppSettings {
             release_microphone_while_idle: false,
             sound_effects: true,
             sound_effect_volume: 0.5,
+            sound_theme: crate::feedback::SoundTheme::default(),
             microphone: None,
             recording_audio_behavior: RecordingAudioBehavior::DoNothing,
             double_tap_lock: true,
@@ -1377,6 +1373,7 @@ impl Default for AppSettings {
             show_dock_icon: true,
             transcription: default_transcription(),
             transcription_recents: Vec::new(),
+            keyboard_model_switching: KeyboardModelSwitching::default(),
             dictation_processing: DictationProcessingSettings::default(),
             voice_action: VoiceActionSettings::default(),
             history_retention: crate::history::HistoryRetention::default(),
@@ -1398,6 +1395,40 @@ impl Default for AppSettings {
     }
 }
 
+/// macOS input-source IDs mapped to the model and language they select. An
+/// absent entry means "Don't switch"; this never changes the model merely
+/// because dictation starts.
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(default)]
+pub struct KeyboardModelSwitching {
+    pub enabled: bool,
+    pub mappings: std::collections::BTreeMap<String, KeyboardModelChoice>,
+}
+
+/// What one input source selects: a model and a language it supports.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct KeyboardModelChoice {
+    pub model: TranscriptionModelId,
+    pub language: String,
+}
+
+impl KeyboardModelChoice {
+    /// The picker's downloadable models only; Apple Speech is never mapped.
+    pub fn validate(&self) -> Result<()> {
+        let model = crate::transcription_models::validate(&TranscriptionSelection {
+            model: self.model,
+            language: self.language.clone(),
+            recognition_hints: String::new(),
+        })?;
+        match model.runtime {
+            crate::transcription_models::ModelRuntime::Gguf(_) => Ok(()),
+            crate::transcription_models::ModelRuntime::AppleSpeech => {
+                Err(eyre!("{} can't be switched to by input source", model.name))
+            }
+        }
+    }
+}
+
 /// A new install starts with the model recommended for the person's
 /// language, so first-run setup can download it without asking.
 fn default_transcription() -> TranscriptionSelection {
@@ -1415,16 +1446,9 @@ impl AppSettings {
             return selection.clone();
         }
         let model = crate::transcription_models::definition(id);
-        let language = if model.supports_language(&self.transcription.language) {
-            self.transcription.language.clone()
-        } else if model.supports_language("en") {
-            "en".into()
-        } else {
-            model.languages[0].into()
-        };
         TranscriptionSelection {
             model: id,
-            language,
+            language: model.language_for(&self.transcription.language).into(),
             recognition_hints: String::new(),
         }
     }
@@ -1527,20 +1551,8 @@ impl AppSettings {
 
     pub fn load() -> Result<Self> {
         let path = path()?;
-        migrate_legacy_settings(&path)?;
-        #[cfg_attr(not(target_os = "macos"), allow(unused_mut))]
+        #[cfg_attr(not(hex_capture), allow(unused_mut))]
         let mut settings = Self::load_from(&path)?;
-        #[cfg(target_os = "macos")]
-        if !settings.has_migration(DATA_FOLDER_MIGRATION)
-            && crate::app_paths::uses_hex_data_folder()
-        {
-            settings.migrations.push(DATA_FOLDER_MIGRATION.into());
-            if path.exists()
-                && let Err(error) = settings.write_to(&path)
-            {
-                tracing::warn!(%error, "could not record the data folder migration");
-            }
-        }
         #[cfg(hex_capture)]
         if capture_available() {
             let read = |path: PathBuf| fs::read(path).ok();
@@ -1667,6 +1679,11 @@ impl AppSettings {
                 settings.migrate_disabled_transcription_model();
                 settings.apply_one_time_migrations();
                 settings.normalize_transcription_recents();
+                // A model that is gone, or a language it lost, maps to nothing.
+                settings
+                    .keyboard_model_switching
+                    .mappings
+                    .retain(|_, choice| choice.validate().is_ok());
                 crate::transcription_models::validate(&settings.transcription)?;
                 settings.repair_hotkey_conflict();
                 if serde_json::to_value(&settings)? != loaded
@@ -1715,6 +1732,7 @@ impl AppSettings {
         );
         crate::feedback::set_enabled(self.sound_effects);
         crate::feedback::set_volume(self.sound_effect_volume.clamp(0.0, 1.0));
+        crate::feedback::set_theme(self.sound_theme);
         crate::desktop_i18n::apply(self.ui_language.as_deref());
         INDICATOR_POSITION.store(self.indicator_position as u8, Ordering::Relaxed);
         RECORDING_AUDIO_BEHAVIOR.store(self.recording_audio_behavior.encoded(), Ordering::Relaxed);
@@ -2358,7 +2376,7 @@ pub fn set_hotkey_capture_active(active: bool) {
 }
 
 /// The Dock policy while no Settings window is open. An open window always
-/// shows the icon: hiding it deactivates HEX asynchronously, which would drop
+/// shows the icon: hiding it deactivates Hex asynchronously, which would drop
 /// that window behind other applications.
 pub fn dock_icon_visible(show_dock_icon: bool, status_item_available: bool) -> bool {
     show_dock_icon || !status_item_available
@@ -2384,7 +2402,7 @@ pub fn set_dock_icon_visible(visible: bool) {
 #[cfg(target_os = "macos")]
 pub fn hide_application() {
     let Some(marker) = MainThreadMarker::new() else {
-        tracing::warn!("cannot hide HEX outside the main thread");
+        tracing::warn!("cannot hide Hex outside the main thread");
         return;
     };
     NSApplication::sharedApplication(marker).hide(None);
@@ -2394,57 +2412,10 @@ fn path() -> Result<PathBuf> {
     Ok(crate::app_paths::support_dir()?.join("settings.json"))
 }
 
-/// The per-OS settings file that predates `settings.json`.
-const LEGACY_SETTINGS_FILE: Option<&str> = if cfg!(target_os = "windows") {
-    Some("windows-settings.json")
-} else if cfg!(target_os = "linux") {
-    Some("linux-settings.json")
-} else {
-    None
-};
-
-/// Whether settings were ever saved, including a legacy file that the next
-/// load migrates; a first run has neither and onboards.
+/// Whether settings were ever saved; a first run has none and onboards.
 #[cfg_attr(target_os = "macos", allow(dead_code))]
 pub fn exists() -> bool {
-    path().is_ok_and(|path| saved_at(&path))
-}
-
-fn saved_at(path: &std::path::Path) -> bool {
-    path.exists()
-        || LEGACY_SETTINGS_FILE
-            .zip(path.parent())
-            .is_some_and(|(legacy, directory)| directory.join(legacy).exists())
-}
-
-/// Before the first `settings.json`, adopt a legacy per-OS settings file
-/// once: write `settings.json`, then keep the old file as `*.migrated`.
-pub(crate) fn migrate_legacy_settings(path: &std::path::Path) -> Result<()> {
-    if path.exists() {
-        return Ok(());
-    }
-    let Some(directory) = path.parent() else {
-        return Ok(());
-    };
-    #[cfg(target_os = "windows")]
-    let legacy = crate::windows_migration::legacy_settings(directory)?;
-    #[cfg(target_os = "linux")]
-    let legacy = crate::linux_migration::legacy_settings(directory)?;
-    #[cfg(target_os = "macos")]
-    let legacy: Option<(PathBuf, AppSettings)> = {
-        let _ = directory;
-        None
-    };
-    let Some((legacy_path, mut settings)) = legacy else {
-        return Ok(());
-    };
-    settings.migrations.clear();
-    settings.write_to(path)?;
-    let mut migrated = legacy_path.clone().into_os_string();
-    migrated.push(".migrated");
-    fs::rename(&legacy_path, migrated)?;
-    tracing::info!(from = %legacy_path.display(), "migrated legacy settings into settings.json");
-    Ok(())
+    path().is_ok_and(|path| path.exists())
 }
 
 #[cfg(test)]
@@ -2519,6 +2490,54 @@ mod tests {
         assert!(settings.hotkey_in_use(HotkeySlot::Capture, &list));
         // The others don't see them while off.
         assert!(!settings.hotkey_in_use(HotkeySlot::VoiceAction, &capture));
+    }
+
+    #[test]
+    fn keyboard_model_switching_is_opt_in_and_source_mappings_round_trip() {
+        let mut settings: AppSettings = serde_json::from_str("{}").unwrap();
+        assert!(!settings.keyboard_model_switching.enabled);
+        assert!(settings.keyboard_model_switching.mappings.is_empty());
+        settings.keyboard_model_switching.enabled = true;
+        settings.keyboard_model_switching.mappings.insert(
+            "com.apple.keylayout.Spanish".into(),
+            KeyboardModelChoice {
+                model: TranscriptionModelId::ParakeetV3,
+                language: "es".into(),
+            },
+        );
+        let restored: AppSettings =
+            serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
+        assert_eq!(
+            restored.keyboard_model_switching,
+            settings.keyboard_model_switching
+        );
+    }
+
+    #[test]
+    fn loading_drops_keyboard_mappings_to_a_language_the_model_lacks() {
+        let dir = TestSettingsDir::new("keyboard-mappings");
+        let mut settings = AppSettings::default();
+        let russian = KeyboardModelChoice {
+            model: TranscriptionModelId::ParakeetV3,
+            language: "ru".into(),
+        };
+        settings
+            .keyboard_model_switching
+            .mappings
+            .insert("Russian".into(), russian.clone());
+        settings.keyboard_model_switching.mappings.insert(
+            "Japanese".into(),
+            KeyboardModelChoice {
+                model: TranscriptionModelId::ParakeetUnifiedEnglish,
+                language: "ja".into(),
+            },
+        );
+        settings.write_to(&dir.path).unwrap();
+        let loaded = AppSettings::load_from(&dir.path).unwrap();
+        assert_eq!(
+            loaded.keyboard_model_switching.mappings,
+            [("Russian".to_owned(), russian)].into()
+        );
     }
 
     #[test]
@@ -2964,19 +2983,6 @@ mod tests {
 
         assert!(AppSettings::default().write_to(&dir.path).is_err());
         assert!(!dir.path.exists());
-    }
-
-    #[test]
-    fn a_legacy_settings_file_counts_as_saved_settings() {
-        let dir = TestSettingsDir::new("legacy-exists");
-        assert!(!saved_at(&dir.path));
-        if let Some(legacy) = LEGACY_SETTINGS_FILE {
-            fs::write(dir.directory.join(legacy), b"{}").unwrap();
-            assert!(saved_at(&dir.path));
-            fs::remove_file(dir.directory.join(legacy)).unwrap();
-        }
-        fs::write(&dir.path, b"{}").unwrap();
-        assert!(saved_at(&dir.path));
     }
 
     #[test]

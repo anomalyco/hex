@@ -3,6 +3,7 @@ name: Check Linux
 on:
   workflow_dispatch:
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - "Cargo.toml"
       - "Cargo.lock"
@@ -47,12 +48,15 @@ on:
 permissions:
   contents: read
 
+# A new push to a pull request cancels its stale run. Every push and manual run
+# keeps its own group, so each dev commit gets a result.
 concurrency:
-  group: linux-${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
+  group: ${{ github.event_name == 'pull_request' && format('{0}-pr-{1}', github.workflow, github.event.pull_request.number) || format('{0}-run-{1}', github.workflow, github.run_id) }}
   cancel-in-progress: true
 
 jobs:
   test:
+    if: ${{ !github.event.pull_request.draft }}
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     env:
@@ -85,7 +89,7 @@ jobs:
             sway wl-clipboard wtype dbus-x11 jq mesa-vulkan-drivers \
             pulseaudio pulseaudio-utils libasound2-plugins xdotool
       - run: cargo fmt --all --check
-      - run: cargo nextest run --locked --profile ci --bin voice-control
+      - run: cargo nextest run --locked --profile ci --bin hex
       - run: cargo nextest run --locked --profile ci -p scrawl-router
       - name: Upload renders that missed their goldens
         if: failure()
@@ -98,14 +102,14 @@ jobs:
         run: |
           xvfb-run -a --server-args="-screen 0 1280x900x24 -noreset" sh -c '
             xmodmap -e "keycode 191 = F24"
-            cargo nextest run --locked --profile ci --bin voice-control --run-ignored only --test-threads 1 linux_input::tests
+            cargo nextest run --locked --profile ci --bin hex --run-ignored only --test-threads 1 linux_input::tests
           '
       - name: Exercise native Wayland paste into GTK
         run: |
-          binary=$(cargo test --locked --bin voice-control --no-run --message-format=json |
-            jq -r 'select(.reason == "compiler-artifact" and .profile.test == true and .target.name == "voice-control") | .executable // empty')
-          app=$(cargo build --locked --bin voice-control --message-format=json |
-            jq -r 'select(.reason == "compiler-artifact" and .target.name == "voice-control") | .executable // empty')
+          binary=$(cargo test --locked --bin hex --no-run --message-format=json |
+            jq -r 'select(.reason == "compiler-artifact" and .profile.test == true and .target.name == "hex") | .executable // empty')
+          app=$(cargo build --locked --bin hex --message-format=json |
+            jq -r 'select(.reason == "compiler-artifact" and .target.name == "hex") | .executable // empty')
           scripts/test-wayland-paste.sh "$binary" "$app"
       - uses: actions/cache@v6
         with:
@@ -115,24 +119,25 @@ jobs:
         env:
           HEX_APPLICATION_SUPPORT_DIR: ${{ runner.temp }}/hex-model-test
         run: |
-          target/debug/voice-control model install
+          target/debug/hex model install
           curl --fail --location --silent --show-error --max-time 60 \
             https://raw.githubusercontent.com/ggml-org/whisper.cpp/b0a11594aec50892a02cd8d129eee2dfe93a8bb8/samples/jfk.wav \
             --output "$RUNNER_TEMP/jfk.wav"
           printf '%s  %s\n' \
             59dfb9a4acb36fe2a2affc14bacbee2920ff435cb13cc314a08c13f66ba7860e \
             "$RUNNER_TEMP/jfk.wav" | sha256sum --check
-          scripts/test-linux-dictation.sh target/debug/voice-control \
+          scripts/test-linux-dictation.sh target/debug/hex \
             "$HEX_APPLICATION_SUPPORT_DIR/models/parakeet-unified-en-0.6b-Q8_0.gguf" \
             "$RUNNER_TEMP/jfk.wav"
       - name: Exercise signed installer and tamper rejection
         run: scripts/test-install-linux-release.sh
       - name: Exercise service IPC and client-independent lifecycle
-        run: python3 scripts/test-linux-service.py target/debug/voice-control
-      - run: cargo clippy --locked --bin voice-control --tests -- -D warnings
+        run: python3 scripts/test-linux-service.py target/debug/hex
+      - run: cargo clippy --locked --bin hex --tests -- -D warnings
       - run: cargo clippy --locked -p scrawl-router --all-targets -- -D warnings
 
   nix:
+    if: ${{ !github.event.pull_request.draft }}
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     steps:
@@ -152,5 +157,5 @@ jobs:
             .#checks.x86_64-linux.session-readiness
       - name: Build and test the installed Nix package
         run: |
-          nix build --no-link --print-build-logs --max-jobs 1 --cores 1 \
+          nix build --no-link --print-build-logs \
             .#checks.x86_64-linux.package

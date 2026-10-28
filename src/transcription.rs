@@ -70,7 +70,7 @@ impl Transcriber {
     }
 
     /// Transcribe normalized 16 kHz audio. Backend padding is applied once here,
-    /// before GGUF chunking or any voice-control retranscription.
+    /// before GGUF chunking or any hex retranscription.
     pub fn transcribe(&mut self, mut samples: Vec<f32>) -> Result<String> {
         match self {
             Self::Gguf(model) => {

@@ -50,7 +50,7 @@ export default function App() {
         <header className="header">
           <a className="wordmark" href={import.meta.env.BASE_URL} aria-label="Hex home" data-avoid>
             <HexMark />
-            <span>HEX</span>
+            <span>Hex</span>
           </a>
           <div className="header__tools" data-avoid>
             {shout.phase === "started" && <SoundToggle muted={shout.muted} onToggle={shout.toggleMuted} />}

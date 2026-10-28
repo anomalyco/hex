@@ -1,10 +1,10 @@
 ; Per-user Windows installer for Hex. It installs exactly the managed layout
 ; that scripts/install-windows.ps1 creates and src/windows_updater.rs updates:
 ;
-;   %APPDATA%\voice-control\versions\<version>\hex.exe
-;   %APPDATA%\voice-control\current-version
-;   %APPDATA%\voice-control\install.json  (the direct-install receipt)
-;   Start Menu\Programs\Hex.lnk  (description "HEX managed install")
+;   %APPDATA%\hex\versions\<version>\hex.exe
+;   %APPDATA%\hex\current-version
+;   %APPDATA%\hex\install.json  (the direct-install receipt)
+;   Start Menu\Programs\Hex.lnk  (description "Hex managed install")
 ;
 ; so the app keeps updating itself from the release service afterwards. The
 ; uninstaller lives outside versions\ because the updater prunes old version
@@ -38,7 +38,7 @@
 [Setup]
 ; Keep this AppId forever: it names the Apps & Features entry that
 ; src/windows_updater.rs keeps current after self-updates.
-AppId={{8FCF0256-C55C-40C3-865D-5FADB32D13B3}
+AppId={{6ED48C92-5177-41F4-B8D6-37B7B02CFDF4}
 AppName=Hex
 AppVersion={#AppVersion}
 AppVerName=Hex {#AppVersion}
@@ -49,7 +49,7 @@ AppUpdatesURL=https://github.com/anomalyco/hex/releases
 PrivilegesRequired=lowest
 ArchitecturesAllowed={#AllowedArchitectures}
 ArchitecturesInstallIn64BitMode={#AllowedArchitectures}
-DefaultDirName={userappdata}\voice-control
+DefaultDirName={userappdata}\hex
 DisableDirPage=yes
 UsePreviousAppDir=no
 DisableProgramGroupPage=yes
@@ -73,7 +73,7 @@ Source: "{#Executable}"; DestDir: "{app}\versions\{#AppVersion}"; DestName: "hex
 Source: "..\..\resources\windows\hex.ico"; DestDir: "{app}\uninstall"; Flags: ignoreversion
 
 [Icons]
-Name: "{userprograms}\Hex"; Filename: "{app}\versions\{#AppVersion}\hex.exe"; Parameters: "app"; WorkingDir: "{app}\versions\{#AppVersion}"; Comment: "HEX managed install"
+Name: "{userprograms}\Hex"; Filename: "{app}\versions\{#AppVersion}\hex.exe"; Parameters: "app"; WorkingDir: "{app}\versions\{#AppVersion}"; Comment: "Hex managed install"
 
 [Run]
 Filename: "{app}\versions\{#AppVersion}\hex.exe"; Parameters: "app"; Description: "Open Hex"; Flags: postinstall nowait skipifsilent
@@ -166,8 +166,8 @@ begin
     { Self-updates run from newer version directories this uninstaller did
       not create, so stop any Hex running from the managed layout. }
     StopManagedHex();
-    if RegQueryStringValue(HKCU, 'Software\Microsoft\Windows\CurrentVersion\Run', 'HEX', Command) and
+    if RegQueryStringValue(HKCU, 'Software\Microsoft\Windows\CurrentVersion\Run', 'Hex', Command) and
        (Pos(LowerCase(ExpandConstant('{app}\versions\')), LowerCase(Command)) > 0) then
-      RegDeleteValue(HKCU, 'Software\Microsoft\Windows\CurrentVersion\Run', 'HEX');
+      RegDeleteValue(HKCU, 'Software\Microsoft\Windows\CurrentVersion\Run', 'Hex');
   end;
 end;

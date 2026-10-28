@@ -214,17 +214,20 @@ fn missing_permissions_lead_settings_and_open_the_guide() {
     let mut rt = runtime("mac-settings-permissions", true, (980.0, 2400.0));
     let shown = texts(&rt);
     assert!(shown.iter().any(|text| text == "Permissions needed"));
-    assert!(rt.find("permission-microphone").is_none(), "granted");
-    tap(&mut rt, "permission-input-monitoring-allow");
+    assert!(
+        rt.find("permission-microphone-allow-control/mark/dot")
+            .is_none()
+    );
+    tap(&mut rt, "permission-microphone-allow");
     assert_eq!(
         asked(&rt),
         [PlatformRequest::Permission(PermissionAction::ShowGuide(
-            PermissionKind::InputMonitoring
+            PermissionKind::Microphone
         ))]
     );
-    assert!(rt.state.platform.asked(PermissionKind::InputMonitoring));
+    assert!(rt.state.platform.asked(PermissionKind::Microphone));
     assert!(
-        rt.find("permission-input-monitoring-allow-control/mark/dot")
+        rt.find("permission-microphone-allow-control/mark/dot")
             .is_some(),
         "asked permissions wait with a dot"
     );
@@ -865,21 +868,18 @@ fn the_explainer_picker_and_shortcut_recording_never_share_the_window() {
     assert!(matches!(rt.state.capture, settings::Capture::Idle));
     assert!(sent(&rt).contains(&Request::CancelShortcut));
 
-    picker::open(&mut rt.state, "en".into());
+    picker::open(&mut rt.state);
     assert!(!rt.state.explainer.open, "the picker closes the explainer");
     explainer::open(&mut rt.state);
-    assert!(
-        rt.state.picker.language.is_none(),
-        "and the explainer the picker"
-    );
+    assert!(!rt.state.picker.open, "and the explainer the picker");
 
     rt.state
         .select_pane(Pane::History, &mut rune::Tx::default());
     assert!(!rt.state.explainer.open);
-    picker::open(&mut rt.state, "en".into());
+    picker::open(&mut rt.state);
     rt.state
         .select_pane(Pane::General, &mut rune::Tx::default());
-    assert!(rt.state.picker.language.is_none());
+    assert!(!rt.state.picker.open);
 }
 
 #[test]
@@ -1290,7 +1290,6 @@ fn the_mac_tour_asks_each_permission_then_practices() {
     // macOS grants everything and the model lands: setup moves on.
     use crate::onboarding::PermissionState::Ready;
     rt.state.platform.permissions.microphone = Ready;
-    rt.state.platform.permissions.input_monitoring = Ready;
     rt.state.platform.permissions.accessibility = Ready;
     rt.state.picker.installed = Some(vec![rt.state.settings.transcription.model]);
     refresh(&mut rt);
@@ -1360,6 +1359,7 @@ fn platform_goldens() {
         check_golden("meetings-calendar", dark, (980.0, 1800.0));
         for scene in [
             "mac-settings",
+            "mac-input-source-models",
             "mac-commands",
             "meetings",
             "meetings-settings",
@@ -1391,6 +1391,8 @@ fn platform_goldens() {
     check_golden("mac-onboarding-listening", true, PANE_SIZE);
     check_golden("mac-onboarding-reopen", false, PANE_SIZE);
     check_golden("mac-onboarding-done", true, PANE_SIZE);
+    check_golden("mac-onboarding-mic-open", true, PANE_SIZE);
+    check_golden("mac-onboarding-mic-silent", false, PANE_SIZE);
 }
 
 #[test]
@@ -1549,6 +1551,24 @@ fn hud_lab_tunes_dot_scope_when_its_experiment_is_on() {
     assert!(!rt2.state.hud_saved);
     tap(&mut rt, "hud-style0");
     assert_eq!(rt.state.platform.hud.dot_scope, None);
+}
+
+#[test]
+fn hud_lab_picks_dot_scope_processing_placement_and_level() {
+    use crate::dot_scope::{Placement, Processing};
+    let mut rt = runtime("mac-hud-lab-dot-scope", true, PANE_SIZE);
+    tap(&mut rt, "dot-processing/segments/segment2");
+    tap(&mut rt, "dot-placement/segments/segment2");
+    tap(&mut rt, "dot-auto-level");
+    tap(&mut rt, "dot-pretend-notch");
+    let Some(PlatformRequest::TuneHud(lab)) = asked(&rt).last().cloned() else {
+        panic!("{:?}", asked(&rt));
+    };
+    let tuning = lab.dot_scope.unwrap();
+    assert_eq!(tuning.processing, Processing::Pulse);
+    assert_eq!(tuning.placement, Placement::Notch);
+    assert!(!tuning.auto_level && tuning.pretend_notch);
+    assert!(rt.find("dot-noise-floor").is_some());
 }
 
 #[test]

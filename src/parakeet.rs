@@ -2209,10 +2209,9 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "requires VOICE_CONTROL_DICTATION_FIXTURE_DIR and the installed Parakeet model"]
+    #[ignore = "requires HEX_DICTATION_FIXTURE_DIR and the installed Parakeet model"]
     fn dictation_protocol_audio() {
-        let directory =
-            PathBuf::from(std::env::var("VOICE_CONTROL_DICTATION_FIXTURE_DIR").unwrap());
+        let directory = PathBuf::from(std::env::var("HEX_DICTATION_FIXTURE_DIR").unwrap());
         let protocol = DictationProtocol::try_new(
             vec!["say".into()],
             vec!["say paste".into(), "say stop".into()],
@@ -2254,9 +2253,9 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "requires VOICE_CONTROL_STUTTER_FIXTURE and the installed Parakeet model"]
+    #[ignore = "requires HEX_STUTTER_FIXTURE and the installed Parakeet model"]
     fn tdt_decoder_does_not_repeat_single_letter_tokens() {
-        let path = PathBuf::from(std::env::var("VOICE_CONTROL_STUTTER_FIXTURE").unwrap());
+        let path = PathBuf::from(std::env::var("HEX_STUTTER_FIXTURE").unwrap());
         let mut reader = WavReader::open(path).unwrap();
         let sample_rate = reader.spec().sample_rate;
         let samples = reader

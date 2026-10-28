@@ -1,6 +1,6 @@
 # Meetings (beta)
 
-Record a call locally: HEX captures the other participants (system audio) and
+Record a call locally: Hex captures the other participants (system audio) and
 you (microphone) as separate tracks, transcribes them on this Mac, and saves a
 Markdown transcript with `You` and `Them` turns. Recording starts automatically
 only for calls from a website or app set to Always record, and never stops
@@ -189,7 +189,7 @@ Brave WebRTC `getUserMedia({audio: true})` reproduction on Pro confirmed
 `com.brave.Browser` and `com.tinyspeck.slackmacgap` afterward.
 
 The capsules have no `--snap` scene. `HEX_CAPSULE_SNAPS=<folder> cargo test
---bin voice-control capsule_snapshots` renders the offer, its choices, the
+--bin hex capsule_snapshots` renders the offer, its choices, the
 calendar reminders, and the automatic-recording states in light and dark on a
 Mac with a GPU.
 
@@ -418,6 +418,8 @@ While recording                                      // meetings.rolling
      │   (so a chunk is at most 12 s of audio)
      └── Silent chunk (no 20 ms frame ≥ -60 dB) -> skipped, no inference
   -> Each chunk runs on dictation's loaded model, only while dictation is idle
+     ├── No speech detected (Silero, once installed) -> empty transcript, no
+     │   inference; coverage still advances
      └── A dictation request or live stream came first -> retried once idle
   -> Timed words joined word by word at a shared word near each overlap's middle
      -> sentences (punctuation or a 600 ms pause)
@@ -502,6 +504,21 @@ Repeated words (two to twelve) at the join are removed, and Stop publishes the
 words still waiting on a seam. Joining
 words rather than sentences keeps a sentence that runs across a hard cut whole;
 joining sentences lost its words on one side (10% word error on `You` lines).
+
+Speechless chunks: models invent text for silence and noise ("Thank you",
+"Grazie a tutti", or the recognition hints), and room or keyboard noise passes
+the -60 dB silent-chunk check, so every chunk that passes it also goes through
+the Silero speech detector used by dictation (see
+[dictation](dictation.md#ongoing-jobs-and-output)). A chunk with no speech of at
+least 160 ms becomes an empty transcript without inference, in rolling
+transcription, the Stop & Transcribe fallback, and `meeting echo`. In a probe
+outside the tree, run on each microphone entry of one 63-minute Italian call,
+the detector found speech in 1 of 152 invented entries (a "Grazie a tutti.")
+and in 32 of 33 real ones (the miss: a 40 ms "Certo." at a chunk boundary), and
+scanned the call in 1.6 s on the CPU. Invented text inside a
+chunk that also holds speech is not addressed. Without the detector only the
+-60 dB check applies, as before. A Whisper chunk that returns only the recognition
+hints is emptied too ([models](README.md#get-ready)).
 
 In-call text was a Moonshine draft until 2026-10-22: the pane showed Parakeet
 only for time rolling had covered, and Option-Control-V and the GPUI capsule's
@@ -619,6 +636,8 @@ Other checks:
 `chunks_end_at_the_first_pause_after_the_target_length`,
 `short_recordings_become_one_chunk_and_silence_tails_are_dropped`,
 `overlapping_chunks_join_at_the_middle_of_the_overlap`, `seam_drops_repeated_words`,
+`speechless_chunks_skip_the_model_and_still_advance_coverage`,
+`a_speechless_chunk_after_an_overlap_keeps_earlier_entries`,
 `a_sentence_across_a_hard_cut_keeps_every_word`,
 `rolling_publishes_only_entries_a_later_seam_cannot_replace`,
 `a_capture_gap_restarts_the_track_after_it_instead_of_dropping_it`,
@@ -753,7 +772,7 @@ Final publication complete                               // meetings.notes
   -> Manifest: notes { title ≤8 words, summary ≤2 sentences / 400 chars,
      excerpt_chars, transcript_chars }
   -> Markdown copy, same file name, atomic replace
-     ├── Heading -> final title, only while it still reads HEX's last title
+     ├── Heading -> final title, only while it still reads Hex's last title
      ├── <!-- hex:notes --> ## Summary (one paragraph) above ## Transcript
      ├── Text outside the block is preserved; changed mid-write -> not written
      └── Missing file -> manifest only
@@ -910,7 +929,7 @@ hex mcp [--meetings-dir <path>]                     // meetings.mcp; release bui
 ├── MCP over stdio; independent of the Meetings opt-in (read-only)
 ├── Dispatches before process logging, the instance lock, GUI, and permissions
 │   └── Safe beside the running app; logs only to stderr (HEX_MCP_LOG)
-├── Default folder: Application Support/hex/meetings (voice-control on older builds)
+├── Default folder: Application Support/hex/meetings (hex on older builds)
 │   └── --meetings-dir -> any mirrored copy (rsync of that folder)
 ├── A copy named hex-meetings-mcp -> always `hex mcp` with the same flags
 │   (no subcommand never falls back to listening)
@@ -977,7 +996,7 @@ text as one document.
 Semantic search is not shipped. On-device candidates are Apple NaturalLanguage
 `NLContextualEmbedding` (asset download, macOS 14+) or the older static
 `NLEmbedding` sentence model, through a Swift bridge like `apple_speech`, with a
-cache under `~/Library/Caches/voice-control/meeting-index` keyed by meeting
+cache under `~/Library/Caches/hex/meeting-index` keyed by meeting
 fingerprints. Full-text with stemming and fuzzy matching answered the real
 queries below; embeddings wait until a query fails for lack of paraphrase.
 
@@ -1024,7 +1043,7 @@ Do: one periodic pull, then local servers               // meetings.mcp.mirror
 scripts/sync-meetings-mirror.sh (LaunchAgent template, every 120 s,
   ProcessType Background, Nice 10, LowPriorityIO)
 ├── ONE rsync over ssh (BatchMode, ConnectTimeout 5, --timeout 60)
-│   pro:Library/Application Support/voice-control/meetings/ (symlink to hex/ once migrated)
+│   pro:Library/Application Support/hex/meetings/
 │   -> ~/Library/Caches/hex-meetings-mirror/ (0700)
 ├── Skips *.wav, *.lock, *.tmp; --delay-updates (files land together at the
 │   end); --delete-delay (meetings trashed on the Pro disappear)

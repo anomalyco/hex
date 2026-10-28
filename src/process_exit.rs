@@ -88,9 +88,6 @@ fn finish_within(drain: &Drain, deadline: Duration) -> ! {
 }
 
 fn end_process() -> ! {
-    // A personal-command host whose worker missed its deadline would outlive
-    // Hex; `_exit` does not signal children.
-    crate::personal_commands::kill_live_hosts();
     let _ = std::io::stdout().flush();
     let _ = std::io::stderr().flush();
     // SAFETY: `_exit` ends the process immediately; nothing runs after it.

@@ -69,7 +69,7 @@ Transcription quality plan (ordered by value / effort)
     - Add all five language translations in `src/desktop_i18n.rs` and update `--snap` scenes (`mac-settings`, `history`) in light and dark.
 - **Measurement & gate:**
   - Unit tests in `src/text_replacements.rs` covering CJK phrases (`#177`) and overlapping candidates (`#139`).
-  - Phase 1 benchmark: 100% recall on unambiguous aliases (`"open code" -> "OpenCode"`, `"scrawl"`, `"rune"`) and LLM-rewritten `"Hanks"` / `"Avatar"` sentences; `cargo test --bin voice-control rune_ui` green with updated light/dark goldens.
+  - Phase 1 benchmark: 100% recall on unambiguous aliases (`"open code" -> "OpenCode"`, `"scrawl"`, `"rune"`) and LLM-rewritten `"Hanks"` / `"Avatar"` sentences; `cargo test --bin hex rune_ui` green with updated light/dark goldens.
 - **Effort:** 4 days.
 - **Risk:** Low. Users could enter a common word as an unconditional alias (e.g. `"Hanks" -> "Hex"`); mitigate in Phase 4 by routing single-word real-word collisions through acoustic margin gating when Parakeet is active, or warning inline when an alias is a common dictionary word.
 - **Unblocks:** Feeds a single user vocabulary into Qwen3-ASR hints (Phase 3), Parakeet decoder boosting (Phase 4), and meeting transcripts (Phase 5).

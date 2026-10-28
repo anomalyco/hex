@@ -1,7 +1,7 @@
 use std::fs::{self, File};
 use std::io::{ErrorKind, Read};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
 use std::thread;
@@ -171,19 +171,18 @@ pub struct GgufArtifact {
     pub variant: &'static str,
 }
 
+impl GgufArtifact {
+    fn download_url(&self) -> String {
+        format!(
+            "https://huggingface.co/{}/resolve/{}/{}",
+            self.repository, self.revision, self.filename
+        )
+    }
+}
+
 impl ModelDefinition {
     pub const fn available(&self) -> bool {
         !matches!(self.runtime, ModelRuntime::AppleSpeech)
-    }
-
-    fn download_url(&self) -> Result<String> {
-        let ModelRuntime::Gguf(artifact) = self.runtime else {
-            bail!("{} is managed by macOS and has no GGUF artifact", self.name);
-        };
-        Ok(format!(
-            "https://huggingface.co/{}/resolve/{}/{}",
-            artifact.repository, artifact.revision, artifact.filename
-        ))
     }
 
     pub fn supports_language(&self, language: &str) -> bool {
@@ -205,6 +204,36 @@ impl ModelDefinition {
     pub fn runtime_language_hint<'a>(&self, language: &'a str) -> Option<&'a str> {
         (language != AUTO_LANGUAGE && self.accepts_language_hint)
             .then(|| self.runtime_language(language))
+    }
+
+    /// The languages Settings offers for this model, in [`LANGUAGES`] order,
+    /// Auto first when the model detects the language.
+    pub fn language_choices(&self) -> Vec<&'static str> {
+        LANGUAGES
+            .iter()
+            .map(|(code, _)| *code)
+            .filter(|code| self.supports_language(code))
+            .collect()
+    }
+
+    /// The language a switch to this model falls back to when it does not
+    /// support the selected one: English when it can, else its first.
+    pub fn default_language(&self) -> &'static str {
+        if self.supports_language("en") {
+            "en"
+        } else {
+            self.languages[0]
+        }
+    }
+
+    /// `language` when this model supports it, else its default language, so
+    /// a model switch always yields a valid selection.
+    pub fn language_for<'a>(&self, language: &'a str) -> &'a str {
+        if self.supports_language(language) {
+            language
+        } else {
+            self.default_language()
+        }
     }
 
     #[cfg(target_os = "macos")]
@@ -318,6 +347,20 @@ const COHERE_ARTIFACT: GgufArtifact = GgufArtifact {
     architecture: "cohere_asr",
     variant: "cohere-transcribe-03-2026",
 };
+/// Silero VAD v6.2. Dictation and meetings skip audio it finds no speech in,
+/// because models hallucinate closing phrases such as "thank you" on silence
+/// and room noise. It downloads with every transcription model.
+pub const SPEECH_DETECTOR_ARTIFACT: GgufArtifact = GgufArtifact {
+    filename: "silero-vad-v6.2-F32.gguf",
+    revision: "a9b2d61c20ae4ddf3644edb34969e8185a485448",
+    repository: "handy-computer/silero-vad-v6.2-gguf",
+    bytes: 1_241_056,
+    sha256: "0d871a800c420fdd5d1b17a3aea4296d1c39608f0ff4a9295eb76457eb1c88e6",
+    architecture: "silero_vad",
+    variant: "v6.2",
+};
+#[cfg_attr(test, allow(dead_code))]
+const SPEECH_DETECTOR_NAME: &str = "the speech detector";
 
 pub const MODELS: &[ModelDefinition] = &[
     ModelDefinition {
@@ -563,22 +606,28 @@ pub(crate) fn choices_for_runtime(language: &str) -> Vec<ModelChoice> {
         .collect()
 }
 
-/// Models that are no longer recommended for `language` but that the user
-/// still has: the saved selection or an installed download. The picker keeps
-/// them selectable and deletable, without a recommendation badge.
-pub(crate) fn retained_models(
+/// Every available model in the picker's order for `language`: its
+/// recommendations first, each with its badge, then the other models that
+/// support it, then those that would change the language.
+pub(crate) fn picker_models(
     language: &str,
-    selection: &TranscriptionSelection,
-    installed: impl Fn(&ModelDefinition) -> bool,
-) -> Vec<&'static ModelDefinition> {
+) -> Vec<(&'static ModelDefinition, Option<Recommendation>)> {
     let recommended = choices_for_runtime(language);
-    MODELS
+    let others = MODELS
         .iter()
-        .filter(|model| model.available() && model.supports_language(language))
-        .filter(|model| recommended.iter().all(|choice| choice.model.id != model.id))
-        .filter(|model| {
-            installed(model) || (selection.model == model.id && selection.language == language)
-        })
+        .filter(|model| model.available())
+        .filter(|model| recommended.iter().all(|choice| choice.model.id != model.id));
+    let (supporting, switching): (Vec<_>, Vec<_>) =
+        others.partition(|model| model.supports_language(language));
+    recommended
+        .iter()
+        .map(|choice| (choice.model, Some(choice.recommendation)))
+        .chain(
+            supporting
+                .into_iter()
+                .chain(switching)
+                .map(|model| (model, None)),
+        )
         .collect()
 }
 
@@ -607,7 +656,16 @@ pub fn validate(selection: &TranscriptionSelection) -> Result<&'static ModelDefi
 }
 
 pub fn models_dir() -> Result<PathBuf> {
+    #[cfg(test)]
+    if let Some(directory) = TEST_MODELS_DIR.with(|directory| directory.borrow().clone()) {
+        return Ok(directory);
+    }
     Ok(crate::app_paths::support_dir()?.join("models"))
+}
+
+#[cfg(test)]
+thread_local! {
+    static TEST_MODELS_DIR: std::cell::RefCell<Option<PathBuf>> = const { std::cell::RefCell::new(None) };
 }
 
 pub fn max_audio_chunk_samples(architecture: &str, max_audio_ms: i64) -> Option<usize> {
@@ -645,6 +703,7 @@ pub fn is_installed(model: &ModelDefinition, language: &str) -> bool {
     }
 }
 
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 pub fn is_verified(model: &ModelDefinition) -> bool {
     let Ok(path) = model_path(model) else {
         return false;
@@ -788,10 +847,15 @@ fn lock_downloads(directory: &Path, canceled: &AtomicBool) -> Result<File> {
     }
 }
 
+#[cfg(any(target_os = "macos", target_os = "windows", test))]
 fn verification_receipt_matches(path: &Path, model: &ModelDefinition) -> bool {
     let ModelRuntime::Gguf(artifact) = model.runtime else {
         return false;
     };
+    artifact_receipt_matches(path, artifact)
+}
+
+fn artifact_receipt_matches(path: &Path, artifact: &GgufArtifact) -> bool {
     let Ok(metadata) = fs::metadata(path) else {
         return false;
     };
@@ -828,6 +892,47 @@ pub fn download_with_stage_progress(
     let ModelRuntime::Gguf(artifact) = model.runtime else {
         bail!("{} is installed and managed by macOS", model.name);
     };
+    let path = download_artifact(artifact, model.name, canceled, downloaded_bytes, stage)?;
+    // In the background, so an installed model activates at once even
+    // offline. Until the detector lands, dictation and meetings keep their
+    // level-only silence handling.
+    if !speech_detector_installed() {
+        crate::speech_detector::start_download();
+    }
+    Ok(path)
+}
+
+/// Downloads the speech detector unless a verified copy is installed.
+#[cfg_attr(test, allow(dead_code))]
+pub fn download_speech_detector(canceled: &AtomicBool) -> Result<PathBuf> {
+    download_artifact(
+        &SPEECH_DETECTOR_ARTIFACT,
+        SPEECH_DETECTOR_NAME,
+        canceled,
+        &AtomicU64::new(0),
+        &AtomicU8::new(ModelPreparationStage::Downloading as u8),
+    )
+}
+
+pub fn speech_detector_path() -> Result<PathBuf> {
+    Ok(models_dir()?.join(SPEECH_DETECTOR_ARTIFACT.filename))
+}
+
+/// Whether the speech detector is installed at its pinned size. Its checksum
+/// is checked when it downloads.
+pub fn speech_detector_installed() -> bool {
+    speech_detector_path()
+        .and_then(|path| Ok(fs::metadata(path)?.len() == SPEECH_DETECTOR_ARTIFACT.bytes))
+        .unwrap_or(false)
+}
+
+fn download_artifact(
+    artifact: &GgufArtifact,
+    name: &str,
+    canceled: &AtomicBool,
+    downloaded_bytes: &AtomicU64,
+    stage: &AtomicU8,
+) -> Result<PathBuf> {
     ModelPreparationStage::Downloading.store(stage);
     check_canceled(canceled)?;
     let directory = models_dir()?;
@@ -837,14 +942,14 @@ pub fn download_with_stage_progress(
     delete_set_aside_in(&directory);
     let destination = directory.join(artifact.filename);
     if destination.exists() {
-        if is_verified(model) {
+        if artifact_receipt_matches(&destination, artifact) {
             downloaded_bytes.store(artifact.bytes, Ordering::Relaxed);
             return Ok(destination);
         }
         ModelPreparationStage::Verifying.store(stage);
-        match verify_file_with_cancel(&destination, model, canceled) {
+        match verify_artifact(&destination, artifact, name, canceled) {
             Ok(()) => {
-                write_verification_receipt(&destination, model)?;
+                write_artifact_receipt(&destination, artifact)?;
                 downloaded_bytes.store(artifact.bytes, Ordering::Relaxed);
                 return Ok(destination);
             }
@@ -866,7 +971,8 @@ pub fn download_with_stage_progress(
             &partial,
             &destination,
             &directory,
-            model,
+            artifact,
+            name,
             canceled,
             downloaded_bytes,
             stage,
@@ -881,7 +987,7 @@ pub fn download_with_stage_progress(
         }
     }
     ModelPreparationStage::Downloading.store(stage);
-    let mut child = Command::new("curl")
+    let mut child = crate::background_process::command("curl")
         .args([
             "--fail",
             "--location",
@@ -900,7 +1006,7 @@ pub fn download_with_stage_progress(
             "--output",
         ])
         .arg(&partial)
-        .arg(model.download_url()?)
+        .arg(artifact.download_url())
         .stderr(Stdio::piped())
         .spawn()
         .wrap_err("could not start model download")?;
@@ -938,7 +1044,8 @@ pub fn download_with_stage_progress(
         &partial,
         &destination,
         &directory,
-        model,
+        artifact,
+        name,
         canceled,
         downloaded_bytes,
         stage,
@@ -951,24 +1058,24 @@ pub fn download_with_stage_progress(
     Ok(destination)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn verify_and_promote_partial(
     partial: &Path,
     destination: &Path,
     directory: &Path,
-    model: &ModelDefinition,
+    artifact: &GgufArtifact,
+    name: &str,
     canceled: &AtomicBool,
     downloaded_bytes: &AtomicU64,
     stage: &AtomicU8,
 ) -> Result<()> {
     ModelPreparationStage::Verifying.store(stage);
-    verify_file_with_cancel(partial, model, canceled)?;
+    verify_artifact(partial, artifact, name, canceled)?;
     sync_file(partial)?;
     replace_file(partial, destination)?;
     sync_directory(directory)?;
-    write_verification_receipt(destination, model)?;
-    if let Some(bytes) = model.download_bytes() {
-        downloaded_bytes.store(bytes, Ordering::Relaxed);
-    }
+    write_artifact_receipt(destination, artifact)?;
+    downloaded_bytes.store(artifact.bytes, Ordering::Relaxed);
     Ok(())
 }
 
@@ -1063,10 +1170,15 @@ pub(crate) fn sha256_hex(path: &Path, canceled: Option<&AtomicBool>) -> Result<S
         .collect())
 }
 
+#[cfg(any(target_os = "macos", target_os = "windows", test))]
 fn write_verification_receipt(path: &Path, model: &ModelDefinition) -> Result<()> {
     let ModelRuntime::Gguf(artifact) = model.runtime else {
         bail!("{} has no artifact verification receipt", model.name);
     };
+    write_artifact_receipt(path, artifact)
+}
+
+fn write_artifact_receipt(path: &Path, artifact: &GgufArtifact) -> Result<()> {
     let metadata = fs::metadata(path)?;
     let receipt = VerificationReceipt {
         bytes: artifact.bytes,
@@ -1089,6 +1201,7 @@ fn verify_file(path: &Path, model: &ModelDefinition) -> Result<()> {
     verify_file_with_cancel(path, model, &AtomicBool::new(false))
 }
 
+#[cfg(any(target_os = "macos", target_os = "windows", test))]
 fn verify_file_with_cancel(
     path: &Path,
     model: &ModelDefinition,
@@ -1097,17 +1210,26 @@ fn verify_file_with_cancel(
     let ModelRuntime::Gguf(artifact) = model.runtime else {
         bail!("{} has no artifact to verify", model.name);
     };
+    verify_artifact(path, artifact, model.name, canceled)
+}
+
+fn verify_artifact(
+    path: &Path,
+    artifact: &GgufArtifact,
+    name: &str,
+    canceled: &AtomicBool,
+) -> Result<()> {
     let metadata = fs::metadata(path)?;
     if metadata.len() != artifact.bytes {
         bail!(
             "downloaded {} bytes for {}, expected {}",
             metadata.len(),
-            model.name,
+            name,
             artifact.bytes
         );
     }
     if sha256_hex(path, Some(canceled))? != artifact.sha256 {
-        bail!("checksum mismatch for {}", model.name);
+        bail!("checksum mismatch for {}", name);
     }
     Ok(())
 }
@@ -1415,27 +1537,89 @@ mod tests {
     }
 
     #[test]
-    fn saved_models_no_longer_recommended_stay_valid_and_visible() {
-        let saved = TranscriptionSelection {
-            model: TranscriptionModelId::ParakeetV3,
-            language: "el".into(),
-            recognition_hints: String::new(),
+    fn the_picker_lists_every_model_with_the_language_s_recommendations_first() {
+        let ids = |language| {
+            picker_models(language)
+                .into_iter()
+                .map(|(model, recommendation)| (model.id, recommendation))
+                .collect::<Vec<_>>()
         };
-        assert!(validate(&saved).is_ok());
-        assert!(
-            retained_models("el", &saved, |_| false)
-                .iter()
-                .any(|model| model.id == TranscriptionModelId::ParakeetV3)
-        );
-        assert!(retained_models("de", &saved, |_| false).is_empty());
-        let installed = retained_models("tr", &TranscriptionSelection::default(), |model| {
-            model.id == TranscriptionModelId::Qwen3Asr06B
-        });
+        let available = MODELS.iter().filter(|model| model.available()).count();
+        for (language, _) in LANGUAGES {
+            assert_eq!(ids(language).len(), available, "{language}");
+        }
+        let greek = ids("el");
         assert_eq!(
-            installed.iter().map(|model| model.id).collect::<Vec<_>>(),
-            [TranscriptionModelId::Qwen3Asr06B]
+            greek[..2],
+            [
+                (
+                    TranscriptionModelId::CohereTranscribe,
+                    Some(Recommendation::Recommended)
+                ),
+                (
+                    TranscriptionModelId::WhisperLargeV3Turbo,
+                    Some(Recommendation::RecognitionHints)
+                ),
+            ]
         );
-        assert!(retained_models("tr", &TranscriptionSelection::default(), |_| false).is_empty());
+        // Then Parakeet v3, which supports Greek, before every model that
+        // would change the language.
+        assert_eq!(greek[2], (TranscriptionModelId::ParakeetV3, None));
+        let supports = greek
+            .iter()
+            .map(|(id, _)| definition(*id).supports_language("el"))
+            .collect::<Vec<_>>();
+        assert!(supports.windows(2).all(|pair| pair[0] || !pair[1]));
+        assert!(!supports[supports.len() - 1]);
+    }
+
+    #[test]
+    fn a_model_switch_keeps_a_supported_language_or_falls_back_to_the_model_s_default() {
+        let unified = definition(TranscriptionModelId::ParakeetUnifiedEnglish);
+        let whisper = definition(TranscriptionModelId::WhisperLargeV3Turbo);
+        let qwen = definition(TranscriptionModelId::Qwen3Asr06B);
+        let cohere = definition(TranscriptionModelId::CohereTranscribe);
+        assert_eq!(unified.language_for("ja"), "en");
+        assert_eq!(unified.language_for("auto"), "en");
+        assert_eq!(whisper.language_for("ja"), "ja");
+        assert_eq!(whisper.language_for("auto"), "auto");
+        assert_eq!(qwen.language_for("auto"), "auto");
+        assert_eq!(cohere.language_for("auto"), "en");
+        for model in MODELS.iter().filter(|model| model.available()) {
+            for (language, _) in LANGUAGES {
+                let selection = TranscriptionSelection {
+                    model: model.id,
+                    language: model.language_for(language).into(),
+                    recognition_hints: String::new(),
+                };
+                assert!(validate(&selection).is_ok(), "{} {language}", model.name);
+            }
+        }
+    }
+
+    #[test]
+    fn each_model_offers_exactly_the_languages_it_supports() {
+        let unified = definition(TranscriptionModelId::ParakeetUnifiedEnglish);
+        assert_eq!(unified.language_choices(), ["en"]);
+        let whisper = definition(TranscriptionModelId::WhisperLargeV3Turbo);
+        assert_eq!(whisper.language_choices().len(), LANGUAGES.len());
+        assert_eq!(whisper.language_choices()[0], AUTO_LANGUAGE);
+        let sensevoice = definition(TranscriptionModelId::SenseVoiceSmall);
+        assert_eq!(
+            sensevoice.language_choices(),
+            ["auto", "en", "zh", "yue", "ja", "ko"]
+        );
+        for model in MODELS.iter().filter(|model| model.available()) {
+            assert!(model.language_choices().contains(&model.default_language()));
+            let declared = model.languages.iter().filter(|code| **code != "*");
+            for code in declared {
+                assert!(
+                    model.language_choices().contains(code),
+                    "{} lists {code} outside LANGUAGES",
+                    model.name
+                );
+            }
+        }
     }
 
     #[test]
@@ -1503,6 +1687,38 @@ mod tests {
     }
 
     #[test]
+    fn speech_detector_artifact_downloads_from_its_pinned_revision() {
+        assert_eq!(
+            SPEECH_DETECTOR_ARTIFACT.download_url(),
+            "https://huggingface.co/handy-computer/silero-vad-v6.2-gguf/resolve/\
+             a9b2d61c20ae4ddf3644edb34969e8185a485448/silero-vad-v6.2-F32.gguf"
+        );
+        assert_eq!(SPEECH_DETECTOR_ARTIFACT.bytes, 1_241_056);
+    }
+
+    #[test]
+    fn artifact_verification_names_the_artifact_it_rejects() {
+        let ModelRuntime::Gguf(artifact) = fixture_model().runtime else {
+            unreachable!("the fixture is a GGUF model");
+        };
+        let path = std::env::temp_dir().join(format!(
+            "hex-artifact-verification-{}-{}",
+            std::process::id(),
+            NEXT_TEMP_FILE.fetch_add(1, Ordering::Relaxed)
+        ));
+        let canceled = AtomicBool::new(false);
+        fs::write(&path, b"hello!").unwrap();
+        let error = verify_artifact(&path, artifact, "the fixture", &canceled).unwrap_err();
+        assert!(error.to_string().contains("for the fixture, expected 5"));
+        fs::write(&path, b"world").unwrap();
+        let error = verify_artifact(&path, artifact, "the fixture", &canceled).unwrap_err();
+        assert_eq!(error.to_string(), "checksum mismatch for the fixture");
+        fs::write(&path, b"hello").unwrap();
+        assert!(verify_artifact(&path, artifact, "the fixture", &canceled).is_ok());
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
     fn verification_receipt_is_invalidated_when_the_artifact_changes() {
         let model = fixture_model();
         let path = std::env::temp_dir().join(format!(
@@ -1518,6 +1734,37 @@ mod tests {
         assert!(!verification_receipt_matches(&path, &model));
         let _ = fs::remove_file(verification_receipt_path(&path));
         let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn an_installed_model_does_not_wait_for_the_speech_detector() {
+        let directory = std::env::temp_dir().join(format!(
+            "hex-installed-download-{}-{}",
+            std::process::id(),
+            NEXT_TEMP_FILE.fetch_add(1, Ordering::Relaxed),
+        ));
+        fs::create_dir(&directory).unwrap();
+        fs::write(directory.join("fixture.gguf"), b"hello").unwrap();
+        TEST_MODELS_DIR.with(|models| *models.borrow_mut() = Some(directory.clone()));
+        let requests = crate::speech_detector::download_requests_for_test();
+        let downloaded = download_with_progress(
+            &fixture_model(),
+            &AtomicBool::new(false),
+            &AtomicU64::new(0),
+        );
+        TEST_MODELS_DIR.with(|models| *models.borrow_mut() = None);
+        let detector_touched = directory.join(SPEECH_DETECTOR_ARTIFACT.filename).exists()
+            || directory
+                .join(SPEECH_DETECTOR_ARTIFACT.filename)
+                .with_extension("gguf.partial")
+                .exists();
+        fs::remove_dir_all(&directory).unwrap();
+        assert_eq!(downloaded.unwrap(), directory.join("fixture.gguf"));
+        assert_eq!(
+            crate::speech_detector::download_requests_for_test(),
+            requests + 1
+        );
+        assert!(!detector_touched);
     }
 
     #[test]

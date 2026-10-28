@@ -21,7 +21,7 @@ use crate::app_settings::{self, RecordingAudioBehavior};
 const VIRTUAL_MAIN_VOLUME: u32 = u32::from_be_bytes(*b"vmvc");
 const POWER_ASSERTION_LEVEL_ON: u32 = 255;
 
-/// A media player HEX may pause while recording and resume afterwards.
+/// A media player Hex may pause while recording and resume afterwards.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 enum MediaPlayer {
     Music,
@@ -355,7 +355,7 @@ pub struct PreventSleep {
 impl PreventSleep {
     fn start() -> std::io::Result<Self> {
         let assertion_type = CFString::from_static_str("NoIdleSleepAssertion");
-        let assertion_name = CFString::from_static_str("HEX intentional recording");
+        let assertion_name = CFString::from_static_str("Hex intentional recording");
         let mut assertion_id = 0;
         // SAFETY: Both Core Foundation strings remain alive for the call and
         // assertion_id points to writable, correctly sized storage. IOKit
