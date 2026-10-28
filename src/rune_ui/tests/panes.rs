@@ -1603,6 +1603,7 @@ fn experiment_goldens() {
     check_golden("mac-voice-filter-driver-missing", false, PANE_SIZE);
     check_golden("mac-activity", false, PANE_SIZE);
     check_golden("mac-settings-sides", true, PANE_SIZE);
+    check_golden("mac-local-build", true, PANE_SIZE);
 }
 
 #[test]

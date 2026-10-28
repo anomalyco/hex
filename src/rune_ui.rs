@@ -581,6 +581,8 @@ pub(crate) struct Ui {
     /// General's Advanced disclosure, once pressed: open or closed. Until
     /// then it is open only while an advanced setting is in use.
     advanced: Option<bool>,
+    /// A scene previewing the badge of a build kind this binary is not.
+    build_preview: Option<BuildKind>,
     capture: Capture,
     hints: TextEdit,
     vocabulary: vocabulary::VocabularyEditor,
@@ -662,6 +664,7 @@ impl Ui {
             microphones_listing: None,
             confirm_release: false,
             advanced: None,
+            build_preview: None,
             capture: Capture::Idle,
             hints,
             vocabulary,
@@ -1378,8 +1381,68 @@ fn footer(ui: &Ui, p: Paint) -> El {
     col()
         .key("footer")
         .mt(8.0)
-        .child(line("version", &version_label(), p.faint()))
+        .child(version_line(
+            ui,
+            p,
+            line("version", &version_label(), p.faint()),
+        ))
         .children(status)
+}
+
+/// A local or test build marks itself beside the version, quietly: an outline
+/// pill with a dot, in muted theme tokens.
+fn version_line(ui: &Ui, p: Paint, version: El) -> El {
+    let badge = match ui.build_preview.unwrap_or_else(build_kind) {
+        BuildKind::Release => return version,
+        BuildKind::Local => tr("Local"),
+        BuildKind::Test => tr("Test"),
+    };
+    let c = &p.k.c;
+    row()
+        .key("version-row")
+        .gap(2.0)
+        .center_y()
+        .child(version.key("version"))
+        .child(
+            row()
+                .key("build-badge")
+                .h(16.0)
+                .px(6.0)
+                .gap(4.0)
+                .center_y()
+                .radius(8.0)
+                .border(p.hair.max(0.5), c.border_muted)
+                .child(
+                    controls::status_dot(c.text_faint)
+                        .size(5.0, 5.0)
+                        .radius(2.5),
+                )
+                .child(
+                    text(badge)
+                        .key("label")
+                        .font(p.k.ty.small)
+                        .color(c.text_muted),
+                ),
+        )
+}
+
+/// What kind of build this is, for the footer's badge. The scenes preview
+/// the others on a release build.
+#[derive(Clone, Copy, PartialEq)]
+enum BuildKind {
+    Release,
+    Local,
+    Test,
+}
+
+fn build_kind() -> BuildKind {
+    if crate::app_paths::is_local_build() {
+        BuildKind::Local
+    } else if option_env!("HEX_TEST_BUILD") == Some("1") {
+        BuildKind::Test
+    } else {
+        BuildKind::Release
+    }
 }
 
 /// The footer's lines: as tall as each other, so a check moves nothing.
@@ -1787,6 +1850,18 @@ const SCENES: &[Scene] = &[
     ("mac-settings-dev-channel", |ui| {
         *ui = mac_fixture();
         ui.settings.updates.channel = Some(crate::app_settings::UpdateChannel::Dev);
+    }),
+    // A local build: the badge, the quiet status line, no channel row.
+    ("mac-local-build", |ui| {
+        *ui = mac_fixture();
+        ui.build_preview = Some(BuildKind::Local);
+        if let Some(view) = &mut ui.view {
+            view.update_status = DesktopUpdateStatus::SourceBuild;
+        }
+    }),
+    ("mac-test-build", |ui| {
+        *ui = mac_fixture();
+        ui.build_preview = Some(BuildKind::Test);
     }),
     ("mac-update-ready", |ui| {
         *ui = mac_fixture();
