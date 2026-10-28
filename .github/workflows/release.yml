@@ -5,7 +5,7 @@ name: Release
 # docs/plans/release-service.md), split the way OpenCode's release is:
 #
 # - build jobs (Build desktop, build-macos, Windows installers, the AUR and
-#   Homebrew staging) run repository code: cargo, build.rs, bun, makepkg,
+#   Homebrew staging) run repository code: cargo, build.rs, makepkg,
 #   brew. They have no environment, no secrets, and no id-token, and they
 #   produce unsigned files.
 # - sign and publish jobs run in the release environment. They check out only
@@ -132,7 +132,6 @@ jobs:
         with:
           toolchain: stable
       - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
       - name: Install the Metal toolchain
         run: xcrun --sdk macosx metal --version || xcodebuild -downloadComponent MetalToolchain
       - name: Build Hex.app

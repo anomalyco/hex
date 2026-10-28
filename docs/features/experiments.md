@@ -59,8 +59,8 @@ The known experiments are compiled into
   every OS. Off by default (Kit, 2026-10-27): no Modes pane or onboarding tip,
   and processing runs only the global replacements, so no per-app mode,
   OpenCode rewrite, mode correction, or transformation ever touches a
-  transcript, and the transformations host starts only for the user's own
-  `hex.config.ts` workspace. The gate is where the work starts:
+  transcript, and custom transformations load only for the user's own
+  `hex.config.ts`. The gate is where the work starts:
   `ModeRuntime::with_modes` (Windows and Linux), `config::build_dictation_profiles`
   (macOS), and `app_settings::transformations_used`. Saved modes stay in
   `settings.json` and keep their `hex settings` keys; turning the experiment

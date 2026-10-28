@@ -1,6 +1,6 @@
 //! The Modes pane: the Global mode and custom modes chosen by the frontmost
 //! application, each with corrections, optional OpenCode rewriting, and
-//! TypeScript transformations. Text fields are drafts saved when
+//! transformations, built in or from the user's config. Text fields are drafts saved when
 //! typing pauses; every other edit saves at once and asks the service to
 //! reload.
 
@@ -184,7 +184,7 @@ impl ModesPane {
 
     fn read_status(&mut self) -> bool {
         self.status_read = Some(Instant::now());
-        let exists = self.workspace.join("hex.config.ts").is_file();
+        let exists = crate::personal_commands::workspace_configured();
         let mut changed = exists != self.config_exists;
         self.config_exists = exists;
         let mut status =
@@ -1265,43 +1265,35 @@ fn transformations(ui: &Ui, p: Paint, current: &DictationMode) -> El {
     }
 }
 
-/// The TypeScript workspace behind custom transformations: setup, loading,
-/// and failures with the action that recovers. Hidden once it is loaded.
+/// The config behind custom transformations: setup, loading, and load
+/// failures, which clear when a saved fix reloads. Hidden once it is loaded.
 fn workspace_status(ui: &Ui, p: Paint) -> Option<El> {
     if !ui.live() {
         return None;
     }
     let pane = &ui.modes;
     let (description, error, action) = if pane.workspace_receiver.is_some() {
-        (
-            tr("Preparing the TypeScript workspace and installing its dependencies…"),
-            None,
-            None,
-        )
+        (tr("Creating config…"), None, None)
     } else if let Some(error) = pane.workspace_error.clone() {
         (
-            tr("The TypeScript workspace could not be prepared."),
+            tr("The config could not be created."),
             Some(error),
             Some(tr("Retry setup")),
         )
     } else if !pane.config_exists {
         (
-            tr("Create a TypeScript workspace to define reusable transformations."),
+            tr("Create a config file to define reusable transformations."),
             None,
             Some(tr("Set up")),
         )
     } else {
         match pane.status.host_state {
             HostState::Active if pane.status.last_reload_error.is_none() => return None,
-            HostState::Starting => (
-                tr("Loading registered TypeScript transformations…"),
-                None,
-                None,
-            ),
+            HostState::Starting => (tr("Loading custom transformations…"), None, None),
             _ => (
-                tr("Registered TypeScript transformations are unavailable."),
+                tr("Custom transformations are unavailable."),
                 pane.status.last_reload_error.clone(),
-                Some(tr("Retry")),
+                None,
             ),
         }
     };

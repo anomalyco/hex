@@ -28,6 +28,8 @@ override shipped behavior.
   source and CLI baseline, integration contract, and validation limits.
 - [`plans/personal-commands.md`](plans/personal-commands.md): shipped personal
   command contract and remaining lifecycle work.
+- [`plans/quickjs.md`](plans/quickjs.md): why and how configs run in embedded
+  QuickJS instead of Bun, with size and latency measurements.
 - [`specs/local-transcription-service.md`](specs/local-transcription-service.md):
   implemented macOS local-service protocol and lifecycle guarantees.
 

@@ -40,7 +40,7 @@ The other capabilities stay here until they need their own verification recipe.
 Install the signed macOS app with `brew install --cask anomalyco/tap/hex` or the
 [manual DMG](../../README.md#install-hex). The cask uses a versioned, checksum-pinned
 DMG, requires Apple silicon/macOS 15+, and leaves updates to Hex's own updater. It does
-not require Bun or OpenCode, launch the app automatically, migrate the legacy
+not require OpenCode, launch the app automatically, migrate the legacy
 Swift app, or forcibly replace an existing app destination. Homebrew uninstall
 leaves runtime settings, models, and retained data intact.
 
@@ -523,7 +523,7 @@ Experiment `modes` off (the default)     // experiments.md; modes.experiment
 ├── `window show --pane modes` -> Stays on the current pane
 ├── Processing -> Global replacements only    // literal, cheap, still applied
 │   └── No per-app mode, corrections, OpenCode rewrite, or transformations
-├── Transformations host -> Not started for modes; a hex.config.ts workspace still starts it
+├── Custom transformations -> Not loaded for modes; a hex.config.ts still loads them
 ├── Voice Action and the OpenCode catalog -> Unchanged // the catalog is Voice Action's too
 ├── History -> No processing profile, since nothing processed
 └── Saved modes, `hex settings dictation_processing.*` -> Untouched and working
@@ -545,8 +545,9 @@ Selected mode                            // replaces Global, does not layer over
 Stage fails -> Preserve its input        // failed chain discards partial results
 ```
 
-Built-in text transformations run natively. Custom transformations require the
-managed Bun workspace, not Commands enabled. OpenCode rewriting sends documented
+Built-in text transformations run natively. Custom transformations come from
+`~/.config/hex/hex.config.ts`, run in Hex's embedded script engine with a 1 s
+limit per call; they need neither Commands enabled nor anything installed. OpenCode rewriting sends documented
 context to the configured provider; speech transcription stays local.
 
 The built-ins are Lowercase, SpongeBob case, and No trailing punctuation. The
@@ -556,7 +557,9 @@ closing quotes/brackets. Punctuation inside a final closing quote is preserved.
 Select it after Lowercase for lowercase messages without the final period.
 The `no_trailing_punctuation_*` and `built_in_transformations_chain_in_selected_order`
 tests in [personal_commands.rs](../../src/personal_commands.rs) cover text behavior
-and native dispatch, not a live custom-host or target-app paste.
+and native dispatch; `transformations_chain_with_built_ins_and_failures_keep_nothing`
+and `runaway_scripts_stop_at_the_time_limit_and_the_config_keeps_working` run
+real scripts. None is a live target-app paste.
 
 Selection and stage checks start in
 [dictation_processor.rs](../../src/dictation_processor.rs),

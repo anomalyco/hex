@@ -79,9 +79,6 @@ whole clip. CPU devices (including ARM64) always use the whole-clip path. Set
   MSVC. Build with `CC=clang-cl`, `CXX=clang-cl`, `CMAKE_GENERATOR=Ninja`, and
   `TRANSCRIBE_CMAKE_ARGS=-DGGML_NATIVE=OFF -DGGML_OPENMP=OFF`, as
   `.github/workflows/check-windows.yml` does.
-- Bun is optional. It is required only for user-defined TypeScript
-  transformations; the built-in Lowercase and SpongeBob case transformations
-  run without it.
 
 `.cargo/config.toml` links the C and C++ runtimes statically. Distributed builds
 also set `TRANSCRIBE_CMAKE_ARGS=-DGGML_NATIVE=OFF`; without it ggml tunes its
@@ -161,18 +158,18 @@ by default.
 ## Custom Transformations
 
 The Transformations card in Modes always offers the built-in transformations.
-Choose **Set up** there to create `~/.config/hex/hex.config.ts`, install the
-managed `@hex/commands` SDK with Bun, and load any transformations registered by
-that config. The Windows release executable embeds the checked-in SDK source,
-so a managed single-executable install does not depend on a repository checkout.
+Choose **Set up** there to create `~/.config/hex/hex.config.ts` and load any
+transformations registered by that config. Hex runs the config in its embedded
+JavaScript engine (QuickJS), so nothing else needs installing.
 
 Transformations run in the displayed order after mode corrections and the
 optional OpenCode rewrite. Reordering, adding, or removing them persists in the
-global or contextual mode and applies to the next output job. Host startup,
-registration, IPC, execution time, and status files are bounded; a failed step
-preserves the previous pipeline output. Use **Retry** in the card after fixing a
-Bun, dependency, or config error. Literal voice commands in the same config
-remain unavailable on Windows until a real streaming command recognizer lands.
+global or contextual mode and applies to the next output job. Each
+transformation call is limited to one second and the engine to 64 MiB; a
+failed step preserves the previous pipeline output. Saving the config reloads
+it; a config that fails to load keeps the previous one and shows its error in
+the card. Literal voice commands in the same config remain unavailable on
+Windows until a real streaming command recognizer lands.
 
 ## The App
 

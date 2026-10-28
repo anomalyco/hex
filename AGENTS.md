@@ -166,14 +166,17 @@ substitute for source inspection or a second roadmap.
 - `commands`: pure contextual resolution plus bounded asynchronous action
   execution (`open` and CoreGraphics keystrokes on macOS; shell-opened URLs,
   paths, and applications on Windows).
-- `personal_commands`: the Bun-hosted `@hex/commands` TypeScript workspace:
-  managed SDK provisioning (built `dist` on macOS, the embedded TypeScript
-  `src` on Windows and Linux), the watch-reloaded user command and
-  transformation host, bounded invocation dispatch, and status snapshots.
-  macOS, Windows, and Linux share it; Windows and Linux host transformations
-  only.
+- `personal_commands`: the user's `hex.config.ts` (or `.js`) in
+  `~/.config/hex`, run in-process by embedded QuickJS (`rquickjs`) on one
+  worker thread: TypeScript erased to same-position JavaScript by
+  `personal_commands/typescript` (oxc's parser), the `@hex/commands` module
+  and managed `hex.d.ts` typings, the watch-reloaded registration compiled
+  into the command registry, handler calls whose returned actions run on
+  Hex's native executor, transformation calls, per-call time and runtime
+  memory limits, status snapshots, and `hex commands init|check`. macOS,
+  Windows, and Linux share it; Windows and Linux use transformations only.
 - `background_process`: the one constructor for child processes Hex starts for
-  its own work (Bun host, OpenCode CLI, curl, PowerShell); on Windows they
+  its own work (OpenCode CLI, curl, PowerShell); on Windows they
   never open a console window.
 - `text_replacements`: phrase-boundary-aware compilation of configured text
   replacements applied longest-match-first to transcripts.
@@ -381,9 +384,9 @@ substitute for source inspection or a second roadmap.
   command listeners.
 - `process_exit`: how the macOS app ends. Every quit path (menu, `hex quit`
   and `hex restart`, Ctrl-C, and AppKit's terminate) stops and joins Hex's
-  workers, bounded by a 5 s deadline, kills any personal-command host left,
-  then calls `_exit`, so C++ static destructors (ggml's Metal device,
-  Moonshine's transcriber map) never run under live threads. A restart
+  workers, bounded by a 5 s deadline, then calls `_exit`, so C++ static
+  destructors (ggml's Metal device, Moonshine's transcriber map) never run
+  under live threads. A restart
   schedules its relaunch first; the new copy waits for the old pid to exit.
 - `feedback`: bounded volume-controlled mode, capture, cancellation, and
   failure tones.
@@ -593,6 +596,17 @@ CoreAudio formats, AppleScript details, or event serialization.
   OpenCode V2 while Settings is open refreshes the model catalog without
   restarting Hex. Catalog failures require an explicit retry rather than
   spawning clients in a tight loop.
+- Personal commands and transformations run in-process: no child process,
+  no Node or Bun, and no filesystem, network, process, or timer API in the
+  script engine; scripts import only `@hex/commands` and files inside the
+  config folder. One worker thread owns the QuickJS runtime; each handler or
+  transformation call is interrupted after 1 s and a load after 2 s, and the
+  runtime is capped at 64 MiB. A config that fails to load or compile keeps
+  the previous registry and reports its error with file, line, and column;
+  a removed config unregisters everything. Handlers only return or queue
+  actions, which Hex validates as a whole and runs in order on its native
+  executor after the handler returns. The built-in transformations stay
+  native Rust and never touch the script engine.
 - Ordinary resolver commands execute only from completed Moonshine lines.
   Voice-delimited activation and stable control phrases are deliberate exceptions.
 - Contextual commands enter the candidate set only when their predicate matches.
@@ -955,7 +969,6 @@ keep a version pull request open into `dev`; the workflow publishes only when
 ```sh
 ./scripts/setup.sh
 ./scripts/setup-parakeet.sh
-bun run --cwd sdk/commands build
 cargo run -- listen
 cargo run -- status --json   # asks the running Hex (docs/cli.md)
 cargo run -- dev dashboard   # debug recognition TUI

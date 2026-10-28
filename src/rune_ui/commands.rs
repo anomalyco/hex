@@ -100,10 +100,10 @@ fn agent_prompt(workspace: &str) -> String {
         "Help me configure my Hex custom voice commands.\n\n\
          Workspace: {workspace}\n\
          Config: {workspace}/hex.config.ts\n\n\
-         Read AGENTS.md and .agents/skills/personal-commands/SKILL.md in the workspace \
-         before editing. Ask me what commands or dictation phrases I want, update \
-         hex.config.ts, and run `bun run check` from the workspace when finished. You \
-         may add npm packages when a command needs them."
+         Read AGENTS.md in the workspace before editing. Ask me what commands or \
+         dictation phrases I want, update hex.config.ts, and run `hex commands check` \
+         when finished. Hex runs the config itself: no npm packages, filesystem, or \
+         network."
     )
 }
 
