@@ -172,6 +172,9 @@ substitute for source inspection or a second roadmap.
   transformation host, bounded invocation dispatch, and status snapshots.
   macOS, Windows, and Linux share it; Windows and Linux host transformations
   only.
+- `background_process`: the one constructor for child processes Hex starts for
+  its own work (Bun host, OpenCode CLI, curl, PowerShell); on Windows they
+  never open a console window.
 - `text_replacements`: phrase-boundary-aware compilation of configured text
   replacements applied longest-match-first to transcripts.
 - `config`: compiled commands and dictation profiles.

@@ -634,7 +634,7 @@ fn directory_manifest(root: &Path) -> Result<Vec<(PathBuf, Option<Vec<u8>>)>> {
 }
 
 fn install_workspace_dependencies(workspace: &Path, bun: &Path) -> Result<()> {
-    let status = Command::new(bun)
+    let status = crate::background_process::command(bun)
         // A plain install reuses stale peer metadata for file:.hex-sdk in bun.lock.
         .args(["update", "@hex/commands"])
         .current_dir(workspace)
@@ -1804,7 +1804,7 @@ fn reload(
 
 fn start_candidate(generation: u64, launch: &HostLaunch<'_>) -> Result<Candidate> {
     let mut child = spawn_host(
-        Command::new(launch.bun)
+        crate::background_process::command(launch.bun)
             .arg(launch.host_entrypoint)
             .arg(launch.config)
             .current_dir(launch.workspace)

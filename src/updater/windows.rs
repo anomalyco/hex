@@ -6,15 +6,15 @@
 //! Administrators turn updates off with the `DisableUpdates` policy value.
 
 use std::fs::{self, OpenOptions};
-use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 
 use color_eyre::eyre::{Result, WrapErr, bail};
 use fs2::FileExt;
 
 use super::Method;
 use super::protocol::is_version_name;
+use crate::background_process;
 
 #[cfg(target_arch = "x86_64")]
 pub const TARGET: &str = "windows-x64";
@@ -31,7 +31,6 @@ pub const DOWNLOAD_TARGET: &str = "windows-arm64-setup";
 pub const AUTHENTICODE_SIGNER: &str = "Anomaly Innovations, Inc https://anoma.ly/";
 /// `HKLM` (or `HKCU`) `\SOFTWARE\Policies\Anomaly\Hex`, value `DisableUpdates`.
 const POLICY_KEY: &str = r"SOFTWARE\Policies\Anomaly\Hex";
-const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 /// The Apps & Features entry that packaging/windows/hex.iss registers.
 const UNINSTALL_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Uninstall\{8FCF0256-C55C-40C3-865D-5FADB32D13B3}_is1";
 
@@ -110,7 +109,7 @@ pub fn stage(file: &Path, version: &str) -> Result<Staged> {
 /// Requires a valid Authenticode signature (chain and timestamp checked by
 /// Windows) whose signer certificate's common name is `signer`.
 pub fn verify_authenticode(file: &Path, signer: &str) -> Result<()> {
-    let output = Command::new("powershell.exe")
+    let output = background_process::command("powershell.exe")
         .args([
             "-NoProfile",
             "-NonInteractive",
@@ -123,7 +122,6 @@ pub fn verify_authenticode(file: &Path, signer: &str) -> Result<()> {
         // A PowerShell 7 parent's module path breaks Windows PowerShell's
         // own modules, Microsoft.PowerShell.Security among them.
         .env_remove("PSModulePath")
-        .creation_flags(CREATE_NO_WINDOW)
         .stdin(Stdio::null())
         .output()
         .wrap_err("could not check the update's Authenticode signature")?;
@@ -149,7 +147,7 @@ fn repoint_start_menu_shortcut(executable: &Path) -> Result<()> {
     if !shortcut.exists() {
         return Ok(());
     }
-    let status = Command::new("powershell.exe")
+    let status = background_process::command("powershell.exe")
         .args([
             "-NoProfile",
             "-WindowStyle",
@@ -163,7 +161,6 @@ fn repoint_start_menu_shortcut(executable: &Path) -> Result<()> {
         ])
         .env("HEX_SHORTCUT", &shortcut)
         .env("HEX_EXECUTABLE", executable)
-        .creation_flags(CREATE_NO_WINDOW)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -193,9 +190,8 @@ fn update_uninstall_entry(version: &str) -> Result<()> {
 }
 
 fn validate_executable(path: &Path, version: &str) -> Result<()> {
-    let output = Command::new(path)
+    let output = background_process::command(path)
         .arg("--version")
-        .creation_flags(CREATE_NO_WINDOW)
         .stdin(Stdio::null())
         .output()
         .wrap_err("could not start the downloaded Windows update")?;
@@ -262,7 +258,7 @@ fn activate(support: &Path, version: &str, staging: &Path) -> Result<PathBuf> {
 /// slow shutdown can never produce two running instances.
 pub fn restart_into(staged: &Staged) -> Result<()> {
     let pid = std::process::id();
-    Command::new("powershell.exe")
+    background_process::command("powershell.exe")
         .args([
             "-NoProfile",
             "-WindowStyle",
@@ -276,7 +272,6 @@ pub fn restart_into(staged: &Staged) -> Result<()> {
         ])
         .env("HEX_EXECUTABLE", &staged.0)
         .env_remove("PSModulePath")
-        .creation_flags(CREATE_NO_WINDOW)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -325,7 +320,7 @@ mod tests {
         // also validates.
         let system = PathBuf::from(std::env::var_os("SystemRoot").unwrap());
         let signer_of = |path: &Path| {
-            let output = Command::new("powershell.exe")
+            let output = background_process::command("powershell.exe")
                 .args([
                     "-NoProfile",
                     "-Command",

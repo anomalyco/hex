@@ -1647,7 +1647,7 @@ fn release_is_v2(output: &str) -> Option<bool> {
 }
 
 fn run_opencode_probe(executable: &Path, args: &[&str]) -> Result<CommandOutput> {
-    let mut command = std::process::Command::new(executable);
+    let mut command = crate::background_process::command(executable);
     command.args(args);
     #[cfg(not(target_os = "windows"))]
     let output = run_command(
@@ -1776,7 +1776,6 @@ use cli::{generate_cancellable, is_executable, opencode_candidates};
 #[cfg(target_os = "windows")]
 mod cli {
     use std::ffi::OsStr;
-    use std::os::windows::process::CommandExt;
     use std::path::{Path, PathBuf};
     use std::process::{Child, Command, Stdio};
     use std::sync::atomic::{AtomicBool, Ordering};
@@ -1914,7 +1913,7 @@ mod cli {
             .ok_or_else(|| eyre!("OpenCode workspace path is not valid UTF-8"))?;
         // canonicalize returns a verbatim path; OpenCode wants the drive form.
         let directory = directory.strip_prefix(r"\\?\").unwrap_or(directory);
-        let mut command = Command::new(super::opencode_executable());
+        let mut command = crate::background_process::command(super::opencode_executable());
         command.current_dir(&workspace).args([
             "api",
             "--header",
@@ -1935,10 +1934,8 @@ mod cli {
         if deadline.is_zero() {
             return Err(eyre!("opencode2 {operation} deadline expired"));
         }
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
         let mut job = job::Job::kill_on_close();
         let mut child = command
-            .creation_flags(CREATE_NO_WINDOW)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -2170,7 +2167,7 @@ mod cli {
 
         #[test]
         fn cancelled_generation_process_is_killed_promptly() {
-            let mut command = Command::new("cmd");
+            let mut command = crate::background_process::command("cmd");
             command.args(["/C", "ping -n 6 127.0.0.1 > NUL"]);
             let started = Instant::now();
 
@@ -2189,7 +2186,7 @@ mod cli {
 
         #[test]
         fn descendant_holding_output_cannot_outlive_the_deadline() {
-            let mut command = Command::new("cmd");
+            let mut command = crate::background_process::command("cmd");
             command.args(["/C", "ping -n 6 127.0.0.1"]);
             let started = Instant::now();
 

@@ -1,7 +1,7 @@
 use std::fs::{self, File};
 use std::io::{ErrorKind, Read};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
 use std::thread;
@@ -917,7 +917,7 @@ pub fn download_with_stage_progress(
         }
     }
     ModelPreparationStage::Downloading.store(stage);
-    let mut child = Command::new("curl")
+    let mut child = crate::background_process::command("curl")
         .args([
             "--fail",
             "--location",
