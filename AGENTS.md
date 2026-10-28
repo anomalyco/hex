@@ -91,8 +91,9 @@ substitute for source inspection or a second roadmap.
   for macOS, Windows, and Linux: context-selected corrections, deadline-bounded
   OpenCode rewrite profiles with corrected-transcript fallback, the ranked
   model catalog, Voice Action generation, and the transformation stage. Every
-  OS discovers the OpenCode V2 CLI (any `opencode2` first, else an `opencode`
-  that proves to be V2; a V1 `opencode` is never run) and links missing installs
+  OS discovers the OpenCode V2 CLI (macOS/Linux prefer an `opencode` that
+  proves to be V2, else `opencode2`; Windows keeps `opencode2` first; a V1
+  `opencode` is never run for generation) and links missing installs
   to `https://v2.opencode.ai/`. On macOS and Linux, `opencode2 api get` discovers
   or starts the managed service, and generation uses the matching owner-only
   service registration and authenticated loopback HTTP through the system curl;

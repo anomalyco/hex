@@ -561,7 +561,8 @@ Selection and stage checks start in
 provider availability or real application/Brave context changes.
 
 OpenCode transformation shares Voice Action's OpenCode discovery, which accepts
-`opencode2` or a V2 `opencode` and rejects V1
+`opencode2` or a V2 `opencode` and rejects V1. On macOS/Linux, verified V2
+`opencode` takes precedence so a stale `opencode2` cannot shadow it
 ([Voice Action](voice-action.md)). While the switch can't be turned on, the
 reason ("Requires OpenCode", "Requires OpenCode V2") shows beside it and the
 setup/retry notice below; `unavailable_opencode_is_explained_beside_each_switch`

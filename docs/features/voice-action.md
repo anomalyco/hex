@@ -32,9 +32,9 @@ HEX-owned provider service.
 ```ts
 VOICE_CONTROL_OPENCODE_CLI set -> Use it as is
 Otherwise PATH, home install folders, Node version managers, Homebrew
-├── Any `opencode2` -> Use it                        // beats every `opencode`
-├── Else an `opencode` whose `--version` is 2.x -> Use it
+├── An `opencode` whose `--version` is 2.x -> Use it  // macOS/Linux: before any `opencode2`
 ├── Else an `opencode` printing `0.0.0-…` that answers `api get /api/info` -> Use it
+├── Else an `opencode2` -> Use it                    // beta-only and V1 + beta still work
 ├── Only V1 `opencode` -> "Requires OpenCode V2"     // never run for generation
 └── Nothing -> "Requires OpenCode"                  // both rechecked every 60 s
 ```
@@ -42,12 +42,17 @@ Otherwise PATH, home install folders, Node version managers, Homebrew
 The bounded probe runs only on the catalog, generation, and Capture threads and
 keeps each definite verdict until the executable changes; the hotkey and UI
 paths only read that verdict ([#281](https://github.com/anomalyco/hex/issues/281)).
-`opencode2_is_preferred_and_only_a_v2_opencode_is_accepted` and
-`release_versions_tell_the_generations_apart` cover precedence and V1 rejection
-with temporary executables, not installed CLIs.
+`v2_opencode_is_preferred_over_a_stale_fnm_opencode2`,
+`v2_opencode_outside_path_beats_opencode2_on_path`,
+`v2_opencode_is_preferred_and_v1_falls_back_to_opencode2`, and
+`configured_executable_wins_even_when_both_names_are_installed` cover Unix
+precedence, V1 release/snapshot rejection, beta fallback, and overrides using
+temporary executables isolated from real install folders, not installed CLIs.
+`release_versions_tell_the_generations_apart` checks version parsing. Windows
+keeps beta-first precedence (`opencode2_wins_over_an_opencode_earlier_on_path`).
 
-Discovery uses `opencode2 api get /api/info`; an exact CLI 404 falls back to
-`/api/status`, then `/api/health`, for older V2 services. All attempts share the
+Discovery uses the selected CLI's `api get /api/info`; an exact CLI 404 falls
+back to `/api/status`, then `/api/health`, for older V2 services. All attempts share the
 original deadline and cancellation flag. Authentication, server, and
 malformed-response failures do not trigger that fallback, and discovery output
 is excluded from errors. `service_discovery_supports_current_and_legacy_endpoints`

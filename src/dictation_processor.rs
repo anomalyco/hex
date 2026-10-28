@@ -1522,8 +1522,11 @@ pub(crate) enum OpenCodeInstall {
     Missing,
 }
 
-/// The names the V2 CLI ships under, preferred first: any `opencode2` beats
-/// every `opencode`, and an `opencode` counts only once it proves to be V2.
+/// Prefer the GA name on Unix so a stale beta cannot shadow it. An `opencode`
+/// counts only once it proves to be V2; Windows keeps its existing order.
+#[cfg(not(target_os = "windows"))]
+const OPENCODE_BINARY_NAMES: [&str; 2] = ["opencode", "opencode2"];
+#[cfg(target_os = "windows")]
 const OPENCODE_BINARY_NAMES: [&str; 2] = ["opencode2", "opencode"];
 const OPENCODE_PROBE_DEADLINE: Duration = Duration::from_secs(10);
 
@@ -1545,13 +1548,28 @@ fn discover_opencode(is_v2: impl FnMut(&Path) -> bool) -> OpenCodeInstall {
     )
 }
 
-/// The configured override is trusted as is; otherwise every location is
-/// searched for `opencode2` before any `opencode` is considered.
+/// The configured override is trusted as is; otherwise search every location
+/// in the platform's name order, accepting an `opencode` only if it is V2.
 fn find_opencode_executable(
     configured: Option<PathBuf>,
     path: Option<&OsStr>,
     home: Option<&Path>,
     current_directory: Option<&Path>,
+    is_v2: impl FnMut(&Path) -> bool,
+) -> OpenCodeInstall {
+    select_opencode_executable(
+        configured,
+        current_directory,
+        |name| opencode_candidates(name, path, home, current_directory),
+        is_v2,
+    )
+}
+
+/// Supplying candidates keeps fixture searches out of real install folders.
+fn select_opencode_executable(
+    configured: Option<PathBuf>,
+    current_directory: Option<&Path>,
+    mut candidates: impl FnMut(&str) -> Vec<PathBuf>,
     mut is_v2: impl FnMut(&Path) -> bool,
 ) -> OpenCodeInstall {
     if let Some(configured) = configured {
@@ -1559,7 +1577,7 @@ fn find_opencode_executable(
     }
     let mut found_v1 = false;
     for name in OPENCODE_BINARY_NAMES {
-        for candidate in opencode_candidates(name, path, home, current_directory) {
+        for candidate in candidates(name) {
             if !is_executable(&candidate) {
                 continue;
             }
@@ -2254,6 +2272,27 @@ mod tests {
         fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
     }
 
+    /// Keep discovery fixtures out of the host's Homebrew install folders.
+    #[cfg(not(target_os = "windows"))]
+    fn find_fixture_opencode_executable(
+        configured: Option<PathBuf>,
+        path: Option<&OsStr>,
+        root: &Path,
+        is_v2: impl FnMut(&Path) -> bool,
+    ) -> OpenCodeInstall {
+        select_opencode_executable(
+            configured,
+            Some(root),
+            |name| {
+                opencode_candidates(name, path, Some(root), Some(root))
+                    .into_iter()
+                    .filter(|candidate| candidate.starts_with(root))
+                    .collect()
+            },
+            is_v2,
+        )
+    }
+
     /// Accepts one connection, failing instead of hanging when the client
     /// under test never connects.
     #[cfg(not(target_os = "windows"))]
@@ -2327,24 +2366,25 @@ mod tests {
             std::process::id(),
             thread::current().id()
         ));
-        for location in [
-            ".opencode/bin/opencode2",
-            ".vite-plus/bin/opencode2",
-            "Library/pnpm/bin/opencode2",
-        ] {
-            let executable = root.join(location);
-            fake_executable(&executable);
+        for name in OPENCODE_BINARY_NAMES {
+            for directory in [".opencode/bin", ".vite-plus/bin", "Library/pnpm/bin"] {
+                let executable = root.join(directory).join(name);
+                fake_executable(&executable);
 
-            let found = find_opencode_executable(
-                None,
-                Some(OsStr::new("/usr/bin:/bin")),
-                Some(&root),
-                Some(&root),
-                |_| unreachable!("opencode2 is never probed"),
-            );
+                let found = find_fixture_opencode_executable(
+                    None,
+                    Some(OsStr::new("/usr/bin:/bin")),
+                    &root,
+                    |candidate| {
+                        assert_eq!(name, "opencode", "opencode2 is never probed");
+                        assert_eq!(candidate, executable);
+                        true
+                    },
+                );
 
-            assert_eq!(found, OpenCodeInstall::Ready(executable));
-            std::fs::remove_dir_all(&root).unwrap();
+                assert_eq!(found, OpenCodeInstall::Ready(executable));
+                std::fs::remove_dir_all(&root).unwrap();
+            }
         }
     }
 
@@ -2464,9 +2504,8 @@ mod tests {
             fake_executable(executable);
         }
         let path = root.join("path");
-        let find = |configured, path| {
-            find_opencode_executable(configured, path, Some(&root), Some(&root), |_| true)
-        };
+        let find =
+            |configured, path| find_fixture_opencode_executable(configured, path, &root, |_| true);
         assert_eq!(
             find(Some("override/opencode2".into()), Some(path.as_os_str())),
             OpenCodeInstall::Ready(root.join("override/opencode2"))
@@ -2495,7 +2534,7 @@ mod tests {
         let executable = root.join(".nvm/versions/node/v24.4.1/bin/opencode2");
         fake_executable(&executable);
 
-        let found = find_opencode_executable(None, None, Some(&root), Some(&root), |_| true);
+        let found = find_fixture_opencode_executable(None, None, &root, |_| true);
 
         assert_eq!(found, OpenCodeInstall::Ready(executable));
         std::fs::remove_dir_all(root).unwrap();
@@ -2523,7 +2562,7 @@ mod tests {
 
     #[cfg(not(target_os = "windows"))]
     #[test]
-    fn opencode2_is_preferred_and_only_a_v2_opencode_is_accepted() {
+    fn v2_opencode_is_preferred_and_v1_falls_back_to_opencode2() {
         let root = std::env::temp_dir().join(format!(
             "hex-opencode-generation-{}-{:?}",
             std::process::id(),
@@ -2533,24 +2572,99 @@ mod tests {
         let second = root.join("second/opencode");
         let shim = root.join(".opencode/bin/opencode2");
         let path = std::env::join_paths([root.join("first"), root.join("second")]).unwrap();
-        let find = || {
-            find_opencode_executable(None, Some(&path), Some(&root), Some(&root), opencode_is_v2)
-        };
+        let find = || find_fixture_opencode_executable(None, Some(&path), &root, opencode_is_v2);
 
+        assert_eq!(find(), OpenCodeInstall::Missing);
         fake_opencode(&first, "1.19.5", false);
         assert_eq!(find(), OpenCodeInstall::V1Only);
         // A V1 snapshot build prints a prerelease version and rejects `api`.
         fake_opencode(&second, "0.0.0-dev-202610280534", false);
         assert_eq!(find(), OpenCodeInstall::V1Only);
 
+        fake_executable(&shim);
+        assert_eq!(find(), OpenCodeInstall::Ready(shim.clone()));
+
         fake_opencode(&second, "opencode v2.2.0", false);
         assert_eq!(find(), OpenCodeInstall::Ready(second.clone()));
         fake_opencode(&second, "opencode v0.0.0-dev-88", true);
         assert_eq!(find(), OpenCodeInstall::Ready(second.clone()));
+        fake_opencode(&first, "2.2.0", false);
+        assert_eq!(find(), OpenCodeInstall::Ready(first));
 
-        // Any `opencode2` beats an `opencode` earlier in the search.
-        fake_executable(&shim);
-        assert_eq!(find(), OpenCodeInstall::Ready(shim));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    #[test]
+    fn v2_opencode_is_preferred_over_a_stale_fnm_opencode2() {
+        let root = std::env::temp_dir().join(format!(
+            "hex-opencode-stale-fnm-{}-{:?}",
+            std::process::id(),
+            thread::current().id()
+        ));
+        let ga = root.join("path/opencode");
+        let beta = root.join(
+            "Library/Application Support/fnm/node-versions/v22.14.0/installation/bin/opencode2",
+        );
+        fake_opencode(&ga, "opencode v2.2.0", true);
+        fake_opencode(&beta, "opencode2 v0.0.0-beta-19271", false);
+        let path = root.join("path");
+
+        let found =
+            find_fixture_opencode_executable(None, Some(path.as_os_str()), &root, opencode_is_v2);
+
+        assert_eq!(found, OpenCodeInstall::Ready(ga));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    #[test]
+    fn v2_opencode_outside_path_beats_opencode2_on_path() {
+        let root = std::env::temp_dir().join(format!(
+            "hex-opencode-ga-home-{}-{:?}",
+            std::process::id(),
+            thread::current().id()
+        ));
+        let ga = root.join(".opencode/bin/opencode");
+        let beta = root.join("path/opencode2");
+        fake_opencode(&ga, "2.2.0", false);
+        fake_executable(&beta);
+        let path = root.join("path");
+
+        let found =
+            find_fixture_opencode_executable(None, Some(path.as_os_str()), &root, opencode_is_v2);
+
+        assert_eq!(found, OpenCodeInstall::Ready(ga));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    #[test]
+    fn configured_executable_wins_even_when_both_names_are_installed() {
+        let root = std::env::temp_dir().join(format!(
+            "hex-opencode-ga-override-{}-{:?}",
+            std::process::id(),
+            thread::current().id()
+        ));
+        let ga = root.join("path/opencode");
+        let beta = root.join("path/opencode2");
+        fake_opencode(&ga, "2.2.0", false);
+        fake_executable(&beta);
+        let path = root.join("path");
+
+        for (configured, expected) in [
+            (beta.clone(), beta.clone()),
+            (PathBuf::from("path/opencode2"), beta),
+            (root.join("missing/opencode"), root.join("missing/opencode")),
+        ] {
+            let found = find_fixture_opencode_executable(
+                Some(configured),
+                Some(path.as_os_str()),
+                &root,
+                |_| unreachable!("the override is never probed"),
+            );
+            assert_eq!(found, OpenCodeInstall::Ready(expected));
+        }
         fs::remove_dir_all(root).unwrap();
     }
 
