@@ -1735,6 +1735,15 @@ const SCENES: &[Scene] = &[
         modes::fixture(ui);
         ui.pane = Pane::Modes;
     }),
+    ("modes-opencode-v1", |ui| {
+        *ui = portal_fixture();
+        modes::fixture(ui);
+        ui.models = models::Models::fixture_v1();
+        ui.settings.dictation_processing.modes[0]
+            .post_processing
+            .enabled = false;
+        ui.pane = Pane::Modes;
+    }),
     ("modes-off", |ui| {
         *ui = portal_fixture();
         ui.platform.modes = false;

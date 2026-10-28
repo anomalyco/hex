@@ -1078,11 +1078,14 @@ fn processing(
         })
         .build(p.k)
         .key("processing-toggle");
+    let reason = (!can_toggle)
+        .then(|| models::unavailable_reason(ui, OpenCodeFeature::Transformation))
+        .flatten();
     let mut rows = vec![setting_row(
         p,
         "processing-enabled",
         tr("OpenCode transformation"),
-        None,
+        reason,
         toggle,
     )];
     if enabled {

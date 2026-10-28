@@ -7,9 +7,9 @@ use std::thread;
 use std::time::Duration;
 
 use crate::desktop_i18n::tr;
-use crate::dictation_processor::ModelCatalog;
+use crate::dictation_processor::{ModelCatalog, OpenCodeInstall};
 
-/// How often a missing `opencode2` install is looked for again.
+/// How often a missing (or V1-only) OpenCode install is looked for again.
 pub(crate) const OPENCODE_INSTALL_RETRY_INTERVAL: Duration = Duration::from_secs(60);
 const MAX_OPENCODE_ERROR_BYTES: usize = 4 * 1024;
 const OPENCODE_BETA_DOCS_URL: &str = "https://v2.opencode.ai/";
@@ -18,10 +18,14 @@ pub(crate) enum ModelCatalogState {
     Loading,
     Loaded(ModelCatalog),
     Missing,
+    /// Only an OpenCode V1 `opencode` is installed.
+    NeedsV2,
     Failed(String),
 }
 
 pub(crate) struct OpenCodeUnavailableCopy {
+    /// Why, in a few words, for beside a switch the user can't turn on.
+    pub(crate) reason: &'static str,
     pub(crate) title: &'static str,
     pub(crate) description: &'static str,
     pub(crate) error: Option<String>,
@@ -42,6 +46,7 @@ pub(crate) fn opencode_unavailable_copy(
 ) -> Option<OpenCodeUnavailableCopy> {
     match state {
         ModelCatalogState::Loading => Some(OpenCodeUnavailableCopy {
+            reason: tr("Checking for OpenCode"),
             title: tr("Checking for OpenCode"),
             description: match feature {
                 OpenCodeFeature::VoiceAction => {
@@ -57,6 +62,7 @@ pub(crate) fn opencode_unavailable_copy(
             can_open_setup: false,
         }),
         ModelCatalogState::Missing => Some(OpenCodeUnavailableCopy {
+            reason: tr("Requires OpenCode"),
             title: match feature {
                 OpenCodeFeature::VoiceAction => tr("Voice Action requires OpenCode"),
                 OpenCodeFeature::Transformation => tr("Transformation requires OpenCode"),
@@ -74,7 +80,22 @@ pub(crate) fn opencode_unavailable_copy(
             retry_label: tr("Check again"),
             can_open_setup: true,
         }),
+        ModelCatalogState::NeedsV2 => Some(OpenCodeUnavailableCopy {
+            reason: tr("Requires OpenCode V2"),
+            title: match feature {
+                OpenCodeFeature::VoiceAction => tr("Voice Action requires OpenCode V2"),
+                OpenCodeFeature::Transformation => tr("Transformation requires OpenCode V2"),
+            },
+            description: tr(
+                "The installed opencode is OpenCode V1, which Hex can't use. Install OpenCode V2.",
+            ),
+            error: None,
+            can_retry: true,
+            retry_label: tr("Check again"),
+            can_open_setup: true,
+        }),
         ModelCatalogState::Failed(error) => Some(OpenCodeUnavailableCopy {
+            reason: tr("OpenCode is unavailable"),
             title: tr("OpenCode is unavailable"),
             description: tr("Hex could not load the OpenCode model catalog."),
             error: Some(error.clone()),
@@ -100,17 +121,17 @@ fn bounded_opencode_error(error: &str) -> String {
 pub(crate) fn start_model_catalog_load() -> Receiver<ModelCatalogState> {
     let (sender, receiver) = sync_channel(1);
     thread::spawn(move || {
-        let state = if crate::dictation_processor::opencode_installed() {
-            match crate::dictation_processor::load_model_catalog() {
+        let state = match crate::dictation_processor::find_opencode_install() {
+            OpenCodeInstall::Ready(_) => match crate::dictation_processor::load_model_catalog() {
                 Ok(catalog) => ModelCatalogState::Loaded(catalog),
                 Err(error) => {
                     let error = bounded_opencode_error(&error.to_string());
                     tracing::warn!(%error, "could not load OpenCode model catalog");
                     ModelCatalogState::Failed(error)
                 }
-            }
-        } else {
-            ModelCatalogState::Missing
+            },
+            OpenCodeInstall::V1Only => ModelCatalogState::NeedsV2,
+            OpenCodeInstall::Missing => ModelCatalogState::Missing,
         };
         let _ = sender.send(state);
     });
@@ -264,6 +285,28 @@ mod tests {
         assert_eq!(copy.error, None);
         assert!(copy.can_retry);
         assert!(copy.can_open_setup);
+    }
+
+    #[test]
+    fn opencode_v1_copy_asks_for_v2_with_setup() {
+        for (feature, title) in [
+            (
+                OpenCodeFeature::VoiceAction,
+                "Voice Action requires OpenCode V2",
+            ),
+            (
+                OpenCodeFeature::Transformation,
+                "Transformation requires OpenCode V2",
+            ),
+        ] {
+            let copy = opencode_unavailable_copy(&ModelCatalogState::NeedsV2, feature).unwrap();
+            assert_eq!(copy.reason, "Requires OpenCode V2");
+            assert_eq!(copy.title, title);
+            assert!(copy.description.contains("OpenCode V1"));
+            assert_eq!(copy.error, None);
+            assert!(copy.can_retry);
+            assert!(copy.can_open_setup);
+        }
     }
 
     #[test]

@@ -91,8 +91,9 @@ substitute for source inspection or a second roadmap.
   for macOS, Windows, and Linux: context-selected corrections, deadline-bounded
   OpenCode rewrite profiles with corrected-transcript fallback, the ranked
   model catalog, Voice Action generation, and the transformation stage. Every
-  OS discovers the `opencode2` beta executable and links missing installs to
-  `https://v2.opencode.ai/`. On macOS and Linux, `opencode2 api get` discovers
+  OS discovers the OpenCode V2 CLI (any `opencode2` first, else an `opencode`
+  that proves to be V2; a V1 `opencode` is never run) and links missing installs
+  to `https://v2.opencode.ai/`. On macOS and Linux, `opencode2 api get` discovers
   or starts the managed service, and generation uses the matching owner-only
   service registration and authenticated loopback HTTP through the system curl;
   request bodies and credentials use stdin, never argv or new temporary files.
@@ -587,8 +588,8 @@ CoreAudio formats, AppleScript details, or event serialization.
   the catalog uses authenticated loopback HTTP to avoid large CLI pipe truncation.
   HEX never invokes
   `opencode2 serve --service` or owns that service's lifecycle directly. A
-  missing beta install is retried at a coarse interval so installing
-  `opencode2` while Settings is open refreshes the model catalog without
+  missing or V1-only install is retried at a coarse interval so installing
+  OpenCode V2 while Settings is open refreshes the model catalog without
   restarting HEX. Catalog failures require an explicit retry rather than
   spawning clients in a tight loop.
 - Ordinary resolver commands execute only from completed Moonshine lines.

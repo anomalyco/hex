@@ -842,6 +842,28 @@ fn opencode_missing_offers_setup_instead_of_models() {
 }
 
 #[test]
+fn unavailable_opencode_is_explained_beside_each_switch() {
+    let beside = |rt: &Runtime<Ui>, row: &str| {
+        rt.elements()
+            .into_iter()
+            .filter(|e| e.path.contains(row) && e.path.ends_with("/description"))
+            .filter_map(|e| e.text)
+            .collect::<Vec<_>>()
+    };
+    let rt = runtime("modes-opencode-v1", true, PANE_SIZE);
+    assert!(rt.find("processing-toggle").is_some());
+    assert_eq!(beside(&rt, "processing-enabled"), ["Requires OpenCode V2"]);
+    assert!(
+        texts(&rt)
+            .iter()
+            .any(|text| text == "Transformation requires OpenCode V2")
+    );
+
+    let rt = runtime("voice-action-unavailable", true, PANE_SIZE);
+    assert_eq!(beside(&rt, "voice-action-enabled"), ["Requires OpenCode"]);
+}
+
+#[test]
 fn history_selects_deletes_and_clears_in_two_steps() {
     let mut rt = runtime("history", true, PANE_SIZE);
     tap(&mut rt, "history-entry3");
@@ -1444,6 +1466,7 @@ fn goldens() {
     check_golden("menus", false, GOLDEN_SIZE);
     check_golden("voice-action-models", true, PANE_SIZE);
     check_golden("voice-action-unavailable", false, PANE_SIZE);
+    check_golden("modes-opencode-v1", false, PANE_SIZE);
     check_golden("onboarding", true, PANE_SIZE);
 }
 

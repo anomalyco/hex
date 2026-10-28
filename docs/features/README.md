@@ -527,6 +527,13 @@ Selection and stage checks start in
 [personal_commands.rs](../../src/personal_commands.rs). They do not prove live
 provider availability or real application/Brave context changes.
 
+OpenCode transformation shares Voice Action's OpenCode discovery, which accepts
+`opencode2` or a V2 `opencode` and rejects V1
+([Voice Action](voice-action.md)). While the switch can't be turned on, the
+reason ("Requires OpenCode", "Requires OpenCode V2") shows beside it and the
+setup/retry notice below; `unavailable_opencode_is_explained_beside_each_switch`
+covers both panes headlessly.
+
 GUI executable discovery also checks `~/.vite-plus/bin/opencode2` when it is
 absent from the inherited PATH. `standard_install_location_finds_opencode_outside_the_gui_path`
 in [dictation_processor.rs](../../src/dictation_processor.rs) covers this with
