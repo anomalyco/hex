@@ -7,10 +7,12 @@ set -eu
 origin=${HEX_RELEASE_BASE_URL:-https://anoma.ly/release}
 origin=${origin%/}
 # HEX_INSTALL_CHANNEL=dev installs the newest dev build and keeps the
-# install on the Dev update channel.
-channel=${HEX_INSTALL_CHANNEL:-stable}
+# install on the Dev update channel; =stable requires the stable release.
+# Unset, it installs stable, or the newest dev build while the release
+# service has no stable Hex release yet.
+channel=${HEX_INSTALL_CHANNEL:-}
 case "$channel" in
-  stable | dev) ;;
+  '' | stable | dev) ;;
   *)
     echo "HEX_INSTALL_CHANNEL must be stable or dev." >&2
     exit 1
@@ -164,6 +166,7 @@ trap cleanup EXIT
 trap 'exit 1' HUP INT TERM
 manifest="$temporary/manifest.json"
 artifact_path=${HEX_INSTALL_ARTIFACT:-$temporary/hex}
+if [ -n "${HEX_INSTALL_ARTIFACT:-}" ] && [ -z "$channel" ]; then channel=stable; fi
 version=${HEX_INSTALL_VERSION:-}
 
 if [ -z "${HEX_INSTALL_ARTIFACT:-}" ]; then
@@ -177,6 +180,21 @@ if [ -z "${HEX_INSTALL_ARTIFACT:-}" ]; then
     https://*) ;;
     *) fail "HEX_RELEASE_BASE_URL must be an https:// URL." ;;
   esac
+  if [ -z "$channel" ]; then
+    status=$(curl --location --proto '=https' --proto-redir '=https' \
+      --silent --show-error --connect-timeout 10 --max-time 60 \
+      --max-filesize 1048576 --write-out '%{http_code}' \
+      "$origin/hex/desktop/stable.json" -o "$manifest") \
+      || fail "Could not reach $origin."
+    case "$status" in
+      200) channel=stable ;;
+      404)
+        echo "Hex has no stable release yet; installing the newest dev build, which keeps updating from the Dev channel. Set HEX_INSTALL_CHANNEL=stable to require the stable release." >&2
+        channel=dev
+        ;;
+      *) fail "$origin/hex/desktop/stable.json answered $status." ;;
+    esac
+  fi
   manifest_url="$origin/hex/desktop/$channel.json"
   curl --fail --location --proto '=https' --proto-redir '=https' \
     --silent --show-error --connect-timeout 10 --max-time 60 \

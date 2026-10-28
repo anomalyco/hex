@@ -361,8 +361,9 @@ it. No reviewer is required.
 
 ## Linux packages
 
-- **Direct install** (`curl -fsSL https://anoma.ly/hex/install-linux.sh | sh`
-  once the service has a release): the user-local version layout plus the
+- **Direct install** (`curl -fsSL https://anoma.ly/hex/files/install-linux.sh | sh`,
+  kept current by the Installers workflow; stable, or dev until there is a
+  stable release): the user-local version layout plus the
   `install.json` receipt; it updates itself from the service's manifest and
   the window offers "Update" (restart into the staged version).
 - **AUR** `hex-bin` (`packaging/aur`, staged by `scripts/release-aur.sh`, pushed by `.github/release/push-aur.sh`):

@@ -107,7 +107,10 @@ Vulkan like x64 and fall back to the CPU.
 ### Install script
 
 The script installs the bare executable for your architecture into a
-user-local layout that updates itself:
+user-local layout (`~/.local/share/hex`) that updates itself. It installs the
+stable release, or the newest dev build (on the Dev update channel) while
+there is no stable release yet; set `HEX_INSTALL_CHANNEL=stable` or `=dev` to
+choose:
 
 ```sh
 curl -fsSL https://anoma.ly/hex/files/install-linux.sh | sh
