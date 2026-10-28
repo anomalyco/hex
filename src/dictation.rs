@@ -5,7 +5,7 @@ use rubato::audioadapter_buffers::direct::InterleavedSlice;
 use rubato::{Fft, FixedSync, Indexing, Resampler, WindowFunction};
 
 use crate::audio::CaptureInstant;
-use crate::transcription_engine::{LiveStream, TranscriptionEngine};
+use crate::transcription_engine::{LiveStream, Partial, TranscriptionEngine};
 
 #[cfg(target_os = "macos")]
 use crate::recording_environment::{RecordingEnvironmentController, RecordingEnvironmentSession};
@@ -706,6 +706,9 @@ struct Recording {
     input_buffer: Vec<f32>,
     resampler: Option<Fft<f32>>,
     stream: Option<LiveStream>,
+    /// This recording's hold on the HUDs' live text, from its first text;
+    /// dropping the recording clears it.
+    live_text: Option<crate::live_text::Publisher>,
     #[cfg(target_os = "macos")]
     environment: RecordingEnvironmentState,
     #[cfg(target_os = "macos")]
@@ -770,6 +773,7 @@ impl Recording {
             input_buffer: Vec::with_capacity(Self::CHUNK_SIZE),
             resampler,
             stream: None,
+            live_text: None,
             #[cfg(target_os = "macos")]
             environment: RecordingEnvironmentState::Disabled,
             #[cfg(target_os = "macos")]
@@ -1117,6 +1121,40 @@ impl DictationCapture {
         self.recording
             .as_ref()
             .is_some_and(|recording| recording.stream.is_some())
+    }
+
+    /// The active recording's text so far when its live stream published a
+    /// change since the last call: only with live text on, and only for
+    /// display. The finished clip's transcript replaces it.
+    pub fn take_partial(&mut self) -> Option<Partial> {
+        self.recording.as_mut()?.stream.as_mut()?.take_partial()
+    }
+
+    /// Shows the live text on the HUDs when it changed, and logs at debug
+    /// how far it has got: word counts against the audio fed, never the
+    /// words (the engine logs each stream's count of changes). Every OS's
+    /// capture loop calls it after ingesting audio; it does nothing without
+    /// live text.
+    pub fn report_live_text(&mut self) {
+        let Some(partial) = self.take_partial() else {
+            return;
+        };
+        let Some(recording) = &mut self.recording else {
+            return;
+        };
+        tracing::debug!(
+            fed_ms = recording
+                .stream
+                .as_ref()
+                .map_or(0, |stream| stream.fed() / 16),
+            stable_words = partial.stable.split_whitespace().count(),
+            tentative_words = partial.tentative.split_whitespace().count(),
+            "live text"
+        );
+        recording
+            .live_text
+            .get_or_insert_with(crate::live_text::Publisher::new)
+            .show(&partial);
     }
 
     /// Opens a live stream for the active recording when the engine's model
@@ -1715,6 +1753,74 @@ mod tests {
         );
         capture.ingest(&[0.5; 1_600], start + Duration::from_millis(200));
         assert_eq!(stream_traffic(&commands).0.len(), 3_200);
+    }
+
+    #[test]
+    fn live_text_follows_the_recording_and_never_outlives_it() {
+        use crate::transcription_engine::Command;
+        let said = |stable: &str| Partial {
+            stable: stable.into(),
+            tentative: String::new(),
+        };
+        let begun = |commands: &std::sync::mpsc::Receiver<Command>| {
+            commands
+                .try_iter()
+                .find_map(|command| match command {
+                    Command::Begin { partials, .. } => partials,
+                    _ => None,
+                })
+                .expect("live text gives the stream a slot")
+        };
+        let (engine, commands) = TranscriptionEngine::for_test();
+        let engine = engine.with_live_text();
+        let start = capture_time();
+        let mut capture = DictationCapture::new(16_000);
+        assert_eq!(capture.take_partial(), None, "no recording, no text");
+        capture.start(start);
+        assert!(capture.become_intentional(start + MINIMUM_HOLD_DURATION));
+        capture.begin_stream(&engine);
+        let first = begun(&commands);
+        capture.ingest(&[0.5; 16_000], start + Duration::from_secs(1));
+        assert_eq!(
+            capture.take_partial(),
+            None,
+            "nothing until the model publishes"
+        );
+        first.publish(said("so the plan"));
+        assert_eq!(capture.take_partial(), Some(said("so the plan")));
+        assert_eq!(capture.take_partial(), None);
+
+        // Finishing hands the stream to the clip; the capture shows nothing,
+        // even when the old stream publishes again while it finishes.
+        let Finish::Transcribe(mut clip) = capture.finish(start + Duration::from_secs(1)) else {
+            panic!("expected transcription")
+        };
+        first.publish(say_more());
+        assert_eq!(capture.take_partial(), None);
+
+        // The next capture starts empty and shows only its own text.
+        capture.start(start + Duration::from_secs(2));
+        assert!(capture.become_intentional(start + Duration::from_secs(3)));
+        capture.begin_stream(&engine);
+        let second = begun(&commands);
+        assert_eq!(capture.take_partial(), None, "no text carried over");
+        first.publish(said("stale"));
+        assert_eq!(capture.take_partial(), None);
+        second.publish(said("next"));
+        assert_eq!(capture.take_partial(), Some(said("next")));
+
+        // Escape drops the text with the recording.
+        second.publish(said("next one"));
+        capture.cancel();
+        assert_eq!(capture.take_partial(), None);
+        drop(clip.take_stream());
+
+        fn say_more() -> Partial {
+            Partial {
+                stable: "so the plan for today".into(),
+                tentative: " is".into(),
+            }
+        }
     }
 
     #[test]

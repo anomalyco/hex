@@ -12,8 +12,8 @@
 #[cfg(target_os = "macos")]
 mod macos;
 
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use rune::compose::{Compositor, Frame};
@@ -21,11 +21,12 @@ use rune::{Cx, El, OverlayHandle, OverlayOptions, OverlaySpec, ScreenEdge, el};
 
 use crate::app_settings::IndicatorPosition;
 use crate::dictation_indicator::{
-    DictationIndicatorEvent, DotFrame, Drawn, IndicatorModel, Uniforms, WINDOW_HEIGHT,
-    WINDOW_WIDTH, dot_scope_enabled,
+    CAPSULE_HEIGHT, DictationIndicatorEvent, DotFrame, Drawn, IndicatorModel, Uniforms,
+    WINDOW_HEIGHT, WINDOW_WIDTH, dot_scope_enabled,
 };
 use crate::dot_scope::{self, MAX_DOTS};
 use crate::hud_placement::{ISLAND_INSET, ISLAND_PAD, Island, Layout};
+use crate::rune_ui::live_text::Spot;
 
 #[cfg(target_os = "macos")]
 pub(crate) use macos::DictationIndicatorUi;
@@ -46,6 +47,32 @@ const DOT_SCOPE_WINDOW: (f32, f32) = (304.0, 80.0);
 const NOTCH_RADIUS: f32 = 8.0;
 /// The open island's bottom corner radius.
 const ISLAND_RADIUS: f32 = 18.0;
+
+/// The live text's gap from the HUD's plate.
+const LIVE_TEXT_GAP: f32 = 6.0;
+
+/// Where the live text starts, as of the HUD's last show.
+static LIVE_TEXT: Mutex<Option<Spot>> = Mutex::new(None);
+
+/// Where the live text plate starts: just past the HUD's plate, on its
+/// screen; with the HUD hidden, where its plate would be.
+pub(crate) fn live_text_place() -> Spot {
+    let spot = *LIVE_TEXT.lock().unwrap_or_else(|error| error.into_inner());
+    spot.unwrap_or(Spot::Edge(ScreenEdge::Top, 40.0))
+}
+
+fn set_live_text(spot: Spot) {
+    *LIVE_TEXT.lock().unwrap_or_else(|error| error.into_inner()) = Some(spot);
+}
+
+/// The height of the HUD's plate.
+fn plate_height() -> f32 {
+    if dot_scope_enabled() {
+        dot_scope::PLATE_HEIGHT
+    } else {
+        CAPSULE_HEIGHT
+    }
+}
 
 /// The HUD window, and the widest plate it holds.
 fn window() -> (f32, f32) {
@@ -139,6 +166,13 @@ impl Hud {
             self.position = crate::app_settings::indicator_position();
         }
         if self.position == IndicatorPosition::Hidden {
+            #[cfg(target_os = "macos")]
+            self.place_live_text_without_hud();
+            #[cfg(not(target_os = "macos"))]
+            {
+                let plate_start = TOP_OFFSET + (window().1 - plate_height()) / 2.0;
+                set_live_text(Spot::Edge(ScreenEdge::Top, plate_start));
+            }
             self.hide();
             return;
         }
@@ -151,6 +185,9 @@ impl Hud {
                 _ => (ScreenEdge::Top, TOP_OFFSET),
             };
             overlay.place(edge, margin);
+            // The plate sits in the middle of the window.
+            let past_plate = margin + (window().1 + plate_height()) / 2.0 + LIVE_TEXT_GAP;
+            set_live_text(Spot::Edge(edge, past_plate));
         }
         if !self.shown {
             overlay.show();

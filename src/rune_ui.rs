@@ -26,6 +26,7 @@ mod hud_lab;
 #[cfg(target_os = "macos")]
 mod hud_stories;
 mod lists;
+pub(crate) mod live_text;
 #[cfg(target_os = "macos")]
 pub(crate) mod meeting_capsules;
 mod meetings;
@@ -138,6 +139,7 @@ pub(crate) fn run_app(
         .windowless()
         .window_options(fixed_window());
     crate::linux_rune_hud::install(&mut app);
+    live_text::install(&mut app, crate::rune_hud::live_text_place);
     // The capture capsule, picker, and ink, with the `capture` experiment on.
     let _capture_overlays = crate::app_settings::capture_available()
         .then(|| crate::rune_ui::capture_capsule::feed::CaptureOverlays::install(&mut app));

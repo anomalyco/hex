@@ -55,6 +55,33 @@ The known experiments are compiled into
   [Live Chapters](meetings.md#live-chapters-experiment-live-chapters)). The
   gate is where the work starts: the recorder's chapter worker, recording
   chapters in the manifest, and the boundary pass after Stop.
+- `live-text`: a streaming dictation shows what you have said so far while
+  you dictate, as one click-through line just past the recording HUD (every
+  OS; see [Streaming Finish](dictation.md#streaming-finish)). The gate is
+  where the work starts: with it off, the engine gives a hotkey capture's
+  live stream no partial slot and never reads the model's text between
+  feeds, and no host adds the line's overlay. Each dictation's `finished
+  live stream` line in process.log counts its text changes (`partials`);
+  `RUST_LOG=hex=debug` adds a `live text` line per change with the audio
+  fed and the word counts, never the words. Checks:
+  `a_dictation_stream_publishes_its_text_after_each_feed_with_live_text`,
+  `without_live_text_a_dictation_stream_publishes_nothing`,
+  `each_dictation_stream_has_its_own_text`, and
+  `a_failed_feed_clears_the_text_and_stops_publishing` in
+  [transcription_engine.rs](../../src/transcription_engine.rs);
+  `live_text_follows_the_recording_and_never_outlives_it` in
+  [dictation.rs](../../src/dictation.rs); the three tests in
+  [live_text.rs](../../src/live_text.rs) (a recording's end clears only its
+  own text); `a_spot_places_the_plate_just_past_the_hud`,
+  `a_short_line_hugs_its_words_in_the_middle`,
+  `a_long_line_stays_inside_the_overlay_on_one_line`, and
+  `no_words_draw_nothing` in
+  [rune_ui/live_text.rs](../../src/rune_ui/live_text.rs), whose opt-in
+  `snapshots` renders the line in light and dark; and
+  `live_text_hangs_just_past_the_plate_wherever_it_sits` in
+  [hud_placement.rs](../../src/hud_placement.rs). The line has no golden
+  and no `--snap` scene (overlays have none), and nothing headless checks
+  how it appears and hides on screen.
 - `modes`: Modes ([Process Text With Modes](README.md#process-text-with-modes)),
   every OS. Off by default (Kit, 2026-10-27): no Modes pane or onboarding tip,
   and processing runs only the global replacements, so no per-app mode,

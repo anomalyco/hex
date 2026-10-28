@@ -440,6 +440,7 @@ pub fn run(shutdown: &'static AtomicBool, listener: ListenerConfig) -> Result<()
         )
     };
     let hud = crate::rune_hud::install(&mut app);
+    crate::rune_ui::live_text::install(&mut app, crate::rune_hud::live_text_place);
     // The capture capsule, picker, and ink, with the `capture` experiment on.
     #[cfg(hex_capture)]
     let capture_overlays = crate::app_settings::capture_available()

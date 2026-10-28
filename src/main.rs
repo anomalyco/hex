@@ -94,6 +94,7 @@ mod linux_service;
 mod linux_session;
 #[cfg(target_os = "linux")]
 mod linux_tray;
+mod live_text;
 #[cfg(target_os = "macos")]
 mod local_api;
 #[cfg(any(target_os = "linux", target_os = "windows"))]

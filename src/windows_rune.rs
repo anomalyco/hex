@@ -191,6 +191,7 @@ pub fn open(event_path: PathBuf, shutdown: &'static AtomicBool, start_hidden: bo
         }
     };
     let hud = crate::rune_hud::install(&mut app);
+    crate::rune_ui::live_text::install(&mut app, crate::rune_hud::live_text_place);
     let (requests, receiver) = mpsc::channel();
     let shared = Arc::new(Shared::default());
     RUNTIME

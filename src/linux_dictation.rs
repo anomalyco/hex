@@ -641,6 +641,7 @@ pub(crate) fn run(
                     suppressor.suppress();
                 }
                 stream_when_due(&mut capture, &engine, toggle);
+                capture.report_live_text();
             }
             RecoveringAudioInputEvent::Timeout => {}
             RecoveringAudioInputEvent::Interrupted => {

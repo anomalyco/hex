@@ -31,6 +31,7 @@ pub enum Experiment {
     Capture,
     DotScope,
     LiveChapters,
+    LiveText,
     Modes,
     Playground,
     SmartTurn,
@@ -41,10 +42,11 @@ pub enum Experiment {
 impl Experiment {
     /// Every experiment, including those a platform lacks;
     /// [`Self::available`] lists the ones this build offers.
-    const ALL: [Self; 8] = [
+    const ALL: [Self; 9] = [
         Self::Capture,
         Self::DotScope,
         Self::LiveChapters,
+        Self::LiveText,
         Self::Modes,
         Self::Playground,
         Self::SmartTurn,
@@ -72,6 +74,7 @@ impl Experiment {
             Self::Capture => "capture",
             Self::DotScope => "dot-scope",
             Self::LiveChapters => "live-chapters",
+            Self::LiveText => "live-text",
             Self::Modes => "modes",
             Self::Playground => "playground",
             Self::SmartTurn => "smart-turn",
@@ -87,6 +90,9 @@ impl Experiment {
                 "Dot scope: the recording indicator as a braided dot oscilloscope (macOS, Linux, Windows; tuned in HUD Lab)."
             }
             Self::LiveChapters => "Chapter a meeting's transcript live while it records.",
+            Self::LiveText => {
+                "Live text: a streaming model publishes what you have said so far while you dictate."
+            }
             Self::Modes => {
                 "Modes: the pane, per-app corrections, OpenCode rewriting, and transformations."
             }
@@ -692,6 +698,12 @@ mod tests {
                     {
                         "name": "live-chapters",
                         "description": Experiment::LiveChapters.description(),
+                        "enabled": false,
+                        "sources": [],
+                    },
+                    {
+                        "name": "live-text",
+                        "description": Experiment::LiveText.description(),
                         "enabled": false,
                         "sources": [],
                     },

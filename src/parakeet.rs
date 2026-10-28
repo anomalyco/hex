@@ -1954,6 +1954,12 @@ mod tests {
             Box::new(model),
         )))
         .unwrap();
+        // `HEX_STREAM_LIVE_TEXT=0` replays without reading live text.
+        let engine = if std::env::var("HEX_STREAM_LIVE_TEXT").is_ok_and(|value| value == "0") {
+            engine
+        } else {
+            engine.with_live_text()
+        };
         let speed = std::env::var("HEX_STREAM_SPEED")
             .ok()
             .and_then(|speed| speed.parse::<f64>().ok())
@@ -2011,10 +2017,27 @@ mod tests {
             let mut stream = engine.begin().expect("the model streams");
             let held = samples.len().saturating_sub(3_200);
             let feeding = Instant::now();
+            // Live text as a HUD would read it: (audio fed in ms, stable
+            // words, tentative words), and how often the stable text was
+            // rewritten instead of extended.
+            let mut timeline = Vec::new();
+            let mut stable = String::new();
+            let mut rewrites = 0;
             for (index, block) in samples[..held].chunks(2_560).enumerate() {
                 let due = std::time::Duration::from_secs_f64(index as f64 * 0.16 / speed);
                 thread::sleep(due.saturating_sub(feeding.elapsed()));
                 stream.feed(block);
+                if let Some(partial) = stream.take_partial() {
+                    if !partial.stable.starts_with(stable.as_str()) {
+                        rewrites += 1;
+                    }
+                    stable = partial.stable.clone();
+                    timeline.push((
+                        stream.fed() / 16,
+                        words(&partial.stable).len(),
+                        words(&partial.tentative).len(),
+                    ));
+                }
             }
             thread::sleep(std::time::Duration::from_secs_f64(0.2 / speed));
             let streamed = engine
@@ -2045,6 +2068,19 @@ mod tests {
             );
             println!("  offline {}", whole.text);
             println!("  stream  {}", streamed.text);
+            let first_text_ms = timeline
+                .iter()
+                .find(|(_, stable, tentative)| stable + tentative > 0)
+                .map(|(fed_ms, ..)| *fed_ms);
+            println!(
+                "  live text: updates={} first_text_at_audio_ms={first_text_ms:?} stable_rewrites={rewrites} last_stable_words={}/{}",
+                timeline.len(),
+                timeline.last().map_or(0, |(_, stable, _)| *stable),
+                reference.len()
+            );
+            for (fed_ms, stable, tentative) in &timeline {
+                println!("    audio_ms={fed_ms} stable_words={stable} tentative_words={tentative}");
+            }
             assert_eq!(streamed.source, Source::Stream);
             assert!(differences * 20 <= reference.len().max(20));
         }

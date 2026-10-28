@@ -263,6 +263,11 @@ substitute for source inspection or a second roadmap.
   `rune_ui/windows_host.rs` is the window's host), the WASAPI dictation loop,
   low-level keyboard hook, clipboard paste, UI Automation context, audio ducking, and the
   login item.
+- `live_text`: the `live-text` experiment's text of the recording in
+  progress: the recording's `Publisher` shows it and its drop clears it, and
+  each OS's host installs `rune_ui::live_text`, one click-through line just
+  past the HUD, as a watcher, placed where `rune_hud` last showed the HUD
+  (`rune_hud::live_text_place`).
 - `dictation_modes`: the mode runtime the Windows and Linux listeners share:
   mode selection by application and website, then global replacements, mode
   corrections, OpenCode rewriting, and transformations, and the History entry.
@@ -542,8 +547,10 @@ CoreAudio formats, AppleScript details, or event serialization.
 - Streaming dictation is speculative on every OS: a hotkey capture's stream
   receives exactly the capture's 16 kHz audio, the finish always carries the
   complete clip, and a failed, empty, overfed, late, or interrupted stream
-  falls back to the whole clip. Nothing pastes, and no partial text shows,
-  before the final text. One engine thread runs every inference because a live
+  falls back to the whole clip. Nothing pastes or reaches the focused app
+  before the final text. With the `live-text` experiment a hotkey capture's
+  stream publishes its provisional text for Hex's own HUD only; it is never
+  pasted, copied, or kept in History or Paste Last. One engine thread runs every inference because a live
   stream holds the model's compute lease. Streams run only on GPU devices
   (Metal, Vulkan); models that cannot stream transcribe the whole clip after
   release. Dictation is never cut at pauses; meetings are.

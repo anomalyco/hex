@@ -243,6 +243,30 @@ pub fn place(placement: Placement, screen: &Screen, content: Content, bottom: bo
     }
 }
 
+/// The placed plate's top and bottom edges in screen coordinates (y up),
+/// with an island's room below it.
+pub fn plate_span(placed: &Placed, content: Content) -> (f64, f64) {
+    let (_, window_height) = content.window;
+    let (_, plate_height) = content.plate;
+    let middle = placed.top_left.1 - window_height / 2.0 - f64::from(placed.layout.center[1]);
+    let half = plate_height * f64::from(placed.layout.fit) / 2.0;
+    let below = placed.layout.island.map_or(0.0, |_| ISLAND_PAD);
+    (middle + half, middle - half - below)
+}
+
+/// Where something hung beside a placed plate goes, such as the live text:
+/// the screen edge nearer the plate (true for the bottom) and the distance
+/// from that edge to `gap` past the plate's far side.
+pub fn beside_plate(placed: &Placed, screen: &Screen, content: Content, gap: f64) -> (bool, f64) {
+    let (top, bottom) = plate_span(placed, content);
+    let middle = screen.frame.y + screen.frame.height / 2.0;
+    if (top + bottom) / 2.0 < middle {
+        (true, top - screen.frame.y + gap)
+    } else {
+        (false, screen.frame.top() - bottom + gap)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -304,6 +328,57 @@ mod tests {
             x + CONTENT.window.0 / 2.0 + f64::from(placed.layout.center[0]),
             top - CONTENT.window.1 / 2.0 - f64::from(placed.layout.center[1]),
         )
+    }
+
+    #[test]
+    fn live_text_hangs_just_past_the_plate_wherever_it_sits() {
+        // A flat 1440 × 900 display: a 24 pt menu bar and a 60 pt Dock.
+        let flat = Screen {
+            frame: Rect {
+                x: 0.0,
+                y: 0.0,
+                width: 1440.0,
+                height: 900.0,
+            },
+            visible: Rect {
+                x: 0.0,
+                y: 60.0,
+                width: 1440.0,
+                height: 816.0,
+            },
+            bar: 24.0,
+            ..Screen::default()
+        };
+        let beside = |placement, screen: &Screen, bottom| {
+            let placed = place(placement, screen, CONTENT, bottom);
+            beside_plate(&placed, screen, CONTENT, 4.0)
+        };
+        let plate = CONTENT.plate.1;
+        let close = |(bottom, margin): (bool, f64), want: (bool, f64)| {
+            assert_eq!(bottom, want.0);
+            assert!((margin - want.1).abs() < 0.01, "{margin} vs {}", want.1);
+        };
+        // Below the menu bar, and above the Dock at the bottom.
+        close(
+            beside(Placement::Below, &flat, false),
+            (false, 24.0 + TOP_OFFSET + plate + 4.0),
+        );
+        close(
+            beside(Placement::Below, &flat, true),
+            (true, 60.0 + BOTTOM_OFFSET + plate + 4.0),
+        );
+        // In the menu bar the plate shrinks to fit it, and the line hangs
+        // under the bar even with the Bottom setting.
+        close(
+            beside(Placement::MenuBar, &flat, true),
+            (false, 24.0 - BAR_INSET + 4.0),
+        );
+        // Out of the notch, below the island.
+        let notched = notched();
+        close(
+            beside(Placement::Notch, &notched, false),
+            (false, notched.safe_top + 2.0 * ISLAND_PAD + plate + 4.0),
+        );
     }
 
     #[test]

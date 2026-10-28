@@ -17,7 +17,7 @@ use crate::spring::{REDUCED_FADE, Spec, Spring};
 pub const WINDOW_WIDTH: f32 = 112.0;
 pub const WINDOW_HEIGHT: f32 = 64.0;
 const CAPSULE_WIDTH: f32 = 56.0;
-const CAPSULE_HEIGHT: f32 = 16.0;
+pub(crate) const CAPSULE_HEIGHT: f32 = 16.0;
 const ENTRANCE_ANGULAR_FREQUENCY: f32 = 24.0;
 const EXIT_ANGULAR_FREQUENCY: f32 = 24.0;
 const GEOMETRY_ANGULAR_FREQUENCY: f32 = 24.0;

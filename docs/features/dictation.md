@@ -474,7 +474,22 @@ Model advertises streaming, GPU device             // dictate.streaming
        └── Model switched during the capture -> Stream closed -> Whole clip
   Short tap, Escape, chord discard, microphone failure -> Drop the stream
   Voice-delimited and programmatic captures (macOS) -> Whole clip after release
-  Nothing is shown or pasted until the final text exists
+  Nothing is pasted or reaches the focused app until the final text exists
+  live-text experiment -> After each feed the stream publishes its text   // dictate.live-text
+  ├── Stable (committed) and tentative text, per capture; a new capture starts empty
+  ├── One click-through line just past the HUD, on the HUD's screen
+  │   ├── macOS: beside the plate the HUD placed (under the menu bar, over the Dock,
+  │   │   in the menu bar, out of the notch), on the pointer's screen
+  │   ├── Linux, Windows: past the plate `rune_hud` draws, on the primary display
+  │   ├── HUD hidden -> In the HUD's place at the top
+  │   ├── Appears with the first words, already drawn; prewarmed, so macOS never
+  │   │   reveals the last dictation's words for a frame (Linux, Windows: unverified)
+  │   ├── Grows with the words to 552 pt; the newest stay in view, "…" cutting the start
+  │   └── Tentative words, when the model has any, are dimmed after the stable ones
+  ├── Release, Escape, short tap, or a lost microphone -> The recording ends -> Hidden
+  ├── Provisional: never pasted, copied, or kept (the final text replaces it)
+  ├── A failed or interrupted stream clears the text while the capture goes on
+  └── process.log: `partials` on "finished live stream"; per change at debug (no words)
   Picker -> "Streams" tag on catalog models whose artifact streams   // setup.model-card
   Picker -> The saved language's Recommended/Fastest/Most accurate cards first  // setup.model-routing
   ├── el: Cohere; tr, ms, fil, fa, mk, ar, ja, fi, sv, da: Whisper turbo first
@@ -508,7 +523,8 @@ pauses" setting no longer affects dictation.
 
 Checks: `recorded_audio_is_a_prefix_of_the_finished_clip` (16, 44.1, and
 48 kHz), `resampled_clips_keep_the_last_word_through_a_delayed_release` (streamed
-and not), `a_stream_starts_with_the_backlog_and_feeds_in_blocks`, and
+and not), `a_stream_starts_with_the_backlog_and_feeds_in_blocks`,
+`live_text_follows_the_recording_and_never_outlives_it`, and
 `short_taps_cancellation_and_unstreamable_models_end_the_stream` in dictation.rs;
 `hotkey_captures_stream_once_intentional_and_others_do_not` in dictation_audio.rs;
 `hold_streams_after_the_threshold_and_toggle_streams_from_the_press`,
@@ -550,6 +566,35 @@ release-to-text (10/131 s) versus 156/2,838 ms whole-clip, with 0/28 and 1/408
 word differences. This drives the production engine and Parakeet adapter, not
 the shortcut, microphone, or paste. Not measured: physical microphone corpora,
 noisy rooms, or Linux on a real GPU.
+
+**Observed October 28, 2026, Apple Silicon Mac (macOS 27), Metal, Unified
+English Q8, a 13.1 s `say` clip (40 words) at 1× through
+`metal_stream_tracks_offline_transcription` with live text:** the text changed
+12 times, once per 1.04 s chunk; the first words arrived 2.24 s into the audio,
+and at 12.6 s 35 of 40 words showed (about 1–2 s behind speech). The stable
+text was never rewritten and the tentative text was always empty, so with
+Parakeet's buffered settings live text grows in whole-chunk steps. The final
+text came from the stream 154 ms after release, with 0/40 word differences
+from the whole clip. Synthetic speech; not a physical microphone or the HUD.
+
+**Live text observed October 28, 2026, Apple M3 Pro, Metal, Unified English Q8,
+`Hex Test.app` at `84f594a` with `live-text`, a physical microphone:** the line
+appeared under the HUD and grew with the words; three dictations in a row
+reappeared with no trace of the previous text; a dictation released before its
+first words never showed the line and one released just after hid it; with the
+HUD at the Bottom the line sat above it, and with the HUD hidden it took the
+HUD's place at the top. Not observed: a second display, Dot scope placements,
+Linux, Windows.
+
+**Known defect, observed October 28, 2026 (same Mac and model):** the stream
+can drop the first words spoken after a pause, and the paste carries the loss
+because a stream with text is never retranscribed. In real dictation the
+words that resumed after 6 s and 13 s pauses were lost or garbled. Replaying
+`say` speech around 3, 8, and 13 s gaps (digital silence and a −50 dBFS noise
+floor) through `metal_stream_tracks_offline_transcription` lost "I" after the
+8 s gap of digital silence only, and the whole clip kept it: the loss depends
+on where speech resumes against the stream's chunks. Live text does not cause
+it: `HEX_STREAM_LIVE_TEXT=0` gives the same text.
 ### Optional Voice Controls
 
 Optional spoken entry requires Commands enabled, its model ready, and recognition
