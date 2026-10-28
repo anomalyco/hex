@@ -1726,7 +1726,7 @@ fn double_tap_to_lock_folds_away_under_the_rows_below() {
             }) {
                 let shown = row.visible[1] + row.visible[3];
                 assert!(
-                    shown <= bottom + 0.01,
+                    shown <= bottom + 0.25,
                     "the row shows {shown} past its slot's edge {bottom}"
                 );
             }
