@@ -6,7 +6,9 @@
 //! reader agrees: `AVFoundation`, `FFmpeg`, and external players. A movie-level time-scale edit
 //! would be stored as an edit-list media rate, which `FFmpeg` ignores. When B-frames put a frame
 //! presented earlier last in decode order, one skipped picture repeating the final frame is
-//! appended instead ([`skip_frame`]). Nothing is re-encoded and no existing sample moves. The
+//! appended instead ([`skip_frame`]). The video ends where its media's presentation ends, mapped
+//! through the edit list: `SCRecordingOutput` can write an edit list that runs past the media,
+//! and readers show nothing there. Nothing is re-encoded and no existing sample moves. The
 //! edit is applied to an APFS clone in the same directory, verified, and atomically renamed over
 //! the original, so a failure always leaves the original recording intact.
 
@@ -427,13 +429,25 @@ fn leaf_mut<'a>(item: &'a mut Mp4Box, path: &[&[u8; 4]]) -> Option<&'a mut Vec<u
 struct HoldPlan {
     movie_timescale: u32,
     video_track: usize,
+    /// Where the video's frames really stop, in movie time: the end of the media's presentation,
+    /// mapped through the edit list. An edit list may claim more.
     video_end: u64,
     target_end: u64,
+    /// The movie duration after the hold: the target end or the longest other track.
+    movie_end: u64,
     media_extension: u64,
-    /// Media time where the held video's final edit ends, when the track has an edit list.
-    edit_media_end: Option<u64>,
+    /// The final edit after the hold, when the track has an edit list.
+    held_edit: Option<HeldEdit>,
     /// The final sample in decode order is not presented last.
     reordered: bool,
+}
+
+#[derive(Clone, Copy)]
+struct HeldEdit {
+    /// Movie-time duration that makes the edit end at the target end.
+    duration: u64,
+    /// Media time where the edit then ends.
+    media_end: u64,
 }
 
 fn plan_hold(moov: &[Mp4Box], recorded_end: MediaTime) -> Result<HoldPlan, FinalFrameHoldError> {
@@ -453,6 +467,7 @@ fn plan_hold(moov: &[Mp4Box], recorded_end: MediaTime) -> Result<HoldPlan, Final
 
     let mut video = None;
     let mut audio_end = None::<u64>;
+    let mut others_end = 0_u64;
     for (index, trak) in children(moov).iter().enumerate() {
         if trak.kind != *b"trak" {
             continue;
@@ -470,8 +485,12 @@ fn plan_hold(moov: &[Mp4Box], recorded_end: MediaTime) -> Result<HoldPlan, Final
             b"soun" => audio_end = Some(audio_end.map_or(duration, |end| end.max(duration))),
             _ => {}
         }
+        if handler != b"vide" {
+            others_end = others_end.max(duration);
+        }
     }
-    let (video_track, video_end) = video.ok_or(FinalFrameHoldError::Unsupported("no video"))?;
+    let (video_track, track_duration) =
+        video.ok_or(FinalFrameHoldError::Unsupported("no video"))?;
     let target_end = match audio_end {
         Some(end) => end,
         None => ceil_ratio(
@@ -480,17 +499,6 @@ fn plan_hold(moov: &[Mp4Box], recorded_end: MediaTime) -> Result<HoldPlan, Final
             u64::try_from(recorded_end.timescale()).map_err(|_| FinalFrameHoldError::Overflow)?,
         )?,
     };
-    if video_end >= target_end {
-        return Ok(HoldPlan {
-            movie_timescale,
-            video_track,
-            video_end,
-            target_end,
-            media_extension: 0,
-            edit_media_end: None,
-            reordered: false,
-        });
-    }
 
     let trak = &children(moov)[video_track];
     let mdhd = leaf(trak, &[b"mdia", b"mdhd"]).ok_or(FinalFrameHoldError::Malformed("mdhd"))?;
@@ -498,87 +506,153 @@ fn plan_hold(moov: &[Mp4Box], recorded_end: MediaTime) -> Result<HoldPlan, Final
     if media_timescale == 0 {
         return Err(FinalFrameHoldError::Malformed("media timescale"));
     }
-    let mut edit_media_end = None;
-    if let Some(elst) = leaf(trak, &[b"edts", b"elst"]) {
-        let last = edit_entries(elst)?
-            .pop()
-            .ok_or(FinalFrameHoldError::Unsupported("empty edit list"))?;
-        if last.media_time < 0 || last.rate != 0x0001_0000 {
+    let to_movie =
+        |media: u64| ceil_ratio(media, u64::from(movie_timescale), media_timescale.into());
+    let to_media =
+        |movie: u64| ceil_ratio(movie, media_timescale.into(), u64::from(movie_timescale));
+    let presentation = media_presentation(trak)?;
+    let edits = leaf(trak, &[b"edts", b"elst"])
+        .map(edit_entries)
+        .transpose()?;
+    // A final edit that is not plain playback is trusted as written; holding it is refused below.
+    let final_edit = match edits.as_deref().map(<[Edit]>::split_last) {
+        None => None,
+        Some(None) => return Err(FinalFrameHoldError::Unsupported("empty edit list")),
+        Some(Some((last, earlier))) => Some((
+            last,
+            earlier.iter().try_fold(0_u64, |start, edit| {
+                start
+                    .checked_add(edit.duration)
+                    .ok_or(FinalFrameHoldError::Overflow)
+            })?,
+        )),
+    };
+    let plain = |edit: &Edit| edit.media_time >= 0 && edit.rate == 0x0001_0000;
+    // An edit that runs past the media shows nothing there, so the media decides where it ends.
+    let video_end = track_duration.min(match final_edit {
+        None => to_movie(presentation.end)?,
+        Some((last, start)) if plain(last) => {
+            let shown = presentation
+                .end
+                .saturating_sub(last.media_time.cast_unsigned());
+            start
+                .checked_add(last.duration.min(to_movie(shown)?))
+                .ok_or(FinalFrameHoldError::Overflow)?
+        }
+        Some(_) => track_duration,
+    });
+    if video_end >= target_end {
+        return Ok(HoldPlan {
+            movie_timescale,
+            video_track,
+            video_end,
+            target_end,
+            movie_end: target_end,
+            media_extension: 0,
+            held_edit: None,
+            reordered: false,
+        });
+    }
+
+    let held_edit = match final_edit {
+        None => None,
+        Some((last, _)) if !plain(last) => {
             return Err(FinalFrameHoldError::Unsupported(
                 "final edit is not plain playback",
             ));
         }
-        let held_duration = last
-            .duration
-            .checked_add(target_end - video_end)
-            .ok_or(FinalFrameHoldError::Overflow)?;
-        edit_media_end = Some(
-            last.media_time.cast_unsigned()
-                + ceil_ratio(
-                    held_duration,
-                    u64::from(media_timescale),
-                    u64::from(movie_timescale),
-                )?,
-        );
-    }
+        Some((last, start)) => {
+            let duration = target_end
+                .checked_sub(start)
+                .ok_or(FinalFrameHoldError::Malformed("edit list"))?;
+            Some(HeldEdit {
+                duration,
+                media_end: last
+                    .media_time
+                    .cast_unsigned()
+                    .checked_add(to_media(duration)?)
+                    .ok_or(FinalFrameHoldError::Overflow)?,
+            })
+        }
+    };
+    let media_end = match held_edit {
+        Some(edit) => edit.media_end,
+        None => to_media(target_end)?,
+    };
     Ok(HoldPlan {
         movie_timescale,
         video_track,
         video_end,
         target_end,
-        media_extension: ceil_ratio(
-            target_end - video_end,
-            u64::from(media_timescale),
-            u64::from(movie_timescale),
-        )?,
-        edit_media_end,
-        reordered: !final_decode_sample_is_presented_last(trak)?,
+        movie_end: target_end.max(others_end),
+        media_extension: media_end.saturating_sub(presentation.end),
+        held_edit,
+        reordered: presentation.reordered,
     })
 }
 
-/// Whether the final sample in decode order is also the final frame shown, so lengthening it
-/// holds that frame.
-fn final_decode_sample_is_presented_last(trak: &Mp4Box) -> Result<bool, FinalFrameHoldError> {
+struct MediaPresentation {
+    /// Media time where the final frame shown stops: its presentation time plus its duration.
+    end: u64,
+    /// The final sample in decode order is not the final frame shown, so lengthening it would
+    /// hold the wrong frame.
+    reordered: bool,
+}
+
+fn media_presentation(trak: &Mp4Box) -> Result<MediaPresentation, FinalFrameHoldError> {
     let stbl = [b"mdia", b"minf", b"stbl"];
     let stts = leaf(trak, &[stbl[0], stbl[1], stbl[2], b"stts"])
         .ok_or(FinalFrameHoldError::Malformed("missing stts"))?;
-    let Some(ctts) = leaf(trak, &[stbl[0], stbl[1], stbl[2], b"ctts"]) else {
-        return Ok(true);
-    };
-    let mut decode_times = Vec::new();
+    let mut samples = Vec::new();
     let mut decode_time = 0_i64;
     for (count, delta) in time_to_sample_entries(stts)? {
         for _ in 0..count {
-            decode_times.push(decode_time);
+            samples.push((decode_time, i64::from(delta)));
             decode_time = decode_time
                 .checked_add(i64::from(delta))
                 .ok_or(FinalFrameHoldError::Overflow)?;
         }
     }
-    let mut presentation_times = Vec::with_capacity(decode_times.len());
-    let entries = be_u32(ctts, 4)?;
-    for entry in 0..usize::try_from(entries).map_err(|_| FinalFrameHoldError::Overflow)? {
-        let count = be_u32(ctts, 8 + entry * 8)?;
-        let offset = i64::from(be_u32(ctts, 12 + entry * 8)?.cast_signed());
-        for _ in 0..count {
-            let decode_time = decode_times
-                .get(presentation_times.len())
-                .ok_or(FinalFrameHoldError::Malformed("ctts sample count"))?;
-            presentation_times.push(decode_time + offset);
+    if let Some(ctts) = leaf(trak, &[stbl[0], stbl[1], stbl[2], b"ctts"]) {
+        let mut sample = 0;
+        let entries = be_u32(ctts, 4)?;
+        for entry in 0..usize::try_from(entries).map_err(|_| FinalFrameHoldError::Overflow)? {
+            let count = be_u32(ctts, 8 + entry * 8)?;
+            let offset = i64::from(be_u32(ctts, 12 + entry * 8)?.cast_signed());
+            for _ in 0..count {
+                let (time, _) = samples
+                    .get_mut(sample)
+                    .ok_or(FinalFrameHoldError::Malformed("ctts sample count"))?;
+                *time = time
+                    .checked_add(offset)
+                    .ok_or(FinalFrameHoldError::Overflow)?;
+                sample += 1;
+            }
         }
     }
-    let (last, earlier) = presentation_times
+    let (last, earlier) = samples
         .split_last()
-        .ok_or(FinalFrameHoldError::Malformed("ctts sample count"))?;
-    Ok(earlier.iter().all(|time| time < last))
+        .ok_or(FinalFrameHoldError::Malformed("empty video track"))?;
+    let reordered = earlier.iter().any(|(time, _)| time >= &last.0);
+    let (time, duration) = samples
+        .iter()
+        .copied()
+        .max_by_key(|(time, _)| *time)
+        .unwrap_or(*last);
+    Ok(MediaPresentation {
+        end: u64::try_from(
+            time.checked_add(duration)
+                .ok_or(FinalFrameHoldError::Overflow)?,
+        )
+        .map_err(|_| FinalFrameHoldError::Malformed("negative presentation time"))?,
+        reordered,
+    })
 }
 
 fn apply_hold(moov: &mut [Mp4Box], plan: &HoldPlan) -> Result<(), FinalFrameHoldError> {
-    let movie_extension = plan.target_end - plan.video_end;
     let moov = &mut moov[0];
     let movie_header = leaf_mut(moov, &[b"mvhd"]).ok_or(FinalFrameHoldError::Malformed("mvhd"))?;
-    let (_, movie_duration) = timescale_and_duration(movie_header)?;
-    set_header_duration(movie_header, movie_duration.max(plan.target_end))?;
+    set_header_duration(movie_header, plan.movie_end)?;
 
     let Body::Container(tracks) = &mut moov.body else {
         return Err(FinalFrameHoldError::Malformed("movie header"));
@@ -586,8 +660,8 @@ fn apply_hold(moov: &mut [Mp4Box], plan: &HoldPlan) -> Result<(), FinalFrameHold
     let trak = &mut tracks[plan.video_track];
     let tkhd = leaf_mut(trak, &[b"tkhd"]).ok_or(FinalFrameHoldError::Malformed("tkhd"))?;
     set_tkhd_duration(tkhd, plan.target_end)?;
-    if let Some(elst) = leaf_mut(trak, &[b"edts", b"elst"]) {
-        extend_last_edit(elst, movie_extension)?;
+    if let (Some(elst), Some(edit)) = (leaf_mut(trak, &[b"edts", b"elst"]), plan.held_edit) {
+        set_last_edit_duration(elst, edit.duration)?;
     }
     if plan.reordered {
         // The appended picture already carries the held media time.
@@ -668,7 +742,7 @@ fn edit_entries(elst: &[u8]) -> Result<Vec<Edit>, FinalFrameHoldError> {
         .collect()
 }
 
-fn extend_last_edit(elst: &mut [u8], extension: u64) -> Result<(), FinalFrameHoldError> {
+fn set_last_edit_duration(elst: &mut [u8], duration: u64) -> Result<(), FinalFrameHoldError> {
     let version = *elst.first().ok_or(FinalFrameHoldError::Malformed("elst"))?;
     let entries = usize::try_from(be_u32(elst, 4)?).map_err(|_| FinalFrameHoldError::Overflow)?;
     let entry_len = if version == 1 { 20 } else { 12 };
@@ -677,13 +751,9 @@ fn extend_last_edit(elst: &mut [u8], extension: u64) -> Result<(), FinalFrameHol
         .ok_or(FinalFrameHoldError::Malformed("elst"))?
         * entry_len;
     if version == 1 {
-        let duration = be_u64(elst, offset)?
-            .checked_add(extension)
-            .ok_or(FinalFrameHoldError::Overflow)?;
         put(elst, offset, &duration.to_be_bytes())
     } else {
-        let duration = u32::try_from(u64::from(be_u32(elst, offset)?) + extension)
-            .map_err(|_| FinalFrameHoldError::Overflow)?;
+        let duration = u32::try_from(duration).map_err(|_| FinalFrameHoldError::Overflow)?;
         put(elst, offset, &duration.to_be_bytes())
     }
 }

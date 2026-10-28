@@ -50,7 +50,8 @@ pub(super) fn append_skip_frame(
     data_offset: u64,
 ) -> Result<Vec<u8>, FinalFrameHoldError> {
     let edit_media_end = plan
-        .edit_media_end
+        .held_edit
+        .map(|edit| edit.media_end)
         .ok_or_else(|| unsupported("reordered video without an edit list"))?;
     let trak = video_trak_mut(moov, plan.video_track)?;
     let stbl = stbl_mut(trak)?;
