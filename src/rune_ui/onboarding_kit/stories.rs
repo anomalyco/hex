@@ -123,6 +123,11 @@ impl Onboard {
         self.download.is_some_and(Download::done)
     }
 
+    /// The meter's peak while Hex is listening.
+    pub(crate) fn listening_peak(&self) -> Option<f32> {
+        (self.step == Step::Hearing).then_some(self.meter.1)
+    }
+
     /// Whether anything can turn speech into words yet.
     pub(crate) fn can_hear(&self) -> bool {
         self.speech == Speech::Apple || self.downloaded()

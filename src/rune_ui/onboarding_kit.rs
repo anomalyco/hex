@@ -15,8 +15,8 @@
 //!   [`typing`], a reply typed on it by hand, typos and all.
 //! - [`mic`]: the microphone's level.
 //! - [`landing`]: the language pick and the Ready landing.
-//! - [`mic_slot`]: where the microphone picker (t421) goes on the try
-//!   screen, held until that piece lands.
+//! - [`mic_line`]: the current tour's microphone picker (t421) on the try
+//!   screen.
 //!
 //! Each reads only what the running app already reports (see
 //! [`fixture`]): download bytes from `transcription_preparation`, the
@@ -32,7 +32,7 @@ mod hex_meter;
 mod keyboard;
 mod landing;
 mod mic;
-mod mic_slot;
+mod mic_line;
 mod pill;
 mod stories;
 mod typing;

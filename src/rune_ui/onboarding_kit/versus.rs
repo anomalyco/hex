@@ -17,7 +17,7 @@ use super::flows::continue_button;
 use super::keyboard::{self, keyboard};
 use super::landing::{LEAD, TITLE, arrives, keys, language_pick, ready};
 use super::mic::mic_level;
-use super::mic_slot::mic_slot;
+use super::mic_line::mic_line;
 use super::pill::{pill, slot};
 use super::stories::{Onboard, Step};
 use super::typing;
@@ -139,7 +139,11 @@ pub(super) fn view(p: Paint, s: &Onboard) -> Vec<El> {
                     .gap(12.0)
                     .items_center()
                     .child(row().key("action").h(ACTION_H).center().child(act))
-                    .child(mic_slot(p, s.can_hear() && s.step >= Step::YourTurn)),
+                    .child(mic_line(
+                        p,
+                        s.can_hear() && s.step >= Step::YourTurn,
+                        s.listening_peak(),
+                    )),
             ),
     ]
 }
