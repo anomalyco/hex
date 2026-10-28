@@ -1345,11 +1345,15 @@ fn check_golden(scene: &str, dark: bool, size: (f32, f32)) {
         rune::render::write_png(&path, width, height, &pixels).unwrap();
         return;
     }
-    assert!(
-        path.exists(),
-        "{} is missing; run with HEX_UPDATE_GOLDENS=1",
-        path.display()
-    );
+    if !path.exists() {
+        let actual = std::env::temp_dir().join(format!("rune-settings-{name}-actual.png"));
+        rune::render::write_png(&actual, width, height, &pixels).unwrap();
+        panic!(
+            "{} is missing; run with HEX_UPDATE_GOLDENS=1 (render at {})",
+            path.display(),
+            actual.display()
+        );
+    }
     let (golden_width, golden_height, golden) = read_png(&path);
     assert_eq!(
         (golden_width, golden_height),
