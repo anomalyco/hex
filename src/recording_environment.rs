@@ -442,7 +442,7 @@ impl AudioBehaviorGuard {
                 // opens while you dictate.
                 let browser = (app_settings::pause_browser_media()
                     && crate::meeting::system_audio_ready())
-                .then(|| browser_media::pause(&mut NativeBrowserAudio::new()))
+                .then(|| browser_media::pause(&mut NativeBrowserAudio::for_pause()))
                 .flatten();
                 if browser.is_some() {
                     tracing::info!("paused the browser while recording");
@@ -467,7 +467,7 @@ impl Drop for AudioBehaviorGuard {
             Self::Paused { players, browser } => {
                 resume_media(players);
                 if let Some(paused) = browser.take() {
-                    browser_media::resume(&mut NativeBrowserAudio::new(), paused);
+                    browser_media::resume(&mut NativeBrowserAudio::for_resume(), paused);
                 }
             }
             Self::None => {}

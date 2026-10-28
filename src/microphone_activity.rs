@@ -9,7 +9,8 @@ use objc2_core_audio::{
     AudioObjectPropertyAddress, AudioObjectPropertySelector,
     kAudioHardwarePropertyProcessObjectList, kAudioObjectPropertyElementMain,
     kAudioObjectPropertyScopeGlobal, kAudioObjectSystemObject, kAudioProcessPropertyBundleID,
-    kAudioProcessPropertyIsRunningInput, kAudioProcessPropertyPID,
+    kAudioProcessPropertyIsRunningInput, kAudioProcessPropertyIsRunningOutput,
+    kAudioProcessPropertyPID,
 };
 use objc2_core_foundation::{CFRetained, CFString};
 use objc2_foundation::NSString;
@@ -61,8 +62,25 @@ pub(crate) fn browser_bundle(bundle_id: &str, name: Option<&str>) -> bool {
     is_browser_id(canonical_bundle_id_for(bundle_id, name))
 }
 
-/// The Core Audio process objects of every running browser, Hex excluded.
-pub(crate) fn browser_process_objects() -> Result<Vec<AudioObjectID>> {
+/// Which browser processes to hear.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum BrowserProcesses {
+    /// Only those with open output; unknown counts as open.
+    Playing,
+    All,
+}
+
+impl BrowserProcesses {
+    fn includes(self, running_output: Option<bool>) -> bool {
+        match self {
+            Self::Playing => running_output.unwrap_or(true),
+            Self::All => true,
+        }
+    }
+}
+
+/// The Core Audio process objects of the running browsers, Hex excluded.
+pub(crate) fn browser_process_objects(which: BrowserProcesses) -> Result<Vec<AudioObjectID>> {
     objc2::rc::autoreleasepool(|_| {
         let own_pid = std::process::id() as i32;
         let process_objects = property_vec::<AudioObjectID>(
@@ -87,7 +105,13 @@ pub(crate) fn browser_process_objects() -> Result<Vec<AudioObjectID>> {
                     .then(|| running_application_info(pid))
                     .flatten()
                     .and_then(|(_, name)| name);
-                pid != own_pid && browser_bundle(&bundle_id, name.as_deref())
+                pid != own_pid
+                    && browser_bundle(&bundle_id, name.as_deref())
+                    && which.includes(
+                        property_value::<u32>(process_object, kAudioProcessPropertyIsRunningOutput)
+                            .ok()
+                            .map(|running| running != 0),
+                    )
             })
             .collect())
     })
@@ -642,6 +666,14 @@ mod tests {
             )
             .is_none()
         );
+    }
+
+    #[test]
+    fn a_pause_taps_only_browsers_with_open_output() {
+        assert!(BrowserProcesses::Playing.includes(Some(true)));
+        assert!(!BrowserProcesses::Playing.includes(Some(false)));
+        assert!(BrowserProcesses::Playing.includes(None));
+        assert!(BrowserProcesses::All.includes(Some(false)));
     }
 
     #[test]

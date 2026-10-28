@@ -23,13 +23,22 @@ use objc2_core_audio::{
 use objc2_core_audio_types::{AudioBuffer, AudioBufferList, AudioTimeStamp};
 use objc2_foundation::{NSArray, NSNumber, NSString};
 
-/// Sound: a peak above this over the first listen.
+use crate::microphone_activity::BrowserProcesses;
+
+/// Sound: a peak above this in every listen window.
 const SOUND_DBFS: f32 = -60.0;
-/// Silence: a peak below this in one window after the pause.
+/// Silence: a peak below this in consecutive windows soon after the pause.
 const SILENCE_DBFS: f32 = -90.0;
-const LISTEN: Duration = Duration::from_millis(300);
-const CONFIRM_WINDOW: Duration = Duration::from_millis(100);
-const CONFIRM_WINDOWS: usize = 10;
+const WINDOW: Duration = Duration::from_millis(100);
+const LISTEN_WINDOWS: usize = 3;
+/// The silence must start in the first windows after the pause: a sound
+/// that ends later on its own is not the pause reaching the browser.
+const CONFIRM_WINDOWS: usize = 5;
+const SILENT_WINDOWS: usize = 2;
+/// The last listen before play.
+const RESUME_LISTEN: Duration = Duration::from_millis(300);
+/// How long a new tap may take to deliver its first cycle.
+const TAP_WARM_UP: Duration = Duration::from_millis(300);
 
 /// The explicit MediaRemote commands. Never the toggle: it can start music.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -63,28 +72,36 @@ pub(crate) fn pause(audio: &mut impl BrowserAudio) -> Option<PausedBrowser> {
         tracing::info!("left the browser alone: it is using the microphone");
         return None;
     }
-    match audio.peak_dbfs(LISTEN) {
-        Some(peak) if peak > SOUND_DBFS => {}
-        Some(_) => {
-            tracing::info!("left the browser alone: it is silent");
-            return None;
-        }
-        None => {
-            tracing::info!("left the browser alone: cannot hear it");
-            return None;
+    for _ in 0..LISTEN_WINDOWS {
+        match audio.peak_dbfs(WINDOW) {
+            Some(peak) if peak > SOUND_DBFS => {}
+            Some(_) => {
+                tracing::info!("left the browser alone: it is silent");
+                return None;
+            }
+            None => {
+                tracing::info!("left the browser alone: cannot hear it");
+                return None;
+            }
         }
     }
     if !audio.send(MediaCommand::Pause) {
         tracing::info!("the system refused the pause command");
         return None;
     }
+    let mut silent = 0;
     for _ in 0..CONFIRM_WINDOWS {
         if audio
-            .peak_dbfs(CONFIRM_WINDOW)
+            .peak_dbfs(WINDOW)
             .is_some_and(|peak| peak < SILENCE_DBFS)
         {
-            tracing::info!("paused the browser");
-            return Some(PausedBrowser(()));
+            silent += 1;
+            if silent == SILENT_WINDOWS {
+                tracing::info!("paused the browser");
+                return Some(PausedBrowser(()));
+            }
+        } else {
+            silent = 0;
         }
     }
     tracing::info!("sent pause but the browser still plays; it will not get play");
@@ -92,12 +109,16 @@ pub(crate) fn pause(audio: &mut impl BrowserAudio) -> Option<PausedBrowser> {
 }
 
 pub(crate) fn resume(audio: &mut impl BrowserAudio, _paused: PausedBrowser) {
-    if audio
-        .peak_dbfs(LISTEN)
-        .is_some_and(|peak| peak > SOUND_DBFS)
-    {
-        tracing::info!("the browser already plays again; sent no play");
-        return;
+    match audio.peak_dbfs(RESUME_LISTEN) {
+        Some(peak) if peak <= SOUND_DBFS => {}
+        Some(_) => {
+            tracing::info!("the browser already plays again; sent no play");
+            return;
+        }
+        None => {
+            tracing::info!("cannot hear the browser; sent no play");
+            return;
+        }
     }
     if audio.send(MediaCommand::Play) {
         tracing::info!("resumed the browser");
@@ -110,13 +131,26 @@ pub(crate) fn resume(audio: &mut impl BrowserAudio, _paused: PausedBrowser) {
 /// and the system media commands. Build one per pause or resume: the tap
 /// covers the browser processes running when it first listens.
 pub(crate) struct NativeBrowserAudio {
+    processes: BrowserProcesses,
     tap: Option<BrowserTap>,
     started: bool,
 }
 
 impl NativeBrowserAudio {
-    pub(crate) fn new() -> Self {
+    /// Hears only browsers with open output: a closed output is silent, so
+    /// most dictations open no tap at all.
+    pub(crate) fn for_pause() -> Self {
+        Self::new(BrowserProcesses::Playing)
+    }
+
+    /// Hears every browser: a paused one closes its output a few seconds later.
+    pub(crate) fn for_resume() -> Self {
+        Self::new(BrowserProcesses::All)
+    }
+
+    fn new(processes: BrowserProcesses) -> Self {
         Self {
+            processes,
             tap: None,
             started: false,
         }
@@ -133,7 +167,7 @@ impl BrowserAudio for NativeBrowserAudio {
     fn peak_dbfs(&mut self, window: Duration) -> Option<f32> {
         if !self.started {
             self.started = true;
-            self.tap = BrowserTap::start()
+            self.tap = BrowserTap::start(self.processes)
                 .inspect_err(|error| tracing::warn!(%error, "could not listen to the browser"))
                 .ok()
                 .flatten();
@@ -157,9 +191,9 @@ struct BrowserTap {
 }
 
 impl BrowserTap {
-    /// None when no browser is running.
-    fn start() -> Result<Option<Self>> {
-        let processes = crate::microphone_activity::browser_process_objects()?;
+    /// None when no browser process matches.
+    fn start(processes: BrowserProcesses) -> Result<Option<Self>> {
+        let processes = crate::microphone_activity::browser_process_objects(processes)?;
         if processes.is_empty() {
             return Ok(None);
         }
@@ -227,6 +261,10 @@ impl BrowserTap {
             unsafe { AudioDeviceStart(source.aggregate, source.io_proc) },
             "could not start the browser audio tap",
         )?;
+        let warm_up = std::time::Instant::now();
+        while source.callbacks.load(Ordering::Relaxed) == 0 && warm_up.elapsed() < TAP_WARM_UP {
+            std::thread::sleep(Duration::from_millis(10));
+        }
         Ok(Some(source))
     }
 
@@ -364,10 +402,15 @@ mod tests {
         }
     }
 
+    /// The three listen windows of a browser that plays.
+    fn playing() -> [Option<f32>; 3] {
+        [Some(-20.0); 3]
+    }
+
     #[test]
     #[ignore = "needs a browser playing audio and System Audio Recording"]
     fn native_tap_hears_a_playing_browser() {
-        let peak = NativeBrowserAudio::new().peak_dbfs(Duration::from_millis(300));
+        let peak = NativeBrowserAudio::for_pause().peak_dbfs(WINDOW);
         eprintln!("browser peak: {peak:?} dBFS");
         assert!(peak.is_some_and(|peak| peak > SOUND_DBFS));
     }
@@ -380,8 +423,21 @@ mod tests {
     }
 
     #[test]
+    fn a_short_sound_is_not_a_playing_browser() {
+        for listen in [
+            [Some(-20.0), Some(-120.0), Some(-120.0)],
+            [Some(-120.0), Some(-20.0), Some(-20.0)],
+            [Some(-20.0), Some(-20.0), None],
+        ] {
+            let mut audio = Fake::new(listen.into_iter().chain([Some(-200.0); 5]));
+            assert!(pause(&mut audio).is_none(), "{listen:?}");
+            assert_eq!(audio.sent, [], "{listen:?}");
+        }
+    }
+
+    #[test]
     fn a_call_is_never_paused() {
-        let mut audio = Fake::new([Some(-20.0)]);
+        let mut audio = Fake::new(playing());
         audio.in_call = true;
         assert!(pause(&mut audio).is_none());
         assert_eq!(audio.sent, []);
@@ -390,7 +446,12 @@ mod tests {
 
     #[test]
     fn a_confirmed_pause_is_resumed() {
-        let mut audio = Fake::new([Some(-20.0), Some(-30.0), Some(-200.0), Some(-200.0)]);
+        let mut audio = Fake::new(playing().into_iter().chain([
+            Some(-30.0),
+            Some(-200.0),
+            Some(-200.0),
+            Some(-200.0),
+        ]));
         let paused = pause(&mut audio).expect("the pause is confirmed");
         resume(&mut audio, paused);
         assert_eq!(audio.sent, [MediaCommand::Pause, MediaCommand::Play]);
@@ -398,8 +459,38 @@ mod tests {
 
     #[test]
     fn two_sounding_tabs_never_get_play() {
-        let mut audio =
-            Fake::new(std::iter::once(Some(-20.0)).chain(std::iter::repeat_n(Some(-25.0), 10)));
+        let mut audio = Fake::new(
+            playing()
+                .into_iter()
+                .chain(std::iter::repeat_n(Some(-25.0), 10)),
+        );
+        assert!(pause(&mut audio).is_none());
+        assert_eq!(audio.sent, [MediaCommand::Pause]);
+    }
+
+    #[test]
+    fn a_late_silence_is_not_a_confirmed_pause() {
+        let mut audio = Fake::new(
+            playing()
+                .into_iter()
+                .chain([Some(-25.0); 4])
+                .chain([Some(-200.0); 6]),
+        );
+        assert!(pause(&mut audio).is_none());
+        assert_eq!(audio.sent, [MediaCommand::Pause]);
+    }
+
+    #[test]
+    fn one_quiet_window_is_not_a_confirmed_pause() {
+        let mut audio = Fake::new(playing().into_iter().chain([
+            Some(-200.0),
+            Some(-25.0),
+            Some(-200.0),
+            Some(-25.0),
+            Some(-25.0),
+            Some(-200.0),
+            Some(-200.0),
+        ]));
         assert!(pause(&mut audio).is_none());
         assert_eq!(audio.sent, [MediaCommand::Pause]);
     }
@@ -413,7 +504,7 @@ mod tests {
 
     #[test]
     fn a_browser_already_playing_gets_no_play() {
-        let mut audio = Fake::new([Some(-20.0), Some(-200.0)]);
+        let mut audio = Fake::new(playing().into_iter().chain([Some(-200.0), Some(-200.0)]));
         let paused = pause(&mut audio).expect("the pause is confirmed");
         audio.peaks = VecDeque::from([Some(-20.0)]);
         resume(&mut audio, paused);
@@ -421,8 +512,15 @@ mod tests {
     }
 
     #[test]
+    fn a_browser_it_cannot_hear_gets_no_play() {
+        let mut audio = Fake::new([None]);
+        resume(&mut audio, PausedBrowser::for_test());
+        assert_eq!(audio.sent, []);
+    }
+
+    #[test]
     fn a_refused_command_is_not_confirmed() {
-        let mut audio = Fake::new([Some(-20.0), Some(-200.0)]);
+        let mut audio = Fake::new(playing().into_iter().chain([Some(-200.0); 5]));
         audio.send_ok = false;
         assert!(pause(&mut audio).is_none());
         assert_eq!(audio.sent, [MediaCommand::Pause]);
