@@ -111,6 +111,8 @@ const PATHS: &[(&str, &str)] = &[
         "shortcut-explainer-motion",
         "Window/Shortcut explainer/Looping",
     ),
+    ("sound-sets", "Window/Sounds/Sheet"),
+    ("sound-sets-playing", "Window/Sounds/Playing"),
     ("modes", "Window/Modes/Modes"),
     ("modes-global", "Window/Modes/Global mode"),
     ("modes-picker", "Window/Modes/App picker"),

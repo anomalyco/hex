@@ -32,10 +32,6 @@ pub(super) const SOUND_VOLUME_STEPS: [(&str, f32); 5] = [
     ("75%", 0.75),
     ("100%", 1.0),
 ];
-pub(super) const SOUND_THEMES: [(&str, crate::feedback::SoundTheme); 2] = [
-    ("Signature", crate::feedback::SoundTheme::Signature),
-    ("Classic", crate::feedback::SoundTheme::Classic),
-];
 /// How long a newly saved shortcut shows "Saved".
 const SAVED_FOR: Duration = Duration::from_secs(1);
 /// How long to wait for the service to start a requested shortcut edit.

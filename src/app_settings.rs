@@ -1358,7 +1358,8 @@ pub struct AppSettings {
     pub release_microphone_while_idle: bool,
     pub sound_effects: bool,
     pub sound_effect_volume: f32,
-    pub sound_theme: crate::feedback::SoundTheme,
+    /// Which feedback sounds play (`crate::feedback`).
+    pub sound_theme: crate::feedback::SoundSet,
     pub microphone: Option<String>,
     /// System default records from the built-in microphone, else another
     /// real input, rather than a Bluetooth default (macOS).
@@ -1455,7 +1456,7 @@ impl Default for AppSettings {
             release_microphone_while_idle: false,
             sound_effects: true,
             sound_effect_volume: 0.5,
-            sound_theme: crate::feedback::SoundTheme::default(),
+            sound_theme: crate::feedback::SoundSet::default(),
             microphone: None,
             avoid_bluetooth_microphone: true,
             recording_audio_behavior: RecordingAudioBehavior::DoNothing,
@@ -1843,7 +1844,7 @@ impl AppSettings {
         );
         crate::feedback::set_enabled(self.sound_effects);
         crate::feedback::set_volume(self.sound_effect_volume.clamp(0.0, 1.0));
-        crate::feedback::set_theme(self.sound_theme);
+        crate::feedback::set_sound_set(self.sound_theme);
         crate::desktop_i18n::apply(self.ui_language.as_deref());
         INDICATOR_POSITION.store(self.indicator_position as u8, Ordering::Relaxed);
         RECORDING_DUCK_VOLUME.store(self.recording_duck_volume.to_bits(), Ordering::Relaxed);

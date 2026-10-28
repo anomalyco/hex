@@ -888,10 +888,6 @@ Record -> Release -> Transcribing/processing/paste -> Finished // dictate.feedba
   Tone requested -> Playback worker opens the default output, then plays
      -> Output stays open five minutes past the last tone, then releases
      -> Released output holds no macOS idle-sleep assertion
-  Sounds = Signature (default) / Classic                    // dictate.sound-theme
-     -> Change -> Save, apply live, preview the start tone (unless muted)
-     -> Classic -> Previous start clicks, stop swish, cancel thud; macOS
-        errors play Basso; no done tone; onboarding keeps the signature chime
   Feedback volume = 0 -> No tones
      -> Playback worker releases output on its next 250 ms observation
      -> Volume enabled again -> Reopen for the next tone, never capture/UI
@@ -899,29 +895,64 @@ Record -> Release -> Transcribing/processing/paste -> Finished // dictate.feedba
      -> Loader keeps running; later tones play once the output opens
 ```
 
-The sounds are Hex's own (2026-10-27), one kalimba-like FM voice playing one
-motif, D-B-A-D (a sixth, since "hex" is six): start D5 to B5 (116 ms), stop B5
-to A5 (230 ms), done D6 over A5 (330 ms), cancel B5 down to D5 (225 ms), error
-D4 then a minor D4+Bb4 (280 ms), and onboarding success, the whole motif
-landing on a D sixth chord (1.1 s), played when the first-run tour reaches
-its last step. They are 48 kHz mono WAVs in `resources/audio/`, each starting
-on its first sample, made by
-[`scripts/sounds/synth.py`](../../scripts/sounds/synth.py)
-(`uv run scripts/sounds/synth.py` rewrites them). Their levels match the
-sounds they replaced at the same volume: start like the old start clicks
-(-25.5 LUFS momentary), stop like the old swish, error like macOS Basso;
-cancel is far quieter than the old thud. Windows and Linux play start, stop,
-done, and cancel; their failures stay silent as before. Check:
-`bundled_sounds_are_short_and_sound_immediately` (each sound under its length
-budget, audible within 1 ms). The sounds were checked by waveform, spectrum
-and loudness only, never played aloud on a Mac.
+```ts
+Settings > Sounds (next to Sound volume)                    // dictate.sound-set
+├── Default / older settings -> Hex signature
+├── Row shows the saved set -> Opens the Sounds sheet
+│   ├── Stage -> A capsule acts out a short dictation as its sounds play
+│   │   ├── Start (0 s) -> Recording: red dot + moving levels
+│   │   ├── Stop (1.4 s) -> Transcribing: three dots
+│   │   └── Done (2.1 s) -> Pasted: check; empty again at 2.9 s
+│   ├── Chips -> Start / Stop / Done / Cancel / Error (macOS) play one sound
+│   │   └── Set has no such sound (Classic's done) -> Chip faint and inert
+│   ├── Each set -> Name, what it sounds like, play button
+│   │   ├── Play -> Plays its dictation without choosing it; again stops it
+│   │   └── Press the set -> Save and apply live; play its dictation
+│   ├── Any playback -> Stops the one before it (20 ms fade)
+│   ├── Sound volume -> Plays at it; Off plays nothing, the capsule still acts
+│   ├── Reduce Motion -> Levels and dots hold still; moments still follow
+│   └── Close / Escape / scrim / leaving the pane -> Stops playback
+├── hex settings set sound_theme <signature|classic|click|soft|wood|analog>
+└── Every set -> Same loudness per sound at a given volume
+```
 
-The **Sounds** setting (`sound_theme`, next to Sound volume, issue #302)
-switches to **Classic**: the MP3s Hex played before the signature set
-(`startRecording`, `stopRecording`, `cancel` in `resources/audio/`, restored
-byte-for-byte), macOS Basso for errors, and no done tone. The onboarding chime
-and capture tones have no classic counterpart and stay the same. Check:
-`bundled_sounds_decode_without_an_audio_device` covers both sets.
+The sheet is a modal like the shortcut explainer, opened from a
+`sheet_button` because its choices need room to be heard, not a menu. Checks:
+`auditions_play_each_sound_at_its_moment`,
+`stopping_an_audition_fades_all_of_it`,
+`each_moment_shows_from_its_sound_to_the_next`,
+`the_sound_sets_sheet_plays_and_chooses_sets` (Linux), and the `sound-sets`
+and `sound-sets-playing` goldens. The capsule is a stand-in drawn with theme
+tokens, not the native HUD.
+
+Hex signature (2026-10-27) is one kalimba-like FM voice playing one motif,
+D-B-A-D (a sixth, since "hex" is six): start D5 to B5 (116 ms), stop B5 to A5
+(230 ms), done D6 over A5 (330 ms), cancel B5 down to D5 (225 ms), error D4
+then a minor D4+Bb4 (280 ms), and onboarding success, the whole motif landing
+on a D sixth chord (1.1 s), played when the first-run tour reaches its last
+step. Click is mechanical key clicks, Soft tone warm sine blips in A major,
+Wood a soft-mallet marimba with hollow wood blocks for cancel and error, and
+Warm synth two detuned saws through a closing low-pass filter. Classic is the
+sounds Hex played before the signature set (start clicks, stop swish, cancel
+thud), restored from git; it has no done tone, errors play macOS Basso as they
+did, and onboarding success plays signature's.
+
+Each set is a folder in `resources/audio/sounds/` made by
+[`scripts/sounds/synth.py`](../../scripts/sounds/synth.py)
+(`uv run scripts/sounds/synth.py` rewrites them; signature regenerates
+byte-identical). Synthesized sounds are 48 kHz mono WAVs starting on their
+first sample; Classic keeps its 44.1 kHz stereo, trimmed to start at its first
+audible sample. Every sound is normalized to one loudness per kind (start
+-25.5 LUFS max momentary, stop and done -27, cancel and error -26.5, success
+-25), so a volume sounds the same in every set. Classic's start and stop come
+up 2.5 and 3 dB (a soft limiter touches 0.1% of the start's samples) and its
+cancel, once 15 dB louder than the rest, comes down. Windows and Linux play
+start, stop, done, and cancel; their failures stay silent as before. Checks:
+`bundled_sounds_are_short_and_sound_immediately` (each sound under its length
+budget; every start, and every synthesized sound, audible within 1 ms),
+`every_set_but_classic_has_every_sound`, `sound_set_offers_every_set`. The
+sounds were checked by waveform, spectrum and loudness only, never played
+aloud on a Mac.
 
 Feedback admission is advisory on every platform: a cold audio stack can exceed
 the two-second preload timeout, so the recognition worker logs a warning and

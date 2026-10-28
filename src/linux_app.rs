@@ -482,7 +482,7 @@ impl LinuxDesktopHost {
     fn apply_output_settings(&mut self) {
         crate::feedback::set_enabled(self.settings.sound_effects);
         crate::feedback::set_volume(self.settings.sound_effect_volume.clamp(0.0, 1.0));
-        crate::feedback::set_theme(self.settings.sound_theme);
+        crate::feedback::set_sound_set(self.settings.sound_theme);
         *self
             .output
             .modes

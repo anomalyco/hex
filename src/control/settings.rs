@@ -128,8 +128,8 @@ const KEYS: &[Key] = &[
     ),
     key(
         "sound_theme",
-        Kind::Choice(&["signature", "classic"]),
-        "Which feedback sounds play: Hex's signature set or the classic tones",
+        Kind::Choice(&["signature", "classic", "click", "soft", "wood", "analog"]),
+        "Which sounds play; classic is Hex's original tones",
     ),
     optional(
         "microphone",
@@ -1197,6 +1197,28 @@ mod tests {
         .unwrap();
         assert!(change.settings.sound_effects);
         assert_eq!(change.settings.sound_effect_volume, 0.25);
+    }
+
+    #[test]
+    fn sound_set_offers_every_set() {
+        let key = keys().find(|key| key.key == "sound_theme").unwrap();
+        let Kind::Choice(choices) = key.kind else {
+            panic!("sound_theme is a choice");
+        };
+        let sets: Vec<String> = crate::feedback::SoundSet::ALL
+            .iter()
+            .map(|set| serde_json::to_value(set).unwrap().as_str().unwrap().into())
+            .collect();
+        assert_eq!(sets, choices);
+        let change = apply(
+            &AppSettings::default(),
+            "sound_theme",
+            "wood",
+            false,
+            &rules(),
+        )
+        .unwrap();
+        assert_eq!(change.settings.sound_theme, crate::feedback::SoundSet::Wood);
     }
 
     #[test]

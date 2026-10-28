@@ -66,7 +66,7 @@ pub struct WindowsDictationConfig {
     pub while_dictating: crate::app_settings::RecordingAudioBehavior,
     pub release_microphone_while_idle: bool,
     pub feedback_volume: u8,
-    pub sound_theme: crate::feedback::SoundTheme,
+    pub sound_theme: crate::feedback::SoundSet,
     pub history: Option<crate::history::History>,
     pub last_dictation: Arc<Mutex<Option<String>>>,
     pub indicator: Option<crate::rune_hud::HudSender>,
@@ -164,7 +164,7 @@ pub fn run(
     let _indicator_guard = IndicatorGuard(indicator.clone());
     crate::feedback::set_enabled(feedback_volume > 0);
     crate::feedback::set_volume(f32::from(feedback_volume) / 100.0);
-    crate::feedback::set_theme(sound_theme);
+    crate::feedback::set_sound_set(sound_theme);
     if feedback_volume > 0
         && let Err(error) = crate::feedback::preload()
     {

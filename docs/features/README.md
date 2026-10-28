@@ -562,7 +562,7 @@ General                                  // settings
 │       ├── On -> Screen & System Audio Recording row: Allow / waiting / Allowed
 │       └── Dictation -> browser_media sequence below
 ├── Sound volume -> immediate feedback; zero suppresses tones
-├── Sounds -> Signature (default) / Classic; previews start
+├── Sounds -> Sheet: hear each set on Hex's real HUD, pick one
 └── Linux / Windows -> listener card and desktop commands below the basics
 
 Pause media + Also pause the browser     // browser_media

@@ -864,26 +864,23 @@ fn application(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<CardRow> {
         },
         layer,
     ));
-    rows.push(pick_row(
-        ui,
-        p,
-        "sound-theme",
-        &MUSIC,
-        tr("Sounds"),
-        s::SOUND_THEMES.iter().map(|(label, _)| tr(label)).collect(),
-        s::SOUND_THEMES
-            .iter()
-            .position(|(_, theme)| *theme == settings.sound_theme)
-            .unwrap_or(0),
-        |ui, index| {
-            let theme = s::SOUND_THEMES[index].1;
-            let saved = ui.update(|settings| settings.sound_theme = theme);
-            if saved && ui.settings.sound_effects && ui.live() {
-                crate::feedback::play(crate::feedback::Tone::DictationStart);
-            }
-        },
-        layer,
-    ));
+    rows.push(
+        icon_row(
+            p,
+            "sound-set",
+            &MUSIC,
+            tr("Sounds"),
+            None,
+            value_button(
+                p,
+                "sound-set-control",
+                tr(settings.sound_theme.name()),
+                &rune_theme_opencode::icons::CHEVRON_RIGHT,
+                super::sound_sets::open,
+            ),
+        )
+        .into(),
+    );
     let languages = crate::desktop_i18n::LANGUAGE_CHOICES;
     rows.push(pick_row(
         ui,
