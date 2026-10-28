@@ -15,8 +15,8 @@ pub const MANIFEST_NAME: &str = "capture.json";
 
 /// Everything one recording does.
 pub struct Plan {
-    /// Displays and windows, each recorded to its own MP4. The first source owns audio.
-    pub sources: Vec<Source>,
+    /// Displays, windows and regions, each recorded to its own MP4. The first source owns audio.
+    pub sources: Vec<SourcePlan>,
     pub cursor: CursorDrawing,
     pub audio: AudioPlan,
     pub input: Input,
@@ -32,13 +32,129 @@ pub struct Plan {
 }
 
 /// One thing to record.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case", tag = "kind", content = "id")]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(into = "SourceJson", from = "SourceJson")]
 pub enum Source {
     /// A display by its `CGDirectDisplayID`.
     Display(u32),
     /// A window by its `CGWindowID`.
     Window(u32),
+    /// Part of a display: `rect` is in the display's own points from its top-left corner (the
+    /// stream's `sourceRect`). It is trimmed to the display.
+    Region { display: u32, rect: Rect },
+}
+
+/// `{"kind": "display", "id": 1}`, `{"kind": "region", "display": 1, "rect": {...}}`.
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "kind")]
+enum SourceJson {
+    Display { id: u32 },
+    Window { id: u32 },
+    Region { display: u32, rect: Rect },
+}
+
+impl From<Source> for SourceJson {
+    fn from(source: Source) -> Self {
+        match source {
+            Source::Display(id) => Self::Display { id },
+            Source::Window(id) => Self::Window { id },
+            Source::Region { display, rect } => Self::Region { display, rect },
+        }
+    }
+}
+
+impl From<SourceJson> for Source {
+    fn from(source: SourceJson) -> Self {
+        match source {
+            SourceJson::Display { id } => Self::Display(id),
+            SourceJson::Window { id } => Self::Window(id),
+            SourceJson::Region { display, rect } => Self::Region { display, rect },
+        }
+    }
+}
+
+/// A source and the size it records at.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SourcePlan {
+    pub source: Source,
+    /// The longest side of the video in pixels, keeping the aspect. `None` records at the
+    /// source's own pixels; a source is never scaled above them.
+    pub long_edge: Option<u32>,
+}
+
+impl From<Source> for SourcePlan {
+    fn from(source: Source) -> Self {
+        Self {
+            source,
+            long_edge: None,
+        }
+    }
+}
+
+/// A rectangle in points.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct Rect {
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+}
+
+impl Rect {
+    pub(crate) fn is_valid(self) -> bool {
+        self.x.is_finite()
+            && self.y.is_finite()
+            && self.width.is_finite()
+            && self.height.is_finite()
+            && self.width > 0.0
+            && self.height > 0.0
+    }
+
+    /// The part of `self` inside `bounds`, if any.
+    pub(crate) fn intersection(self, bounds: Self) -> Option<Self> {
+        let x = self.x.max(bounds.x);
+        let y = self.y.max(bounds.y);
+        let right = (self.x + self.width).min(bounds.x + bounds.width);
+        let bottom = (self.y + self.height).min(bounds.y + bounds.height);
+        let rect = Self {
+            x,
+            y,
+            width: right - x,
+            height: bottom - y,
+        };
+        rect.is_valid().then_some(rect)
+    }
+}
+
+/// The encoded size of a source `points` large at `scale` pixels per point, with its long edge at
+/// most `long_edge` pixels. Never above the source's own pixels; both sides even, as H.264 wants.
+#[must_use]
+pub(crate) fn output_size(
+    points: (f64, f64),
+    scale: f64,
+    long_edge: Option<u32>,
+) -> Option<(u32, u32)> {
+    let (width, height) = points;
+    if !(width.is_finite() && height.is_finite() && width > 0.0 && height > 0.0) {
+        return None;
+    }
+    let native = if scale.is_finite() && scale > 0.0 {
+        scale
+    } else {
+        1.0
+    };
+    let scale = long_edge.map_or(native, |edge| {
+        (f64::from(edge) / width.max(height)).min(native)
+    });
+    let side = |points: f64| {
+        let pixels = (points * scale).round();
+        if !pixels.is_finite() || pixels > f64::from(u32::MAX) {
+            return None;
+        }
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        Some(((pixels as u32) & !1).max(2))
+    };
+    Some((side(width)?, side(height)?))
 }
 
 /// Whether the cursor is drawn into the video.
@@ -106,8 +222,8 @@ pub enum Input {
     Tap,
 }
 
-/// What display sources leave out. Window sources capture only their window, so exclusions do
-/// not apply to them.
+/// What display and region sources leave out. Window sources capture only their window, so
+/// exclusions do not apply to them.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Exclusions {
     /// Window IDs.
@@ -211,6 +327,88 @@ mod tests {
         assert!(names(&["../a.mp4"]).validate(1, &audio).is_err());
         assert!(names(&[".hidden.mp4"]).validate(1, &audio).is_err());
         assert!(names(&[MANIFEST_NAME]).validate(1, &audio).is_err());
+    }
+
+    #[test]
+    fn output_size_caps_the_long_edge_and_keeps_the_aspect() {
+        // A 2x 1728×1117 display: 2560 px long edge, never above its 3456 px.
+        assert_eq!(
+            output_size((1_728.0, 1_117.0), 2.0, Some(2_560)),
+            Some((2_560, 1_654))
+        );
+        assert_eq!(
+            output_size((1_728.0, 1_117.0), 2.0, None),
+            Some((3_456, 2_234))
+        );
+        // A 1x 1920×1080 display is not upscaled.
+        assert_eq!(
+            output_size((1_920.0, 1_080.0), 1.0, Some(2_560)),
+            Some((1_920, 1_080))
+        );
+        // A 2x 480×320 region at 1280.
+        assert_eq!(
+            output_size((480.0, 320.0), 2.0, Some(1_280)),
+            Some((960, 640))
+        );
+        // A tall window keeps its long side at the cap.
+        assert_eq!(
+            output_size((600.0, 1_600.0), 2.0, Some(1_280)),
+            Some((480, 1_280))
+        );
+        assert_eq!(output_size((0.0, 100.0), 2.0, None), None);
+        assert_eq!(output_size((f64::NAN, 100.0), 2.0, None), None);
+    }
+
+    #[test]
+    fn regions_are_trimmed_to_their_display() {
+        let display = Rect {
+            x: 0.0,
+            y: 0.0,
+            width: 1_728.0,
+            height: 1_117.0,
+        };
+        let rect = Rect {
+            x: -100.0,
+            y: 100.0,
+            width: 300.0,
+            height: 200.0,
+        };
+        assert_eq!(
+            rect.intersection(display),
+            Some(Rect {
+                x: 0.0,
+                y: 100.0,
+                width: 200.0,
+                height: 200.0
+            })
+        );
+        let outside = Rect {
+            x: 2_000.0,
+            y: 0.0,
+            width: 10.0,
+            height: 10.0,
+        };
+        assert_eq!(outside.intersection(display), None);
+    }
+
+    #[test]
+    fn source_json_is_tagged_by_kind() {
+        let display = serde_json::to_value(Source::Display(1)).unwrap();
+        assert_eq!(display, serde_json::json!({ "kind": "display", "id": 1 }));
+        let region = Source::Region {
+            display: 2,
+            rect: Rect {
+                x: 10.0,
+                y: 20.0,
+                width: 300.0,
+                height: 200.0,
+            },
+        };
+        let json = serde_json::to_value(region).unwrap();
+        assert_eq!(json["kind"], "region");
+        assert_eq!(json["display"], 2);
+        assert_eq!(json["rect"]["width"], 300.0);
+        assert_eq!(serde_json::from_value::<Source>(json).unwrap(), region);
     }
 
     #[test]

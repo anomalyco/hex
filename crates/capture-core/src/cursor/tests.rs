@@ -272,6 +272,7 @@ fn clicks_correlate_to_nearest_host_clock_frame_anchor() {
         capture.telemetry.button_events,
         vec![CursorButtonEvent {
             source_time: Millis(100),
+            host_ns: HostTime::from_ticks(1_800).as_nanos(),
             button: CursorButton::Left,
             state: CursorButtonState::Pressed,
         }]

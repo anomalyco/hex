@@ -1,6 +1,6 @@
 use std::fmt;
 
-use crate::plan::Source;
+use crate::plan::{Rect, Source};
 
 /// Why a recording could not start, or how a source failed to finish.
 #[derive(Debug)]
@@ -10,6 +10,8 @@ pub enum Error {
     /// A source in the plan is not on screen.
     SourceUnavailable(Source),
     InvalidDimensions,
+    /// A region with no area on its display.
+    InvalidRegion(Rect),
     InvalidFrameRate,
     NoSources,
     DuplicateSources,
@@ -31,6 +33,8 @@ pub enum Error {
     StreamStopped(String),
     Stop(String),
     FinishTimeout,
+    /// `SCScreenshotManager` could not take or read a screenshot.
+    Screenshot(String),
     /// The finishing thread ended without a result.
     FinisherLost,
 }
@@ -43,6 +47,9 @@ impl fmt::Display for Error {
                 write!(f, "capture source is no longer available: {source:?}")
             }
             Self::InvalidDimensions => f.write_str("capture source has invalid dimensions"),
+            Self::InvalidRegion(rect) => {
+                write!(f, "capture region is not on its display: {rect:?}")
+            }
             Self::InvalidFrameRate => f.write_str("frame rate must be greater than zero"),
             Self::NoSources => f.write_str("at least one capture source is required"),
             Self::DuplicateSources => f.write_str("capture sources must be unique"),
@@ -64,6 +71,7 @@ impl fmt::Display for Error {
             Self::StreamStopped(error) => write!(f, "capture stream stopped: {error}"),
             Self::Stop(error) => write!(f, "failed to stop recording: {error}"),
             Self::FinishTimeout => f.write_str("timed out waiting for recording finalization"),
+            Self::Screenshot(error) => write!(f, "screenshot failed: {error}"),
             Self::FinisherLost => f.write_str("the finishing thread ended without a result"),
         }
     }

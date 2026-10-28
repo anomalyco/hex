@@ -6,7 +6,6 @@
 //! losing the file or leaving it unfinished. Only after the output finishes (or fails) is the
 //! stream stopped, and that stop is bounded because the capture service can stop answering.
 
-use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -27,12 +26,12 @@ use crate::final_frame_hold::hold_final_video_frame;
 use crate::frames::FrameSampler;
 use crate::input::{HostInputDrain, InputLog, RecordedInput};
 use crate::manifest::{
-    Clock, FileEntry, FileKind, Frame, MANIFEST_VERSION, Manifest, Permission, SourceEntry,
-    TrackKind, write_json,
+    Clock, FileEntry, FileKind, MANIFEST_VERSION, Manifest, Permission, SourceEntry, TrackKind,
+    write_json,
 };
 use crate::plan::{MANIFEST_NAME, Names, Source};
 use crate::system_audio::SystemAudioWriter;
-use crate::time::{HostTime, MediaTime, Timebase, host_delta_millis, signed_millis};
+use crate::time::{HostTime, MediaTime, host_delta_millis};
 
 // ScreenCaptureKit can take well over ten seconds to finalize longer MP4s even after the file is
 // complete on disk. Keep finishing bounded without cutting normal finalization short.
@@ -226,7 +225,6 @@ impl SourceRun {
         mut stop: StopState,
         deadline: Instant,
         timeouts: Timeouts,
-        anchor: HostTime,
         stop_at: HostTime,
     ) -> SourceOutcome {
         if let Err(error) = self.stream.remove_handlers() {
@@ -295,25 +293,24 @@ impl SourceRun {
         if let Some(error) = &error {
             tracing::warn!(source = ?self.source, %error, "source did not finish cleanly");
         }
-        let start_ms = signed_millis(
-            anchor,
-            first_frame.map_or(self.attached, HostTime::from_ticks),
-        );
+        let start_ns = first_frame
+            .map_or(self.attached, HostTime::from_ticks)
+            .as_nanos();
         SourceOutcome {
             entry: SourceEntry {
                 source: self.source,
                 file: self.name,
-                start_ms,
+                start_ns,
                 duration_ms,
                 width: self.width,
                 height: self.height,
-                frame: frame_of(self.rect),
+                frame: self.rect,
                 audio_tracks: self.audio_tracks,
                 error: error.map(|error| error.to_string()),
             },
             cursor: SourceCursor {
                 source: self.source,
-                start_ms,
+                start_ns,
                 capture: cursor,
             },
         }
@@ -333,21 +330,12 @@ fn hold_final_frame(path: &Path, recorded: MediaTime) -> Option<u64> {
     }
 }
 
-fn frame_of(rect: Rect) -> Frame {
-    Frame {
-        x: rect.x,
-        y: rect.y,
-        width: rect.width,
-        height: rect.height,
-    }
-}
-
 /// One source's cursor telemetry, as written to [`Names::cursor`].
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SourceCursor {
     pub source: Source,
-    /// Where the source's video starts on the clock; telemetry times count from the video start.
-    pub start_ms: i64,
+    /// When the source's video starts on the host clock. Each `source_time` counts from here.
+    pub start_ns: u64,
     #[serde(flatten)]
     pub capture: CursorCapture,
 }
@@ -361,7 +349,8 @@ struct CursorFile<'a> {
 #[derive(Serialize)]
 struct InputFile<'a> {
     version: u32,
-    anchor_host_time: u64,
+    clock: Clock,
+    anchor_ns: u64,
     dropped: u64,
     events: &'a [RecordedInput],
 }
@@ -487,7 +476,7 @@ impl Active {
                 .zip(stops)
                 .map(|(run, stop)| (run, stop.unwrap_or_else(StopState::lost)))
                 .collect(),
-            |(run, stop)| run.finish(stop, deadline, timeouts, anchor, stop_at),
+            |(run, stop)| run.finish(stop, deadline, timeouts, stop_at),
         );
         let mut sources = Vec::with_capacity(outcomes.len());
         let mut cursor = Vec::with_capacity(outcomes.len());
@@ -501,11 +490,11 @@ impl Active {
                 None => sources.push(SourceEntry {
                     source,
                     file,
-                    start_ms: 0,
+                    start_ns: anchor.as_nanos(),
                     duration_ms: 0,
                     width,
                     height,
-                    frame: frame_of(rect),
+                    frame: rect,
                     audio_tracks: Vec::new(),
                     error: Some("the finishing thread panicked".into()),
                 }),
@@ -518,7 +507,7 @@ impl Active {
             .map(|(index, source)| FileEntry {
                 name: source.file.clone(),
                 kind: FileKind::Video { source: index },
-                start_ms: Some(source.start_ms),
+                start_ns: Some(source.start_ns),
             })
             .collect::<Vec<_>>();
         let mut audio_gaps = Vec::new();
@@ -534,12 +523,12 @@ impl Active {
                     kind: FileKind::Microphone {
                         sample_rate: summary.sample_rate,
                     },
-                    start_ms: Some(0),
+                    start_ns: Some(anchor.as_nanos()),
                 });
             }
         }
         if let Some(system) = self.system_audio.take() {
-            let summary = system.finish(anchor);
+            let summary = system.finish();
             if let Some(error) = summary.error {
                 errors.push(format!("system audio: {error}"));
             }
@@ -553,7 +542,7 @@ impl Active {
                 files.push(FileEntry {
                     name: name.clone(),
                     kind: FileKind::SystemAudio,
-                    start_ms: summary.start_ms,
+                    start_ns: summary.start_ns,
                 });
             }
         }
@@ -571,7 +560,7 @@ impl Active {
                 Ok(()) => files.push(FileEntry {
                     name: name.clone(),
                     kind: FileKind::Cursor,
-                    start_ms: None,
+                    start_ns: None,
                 }),
                 Err(error) => errors.push(format!("cursor telemetry: {error}")),
             }
@@ -579,7 +568,8 @@ impl Active {
         if let Some(name) = &self.names.input {
             let file = InputFile {
                 version: 1,
-                anchor_host_time: anchor.ticks(),
+                clock: Clock::MachHostNs,
+                anchor_ns: anchor.as_nanos(),
                 dropped: input_dropped,
                 events: &input,
             };
@@ -587,17 +577,15 @@ impl Active {
                 Ok(()) => files.push(FileEntry {
                     name: name.clone(),
                     kind: FileKind::Input,
-                    start_ms: Some(0),
+                    start_ns: None,
                 }),
                 Err(error) => errors.push(format!("input log: {error}")),
             }
         }
         let manifest = Manifest {
             version: MANIFEST_VERSION,
-            clock: Clock {
-                anchor_host_time: anchor.ticks(),
-                timebase: Timebase::current(),
-            },
+            clock: Clock::MachHostNs,
+            anchor_ns: anchor.as_nanos(),
             sources,
             files,
             audio_gaps,
@@ -692,7 +680,8 @@ pub struct Recording {
 }
 
 impl Recording {
-    /// The clock anchor every `*_ms` in the bundle counts from.
+    /// The moment the recording started: the manifest's `anchor_ns` and sample 0 of the
+    /// external microphone WAV.
     #[must_use]
     pub fn anchor(&self) -> HostTime {
         self.active
@@ -840,7 +829,11 @@ pub(crate) fn validate_sources(sources: &[Source]) -> Result<(), Error> {
     if sources.is_empty() {
         return Err(Error::NoSources);
     }
-    if sources.iter().collect::<HashSet<_>>().len() != sources.len() {
+    if sources
+        .iter()
+        .enumerate()
+        .any(|(index, source)| sources[..index].contains(source))
+    {
         return Err(Error::DuplicateSources);
     }
     Ok(())

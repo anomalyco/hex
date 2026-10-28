@@ -11,6 +11,7 @@ use objc2_core_graphics::{CGEvent, CGEventSource, CGEventSourceStateID};
 use screencapturekit::cm::{CMTime, SCFrameStatus};
 use serde::{Deserialize, Serialize};
 
+pub(crate) use crate::plan::Rect;
 use crate::time::HostTime;
 
 /// The largest [`NormalizedCoordinate`]: the far edge of the captured frame.
@@ -35,7 +36,10 @@ pub struct NormalizedCoordinate(pub u32);
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub struct CursorPositionSample {
+    /// From the start of the source's video.
     pub source_time: Millis,
+    /// The same instant on the host clock, in nanoseconds.
+    pub host_ns: u64,
     pub x: NormalizedCoordinate,
     pub y: NormalizedCoordinate,
 }
@@ -58,7 +62,10 @@ pub enum CursorButtonState {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub struct CursorButtonEvent {
+    /// The video frame the event is shown on, from the start of the source's video.
     pub source_time: Millis,
+    /// When the event happened on the host clock, in nanoseconds.
+    pub host_ns: u64,
     pub button: CursorButton,
     pub state: CursorButtonState,
 }
@@ -143,14 +150,6 @@ pub struct CursorCaptureDiagnostics {
 pub(crate) struct Point {
     pub x: f64,
     pub y: f64,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) struct Rect {
-    pub x: f64,
-    pub y: f64,
-    pub width: f64,
-    pub height: f64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -306,17 +305,6 @@ fn interpolate(before: PointerSample, after: PointerSample, host_time: u64) -> O
         x: before_point.x + (after_point.x - before_point.x) * fraction,
         y: before_point.y + (after_point.y - before_point.y) * fraction,
     })
-}
-
-impl Rect {
-    pub(crate) fn is_valid(self) -> bool {
-        self.x.is_finite()
-            && self.y.is_finite()
-            && self.width.is_finite()
-            && self.height.is_finite()
-            && self.width > 0.0
-            && self.height > 0.0
-    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -560,6 +548,7 @@ impl CursorCollector {
         };
         self.capture.telemetry.positions.push(CursorPositionSample {
             source_time: Millis(source_time),
+            host_ns: HostTime::from_ticks(display_time).as_nanos(),
             x: NormalizedCoordinate(x),
             y: NormalizedCoordinate(y),
         });
@@ -597,17 +586,21 @@ impl CursorCollector {
                 self.capture.diagnostics.invalid_click_transitions += 1;
                 continue;
             }
+            let host_ns = HostTime::from_ticks(event.host_time).as_nanos();
             if let Some((x, y)) = event.position {
-                self.capture
-                    .telemetry
-                    .positions
-                    .push(CursorPositionSample { source_time, x, y });
+                self.capture.telemetry.positions.push(CursorPositionSample {
+                    source_time,
+                    host_ns,
+                    x,
+                    y,
+                });
             }
             self.capture
                 .telemetry
                 .button_events
                 .push(CursorButtonEvent {
                     source_time,
+                    host_ns,
                     button: event.button,
                     state: event.state,
                 });

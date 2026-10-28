@@ -12,17 +12,15 @@ use std::time::Duration;
 
 use screencapturekit::cm::{CMSampleBuffer, CMSampleBufferExt, SCFrameStatus};
 
-use crate::time::{HostTime, signed_millis};
+use crate::time::HostTime;
 
 /// One downscaled frame, tightly packed RGBA.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Frame {
     /// The index of the frame's source in [`Plan::sources`](crate::Plan::sources).
     pub source: usize,
-    /// When the frame was composited, on the host clock.
+    /// When the frame was composited, on the host clock ([`HostTime::as_nanos`] for nanoseconds).
     pub host_time: HostTime,
-    /// The same instant, from the clock anchor.
-    pub t_ms: i64,
     pub width: u32,
     pub height: u32,
     pub rgba: Vec<u8>,
@@ -80,20 +78,18 @@ struct SamplerState {
 pub(crate) struct FrameSampler {
     tap: FrameTap,
     source: usize,
-    anchor: HostTime,
     interval_ticks: u64,
     state: Mutex<SamplerState>,
 }
 
 impl FrameSampler {
-    pub(crate) fn new(tap: FrameTap, source: usize, anchor: HostTime) -> Self {
+    pub(crate) fn new(tap: FrameTap, source: usize) -> Self {
         let interval_ticks =
             HostTime::from_nanos(u64::try_from(tap.interval.as_nanos()).unwrap_or(u64::MAX))
                 .ticks();
         Self {
             tap,
             source,
-            anchor,
             interval_ticks,
             state: Mutex::new(SamplerState {
                 last_sent: None,
@@ -166,7 +162,6 @@ impl FrameSampler {
         self.tap.send(Frame {
             source: self.source,
             host_time,
-            t_ms: signed_millis(self.anchor, host_time),
             width,
             height,
             rgba,
@@ -244,7 +239,6 @@ mod tests {
         let frame = Frame {
             source: 0,
             host_time: HostTime::from_ticks(1),
-            t_ms: 0,
             width: 1,
             height: 1,
             rgba: vec![0; 4],

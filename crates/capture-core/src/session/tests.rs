@@ -2,7 +2,7 @@ use std::sync::mpsc::Sender;
 
 use super::*;
 use crate::cursor::CursorCollector;
-use crate::plan::{AudioPlan, CursorDrawing, Exclusions, Input, Plan};
+use crate::plan::{AudioPlan, CursorDrawing, Exclusions, Input, Plan, SourcePlan};
 
 /// What the fake stream saw, in order.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -178,7 +178,13 @@ fn stop_returns_at_once_while_the_output_finishes() {
     let finished = finishing.wait().unwrap();
     assert_eq!(finished.error(), None);
     assert_eq!(finished.manifest.sources.len(), 1);
-    assert!(Manifest::read(&finished.dir).is_ok());
+    let manifest = Manifest::read(&finished.dir).unwrap();
+    assert_eq!(manifest.clock, Clock::MachHostNs);
+    assert!(manifest.anchor_ns <= HostTime::now().as_nanos());
+    assert_eq!(
+        manifest.sources[0].start_ns, manifest.anchor_ns,
+        "with no frame, a source starts where its output was attached"
+    );
 }
 
 #[test]
@@ -351,7 +357,7 @@ fn stop_stream_within_reports_an_unresponsive_stop() {
 
 fn plan(dir: &Path) -> Plan {
     Plan {
-        sources: vec![Source::Display(1)],
+        sources: vec![Source::Display(1).into()],
         cursor: CursorDrawing::Hidden,
         audio: AudioPlan::default(),
         input: Input::None,
@@ -377,7 +383,7 @@ fn an_invalid_plan_is_refused_before_touching_the_screen() {
     ));
 
     let mut duplicates = plan(dir.path());
-    duplicates.sources = vec![Source::Display(1), Source::Display(1)];
+    duplicates.sources = vec![Source::Display(1).into(), Source::Display(1).into()];
     duplicates.names.videos = vec!["a.mp4".into(), "b.mp4".into()];
     assert!(matches!(
         crate::Recorder::start(duplicates),
@@ -402,11 +408,52 @@ fn records_the_main_display() {
     let dir = crate::test_dir::tempdir().unwrap();
     let main = objc2_core_graphics::CGMainDisplayID();
     let mut plan = plan(dir.path());
-    plan.sources = vec![Source::Display(main)];
+    plan.sources = vec![Source::Display(main).into()];
     plan.names.cursor = Some("cursor.json".into());
     let recording = crate::Recorder::start(plan).unwrap();
     thread::sleep(Duration::from_secs(1));
     let finished = recording.stop().wait().unwrap();
     assert_eq!(finished.error(), None);
     assert!(finished.manifest.sources[0].duration_ms >= 900);
+}
+
+/// Needs Screen Recording permission and a display; records a region at a capped size.
+#[test]
+#[ignore = "needs Screen Recording permission (TCC) and a live display"]
+fn records_a_region_at_its_long_edge() {
+    let dir = crate::test_dir::tempdir().unwrap();
+    let main = objc2_core_graphics::CGMainDisplayID();
+    let mut plan = plan(dir.path());
+    plan.sources = vec![SourcePlan {
+        source: Source::Region {
+            display: main,
+            rect: crate::Rect {
+                x: 100.0,
+                y: 100.0,
+                width: 800.0,
+                height: 400.0,
+            },
+        },
+        long_edge: Some(1_280),
+    }];
+    let recording = crate::Recorder::start(plan).unwrap();
+    thread::sleep(Duration::from_secs(1));
+    let finished = recording.stop().wait().unwrap();
+    assert_eq!(finished.error(), None);
+    let source = &finished.manifest.sources[0];
+    assert!(source.width <= 1_280 && source.width >= source.height * 2 - 2);
+}
+
+/// Needs Screen Recording permission and a display.
+#[test]
+#[ignore = "needs Screen Recording permission (TCC) and a live display"]
+fn screenshots_the_main_display() {
+    let main = objc2_core_graphics::CGMainDisplayID();
+    let image =
+        crate::screenshot(&Source::Display(main), &Exclusions::default(), Some(640)).unwrap();
+    assert_eq!(image.width.max(image.height), 640);
+    assert_eq!(
+        image.rgba.len(),
+        image.width as usize * image.height as usize * 4
+    );
 }

@@ -81,19 +81,6 @@ pub fn host_delta_millis(start: HostTime, end: HostTime) -> Option<u64> {
     Some(HostTime(ticks).as_nanos() / 1_000_000)
 }
 
-/// Signed whole milliseconds from `anchor` to `time`.
-#[must_use]
-pub fn signed_millis(anchor: HostTime, time: HostTime) -> i64 {
-    let millis = |from: HostTime, to: HostTime| {
-        i64::try_from(host_delta_millis(from, to).unwrap_or(0)).unwrap_or(i64::MAX)
-    };
-    if time >= anchor {
-        millis(anchor, time)
-    } else {
-        -millis(time, anchor)
-    }
-}
-
 /// A canonical, non-negative rational timestamp, compared exactly.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct MediaTime {
@@ -211,7 +198,6 @@ mod tests {
         assert!(now.ticks().abs_diff(back.ticks()) <= 1);
         let later = HostTime::from_ticks(now.ticks() + HostTime::from_nanos(1_500_000_000).ticks());
         assert_eq!(host_delta_millis(now, later), Some(1_500));
-        assert_eq!(signed_millis(later, now), -1_500);
         assert_eq!(host_delta_millis(later, now), None);
     }
 }

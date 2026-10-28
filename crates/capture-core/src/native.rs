@@ -9,6 +9,7 @@ use std::thread;
 use std::time::Duration;
 
 use screencapturekit::audio_devices::AudioInputDevice;
+use screencapturekit::cg::CGRect;
 use screencapturekit::cm::{CMSampleBuffer, CMSampleBufferSCExt, CMTime};
 use screencapturekit::recording_output::{
     RecordingCallbacks, SCRecordingOutput, SCRecordingOutputCodec, SCRecordingOutputConfiguration,
@@ -25,14 +26,17 @@ use screencapturekit::stream::output_type::SCStreamOutputType;
 
 use crate::clicks::ClickMonitor;
 use crate::cursor::{
-    Collectors, CursorClickCaptureStatus, CursorCollector, PointerHistory, PointerSampler, Rect,
+    Collectors, CursorClickCaptureStatus, CursorCollector, PointerHistory, PointerSampler,
 };
 use crate::error::Error;
 use crate::external_audio::ExternalAudioWriter;
 use crate::frames::FrameSampler;
 use crate::input::{HostInputDrain, InputLog};
 use crate::manifest::{Permission, TrackKind};
-use crate::plan::{CursorDrawing, Exclusions, Input, MANIFEST_NAME, Mic, Plan, Source};
+use crate::plan::{
+    CursorDrawing, Exclusions, Input, MANIFEST_NAME, Mic, Plan, Rect, Source, SourcePlan,
+    output_size,
+};
 use crate::session::{
     Active, Recording, RecordingEvent, RecordingEvents, SourceRun, SourceStream, Stopper,
     validate_sources,
@@ -72,7 +76,7 @@ impl Recorder {
         if fps == 0 {
             return Err(Error::InvalidFrameRate);
         }
-        validate_sources(&sources)?;
+        validate_sources(&sources.iter().map(|plan| plan.source).collect::<Vec<_>>())?;
         names.validate(sources.len(), &audio)?;
         check_dir(&dir, names.all().chain([MANIFEST_NAME]))?;
         if let Mic::Device(id) = &audio.mic
@@ -121,8 +125,7 @@ impl Recorder {
             active.frames = frames
                 .iter()
                 .flat_map(|tap| {
-                    (0..targets.len())
-                        .map(|index| Arc::new(FrameSampler::new(tap.clone(), index, anchor)))
+                    (0..targets.len()).map(|index| Arc::new(FrameSampler::new(tap.clone(), index)))
                 })
                 .collect();
 
@@ -132,7 +135,8 @@ impl Recorder {
             let start_order = (1..targets.len()).chain(std::iter::once(0));
             for index in start_order {
                 let context = SourceContext {
-                    source: sources[index],
+                    source: sources[index].source,
+                    region: targets[index].source_rect.map(|_| targets[index].rect),
                     fps,
                     cursor,
                     telemetry,
@@ -217,44 +221,29 @@ fn check_dir<'a>(dir: &Path, names: impl Iterator<Item = &'a str>) -> Result<(),
 }
 
 /// A source resolved against the current shareable content.
-struct Target {
-    filter: SCContentFilter,
-    width: u32,
-    height: u32,
-    rect: Rect,
+pub(crate) struct Target {
+    pub filter: SCContentFilter,
+    /// Encoded size in pixels.
+    pub width: u32,
+    pub height: u32,
+    /// The captured area in global top-left points.
+    pub rect: Rect,
+    /// For a region, the area in its display's own points.
+    pub source_rect: Option<Rect>,
 }
 
 impl Target {
-    fn find(
+    pub(crate) fn find(
         content: &SCShareableContent,
-        source: Source,
+        plan: SourcePlan,
         exclude: &Exclusions,
     ) -> Result<Self, Error> {
-        match source {
+        let source = plan.source;
+        let (filter, rect, source_rect) = match source {
             Source::Display(id) => {
-                let display = content
-                    .displays()
-                    .into_iter()
-                    .find(|display| display.display_id() == id)
-                    .ok_or(Error::SourceUnavailable(source))?;
-                let width = display.width();
-                let height = display.height();
-                if width == 0 || height == 0 {
-                    return Err(Error::InvalidDimensions);
-                }
+                let display = find_display(content, id).ok_or(Error::SourceUnavailable(source))?;
                 let filter = display_filter(content, &display, exclude)?;
-                let frame = display.frame();
-                Ok(Self {
-                    filter,
-                    width,
-                    height,
-                    rect: Rect {
-                        x: frame.origin.x,
-                        y: frame.origin.y,
-                        width: frame.size.width,
-                        height: frame.size.height,
-                    },
-                })
+                (filter, rect_of(display.frame()), None)
             }
             Source::Window(id) => {
                 let window = content
@@ -266,24 +255,65 @@ impl Target {
                     .with_window(&window)
                     .build()
                     .map_err(|error| Error::ConfigureStream(error.to_string()))?;
-                let frame = window.frame();
-                let scale = f64::from(filter.point_pixel_scale());
-                let width = dimension(frame.size.width * scale).ok_or(Error::InvalidDimensions)?;
-                let height =
-                    dimension(frame.size.height * scale).ok_or(Error::InvalidDimensions)?;
-                Ok(Self {
-                    filter,
-                    width,
-                    height,
-                    rect: Rect {
-                        x: frame.origin.x,
-                        y: frame.origin.y,
-                        width: frame.size.width,
-                        height: frame.size.height,
-                    },
-                })
+                (filter, rect_of(window.frame()), None)
             }
+            Source::Region { display: id, rect } => {
+                let display = find_display(content, id).ok_or(Error::SourceUnavailable(source))?;
+                let frame = rect_of(display.frame());
+                let local = rect
+                    .intersection(Rect {
+                        x: 0.0,
+                        y: 0.0,
+                        width: frame.width,
+                        height: frame.height,
+                    })
+                    .ok_or(Error::InvalidRegion(rect))?;
+                let filter = display_filter(content, &display, exclude)?;
+                let global = Rect {
+                    x: frame.x + local.x,
+                    y: frame.y + local.y,
+                    ..local
+                };
+                (filter, global, Some(local))
+            }
+        };
+        let scale = f64::from(filter.point_pixel_scale());
+        let (width, height) = output_size((rect.width, rect.height), scale, plan.long_edge)
+            .ok_or(Error::InvalidDimensions)?;
+        Ok(Self {
+            filter,
+            width,
+            height,
+            rect,
+            source_rect,
+        })
+    }
+
+    /// The stream configuration's size and area for this target.
+    pub(crate) fn configure(&self, config: SCStreamConfiguration) -> SCStreamConfiguration {
+        let config = config.with_width(self.width).with_height(self.height);
+        match self.source_rect {
+            Some(rect) => {
+                config.with_source_rect(CGRect::new(rect.x, rect.y, rect.width, rect.height))
+            }
+            None => config,
         }
+    }
+}
+
+fn find_display(content: &SCShareableContent, id: u32) -> Option<SCDisplay> {
+    content
+        .displays()
+        .into_iter()
+        .find(|display| display.display_id() == id)
+}
+
+fn rect_of(frame: CGRect) -> Rect {
+    Rect {
+        x: frame.origin.x,
+        y: frame.origin.y,
+        width: frame.size.width,
+        height: frame.size.height,
     }
 }
 
@@ -328,16 +358,10 @@ fn display_filter(
         .map_err(|error| Error::Exclusion(error.to_string()))
 }
 
-fn dimension(value: f64) -> Option<u32> {
-    if !value.is_finite() || value <= 0.0 || value > f64::from(u32::MAX) {
-        return None;
-    }
-    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-    Some(value.round() as u32)
-}
-
 struct SourceContext<'a> {
     source: Source,
+    /// A region's area in global points. It places the cursor, whatever rect its frames report.
+    region: Option<Rect>,
     fps: u32,
     cursor: CursorDrawing,
     telemetry: bool,
@@ -356,9 +380,8 @@ fn start_source(target: &Target, context: SourceContext<'_>) -> Result<SourceRun
     let configure =
         |error: screencapturekit::error::SCError| Error::ConfigureStream(error.to_string());
     let interval = CMTime::new(1, i32::try_from(context.fps).unwrap_or(i32::MAX));
-    let mut config = SCStreamConfiguration::new()
-        .with_width(target.width)
-        .with_height(target.height)
+    let mut config = target
+        .configure(SCStreamConfiguration::new())
         .with_minimum_frame_interval(&interval)
         .with_queue_depth(8)
         .with_pixel_format(PixelFormat::BGRA)
@@ -500,6 +523,7 @@ impl NativeStream {
     /// it stays attached, removing the recording output never stops the stream on its own.
     fn add_handlers(&mut self, context: &SourceContext<'_>) -> Result<(), Error> {
         let collector = Arc::clone(&context.collector);
+        let region = context.region;
         let pointer = context.pointer.clone();
         let frames = context.frames.clone();
         let stopping = Arc::clone(&context.stopping);
@@ -508,12 +532,7 @@ impl NativeStream {
             .add_output_handler(
                 move |sample: CMSampleBuffer, _| {
                     let info = sample.frame_info().unwrap_or_default();
-                    let screen_rect = info.screen_rect.map(|rect| Rect {
-                        x: rect.origin.x,
-                        y: rect.origin.y,
-                        width: rect.size.width,
-                        height: rect.size.height,
-                    });
+                    let screen_rect = region.or_else(|| info.screen_rect.map(rect_of));
                     let point = info.display_time.and_then(|display_time| {
                         pointer.as_ref().and_then(|history| {
                             history

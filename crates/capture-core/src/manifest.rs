@@ -7,8 +7,7 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-use crate::plan::{MANIFEST_NAME, Source};
-use crate::time::Timebase;
+use crate::plan::{MANIFEST_NAME, Rect, Source};
 
 /// The manifest format. Readers refuse a newer major version.
 pub const MANIFEST_VERSION: u32 = 1;
@@ -16,7 +15,11 @@ pub const MANIFEST_VERSION: u32 = 1;
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Manifest {
     pub version: u32,
+    /// The clock every `*_ns` in the bundle is on.
     pub clock: Clock,
+    /// The moment the recording started, just before its first source. The microphone WAV's
+    /// sample 0 sits here.
+    pub anchor_ns: u64,
     pub sources: Vec<SourceEntry>,
     pub files: Vec<FileEntry>,
     /// Spans of the microphone WAV that are silence because no audio arrived.
@@ -24,11 +27,14 @@ pub struct Manifest {
     pub missing_permissions: Vec<Permission>,
 }
 
-/// Every `*_ms` in the bundle counts from `anchor_host_time`, in Mach ticks of the host clock.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Clock {
-    pub anchor_host_time: u64,
-    pub timebase: Timebase,
+/// The clock bundle timestamps are on.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Clock {
+    /// The Mach host clock (`mach_absolute_time`) in nanoseconds: the clock of Core Audio host
+    /// times, `CGEvent` timestamps and `ScreenCaptureKit` frame display times.
+    #[default]
+    MachHostNs,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -36,28 +42,20 @@ pub struct SourceEntry {
     pub source: Source,
     /// The source's video file.
     pub file: String,
-    /// Where the video's first frame sits on the clock. Negative when it precedes the anchor.
-    pub start_ms: i64,
+    /// When the video's first frame was shown.
+    pub start_ns: u64,
     pub duration_ms: u64,
     /// Encoded size in pixels.
     pub width: u32,
     pub height: u32,
     /// The captured area in global top-left points when the recording started.
-    pub frame: Frame,
+    pub frame: Rect,
     /// Whether the microphone ([`Mic::Device`](crate::Mic::Device)) and system audio are tracks in
     /// this video.
     pub audio_tracks: Vec<TrackKind>,
     /// Why this source's video is missing or incomplete.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
-pub struct Frame {
-    pub x: f64,
-    pub y: f64,
-    pub width: f64,
-    pub height: f64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -71,9 +69,10 @@ pub enum TrackKind {
 pub struct FileEntry {
     pub name: String,
     pub kind: FileKind,
-    /// Where the file's time zero sits on the clock, when it has one.
+    /// Where the file's time zero sits on the clock, for media files. Logs carry their own
+    /// `host_ns` per entry.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub start_ms: Option<i64>,
+    pub start_ns: Option<u64>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -93,8 +92,8 @@ pub enum FileKind {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AudioGap {
-    pub start_ms: u64,
-    pub end_ms: u64,
+    pub start_ns: u64,
+    pub end_ns: u64,
 }
 
 /// A permission the recording ran without, and what it lost.
@@ -151,21 +150,16 @@ mod tests {
     fn manifest() -> Manifest {
         Manifest {
             version: MANIFEST_VERSION,
-            clock: Clock {
-                anchor_host_time: 123_456_789,
-                timebase: Timebase {
-                    numer: 125,
-                    denom: 3,
-                },
-            },
+            clock: Clock::MachHostNs,
+            anchor_ns: 5_000_000_000,
             sources: vec![SourceEntry {
                 source: Source::Display(1),
                 file: "recording.mp4".into(),
-                start_ms: -12,
+                start_ns: 4_988_000_000,
                 duration_ms: 4_500,
                 width: 3_024,
                 height: 1_964,
-                frame: Frame {
+                frame: Rect {
                     x: 0.0,
                     y: 0.0,
                     width: 1_512.0,
@@ -178,19 +172,19 @@ mod tests {
                 FileEntry {
                     name: "recording.mp4".into(),
                     kind: FileKind::Video { source: 0 },
-                    start_ms: Some(-12),
+                    start_ns: Some(4_988_000_000),
                 },
                 FileEntry {
                     name: "audio.wav".into(),
                     kind: FileKind::Microphone {
                         sample_rate: 16_000,
                     },
-                    start_ms: Some(0),
+                    start_ns: Some(5_000_000_000),
                 },
             ],
             audio_gaps: vec![AudioGap {
-                start_ms: 1_000,
-                end_ms: 1_250,
+                start_ns: 6_000_000_000,
+                end_ns: 6_250_000_000,
             }],
             missing_permissions: vec![Permission::InputMonitoring],
         }
@@ -217,13 +211,15 @@ mod tests {
     fn manifest_json_shape_is_stable() {
         let json = serde_json::to_value(manifest()).unwrap();
         assert_eq!(json["version"], 1);
-        assert_eq!(json["clock"]["anchor_host_time"], 123_456_789);
+        assert_eq!(json["clock"], "mach_host_ns");
+        assert_eq!(json["anchor_ns"], 5_000_000_000_u64);
+        assert_eq!(json["sources"][0]["start_ns"], 4_988_000_000_u64);
         assert_eq!(json["sources"][0]["source"]["kind"], "display");
         assert_eq!(json["sources"][0]["source"]["id"], 1);
         assert!(json["sources"][0].get("error").is_none());
         assert_eq!(json["files"][0]["kind"]["type"], "video");
         assert_eq!(json["files"][1]["kind"]["sample_rate"], 16_000);
-        assert_eq!(json["audio_gaps"][0]["end_ms"], 1_250);
+        assert_eq!(json["audio_gaps"][0]["end_ns"], 6_250_000_000_u64);
         assert_eq!(json["missing_permissions"][0], "input_monitoring");
     }
 

@@ -8,7 +8,7 @@ use objc2_av_foundation::AVFileTypeAppleM4A;
 use screencapturekit::cm::{CMSampleBuffer, CMTime};
 
 use crate::av_writer::AvWriter;
-use crate::time::{HostTime, signed_millis};
+use crate::time::HostTime;
 
 const FINISH_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -30,8 +30,8 @@ struct State {
 pub(crate) struct SystemAudioSummary {
     /// Whether the file exists: no file is left when no system audio arrived.
     pub written: bool,
-    /// Where the file's time zero sits, from the clock anchor.
-    pub start_ms: Option<i64>,
+    /// Where the file's time zero sits on the host clock, in nanoseconds.
+    pub start_ns: Option<u64>,
     pub dropped: u64,
     pub error: Option<String>,
 }
@@ -110,15 +110,12 @@ impl SystemAudioWriter {
     }
 
     /// Closes the file. Later buffers are ignored.
-    pub(crate) fn finish(&self, anchor: HostTime) -> SystemAudioSummary {
+    pub(crate) fn finish(&self) -> SystemAudioSummary {
         let mut guard = self.state.lock().unwrap_or_else(PoisonError::into_inner);
         let state = &mut *guard;
         state.closed = true;
         let writer = state.writer.take();
-        let start_ms = state
-            .first
-            .and_then(host_time_of)
-            .map(|at| signed_millis(anchor, at));
+        let start_ns = state.first.and_then(host_time_of).map(HostTime::as_nanos);
         let mut error = state.error.take();
         let mut written = false;
         if let Some(writer) = writer {
@@ -150,7 +147,7 @@ impl SystemAudioWriter {
         }
         SystemAudioSummary {
             written,
-            start_ms,
+            start_ns,
             dropped: state.dropped,
             error,
         }

@@ -381,18 +381,22 @@ impl<W: std::io::Write + std::io::Seek> WavTimeline<W> {
     /// Pads silence from the current end to `end` and records the span.
     fn pad_gap(&mut self, end: u64) {
         let start = self.end();
-        let start_ms = self.millis(start);
-        let end_ms = self.millis(end);
+        let start_ns = self.host_ns(start);
+        let end_ns = self.host_ns(end);
         match self.gaps.last_mut() {
-            Some(last) if last.end_ms >= start_ms => last.end_ms = last.end_ms.max(end_ms),
-            _ => self.gaps.push(AudioGap { start_ms, end_ms }),
+            Some(last) if last.end_ns >= start_ns => last.end_ns = last.end_ns.max(end_ns),
+            _ => self.gaps.push(AudioGap { start_ns, end_ns }),
         }
         let padding = usize::try_from(end - start).unwrap_or(0);
         self.held.extend(std::iter::repeat_n(0.0, padding));
     }
 
-    fn millis(&self, frames: u64) -> u64 {
-        frames * 1_000 / u64::from(self.sample_rate)
+    /// Where frame `frames` of the file sits on the host clock, in nanoseconds.
+    fn host_ns(&self, frames: u64) -> u64 {
+        let offset = u128::from(frames) * 1_000_000_000 / u128::from(self.sample_rate.max(1));
+        self.anchor
+            .as_nanos()
+            .saturating_add(u64::try_from(offset).unwrap_or(u64::MAX))
     }
 
     /// Writes held frames before `at`.
@@ -425,10 +429,10 @@ impl<W: std::io::Write + std::io::Seek> WavTimeline<W> {
         // Audio delivered after the stop belongs to no recording.
         let keep = usize::try_from(stop_frame.saturating_sub(self.written)).unwrap_or(usize::MAX);
         self.held.truncate(keep);
-        let stop_ms = self.millis(stop_frame);
+        let stop_ns = self.host_ns(stop_frame);
         self.gaps.retain_mut(|gap| {
-            gap.end_ms = gap.end_ms.min(stop_ms);
-            gap.start_ms < gap.end_ms
+            gap.end_ns = gap.end_ns.min(stop_ns);
+            gap.start_ns < gap.end_ns
         });
         if let Err(error) = self.flush_before(stop) {
             return self.fail(error);
@@ -526,6 +530,14 @@ mod tests {
         )
     }
 
+    /// A gap `start_ms`..`end_ms` from the anchor, on the host clock.
+    fn gap(anchor: HostTime, start_ms: u64, end_ms: u64) -> AudioGap {
+        AudioGap {
+            start_ns: anchor.as_nanos() + start_ms * 1_000_000,
+            end_ns: anchor.as_nanos() + end_ms * 1_000_000,
+        }
+    }
+
     fn ms_of(anchor: HostTime, at: HostTime) -> u64 {
         host_delta_millis(anchor, at).unwrap()
     }
@@ -613,16 +625,7 @@ mod tests {
         assert_eq!(summary.frames, 650 * 16);
         assert_eq!(
             summary.gaps,
-            vec![
-                AudioGap {
-                    start_ms: 100,
-                    end_ms: 300
-                },
-                AudioGap {
-                    start_ms: 400,
-                    end_ms: 600
-                },
-            ]
+            vec![gap(anchor, 100, 300), gap(anchor, 400, 600)]
         );
         let reader = hound::WavReader::open(&path).unwrap();
         assert_eq!(reader.spec().sample_rate, RATE);
@@ -661,12 +664,6 @@ mod tests {
         let summary = writer.finish(at_ms(anchor, 500));
         assert!(started.elapsed() < Duration::from_secs(1));
         assert_eq!(summary.frames, 500 * 16);
-        assert_eq!(
-            summary.gaps,
-            vec![AudioGap {
-                start_ms: 100,
-                end_ms: 500
-            }]
-        );
+        assert_eq!(summary.gaps, vec![gap(anchor, 100, 500)]);
     }
 }

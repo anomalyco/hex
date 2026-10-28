@@ -13,7 +13,7 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 
 use crate::cursor::{Collectors, CursorButton, CursorButtonState, Point, RawCursorButtonEvent};
-use crate::time::{HostTime, signed_millis};
+use crate::time::HostTime;
 
 const DRAIN_POLL: Duration = Duration::from_millis(50);
 
@@ -79,11 +79,11 @@ pub struct HostEvent {
     pub event: InputEvent,
 }
 
-/// One logged event, `t_ms` from the capture's clock anchor.
+/// One logged event.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct RecordedInput {
-    pub t_ms: i64,
-    pub host_time: u64,
+    /// When it happened on the host clock, in nanoseconds.
+    pub host_ns: u64,
     #[serde(flatten)]
     pub event: InputEvent,
 }
@@ -235,8 +235,7 @@ impl InputLog {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .push(RecordedInput {
-                t_ms: signed_millis(self.anchor, at),
-                host_time: at.ticks(),
+                host_ns: at.as_nanos(),
                 event,
             });
     }
@@ -245,7 +244,7 @@ impl InputLog {
     pub(crate) fn take(&self) -> Vec<RecordedInput> {
         let mut events =
             std::mem::take(&mut *self.events.lock().unwrap_or_else(PoisonError::into_inner));
-        events.sort_by_key(|event| event.host_time);
+        events.sort_by_key(|event| event.host_ns);
         events
     }
 }
@@ -453,8 +452,9 @@ mod tests {
 
         let events = log.take();
         assert_eq!(events.len(), 1, "{events:?}");
-        assert_eq!(events[0].t_ms, 5);
+        assert_eq!(events[0].host_ns, later.as_nanos());
         let json = serde_json::to_value(&events[0]).unwrap();
+        assert_eq!(json["host_ns"], later.as_nanos());
         assert_eq!(json["type"], "button");
         assert_eq!(json["button"], "left");
         assert_eq!(

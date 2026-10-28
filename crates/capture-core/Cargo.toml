@@ -13,8 +13,26 @@ block2 = "0.6.2"
 hound = "3.5.1"
 mach2 = "0.6.0"
 objc2 = "0.6.4"
-objc2-av-foundation = "0.3.2"
-objc2-avf-audio = "0.3.2"
+# Only the classes in use: the default features pull in frameworks (Image I/O,
+# Media Toolbox) that nothing here needs.
+objc2-av-foundation = { version = "0.3.2", default-features = false, features = [
+    "std",
+    "block2",
+    "objc2-core-graphics",
+    "objc2-core-media",
+    "objc2-core-video",
+    "AVAsset",
+    "AVAssetImageGenerator",
+    "AVAssetTrack",
+    "AVAssetWriter",
+    "AVAssetWriterInput",
+    "AVMediaFormat",
+    "AVVideoSettings",
+] }
+objc2-avf-audio = { version = "0.3.2", default-features = false, features = [
+    "std",
+    "AVAudioSettings",
+] }
 objc2-core-audio-types = "0.3.2"
 objc2-core-foundation = "0.3.2"
 objc2-core-graphics = "0.3.2"

@@ -1,8 +1,9 @@
 # capture-core
 
 Screen recording for macOS 15+ on ScreenCaptureKit. A host describes a recording as a `Plan`;
-the core records each display or window to its own H.264 MP4, places every file it writes on one
-host clock, and describes the result in a versioned `capture.json` manifest.
+the core records each display, window or display region to its own H.264 MP4, places everything
+it writes on one clock (Mach host time in nanoseconds), and describes the result in a versioned
+`capture.json` manifest.
 
 The crate compiles only on macOS. In this repository it sits outside the workspace and is built
 only through the `capture` feature (`scripts/check` lints and tests it as `-p capture-core`).
@@ -17,7 +18,10 @@ let (input, input_rx) = host_channel(1024, KeyPolicy::Chords);
 let (frames, frame_rx) = FrameTap::new(8, Duration::from_millis(500), 640);
 
 let mut recording = Recorder::start(Plan {
-    sources: vec![Source::Display(display_id), Source::Window(window_id)],
+    sources: vec![
+        SourcePlan { source: Source::Display(display_id), long_edge: Some(2560) },
+        SourcePlan { source: Source::Window(window_id), long_edge: Some(1280) },
+    ],
     cursor: CursorDrawing::Hidden,
     audio: AudioPlan { mic: Mic::External(ExternalMic::default()), system: false },
     input: Input::Host(input_rx),
@@ -34,10 +38,10 @@ let mut recording = Recorder::start(Plan {
     },
 })?;
 
-let mut mic = recording.external_audio().unwrap(); // ExternalAudioSink
-mic.offer(&pcm_16k_mono, captured_through);         // never blocks
-mic.gap(from, through);                             // the host lost audio
-input.send(HostTime::now(), event);                 // never blocks
+let mut mic = recording.external_audio().unwrap();       // ExternalAudioSink
+mic.offer(&pcm_16k_mono, HostTime::from_nanos(core_audio_ns)); // never blocks
+mic.gap(from, through);                                   // the host lost audio
+input.send(HostTime::now(), event);                       // never blocks
 
 let finishing = recording.stop();   // returns at once
 // ... frame_rx already holds the last frame of each source
@@ -46,6 +50,12 @@ let finished = finishing.wait()?;   // or poll with finishing.try_wait()
 
 - `Recorder::start(Plan) -> Result<Recording, Error>`: validates the plan, refuses names that
   already exist in `dir`, and starts sources `1..n` before source `0`, which owns audio.
+- `Source`: `Display(id)`, `Window(id)`, or `Region { display, rect }`, a rect in the display's
+  own points from its top-left corner (the stream's `sourceRect`), trimmed to the display.
+- `SourcePlan::long_edge`: the video's longest side in pixels, keeping the aspect and never above
+  the source's own pixels. `None` records at full resolution. Both sides are rounded to even.
+- `screenshot(&Source, &Exclusions, long_edge) -> Result<Image, Error>`: one RGBA still through
+  `SCScreenshotManager`, with the same filter and size a recording of that source would use.
 - `Recording`: `stop()` and `cancel()` (which removes every file) return a `Finishing` at once.
   `health()` reports output failures and system stream stops as they happen. `external_audio()`
   hands out the microphone sink once. `click_status()` reports the optional tap. Dropping a
@@ -88,6 +98,15 @@ let finished = finishing.wait()?;   // or poll with finishing.try_wait()
 per `interval` through a bounded channel, dropping frames when it is full. The newest skipped
 frame is sent the moment the recording stops, so the host can build a contact sheet right away.
 
+## The clock
+
+Every timestamp the core produces is Mach host time (`mach_absolute_time`) in nanoseconds: the
+clock of Core Audio host times, `CGEvent` timestamps and ScreenCaptureKit frame display times.
+That covers stream starts, audio file starts and gaps, cursor samples and clicks (`host_ns`, next
+to their `source_time` in the video), input events (`host_ns`) and tapped frames
+(`Frame::host_time`). A host on the same clock lines its own timestamps up without converting.
+`HostTime::from_nanos` and `HostTime::as_nanos` cross the API boundary.
+
 ## The bundle
 
 The host picks every file name. The core adds only `capture.json`:
@@ -95,26 +114,29 @@ The host picks every file name. The core adds only `capture.json`:
 ```json
 {
   "version": 1,
-  "clock": { "anchor_host_time": 123456789, "timebase": { "numer": 125, "denom": 3 } },
+  "clock": "mach_host_ns",
+  "anchor_ns": 81234000000000,
   "sources": [{
-    "source": { "kind": "display", "id": 1 },
+    "source": { "kind": "region", "display": 1, "rect": { "x": 100.0, "y": 80.0, "width": 640.0, "height": 400.0 } },
     "file": "recording.mp4",
-    "start_ms": 41, "duration_ms": 5000, "width": 3024, "height": 1964,
-    "frame": { "x": 0.0, "y": 0.0, "width": 1512.0, "height": 982.0 },
+    "start_ns": 81234041000000, "duration_ms": 5000, "width": 1280, "height": 800,
+    "frame": { "x": 100.0, "y": 80.0, "width": 640.0, "height": 400.0 },
     "audio_tracks": []
   }],
   "files": [
-    { "name": "recording.mp4", "kind": { "type": "video", "source": 0 }, "start_ms": 41 },
-    { "name": "audio.wav", "kind": { "type": "microphone", "sample_rate": 16000 }, "start_ms": 0 }
+    { "name": "recording.mp4", "kind": { "type": "video", "source": 0 }, "start_ns": 81234041000000 },
+    { "name": "audio.wav", "kind": { "type": "microphone", "sample_rate": 16000 }, "start_ns": 81234000000000 }
   ],
-  "audio_gaps": [{ "start_ms": 1200, "end_ms": 1450 }],
+  "audio_gaps": [{ "start_ns": 81235200000000, "end_ns": 81235450000000 }],
   "missing_permissions": []
 }
 ```
 
-Every `*_ms` counts from `clock.anchor_host_time`, a Mach host time taken just before the first
-source starts. A source's `error` is set when it did not finish cleanly. `Manifest::read` refuses
-a manifest newer than it understands.
+`anchor_ns` is taken just before the first source starts; sample 0 of the microphone WAV sits
+there. A media file's `start_ns` is where its time zero sits; the cursor and input logs carry
+`host_ns` per entry instead. A source's `frame` is the captured area in global points, and its
+`error` is set when it did not finish cleanly. `Manifest::read` refuses a manifest newer than it
+understands.
 
 ## Seams
 
