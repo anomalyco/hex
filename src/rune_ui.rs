@@ -30,6 +30,7 @@ mod meetings;
 mod models;
 mod modes;
 mod onboarding;
+mod onboarding_kit;
 mod picker;
 mod platform;
 mod platform_settings;

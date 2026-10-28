@@ -1,0 +1,386 @@
+//! The onboarding options as playground stories (the `playground`
+//! experiment, ⇧⌘D, group Onboarding). Each plays itself on open and on R,
+//! from a fake host that reports what the real one would: download bytes,
+//! the microphone's meter, and partial transcripts. Variants switch what
+//! the platform can do before the download finishes.
+
+use std::cell::Cell;
+use std::time::Duration;
+
+use rune::{Cx, El, Play, Playground, Story, Tx, col, text};
+
+use super::super::controls::Paint;
+use super::fixture::{ANSWER_JAY, Download, EXAMPLE_REPLIES, Language, Speech, downloaded};
+use super::flows;
+
+/// How long the stories' download takes. A real one runs at the
+/// connection's speed; the fixture only keeps the clip short.
+const DOWNLOAD_SECS: f64 = 9.0;
+/// How long the meter takes to close into the mark once it's full.
+const CLOSE_SECS: f64 = 0.65;
+/// Example replies type a word this often, about a fast speaker's pace.
+const WORD_SECS: f64 = 0.22;
+const EXAMPLE_START: f64 = 0.6;
+const EXAMPLE_GAP: f64 = 0.5;
+const FRAME: Duration = Duration::from_millis(16);
+const SIDE_W: f32 = 240.0;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Flow {
+    /// The button becomes the download pill, which parks in the top bar
+    /// while you answer a message, then flies up to say Ready.
+    Pill,
+    /// The mark fills in the middle while messages float around it to
+    /// answer.
+    Fill,
+    /// Say anything: each word rises in big and settles into a line.
+    Shout,
+}
+
+/// Where the flow is, in order.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum Step {
+    Pick,
+    /// The download started where the button was.
+    Started,
+    /// The pill moved out of the way; waiting until Hex can hear.
+    Parked,
+    /// Hex can hear: hold the shortcut.
+    YourTurn,
+    Hearing,
+    Heard,
+    /// Heard, and the download's done: Continue.
+    Done,
+    Ready,
+}
+
+pub(crate) struct Onboard {
+    pub(crate) flow: Flow,
+    pub(crate) speech: Speech,
+    /// What the script picks, as a person would press it.
+    pub(crate) wants: Language,
+    pub(crate) caps: Vec<String>,
+    pub(crate) step: Step,
+    pub(crate) language: Option<Language>,
+    pub(crate) now: f64,
+    pub(crate) reduced: Cell<bool>,
+    download_from: Option<f64>,
+    pub(crate) download: Option<Download>,
+    take_from: Option<f64>,
+    pub(crate) partial: &'static str,
+    pub(crate) meter: (f32, f32),
+    examples_from: Option<f64>,
+    closed_from: Option<f64>,
+    pub(crate) closed: f32,
+}
+
+impl Onboard {
+    fn new(flow: Flow) -> Self {
+        Self {
+            flow,
+            speech: Speech::Apple,
+            wants: Language::English,
+            caps: crate::app_settings::AppSettings::default()
+                .dictation_hotkey
+                .keycaps(),
+            step: Step::Pick,
+            language: None,
+            now: 0.0,
+            reduced: Cell::new(false),
+            download_from: None,
+            download: None,
+            take_from: None,
+            partial: "",
+            meter: (0.0, 0.0),
+            examples_from: None,
+            closed_from: None,
+            closed: 0.0,
+        }
+    }
+
+    /// Starts the download for `language`.
+    pub(crate) fn pick(&mut self, language: Language) {
+        if self.step != Step::Pick {
+            return;
+        }
+        self.language = Some(language);
+        self.step = Step::Started;
+        self.download_from = Some(self.now);
+        self.download = Some(Download {
+            language,
+            downloaded: 0,
+            total: language.bytes(),
+        });
+    }
+
+    pub(crate) fn downloaded(&self) -> bool {
+        self.download.is_some_and(Download::done)
+    }
+
+    /// Whether anything can turn speech into words yet.
+    pub(crate) fn can_hear(&self) -> bool {
+        self.speech == Speech::Apple || self.downloaded()
+    }
+
+    /// Whether words show while you speak: Apple Speech streams, and so
+    /// does the English model once it's down; the multilingual one shows
+    /// the whole reply when you let go.
+    pub(crate) fn streams(&self) -> bool {
+        self.speech == Speech::Apple || self.language.is_some_and(Language::streams)
+    }
+
+    /// The example reply `index` as typed so far, and whether it's done.
+    pub(crate) fn example(&self, index: usize) -> (&'static str, bool) {
+        let Some(from) = self.examples_from else {
+            return ("", false);
+        };
+        let mut start = from + EXAMPLE_START;
+        for reply in &EXAMPLE_REPLIES[..index] {
+            start += reply.split_whitespace().count() as f64 * WORD_SECS + EXAMPLE_GAP;
+        }
+        let reply = EXAMPLE_REPLIES[index];
+        let count = reply.split_whitespace().count();
+        let shown = (((self.now - start) / WORD_SECS).floor().max(0.0) as usize).min(count);
+        let end = reply
+            .split_whitespace()
+            .take(shown)
+            .map(str::len)
+            .sum::<usize>()
+            + shown.saturating_sub(1);
+        (
+            &reply[..end],
+            shown == count && self.now - start >= count as f64 * WORD_SECS + 0.3,
+        )
+    }
+}
+
+/// Adds every option to `playground`.
+pub(crate) fn add<S: 'static>(playground: Playground<S>) -> Playground<S> {
+    playground
+        .story(story("Onboarding/Option · Pill", || {
+            Onboard::new(Flow::Pill)
+        }))
+        .story(story("Onboarding/Option · Fill", || {
+            Onboard::new(Flow::Fill)
+        }))
+        .story(story("Onboarding/Option · Shout", || {
+            Onboard::new(Flow::Shout)
+        }))
+}
+
+fn story(name: &'static str, init: fn() -> Onboard) -> Story<Onboard> {
+    Story::new(name, init, view)
+        .poll(poll)
+        .trigger('r', "Play", play)
+        .trigger('d', "Finish the download", |s, _| {
+            if let Some(from) = s.download_from.as_mut() {
+                *from -= DOWNLOAD_SECS;
+            }
+        })
+        .variant("macOS 26 and later", |s| s.speech = Speech::Apple)
+        .variant("Windows, Linux, older macOS", |s| {
+            s.speech = Speech::AfterDownload;
+        })
+        .variant("Other language, no Apple Speech", |s| {
+            s.speech = Speech::AfterDownload;
+            s.wants = Language::Other;
+        })
+        .side(side)
+}
+
+fn view(s: &Onboard, cx: &mut Cx<Onboard>) -> El {
+    let p = Paint::new(cx.system_dark(), cx.env().scale);
+    s.reduced.set(cx.is_reduced_motion());
+    flows::view(p, s)
+}
+
+/// Plays the flow from the top: the examples, a pick, the download, an
+/// answer, Ready.
+fn play(s: &mut Onboard, play: &mut Play<'_, Onboard>) {
+    s.now = play.now();
+    s.examples_from = Some(play.now());
+    play.after(2.6, advance);
+    play.wake_after(Duration::ZERO);
+}
+
+/// Moves the flow one step on, or waits where it needs the host.
+fn advance(s: &mut Onboard, play: &mut Play<'_, Onboard>) {
+    const WAIT: f64 = 0.25;
+    s.now = play.now();
+    let next = match s.step {
+        Step::Pick => {
+            s.pick(s.wants);
+            Some(if s.flow == Flow::Shout { 0.6 } else { 0.9 })
+        }
+        Step::Started => {
+            s.step = Step::Parked;
+            Some(0.5)
+        }
+        Step::Parked if s.can_hear() => {
+            s.step = Step::YourTurn;
+            Some(1.1)
+        }
+        Step::Parked => Some(WAIT),
+        Step::YourTurn => {
+            s.step = Step::Hearing;
+            s.take_from = Some(play.now());
+            Some(ANSWER_JAY.release + 0.1)
+        }
+        Step::Hearing => {
+            s.step = Step::Heard;
+            Some(1.2)
+        }
+        Step::Heard if s.downloaded() => {
+            s.step = Step::Done;
+            Some(1.2)
+        }
+        Step::Heard => Some(WAIT),
+        Step::Done => {
+            s.step = Step::Ready;
+            None
+        }
+        Step::Ready => None,
+    };
+    if let Some(secs) = next {
+        play.after(secs, advance);
+    }
+    play.wake_after(Duration::ZERO);
+}
+
+/// Reads the fake host at `now`: bytes, the meter, the partial transcript.
+fn poll(s: &mut Onboard, now: f64, tx: &mut Tx) -> bool {
+    s.now = now;
+    let mut moving = s.examples_from.is_some() && s.step < Step::Ready;
+    if let (Some(from), Some(download)) = (s.download_from, s.download.as_mut()) {
+        download.downloaded = downloaded(download.total, now - from, DOWNLOAD_SECS);
+        if download.done() {
+            s.closed_from.get_or_insert(now);
+        } else {
+            moving = true;
+        }
+    }
+    if let Some(from) = s.closed_from {
+        s.closed = if s.reduced.get() {
+            1.0
+        } else {
+            smooth(((now - from) / CLOSE_SECS) as f32)
+        };
+        moving |= s.closed < 1.0;
+    }
+    match s.take_from {
+        Some(from) => {
+            let elapsed = now - from;
+            let done = ANSWER_JAY.finished(elapsed);
+            s.partial = if done || s.streams() {
+                ANSWER_JAY.partial(elapsed)
+            } else {
+                ""
+            };
+            s.meter = ANSWER_JAY.meter(elapsed);
+            moving |= !done;
+        }
+        None => {
+            // A quiet room: what an open microphone reads between words.
+            let hum = ((now * 9.0).sin() * (now * 4.3).sin()).abs() as f32;
+            s.meter = (0.03 + 0.04 * hum, 0.05 + 0.06 * hum);
+        }
+    }
+    if moving {
+        tx.wake_after(FRAME);
+    }
+    true
+}
+
+fn smooth(u: f32) -> f32 {
+    let u = u.clamp(0.0, 1.0);
+    u * u * (3.0 - 2.0 * u)
+}
+
+/// What the story needs from the platform, beside the stage.
+fn side(s: &Onboard, cx: &mut Cx<Onboard>) -> El {
+    let p = Paint::new(cx.system_dark(), cx.env().scale);
+    let line = |key: &str, copy: &str| {
+        text(copy)
+            .key(key)
+            .font(p.k.ty.small)
+            .color(p.muted())
+            .wrap()
+            .w(SIDE_W)
+    };
+    let words = match s.speech {
+        Speech::Apple => "Words now: Apple Speech (SpeechAnalyzer) streams with no download.",
+        Speech::AfterDownload => {
+            "Words after the download: nothing can hear until the model lands, so this waits."
+        }
+    };
+    col()
+        .key("onboarding-side")
+        .w(SIDE_W)
+        .gap(8.0)
+        .child(line(
+            "progress",
+            "Progress: transcription_preparation's downloaded bytes.",
+        ))
+        .child(line("meter", "Meter: the HUD's Meter { average, peak }."))
+        .child(line("words", words))
+        .child(line(
+            "model",
+            "English: Parakeet Unified English, 731 MB, streams. Other: Parakeet v3, 740 MB, whole reply on release.",
+        ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn run(flow: Flow, speech: Speech) -> Onboard {
+        let mut s = Onboard::new(flow);
+        s.speech = speech;
+        s.examples_from = Some(0.0);
+        s
+    }
+
+    #[test]
+    fn apple_speech_hears_before_the_download_finishes() {
+        let mut s = run(Flow::Pill, Speech::Apple);
+        s.pick(Language::English);
+        assert!(s.can_hear());
+        assert!(!s.downloaded());
+    }
+
+    #[test]
+    fn without_apple_speech_nothing_hears_until_the_model_lands() {
+        let mut s = run(Flow::Pill, Speech::AfterDownload);
+        s.pick(Language::English);
+        assert!(!s.can_hear());
+        let mut tx = Tx::default();
+        poll(&mut s, DOWNLOAD_SECS + 0.1, &mut tx);
+        assert!(s.downloaded());
+        assert!(s.can_hear());
+        assert!(s.streams());
+    }
+
+    #[test]
+    fn the_multilingual_model_shows_the_reply_on_release() {
+        let mut s = run(Flow::Shout, Speech::AfterDownload);
+        s.pick(Language::Other);
+        assert!(!s.streams());
+        s.take_from = Some(0.0);
+        let mut tx = Tx::default();
+        poll(&mut s, 1.5, &mut tx);
+        assert_eq!(s.partial, "");
+        poll(&mut s, ANSWER_JAY.release + 0.1, &mut tx);
+        assert_eq!(s.partial, ANSWER_JAY.text());
+    }
+
+    #[test]
+    fn examples_type_one_after_the_other() {
+        let mut s = run(Flow::Pill, Speech::Apple);
+        s.now = EXAMPLE_START + WORD_SECS * 2.5;
+        assert_eq!(s.example(0), ("Yes, call", false));
+        assert_eq!(s.example(1).0, "");
+        s.now = 20.0;
+        assert_eq!(s.example(0), (EXAMPLE_REPLIES[0], true));
+        assert_eq!(s.example(1), (EXAMPLE_REPLIES[1], true));
+    }
+}
