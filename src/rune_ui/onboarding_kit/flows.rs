@@ -29,6 +29,7 @@ pub(super) fn view(p: Paint, s: &Onboard) -> El {
         Flow::Pill => pill_flow(p, s),
         Flow::Fill => fill_flow(p, s),
         Flow::Shout => shout_flow(p, s),
+        Flow::Versus => super::versus::view(p, s),
     };
     col()
         .key("onboarding")
@@ -62,7 +63,7 @@ fn download(s: &Onboard) -> Download {
 }
 
 /// A Continue the person would press; the story moves on by itself.
-fn continue_button(p: Paint) -> El {
+pub(super) fn continue_button(p: Paint) -> El {
     Button::new("Continue")
         .variant(ButtonVariant::Contrast)
         .on_press(|_: &mut Onboard| {})

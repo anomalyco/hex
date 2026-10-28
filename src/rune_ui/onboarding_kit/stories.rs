@@ -11,7 +11,7 @@ use rune::{Cx, El, Play, Playground, Story, Tx, col, text};
 
 use super::super::controls::Paint;
 use super::fixture::{ANSWER_JAY, Download, EXAMPLE_REPLIES, Language, Speech, downloaded};
-use super::flows;
+use super::{flows, typing};
 
 /// How long the stories' download takes. A real one runs at the
 /// connection's speed; the fixture only keeps the clip short.
@@ -35,6 +35,9 @@ pub(crate) enum Flow {
     Fill,
     /// Say anything: each word rises in big and settles into a line.
     Shout,
+    /// Answer Jay on the keyboard while the model downloads, then by
+    /// voice, the words flying in as on the site.
+    Versus,
 }
 
 /// Where the flow is, in order.
@@ -66,7 +69,9 @@ pub(crate) struct Onboard {
     pub(crate) reduced: Cell<bool>,
     download_from: Option<f64>,
     pub(crate) download: Option<Download>,
-    take_from: Option<f64>,
+    /// When typing the reply by hand started.
+    pub(crate) typing_from: Option<f64>,
+    pub(crate) take_from: Option<f64>,
     pub(crate) partial: &'static str,
     pub(crate) meter: (f32, f32),
     examples_from: Option<f64>,
@@ -89,6 +94,7 @@ impl Onboard {
             reduced: Cell::new(false),
             download_from: None,
             download: None,
+            typing_from: None,
             take_from: None,
             partial: "",
             meter: (0.0, 0.0),
@@ -166,6 +172,9 @@ pub(crate) fn add<S: 'static>(playground: Playground<S>) -> Playground<S> {
         .story(story("Onboarding/Option · Shout", || {
             Onboard::new(Flow::Shout)
         }))
+        .story(story("Onboarding/Without Hex · With Hex", || {
+            Onboard::new(Flow::Versus)
+        }))
 }
 
 fn story(name: &'static str, init: fn() -> Onboard) -> Story<Onboard> {
@@ -199,7 +208,7 @@ fn view(s: &Onboard, cx: &mut Cx<Onboard>) -> El {
 fn play(s: &mut Onboard, play: &mut Play<'_, Onboard>) {
     s.now = play.now();
     s.examples_from = Some(play.now());
-    play.after(2.6, advance);
+    play.after(if s.flow == Flow::Versus { 1.4 } else { 2.6 }, advance);
     play.wake_after(Duration::ZERO);
 }
 
@@ -214,7 +223,13 @@ fn advance(s: &mut Onboard, play: &mut Play<'_, Onboard>) {
         }
         Step::Started => {
             s.step = Step::Parked;
-            Some(0.5)
+            if s.flow == Flow::Versus {
+                // Type the reply by hand first.
+                s.typing_from = Some(play.now() + 0.4);
+                Some(0.4 + typing::duration() + 1.0)
+            } else {
+                Some(0.5)
+            }
         }
         Step::Parked if s.can_hear() => {
             s.step = Step::YourTurn;
@@ -228,7 +243,8 @@ fn advance(s: &mut Onboard, play: &mut Play<'_, Onboard>) {
         }
         Step::Hearing => {
             s.step = Step::Heard;
-            Some(1.2)
+            // Long enough for the last word to land and cool.
+            Some(if s.flow == Flow::Versus { 1.6 } else { 1.2 })
         }
         Step::Heard if s.downloaded() => {
             s.step = Step::Done;
