@@ -227,7 +227,11 @@ substitute for source inspection or a second roadmap.
   a Rune overlay in the Hex process: layer-shell on Wayland, override-redirect
   on X11, at the top or bottom. The listener reports through `LinuxIndicator`
   and never waits on it; it shows once the window's app runs, whether or not
-  the window is open. Linux has no tray icon.
+  the window is open.
+- `linux_tray`: the optional tray icon, a StatusNotifierItem with a dbusmenu
+  (Show Hex, Quit Hex) on its own thread and private bus connection. It
+  registers whenever a tray host (`org.kde.StatusNotifierWatcher`) appears;
+  without one Hex runs unchanged.
 - `updater`: the in-app updater on every OS, a client of the Anomaly release
   service (`docs/plans/release-service.md`). `updater/protocol` is the
   protocol's strict SemVer, lenient manifest parsing, and client rules (the
@@ -533,10 +537,13 @@ CoreAudio formats, AppleScript details, or event serialization.
   default-input stream's change report, and Linux at the next stream open
   (ALSA's default resolves when it opens). Hex never captures from Hex
   Microphone: a Hex Microphone default stands in with the built-in microphone,
-  else the first real input, logged and shown in Settings. A saved microphone
+  else the first real input, logged and shown in Settings. With a MacBook's
+  lid closed (`AppleClamshellState`), the built-in microphone is off in
+  hardware but still listed, so it is passed over the same way, and with no
+  other input Hex reports why instead of recording silence. A saved microphone
   that is missing or will not open falls back to the system default without
   changing the setting, and Hex switches back when it returns. Any switch
-  (selection, default, or device list) happens only while capture is idle,
+  (selection, default, device list, or lid) happens only while capture is idle,
   after the current capture, and opening the replacement must succeed before
   the old stream is dropped; a device that resolves to the one already open is
   kept. An explicit CLI `--device` remains authoritative for that listener
@@ -948,7 +955,7 @@ scripts/check            # fmt, clippy, every test
 scripts/check meeting::query  # fmt, then only matching tests
 git diff --check
 ./scripts/test-app-identity.sh # macOS only
-./scripts/test-install-linux-release.sh # x86_64 Linux only
+./scripts/test-install-linux-release.sh # x86_64 or aarch64 Linux
 cd sdk/typescript && bun run check && bun run test && bun run build
 ```
 
@@ -980,7 +987,8 @@ render on lavapipe with `VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json`.
 A scene is a fixture, not native end-to-end proof; the meeting capsules and
 HUDs have no scene.
 
-The supported Linux beta and release host use x86_64 Arch Linux. Install its
+The supported Linux beta host is x86_64 Arch Linux; releases build on Ubuntu
+24.04 (x64 and ARM64) for a glibc 2.39 floor. Install its
 native build dependencies with:
 
 ```sh
@@ -1081,8 +1089,8 @@ public release; dispatched from `production` only). Tags never start a
 release: like OpenCode, the stable run tags `v<VERSION>` (the crate version)
 on the released commit only after every platform published, then creates the
 GitHub release with the built-in `GITHUB_TOKEN`, so a failed run leaves no
-tag; `v*` tags are unrestricted because nothing triggers on them. Like OpenCode's release, build jobs (Linux x86_64 in an Arch
-container, Windows x64 and ARM64 through `.github/workflows/build-desktop.yml`,
+tag; `v*` tags are unrestricted because nothing triggers on them. Like OpenCode's release, build jobs (Linux x64 and ARM64 on
+Ubuntu 24.04 runners with their `.deb` and `.rpm`, Windows x64 and ARM64 through `.github/workflows/build-desktop.yml`,
 macOS as an ad-hoc signed `HEX_RELEASE_UNSIGNED=1` app, installers through
 `windows-installers.yml`, AUR and Homebrew staging) run repository code with
 no environment, secret, or id-token; sign and publish jobs run in `release`,
@@ -1134,13 +1142,19 @@ are built around the signed bytes, and `sign-windows-installers` signs them
 builds never hold signing credentials; until the Azure values exist in
 `release`, dev and check runs have no Windows targets. See `docs/windows-signing.md`.
 
-Run `scripts/build-linux.sh` on x86_64 Linux and `scripts/build-windows.sh`
+Run `scripts/build-linux.sh` on x86_64 or aarch64 Linux (then
+`scripts/package-linux.sh` for the `.deb` and `.rpm`) and `scripts/build-windows.sh`
 from Git Bash once per architecture with `HEX_WINDOWS_ARCH=x86_64` (the
 default; Vulkan SDK required) or `aarch64` (clang-cl and Ninja; best on an
 ARM64 host). Builds use `-DGGML_NATIVE=OFF` so the CPU kernels stay portable,
 and the static runtime in `.cargo/config.toml` keeps the Visual C++
 Redistributable unnecessary; the release workflow asserts neither Windows
-executable imports it. `scripts/install-linux-release.sh` and
+executable imports it. Every build embeds Vulkan shaders only for f32, f16,
+and q8_0 tensors and no MUL_MAT_ID (`CMAKE_ARGS` in `.cargo/config.toml`,
+through the patched `transcribe-cpp-sys` in `Cargo.toml`): about 7 MB of
+SPIR-V instead of 44 MB. ggml aborts a Vulkan run whose weights use another
+type, so widen `GGML_VULKAN_SHADER_TYPES` before the catalog gains a non-Q8_0
+model. Release executables are stripped (`[profile.release]`). `scripts/install-linux-release.sh` and
 `scripts/install-windows.ps1` (served at `https://anoma.ly/hex/`) install from
 the service's stable manifest and check each file's size and SHA-256;
 `scripts/test-install-linux-release.sh` exercises the Linux one against a

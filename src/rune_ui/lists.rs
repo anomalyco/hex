@@ -87,12 +87,11 @@ pub(super) fn source_list(list: El) -> El {
     list.role("list").focus_group().focus_follows()
 }
 
-/// A row of a [`source_list`]. Its ring is inset because rows touch and
-/// their scroll view clips.
-pub(super) fn source_item(p: Paint, item: El, selected: bool) -> El {
-    item.focusable(true)
-        .focus_selected(selected)
-        .focus_ring(2.0, -2.0, p.k.c.border_focus)
+/// A row of a [`source_list`]. It draws no focus ring: focus follows the
+/// selection, so the selected fill shows where focus is, as in a native
+/// sidebar.
+pub(super) fn source_item(item: El, selected: bool) -> El {
+    item.focusable(true).focus_selected(selected)
 }
 
 /// A selectable list row: title (with trailing pieces) over a meta line.
@@ -143,7 +142,7 @@ pub(super) fn list_row(
     if selected {
         item = item.fill(c.layer_02);
     }
-    source_item(p, item, selected)
+    source_item(item, selected)
 }
 
 /// A quiet message in a list or detail (empty, no matches, failed load).

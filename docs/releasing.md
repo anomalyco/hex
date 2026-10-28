@@ -30,7 +30,8 @@ secret. `.github/workflows/` (Release, Site deploy, Legacy appcast) and
 ```ts
 Release (push to dev: dev channel; workflow_dispatch: ref + channel check | dev | stable (from production))
 ├─ plan                     .github/release/plan.sh: version, channel, tag, notes
-├─ build                    build-desktop.yml: Linux x86_64 (Arch), Windows x64 + ARM64, unsigned   [build]
+├─ build                    build-desktop.yml: Linux x64 + ARM64 (Ubuntu 24.04) executables, .deb,  [build]
+│                           .rpm (installed and run on Ubuntu and Fedora); Windows x64 + ARM64
 ├─ build-macos              Hex.app as anomaly.hex, ad-hoc signed (HEX_RELEASE_UNSIGNED)             [build]
 ├─ sign-macos               Developer ID inside-out, notarize + staple, ZIP + DMG (sign-macos.sh)     [release]
 ├─ verify-macos             validate-app.sh, Gatekeeper, updater requirement, launch                 [build]
@@ -41,7 +42,7 @@ Release (push to dev: dev channel; workflow_dispatch: ref + channel check | dev 
 ├─ github                   last: tag v<version> on the released commit (tag-release.sh), then the    [contents: write]
 │                           GitHub release mirror (publish-github-release.sh); GITHUB_TOKEN only.
 │                           check: pushes and deletes a throwaway v0.0.0-test-<run> tag
-├─ aur-stage → aur          stable: makepkg + install from the published file → push-aur.sh           [build → release]
+├─ aur-stage → aur          stable: makepkg + install from the published files → push-aur.sh          [build → release]
 ├─ homebrew-stage → homebrew stable: render + brew style/audit → push-homebrew.sh                     [build → release]
 └─ record-aur, record-brew  OIDC: the package manager serves the version                              [release]
 ```
@@ -100,11 +101,13 @@ token, and the Windows signing jobs one for Azure.
 
 `publish` uploads each file under its own name with its SHA-256 (files over
 95 MiB in 90 MiB parts), then posts the release naming each target by file
-and hash, with distributions `direct`, `aur` (`hex-bin`), `brew`
-(`anomalyco/tap/hex`), and `nix`. It then downloads every published URL and
-compares it with the local bytes. Package-manager entries gain a version only
-once that package manager serves it: `nix` at publish (the flake builds the
-release commit), `aur` after the push, and `brew` after the cask push. Manifests are not signed;
+and hash, with distributions `direct`, `aur` (`hex-bin`), `deb-x64`,
+`deb-arm64`, `rpm-x64`, `rpm-arm64`, `brew` (`anomalyco/tap/hex`), and `nix`.
+It then downloads every published URL and compares it with the local bytes.
+Package-manager entries gain a version only once that package manager serves
+it: `nix` and the `deb`/`rpm` kinds at publish (the flake builds the release
+commit; the packages are files of the release), `aur` after the push, and
+`brew` after the cask push. Manifests are not signed;
 clients check HTTPS, each file's size and SHA-256, and the OS code signature
 (Developer ID on macOS, Authenticode on Windows). Linux has only the hash.
 
@@ -364,14 +367,34 @@ it. No reviewer is required.
 - **AUR** `hex-bin` (`packaging/aur`, staged by `scripts/release-aur.sh`, pushed by `.github/release/push-aur.sh`):
   `/usr/bin/hex`, the desktop entry, and the systemd user unit
   `/usr/lib/systemd/user/hex.service`, from the release service's
-  `linux-x64` file. Not a prebuilt of the official `extra/hex` (a hex dump tool
+  `linux-x64` (`x86_64`) or `linux-arm64` (`aarch64`) file. Not a prebuilt of the official `extra/hex` (a hex dump tool
   that installs `/usr/bin/hx`), so it neither provides nor conflicts with it;
   its description says so. Maintained under Dax's AUR account.
+- **.deb and .rpm** `hex` (`packaging/linux/nfpm.yaml`, built by
+  `scripts/package-linux.sh` with nfpm in the build jobs): the same three
+  files as the AUR package, for x64 and arm64, published as
+  `linux-<arch>-deb` and `linux-<arch>-rpm` (`hex.deb`, `hex.rpm`). There is no
+  apt or dnf repository: the release service's `deb-<arch>`/`rpm-<arch>`
+  distributions carry the command that downloads the stable package from its
+  alias link and installs it with `apt` or `dnf`. Dependencies name Ubuntu
+  24.04 packages (either name across its 64-bit time_t rename) and, for rpm,
+  shared libraries, so Fedora and openSUSE both resolve them. Package versions
+  turn the first hyphen into a tilde (`0.0.0~dev.42`, `2.5.0~beta.1`).
 - **Nix**: `nix/package.nix` builds from source; flake inputs update it.
 - **Source** (`scripts/install-linux.sh`): the version layout with a
   `source-build` marker; the checkout updates it.
 
-An executable outside the user-local layout that the user does not own (pacman's
-`/usr/bin/hex`) or that lives in the Nix store never self-updates; Settings says
+An executable outside the user-local layout that the user does not own and
+pacman, dpkg, or rpm owns (`/usr/bin/hex`), or that lives in the Nix store,
+never self-updates; Settings says
 "Updated by your package manager". Source installs say "Updated from your
 source checkout".
+
+Both Linux architectures build natively on Ubuntu 24.04 runners
+(`ubuntu-24.04`, `ubuntu-24.04-arm`), so every Linux file needs glibc 2.39
+(Ubuntu 24.04, Debian 13, Fedora 40, current Arch) instead of the newest
+glibc of an Arch build. ARM64 keeps the Vulkan backend like x64; ggml's CPU
+kernels stay portable (`GGML_NATIVE=OFF`, baseline ARMv8-A). There is no
+AppImage: the bare executable already runs without installing, and Hex's
+systemd user unit and updater want a stable executable path that an AppImage
+does not have.

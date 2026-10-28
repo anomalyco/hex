@@ -2,7 +2,7 @@
 //! (`<support>/install.json`) updates itself by activating a new version
 //! directory and switching the `current` symlink atomically. Source builds
 //! (the `source-build` marker) and package-managed executables (pacman,
-//! Nix) never replace themselves. Linux has no OS code signature to check:
+//! dpkg, rpm, Nix) never replace themselves. Linux has no OS code signature to check:
 //! HTTPS and the manifest's SHA-256 are the only integrity checks.
 
 use std::fs::{self, File, OpenOptions};
@@ -16,8 +16,27 @@ use fs2::FileExt;
 use super::Method;
 use super::protocol::is_version_name;
 
+#[cfg(target_arch = "x86_64")]
 pub const TARGET: &str = "linux-x64";
-pub const DOWNLOAD_TARGET: &str = "linux-x64";
+#[cfg(target_arch = "aarch64")]
+pub const TARGET: &str = "linux-arm64";
+pub const DOWNLOAD_TARGET: &str = TARGET;
+
+/// The release service's distribution kinds for this architecture's `.deb`
+/// and `.rpm` packages: their update commands download this architecture's
+/// package.
+#[cfg(target_arch = "x86_64")]
+const PACKAGES: [(&str, &[&str], &str); 3] = [
+    ("pacman", &["-Qqo"], "aur"),
+    ("dpkg-query", &["-S"], "deb-x64"),
+    ("rpm", &["-qf"], "rpm-x64"),
+];
+#[cfg(target_arch = "aarch64")]
+const PACKAGES: [(&str, &[&str], &str); 3] = [
+    ("pacman", &["-Qqo"], "aur"),
+    ("dpkg-query", &["-S"], "deb-arm64"),
+    ("rpm", &["-qf"], "rpm-arm64"),
+];
 
 /// The marker `scripts/install-linux.sh` leaves beside an executable it
 /// built from a checkout: that install updates from its checkout.
@@ -46,16 +65,18 @@ pub fn method() -> Method {
         return Method::Package("nix");
     }
     if fs::metadata(&executable).is_ok_and(|metadata| metadata.uid() != user)
-        && Command::new("pacman")
-            .arg("-Qqo")
-            .arg(&executable)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .is_ok_and(|status| status.success())
+        && let Some((_, _, kind)) = PACKAGES.iter().find(|(manager, arguments, _)| {
+            Command::new(manager)
+                .args(*arguments)
+                .arg(&executable)
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status()
+                .is_ok_and(|status| status.success())
+        })
     {
-        return Method::Package("aur");
+        return Method::Package(kind);
     }
     Method::Unknown
 }
@@ -64,7 +85,7 @@ pub fn updates_disabled_by_policy() -> bool {
     false
 }
 
-/// The `linux-x64` target is the bare executable, so this build is the file
+/// The Linux targets are the bare executable, so this build is the file
 /// whose SHA-256 it has.
 pub fn running_sha256() -> Option<String> {
     crate::transcription_models::sha256_hex(&std::env::current_exe().ok()?, None).ok()

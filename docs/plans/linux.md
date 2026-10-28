@@ -18,7 +18,7 @@ The Linux beta keeps its contracts explicit:
 | Inference | Vulkan with CPU fallback |
 | Shortcut | Configurable key-containing chord; default `Alt+Space` |
 | Insertion | Clipboard plus Ctrl-V, with a Ctrl-Shift-V terminal setting |
-| UI | One process: the Rune window on demand and a Rune overlay HUD (layer-shell on Wayland, override-redirect on X11); no tray |
+| UI | One process: the Rune window on demand and a Rune overlay HUD (layer-shell on Wayland, override-redirect on X11); a StatusNotifierItem tray icon when a tray host exists |
 
 The beta does not claim voice commands, application or browser context,
 meetings, or universal Wayland support. Wayland needs `wl-copy`, `wtype`, and

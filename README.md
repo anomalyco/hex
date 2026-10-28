@@ -46,6 +46,11 @@ Builds from the dev channel, published on every change to `dev`:
 | Windows x64 | [Installer](https://anoma.ly/release/hex/desktop/dev/windows-x64-setup) |
 | Windows ARM64 | [Installer](https://anoma.ly/release/hex/desktop/dev/windows-arm64-setup) |
 | Linux x86_64 | [Executable](https://anoma.ly/release/hex/desktop/dev/linux-x64) |
+| Linux x86_64 (Debian, Ubuntu) | [.deb](https://anoma.ly/release/hex/desktop/dev/linux-x64-deb) |
+| Linux x86_64 (Fedora, openSUSE) | [.rpm](https://anoma.ly/release/hex/desktop/dev/linux-x64-rpm) |
+| Linux ARM64 | [Executable](https://anoma.ly/release/hex/desktop/dev/linux-arm64) |
+| Linux ARM64 (Debian, Ubuntu) | [.deb](https://anoma.ly/release/hex/desktop/dev/linux-arm64-deb) |
+| Linux ARM64 (Fedora, openSUSE) | [.rpm](https://anoma.ly/release/hex/desktop/dev/linux-arm64-rpm) |
 
 Updater files: [macOS ZIP](https://anoma.ly/release/hex/desktop/dev/macos-arm64),
 [Windows x64 EXE](https://anoma.ly/release/hex/desktop/dev/windows-x64),

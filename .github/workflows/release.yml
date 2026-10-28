@@ -435,15 +435,17 @@ jobs:
       HEX_VERSION: ${{ needs.plan.outputs.release-version }}
       HEX_RELEASE_CHANNEL: ${{ needs.plan.outputs.release-channel }}
     outputs:
-      linux-url: ${{ steps.publish.outputs.linux-url }}
+      linux-x64-url: ${{ steps.publish.outputs.linux-x64-url }}
+      linux-arm64-url: ${{ steps.publish.outputs.linux-arm64-url }}
     steps:
       - *checkout-release
       - name: Download
         uses: ./.github/release/download
         with:
-          pattern: "{build-linux-x86_64,sign-macos,sign-windows,sign-windows-installers}"
+          pattern: "{build-linux-*,sign-macos,sign-windows,sign-windows-installers}"
           digests: >-
-            build-linux-x86_64=${{ needs.build.outputs.linux-digest }}
+            build-linux-x86_64=${{ needs.build.outputs.linux-x64-digest }}
+            build-linux-aarch64=${{ needs.build.outputs.linux-arm64-digest }}
             sign-macos=${{ needs.sign-macos.outputs.digest }}
             sign-windows=${{ needs.sign-windows.outputs.digest }}
             sign-windows-installers=${{ needs.sign-windows-installers.outputs.digest }}
@@ -455,12 +457,18 @@ jobs:
           NOTES_URL: ${{ needs.plan.outputs.notes-url }}
         run: |
           bash .github/release/release-service.sh publish "$RUNNER_TEMP/dist" "$NOTES_URL"
-          echo "linux-url=${RELEASE%/release}$(jq -r '.release.targets["linux-x64"].url' "$RUNNER_TEMP/dist/manifest.json")" >> "$GITHUB_OUTPUT"
+          for target in linux-x64 linux-arm64; do
+            echo "$target-url=${RELEASE%/release}$(jq -r --arg target "$target" '.release.targets[$target].url' "$RUNNER_TEMP/dist/manifest.json")" >> "$GITHUB_OUTPUT"
+          done
           { echo '### Manifest'; echo '```json'; cat "$RUNNER_TEMP/dist/manifest.json"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
-      - name: Record the Nix flake
-        # The flake builds this commit from source, so it serves the version now.
+      - name: Record the Nix flake and the Linux packages
+        # The flake builds this commit from source, and the .deb and .rpm are
+        # files of this release, so they serve the version now.
         if: needs.plan.outputs.channel == 'stable'
-        run: bash .github/release/release-service.sh distribution nix "$HEX_VERSION"
+        run: |
+          for kind in nix deb-x64 deb-arm64 rpm-x64 rpm-arm64; do
+            bash .github/release/release-service.sh distribution "$kind" "$HEX_VERSION"
+          done
 
   # Last, once every platform and the release service published: tags
   # v<version> on the released commit and mirrors the files to its GitHub
@@ -502,9 +510,10 @@ jobs:
         if: needs.plan.outputs.channel == 'stable'
         uses: ./.github/release/download
         with:
-          pattern: "{build-linux-x86_64,sign-macos,sign-windows,sign-windows-installers}"
+          pattern: "{build-linux-*,sign-macos,sign-windows,sign-windows-installers}"
           digests: >-
-            build-linux-x86_64=${{ needs.build.outputs.linux-digest }}
+            build-linux-x86_64=${{ needs.build.outputs.linux-x64-digest }}
+            build-linux-aarch64=${{ needs.build.outputs.linux-arm64-digest }}
             sign-macos=${{ needs.sign-macos.outputs.digest }}
             sign-windows=${{ needs.sign-windows.outputs.digest }}
             sign-windows-installers=${{ needs.sign-windows-installers.outputs.digest }}
@@ -517,7 +526,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: bash .github/release/publish-github-release.sh "$RUNNER_TEMP/dist"
 
-  # Builds and installs hex-bin from the published file, without secrets.
+  # Builds and installs hex-bin from the published x64 file, without
+  # secrets; its PKGBUILD also names the published arm64 file.
   aur-stage:
     name: AUR package
     needs: [plan, build, publish]
@@ -526,7 +536,8 @@ jobs:
     container: archlinux:base-devel
     env:
       HEX_VERSION: ${{ needs.plan.outputs.release-version }}
-      LINUX_URL: ${{ needs.publish.outputs.linux-url }}
+      LINUX_X64_URL: ${{ needs.publish.outputs.linux-x64-url }}
+      LINUX_ARM64_URL: ${{ needs.publish.outputs.linux-arm64-url }}
     outputs:
       digest: ${{ steps.upload.outputs.digest }}
     steps:
@@ -540,19 +551,23 @@ jobs:
           persist-credentials: false
       - uses: ./.github/release/download
         with:
-          pattern: build-linux-x86_64
-          digests: build-linux-x86_64=${{ needs.build.outputs.linux-digest }}
+          pattern: build-linux-*
+          digests: >-
+            build-linux-x86_64=${{ needs.build.outputs.linux-x64-digest }}
+            build-linux-aarch64=${{ needs.build.outputs.linux-arm64-digest }}
       - name: Stage and test hex-bin
         run: |
           stage="$RUNNER_TEMP/aur"
-          linux="$RUNNER_TEMP/in/build-linux-x86_64/hex-$HEX_VERSION-linux-x64"
+          x64="$RUNNER_TEMP/in/build-linux-x86_64/hex-$HEX_VERSION-linux-x64"
+          arm64="$RUNNER_TEMP/in/build-linux-aarch64/hex-$HEX_VERSION-linux-arm64"
           chown -R builder: "$GITHUB_WORKSPACE" "$RUNNER_TEMP"
-          runuser -u builder -- scripts/release-aur.sh stage "$HEX_VERSION" "$linux" "$LINUX_URL" "$stage"
+          runuser -u builder -- scripts/release-aur.sh stage "$HEX_VERSION" "$x64" "$LINUX_X64_URL" "$arm64" "$LINUX_ARM64_URL" "$stage"
           runuser -u builder -- scripts/release-aur.sh test "$stage"
           pacman -U --noconfirm "$stage"/hex-bin-*.pkg.tar.zst
           test "$(hex --version | awk 'NF { value=$NF } END { print value }')" = "$HEX_VERSION"
-          # The PKGBUILD's source is the published file.
-          curl -fsS "$LINUX_URL" | cmp - "$linux"
+          # The PKGBUILD's sources are the published files.
+          curl -fsS "$LINUX_X64_URL" | cmp - "$x64"
+          curl -fsS "$LINUX_ARM64_URL" | cmp - "$arm64"
           mkdir -p "$RUNNER_TEMP/aur-out"
           (cd "$stage" && cp PKGBUILD .SRCINFO hex.desktop hex.service LICENSE hex-bin.install "$RUNNER_TEMP/aur-out/")
           { echo '### AUR PKGBUILD'; echo '```'; cat "$stage/PKGBUILD"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"

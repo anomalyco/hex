@@ -17,7 +17,12 @@ https://anoma.ly/release/hex/              the service (its dev stage, dev.anoma
       ├─ windows-x64-setup    HexSetup.exe    Inno Setup installer (download page)
       ├─ windows-arm64        hex.exe
       ├─ windows-arm64-setup  HexSetup.exe
-      └─ linux-x64            hex             bare executable (updater, installer, AUR)
+      ├─ linux-x64            hex             bare executable (updater, installer, AUR)
+      ├─ linux-x64-deb        hex.deb         Debian/Ubuntu package (package manager updates it)
+      ├─ linux-x64-rpm        hex.rpm         Fedora/openSUSE package
+      ├─ linux-arm64          hex
+      ├─ linux-arm64-deb      hex.deb
+      └─ linux-arm64-rpm      hex.rpm
 ```
 
 Published names carry no version or target: each file lives at

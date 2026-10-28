@@ -1,0 +1,85 @@
+# The hex .deb and .rpm, built by scripts/package-linux.sh with nfpm from a
+# release executable, in a directory it stages with hex, hex.desktop,
+# hex.service, and LICENSE. They install what the AUR package hex-bin does:
+# /usr/bin/hex, the desktop entry, and the systemd user unit. Hex never
+# replaces a package-managed executable; it shows the update command the
+# release service lists for the deb-<arch> or rpm-<arch> distribution.
+name: hex
+arch: ${HEX_PACKAGE_ARCH}
+platform: linux
+version: ${HEX_PACKAGE_VERSION}
+version_schema: none
+release: "1"
+section: utils
+priority: optional
+maintainer: Anomaly <hex@anoma.ly>
+vendor: Anomaly
+homepage: https://anoma.ly/hex
+license: MIT
+description: |-
+  Hex voice dictation: hold a key, speak, and it types.
+  Local speech recognition with optional voice commands (Linux beta).
+contents:
+  - src: hex
+    dst: /usr/bin/hex
+    file_info:
+      mode: 0755
+  - src: hex.desktop
+    dst: /usr/share/applications/hex.desktop
+    file_info:
+      mode: 0644
+  - src: hex.service
+    dst: /usr/lib/systemd/user/hex.service
+    file_info:
+      mode: 0644
+  - src: LICENSE
+    dst: /usr/share/licenses/hex/LICENSE
+    file_info:
+      mode: 0644
+overrides:
+  # Linked, then loaded at runtime: the X11, Wayland, and xkbcommon client
+  # libraries. Ubuntu 24.04 renamed alsa and glib for its 64-bit time_t
+  # transition, so each takes either name.
+  deb:
+    depends:
+      - libc6 (>= 2.39)
+      - libgcc-s1
+      - libstdc++6
+      - libasound2t64 | libasound2
+      - libglib2.0-0t64 | libglib2.0-0
+      - libvulkan1
+      - libxkbcommon0
+      - libxkbcommon-x11-0
+      - libx11-6
+      - libxcb1
+      - libxcursor1
+      - libxi6
+      - libwayland-client0
+      - curl
+    recommends:
+      - mesa-vulkan-drivers
+      - wl-clipboard
+      - wtype
+      - xdg-utils
+  # Library names, so Fedora and openSUSE resolve them to their own packages.
+  rpm:
+    depends:
+      - libasound.so.2()(64bit)
+      - libglib-2.0.so.0()(64bit)
+      - libgio-2.0.so.0()(64bit)
+      - libvulkan.so.1()(64bit)
+      - libxkbcommon.so.0()(64bit)
+      - libxkbcommon-x11.so.0()(64bit)
+      - libX11.so.6()(64bit)
+      - libxcb.so.1()(64bit)
+      - libXcursor.so.1()(64bit)
+      - libXi.so.6()(64bit)
+      - libwayland-client.so.0()(64bit)
+      - curl
+    recommends:
+      - wl-clipboard
+      - wtype
+      - xdg-utils
+rpm:
+  group: Applications/Productivity
+  summary: Hex voice dictation by Anomaly

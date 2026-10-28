@@ -1,6 +1,6 @@
 # Install The Linux Beta
 
-The Linux beta targets x86_64 Linux: i3/X11 and compatible wlroots-based Wayland
+The Linux beta targets x86_64 and ARM64 (aarch64) Linux: i3/X11 and compatible wlroots-based Wayland
 compositors such as Hyprland or Sway. Audio uses ALSA, including PipeWire systems
 with ALSA compatibility. Inference uses Vulkan when available and can fall back
 to the CPU. The window still needs a Vulkan driver, even with CPU
@@ -24,9 +24,11 @@ Hex on Linux is **one process per user** (and per data directory), not a
 system-wide/root daemon. It owns the microphone, shortcuts, model downloads and
 workers, sounds, paste, History, the recording pill, and the window. The window
 is optional: closing it stops neither dictation nor a model download, and
-launching Hex again opens it. There is no Linux tray icon; quit with
-**Quit Hex** at the bottom of the window's sidebar, the launcher's **Quit Hex**
-action, or `hex quit`.
+launching Hex again opens it. When the desktop has a tray (a
+StatusNotifierItem host, such as Waybar, KDE, or Omarchy's bar), Hex shows a
+tray icon: click it to open the window, or use its menu's **Show Hex** and
+**Quit Hex**. Without a tray, quit with **Quit Hex** at the bottom of the
+window's sidebar, the launcher's **Quit Hex** action, or `hex quit`.
 
 The window has one fixed size on Linux, 980×760 logical pixels (so fractional
 scaling keeps it sharp); it cannot be resized. Wayland has no way to ask a
@@ -98,15 +100,22 @@ mark it urgent), and closing it keeps the window's state for the next open.
 
 ## Install A Published Build
 
-The published build targets current x86_64 Arch Linux and needs glibc 2.44 or
-later. Install it with:
+Published builds exist for x86_64 and ARM64, as a bare executable, a `.deb`,
+and an `.rpm`. They are built on Ubuntu 24.04 and need glibc 2.39 or later:
+Ubuntu 24.04, Debian 13, Fedora 40, current Arch, or newer. ARM64 builds use
+Vulkan like x64 and fall back to the CPU.
+
+### Install script
+
+The script installs the bare executable for your architecture into a
+user-local layout that updates itself:
 
 ```sh
 curl -fsSL https://anoma.ly/hex/files/install-linux.sh | sh
 ```
 
-If a runtime library is missing, the installer names the Arch packages to
-install. Then open Hex from your application launcher, or run
+If a runtime library is missing, the installer names the packages to install
+(with Arch names). Then open Hex from your application launcher, or run
 `~/.local/bin/hex`; its first run downloads a speech model.
 
 To install the dependencies up front, or to inspect the installer before
@@ -135,11 +144,30 @@ Remove the application while preserving logs and settings with:
 sh install-linux.sh uninstall
 ```
 
+### Debian, Ubuntu, Fedora, and openSUSE
+
+The `hex` package installs `/usr/bin/hex`, the desktop entry, and the systemd
+user unit `hex.service` (the same files as the AUR package below). Download
+it for your architecture from <https://anoma.ly/release/hex/desktop/stable/linux-x64-deb>
+(`linux-arm64-deb`, `linux-x64-rpm`, `linux-arm64-rpm`), then:
+
+```sh
+sudo apt install ./hex.deb            # Debian, Ubuntu
+sudo dnf install ./hex.rpm            # Fedora (zypper install on openSUSE)
+systemctl --user enable hex.service   # optional: start Hex at login
+```
+
+There is no apt or dnf repository yet. Hex never replaces a package-installed
+executable: when a new stable release is out, Settings shows the command that
+downloads and installs its package. Package installs follow the stable channel,
+so a package from the dev channel learns of the next stable release only.
+
 ### AUR
 
 From the next release on, the AUR package `hex-bin` installs `/usr/bin/hex`,
 the desktop entry, and the systemd user unit `hex.service`, from the same
-signed release executable. It is not on the AUR yet. With an AUR helper:
+release executable, for `x86_64` and `aarch64`. It is not on the AUR yet. With
+an AUR helper:
 
 ```sh
 yay -S hex-bin

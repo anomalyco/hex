@@ -21,7 +21,7 @@ use crate::app_settings::{
 use crate::desktop_host::{
     DesktopAction, DesktopGrantedShortcut, DesktopShortcut, DesktopShortcuts, DesktopUpdateStatus,
 };
-use crate::desktop_i18n::{tr, tr_fill};
+use crate::desktop_i18n::{tr, tr_fill, tr_named};
 use crate::dictation::ShortcutMode;
 use crate::transcription_models::{self, ModelPreparationStage};
 
@@ -835,16 +835,30 @@ fn dictation_section(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
             !devices.names.is_empty() && !devices.names.iter().any(|name| name == saved)
         })
     });
+    // A MacBook's built-in microphone is off while its lid is closed.
+    let off = listed.and_then(|devices| devices.off_with_lid_closed.as_deref());
+    let saved_off = settings
+        .microphone
+        .as_deref()
+        .filter(|saved| off == Some(*saved));
     // System default's choice, with the input it resolves to in faint text.
     let system_detail = default_name.map(str::to_owned);
     // The field always names the input in use, so a missing saved
     // microphone shows the system default standing in for it.
-    let (microphone, microphone_detail) = match (&settings.microphone, missing) {
+    let (microphone, microphone_detail) = match (&settings.microphone, missing.or(saved_off)) {
         (Some(saved), None) => (saved.clone(), None),
         _ => (tr("System default").to_owned(), system_detail.clone()),
     };
     let mac = ui.platform.caps.os == super::platform::Os::Macos;
+    let lid_note = |built_in: &str| match default_name {
+        Some(name) => tr_named(
+            "{built_in} is off while the lid is closed, so Hex listens to {input}",
+            &[("built_in", built_in), ("input", name)],
+        ),
+        None => tr_fill("{} is off while the lid is closed", built_in),
+    };
     let microphone_note = listed.and_then(|devices| match &settings.microphone {
+        Some(_) if saved_off.is_some() => saved_off.map(lid_note),
         Some(_) => missing.map(|saved| {
             if mac {
                 tr_fill("{} isn't connected; using your Mac's input", saved)
@@ -858,6 +872,7 @@ fn dictation_section(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
                 name,
             )
         }),
+        None if devices.default_is_off_with_lid_closed => off.map(lid_note),
         None => None,
     });
     let mut devices = vec![Choice {
@@ -874,7 +889,8 @@ fn dictation_section(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
             let name = device.clone();
             Choice {
                 label: device.clone(),
-                detail: None,
+                detail: (off == Some(device.as_str()))
+                    .then(|| tr("off while the lid is closed").to_owned()),
                 selected: settings.microphone.as_deref() == Some(device),
                 choose: Box::new(move |ui: &mut Ui| {
                     ui.open = None;

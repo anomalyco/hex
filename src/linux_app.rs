@@ -322,6 +322,7 @@ pub(crate) fn run(
     *published.status.lock().unwrap() = Some(host.status(host.snapshot(), session.clone()));
     let (control, requests) = mpsc::sync_channel(8);
     server.serve(published.clone(), control.clone(), shutdown);
+    let tray = crate::linux_tray::start(control.clone(), shutdown);
     linux_service::notify("READY=1");
     tracing::info!(pid = std::process::id(), "Hex instance ready");
 
@@ -336,6 +337,9 @@ pub(crate) fn run(
     run_window(&host, requests, first, shutdown);
     shutdown.store(true, Ordering::Release);
     let _ = worker.join();
+    if let Some(tray) = tray {
+        let _ = tray.join();
+    }
     Ok(())
 }
 

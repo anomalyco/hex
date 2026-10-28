@@ -1,7 +1,8 @@
 name: Build desktop
 
-# Builds the unsigned Linux x86_64 and Windows x64 and ARM64 executables from
-# one commit, named as the release service targets
+# Builds the unsigned Linux x64 and ARM64 executables with their .deb and
+# .rpm packages, and the Windows x64 and ARM64 executables, from one commit,
+# named as the release service targets
 # (docs/plans/release-service.md). Release calls it for every release, Test
 # builds with test-build so every push to dev has downloadable builds that
 # never update themselves.
@@ -34,8 +35,10 @@ on:
         type: number
         default: 0
     outputs:
-      linux-digest:
-        value: ${{ jobs.linux.outputs.digest }}
+      linux-x64-digest:
+        value: ${{ jobs.linux-x64.outputs.digest }}
+      linux-arm64-digest:
+        value: ${{ jobs.linux-arm64.outputs.digest }}
       windows-x64-digest:
         value: ${{ jobs.windows-x64.outputs.digest }}
       windows-arm64-digest:
@@ -45,62 +48,100 @@ permissions:
   contents: read
 
 jobs:
-  linux:
+  # Both architectures build natively on Ubuntu 24.04, so the executable and
+  # packages need glibc 2.39 (Ubuntu 24.04, Debian 13, Fedora 40, Arch) rather
+  # than a rolling distribution's newest. ARM64 decodes on the GPU through
+  # Vulkan like x64 (Mesa's drivers on ARM boards and Asahi), falling back to
+  # the CPU without a Vulkan device.
+  linux-x64:
     name: Linux x86_64
     runs-on: ubuntu-24.04
     timeout-minutes: 90
-    # The supported Linux host is x86_64 Arch, so the release links against
-    # current Arch libraries; the glibc floor is reported in the summary.
-    container: archlinux:base-devel
     env:
       HEX_VERSION: ${{ inputs.version }}
       HEX_BUILD_CHANNEL: ${{ inputs.channel }}
+      HEX_LINUX_ARCH: x86_64
+      HEX_LINUX_LABEL: x64
+      NFPM_ARCHIVE: nfpm_2.48.0_Linux_x86_64.tar.gz
+      NFPM_SHA256: 6d7f9a28b2f397934403950fcbba83f598b08d02edbe79a0815b3b4897341750
     outputs:
       digest: ${{ steps.upload.outputs.digest }}
-    steps:
-      - name: Install build dependencies
-        run: |
-          pacman -Syu --noconfirm --needed git rustup python alsa-lib curl jq openssl \
-            xxd file binutils util-linux glib2 \
-            libxkbcommon libxkbcommon-x11 libx11 libxcb libxcursor libxi libxrandr \
-            fontconfig freetype2 wayland systemd-libs openblas vulkan-headers \
-            vulkan-icd-loader shaderc spirv-headers clang cmake pkgconf
-          useradd --create-home builder
+    steps: &linux-steps
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.sha }}
           persist-credentials: false
-      - name: Restore the Cargo cache
-        if: inputs.test-build
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
-          path: |
-            /home/builder/.cargo/registry
-            /home/builder/.cargo/git
-            target
-          key: test-build-linux-${{ hashFiles('Cargo.lock') }}
-      - name: Build
+          toolchain: stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        if: inputs.test-build
+        with:
+          key: test-build
+          cache-on-failure: true
+      - name: Install build dependencies
+        # libopenblas-dev only satisfies build.rs's -lopenblas, which
+        # --as-needed drops: the release links no system BLAS
+        # (scripts/build-linux.sh).
         run: |
-          mkdir -p "$RUNNER_TEMP/dist"
-          chown -R builder: "$GITHUB_WORKSPACE" "$RUNNER_TEMP/dist" /home/builder
-          runuser -u builder -- env HOME=/home/builder \
-            HEX_RELEASE_SOURCE="$GITHUB_WORKSPACE" \
-            HEX_RELEASE_DIST="$RUNNER_TEMP/dist" \
-            HEX_VERSION="$HEX_VERSION" HEX_BUILD_CHANNEL="$HEX_BUILD_CHANNEL" \
-            CARGO_BUILD_JOBS=4 BLA_VENDOR=OpenBLAS OPENSSL_NO_VENDOR=1 \
-            CC=clang CXX=clang++ \
-            sh -c 'git config --global --add safe.directory "$HEX_RELEASE_SOURCE" && rustup default stable && scripts/build-linux.sh'
+          sudo apt-get update
+          sudo apt-get install -y clang cmake pkg-config python3 file jq libasound2-dev \
+            libssl-dev libgtk-3-dev libxkbcommon-x11-dev libx11-xcb-dev libfontconfig1-dev \
+            libfreetype-dev libxcursor-dev libxi-dev libxrandr-dev libopenblas-dev \
+            libvulkan-dev glslc libshaderc-dev
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/nfpm.tar.gz" \
+            "https://github.com/goreleaser/nfpm/releases/download/v2.48.0/$NFPM_ARCHIVE"
+          echo "$NFPM_SHA256  $RUNNER_TEMP/nfpm.tar.gz" | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/bin"
+          tar -xzf "$RUNNER_TEMP/nfpm.tar.gz" -C "$RUNNER_TEMP/bin" nfpm
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+      - name: Build
+        env:
+          HEX_RELEASE_DIST: ${{ runner.temp }}/dist
+          CARGO_BUILD_JOBS: 4
+          OPENSSL_NO_VENDOR: 1
+          CC: clang
+          CXX: clang++
+        run: |
+          executable=$(scripts/build-linux.sh)
+          scripts/package-linux.sh "$executable" "$HEX_VERSION" "$HEX_LINUX_LABEL" "$HEX_RELEASE_DIST"
+      - name: Install the .deb here and the .rpm on Fedora
+        run: |
+          base="$RUNNER_TEMP/dist/hex-$HEX_VERSION-linux-$HEX_LINUX_LABEL"
+          dpkg-deb --info "$base.deb"
+          sudo apt-get install -y "$base.deb"
+          test "$(/usr/bin/hex --version | awk 'NF { value=$NF } END { print value }')" = "$HEX_VERSION"
+          dpkg-query -S /usr/bin/hex /usr/lib/systemd/user/hex.service /usr/share/applications/hex.desktop
+          sudo apt-get remove -y hex
+          docker run --rm -v "$RUNNER_TEMP/dist:/dist:ro" -e HEX_VERSION -e HEX_LINUX_LABEL fedora:42 sh -euc '
+            dnf install -y -q "/dist/hex-$HEX_VERSION-linux-$HEX_LINUX_LABEL.rpm"
+            test "$(hex --version | awk "NF { value=\$NF } END { print value }")" = "$HEX_VERSION"
+            rpm -qf /usr/bin/hex /usr/lib/systemd/user/hex.service /usr/share/applications/hex.desktop'
       - name: Report the glibc floor
         run: |
-          floor=$(objdump -T "$RUNNER_TEMP/dist/hex-$HEX_VERSION-linux-x64" | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -1)
-          ldd --version | head -1
-          echo "Linux artifact requires $floor." | tee -a "$GITHUB_STEP_SUMMARY"
+          floor=$(objdump -T "$RUNNER_TEMP/dist/hex-$HEX_VERSION-linux-$HEX_LINUX_LABEL" | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -1)
+          echo "Linux $HEX_LINUX_LABEL artifact requires $floor." | tee -a "$GITHUB_STEP_SUMMARY"
       - id: upload
         uses: ./.github/release/upload
         with:
-          name: ${{ inputs.artifact-prefix }}-linux-x86_64
+          name: ${{ inputs.artifact-prefix }}-linux-${{ env.HEX_LINUX_ARCH }}
           path: ${{ runner.temp }}/dist
           retention-days: ${{ inputs.retention-days }}
+
+  linux-arm64:
+    name: Linux aarch64
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 90
+    env:
+      HEX_VERSION: ${{ inputs.version }}
+      HEX_BUILD_CHANNEL: ${{ inputs.channel }}
+      HEX_LINUX_ARCH: aarch64
+      HEX_LINUX_LABEL: arm64
+      NFPM_ARCHIVE: nfpm_2.48.0_Linux_arm64.tar.gz
+      NFPM_SHA256: a9a75213763783b7669719e505474c748c5ad7dc66591a195619deb50f85c2f4
+    outputs:
+      digest: ${{ steps.upload.outputs.digest }}
+    steps: *linux-steps
 
   windows-x64:
     name: Windows x86_64

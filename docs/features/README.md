@@ -847,7 +847,8 @@ Linux beta                               // not macOS feature parity
 │       ├── X11 -> override-redirect window, empty input shape
 │       ├── No layer-shell -> `hex status` reports the HUD limitation
 │       └── No window loop (no GPU or display, `hex dictate`) -> no HUD
-├── X11 -> No tray; status and sounds remain available
+├── Tray host (StatusNotifierWatcher) -> Tray icon: click opens the window; menu has Show Hex, Quit Hex (linux_tray)
+│   └── No tray host -> No icon; status and sounds remain available
 ├── Microphone -> System default or a saved device; `--device` overrides
 │   └── System default -> ALSA's default, resolved at each stream open // no live follow
 ├── Microphone failure -> Listener exits, not macOS automatic recovery

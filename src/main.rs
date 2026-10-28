@@ -89,6 +89,8 @@ mod linux_rune_hud;
 mod linux_service;
 #[cfg(target_os = "linux")]
 mod linux_session;
+#[cfg(target_os = "linux")]
+mod linux_tray;
 #[cfg(target_os = "macos")]
 mod local_api;
 #[cfg(any(target_os = "linux", target_os = "windows"))]

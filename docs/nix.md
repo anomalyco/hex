@@ -73,7 +73,7 @@ It waits for a Wayland socket or an X11 window manager before launching `hex ser
 which reports readiness to systemd (`Type=notify`) once its socket answers.
 Hex is one process: `hex` opens its window, starting the unit when it is not
 running, and `hex start` starts it without the window. Closing the window never
-stops Hex, and there is no Linux tray. The unit stops with the configured target
+stops Hex; a tray icon shows when the desktop has a tray host. The unit stops with the configured target
 and retries failed starts without a tight restart loop; a crash restart opens no
 window. `hex quit` (or **Quit Hex** in the window) leaves it stopped until the
 next session or the next launch.

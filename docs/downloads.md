@@ -6,7 +6,8 @@
 anoma.ly/release/hex/                      the Anomaly release service (docs/releasing.md)
 ├── index.json, desktop/stable.json        what the site, installers, and apps read
 └── files/<sha256>/<name>                  Hex-<v>-macos-arm64.{zip,dmg}, Hex-<v>-windows-<arch>.exe,
-                                           Hex-Setup-<v>-windows-<arch>.exe, hex-<v>-linux-x64
+                                           Hex-Setup-<v>-windows-<arch>.exe,
+                                           hex-<v>-linux-<x64|arm64>{,.deb,.rpm}
 anoma.ly/hex                               the one site: platform-aware download (Worker hex-production-site)
 ├── install-linux.sh, install-windows.ps1  installers from the stable manifest
 └── files/…                                hex-production-files, frozen at 2.3.1 for old clients:

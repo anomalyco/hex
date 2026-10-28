@@ -148,7 +148,6 @@ pub(crate) fn filtered_model_keys(catalog: &ModelCatalog, query: &str) -> Vec<Op
                     || choice.name.to_lowercase().contains(query)
                     || choice.provider.to_lowercase().contains(query)
             })
-            .take(8)
             .map(|choice| Some(choice.key.clone())),
     );
     choices

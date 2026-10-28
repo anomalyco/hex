@@ -181,6 +181,13 @@ saved microphone missing or will not open
   └── not listed -> look again on a device-list change // macOS reports arrivals
                     └── Windows, Linux: bounded backoff, logged only on a switch
   -> found -> switch back once capture is idle        // not during a pending start or tail
+MacBook lid closed (macOS)                            // built-in mic is off but still listed
+  -> built-in mic is passed over like Hex Microphone  // AppleClamshellState, read per resolve
+  ├── default or saved mic is built in -> first other real input stands in
+  │     -> Settings: "… is off while the lid is closed, so Hex listens to …"
+  ├── no other input -> "the built-in microphone is off while the lid is closed"
+  └── lid opens or closes -> re-resolve like a device-list change // IOKit clamshell notification
+        -> switch once capture is idle
 
 programmatic dictation (local API) when the stream interrupts or gaps
   ├── audio delivered before the loss -> kept under its id // recover.programmatic-loss
@@ -193,6 +200,7 @@ Checks in [audio.rs](../../src/audio.rs):
 `microphone_recovery_retries_with_bounded_backoff_and_resets`,
 `startup_retry_recovers_metadata_and_audio_without_restarting`,
 `a_missing_selection_uses_the_default_until_it_returns`,
+`a_closed_lid_passes_over_the_built_in_microphone`,
 `where_the_os_reports_new_devices_only_a_failed_open_is_retried`,
 `only_an_idle_capture_lets_the_microphone_switch`;
 [dictation_audio.rs](../../src/dictation_audio.rs):
@@ -203,8 +211,12 @@ Checks in [audio.rs](../../src/audio.rs):
 [recognition.rs](../../src/recognition.rs):
 `microphone_loss_keeps_a_programmatic_clip_for_finish` (the hold, not a `/finish`
 through the running listener).
+[rune_ui/tests.rs](../../src/rune_ui/tests.rs):
+`a_closed_lid_names_the_input_standing_in_for_the_built_in_microphone`.
 Proof limit: retry policy and channel-backed replacement audio, not a physical
-device reconnect or full native mic-to-target result.
+device reconnect or full native mic-to-target result. The closed-lid cases are
+pure resolution and a fixture scene; the IOKit lid read and its notification
+have not been observed on a real MacBook closing and opening its lid.
 
 `recover.cold-open`: "Release when idle" opens for a gesture, not an idle retry
 loop. Each attempt must own its opening result.

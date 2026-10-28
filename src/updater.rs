@@ -53,7 +53,7 @@ pub enum Method {
     /// A direct install Hex cannot replace (macOS: a read-only or translocated
     /// location); updates link to the download.
     DownloadOnly,
-    /// A package manager (`aur`, `nix`, `brew`, `winget`, `scoop`) updates
+    /// A package manager (`aur`, `deb-x64`, `rpm-arm64`, `nix`, `brew`, …) updates
     /// it; Hex shows its command once it serves a newer version.
     #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
     Package(&'static str),

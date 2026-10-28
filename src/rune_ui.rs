@@ -1455,7 +1455,7 @@ fn nav_item(p: Paint, pane: Pane, on: bool) -> El {
     if on {
         item = item.fill(c.layer_02);
     }
-    lists::source_item(p, item, on)
+    lists::source_item(item, on)
 }
 
 /// Linux has no tray: the window's way to stop Hex. Closing the window
@@ -1577,6 +1577,7 @@ const SCENES: &[Scene] = &[
             names: vec!["Built-in Audio Analog Stereo".into(), "Shure MV7".into()],
             system_default: Some("Shure MV7".into()),
             default_is_hex_microphone: false,
+            ..Default::default()
         });
         ui.confirm_release = true;
     }),
@@ -1597,6 +1598,13 @@ const SCENES: &[Scene] = &[
     }),
     ("voice-action-models", |ui| {
         *ui = portal_fixture();
+        ui.settings.voice_action.enabled = true;
+        ui.pane = Pane::VoiceAction;
+        ui.open = Some(Menu::Model);
+    }),
+    ("voice-action-models-long", |ui| {
+        *ui = portal_fixture();
+        ui.models = models::Models::fixture_long();
         ui.settings.voice_action.enabled = true;
         ui.pane = Pane::VoiceAction;
         ui.open = Some(Menu::Model);
@@ -1705,6 +1713,15 @@ const SCENES: &[Scene] = &[
     ("mac-microphone-missing", |ui| {
         *ui = mac_fixture();
         ui.settings.microphone = Some("Shure MV7".into());
+        ui.open = Some(Menu::Microphone);
+    }),
+    ("mac-microphone-lid-closed", |ui| {
+        *ui = mac_fixture();
+        if let Ok(devices) = &mut ui.microphones {
+            devices.system_default = Some("Studio Display Microphone".into());
+            devices.off_with_lid_closed = Some("MacBook Pro Microphone".into());
+            devices.default_is_off_with_lid_closed = true;
+        }
         ui.open = Some(Menu::Microphone);
     }),
     ("mac-settings-vocabulary", |ui| {
@@ -2008,6 +2025,7 @@ fn mac_fixture() -> Ui {
         ],
         system_default: Some("Kit Pods".into()),
         default_is_hex_microphone: false,
+        ..Default::default()
     });
     ui.meetings = meetings::MeetingsPane::fixture();
     ui

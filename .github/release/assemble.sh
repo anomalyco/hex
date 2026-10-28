@@ -13,7 +13,9 @@ for file in "$in"/*/*; do
   name=$(basename "$file")
   [ "$name" = SHA256SUMS ] && continue
   case "$name" in
-    "hex-$v-linux-x64" | "Hex-$v-macos-arm64.zip" | "Hex-$v-macos-arm64.dmg" | \
+    "hex-$v-linux-x64" | "hex-$v-linux-x64.deb" | "hex-$v-linux-x64.rpm" | \
+      "hex-$v-linux-arm64" | "hex-$v-linux-arm64.deb" | "hex-$v-linux-arm64.rpm" | \
+      "Hex-$v-macos-arm64.zip" | "Hex-$v-macos-arm64.dmg" | \
       "Hex-$v-windows-x64.exe" | "Hex-$v-windows-arm64.exe" | \
       "Hex-Setup-$v-windows-x64.exe" | "Hex-Setup-$v-windows-arm64.exe") ;;
     *) die "$name is not a release file of Hex $v." ;;

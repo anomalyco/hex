@@ -8,13 +8,14 @@ repository = "https://github.com/anomalyco/hex"
 
 # Crates imported from Scrawl live under `crates/`. Plain `cargo build` and
 # `cargo test` still select only Hex; pass `--workspace` or `-p` for the others.
-# `crates/capture` is excluded so `--workspace` never builds it: it compiles
-# only as the `capture` feature's macOS dependency, and `-p scrawl-capture`
-# tests and lints it. The root package is a member without being listed;
-# listing "." would defeat `exclude`.
+# `crates/capture` and `crates/capture-core` are excluded so `--workspace`
+# never builds them: they compile only as the `capture` feature's macOS
+# dependencies, and `-p scrawl-capture` / `-p capture-core` test and lint
+# them. The root package is a member without being listed; listing "." would
+# defeat `exclude`.
 [workspace]
 members = ["crates/router"]
-exclude = ["crates/capture"]
+exclude = ["crates/capture", "crates/capture-core"]
 
 [[test]]
 name = "keyboard_layout"
@@ -33,6 +34,17 @@ onnx-benchmark = ["dep:transcribe-rs"]
 # every public build, which never compile it or its Swift helper.
 capture = ["dep:scrawl-capture", "dep:anyhow", "dep:rune-motion"]
 
+# Shipped executables carry no symbol table (about 11 MB on Linux). Panic
+# backtraces lose function names; debug builds keep them.
+[profile.release]
+strip = true
+
+# transcribe-cpp-sys 0.4.1 plus one ggml patch that builds only the Vulkan
+# shaders Hex's models use (see `CMAKE_ARGS` in .cargo/config.toml). Drop this
+# once a transcribe.cpp release carries the patch.
+[patch.crates-io]
+transcribe-cpp-sys = { git = "https://github.com/anomalyco/transcribe.cpp", rev = "caf6b22b4ff64d8f5fe521c23d7061b057148c5e" }
+
 [profile.moonshine-lab]
 inherits = "release"
 debug-assertions = true
@@ -49,7 +61,7 @@ hound = "3.5.1"
 libc = "0.2.189"
 libloading = "0.9.0"
 regex = "1.13.1"
-rodio = { version = "0.22.2", default-features = false, features = ["playback", "mp3"] }
+rodio = { version = "0.23.0", default-features = false, features = ["playback", "mp3"] }
 rubato = "5.0.1"
 semver = "1.0.28"
 serde = { version = "1.0.229", features = ["derive"] }
@@ -98,11 +110,11 @@ x11rb = { version = "0.14.0", features = ["xtest"] }
 
 # The desktop UI.
 [target.'cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))'.dependencies]
-rune = { git = "https://github.com/anomalyco/rune.git", rev = "ea59c4961db739be2c240d6273ec3a38f208cb45" }
-rune-kit = { git = "https://github.com/anomalyco/rune.git", rev = "ea59c4961db739be2c240d6273ec3a38f208cb45" }
+rune = { git = "https://github.com/anomalyco/rune.git", rev = "8bc68a1208fde334cb1f30feb1576027cdf309b5" }
+rune-kit = { git = "https://github.com/anomalyco/rune.git", rev = "8bc68a1208fde334cb1f30feb1576027cdf309b5" }
 # The capture capsule's motion-lint trace (`capture` only).
-rune-motion = { git = "https://github.com/anomalyco/rune.git", rev = "ea59c4961db739be2c240d6273ec3a38f208cb45", optional = true }
-rune-theme-opencode = { git = "https://github.com/anomalyco/rune.git", rev = "ea59c4961db739be2c240d6273ec3a38f208cb45" }
+rune-motion = { git = "https://github.com/anomalyco/rune.git", rev = "8bc68a1208fde334cb1f30feb1576027cdf309b5", optional = true }
+rune-theme-opencode = { git = "https://github.com/anomalyco/rune.git", rev = "8bc68a1208fde334cb1f30feb1576027cdf309b5" }
 # The welcome hero's own GPU pass (`rune_ui::hero`); Rune's version.
 wgpu = { version = "30", default-features = false, features = ["std", "parking_lot", "metal", "wgsl"] }
 

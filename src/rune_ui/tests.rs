@@ -750,6 +750,28 @@ fn choosing_an_opencode_model_saves_it() {
 }
 
 #[test]
+fn a_long_model_list_fits_the_window_and_follows_the_highlight() {
+    let mut rt = runtime("voice-action-models-long", true, PANE_SIZE);
+    settle(&mut rt);
+    let [_, top, _, height] = rt.presented("model-results").unwrap().0;
+    assert!(
+        top + height <= PANE_SIZE.1 - 8.0,
+        "the list ends inside the window: {top} + {height}"
+    );
+    tap(&mut rt, "model-search");
+    for _ in 0..40 {
+        key(&mut rt, Key::Down, Mods::default());
+    }
+    settle(&mut rt);
+    let [_, row_top, _, row_height] = rt.presented("model40").unwrap().0;
+    assert!(
+        row_top >= top && row_top + row_height <= top + height,
+        "the highlighted row scrolled into view: {row_top} in {top}..{}",
+        top + height
+    );
+}
+
+#[test]
 fn arrow_keys_move_the_search_highlight_and_enter_picks_it() {
     let mut rt = runtime("voice-action-models", true, PANE_SIZE);
     tap(&mut rt, "model-search");
@@ -1198,6 +1220,33 @@ fn the_microphone_field_names_the_input_in_use() {
     let texts = texts(&rt);
     assert!(texts.contains(&"not connected".to_owned()), "{texts:?}");
     assert!(texts.contains(&"Shure MV7 isn't connected; using your Mac's input".to_owned()));
+}
+
+#[test]
+fn a_closed_lid_names_the_input_standing_in_for_the_built_in_microphone() {
+    let note = "MacBook Pro Microphone is off while the lid is closed, so Hex listens to Studio Display Microphone";
+    let field = |rt: &Runtime<Ui>| element(rt, "microphone-control-field-trigger").label;
+    let mut rt = runtime("mac-microphone-lid-closed", true, PANE_SIZE);
+    assert_eq!(
+        field(&rt).as_deref(),
+        Some("System default, Studio Display Microphone")
+    );
+    let shown = texts(&rt);
+    assert!(shown.contains(&note.to_owned()), "{shown:?}");
+    assert!(shown.contains(&"off while the lid is closed".to_owned()));
+
+    // A saved built-in microphone shows the default standing in, too.
+    rt.state.settings.microphone = Some("MacBook Pro Microphone".into());
+    if let Ok(devices) = &mut rt.state.microphones {
+        devices.default_is_off_with_lid_closed = false;
+    }
+    rt.invalidate();
+    settle(&mut rt);
+    assert_eq!(
+        field(&rt).as_deref(),
+        Some("System default, Studio Display Microphone")
+    );
+    assert!(texts(&rt).contains(&note.to_owned()));
 }
 
 // ---------------------------------------------------------------------------

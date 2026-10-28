@@ -7,7 +7,7 @@
 use std::sync::mpsc::Receiver;
 use std::time::Instant;
 
-use rune::{El, TextEdit, Tx, col, row, text};
+use rune::{El, ScrollSpec, TextEdit, Tx, col, row, text};
 use rune_kit::{Badge, Placement, Popover, Select, SelectAppearance, TextInput};
 
 use super::controls::{ButtonKind, DESCRIPTION, Highlight, Paint, button, setting_row};
@@ -144,6 +144,29 @@ impl Models {
         }
     }
 
+    /// [`Models::fixture`] with as many models as OpenCode lists with
+    /// several providers signed in, more than fit in the window.
+    pub(super) fn fixture_long() -> Self {
+        let mut models = Self::fixture();
+        if let ModelCatalogState::Loaded(catalog) = &mut models.state {
+            for (provider, family) in [
+                ("anthropic", "Claude"),
+                ("openai", "GPT"),
+                ("google", "Gemini"),
+            ] {
+                for version in 1..=16 {
+                    catalog.models.push(ModelChoice {
+                        key: format!("{provider}/{}-{version}", family.to_lowercase()),
+                        name: format!("{family} {version}"),
+                        provider: provider.into(),
+                        variants: Vec::new(),
+                    });
+                }
+            }
+        }
+        models
+    }
+
     pub(super) fn fixture_missing() -> Self {
         Self {
             state: ModelCatalogState::Missing,
@@ -224,14 +247,21 @@ fn open_model_picker(ui: &mut Ui) {
     ui.open = Some(Menu::Model);
 }
 
-/// Up and Down in the search field move the model popover's highlight.
-fn move_highlight(ui: &mut Ui, event: &rune::KeyEvent) -> bool {
+/// Up and Down in the search field move the model popover's highlight and
+/// keep it in view.
+fn move_highlight(ui: &mut Ui, event: &rune::KeyEvent, tx: &mut Tx) -> bool {
     let query = ui.models.query();
     let count = ui
         .models
         .catalog()
         .map_or(0, |catalog| filtered_model_keys(catalog, &query).len());
-    ui.models.highlight.key(&event.key, &query, count)
+    if !ui.models.highlight.key(&event.key, &query, count) {
+        return false;
+    }
+    if let Some(index) = ui.models.highlight.index(&query, count) {
+        tx.scroll_into_view_in("model-results", format!("model{index}"));
+    }
+    true
 }
 
 fn close(ui: &mut Ui) {
@@ -382,7 +412,7 @@ fn model_list(ui: &Ui, p: Paint, target: Target) -> El {
         .width(Some(280.0))
         .leading_icon(p.k.glyph.search)
         .on_edit(|ui: &mut Ui| &mut ui.models.search)
-        .on_key(|ui: &mut Ui, event: &rune::KeyEvent, _: &mut Tx| move_highlight(ui, event))
+        .on_key(|ui: &mut Ui, event: &rune::KeyEvent, tx: &mut Tx| move_highlight(ui, event, tx))
         .on_submit(move |ui: &mut Ui, _: &mut Tx| {
             let query = ui.models.query();
             let picked = ui.models.catalog().and_then(|catalog| {
@@ -396,7 +426,7 @@ fn model_list(ui: &Ui, p: Paint, target: Target) -> El {
         })
         .build(p.k)
         .key("model-search");
-    let mut list = col().key("model-results").w(280.0).mt(8.0);
+    let mut list = col().key("model-rows");
     let Some(catalog) = ui.models.catalog() else {
         return col().key("model-picker-body").child(search);
     };
@@ -463,7 +493,25 @@ fn model_list(ui: &Ui, p: Paint, target: Target) -> El {
         }
         list = list.child(entry);
     }
-    col().key("model-picker-body").child(search).child(list)
+    // The rows scroll under the search field in whatever height the window
+    // leaves the popover.
+    let results = col()
+        .key("model-results")
+        .w(280.0)
+        .mt(8.0)
+        .shrink()
+        .min_h(0.0)
+        .scroll(ScrollSpec {
+            stick_bottom: false,
+        })
+        .scroll_edge_fade(12.0)
+        .child(list);
+    col()
+        .key("model-picker-body")
+        .shrink()
+        .min_h(0.0)
+        .child(search)
+        .child(results)
 }
 
 /// Why OpenCode features are unavailable, with retry and setup actions;

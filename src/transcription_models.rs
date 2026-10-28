@@ -1153,6 +1153,7 @@ mod tests {
     }
 
     #[test]
+<<<<<<< HEAD
     fn accuracy_is_the_inverse_of_the_word_error_rate() {
         assert_eq!(
             definition(TranscriptionModelId::ParakeetUnifiedEnglish)
@@ -1175,6 +1176,25 @@ mod tests {
     }
 
     #[test]
+||||||| c8c1ac68
+=======
+    fn gguf_artifacts_are_q8_0_for_the_vulkan_shader_subset() {
+        // Q8_0 GGUFs hold only f32, f16, and q8_0 tensors, the types the
+        // Vulkan backend is built for (`CMAKE_ARGS` in .cargo/config.toml).
+        // Another quantization needs its type added there, or Vulkan aborts.
+        for model in MODELS {
+            if let ModelRuntime::Gguf(artifact) = model.runtime {
+                assert!(
+                    artifact.filename.ends_with("-Q8_0.gguf"),
+                    "{} needs its tensor types in GGML_VULKAN_SHADER_TYPES",
+                    artifact.filename
+                );
+            }
+        }
+    }
+
+    #[test]
+>>>>>>> origin/dev
     fn only_the_buffered_parakeet_artifact_is_marked_streaming() {
         // transcribe.cpp advertises streaming for Parakeet's chunked-attention
         // variants; Whisper, Qwen3-ASR, SenseVoice, Cohere, and the offline

@@ -80,6 +80,10 @@ api() {
 # The package managers that mirror Hex, each as the service lists it.
 distributions='[
   {"kind": "aur", "package": "hex-bin", "command": "yay -Syu hex-bin"},
+  {"kind": "deb-x64", "package": "hex", "command": "curl -fLo /tmp/hex.deb https://anoma.ly/release/hex/desktop/stable/linux-x64-deb && sudo apt install /tmp/hex.deb"},
+  {"kind": "deb-arm64", "package": "hex", "command": "curl -fLo /tmp/hex.deb https://anoma.ly/release/hex/desktop/stable/linux-arm64-deb && sudo apt install /tmp/hex.deb"},
+  {"kind": "rpm-x64", "package": "hex", "command": "curl -fLo /tmp/hex.rpm https://anoma.ly/release/hex/desktop/stable/linux-x64-rpm && sudo dnf install /tmp/hex.rpm"},
+  {"kind": "rpm-arm64", "package": "hex", "command": "curl -fLo /tmp/hex.rpm https://anoma.ly/release/hex/desktop/stable/linux-arm64-rpm && sudo dnf install /tmp/hex.rpm"},
   {"kind": "brew", "cask": "anomalyco/tap/hex", "command": "brew upgrade --cask anomalyco/tap/hex"},
   {"kind": "nix", "attribute": "github:anomalyco/hex", "command": "nix profile upgrade hex"}
 ]'
@@ -143,7 +147,12 @@ publish() {
     "windows-x64-setup=Hex-Setup-$version-windows-x64.exe=HexSetup.exe" \
     "windows-arm64=Hex-$version-windows-arm64.exe=hex.exe" \
     "windows-arm64-setup=Hex-Setup-$version-windows-arm64.exe=HexSetup.exe" \
-    "linux-x64=hex-$version-linux-x64=hex"
+    "linux-x64=hex-$version-linux-x64=hex" \
+    "linux-x64-deb=hex-$version-linux-x64.deb=hex.deb" \
+    "linux-x64-rpm=hex-$version-linux-x64.rpm=hex.rpm" \
+    "linux-arm64=hex-$version-linux-arm64=hex" \
+    "linux-arm64-deb=hex-$version-linux-arm64.deb=hex.deb" \
+    "linux-arm64-rpm=hex-$version-linux-arm64.rpm=hex.rpm"
   do
     target=${entry%%=*}
     rest=${entry#*=}
