@@ -4,14 +4,12 @@ set -euo pipefail
 if [[ "${1:-}" == --inside ]]; then
   target=
   keyboard=
-  app=
   service=
   finish() {
     status=$?
     trap - EXIT
     if [[ -n "$target" ]]; then kill "$target" 2>/dev/null || true; fi
     if [[ -n "$keyboard" ]]; then kill "$keyboard" 2>/dev/null || true; fi
-    if [[ -n "$app" ]]; then kill "$app" 2>/dev/null || true; fi
     if [[ -n "$service" ]]; then kill "$service" 2>/dev/null || true; wait "$service" 2>/dev/null || true; fi
     printf '%s\n' "$status" > "$HEX_WAYLAND_TEST_RESULT"
     swaymsg exit >/dev/null 2>&1 || true
@@ -19,8 +17,10 @@ if [[ "${1:-}" == --inside ]]; then
   }
   trap finish EXIT
 
-  # Seed the isolated compositor's keyboard state before any window exists.
-  wtype -k v -p VoidSymbol -s 60000 &
+  # Seed the isolated compositor's keyboard state before any window exists,
+  # and keep Ctrl and Alt held on it as a user still holding a shortcut would:
+  # wtype's own keyboard must paste plain Ctrl+V without waiting for them.
+  wtype -k v -M ctrl -M alt -p VoidSymbol -s 60000 &
   keyboard=$!
   for ((attempt = 0; attempt < 100; attempt++)); do
     if swaymsg -t get_inputs -r | grep -q wlr_virtual_keyboard; then break; fi
@@ -55,16 +55,20 @@ if [[ "${1:-}" == --inside ]]; then
     sleep 0.05
   done
   "$HEX_WAYLAND_APP_BINARY" status >/dev/null
-  "$HEX_WAYLAND_APP_BINARY" app >"$HEX_WAYLAND_APP_LOG" 2>&1 &
-  app=$!
-  for ((attempt = 0; attempt < 200; attempt++)); do
-    kill -0 "$app"
-    if swaymsg -t get_tree -r | grep '"name": "Hex"' >/dev/null; then break; fi
-    sleep 0.05
-  done
-  swaymsg -t get_tree -r | grep '"name": "Hex"' >/dev/null
-
-  # Keep GPUI connected while the paste helper creates a virtual keyboard.
+  # A second launch forwards Activate to the running Hex and exits; the
+  # window opens in the service's own process.
+  open_window() {
+    "$HEX_WAYLAND_APP_BINARY" app >>"$HEX_WAYLAND_APP_LOG" 2>&1
+    for ((attempt = 0; attempt < 200; attempt++)); do
+      kill -0 "$service"
+      if swaymsg -t get_tree -r | grep '"name": "Hex"' >/dev/null; then break; fi
+      sleep 0.05
+    done
+    swaymsg -t get_tree -r | grep '"name": "Hex"' >/dev/null
+    swaymsg -t get_tree -r | grep "\"pid\": $service," >/dev/null
+  }
+  open_window
+  # Keep the window connected while the paste helper creates a virtual keyboard.
   export HEX_WAYLAND_PASTE_OUTPUT="$HEX_WAYLAND_PASTE_OUTPUT-coexist"
   "$HEX_WAYLAND_TEST_TARGET" "$HEX_WAYLAND_PASTE_OUTPUT" &
   target=$!
@@ -82,21 +86,31 @@ if [[ "${1:-}" == --inside ]]; then
   test -f "$HEX_WAYLAND_PASTE_OUTPUT.ready"
   "$HEX_WAYLAND_TEST_BINARY" --exact linux_paste::tests::native_wayland_clipboard_shortcut \
     --ignored --nocapture --test-threads=1
-  kill -0 "$app"
+  kill -0 "$service"
   kill "$target"
   wait "$target" 2>/dev/null || true
   target=
 
+  # Closing the window keeps Hex; a later launch opens it again.
   swaymsg '[app_id="hex"] kill' >/dev/null
-  wait "$app"
-  app=
+  for ((attempt = 0; attempt < 100; attempt++)); do
+    if ! swaymsg -t get_tree -r | grep '"name": "Hex"' >/dev/null; then break; fi
+    sleep 0.05
+  done
+  sleep 0.5
   kill -0 "$service"
   "$HEX_WAYLAND_APP_BINARY" status >/dev/null
+  if [[ "${HEX_WAYLAND_REOPEN:-1}" == 1 ]]; then
+    open_window
+  fi
+  "$HEX_WAYLAND_APP_BINARY" quit
+  wait "$service"
+  service=
   exit 0
 fi
 
 if [[ $# != 2 || $(id -u) == 0 ]]; then
-  echo "Usage: $0 /path/to/compiled-test /path/to/voice-control (run as an unprivileged user)" >&2
+  echo "Usage: $0 /path/to/compiled-test /path/to/hex (run as an unprivileged user)" >&2
   exit 1
 fi
 for command in cc pkg-config sway swaymsg wtype wl-copy dbus-run-session timeout; do
@@ -122,11 +136,14 @@ printf '# No physical audio devices in this fixture.\n' > "$ALSA_CONFIG_PATH"
 mkdir -m 700 "$XDG_RUNTIME_DIR"
 cc "$root/tests/fixtures/wayland-paste-target.c" $(pkg-config --cflags --libs gtk+-3.0) -o "$HEX_WAYLAND_TEST_TARGET"
 unset DISPLAY WAYLAND_DISPLAY SWAYSOCK
-export WLR_BACKENDS=headless WLR_RENDERER=pixman WLR_LIBINPUT_NO_DEVICES=1 GDK_BACKEND=wayland
+# Hardware Vulkan drivers need a GPU renderer (WLR_RENDERER=gles2) to share
+# surfaces with the compositor; Mesa's software driver works with pixman.
+export WLR_BACKENDS=headless WLR_RENDERER=${WLR_RENDERER:-pixman} WLR_LIBINPUT_NO_DEVICES=1 GDK_BACKEND=wayland
 if ! timeout 25 dbus-run-session -- sway --config "$root/tests/fixtures/wayland-paste.conf" >"$work/compositor.log" 2>&1 \
   || [[ ! -f "$work/result" || $(<"$work/result") != 0 ]]; then
   cat "$work/compositor.log"
   if [[ -f "$work/hex.log" ]]; then cat "$work/hex.log"; fi
+  if [[ -f "$work/hex.log.service" ]]; then cat "$work/hex.log.service"; fi
   exit 1
 fi
-echo "Native Wayland clipboard insertion and independent Settings/service checks passed."
+echo "Native Wayland clipboard insertion and the single-process window checks passed."

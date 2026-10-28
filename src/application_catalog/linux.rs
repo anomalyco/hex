@@ -1,19 +1,13 @@
 //! Linux applications from their `.desktop` entries, named by executable
 //! ("code", "firefox") as the Linux mode matcher sees the frontmost
-//! process, with icons from the icon theme.
+//! process.
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 
 use color_eyre::eyre::{Result, eyre};
-use gpui::{Image, ImageFormat};
 
 use super::InstalledApplication;
-
-const ICON_SIZES: &[&str] = &[
-    "256x256", "128x128", "96x96", "64x64", "48x48", "scalable", "32x32",
-];
 
 pub(super) fn applications() -> Vec<InstalledApplication> {
     let own = std::env::current_exe()
@@ -41,7 +35,6 @@ pub(super) fn metadata(path: &Path) -> Result<InstalledApplication> {
         name,
         bundle_id: None,
         path: path.to_owned(),
-        icon: None,
     })
 }
 
@@ -87,7 +80,6 @@ fn desktop_files(directory: &Path) -> Vec<PathBuf> {
 #[derive(Default)]
 struct DesktopEntry {
     exec: Option<String>,
-    icon: Option<String>,
     hidden: bool,
     application: bool,
 }
@@ -108,7 +100,6 @@ fn parse_desktop_entry(text: &str) -> DesktopEntry {
         match key.trim() {
             "Type" => entry.application = value == "Application",
             "Exec" => entry.exec = Some(value.into()),
-            "Icon" => entry.icon = Some(value.into()),
             "NoDisplay" | "Hidden" => entry.hidden |= value == "true",
             _ => {}
         }
@@ -126,7 +117,6 @@ fn desktop_application(path: &Path) -> Option<InstalledApplication> {
         name,
         bundle_id: None,
         path: path.to_owned(),
-        icon: entry.icon.as_deref().and_then(icon),
     })
 }
 
@@ -145,36 +135,6 @@ fn executable_name(exec: &str) -> Option<String> {
         return id.rsplit('.').next().map(str::to_lowercase);
     }
     Some(name.to_lowercase()).filter(|name| !name.is_empty() && !name.starts_with('%'))
-}
-
-/// An icon by absolute path or theme name, from hicolor or pixmaps.
-fn icon(name: &str) -> Option<Arc<Image>> {
-    let path = Path::new(name);
-    if path.is_absolute() {
-        return image(path);
-    }
-    let directories = data_directories();
-    let themed = directories.iter().flat_map(|directory| {
-        ICON_SIZES.iter().flat_map(move |size| {
-            ["png", "svg"].map(|extension| {
-                directory.join(format!("icons/hicolor/{size}/apps/{name}.{extension}"))
-            })
-        })
-    });
-    let pixmaps = directories.iter().flat_map(|directory| {
-        ["png", "svg"].map(|extension| directory.join(format!("pixmaps/{name}.{extension}")))
-    });
-    themed.chain(pixmaps).find_map(|path| image(&path))
-}
-
-fn image(path: &Path) -> Option<Arc<Image>> {
-    let format = match path.extension()?.to_str()? {
-        "png" => ImageFormat::Png,
-        "svg" => ImageFormat::Svg,
-        _ => return None,
-    };
-    let bytes = fs::read(path).ok()?;
-    Some(Arc::new(Image::from_bytes(format, bytes)))
 }
 
 #[cfg(test)]
@@ -211,7 +171,6 @@ mod tests {
         );
         assert!(entry.application && !entry.hidden);
         assert_eq!(entry.exec.as_deref(), Some("code"));
-        assert_eq!(entry.icon.as_deref(), Some("vscode"));
         assert!(parse_desktop_entry("[Desktop Entry]\nType=Application\nNoDisplay=true").hidden);
         assert!(!parse_desktop_entry("[Desktop Entry]\nType=Link").application);
     }

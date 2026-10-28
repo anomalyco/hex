@@ -1,11 +1,11 @@
-//! Launch at login. macOS registers the app with `SMAppService`; Windows
-//! writes the current user's `Run` registry value. Linux starts the
-//! `hex.service` unit from its install script or Nix module, so Hex does not
-//! offer the setting there.
+//! Launch at login. macOS registers the app with `SMAppService` through a
+//! worker thread, since ServiceManagement can block; Windows writes the
+//! current user's `Run` registry value (`windows_login_item`). Linux starts
+//! the `hex.service` unit from its install script or Nix module, so Hex does
+//! not offer the setting there.
 
-use color_eyre::eyre::Result;
 #[cfg(target_os = "macos")]
-use color_eyre::eyre::eyre;
+use color_eyre::eyre::{Result, eyre};
 #[cfg(target_os = "macos")]
 use objc2_service_management::{SMAppService, SMAppServiceStatus};
 
@@ -43,46 +43,23 @@ fn set_enabled(enabled: bool) -> Result<LoginItemStatus> {
     status()
 }
 
+/// Reads, or turns on or off, the login item right away. ServiceManagement
+/// can block: call it off the main thread.
+#[cfg(target_os = "macos")]
+pub fn set_now(enabled: Option<bool>) -> Result<LoginItemStatus> {
+    objc2::rc::autoreleasepool(|_| match enabled {
+        Some(enabled) => set_enabled(enabled),
+        None => status(),
+    })
+}
+
 #[cfg(target_os = "macos")]
 fn open_settings() {
     // SAFETY: This asks macOS to open its Login Items settings pane.
     unsafe { SMAppService::openSystemSettingsLoginItems() };
 }
 
-#[cfg(target_os = "windows")]
-fn status() -> Result<LoginItemStatus> {
-    Ok(if crate::windows_login_item::is_enabled()? {
-        LoginItemStatus::Enabled
-    } else {
-        LoginItemStatus::Disabled
-    })
-}
-
-#[cfg(target_os = "windows")]
-fn set_enabled(enabled: bool) -> Result<LoginItemStatus> {
-    crate::windows_login_item::set_enabled(enabled)?;
-    status()
-}
-
-/// Windows never asks for approval, so there is no settings page to open.
-#[cfg(target_os = "windows")]
-fn open_settings() {}
-
-#[cfg(target_os = "linux")]
-fn status() -> Result<LoginItemStatus> {
-    Err(color_eyre::eyre::eyre!(
-        "hex.service decides whether Hex starts at login"
-    ))
-}
-
-#[cfg(target_os = "linux")]
-fn set_enabled(_: bool) -> Result<LoginItemStatus> {
-    status()
-}
-
-#[cfg(target_os = "linux")]
-fn open_settings() {}
-
+#[cfg(target_os = "macos")]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LoginItemRequest {
     Status,
@@ -90,25 +67,26 @@ pub enum LoginItemRequest {
     OpenSettings,
 }
 
+#[derive(Debug)]
 pub struct LoginItemFailure {
     pub status: Option<LoginItemStatus>,
     pub message: String,
 }
 
-pub struct LoginItemResponse {
-    pub request: LoginItemRequest,
-    pub result: Result<LoginItemStatus, LoginItemFailure>,
-}
+/// A request's outcome.
+pub type LoginItemResult = Result<LoginItemStatus, LoginItemFailure>;
 
 /// One worker per Settings window. Polling never queues behind an active request;
 /// user actions replace the single pending action and run before the next poll.
+#[cfg(target_os = "macos")]
 pub struct LoginItemWorker {
     requests: std::sync::mpsc::SyncSender<LoginItemRequest>,
-    responses: std::sync::mpsc::Receiver<Result<LoginItemStatus, LoginItemFailure>>,
+    responses: std::sync::mpsc::Receiver<LoginItemResult>,
     active: Option<LoginItemRequest>,
     pending: Option<LoginItemRequest>,
 }
 
+#[cfg(target_os = "macos")]
 impl LoginItemWorker {
     pub fn new() -> Result<Self, String> {
         Self::with_handler(|request| {
@@ -129,18 +107,12 @@ impl LoginItemWorker {
                     message: error.to_string(),
                 })
             };
-            #[cfg(target_os = "macos")]
-            let result = objc2::rc::autoreleasepool(|_| handle());
-            #[cfg(not(target_os = "macos"))]
-            let result = handle();
-            result
+            objc2::rc::autoreleasepool(|_| handle())
         })
     }
 
     fn with_handler(
-        mut handle: impl FnMut(LoginItemRequest) -> Result<LoginItemStatus, LoginItemFailure>
-        + Send
-        + 'static,
+        mut handle: impl FnMut(LoginItemRequest) -> LoginItemResult + Send + 'static,
     ) -> Result<Self, String> {
         let (requests, receiver) = std::sync::mpsc::sync_channel(1);
         let (sender, responses) = std::sync::mpsc::sync_channel(1);
@@ -178,7 +150,13 @@ impl LoginItemWorker {
         Ok(())
     }
 
-    pub fn poll(&mut self) -> Result<Option<LoginItemResponse>, String> {
+    /// No request is running: the last outcome answered every action asked.
+    pub fn idle(&self) -> bool {
+        self.active.is_none()
+    }
+
+    /// The finished request's outcome, once it has one.
+    pub fn poll(&mut self) -> Result<Option<LoginItemResult>, String> {
         let result = match self.responses.try_recv() {
             Ok(result) => result,
             Err(std::sync::mpsc::TryRecvError::Empty) => return Ok(None),
@@ -186,31 +164,24 @@ impl LoginItemWorker {
                 return Err("Launch at Login worker stopped unexpectedly".into());
             }
         };
-        let request = self.active.take().expect("response has an active request");
+        self.active = None;
         if let Some(pending) = self.pending.take() {
             self.request(pending)?;
         }
-        Ok(Some(LoginItemResponse { request, result }))
-    }
-
-    pub fn desired_enabled(&self) -> Option<bool> {
-        match self.pending.or(self.active) {
-            Some(LoginItemRequest::SetEnabled(enabled)) => Some(enabled),
-            _ => None,
-        }
+        Ok(Some(result))
     }
 }
 
 // Dropping the channels lets the worker exit after its current native call.
 // Never join here: ServiceManagement can block, including while Settings closes.
 
-#[cfg(test)]
+#[cfg(all(test, target_os = "macos"))]
 mod tests {
     use super::*;
     use std::sync::mpsc::{RecvTimeoutError, channel};
     use std::time::{Duration, Instant};
 
-    fn completed(worker: &mut LoginItemWorker) -> LoginItemResponse {
+    fn completed(worker: &mut LoginItemWorker) -> LoginItemResult {
         let deadline = Instant::now() + Duration::from_secs(5);
         loop {
             if let Some(response) = worker.poll().unwrap() {
@@ -241,25 +212,23 @@ mod tests {
         for _ in 0..10 {
             worker.request(LoginItemRequest::Status).unwrap();
         }
-        assert_eq!(worker.desired_enabled(), Some(false));
         release.send(()).unwrap();
-        assert_eq!(completed(&mut worker).request, LoginItemRequest::Status);
+        assert!(completed(&mut worker).is_ok());
+        assert!(!worker.idle(), "the last action runs next");
         assert_eq!(
             observed.recv_timeout(Duration::from_secs(5)).unwrap(),
             (LoginItemRequest::SetEnabled(false), thread)
         );
         release.send(()).unwrap();
-        assert_eq!(
-            completed(&mut worker).request,
-            LoginItemRequest::SetEnabled(false)
-        );
+        assert!(completed(&mut worker).is_ok());
+        assert!(worker.idle());
         worker.request(LoginItemRequest::OpenSettings).unwrap();
         assert_eq!(
             observed.recv_timeout(Duration::from_secs(5)).unwrap(),
             (LoginItemRequest::OpenSettings, thread)
         );
         release.send(()).unwrap();
-        completed(&mut worker);
+        assert!(completed(&mut worker).is_ok());
         drop(worker);
         assert_eq!(
             observed.recv_timeout(Duration::from_secs(5)),

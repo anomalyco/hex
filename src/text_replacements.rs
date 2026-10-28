@@ -56,15 +56,11 @@ impl ReplacementSet {
             .iter()
             .enumerate()
             .flat_map(|(rule, replacement)| {
-                replacement
-                    .matcher
-                    .find_iter(text)
-                    .filter(|matched| phrase_boundary(text, matched.start(), matched.end()))
-                    .map(move |matched| Candidate {
-                        start: matched.start(),
-                        end: matched.end(),
-                        rule,
-                    })
+                phrase_matches(&replacement.matcher, text).map(move |(start, end)| Candidate {
+                    start,
+                    end,
+                    rule,
+                })
             })
             .collect::<Vec<_>>();
         candidates.sort_by(|left, right| {
@@ -195,6 +191,29 @@ fn push_segment(output: &mut String, segment: &str, capitalize_next: &mut bool) 
     *capitalize_next = false;
 }
 
+/// Finds whole-phrase matches. A match rejected for touching a word resumes the
+/// search one character later, so an overlapping whole-phrase match is still found.
+fn phrase_matches<'a>(
+    matcher: &'a Regex,
+    text: &'a str,
+) -> impl Iterator<Item = (usize, usize)> + 'a {
+    let mut from = 0;
+    std::iter::from_fn(move || {
+        while let Some(matched) = matcher.find_at(text, from) {
+            if phrase_boundary(text, matched.start(), matched.end()) {
+                from = matched.end();
+                return Some((matched.start(), matched.end()));
+            }
+            from = matched.start()
+                + text[matched.start()..]
+                    .chars()
+                    .next()
+                    .map_or(1, char::len_utf8);
+        }
+        None
+    })
+}
+
 fn phrase_boundary(text: &str, start: usize, end: usize) -> bool {
     let before = text[..start].chars().next_back();
     let after = text[end..].chars().next();
@@ -296,6 +315,17 @@ mod tests {
         let corrected = replacements.replace("OPEN CODE alpha");
         assert_eq!(corrected, "OpenCode beta release");
         assert_eq!(replacements.replace("beta release"), "gamma release");
+    }
+
+    #[test]
+    fn a_match_rejected_inside_a_word_does_not_hide_an_overlapping_phrase() {
+        let replacements = ReplacementSet::new(&[rule("I I", "I"), rule("the the", "the")]);
+
+        assert_eq!(replacements.replace("Hi I I think so."), "Hi I think so.");
+        assert_eq!(
+            replacements.replace("Breathe the the air."),
+            "Breathe the air."
+        );
     }
 
     #[test]

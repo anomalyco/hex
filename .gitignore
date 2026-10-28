@@ -3,6 +3,7 @@
 /logs
 /perf/transcription-corpus
 /perf/moonshine-corpus
+/.local-corpus/
 /dist
 /.wrangler
 node_modules/

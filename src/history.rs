@@ -16,11 +16,11 @@ use std::time::{Duration, SystemTime};
 use serde::{Deserialize, Serialize};
 
 const VERSION: u32 = 1;
-const MAX_ENTRIES: usize = 2_000;
+const MAX_ENTRIES: usize = 10_000;
 const MAX_TEXT_BYTES: usize = 16 * 1024;
 const MAX_LABEL_BYTES: usize = 256;
 const MAX_FALLBACK_BYTES: usize = 1_024;
-const MAX_TOTAL_TEXT_BYTES: usize = 4 * 1024 * 1024;
+const MAX_TOTAL_TEXT_BYTES: usize = 16 * 1024 * 1024;
 const PRUNE_INTERVAL: Duration = Duration::from_secs(60);
 pub const MAX_SEARCH_RESULTS: usize = 200;
 
@@ -53,7 +53,7 @@ impl HistoryRetention {
         matches!(self, Self::Off)
     }
 
-    const fn max_age_ms(self) -> Option<u64> {
+    pub const fn max_age_ms(self) -> Option<u64> {
         const HOUR_MS: u64 = 60 * 60 * 1_000;
         match self {
             Self::Off | Self::Forever => None,
@@ -150,6 +150,32 @@ struct LoadedHistory {
     version: u32,
     next_id: u64,
     entries: Vec<HistoryEntry>,
+}
+
+/// Read one atomic file snapshot without recovery, pruning writes, or workers.
+/// Opening once pins the old or new inode while the app replaces the file.
+#[cfg(target_os = "macos")]
+pub fn read_snapshot(path: &std::path::Path) -> io::Result<Vec<HistoryEntry>> {
+    use std::io::Read;
+    // Text can expand sixfold when JSON-escaped, plus bounded metadata.
+    const MAX_FILE_BYTES: u64 = (MAX_TOTAL_TEXT_BYTES * 6
+        + MAX_ENTRIES * (6 * (2 * MAX_LABEL_BYTES + MAX_FALLBACK_BYTES) + 1_024))
+        as u64;
+    let file = match fs::File::open(path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(error),
+    };
+    let mut bytes = Vec::new();
+    file.take(MAX_FILE_BYTES + 1).read_to_end(&mut bytes)?;
+    if bytes.len() as u64 > MAX_FILE_BYTES {
+        return Err(io::Error::other("history file exceeds the read limit"));
+    }
+    let loaded: LoadedHistory = serde_json::from_slice(&bytes).map_err(io::Error::other)?;
+    if loaded.version != VERSION {
+        return Err(io::Error::other("unsupported history version"));
+    }
+    Ok(loaded.entries)
 }
 
 /// Owner-only bounded history store. Entries are held oldest-first.
@@ -368,10 +394,13 @@ impl HistoryStore {
             changed = true;
         }
         let mut total: usize = self.entries.iter().map(HistoryEntry::text_bytes).sum();
-        while total > MAX_TOTAL_TEXT_BYTES && self.entries.len() > 1 {
-            total -= self.entries.remove(0).text_bytes();
-            changed = true;
+        let mut remove = 0;
+        while total > MAX_TOTAL_TEXT_BYTES && remove + 1 < self.entries.len() {
+            total -= self.entries[remove].text_bytes();
+            remove += 1;
         }
+        self.entries.drain(..remove);
+        changed |= remove > 0;
         self.prune_pending |= changed;
         changed
     }
@@ -772,12 +801,17 @@ mod tests {
     fn hard_caps_bound_entries_and_text_regardless_of_retention() {
         let path = temp_path("caps");
         let mut store = HistoryStore::open(path, HistoryRetention::Forever, 0);
-        for index in 0..(MAX_ENTRIES + 5) {
-            store
-                .record(draft(&format!("entry {index}")), index as u64)
-                .unwrap();
-        }
+        store.record(draft("entry"), 0).unwrap();
+        store.entries = (0..MAX_ENTRIES + 5)
+            .map(|id| HistoryEntry {
+                id: id as u64,
+                ..store.entries[0].clone()
+            })
+            .collect();
+        store.prune(0);
         assert_eq!(store.len(), MAX_ENTRIES);
+        assert_eq!(store.entries[0].id, 5, "the oldest entries are evicted");
+        store.next_id = (MAX_ENTRIES + 5) as u64;
 
         let oversized = "x".repeat(MAX_TEXT_BYTES + 100);
         let id = store.record(draft(&oversized), 9_999_999).unwrap().unwrap();
@@ -791,15 +825,24 @@ mod tests {
         let big = "y".repeat(MAX_TEXT_BYTES - 10);
         let per_entry = 2 * big.len() + 8;
         let fits = MAX_TOTAL_TEXT_BYTES / per_entry;
-        for index in 0..(fits + 3) {
-            store.record(draft(&big), index as u64).unwrap();
-        }
+        store.record(draft(&big), 0).unwrap();
+        store.entries = (0..fits + 3)
+            .map(|id| HistoryEntry {
+                id: id as u64,
+                ..store.entries[0].clone()
+            })
+            .collect();
+        store.prune(0);
         let total: usize = store
             .entries()
             .map(|entry| entry.raw_text.len() + entry.final_text.len())
             .sum();
         assert!(total <= MAX_TOTAL_TEXT_BYTES);
         assert!(store.len() < fits + 3);
+        assert!(
+            store.entries[0].id > 0,
+            "byte pressure also evicts oldest first"
+        );
     }
 
     #[test]

@@ -10,20 +10,45 @@
 use std::time::Duration;
 
 const SAMPLE_RATE: usize = 16_000;
-const FRAME_SAMPLES: usize = SAMPLE_RATE / 50;
+pub(crate) const FRAME_SAMPLES: usize = SAMPLE_RATE / 50;
 const SPEECH_MARGIN_DB: f32 = 12.0;
 const MINIMUM_SPEECH_DB: f32 = -55.0;
 const LOWEST_FLOOR_DB: f32 = -90.0;
 /// About 3 dB per second at 50 frames per second.
 const FLOOR_RISE_DB_PER_FRAME: f32 = 0.06;
-pub(crate) const MINIMUM_PIECE: Duration = Duration::from_secs(3);
+const MINIMUM_PIECE: Duration = Duration::from_secs(3);
 const PAUSE: Duration = Duration::from_millis(600);
 const LONG_PIECE: Duration = Duration::from_secs(8);
 const LONG_PIECE_PAUSE: Duration = Duration::from_millis(300);
 
+/// Classifies consecutive 20 ms frames of 16 kHz audio as speech or not
+/// against the adaptive noise floor described above.
+#[derive(Default)]
+pub(crate) struct SpeechFrames {
+    floor_db: Option<f32>,
+}
+
+impl SpeechFrames {
+    /// Whether `frame`, the next `FRAME_SAMPLES` samples, is speech.
+    pub(crate) fn is_speech(&mut self, frame: &[f32]) -> bool {
+        let energy = frame.iter().map(|sample| sample * sample).sum::<f32>() / frame.len() as f32;
+        let level_db = if energy.is_finite() {
+            10.0 * energy.max(1e-18).log10()
+        } else {
+            0.0
+        };
+        let floor_db = match self.floor_db {
+            Some(floor_db) if level_db >= floor_db => floor_db + FLOOR_RISE_DB_PER_FRAME,
+            _ => level_db.max(LOWEST_FLOOR_DB),
+        };
+        self.floor_db = Some(floor_db);
+        level_db > (floor_db + SPEECH_MARGIN_DB).max(MINIMUM_SPEECH_DB)
+    }
+}
+
 #[derive(Default)]
 pub struct PauseSegmenter {
-    floor_db: Option<f32>,
+    speech: SpeechFrames,
     frame: Vec<f32>,
     position: usize,
     piece_start: usize,
@@ -49,20 +74,8 @@ impl PauseSegmenter {
     }
 
     fn complete_frame(&mut self) -> Option<usize> {
-        let energy =
-            self.frame.iter().map(|sample| sample * sample).sum::<f32>() / FRAME_SAMPLES as f32;
-        let level_db = if energy.is_finite() {
-            10.0 * energy.max(1e-18).log10()
-        } else {
-            0.0
-        };
-        let floor_db = match self.floor_db {
-            Some(floor_db) if level_db >= floor_db => floor_db + FLOOR_RISE_DB_PER_FRAME,
-            _ => level_db.max(LOWEST_FLOOR_DB),
-        };
-        self.floor_db = Some(floor_db);
         self.position += FRAME_SAMPLES;
-        if level_db > (floor_db + SPEECH_MARGIN_DB).max(MINIMUM_SPEECH_DB) {
+        if self.speech.is_speech(&self.frame) {
             self.silent_frames = 0;
             self.heard_speech = true;
             return None;

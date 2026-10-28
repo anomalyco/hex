@@ -1,9 +1,15 @@
-// Fourth-wall photorealistic screen glass: Z-axis words fired at the camera, stress-field
-// fracture propagation (pulverized conchoidal impact craters, branching radial cracks with
-// tapering width, densely packed Hertzian ring cracks, green-tinted tempered glass edges,
-// RGB chromatic dispersion, and head-lit golden Fresnel glints), 3D extruded Voronoi glass
-// slabs suspended in slow-motion bullet-time with depth-of-field and sparkling glass dust,
-// time-reverse crystalline rebuild, and bold word-synced finale captions.
+// Fourth-wall photorealistic screen glass (v3):
+// - Real-time outward fracture propagation (90–160 ms): crushed white silica crater blooms first,
+//   radial cracks race outward with bright leading fracture-tip sparks, secondary/tertiary branches
+//   spawn as the radial front passes their fork node, concentric Hertzian ring cracks zip across
+//   right behind the radial front, and new cracks arrest (T-junction) at existing crack lines.
+// - Paint-over-matched crystalline white/silver fracture lines with dark total-internal-reflection
+//   bevels, subtle green borosilicate inner tint, localized golden Fresnel glints near the glowing
+//   head, dense fine micro-cracking around craters, and strong per-wedge RGB chromatic refraction.
+// - Paint-over-matched 3D shattered tempered glass slabs with Lloyd-relaxed Voronoi geometry,
+//   dark-crystal + razor-white/gold specular bevel streaks, RGB dispersive page refraction,
+//   anisotropic surface reflections, foreground bokeh DOF, and a 3-tier cloud of ~620 sparkling
+//   golden/white glass dust & bokeh motes suspended in bullet-time.
 
 const SANS = '"Inter Variable", ui-sans-serif, system-ui'
 const MONO = 'ui-monospace, "SF Mono", Menlo, monospace'
@@ -40,6 +46,39 @@ function clipPolyHalfPlane(poly, mx, my, nx, ny) {
   return out
 }
 
+// Segment-segment intersection for real glass crack-arrest (T-junctions against existing fractures)
+function segmentIntersection(ax, ay, bx, by, cx, cy, dx, dy) {
+  const rX = bx - ax
+  const rY = by - ay
+  const sX = dx - cx
+  const sY = dy - cy
+  const denom = rX * sY - rY * sX
+  if (Math.abs(denom) < 1e-6) return null
+  const qpX = cx - ax
+  const qpY = cy - ay
+  const t = (qpX * sY - qpY * sX) / denom
+  const u = (qpX * rY - qpY * rX) / denom
+  if (t > 0.04 && t <= 1.0 && u >= 0.0 && u <= 1.0) {
+    return { t, x: ax + t * rX, y: ay + t * rY }
+  }
+  return null
+}
+
+// When every part of a crack has finished revealing.
+function crackSettle(c) {
+  if (c.settle == null) {
+    let t = 0.03
+    for (const seg of c.segments) t = Math.max(t, seg.t1)
+    for (const ring of c.rings) t = Math.max(t, ring.t1)
+    for (const mc of c.microCracks) t = Math.max(t, mc.t0 + 0.018)
+    for (const w of c.wedges) t = Math.max(t, w.revealDur || 0.09)
+    for (const f of c.craterFacets) t = Math.max(t, f.revealAt || 0)
+    for (const sp of c.specks) t = Math.max(t, sp.revealAt || 0)
+    c.settle = t + 0.02
+  }
+  return c.settle
+}
+
 export class ScreenBreak {
   constructor(root, stageCanvas, rnd = Math.random) {
     this.root = root
@@ -68,22 +107,25 @@ export class ScreenBreak {
     this.headY = 0
     this.headR = 90
     this.state = "idle" // "idle" | "cracking" | "shattered" | "rebuilding"
-    this.zWords = [] // incoming words flying along +Z toward the screen
-    this.cracks = [] // branching radial + Hertzian ring glass fracture networks
-    this.dust = [] // sparkling crystalline micro-splinters and golden glass powder
-    this.shards = [] // 3D extruded tempered glass slabs
+    this.zWords = []
+    this.cracks = []
+    this.dust = []
+    this.shards = []
     this.flash = 0
     this.flashX = 0
     this.flashY = 0
     this.rebuildAge = 0
     this.rebuildDur = 1.8
-    this.caption = null // { words: [{ text, t }], startRtime, endRtime }
+    this.caption = null
   }
 
   resize(W, H, dpr = 1) {
     this.W = Math.max(1, W)
     this.H = Math.max(1, H)
     this.dpr = Math.min(dpr, W < 640 ? 1.25 : 1.5)
+    // Phones skip the chromatic and motion-blur copies, cache each pane's face and bake settled
+    // cracks: redrawing every pane from the full page each frame held the finale near 20 fps.
+    this.lite = W < 640 || matchMedia("(pointer: coarse)").matches
     const pw = Math.max(1, Math.round(this.W * this.dpr))
     const ph = Math.max(1, Math.round(this.H * this.dpr))
     if (this.canvas.width !== pw || this.canvas.height !== ph) {
@@ -95,6 +137,8 @@ export class ScreenBreak {
       this.pageCanvas.height = ph
       this.cleanCanvas.width = pw
       this.cleanCanvas.height = ph
+      this.crackLayer = null
+      for (const c of this.cracks) c.baked = false
     }
   }
 
@@ -112,6 +156,7 @@ export class ScreenBreak {
     this.state = "idle"
     this.zWords.length = 0
     this.cracks.length = 0
+    this.crackLayer = null
     this.dust.length = 0
     this.shards.length = 0
     this.flash = 0
@@ -119,7 +164,10 @@ export class ScreenBreak {
     this.caption = null
     this.root.removeAttribute("data-screen-shattered")
     const dl = this.root.querySelector(".hero .download")
-    if (dl) dl.style.transform = ""
+    if (dl) {
+      dl.style.transition = ""
+      dl.style.transform = ""
+    }
     this.ctx.setTransform(1, 0, 0, 1, 0, 0)
     this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height)
   }
@@ -129,8 +177,6 @@ export class ScreenBreak {
     this.canvas.remove()
   }
 
-  // Draws the live WebGPU/2D stage plus crisp DOM elements into targetCtx so glass facets
-  // refract and shatter the entire page (header, title remains, subtitle, download button, cards).
   captureViewport(targetCtx, opts = {}) {
     const { W, H, dpr } = this
     if (!W || !H) return
@@ -142,12 +188,10 @@ export class ScreenBreak {
     targetCtx.fillStyle = "#070707"
     targetCtx.fillRect(0, 0, W, H)
 
-    // 1. Copy the current engine stage (cards, head, particles)
     if (this.stageCanvas.width > 0 && this.stageCanvas.height > 0) {
       targetCtx.drawImage(this.stageCanvas, 0, 0, W, H)
     }
 
-    // 2. Render header (brand + GitHub)
     const brand = this.root.querySelector(".brand")
     if (brand) {
       const br = brand.getBoundingClientRect()
@@ -157,13 +201,12 @@ export class ScreenBreak {
       targetCtx.font = `700 14px ${SANS}`
       targetCtx.textBaseline = "middle"
       targetCtx.textAlign = "left"
-      targetCtx.fillText("HEX", bx + 24, by + br.height / 2)
+      targetCtx.fillText("Hex", bx + 24, by + br.height / 2)
       targetCtx.strokeStyle = "#f4f4f6"
       targetCtx.lineWidth = 1.6
       targetCtx.strokeRect(bx + 2, by + br.height / 2 - 6, 12, 12)
     }
 
-    // 3. Render title words ("Speak.", "It", "appears.") either at current fallen position or clean rest
     const h1 = this.root.querySelector(".hero__copy h1")
     const h1Style = h1 ? getComputedStyle(h1) : null
     const fontSize = h1Style ? parseFloat(h1Style.fontSize) || 56 : 56
@@ -188,7 +231,6 @@ export class ScreenBreak {
     }
     targetCtx.restore()
 
-    // 4. Render hero subtitle paragraph
     const sub = this.root.querySelector(".hero__copy p")
     if (sub) {
       const sr = sub.getBoundingClientRect()
@@ -217,7 +259,6 @@ export class ScreenBreak {
       if (line) targetCtx.fillText(line, sr.left - rootRect.left + sr.width / 2, ly)
     }
 
-    // 5. Render Download button pill & requirements unless omitted
     if (!opts.skipDownload) {
       const dl = this.root.querySelector(".hero .download")
       if (dl) {
@@ -251,8 +292,8 @@ export class ScreenBreak {
 
   drawDownloadPill(ctx, x, y, w, h, label) {
     ctx.save()
-    ctx.shadowColor = "rgba(0, 0, 0, 0.65)"
-    ctx.shadowBlur = 20
+    ctx.shadowColor = "rgba(0, 0, 0, 0.68)"
+    ctx.shadowBlur = 22
     ctx.shadowOffsetY = 6
     ctx.beginPath()
     ctx.roundRect(x, y, w, h, h / 2)
@@ -284,28 +325,81 @@ export class ScreenBreak {
       dur,
       final,
       hitsDownload,
-      rot: this.rnd(-0.12, 0.12),
-      vrot: this.rnd(-1.4, 1.4),
+      rot: this.rnd(-0.11, 0.11),
+      vrot: this.rnd(-1.3, 1.3),
       onImpact,
     })
   }
 
-  // Recursive stress-field crack propagation with fine jagged micro-steps and secondary/tertiary Y-bifurcations
-  buildCrackBranch(x0, y0, startAng, totalLen, uStart, uSpan, depth, outSegments, outSpecks) {
-    const steps = depth === 0 ? 22 : depth === 1 ? 11 : 6
+  // Recursive stress-field crack propagation with time-based outward reveal (t0 -> t1),
+  // crack-arrest (T-junctions) against prior cracks, and secondary/tertiary hairline bifurcations.
+  buildCrackBranch(
+    originX,
+    originY,
+    x0,
+    y0,
+    startAng,
+    totalLen,
+    uStart,
+    uSpan,
+    tStart,
+    tSpan,
+    depth,
+    priorSegs,
+    outSegments,
+    outSpecks,
+  ) {
+    const steps = depth === 0 ? 22 : depth === 1 ? 12 : 6
     let px = x0
     let py = y0
     let ang = startAng
     const stepLen = totalLen / steps
 
     for (let s = 1; s <= steps; s++) {
-      const frac = s / steps
-      const u = clamp(uStart + frac * uSpan, 0, 1)
-      const kink = this.rnd() < 0.2 ? (this.rnd() < 0.5 ? -1 : 1) * this.rnd(0.11, 0.24) : 0
-      ang += this.rnd(-0.055, 0.055) + kink
+      const frac0 = (s - 1) / steps
+      const frac1 = s / steps
+      const u0 = clamp(uStart + frac0 * uSpan, 0, 1)
+      let u1 = clamp(uStart + frac1 * uSpan, 0, 1)
+      // Outward propagation time: fast tensile burst near impact, slightly decelerating toward tip
+      const t0 = tStart + Math.pow(frac0, 1.18) * tSpan
+      let t1 = tStart + Math.pow(frac1, 1.18) * tSpan
+
+      const kink = this.rnd() < 0.22 ? (this.rnd() < 0.5 ? -1 : 1) * this.rnd(0.1, 0.24) : 0
+      ang += this.rnd(-0.052, 0.052) + kink
       const rStep = stepLen * this.rnd(0.78, 1.24)
-      const nxPos = px + Math.cos(ang) * rStep
-      const nyPos = py + Math.sin(ang) * rStep
+      let nxPos = px + Math.cos(ang) * rStep
+      let nyPos = py + Math.sin(ang) * rStep
+
+      // Check crack-arrest against existing fracture segments from earlier impacts
+      let arrested = false
+      const distFromOwnCrater = Math.hypot(nxPos - originX, nyPos - originY)
+      if (distFromOwnCrater > 34 && priorSegs.length > 0) {
+        let bestHit = null
+        for (let p = 0; p < priorSegs.length; p++) {
+          const ps = priorSegs[p]
+          const hit = segmentIntersection(px, py, nxPos, nyPos, ps.x0, ps.y0, ps.x1, ps.y1)
+          if (hit && (!bestHit || hit.t < bestHit.t)) bestHit = hit
+        }
+        if (bestHit) {
+          nxPos = bestHit.x
+          nyPos = bestHit.y
+          u1 = lerp(u0, u1, bestHit.t)
+          t1 = lerp(t0, t1, bestHit.t)
+          arrested = true
+          // Spawn a bright T-junction stress glint where this crack arrests against the prior crack
+          outSpecks.push({
+            x: nxPos,
+            y: nyPos,
+            r: this.rnd(1.4, 2.8),
+            ang: ang,
+            stretch: 1.8,
+            gold: false,
+            star: true,
+            revealAt: t1,
+            alpha: 0.95,
+          })
+        }
+      }
 
       const dx = nxPos - px
       const dy = nyPos - py
@@ -322,37 +416,75 @@ export class ScreenBreak {
         my: (py + nyPos) * 0.5,
         nx,
         ny,
-        u0: clamp(uStart + ((s - 1) / steps) * uSpan, 0, 1),
-        u1: u,
+        u0,
+        u1,
+        t0,
+        t1,
         depth,
-        spec: this.rnd(0.7, 1.0),
+        spec: this.rnd(0.72, 1.0),
       })
 
-      // Embedded crystalline micro-chips and golden silica glints along the crack
-      if (this.rnd() < (depth === 0 ? 0.78 : 0.45)) {
-        const off = (this.rnd() < 0.5 ? -1 : 1) * this.rnd(0.4, 5.2) * (1 - u * 0.6)
+      // Embedded crystalline micro-chips and silica glints revealed as the crack front passes t1
+      if (this.rnd() < (depth === 0 ? 0.72 : 0.38)) {
+        const off = (this.rnd() < 0.5 ? -1 : 1) * this.rnd(0.3, 4.4) * (1 - u1 * 0.65)
         outSpecks.push({
           x: (px + nxPos) * 0.5 + nx * off,
           y: (py + nyPos) * 0.5 + ny * off,
-          r: this.rnd(0.85, 2.8) * (1 - u * 0.4),
+          r: this.rnd(0.7, 2.2) * (1 - u1 * 0.45),
           ang: ang + this.rnd(-0.5, 0.5),
-          stretch: this.rnd(1.3, 3.4),
-          gold: this.rnd() < 0.68,
-          star: this.rnd() < 0.22,
-          alpha: this.rnd(0.65, 1.0) * (1 - u * 0.3),
+          stretch: this.rnd(1.2, 3.0),
+          gold: this.rnd() < 0.28,
+          star: this.rnd() < 0.16,
+          revealAt: t1,
+          alpha: this.rnd(0.62, 0.98) * (1 - u1 * 0.32),
         })
       }
 
-      if (depth === 0 && (s === 6 || s === 13) && this.rnd() < 0.76) {
+      if (arrested) break
+
+      // Secondary and tertiary hairline Y-bifurcations spawn at the exact moment t1 when the parent front passes!
+      if (depth === 0 && (s === 5 || s === 11 || s === 16) && this.rnd() < 0.78) {
         const side = this.rnd() < 0.5 ? -1 : 1
-        const forkAng = ang + side * this.rnd(0.26, 0.54)
-        const forkLen = (totalLen - s * stepLen) * this.rnd(0.48, 0.78)
-        this.buildCrackBranch(nxPos, nyPos, forkAng, forkLen, u, (1 - u) * 0.75, 1, outSegments, outSpecks)
-      } else if (depth === 1 && s === 5 && this.rnd() < 0.52) {
+        const forkAng = ang + side * this.rnd(0.24, 0.52)
+        const forkLen = (totalLen - s * stepLen) * this.rnd(0.46, 0.76)
+        const remT = Math.max(0.025, (tStart + tSpan - t1) * this.rnd(0.75, 1.05))
+        this.buildCrackBranch(
+          originX,
+          originY,
+          nxPos,
+          nyPos,
+          forkAng,
+          forkLen,
+          u1,
+          (1 - u1) * 0.75,
+          t1,
+          remT,
+          1,
+          priorSegs,
+          outSegments,
+          outSpecks,
+        )
+      } else if (depth === 1 && (s === 4 || s === 8) && this.rnd() < 0.52) {
         const side = this.rnd() < 0.5 ? -1 : 1
-        const forkAng = ang + side * this.rnd(0.3, 0.6)
-        const forkLen = totalLen * this.rnd(0.38, 0.58)
-        this.buildCrackBranch(nxPos, nyPos, forkAng, forkLen, u, (1 - u) * 0.52, 2, outSegments, outSpecks)
+        const forkAng = ang + side * this.rnd(0.28, 0.58)
+        const forkLen = totalLen * this.rnd(0.32, 0.54)
+        const remT = Math.max(0.018, (tStart + tSpan - t1) * 0.8)
+        this.buildCrackBranch(
+          originX,
+          originY,
+          nxPos,
+          nyPos,
+          forkAng,
+          forkLen,
+          u1,
+          (1 - u1) * 0.5,
+          t1,
+          remT,
+          2,
+          priorSegs,
+          outSegments,
+          outSpecks,
+        )
       }
 
       px = nxPos
@@ -360,52 +492,82 @@ export class ScreenBreak {
     }
   }
 
-  // Adds a photorealistic ballistic impact fracture at (x, y) and refracts the page behind it.
+  // Adds a photorealistic ballistic impact fracture at (x, y) that propagates outward over 95–165 ms.
   addCrack(x, y, power = 1, hitsDownload = false) {
     if (this.state === "idle") this.state = "cracking"
     if (hitsDownload) {
       const dl = this.root.querySelector(".hero .download")
       if (dl) {
-        dl.style.transition = "transform 90ms cubic-bezier(0.2, 0.9, 0.3, 1)"
-        dl.style.transform = "translate3d(12px, 16px, 0) rotate(8.5deg)"
+        dl.style.transition = "none"
+        dl.style.transform = "translate3d(12px, 14px, 0) rotate(7deg)"
       }
     }
-    // Capture clean underlying viewport (DOM + stageCanvas, never this.canvas)
-    this.captureViewport(this.basePageCtx)
+    this.captureViewport(this.basePageCtx, { skipDownload: true })
 
-    this.flash = Math.max(this.flash, 0.45 * power)
+    this.flash = Math.max(this.flash, 0.34 * power)
     this.flashX = x
     this.flashY = y
 
+    // Collect primary/secondary segments from prior impacts so new cracks can arrest (T-junction) against them
+    const priorSegs = []
+    for (const prev of this.cracks) {
+      for (let k = 0; k < prev.segments.length; k += 2) {
+        const sg = prev.segments[k]
+        if (sg.depth <= 1) priorSegs.push(sg)
+      }
+    }
+
     const segments = []
     const specks = []
+    const growDur = 0.135 * lerp(0.88, 1.22, clamp(power, 0.7, 1.4))
 
-    // 1. Primary, medium & dense crater star-rays (38-46 rays per impact, matching target-cracks.png)
-    const rayCount = Math.round(lerp(36, 46, clamp(power, 0.7, 1.4)))
-    const maxRunnerLen = Math.min(this.W, this.H) * lerp(0.38, 0.64, clamp(power, 0.7, 1.4))
+    // 1. Primary, medium & dense inner crater rays (42-52 rays per impact, matching target-cracks.png)
+    const rayCount = Math.round(lerp(40, 50, clamp(power, 0.7, 1.4)))
+    const maxRunnerLen = Math.min(this.W, this.H) * lerp(0.4, 0.66, clamp(power, 0.7, 1.4))
     const primaryRays = []
 
     for (let i = 0; i < rayCount; i++) {
-      const baseAng = (i / rayCount) * Math.PI * 2 + this.rnd(-0.07, 0.07)
+      const baseAng = (i / rayCount) * Math.PI * 2 + this.rnd(-0.065, 0.065)
       const isLongRunner = i % 3 === 0
       const isMedium = i % 3 === 1
       const len = isLongRunner
-        ? maxRunnerLen * this.rnd(0.7, 1.18)
+        ? maxRunnerLen * this.rnd(0.72, 1.18)
         : isMedium
-          ? maxRunnerLen * this.rnd(0.32, 0.64)
-          : maxRunnerLen * this.rnd(0.11, 0.28)
+          ? maxRunnerLen * this.rnd(0.32, 0.62)
+          : maxRunnerLen * this.rnd(0.08, 0.22)
+
+      // Crater blooms in first 12 ms; radial rays race out over 90–160 ms
+      const rayStart = this.rnd(0.006, 0.018)
+      const raySpan = growDur * (isLongRunner ? this.rnd(0.82, 1.15) : isMedium ? this.rnd(0.48, 0.78) : this.rnd(0.22, 0.42))
 
       const startIdx = segments.length
-      this.buildCrackBranch(x, y, baseAng, len, 0, 1, isLongRunner ? 0 : 1, segments, specks)
-      const spine = [[x, y]]
+      this.buildCrackBranch(
+        x,
+        y,
+        x,
+        y,
+        baseAng,
+        len,
+        0,
+        1,
+        rayStart,
+        raySpan,
+        isLongRunner ? 0 : 1,
+        priorSegs,
+        segments,
+        specks,
+      )
+      const spine = [{ x, y, t: rayStart }]
       for (let k = startIdx; k < segments.length; k++) {
-        if (segments[k].depth === (isLongRunner ? 0 : 1)) spine.push([segments[k].x1, segments[k].y1])
+        if (segments[k].depth === (isLongRunner ? 0 : 1)) {
+          spine.push({ x: segments[k].x1, y: segments[k].y1, t: segments[k].t1 })
+        }
       }
-      primaryRays.push({ baseAng, len, spine })
+      primaryRays.push({ baseAng, len, spine, raySpan })
     }
 
-    // 2. Densely packed concentric Hertzian stress rings (14 rings: tight spiderweb rosette near core, wider outward)
-    const ringDist = [6, 9, 13, 18, 25, 33, 43, 56, 72, 92, 118, 150, 190, 238].map((d) => d * power)
+    // 2. Dense fine micro-cracking & concentric Hertzian stress rings (16 rings: super-tight near crater, wider outward)
+    const ringDist = [5, 7.5, 10.5, 14, 18.5, 24, 31, 40, 51, 65, 82, 104, 132, 166, 206, 252].map((d) => d * power)
     const rings = []
     const wedges = []
 
@@ -414,126 +576,170 @@ export class ScreenBreak {
       const rB = primaryRays[(i + 1) % primaryRays.length]
       const midAng = (rA.baseAng + rB.baseAng) * 0.5
 
-      // Optical refraction wedge every 3 rays out to ~150px
-      if (i % 3 === 0) {
-        const rNext = primaryRays[(i + 3) % primaryRays.length]
-        const wR = Math.min(rA.len, rNext.len, 150 * power)
-        if (wR > 26) {
-          const disp = this.rnd(4.5, 10.5) * power
-          const sign = (i / 3) % 2 === 0 ? 1 : -1
-          wedges.push({
-            poly: [
-              [x, y],
-              [x + Math.cos(rA.baseAng) * wR * 0.45, y + Math.sin(rA.baseAng) * wR * 0.45],
-              [x + Math.cos(rA.baseAng) * wR, y + Math.sin(rA.baseAng) * wR],
-              [x + Math.cos(rNext.baseAng) * wR, y + Math.sin(rNext.baseAng) * wR],
-              [x + Math.cos(rNext.baseAng) * wR * 0.45, y + Math.sin(rNext.baseAng) * wR * 0.45],
-            ],
-            ox: Math.cos(midAng + sign * 1.15) * disp,
-            oy: Math.sin(midAng + sign * 1.15) * disp,
-            chromaX: Math.cos(midAng) * 2.0 * sign,
-            chromaY: Math.sin(midAng) * 2.0 * sign,
-          })
+      // Non-overlapping optical refraction sectors bounded by actual ring cracks (never cutting across the central head!)
+      if (i % 2 === 0) {
+        const rNext = primaryRays[(i + 2) % primaryRays.length]
+        const wR = Math.min(rA.len * 0.72, rNext.len * 0.72, 138 * power)
+        if (wR > 28) {
+          const midX = x + Math.cos(midAng) * wR * 0.55
+          const midY = y + Math.sin(midAng) * wR * 0.55
+          const distToHead = Math.hypot(midX - (this.headX || this.W * 0.5), midY - (this.headY || this.H * 0.38))
+          const overlapsDownload = midY > this.H * 0.64 && Math.abs(midX - this.W * 0.5) < 165
+          // Only refract outside the glowing head aura & Download pill so wedges never mask them with dark background
+          if (distToHead > (this.headR || 95) * 1.78 && !overlapsDownload) {
+            const disp = this.rnd(5.5, 12.0) * power
+            const sign = (i / 2) % 2 === 0 ? 1 : -1
+            wedges.push({
+              poly: [
+                [x + Math.cos(rA.baseAng) * 10, y + Math.sin(rA.baseAng) * 10],
+                [x + Math.cos(rA.baseAng) * wR, y + Math.sin(rA.baseAng) * wR],
+                [x + Math.cos(midAng) * wR * 1.04, y + Math.sin(midAng) * wR * 1.04],
+                [x + Math.cos(rNext.baseAng) * wR, y + Math.sin(rNext.baseAng) * wR],
+                [x + Math.cos(rNext.baseAng) * 10, y + Math.sin(rNext.baseAng) * 10],
+              ],
+              ox: Math.cos(midAng + sign * 1.15) * disp,
+              oy: Math.sin(midAng + sign * 1.15) * disp,
+              chromaX: Math.cos(midAng) * 2.4 * sign,
+              chromaY: Math.sin(midAng) * 2.4 * sign,
+              revealDur: growDur * 0.65,
+            })
+          }
         }
       }
 
       for (let ri = 0; ri < ringDist.length; ri++) {
         const baseD = ringDist[ri]
-        if (baseD > rA.len * 0.94 || baseD > rB.len * 0.94) continue
-        const prob = ri < 6 ? 0.94 : ri < 10 ? 0.76 : 0.48
+        if (baseD > rA.len * 0.95 || baseD > rB.len * 0.95) continue
+        const prob = ri < 8 ? 0.96 : ri < 12 ? 0.78 : 0.48
         if (this.rnd() > prob) continue
 
-        const dA = baseD * this.rnd(0.92, 1.08)
-        const dB = baseD * this.rnd(0.92, 1.08)
+        const dA = baseD * this.rnd(0.91, 1.09)
+        const dB = baseD * this.rnd(0.91, 1.09)
         const ptA = this.pointAlongSpine(rA.spine, dA)
         const ptB = this.pointAlongSpine(rB.spine, dB)
         if (!ptA || !ptB) continue
 
-        const dx = ptB[0] - ptA[0]
-        const dy = ptB[1] - ptA[1]
+        const dx = ptB.x - ptA.x
+        const dy = ptB.y - ptA.y
         const dl = Math.hypot(dx, dy) || 1
         const nx = -dy / dl
         const ny = dx / dl
-        const u = clamp(baseD / (238 * power), 0, 1)
-        const arch = this.rnd(-2.0, 1.5)
-        const cx = (ptA[0] + ptB[0]) * 0.5 + nx * arch
-        const cy = (ptA[1] + ptB[1]) * 0.5 + ny * arch
+        const u = clamp(baseD / (252 * power), 0, 1)
+        const arch = this.rnd(-1.8, 1.4)
+        const cx = (ptA.x + ptB.x) * 0.5 + nx * arch
+        const cy = (ptA.y + ptB.y) * 0.5 + ny * arch
+
+        // Ring crack forms right behind the radial front (after both bounding radials pass this radius)
+        const tRingStart = Math.max(ptA.t, ptB.t) + this.rnd(0.006, 0.018)
+        const tRingEnd = tRingStart + this.rnd(0.016, 0.032)
 
         rings.push({
-          x0: ptA[0],
-          y0: ptA[1],
+          x0: ptA.x,
+          y0: ptA.y,
           cx,
           cy,
-          x1: ptB[0],
-          y1: ptB[1],
+          x1: ptB.x,
+          y1: ptB.y,
           nx,
           ny,
           u,
-          spec: this.rnd(0.68, 1.0),
+          t0: tRingStart,
+          t1: tRingEnd,
+          fine: ri < 6 || this.rnd() < 0.45,
+          spec: this.rnd(0.72, 1.0),
         })
       }
     }
 
-    // 3. Pulverized conchoidal impact crater (dense white/gold crushed silica rosette)
+    // 3. Dense fine hairline cross-fissures inside r < 75px (matching the shattered safety-glass core of target-cracks.png)
+    const microCracks = []
+    for (let i = 0; i < 58; i++) {
+      const a0 = this.rnd(0, Math.PI * 2)
+      const r0 = Math.pow(this.rnd(), 1.35) * 68 * power
+      const len = this.rnd(5, 22) * (1 - r0 / (85 * power))
+      const a1 = a0 + (this.rnd() < 0.5 ? 1 : -1) * this.rnd(0.4, 1.35)
+      const x0 = x + Math.cos(a0) * r0
+      const y0 = y + Math.sin(a0) * r0
+      const x1 = x0 + Math.cos(a1) * len
+      const y1 = y0 + Math.sin(a1) * len
+      const tReveal = 0.008 + (r0 / (68 * power)) * growDur * 0.55
+      microCracks.push({ x0, y0, x1, y1, t0: tReveal, alpha: this.rnd(0.45, 0.88) })
+    }
+
+    // 4. Bright powdered-white crushed silica impact crater (matching target-cracks.png!)
     const craterFacets = []
-    const facetCount = Math.round(68 * power)
+    const facetCount = Math.round(92 * power)
     for (let i = 0; i < facetCount; i++) {
       const ang = this.rnd(0, Math.PI * 2)
-      const dist = Math.pow(this.rnd(), 1.45) * 30 * power
+      const dist = Math.pow(this.rnd(), 1.55) * 32 * power
       const fx = x + Math.cos(ang) * dist
       const fy = y + Math.sin(ang) * dist
-      const r = this.rnd(1.5, 5.8) * (1 - dist / (36 * power))
+      const r = this.rnd(1.2, 5.2) * (1 - dist / (38 * power))
       const a0 = this.rnd(0, Math.PI * 2)
       craterFacets.push({
         pts: [
           [fx + Math.cos(a0) * r, fy + Math.sin(a0) * r],
-          [fx + Math.cos(a0 + 2.1) * r * 0.85, fy + Math.sin(a0 + 2.1) * r * 0.85],
-          [fx + Math.cos(a0 + 4.2) * r * 1.1, fy + Math.sin(a0 + 4.2) * r * 1.1],
+          [fx + Math.cos(a0 + 2.1) * r * 0.82, fy + Math.sin(a0 + 2.1) * r * 0.82],
+          [fx + Math.cos(a0 + 4.2) * r * 1.08, fy + Math.sin(a0 + 4.2) * r * 1.08],
         ],
-        dark: dist < 7 * power ? this.rnd() < 0.55 : this.rnd() < 0.22,
-        gold: this.rnd() < 0.42,
-        alpha: this.rnd(0.65, 0.98),
+        dark: dist < 5.5 * power ? this.rnd() < 0.65 : this.rnd() < 0.18,
+        revealAt: (dist / (32 * power)) * 0.028,
+        alpha: this.rnd(0.75, 1.0),
       })
     }
 
-    // 135 sparkling crushed-glass powder specks radiating around the impact crater
-    for (let i = 0; i < 135; i++) {
+    // 160 fine crystalline white/silver & golden powder specks around the impact rosette
+    for (let i = 0; i < 160; i++) {
       const ang = this.rnd(0, Math.PI * 2)
-      const dist = Math.pow(this.rnd(), 1.55) * 88 * power
+      const dist = Math.pow(this.rnd(), 1.6) * 96 * power
       specks.push({
         x: x + Math.cos(ang) * dist,
         y: y + Math.sin(ang) * dist,
-        r: this.rnd(0.75, 2.6),
+        r: this.rnd(0.65, 2.3),
         ang: ang + this.rnd(-0.4, 0.4),
-        stretch: this.rnd(1.1, 2.8),
-        gold: this.rnd() < 0.62,
-        star: this.rnd() < 0.18,
-        alpha: this.rnd(0.58, 0.98),
+        stretch: this.rnd(1.1, 2.6),
+        gold: this.rnd() < 0.25,
+        star: this.rnd() < 0.16,
+        revealAt: (dist / (96 * power)) * growDur * 0.7,
+        alpha: this.rnd(0.62, 0.98),
       })
     }
 
-    this.cracks.push({ x, y, power, segments, rings, wedges, craterFacets, specks, age: 0 })
+    this.cracks.push({
+      x,
+      y,
+      power,
+      growDur,
+      segments,
+      rings,
+      wedges,
+      microCracks,
+      craterFacets,
+      specks,
+      age: 0,
+    })
 
-    // 4. Spawn sparkling crystalline micro-splinters and golden glass dust
-    const dustCount = Math.round(64 * power)
+    // 5. Spawn sparkling crystalline micro-splinters and glass powder
+    const dustCount = Math.round(78 * power)
     for (let i = 0; i < dustCount; i++) {
       const ang = this.rnd(0, Math.PI * 2)
-      const spd = this.rnd(40, 320) * power
-      const isNeedle = this.rnd() < 0.45
+      const spd = this.rnd(35, 310) * power
+      const isNeedle = this.rnd() < 0.42
       this.dust.push({
-        x: x + this.rnd(-12, 12),
-        y: y + this.rnd(-12, 12),
+        x: x + this.rnd(-10, 10),
+        y: y + this.rnd(-10, 10),
         vx: Math.cos(ang) * spd,
-        vy: Math.sin(ang) * spd - this.rnd(30, 130),
+        vy: Math.sin(ang) * spd - this.rnd(25, 120),
         rot: ang + this.rnd(-0.5, 0.5),
         vrot: this.rnd(-14, 14),
-        r: isNeedle ? this.rnd(2.0, 4.8) : this.rnd(0.9, 2.5),
-        aspect: isNeedle ? this.rnd(0.22, 0.42) : this.rnd(0.65, 1.0),
-        gold: this.rnd() < 0.72,
-        green: this.rnd() < 0.25,
+        r: isNeedle ? this.rnd(1.8, 4.4) : this.rnd(0.8, 2.2),
+        aspect: isNeedle ? this.rnd(0.2, 0.4) : this.rnd(0.65, 1.0),
+        kind: this.rnd() < 0.18 ? "bokeh" : isNeedle ? "shard" : "spark",
+        gold: this.rnd() < 0.48,
+        green: this.rnd() < 0.22,
         phase: this.rnd(0, Math.PI * 2),
         age: 0,
-        life: this.rnd(0.75, 1.6),
+        life: this.rnd(0.75, 1.65),
       })
     }
   }
@@ -543,27 +749,29 @@ export class ScreenBreak {
     for (let i = 0; i < spine.length - 1; i++) {
       const a = spine[i]
       const b = spine[i + 1]
-      const seg = Math.hypot(b[0] - a[0], b[1] - a[1])
+      const seg = Math.hypot(b.x - a.x, b.y - a.y)
       if (acc + seg >= targetDist) {
-        const t = (targetDist - acc) / (seg || 1)
-        return [lerp(a[0], b[0], t), lerp(a[1], b[1], t)]
+        const f = (targetDist - acc) / (seg || 1)
+        return { x: lerp(a.x, b.x, f), y: lerp(a.y, b.y, f), t: lerp(a.t, b.t, f) }
       }
       acc += seg
     }
     return spine[spine.length - 1]
   }
 
-  // Shatters the entire cracked viewport into 3D extruded tempered glass slabs suspended in
-  // slow-motion bullet-time around the glowing Super Saiyan head (matching target-shatter.png!).
+  // Shatters the entire cracked viewport into Lloyd-relaxed 3D extruded tempered glass slabs +
+  // a 3-tier cloud of ~620 sparkling golden/white glass dust & bokeh motes (matching target-shatter.png!).
   shatter(epicX = this.W * 0.5, epicY = this.H * 0.46) {
     const { W, H, dpr } = this
     if (!W || !H) return
 
+    // Bake fully-grown cracks onto pageCanvas so shards carry the crisp crystalline fracture lines
+    for (const c of this.cracks) c.age = Math.max(c.age, 1.0)
     this.captureViewport(this.cleanCtx, { clean: true, skipDownload: true })
     this.captureViewport(this.pageCtx, { skipDownload: true })
     this.pageCtx.save()
     this.pageCtx.setTransform(dpr, 0, 0, dpr, 0, 0)
-    this.drawCracksOnto(this.pageCtx, 0.9)
+    this.drawCracksOnto(this.pageCtx, 0.92)
     this.pageCtx.restore()
 
     this.root.setAttribute("data-screen-shattered", "")
@@ -579,29 +787,40 @@ export class ScreenBreak {
         h: r.height,
         label: (dl.textContent || "Download for Mac").trim(),
       }
+      dl.style.transition = ""
       dl.style.transform = ""
     }
 
     this.state = "shattered"
-    this.flash = 0.55
+    this.flash = 0.52
     this.flashX = epicX
     this.flashY = epicY
     this.shards.length = 0
 
-    // 1. Multi-scale Voronoi tessellation across the viewport
-    const cols = W < 640 ? 7 : 10
-    const rows = W < 640 ? 6 : 7
+    // 1. Well-spaced Voronoi tessellation with minimum seed separation so every slab is a chunky 3D crystal pane
+    const cols = W < 640 ? 6 : 9
+    const rows = W < 640 ? 5 : 6
     const seeds = []
+    const minSep = Math.min(W / cols, H / rows) * 0.52
     for (let iy = 0; iy < rows; iy++) {
       for (let ix = 0; ix < cols; ix++) {
         const u = (ix + 0.5) / cols
         const v = (iy + 0.5) / rows
-        let sx = u * W + this.rnd(-W / cols, W / cols) * 0.38
-        let sy = v * H + this.rnd(-H / rows, H / rows) * 0.38
-        const pull = (ix + iy) % 2 === 0 ? 0.14 : 0.03
-        sx = lerp(sx, epicX, pull)
-        sy = lerp(sy, epicY, pull)
-        seeds.push([clamp(sx, 16, W - 16), clamp(sy, 16, H - 16)])
+        let sx = u * W + this.rnd(-W / cols, W / cols) * 0.3
+        let sy = v * H + this.rnd(-H / rows, H / rows) * 0.3
+        sx = clamp(sx, 28, W - 28)
+        sy = clamp(sy, 28, H - 28)
+        // Enforce minimum separation so no degenerate needle cells form
+        for (const prev of seeds) {
+          const dx = sx - prev[0]
+          const dy = sy - prev[1]
+          const d = Math.hypot(dx, dy)
+          if (d > 0.1 && d < minSep) {
+            sx += (dx / d) * (minSep - d) * 0.6
+            sy += (dy / d) * (minSep - d) * 0.6
+          }
+        }
+        seeds.push([clamp(sx, 24, W - 24), clamp(sy, 24, H - 24)])
       }
     }
 
@@ -614,7 +833,7 @@ export class ScreenBreak {
     const maxDist = Math.hypot(W * 0.55, H * 0.55)
     const headX = this.headX || W * 0.5
     const headY = this.headY || H * 0.38
-    const clearR = (this.headR || 95) * 1.95
+    const clearR = (this.headR || 95) * 1.9
 
     for (let i = 0; i < seeds.length; i++) {
       const si = seeds[i]
@@ -647,17 +866,20 @@ export class ScreenBreak {
       area = Math.abs(area) * 0.5
       const localPoly = poly.map((p) => [p[0] - cx, p[1] - cy])
 
-      // Generate internal star-fracture glints inside each 3D slab (like target-shatter.png!)
+      // Internal branching star-fracture inside each 3D slab (matching target-shatter.png!)
       const innerCracks = []
-      const gx = localPoly[0][0] * 0.25
-      const gy = localPoly[0][1] * 0.25
+      const gx = localPoly[0][0] * 0.22
+      const gy = localPoly[0][1] * 0.22
       for (let k = 0; k < localPoly.length; k++) {
         const vp = localPoly[k]
-        innerCracks.push([gx, gy, (gx + vp[0]) * 0.5 + this.rnd(-5, 5), (gy + vp[1]) * 0.5 + this.rnd(-5, 5), vp[0] * 0.92, vp[1] * 0.92])
+        const mx = (gx + vp[0]) * 0.5 + this.rnd(-6, 6)
+        const my = (gy + vp[1]) * 0.5 + this.rnd(-6, 6)
+        innerCracks.push([gx, gy, mx, my, vp[0] * 0.94, vp[1] * 0.94])
+        // Secondary fine cross-crack inside the slab
+        const vpNext = localPoly[(k + 1) % localPoly.length]
+        innerCracks.push([mx, my, (mx + vpNext[0] * 0.55) * 0.5, (my + vpNext[1] * 0.55) * 0.5, vpNext[0] * 0.55, vpNext[1] * 0.55])
       }
 
-      // Compute radial burst vector from the head so the center opens cleanly around the head
-      // while the slabs decelerate into a slow-motion 3D ring framing the viewport!
       const dx = cx - headX
       const dy = cy - headY
       const dist = Math.hypot(dx, dy)
@@ -666,10 +888,10 @@ export class ScreenBreak {
       const dirX = Math.cos(outAng)
       const dirY = Math.sin(outAng)
 
-      // Shards covering the head burst outward far enough to clear `clearR`, then suspend in bullet-time
-      const needClear = dist < clearR ? (clearR - dist) * 3.4 + 280 : lerp(260, 95, normD)
-      const impulse = needClear * this.rnd(0.86, 1.18)
-      const zVel = normD > 0.52 ? this.rnd(0.08, 0.22) : this.rnd(-0.04, 0.12)
+      // Shards over the head open a clear window around the head, then suspend in slow-motion bullet-time
+      const needClear = dist < clearR ? (clearR - dist) * 3.2 + 240 : lerp(220, 75, normD)
+      const impulse = needClear * this.rnd(0.86, 1.16)
+      const zVel = normD > 0.54 ? this.rnd(0.08, 0.22) : this.rnd(-0.04, 0.12)
 
       this.shards.push({
         isDownload: false,
@@ -680,23 +902,24 @@ export class ScreenBreak {
         y: cy,
         z: 1,
         vz: zVel,
-        vx: dirX * impulse + this.rnd(-28, 28),
-        vy: dirY * impulse * 0.86 - this.rnd(35, 95),
-        driftX: dirX * this.rnd(12, 34),
-        driftY: dirY * this.rnd(8, 24) + this.rnd(14, 36),
+        vx: dirX * impulse + this.rnd(-24, 24),
+        vy: dirY * impulse * 0.85 - this.rnd(28, 80),
+        driftX: dirX * this.rnd(10, 28),
+        driftY: dirY * this.rnd(6, 20) + this.rnd(10, 28),
         ang: this.rnd(-0.08, 0.08),
-        spin: (dirX >= 0 ? 1 : -1) * this.rnd(0.35, 1.15),
-        pitch: this.rnd(0.22, 0.85) * (this.rnd() < 0.5 ? 1 : -1),
-        vPitch: this.rnd(0.65, 1.65) * (this.rnd() < 0.5 ? 1 : -1),
-        yaw: this.rnd(0.25, 0.92) * (this.rnd() < 0.5 ? 1 : -1),
-        vYaw: this.rnd(0.65, 1.65) * (this.rnd() < 0.5 ? 1 : -1),
-        thick: lerp(8.0, 15.5, clamp(area / 15000, 0, 1)),
-        refractShift: this.rnd(6, 14),
+        spin: (dirX >= 0 ? 1 : -1) * this.rnd(0.32, 0.95),
+        pitch: this.rnd(0.25, 0.78) * (this.rnd() < 0.5 ? 1 : -1),
+        vPitch: this.rnd(0.55, 1.35) * (this.rnd() < 0.5 ? 1 : -1),
+        yaw: this.rnd(0.25, 0.82) * (this.rnd() < 0.5 ? 1 : -1),
+        vYaw: this.rnd(0.55, 1.35) * (this.rnd() < 0.5 ? 1 : -1),
+        thick: lerp(8.5, 16.0, clamp(area / 16000, 0, 1)),
+        refractShift: this.rnd(9, 18),
         specSeed: this.rnd(0, Math.PI * 2),
+        hasCausticStar: this.rnd() < 0.42,
         poly: localPoly,
         innerCracks,
         normD,
-        delay: normD * 0.04,
+        delay: normD * 0.038,
         age: 0,
         fromX: cx,
         fromY: cy,
@@ -707,23 +930,22 @@ export class ScreenBreak {
       })
     }
 
-    // 2. Secondary 3D crystalline glass splinters (sharp angular shards floating in bullet-time around the head)
-    const splinterCount = W < 640 ? 38 : 68
-    for (let i = 0; i < splinterCount; i++) {
+    // 2. Secondary 3D angular crystal chunks (well-proportioned triangles/quads, never skinny lines)
+    const chunkCount = W < 640 ? 34 : 62
+    for (let i = 0; i < chunkCount; i++) {
       const ang = this.rnd(0, Math.PI * 2)
-      const rDist = this.rnd(clearR * 0.72, maxDist * 0.92)
+      const rDist = this.rnd(clearR * 0.68, maxDist * 0.94)
       const sx = clamp(headX + Math.cos(ang) * rDist, 24, W - 24)
       const sy = clamp(headY + Math.sin(ang) * rDist, 24, H - 24)
       const normD = clamp(rDist / maxDist, 0, 1)
-      const len = this.rnd(10, 28)
-      const wid = len * this.rnd(0.28, 0.58)
+      const r0 = this.rnd(8, 22)
       const localPoly = [
-        [-len, -wid * 0.2],
-        [-len * 0.1, -wid],
-        [len, wid * 0.15],
-        [len * 0.15, wid * 0.9],
+        [-r0, -r0 * 0.45],
+        [r0 * 0.2, -r0 * 0.85],
+        [r0 * 1.05, r0 * 0.25],
+        [-r0 * 0.25, r0 * 0.78],
       ]
-      const spd = this.rnd(90, 260)
+      const spd = this.rnd(75, 220)
       this.shards.push({
         isDownload: false,
         isSplinter: true,
@@ -734,20 +956,21 @@ export class ScreenBreak {
         z: this.rnd(0.88, 1.28),
         vz: this.rnd(-0.04, 0.14),
         vx: Math.cos(ang) * spd,
-        vy: Math.sin(ang) * spd * 0.8 - this.rnd(20, 60),
-        driftX: Math.cos(ang) * this.rnd(8, 24),
-        driftY: this.rnd(12, 32),
+        vy: Math.sin(ang) * spd * 0.8 - this.rnd(18, 52),
+        driftX: Math.cos(ang) * this.rnd(6, 20),
+        driftY: this.rnd(10, 26),
         ang: ang + this.rnd(-0.8, 0.8),
-        spin: this.rnd(-1.8, 1.8),
-        pitch: this.rnd(0.3, 1.2),
-        vPitch: this.rnd(-2.2, 2.2),
-        yaw: this.rnd(0.3, 1.2),
-        vYaw: this.rnd(-2.2, 2.2),
-        thick: this.rnd(4.5, 8.0),
-        refractShift: 6,
+        spin: this.rnd(-1.5, 1.5),
+        pitch: this.rnd(0.25, 0.85),
+        vPitch: this.rnd(-1.8, 1.8),
+        yaw: this.rnd(0.25, 0.85),
+        vYaw: this.rnd(-1.8, 1.8),
+        thick: this.rnd(4.5, 8.5),
+        refractShift: 8,
         specSeed: this.rnd(0, Math.PI * 2),
+        hasCausticStar: false,
         poly: localPoly,
-        innerCracks: [[-len * 0.8, 0, 0, 0, len * 0.8, 0]],
+        innerCracks: [[-r0 * 0.7, -r0 * 0.2, 0, 0, r0 * 0.8, r0 * 0.2]],
         normD,
         delay: normD * 0.03,
         age: 0,
@@ -760,8 +983,7 @@ export class ScreenBreak {
       })
     }
 
-    // 3. Dedicated hero piece for the knocked-off Download button: pops up and tumbles in slow-motion
-    // right below the glowing head (matching target-shatter.png!) so the viewer watches it float away!
+    // 3. Dedicated hero piece for the knocked-off Download button
     if (dlRect) {
       this.shards.push({
         isDownload: true,
@@ -798,30 +1020,33 @@ export class ScreenBreak {
       })
     }
 
-    // 4. Cloud of 320 sparkling golden & white-diamond glass powder particles suspended in the void
-    const glitterCount = W < 640 ? 160 : 320
+    // 4. Dense 3-tier nebula of ~620 golden/white glass glitter, micro-shards & warm DOF bokeh motes (matching target-shatter.png!)
+    const glitterCount = W < 640 ? 280 : 620
     for (let i = 0; i < glitterCount; i++) {
       const ang = this.rnd(0, Math.PI * 2)
-      const dist = Math.pow(this.rnd(), 0.72) * maxDist * 0.85
-      const gx = headX + Math.cos(ang) * dist * 0.65 + this.rnd(-25, 25)
-      const gy = headY + Math.sin(ang) * dist * 0.65 + this.rnd(-25, 25)
-      const spd = this.rnd(25, 180)
-      const isSliver = this.rnd() < 0.38
+      const dist = Math.pow(this.rnd(), 0.76) * maxDist * 0.96
+      const gx = headX + Math.cos(ang) * dist * 0.78 + this.rnd(-28, 28)
+      const gy = headY + Math.sin(ang) * dist * 0.78 + this.rnd(-28, 28)
+      const spd = this.rnd(18, 165)
+      const roll = this.rnd()
+      const kind = roll < 0.13 ? "bokeh" : roll < 0.36 ? "shard" : "spark"
       this.dust.push({
         x: gx,
         y: gy,
-        vx: Math.cos(ang) * spd + this.rnd(-22, 22),
-        vy: Math.sin(ang) * spd * 0.75 - this.rnd(15, 65),
+        vx: Math.cos(ang) * spd + this.rnd(-18, 18),
+        vy: Math.sin(ang) * spd * 0.75 - this.rnd(12, 55),
         BulletTime: true,
         rot: this.rnd(0, Math.PI * 2),
-        vrot: this.rnd(-8, 8),
-        r: isSliver ? this.rnd(1.8, 4.4) : this.rnd(0.85, 2.5),
-        aspect: isSliver ? this.rnd(0.24, 0.46) : this.rnd(0.7, 1.0),
-        gold: this.rnd() < 0.8,
-        green: this.rnd() < 0.2,
+        vrot: this.rnd(-7, 7),
+        r: kind === "bokeh" ? this.rnd(3.6, 8.5) : kind === "shard" ? this.rnd(2.2, 4.8) : this.rnd(1.15, 3.1),
+        aspect: kind === "shard" ? this.rnd(0.32, 0.62) : 1.0,
+        kind,
+        star: kind === "spark" && this.rnd() < 0.28,
+        gold: this.rnd() < (kind === "bokeh" ? 0.92 : 0.76),
+        green: this.rnd() < 0.18,
         phase: this.rnd(0, Math.PI * 2),
         age: 0,
-        life: this.rnd(4.5, 6.2),
+        life: this.rnd(4.6, 6.4),
       })
     }
   }
@@ -842,15 +1067,24 @@ export class ScreenBreak {
     }
   }
 
-  drawCracksOnto(ctx, alpha = 1) {
+  // Draws the propagating ballistic fractures: mostly crystalline white/silver with refraction,
+  // thinner hairline secondaries, dense fine micro-cracking near craters, bright powdered-white
+  // impact cores, and localized golden glints from the head's light.
+  drawCracksOnto(ctx, alpha = 1, cracks = this.cracks) {
     const { W, H } = this
     const hx = this.headX || W * 0.5
     const hy = this.headY || H * 0.38
-    const lightRange = Math.min(W, H) * 0.82
+    const headGlowRange = (this.headR || 95) * 3.1
 
-    for (const c of this.cracks) {
-      // 1. Optical refraction across angular glass facets + subtle RGB chromatic dispersion
+    for (const c of cracks) {
+      const age = c.age
+
+      // 1. Optical refraction across angular glass facets + RGB chromatic dispersion (grows with c.age)
       for (const w of c.wedges) {
+        const wProg = clamp(age / (w.revealDur || 0.09), 0, 1)
+        if (wProg <= 0.02) continue
+        const ox = w.ox * wProg
+        const oy = w.oy * wProg
         ctx.save()
         ctx.beginPath()
         ctx.moveTo(w.poly[0][0], w.poly[0][1])
@@ -858,161 +1092,263 @@ export class ScreenBreak {
         ctx.closePath()
         ctx.clip()
         ctx.globalAlpha = 0.96 * alpha
-        ctx.drawImage(this.basePageCanvas, 0, 0, this.basePageCanvas.width, this.basePageCanvas.height, w.ox, w.oy, W, H)
+        ctx.drawImage(this.basePageCanvas, 0, 0, this.basePageCanvas.width, this.basePageCanvas.height, ox, oy, W, H)
+        if (this.lite) {
+          ctx.restore()
+          continue
+        }
+        // Chromatic dispersion shift across fracture boundary
         ctx.globalCompositeOperation = "lighter"
-        ctx.globalAlpha = 0.14 * alpha
+        ctx.globalAlpha = 0.16 * wProg * alpha
         ctx.drawImage(
           this.basePageCanvas,
           0,
           0,
           this.basePageCanvas.width,
           this.basePageCanvas.height,
-          w.ox + w.chromaX,
-          w.oy + w.chromaY,
+          ox + w.chromaX * wProg,
+          oy + w.chromaY * wProg,
           W,
           H,
         )
         ctx.restore()
       }
 
-      // 2. Densely packed concentric Hertzian stress rings (with head-lit golden & green-edge highlights)
+      // 2. Dense fine micro-cracking near impact center (silver-white safety-glass hairlines)
       ctx.save()
       ctx.lineCap = "round"
+      if (c.microCracks) {
+        for (const mc of c.microCracks) {
+          if (age < mc.t0) continue
+          const mProg = clamp((age - mc.t0) / 0.018, 0, 1)
+          const ex = lerp(mc.x0, mc.x1, mProg)
+          const ey = lerp(mc.y0, mc.y1, mProg)
+          ctx.strokeStyle = `rgba(232, 244, 255, ${mc.alpha * alpha})`
+          ctx.lineWidth = 0.48
+          ctx.beginPath()
+          ctx.moveTo(mc.x0, mc.y0)
+          ctx.lineTo(ex, ey)
+          ctx.stroke()
+        }
+      }
+
+      // 3. Exponentially spaced concentric Hertzian stress rings (forming just behind the radial front)
       for (const ring of c.rings) {
-        const taper = Math.pow(1 - ring.u, 0.52)
+        if (age < ring.t0) continue
+        const rProg = clamp((age - ring.t0) / Math.max(0.008, ring.t1 - ring.t0), 0, 1)
+        const taper = Math.pow(1 - ring.u, 0.58)
         const lx = hx - ring.cx
         const ly = hy - ring.cy
         const ld = Math.hypot(lx, ly) || 1
         const ndotl = Math.abs((ring.nx * lx + ring.ny * ly) / ld)
-        const headProx = clamp(1.32 - ld / lightRange, 0.25, 1.32)
-        const goldAmt = Math.pow(ndotl, 1.35) * headProx
+        // Gold ONLY as localized glints where close to the glowing head and angled toward it
+        const goldGlint = Math.pow(ndotl, 3.8) * clamp(1 - ld / headGlowRange, 0, 1)
 
-        ctx.strokeStyle = `rgba(0, 4, 10, ${(0.82 * taper + 0.14) * alpha})`
-        ctx.lineWidth = 1.5 * taper + 0.35
+        const xEnd = rProg >= 1 ? ring.x1 : lerp(ring.x0, ring.x1, rProg)
+        const yEnd = rProg >= 1 ? ring.y1 : lerp(ring.y0, ring.y1, rProg)
+        const cxMid = rProg >= 1 ? ring.cx : lerp(ring.x0, ring.cx, rProg)
+        const cyMid = rProg >= 1 ? ring.cy : lerp(ring.y0, ring.cy, rProg)
+
+        const wBase = ring.fine ? 0.52 * taper + 0.2 : 0.85 * taper + 0.24
+
+        // Crisp dark total-internal-reflection shadow line
+        ctx.strokeStyle = `rgba(0, 4, 10, ${(0.76 * taper + 0.14) * alpha})`
+        ctx.lineWidth = wBase * 1.45
         ctx.beginPath()
-        ctx.moveTo(ring.x0 + 1.0, ring.y0 + 1.0)
-        ctx.quadraticCurveTo(ring.cx + 1.0, ring.cy + 1.0, ring.x1 + 1.0, ring.y1 + 1.0)
+        ctx.moveTo(ring.x0 + 0.85, ring.y0 + 0.85)
+        ctx.quadraticCurveTo(cxMid + 0.85, cyMid + 0.85, xEnd + 0.85, yEnd + 0.85)
         ctx.stroke()
 
-        ctx.strokeStyle = `rgba(110, 242, 202, ${0.28 * taper * alpha})`
-        ctx.lineWidth = 1.75 * taper + 0.35
-        ctx.beginPath()
-        ctx.moveTo(ring.x0, ring.y0)
-        ctx.quadraticCurveTo(ring.cx, ring.cy, ring.x1, ring.y1)
-        ctx.stroke()
+        // Crystalline silver-white ring crack (with warm gold glint only when catching the head's light)
+        if (goldGlint > 0.22) {
+          ctx.strokeStyle = `rgba(255, 222, 138, ${Math.min(0.95, goldGlint * 0.9) * alpha})`
+          ctx.lineWidth = wBase * 1.35
+          ctx.beginPath()
+          ctx.moveTo(ring.x0, ring.y0)
+          ctx.quadraticCurveTo(cxMid, cyMid, xEnd, yEnd)
+          ctx.stroke()
+        }
 
-        const rCol = Math.round(lerp(232, 255, goldAmt))
-        const gCol = Math.round(lerp(245, 224, goldAmt * 0.52))
-        const bCol = Math.round(lerp(252, 148, goldAmt * 0.76))
-        ctx.strokeStyle = `rgba(${rCol}, ${gCol}, ${bCol}, ${Math.min(1, (0.44 + 0.58 * ring.spec * headProx) * (taper + 0.12)) * alpha})`
-        ctx.lineWidth = 0.95 * taper + 0.28
+        ctx.strokeStyle = `rgba(244, 250, 255, ${Math.min(1, (0.48 + 0.52 * ring.spec) * (taper + 0.15)) * alpha})`
+        ctx.lineWidth = wBase
         ctx.beginPath()
         ctx.moveTo(ring.x0, ring.y0)
-        ctx.quadraticCurveTo(ring.cx, ring.cy, ring.x1, ring.y1)
+        ctx.quadraticCurveTo(cxMid, cyMid, xEnd, yEnd)
         ctx.stroke()
       }
 
-      // 3. Branching radial stress cracks with tapering width, green edge tint & head-lit golden specular glints
+      // 4. Outward-propagating radial cracks + thinner hairline secondaries/tertiaries + leading tip glints
+      const activeTips = []
       for (const seg of c.segments) {
-        const taper = Math.pow(1 - seg.u0, 0.65) * (seg.depth === 0 ? 1 : seg.depth === 1 ? 0.74 : 0.5)
+        if (age < seg.t0) continue
+        const sProg = clamp((age - seg.t0) / Math.max(0.005, seg.t1 - seg.t0), 0, 1)
+        const ex = sProg >= 1 ? seg.x1 : lerp(seg.x0, seg.x1, sProg)
+        const ey = sProg >= 1 ? seg.y1 : lerp(seg.y0, seg.y1, sProg)
+        if (sProg < 1 && seg.depth <= 1) {
+          activeTips.push({
+            x: ex,
+            y: ey,
+            ang: Math.atan2(seg.y1 - seg.y0, seg.x1 - seg.x0),
+            depth: seg.depth,
+          })
+        }
+
+        const depthScale = seg.depth === 0 ? 1.0 : seg.depth === 1 ? 0.46 : 0.28
+        const taper = Math.pow(1 - seg.u0, 0.72) * depthScale
         const lx = hx - seg.mx
         const ly = hy - seg.my
         const ld = Math.hypot(lx, ly) || 1
         const ndotl = Math.abs((seg.nx * lx + seg.ny * ly) / ld)
-        const headProx = clamp(1.36 - ld / lightRange, 0.25, 1.35)
-        const goldGlow = Math.pow(ndotl, 1.35) * headProx
+        // Localized golden Fresnel glint ONLY near the head on strongly aligned segments
+        const goldGlint = Math.pow(ndotl, 3.6) * clamp(1.08 - ld / headGlowRange, 0, 1)
 
-        const shOff = 1.15 * taper + 0.35
-        ctx.strokeStyle = `rgba(0, 3, 9, ${(0.86 * taper + 0.14) * alpha})`
-        ctx.lineWidth = 2.2 * taper + 0.45
+        // Pass A: Dark total-internal-reflection shadow bevel
+        const shOff = 0.95 * taper + 0.28
+        ctx.strokeStyle = `rgba(0, 3, 9, ${(0.84 * taper + 0.16) * alpha})`
+        ctx.lineWidth = 1.75 * taper + 0.32
         ctx.beginPath()
         ctx.moveTo(seg.x0 + shOff, seg.y0 + shOff)
-        ctx.lineTo(seg.x1 + shOff, seg.y1 + shOff)
+        ctx.lineTo(ex + shOff, ey + shOff)
         ctx.stroke()
 
-        if (taper > 0.2) {
-          ctx.strokeStyle = `rgba(105, 240, 200, ${0.32 * taper * alpha})`
-          ctx.lineWidth = 2.5 * taper + 0.42
+        // Pass B: Subtle green borosilicate glass edge tint on inner primary bevels
+        if (seg.depth === 0 && seg.u0 < 0.42) {
+          ctx.strokeStyle = `rgba(115, 242, 208, ${0.24 * (1 - seg.u0 / 0.42) * alpha})`
+          ctx.lineWidth = 1.9 * taper + 0.35
           ctx.beginPath()
-          ctx.moveTo(seg.x0 - seg.nx * 0.55, seg.y0 - seg.ny * 0.55)
-          ctx.lineTo(seg.x1 - seg.nx * 0.55, seg.y1 - seg.ny * 0.55)
+          ctx.moveTo(seg.x0 - seg.nx * 0.45, seg.y0 - seg.ny * 0.45)
+          ctx.lineTo(ex - seg.nx * 0.45, ey - seg.ny * 0.45)
           ctx.stroke()
         }
 
-        if (goldGlow > 0.22) {
-          ctx.strokeStyle = `rgba(255, 195, 72, ${Math.min(0.95, goldGlow * 0.82 * taper) * alpha})`
-          ctx.lineWidth = 2.0 * taper + 0.38
+        // Pass C: Localized golden specular glint catching the Super Saiyan head light
+        if (goldGlint > 0.24) {
+          ctx.strokeStyle = `rgba(255, 212, 108, ${Math.min(0.92, goldGlint * 0.85) * alpha})`
+          ctx.lineWidth = 1.55 * taper + 0.28
           ctx.beginPath()
-          ctx.moveTo(seg.x0 + seg.nx * 0.4, seg.y0 + seg.ny * 0.4)
-          ctx.lineTo(seg.x1 + seg.nx * 0.4, seg.y1 + seg.ny * 0.4)
+          ctx.moveTo(seg.x0 + seg.nx * 0.35, seg.y0 + seg.ny * 0.35)
+          ctx.lineTo(ex + seg.nx * 0.35, ey + seg.ny * 0.35)
           ctx.stroke()
         }
 
-        ctx.strokeStyle = `rgba(255, 253, 246, ${Math.min(1, (0.46 + 0.56 * seg.spec * (0.5 + 0.5 * ndotl)) * (taper + 0.14)) * alpha})`
-        ctx.lineWidth = 1.32 * taper + 0.3
+        // Pass D: Crisp crystalline white/silver fracture line (primary bold -> secondary/tertiary razor hairline)
+        const whiteAlpha = Math.min(1, (0.55 + 0.45 * seg.spec) * (seg.depth === 0 ? taper + 0.22 : taper + 0.38)) * alpha
+        ctx.strokeStyle = `rgba(248, 252, 255, ${whiteAlpha})`
+        ctx.lineWidth = seg.depth === 0 ? 1.18 * taper + 0.26 : seg.depth === 1 ? 0.58 * taper + 0.2 : 0.36
         ctx.beginPath()
         ctx.moveTo(seg.x0, seg.y0)
-        ctx.lineTo(seg.x1, seg.y1)
+        ctx.lineTo(ex, ey)
         ctx.stroke()
       }
-      ctx.restore()
 
-      // 4. Pulverized conchoidal impact crater (bright frosted silica rosette + dark central puncture)
-      ctx.save()
-      const rCore = 30 * c.power
-      const halo = ctx.createRadialGradient(c.x, c.y, 1, c.x, c.y, rCore * 1.45)
-      halo.addColorStop(0, `rgba(255, 253, 246, ${0.92 * alpha})`)
-      halo.addColorStop(0.26, `rgba(242, 249, 255, ${0.56 * alpha})`)
-      halo.addColorStop(0.58, `rgba(185, 236, 224, ${0.18 * alpha})`)
-      halo.addColorStop(1, "rgba(120, 200, 190, 0)")
-      ctx.fillStyle = halo
-      ctx.beginPath()
-      ctx.arc(c.x, c.y, rCore * 1.45, 0, Math.PI * 2)
-      ctx.fill()
-
-      for (const f of c.craterFacets) {
-        ctx.beginPath()
-        ctx.moveTo(f.pts[0][0], f.pts[0][1])
-        ctx.lineTo(f.pts[1][0], f.pts[1][1])
-        ctx.lineTo(f.pts[2][0], f.pts[2][1])
-        ctx.closePath()
-        ctx.fillStyle = f.dark
-          ? `rgba(4, 7, 14, ${f.alpha * 0.9 * alpha})`
-          : f.gold
-            ? `rgba(255, 236, 180, ${f.alpha * 0.94 * alpha})`
-            : `rgba(250, 254, 255, ${f.alpha * 0.96 * alpha})`
-        ctx.fill()
-      }
-
-      // 5. Embedded crystalline micro-specks & star glints along the cracks & impact rosette
-      for (const sp of c.specks) {
+      // 5. Razor-sharp anisotropic stress-intensity needle glints racing along the growing crack fronts!
+      for (const tip of activeTips) {
+        const len = tip.depth === 0 ? 7.5 : 4.6
+        const wid = tip.depth === 0 ? 1.35 : 0.95
         ctx.save()
-        ctx.translate(sp.x, sp.y)
-        ctx.rotate(sp.ang)
-        ctx.fillStyle = sp.gold
-          ? `rgba(255, 224, 132, ${sp.alpha * alpha})`
-          : `rgba(248, 253, 255, ${sp.alpha * alpha})`
+        ctx.translate(tip.x, tip.y)
+        ctx.rotate(tip.ang)
+        ctx.fillStyle = `rgba(255, 255, 255, ${0.98 * alpha})`
         ctx.beginPath()
-        ctx.ellipse(0, 0, sp.r * sp.stretch, sp.r * 0.7, 0, 0, Math.PI * 2)
+        ctx.ellipse(-len * 0.25, 0, len, wid, 0, 0, Math.PI * 2)
         ctx.fill()
-        if (sp.star) {
-          ctx.strokeStyle = `rgba(255, 248, 220, ${sp.alpha * 0.85 * alpha})`
-          ctx.lineWidth = 0.65
-          const sl = sp.r * 2.8
+        if (tip.depth === 0) {
+          ctx.strokeStyle = `rgba(210, 245, 255, ${0.85 * alpha})`
+          ctx.lineWidth = 0.75
           ctx.beginPath()
-          ctx.moveTo(-sl, 0)
-          ctx.lineTo(sl, 0)
-          ctx.moveTo(0, -sl * 0.7)
-          ctx.lineTo(0, sl * 0.7)
+          ctx.moveTo(0, -3.6)
+          ctx.lineTo(0, 3.6)
           ctx.stroke()
         }
         ctx.restore()
       }
       ctx.restore()
+
+      // 6. Bright powdered-white crushed silica impact crater (blooms in first 28 ms, matching target-cracks.png!)
+      const craterBloom = smooth(0, 0.026, age)
+      if (craterBloom > 0.01) {
+        ctx.save()
+        const rCore = 32 * c.power * (0.45 + 0.55 * craterBloom)
+        const halo = ctx.createRadialGradient(c.x, c.y, 1.5, c.x, c.y, rCore * 1.4)
+        halo.addColorStop(0, `rgba(255, 255, 255, ${0.96 * craterBloom * alpha})`)
+        halo.addColorStop(0.24, `rgba(246, 251, 255, ${0.78 * craterBloom * alpha})`)
+        halo.addColorStop(0.52, `rgba(215, 236, 248, ${0.26 * craterBloom * alpha})`)
+        halo.addColorStop(1, "rgba(160, 215, 235, 0)")
+        ctx.fillStyle = halo
+        ctx.beginPath()
+        ctx.arc(c.x, c.y, rCore * 1.4, 0, Math.PI * 2)
+        ctx.fill()
+
+        for (const f of c.craterFacets) {
+          if (age < (f.revealAt || 0)) continue
+          ctx.beginPath()
+          ctx.moveTo(f.pts[0][0], f.pts[0][1])
+          ctx.lineTo(f.pts[1][0], f.pts[1][1])
+          ctx.lineTo(f.pts[2][0], f.pts[2][1])
+          ctx.closePath()
+          ctx.fillStyle = f.dark
+            ? `rgba(5, 9, 16, ${f.alpha * 0.92 * alpha})`
+            : `rgba(252, 254, 255, ${f.alpha * 0.98 * alpha})`
+          ctx.fill()
+        }
+
+        // 7. Embedded crystalline micro-specks & star glints revealed as the fracture front passes
+        for (const sp of c.specks) {
+          if (age < (sp.revealAt || 0)) continue
+          ctx.save()
+          ctx.translate(sp.x, sp.y)
+          ctx.rotate(sp.ang)
+          ctx.fillStyle = sp.gold
+            ? `rgba(255, 226, 142, ${sp.alpha * alpha})`
+            : `rgba(248, 253, 255, ${sp.alpha * alpha})`
+          ctx.beginPath()
+          ctx.ellipse(0, 0, sp.r * sp.stretch, sp.r * 0.68, 0, 0, Math.PI * 2)
+          ctx.fill()
+          if (sp.star) {
+            ctx.strokeStyle = `rgba(255, 252, 240, ${sp.alpha * 0.88 * alpha})`
+            ctx.lineWidth = 0.6
+            const sl = sp.r * 2.6
+            ctx.beginPath()
+            ctx.moveTo(-sl, 0)
+            ctx.lineTo(sl, 0)
+            ctx.moveTo(0, -sl * 0.7)
+            ctx.lineTo(0, sl * 0.7)
+            ctx.stroke()
+          }
+          ctx.restore()
+        }
+        ctx.restore()
+      }
     }
   }
 
-  // Draws one 3D extruded glass slab (thick beveled side walls + refracted face + golden Fresnel reflection + internal caustics)
+  // Phones: a crack stops changing once its fronts finish growing, so bake it into one layer and
+  // redraw only the cracks still propagating.
+  drawCracksLite(ctx) {
+    const { W, H, dpr } = this
+    const growing = []
+    for (const c of this.cracks) {
+      if (!c.baked && c.age >= crackSettle(c)) {
+        if (!this.crackLayer) {
+          this.crackLayer = document.createElement("canvas")
+          this.crackLayer.width = this.canvas.width
+          this.crackLayer.height = this.canvas.height
+        }
+        const g = this.crackLayer.getContext("2d")
+        g.setTransform(dpr, 0, 0, dpr, 0, 0)
+        this.drawCracksOnto(g, 1, [c])
+        c.baked = true
+      }
+      if (!c.baked) growing.push(c)
+    }
+    if (this.crackLayer) ctx.drawImage(this.crackLayer, 0, 0, W, H)
+    if (growing.length) this.drawCracksOnto(ctx, 1, growing)
+  }
+
+  // Draws one 3D extruded glass slab matching target-shatter.png:
+  // - Dark crystal slab thickness with green borosilicate inner rim + sharp white/gold specular streaks
+  // - Strong per-shard optical refraction + RGB chromatic dispersion of the page behind it
+  // - Sharp anisotropic surface reflection streaks + internal caustic star-flare
   draw3DGlassShard(ctx, s, healMix, healFade, seamGlint, isGhost = false) {
     if (s.isSplinter && this.state === "rebuilding" && healMix > 0.35) return
     const { W, H } = this
@@ -1020,15 +1356,15 @@ export class ScreenBreak {
     const hy = this.headY || H * 0.38
     const lightRange = Math.min(W, H) * 0.88
 
-    const tiltX = this.state === "rebuilding" ? lerp(0.45 + 0.55 * Math.cos(s.yaw), 1, healMix) : 0.42 + 0.58 * Math.cos(s.yaw)
-    const tiltY = this.state === "rebuilding" ? lerp(0.58 + 0.42 * Math.cos(s.pitch), 1, healMix) : 0.56 + 0.44 * Math.cos(s.pitch)
-    const zScale = this.state === "rebuilding" ? lerp(s.z ?? 1, 1, healMix) : clamp(s.z ?? 1, 0.78, 1.48)
+    // Clamp 3D foreshortening so slabs stay chunky 3D crystal panes and never collapse into 2D needles
+    const tiltX = this.state === "rebuilding" ? lerp(0.58 + 0.42 * Math.cos(s.yaw), 1, healMix) : 0.56 + 0.44 * Math.cos(s.yaw)
+    const tiltY = this.state === "rebuilding" ? lerp(0.64 + 0.36 * Math.cos(s.pitch), 1, healMix) : 0.62 + 0.38 * Math.cos(s.pitch)
+    const zScale = this.state === "rebuilding" ? lerp(s.z ?? 1, 1, healMix) : clamp(s.z ?? 1, 0.82, 1.46)
 
-    // 3D slab extrusion vector in local space (always visible while shattered, collapses to 0 when healed)
     const thickFactor = (1 - healMix) * (isGhost ? 0.6 : 1)
     const rawEx = Math.sin(s.yaw) * s.thick
     const rawEy = Math.sin(s.pitch) * s.thick
-    const minBevel = s.thick * 0.45
+    const minBevel = s.thick * 0.42
     const ex = (Math.abs(rawEx) < minBevel ? (rawEx >= 0 ? minBevel : -minBevel) : rawEx) * thickFactor
     const ey = (Math.abs(rawEy) < minBevel ? (rawEy >= 0 ? minBevel : -minBevel) : rawEy) * thickFactor
 
@@ -1037,13 +1373,13 @@ export class ScreenBreak {
     const ld = Math.hypot(lx, ly) || 1
     const lDirX = lx / ld
     const lDirY = ly / ld
-    const headProx = clamp(1.42 - ld / lightRange, 0.32, 1.42)
-    const faceSpec = (0.28 + 0.72 * Math.pow(0.5 + 0.5 * Math.sin(s.yaw * 1.7 + s.pitch * 1.4 + (s.specSeed ?? 0)), 3)) * (1 - healMix)
+    const headProx = clamp(1.38 - ld / lightRange, 0.28, 1.38)
+    const faceSpec = (0.24 + 0.76 * Math.pow(0.5 + 0.5 * Math.sin(s.yaw * 1.7 + s.pitch * 1.4 + (s.specSeed ?? 0)), 3)) * (1 - healMix)
 
     const splinterFade = s.isSplinter && this.state === "rebuilding" ? 1 - healMix / 0.35 : 1
 
     ctx.save()
-    ctx.globalAlpha = healFade * splinterFade * (isGhost ? 0.22 : 1)
+    ctx.globalAlpha = healFade * splinterFade * (isGhost ? 0.24 : 1)
     ctx.translate(s.x, s.y)
     ctx.scale(zScale, zScale)
     ctx.rotate(s.ang)
@@ -1051,14 +1387,14 @@ export class ScreenBreak {
 
     if (s.isDownload) {
       if (thickFactor > 0.05) {
-        ctx.fillStyle = "rgba(185, 212, 222, 0.9)"
+        ctx.fillStyle = "rgba(175, 218, 212, 0.88)"
         ctx.beginPath()
         ctx.roundRect(-s.w / 2 + ex * 0.55, -s.h / 2 + ey * 0.55, s.w, s.h, s.h / 2)
         ctx.fill()
       }
       this.drawDownloadPill(ctx, -s.w / 2, -s.h / 2, s.w, s.h, s.label)
-      ctx.strokeStyle = `rgba(255, 228, 148, ${Math.min(1, 0.55 + faceSpec * 0.45 + seamGlint)})`
-      ctx.lineWidth = 2.2
+      ctx.strokeStyle = `rgba(255, 236, 172, ${Math.min(1, 0.55 + faceSpec * 0.45 + seamGlint)})`
+      ctx.lineWidth = 2.0
       ctx.beginPath()
       ctx.roundRect(-s.w / 2, -s.h / 2, s.w, s.h, s.h / 2)
       ctx.stroke()
@@ -1069,7 +1405,8 @@ export class ScreenBreak {
     const poly = s.poly
     const n = poly.length
 
-    // 1. Draw 3D extruded tempered-glass side walls (green borosilicate thickness + molten golden head-lit bevels)
+    // 1. 3D extruded glass side bevels: dark refractive borosilicate core + green inner rim +
+    //    sharp gradient specular streak (white core -> golden flare -> dark glass, never a flat yellow block!)
     if (thickFactor > 0.04) {
       const cosA = Math.cos(s.ang)
       const sinA = Math.sin(s.ang)
@@ -1092,27 +1429,32 @@ export class ScreenBreak {
         ctx.lineTo(p0[0] + ex, p0[1] + ey)
         ctx.closePath()
 
-        if (rimDot > 0.24) {
-          const gIntensity = clamp(rimDot * 1.2, 0, 1)
-          const rC = 255
-          const gC = Math.round(lerp(182, 248, gIntensity))
-          const bC = Math.round(lerp(58, 218, gIntensity * gIntensity))
-          ctx.fillStyle = `rgba(${rC}, ${gC}, ${bC}, ${lerp(0.75, 0.98, gIntensity)})`
+        if (rimDot > 0.25) {
+          // Sharp linear specular gradient along the bevel edge so it reads as polished crystal, not flat yellow paint!
+          const gIntensity = clamp(rimDot * 1.15, 0, 1)
+          const bevGrad = ctx.createLinearGradient(p0[0], p0[1], p1[0] + ex, p1[1] + ey)
+          bevGrad.addColorStop(0, `rgba(18, 42, 40, ${0.85 * (1 - gIntensity * 0.3)})`)
+          bevGrad.addColorStop(0.32, `rgba(255, 202, 88, ${0.78 * gIntensity})`)
+          bevGrad.addColorStop(0.52, `rgba(255, 253, 245, ${0.98 * gIntensity})`)
+          bevGrad.addColorStop(0.74, `rgba(135, 245, 215, ${0.65 * gIntensity})`)
+          bevGrad.addColorStop(1, "rgba(12, 28, 30, 0.88)")
+          ctx.fillStyle = bevGrad
         } else {
-          ctx.fillStyle = "rgba(18, 56, 48, 0.88)"
+          ctx.fillStyle = "rgba(12, 34, 32, 0.86)"
         }
         ctx.fill()
 
+        // Razor-thin outer bevel ridge
         ctx.strokeStyle =
-          rimDot > 0.24
-            ? `rgba(255, 248, 215, ${Math.min(1, rimDot * 0.96)})`
-            : "rgba(115, 242, 204, 0.56)"
-        ctx.lineWidth = 0.85
+          rimDot > 0.35
+            ? `rgba(255, 252, 238, ${Math.min(1, rimDot * 0.92)})`
+            : "rgba(115, 242, 206, 0.52)"
+        ctx.lineWidth = 0.75
         ctx.stroke()
       }
     }
 
-    // 2. Front glass face: refracted page content + glossy Fresnel reflection + internal caustic glints
+    // 2. Front glass face: strong page refraction + RGB chromatic dispersion + sharp specular streaks + caustic star
     ctx.beginPath()
     ctx.moveTo(poly[0][0], poly[0][1])
     for (let k = 1; k < n; k++) ctx.lineTo(poly[k][0], poly[k][1])
@@ -1121,79 +1463,122 @@ export class ScreenBreak {
     ctx.save()
     ctx.clip()
 
-    if (!s.isSplinter) {
-      const refX = Math.sin(s.yaw) * (s.refractShift ?? 9) * (1 - healMix)
-      const refY = Math.sin(s.pitch) * (s.refractShift ?? 9) * (1 - healMix)
+    if (!s.isSplinter && this.lite) {
+      // One cached sprite per pane: the refracted page with its fracture lines baked in, then the
+      // clean page faded over it while the glass heals.
+      if (healMix < 0.99) this.drawPaneSprite(ctx, s, false)
+      if (healMix > 0.01) {
+        ctx.globalAlpha = healMix * healFade
+        this.drawPaneSprite(ctx, s, true)
+      }
+    } else if (!s.isSplinter) {
+      const refX = Math.sin(s.yaw) * (s.refractShift ?? 13) * (1 - healMix)
+      const refY = Math.sin(s.pitch) * (s.refractShift ?? 13) * (1 - healMix)
 
       if (healMix < 0.99) {
         ctx.drawImage(this.pageCanvas, 0, 0, this.pageCanvas.width, this.pageCanvas.height, -s.homeX + refX, -s.homeY + refY, W, H)
+        // RGB chromatic dispersion pass inside the shard face so cards & text visibly split into prism edges!
+        if (!isGhost && healMix < 0.82) {
+          const dispAmt = 3.2 * (1 - healMix)
+          ctx.globalCompositeOperation = "lighter"
+          ctx.globalAlpha = 0.24 * (1 - healMix)
+          ctx.drawImage(
+            this.pageCanvas,
+            0,
+            0,
+            this.pageCanvas.width,
+            this.pageCanvas.height,
+            -s.homeX + refX + dispAmt,
+            -s.homeY + refY - dispAmt * 0.6,
+            W,
+            H,
+          )
+          ctx.globalCompositeOperation = "source-over"
+          ctx.globalAlpha = healFade
+        }
       }
       if (healMix > 0.01) {
         ctx.globalAlpha = healMix * healFade
         ctx.drawImage(this.cleanCanvas, 0, 0, this.cleanCanvas.width, this.cleanCanvas.height, -s.homeX, -s.homeY, W, H)
       }
 
-      // Rich Fresnel glass surface reflection catching the warm golden Super Saiyan light & emerald glass tint
+      // Sharp anisotropic Fresnel specular streak across the crystal face (matching target-shatter.png!)
       if (!isGhost && healMix < 0.9) {
         const cosA = Math.cos(-s.ang)
         const sinA = Math.sin(-s.ang)
-        const locLx = (lDirX * cosA - lDirY * sinA) * 75
-        const locLy = (lDirX * sinA + lDirY * cosA) * 75
+        const locLx = (lDirX * cosA - lDirY * sinA) * 68
+        const locLy = (lDirX * sinA + lDirY * cosA) * 68
         const gloss = ctx.createLinearGradient(locLx, locLy, -locLx, -locLy)
-        const gA = (0.18 + faceSpec * 0.42) * headProx * (1 - healMix)
-        gloss.addColorStop(0, `rgba(255, 218, 118, ${Math.min(0.62, gA * 1.15)})`)
-        gloss.addColorStop(0.38, `rgba(255, 252, 240, ${Math.min(0.54, gA * 0.95)})`)
-        gloss.addColorStop(0.68, `rgba(120, 238, 206, ${Math.min(0.24, gA * 0.35)})`)
-        gloss.addColorStop(1, "rgba(18, 42, 40, 0.12)")
+        const gA = (0.14 + faceSpec * 0.44) * headProx * (1 - healMix)
+        gloss.addColorStop(0, "rgba(10, 22, 24, 0.15)")
+        gloss.addColorStop(0.34, `rgba(120, 242, 210, ${Math.min(0.28, gA * 0.42)})`)
+        gloss.addColorStop(0.47, `rgba(255, 254, 248, ${Math.min(0.68, gA * 1.25)})`)
+        gloss.addColorStop(0.56, `rgba(255, 208, 102, ${Math.min(0.48, gA * 0.85)})`)
+        gloss.addColorStop(1, "rgba(6, 12, 16, 0.22)")
         ctx.fillStyle = gloss
         ctx.fill()
       }
 
-      // Internal stress-fracture caustics & star-glint inside the slab (matching target-shatter.png!)
+      // Crystalline internal fracture hairlines + bright star-flare caustic (like bottom-left pane in target-shatter.png!)
       if (!isGhost && s.innerCracks && healMix < 0.88) {
-        const icAlpha = (0.38 + faceSpec * 0.58) * (1 - healMix)
-        for (const ic of s.innerCracks) {
-          ctx.strokeStyle = `rgba(0, 6, 14, ${icAlpha * 0.7})`
-          ctx.lineWidth = 1.4
+        const icAlpha = (0.42 + faceSpec * 0.56) * (1 - healMix)
+        for (let idx = 0; idx < s.innerCracks.length; idx++) {
+          const ic = s.innerCracks[idx]
+          const isPrimary = idx % 2 === 0
+          ctx.strokeStyle = `rgba(0, 5, 12, ${icAlpha * 0.75})`
+          ctx.lineWidth = isPrimary ? 1.2 : 0.65
           ctx.beginPath()
-          ctx.moveTo(ic[0] + 1, ic[1] + 1)
-          ctx.lineTo(ic[2] + 1, ic[3] + 1)
-          ctx.lineTo(ic[4] + 1, ic[5] + 1)
+          ctx.moveTo(ic[0] + 0.8, ic[1] + 0.8)
+          ctx.lineTo(ic[2] + 0.8, ic[3] + 0.8)
+          ctx.lineTo(ic[4] + 0.8, ic[5] + 0.8)
           ctx.stroke()
 
-          ctx.strokeStyle = `rgba(255, 238, 182, ${Math.min(0.95, icAlpha)})`
-          ctx.lineWidth = 0.95
+          ctx.strokeStyle = isPrimary
+            ? `rgba(248, 252, 255, ${Math.min(0.96, icAlpha)})`
+            : `rgba(205, 238, 248, ${Math.min(0.75, icAlpha * 0.8)})`
+          ctx.lineWidth = isPrimary ? 0.85 : 0.45
           ctx.beginPath()
           ctx.moveTo(ic[0], ic[1])
           ctx.lineTo(ic[2], ic[3])
           ctx.lineTo(ic[4], ic[5])
           ctx.stroke()
         }
-        // Bright caustic star-hotspot at the internal fracture vertex
+
         const gv = s.innerCracks[0]
-        if (gv && faceSpec > 0.35) {
-          const sg = ctx.createRadialGradient(gv[0], gv[1], 0.5, gv[0], gv[1], 18)
-          sg.addColorStop(0, `rgba(255, 253, 242, ${Math.min(0.92, faceSpec * (1 - healMix))})`)
-          sg.addColorStop(0.4, `rgba(255, 205, 92, ${Math.min(0.55, faceSpec * 0.65 * (1 - healMix))})`)
+        if (gv && (s.hasCausticStar || faceSpec > 0.42)) {
+          const sg = ctx.createRadialGradient(gv[0], gv[1], 0.5, gv[0], gv[1], 22)
+          sg.addColorStop(0, `rgba(255, 255, 252, ${Math.min(0.98, (0.45 + faceSpec * 0.6) * (1 - healMix))})`)
+          sg.addColorStop(0.32, `rgba(255, 218, 118, ${Math.min(0.68, faceSpec * 0.72 * (1 - healMix))})`)
           sg.addColorStop(1, "rgba(255, 190, 60, 0)")
           ctx.fillStyle = sg
           ctx.beginPath()
-          ctx.arc(gv[0], gv[1], 18, 0, Math.PI * 2)
+          ctx.arc(gv[0], gv[1], 22, 0, Math.PI * 2)
           ctx.fill()
+
+          // Crisp 4-ray star flare spikes at the caustic vertex
+          ctx.strokeStyle = `rgba(255, 252, 238, ${Math.min(0.9, (0.35 + faceSpec * 0.55) * (1 - healMix))})`
+          ctx.lineWidth = 0.85
+          ctx.beginPath()
+          ctx.moveTo(gv[0] - 16, gv[1] - 4)
+          ctx.lineTo(gv[0] + 16, gv[1] + 4)
+          ctx.moveTo(gv[0] - 4, gv[1] + 14)
+          ctx.lineTo(gv[0] + 4, gv[1] - 14)
+          ctx.stroke()
         }
       }
     } else {
-      // Secondary 3D crystalline splinter: warm golden-white specular prism
-      const spGrad = ctx.createLinearGradient(-12, -8, 12, 8)
-      spGrad.addColorStop(0, `rgba(255, 248, 222, ${0.75 + faceSpec * 0.25})`)
-      spGrad.addColorStop(0.5, `rgba(255, 202, 88, ${0.58 + faceSpec * 0.32})`)
-      spGrad.addColorStop(1, "rgba(120, 242, 208, 0.45)")
+      // Secondary 3D crystal chunk: dark glass core with bright white/gold/emerald specular facet
+      const spGrad = ctx.createLinearGradient(-10, -8, 10, 8)
+      spGrad.addColorStop(0, "rgba(14, 34, 34, 0.78)")
+      spGrad.addColorStop(0.45, `rgba(255, 252, 242, ${0.72 + faceSpec * 0.28})`)
+      spGrad.addColorStop(0.75, `rgba(255, 208, 102, ${0.52 + faceSpec * 0.35})`)
+      spGrad.addColorStop(1, "rgba(115, 242, 208, 0.42)")
       ctx.fillStyle = spGrad
       ctx.fill()
     }
     ctx.restore()
 
-    // 3. Per-edge directional specular bevel outline on the front face
+    // 3. Razor-sharp directional specular streaks along the front polygon edges
     const disp = clamp(Math.hypot(s.x - s.homeX, s.y - s.homeY) / 36 + Math.abs(s.ang) * 1.4, 0, 1)
     const edgeVis = (this.state === "shattered" ? 1 : disp * (1 - healMix * 0.9)) + seamGlint
     if (edgeVis > 0.03) {
@@ -1213,14 +1598,14 @@ export class ScreenBreak {
         ctx.moveTo(p0[0], p0[1])
         ctx.lineTo(p1[0], p1[1])
         if (seamGlint > 0.15) {
-          ctx.strokeStyle = `rgba(255, 246, 205, ${Math.min(1, edgeVis)})`
-          ctx.lineWidth = 1.9
-        } else if (rim > 0.22) {
-          ctx.strokeStyle = `rgba(255, 238, 175, ${Math.min(1, (0.52 + rim * 0.65) * edgeVis)})`
-          ctx.lineWidth = 1.55 * clamp(edgeVis, 0.4, 1) + 0.35
+          ctx.strokeStyle = `rgba(255, 250, 225, ${Math.min(1, edgeVis)})`
+          ctx.lineWidth = 1.8
+        } else if (rim > 0.32) {
+          ctx.strokeStyle = `rgba(255, 252, 240, ${Math.min(1, (0.55 + rim * 0.55) * edgeVis)})`
+          ctx.lineWidth = 1.35 * clamp(edgeVis, 0.4, 1) + 0.3
         } else {
-          ctx.strokeStyle = `rgba(130, 242, 208, ${Math.min(0.88, 0.55 * edgeVis)})`
-          ctx.lineWidth = 1.05 * clamp(edgeVis, 0.4, 1) + 0.25
+          ctx.strokeStyle = `rgba(165, 244, 224, ${Math.min(0.85, 0.48 * edgeVis)})`
+          ctx.lineWidth = 0.85 * clamp(edgeVis, 0.4, 1) + 0.2
         }
         ctx.stroke()
       }
@@ -1229,7 +1614,77 @@ export class ScreenBreak {
     ctx.restore()
   }
 
-  // Draws bold comic/cinema word-synced captions at the lower third so finale lines land even when muted.
+  // Bakes a pane's face (page under it, fracture hairlines and caustic) into its own small canvas
+  // the first time it is drawn, so later frames cost one drawImage instead of a clipped full-page copy.
+  drawPaneSprite(ctx, s, clean) {
+    const key = clean ? "cleanSprite" : "sprite"
+    let sp = s[key]
+    if (!sp) {
+      const { W, H, dpr } = this
+      let x0 = Infinity
+      let y0 = Infinity
+      let x1 = -Infinity
+      let y1 = -Infinity
+      for (const [x, y] of s.poly) {
+        x0 = Math.min(x0, x)
+        y0 = Math.min(y0, y)
+        x1 = Math.max(x1, x)
+        y1 = Math.max(y1, y)
+      }
+      x0 = Math.floor(x0 - 1)
+      y0 = Math.floor(y0 - 1)
+      const w = Math.ceil(x1 + 1) - x0
+      const h = Math.ceil(y1 + 1) - y0
+      const canvas = document.createElement("canvas")
+      canvas.width = Math.max(1, Math.round(w * dpr))
+      canvas.height = Math.max(1, Math.round(h * dpr))
+      const g = canvas.getContext("2d")
+      g.setTransform(dpr, 0, 0, dpr, -x0 * dpr, -y0 * dpr)
+      g.beginPath()
+      g.moveTo(s.poly[0][0], s.poly[0][1])
+      for (let k = 1; k < s.poly.length; k++) g.lineTo(s.poly[k][0], s.poly[k][1])
+      g.closePath()
+      g.clip()
+      const src = clean ? this.cleanCanvas : this.pageCanvas
+      g.drawImage(src, 0, 0, src.width, src.height, -s.homeX, -s.homeY, W, H)
+      if (!clean && s.innerCracks) {
+        g.lineCap = "round"
+        for (let idx = 0; idx < s.innerCracks.length; idx++) {
+          const ic = s.innerCracks[idx]
+          const primary = idx % 2 === 0
+          g.strokeStyle = "rgba(0, 5, 12, 0.5)"
+          g.lineWidth = primary ? 1.2 : 0.65
+          g.beginPath()
+          g.moveTo(ic[0] + 0.8, ic[1] + 0.8)
+          g.lineTo(ic[2] + 0.8, ic[3] + 0.8)
+          g.lineTo(ic[4] + 0.8, ic[5] + 0.8)
+          g.stroke()
+          g.strokeStyle = primary ? "rgba(248, 252, 255, 0.8)" : "rgba(205, 238, 248, 0.6)"
+          g.lineWidth = primary ? 0.85 : 0.45
+          g.beginPath()
+          g.moveTo(ic[0], ic[1])
+          g.lineTo(ic[2], ic[3])
+          g.lineTo(ic[4], ic[5])
+          g.stroke()
+        }
+        const gv = s.innerCracks[0]
+        if (gv && s.hasCausticStar) {
+          const sg = g.createRadialGradient(gv[0], gv[1], 0.5, gv[0], gv[1], 22)
+          sg.addColorStop(0, "rgba(255, 255, 252, 0.85)")
+          sg.addColorStop(0.32, "rgba(255, 218, 118, 0.45)")
+          sg.addColorStop(1, "rgba(255, 190, 60, 0)")
+          g.fillStyle = sg
+          g.beginPath()
+          g.arc(gv[0], gv[1], 22, 0, Math.PI * 2)
+          g.fill()
+        }
+      }
+      sp = s[key] = { canvas, x: x0, y: y0, w, h }
+    }
+    ctx.drawImage(sp.canvas, sp.x, sp.y, sp.w, sp.h)
+  }
+
+  // Draws bold comic/cinema word-synced captions with smooth continuous word swell (zero 1-frame pops at 0.25x).
   drawCaption(ctx, rtime) {
     const cap = this.caption
     if (!cap || rtime < cap.startRtime - 0.08 || rtime > cap.endRtime + 0.35) return
@@ -1248,11 +1703,13 @@ export class ScreenBreak {
 
     const spaceW = Math.max(10, ctx.measureText(" ").width * 1.65)
     const wordMetrics = cap.words.map((w, idx) => {
-      const nextT = cap.words[idx + 1]?.t ?? cap.endRtime - cap.startRtime + 0.1
-      const active = elapsed >= w.t - 0.04 && elapsed < nextT + 0.08
-      const spoken = elapsed >= w.t - 0.04
+      const nextT = cap.words[idx + 1]?.t ?? cap.endRtime - cap.startRtime + 0.12
+      const rise = smooth(w.t - 0.045, w.t + 0.025, elapsed)
+      const fall = 1 - smooth(nextT - 0.02, nextT + 0.075, elapsed)
+      const activeAmt = rise * fall
+      const spokenAmt = rise
       const width = ctx.measureText(w.text).width
-      return { ...w, width, active, spoken }
+      return { ...w, width, activeAmt, spokenAmt }
     })
     const totalW = wordMetrics.reduce((acc, m) => acc + m.width, 0) + Math.max(0, wordMetrics.length - 1) * spaceW
     const padX = 26
@@ -1282,16 +1739,17 @@ export class ScreenBreak {
       ctx.save()
       const wcx = curX + m.width * 0.5
       ctx.translate(wcx, cy)
-      if (m.active) {
-        ctx.scale(1.08, 1.08)
-        ctx.shadowColor = "rgba(255, 188, 46, 0.8)"
-        ctx.shadowBlur = 12
-        ctx.fillStyle = "#ffcb47"
-      } else if (m.spoken) {
-        ctx.fillStyle = "#f9fafb"
-      } else {
-        ctx.fillStyle = "rgba(205, 210, 220, 0.52)"
+      const sc = 1 + 0.075 * m.activeAmt
+      ctx.scale(sc, sc)
+      if (m.activeAmt > 0.05) {
+        ctx.shadowColor = `rgba(255, 188, 46, ${(0.8 * m.activeAmt).toFixed(3)})`
+        ctx.shadowBlur = 12 * m.activeAmt
       }
+      const rC = Math.round(lerp(lerp(205, 249, m.spokenAmt), 255, m.activeAmt))
+      const gC = Math.round(lerp(lerp(210, 250, m.spokenAmt), 203, m.activeAmt))
+      const bC = Math.round(lerp(lerp(220, 251, m.spokenAmt), 71, m.activeAmt))
+      const aC = lerp(0.52, 1.0, Math.max(m.spokenAmt, m.activeAmt))
+      ctx.fillStyle = `rgba(${rC}, ${gC}, ${bC}, ${aC.toFixed(3)})`
       ctx.fillText(m.text, -m.width * 0.5, 0)
       ctx.restore()
       curX += m.width + spaceW
@@ -1313,12 +1771,13 @@ export class ScreenBreak {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
     ctx.clearRect(0, 0, W, H)
 
-    this.flash = Math.max(0, this.flash - dt * 6.8)
+    this.flash = Math.max(0, this.flash - dt * 14)
     for (const c of this.cracks) c.age += dt
 
-    // 1. If in "cracking" state, draw the ballistic fractures & page refraction
+    // 1. If in "cracking" state, draw the outward-propagating ballistic fractures & page refraction
     if (this.state === "cracking" && this.cracks.length > 0) {
-      this.drawCracksOnto(ctx, 1)
+      if (this.lite) this.drawCracksLite(ctx)
+      else this.drawCracksOnto(ctx, 1)
     }
 
     // 2. If in "shattered" or "rebuilding" state, simulate & draw the 3D tempered glass slabs + Download button
@@ -1339,21 +1798,18 @@ export class ScreenBreak {
           s.age += dt
           if (s.age > s.delay) {
             const effDt = dt
-            // Explosive outward burst for the first 0.28s, then strong bullet-time damping so
-            // 3D slabs and the Download button suspend & tumble across the viewport during the punchline!
             const drag = s.age < 0.28 ? 2.4 : 4.2
             s.vx = lerp(s.vx, s.driftX ?? 0, 1 - Math.exp(-drag * effDt))
             s.vy = lerp(s.vy, s.driftY ?? 22, 1 - Math.exp(-drag * effDt))
-            s.vy += (s.isDownload ? 38 : 32) * effDt
+            s.vy += (s.isDownload ? 38 : 30) * effDt
             s.x += s.vx * effDt
             s.y += s.vy * effDt
-            s.z = clamp((s.z ?? 1) + (s.vz ?? 0) * effDt, 0.78, 1.46)
+            s.z = clamp((s.z ?? 1) + (s.vz ?? 0) * effDt, 0.82, 1.46)
             s.ang += s.spin * effDt
             s.pitch += s.vPitch * effDt
             s.yaw += s.vYaw * effDt
           }
         } else {
-          // Time-reverse crystalline rebuild: outer shards lift first, center + Download button snap in last
           const startT = (1 - s.normD) * 0.24
           const span = 0.62
           const loc = clamp((this.rebuildAge / this.rebuildDur - startT) / span, 0, 1)
@@ -1372,7 +1828,7 @@ export class ScreenBreak {
         if (s.y - 220 > H && this.state === "shattered") continue
 
         // Foreground depth-of-field / motion-blur ghost pass on outer panes
-        if (this.state === "shattered" && !s.isDownload && !s.isSplinter && (s.normD > 0.58 || s.z > 1.14)) {
+        if (this.state === "shattered" && !this.lite && !s.isDownload && !s.isSplinter && (s.normD > 0.56 || s.z > 1.12)) {
           const mbX = clamp(s.vx * 0.025 + (s.x - W * 0.5) * 0.012, -10, 10)
           const mbY = clamp(s.vy * 0.025 + (s.y - H * 0.5) * 0.012, -10, 10)
           ctx.save()
@@ -1391,7 +1847,7 @@ export class ScreenBreak {
       }
     }
 
-    // 3. Simulate & draw sparkling crystalline micro-splinters and golden glass dust (zero grey triangles!)
+    // 3. Simulate & draw the 3-tier cloud of sparkling glass dust, faceted micro-shards & warm bokeh motes
     for (let i = this.dust.length - 1; i >= 0; i--) {
       const d = this.dust[i]
       d.age += dt
@@ -1406,62 +1862,81 @@ export class ScreenBreak {
         d.vy = lerp(d.vy, (cy - d.y) * 2.2 - 120, dt * 5)
       } else if (d.BulletTime) {
         d.vx *= Math.exp(-2.8 * dt)
-        d.vy = lerp(d.vy, 18, dt * 3.2)
+        d.vy = lerp(d.vy, 16, dt * 3.2)
       } else {
         d.vx *= Math.exp(-1.1 * dt)
-        d.vy += 320 * dt
+        d.vy += 310 * dt
       }
       d.x += d.vx * dt
       d.y += d.vy * dt
       d.rot += d.vrot * dt
 
       const lifeAlpha = (1 - d.age / d.life) * (this.state === "rebuilding" ? 1 - this.rebuildAge / this.rebuildDur : 1)
-      const twinkle = 0.38 + 0.62 * Math.pow(0.5 + 0.5 * Math.sin(d.age * 24 + d.phase), 4)
+      const twinkle = 0.42 + 0.58 * Math.pow(0.5 + 0.5 * Math.sin(d.age * 22 + d.phase), 3)
       const a = clamp(lifeAlpha * twinkle, 0, 1)
       if (a <= 0.02) continue
 
       ctx.save()
       ctx.translate(d.x, d.y)
-      ctx.rotate(d.rot)
-      ctx.fillStyle = d.gold
-        ? `rgba(255, 216, 102, ${a})`
-        : d.green
-          ? `rgba(135, 248, 212, ${a})`
-          : `rgba(255, 253, 245, ${a})`
-      ctx.beginPath()
-      const rx = d.r
-      const ry = d.r * d.aspect
-      ctx.moveTo(0, -ry)
-      ctx.lineTo(rx, 0)
-      ctx.lineTo(0, ry)
-      ctx.lineTo(-rx, 0)
-      ctx.closePath()
-      ctx.fill()
+      if (d.kind === "bokeh") {
+        // Out-of-focus warm golden bokeh dust mote (like target-shatter.png!)
+        const bg = ctx.createRadialGradient(0, 0, 0.2, 0, 0, d.r)
+        bg.addColorStop(0, `rgba(255, 238, 175, ${a * 0.72})`)
+        bg.addColorStop(0.45, `rgba(255, 192, 68, ${a * 0.36})`)
+        bg.addColorStop(1, "rgba(255, 170, 40, 0)")
+        ctx.fillStyle = bg
+        ctx.beginPath()
+        ctx.arc(0, 0, d.r, 0, Math.PI * 2)
+        ctx.fill()
+      } else {
+        ctx.rotate(d.rot)
+        ctx.fillStyle = d.gold
+          ? `rgba(255, 226, 128, ${a})`
+          : d.green
+            ? `rgba(155, 248, 222, ${a})`
+            : `rgba(255, 255, 255, ${a})`
+        ctx.beginPath()
+        const rx = d.r
+        const ry = d.r * d.aspect
+        ctx.moveTo(0, -ry)
+        ctx.lineTo(rx, 0)
+        ctx.lineTo(0, ry)
+        ctx.lineTo(-rx, 0)
+        ctx.closePath()
+        ctx.fill()
+        if (d.star && a > 0.55) {
+          ctx.strokeStyle = d.gold ? `rgba(255, 244, 195, ${a * 0.85})` : `rgba(245, 252, 255, ${a * 0.85})`
+          ctx.lineWidth = 0.65
+          const sl = d.r * 2.4
+          ctx.beginPath()
+          ctx.moveTo(-sl, 0)
+          ctx.lineTo(sl, 0)
+          ctx.moveTo(0, -sl * 0.75)
+          ctx.lineTo(0, sl * 0.75)
+          ctx.stroke()
+        }
+      }
       ctx.restore()
     }
 
-    // 4. Simulate & draw Z-axis words rocketing straight at the camera lens with zoom motion blur
+    // 4. Simulate & draw Z-axis words rocketing straight at the camera lens with 7-step smooth zoom motion blur
     for (let i = this.zWords.length - 1; i >= 0; i--) {
       const zw = this.zWords[i]
       zw.age += dt
       const p = clamp(zw.age / zw.dur, 0, 1)
-      const zCurve = Math.pow(p, 2.35)
-      const x = lerp(zw.fromX, zw.targetX, zCurve)
-      const y = lerp(zw.fromY, zw.targetY, zCurve)
-      const scale = lerp(0.36, zw.final ? 8.2 : 4.8, Math.pow(p, 2.65))
-      const rot = zw.rot + zw.vrot * zw.age
 
-      for (let b = 3; b >= 0; b--) {
-        const bp = clamp(p - b * 0.045, 0, 1)
+      for (let b = 6; b >= 0; b--) {
+        const bp = clamp(p - b * 0.024, 0, 1)
         const bz = Math.pow(bp, 2.35)
         const bx = lerp(zw.fromX, zw.targetX, bz)
         const by = lerp(zw.fromY, zw.targetY, bz)
         const bScale = lerp(0.36, zw.final ? 8.2 : 4.8, Math.pow(bp, 2.65))
-        const alpha = b === 0 ? 1 : (0.34 / b) * p
+        const bRot = zw.rot + zw.vrot * (zw.age - b * 0.004)
+        const alpha = b === 0 ? 1 : (0.26 / b) * p
 
         ctx.save()
         ctx.translate(bx, by)
-        ctx.rotate(rot)
+        ctx.rotate(bRot)
         ctx.scale(bScale, bScale)
         ctx.font = `900 28px ${SANS}`
         ctx.textAlign = "center"
@@ -1470,7 +1945,7 @@ export class ScreenBreak {
           ctx.shadowColor = zw.final ? "rgba(255, 195, 55, 0.95)" : "rgba(255, 135, 35, 0.9)"
           ctx.shadowBlur = 18
         }
-        ctx.fillStyle = b === 0 ? "#fffdf6" : `rgba(255, 196, 92, ${alpha.toFixed(3)})`
+        ctx.fillStyle = b === 0 ? "#fffdf6" : `rgba(255, 202, 104, ${alpha.toFixed(3)})`
         ctx.strokeStyle = `rgba(20, 12, 6, ${(alpha * 0.65).toFixed(3)})`
         ctx.lineWidth = 2.2
         ctx.strokeText(zw.text, 0, 0)
@@ -1489,15 +1964,15 @@ export class ScreenBreak {
       }
     }
 
-    // 5. Tight localized impact flash (warm golden-white at the hit point, zero full-screen washout)
+    // 5. Tight localized impact flash
     if (this.flash > 0.01) {
       const fx = this.flashX ?? W * 0.5
       const fy = this.flashY ?? H * 0.5
-      const fr = this.state === "shattered" ? Math.min(W, H) * 0.42 : 135
+      const fr = this.state === "shattered" ? Math.min(W, H) * 0.36 : 52
       const fg = ctx.createRadialGradient(fx, fy, 0, fx, fy, fr)
-      fg.addColorStop(0, `rgba(255, 250, 232, ${Math.min(0.62, this.flash)})`)
-      fg.addColorStop(0.35, `rgba(255, 205, 110, ${Math.min(0.24, this.flash * 0.42)})`)
-      fg.addColorStop(1, "rgba(255, 180, 70, 0)")
+      fg.addColorStop(0, `rgba(255, 252, 245, ${Math.min(0.62, this.flash)})`)
+      fg.addColorStop(0.35, `rgba(225, 244, 255, ${Math.min(0.24, this.flash * 0.42)})`)
+      fg.addColorStop(1, "rgba(180, 225, 255, 0)")
       ctx.fillStyle = fg
       ctx.beginPath()
       ctx.arc(fx, fy, fr, 0, Math.PI * 2)

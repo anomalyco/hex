@@ -61,7 +61,6 @@ in
       (package: builtins.elem "${lib.getLib package}/lib" (lib.splitString ":" shell.LD_LIBRARY_PATH))
       [
         pkgs.vulkan-loader
-        pkgs.gtk-layer-shell
         pkgs.wayland
         pkgs.libxkbcommon
       ];
@@ -83,7 +82,9 @@ in
     assert !(disabled.systemd.user.services ? hex);
     assert enabled.systemd.user.services.hex.Service.ExecStart == [ "${lib.getExe hex} service" ];
     assert enabled.systemd.user.services.hex.Service.Restart == "on-failure";
-    assert builtins.elem "HEX_APPLICATION_SUPPORT_DIR=${enabled.xdg.dataHome}/voice-control"
+    assert enabled.systemd.user.services.hex.Service.Type == "notify";
+    assert enabled.systemd.user.services.hex.Service.NotifyAccess == "main";
+    assert builtins.elem "HEX_APPLICATION_SUPPORT_DIR=${enabled.xdg.dataHome}/hex"
       enabled.systemd.user.services.hex.Service.Environment;
     assert
       custom.systemd.user.services.hex.Service.ExecStart == [ "${lib.getExe pkgs.hello} service" ];

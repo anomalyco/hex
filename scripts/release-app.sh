@@ -1,158 +1,53 @@
 #!/bin/sh
 set -eu
 
+# Builds the release Hex.app from a clean, pushed commit, signs it with the
+# Developer ID of HEX_TEAM_ID, notarizes and staples the app and
+# its DMG, and leaves the two release files the Release workflow publishes
+# to the Anomaly release service (docs/plans/release-service.md):
+#   dist/Hex-<version>-macos-arm64.dmg   download (target macos-arm64-dmg)
+#   dist/Hex-<version>-macos-arm64.zip   in-app update, root Hex.app (target macos-arm64)
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-team_id=${VOICE_CONTROL_TEAM_ID:?Set VOICE_CONTROL_TEAM_ID to the Apple Developer signing team}
+: "${HEX_TEAM_ID:?Set HEX_TEAM_ID to the Apple Developer signing team}"
 . "$root/scripts/macos-signing.sh"
-mode=${1:-prepare}
 version=$(hex_version "$root")
 build_number=$(hex_build_number "$version")
-notary_profile=${HEX_NOTARY_PROFILE:?Set HEX_NOTARY_PROFILE to the matching notarization profile}
-bucket=${HEX_RELEASE_BUCKET:-hex-releases}
-base_url=${HEX_RELEASE_BASE_URL:-https://downloads.hex.kitlangton.dev}
-release_notes=${HEX_RELEASE_NOTES:-$root/docs/releases/$version.md}
 dist="$root/dist"
-updates="$dist/updates"
-artifact="HEX-$version-arm64.dmg"
-update_artifact="HEX-$version-arm64.zip"
-latest_artifact="HEX-latest-arm64.dmg"
+dmg="$dist/Hex-$version-macos-arm64.dmg"
+zip="$dist/Hex-$version-macos-arm64.zip"
 
-if [ "$mode" != "prepare" ] && [ "$mode" != "publish" ]; then
-  echo "Usage: $0 [prepare|publish]" >&2
+if [ "$#" -gt 1 ] || { [ "$#" -eq 1 ] && [ "$1" != prepare ]; }; then
+  echo "Usage: $0 [prepare]" >&2
+  exit 1
+fi
+# Public builds never carry the capture build option.
+if [ -n "${HEX_CAPTURE:-}" ]; then
+  echo "Unset HEX_CAPTURE: the capture build option is never released." >&2
   exit 1
 fi
 if [ -n "$(git -C "$root" status --porcelain)" ]; then
   echo "Commit or remove all working-tree changes before releasing." >&2
   exit 1
 fi
-upstream=$(git -C "$root" rev-parse --abbrev-ref '@{upstream}' 2>/dev/null || true)
-if [ -z "$upstream" ] || [ "$(git -C "$root" rev-parse HEAD)" != "$(git -C "$root" rev-parse "$upstream")" ]; then
-  echo "Push the release commit to its upstream branch before releasing." >&2
-  exit 1
-fi
-case "$build_number" in
-  ''|*[!0-9]*)
-    echo "HEX_BUILD_NUMBER must be a positive integer." >&2
-    exit 1
-    ;;
-esac
-published_build=$(curl --fail --silent --show-error "$base_url/appcast.xml" \
-  | sed -n 's|.*<sparkle:version>\([0-9][0-9]*\)</sparkle:version>.*|\1|p' \
-  | head -1)
-if [ -z "$published_build" ] || [ "$build_number" -le "$published_build" ]; then
-  echo "Build $build_number must be newer than published build ${published_build:-unknown}." >&2
-  exit 1
-fi
-
-if [ "$mode" = "publish" ]; then
-  if [ ! -f "$dist/$artifact" ] || [ ! -f "$dist/$update_artifact" ] || [ ! -f "$updates/appcast.xml" ]; then
-    echo "Prepare and validate version $version before publishing it." >&2
+# GitHub Actions checks out the exact pushed commit, detached from any branch.
+if [ "${GITHUB_ACTIONS:-}" != true ]; then
+  upstream=$(git -C "$root" rev-parse --abbrev-ref '@{upstream}' 2>/dev/null || true)
+  if [ -z "$upstream" ] || [ "$(git -C "$root" rev-parse HEAD)" != "$(git -C "$root" rev-parse "$upstream")" ]; then
+    echo "Push the release commit to its upstream branch before releasing." >&2
     exit 1
   fi
-  if ! grep -Fq "$base_url/releases/$update_artifact" "$updates/appcast.xml" \
-    || ! grep -Fq 'sparkle:edSignature=' "$updates/appcast.xml"; then
-    echo "The prepared appcast does not contain a signed $update_artifact update." >&2
-    exit 1
-  fi
-  xcrun stapler validate "$dist/$artifact"
-  spctl --assess --type open --context context:primary-signature --verbose=2 "$dist/$artifact"
-  verification=$(mktemp -d "${TMPDIR:-/tmp}/hex-release-validation.XXXXXX")
-  mountpoint="$verification/dmg"
-  mkdir -p "$mountpoint" "$verification/update"
-  trap 'hdiutil detach -quiet "$mountpoint" 2>/dev/null || true; rm -rf "$verification"' EXIT HUP INT TERM
-  hdiutil attach -quiet -nobrowse -readonly -mountpoint "$mountpoint" "$dist/$artifact"
-  "$root/scripts/validate-app.sh" "$mountpoint/Hex.app" Hex.app "$version" "$build_number" >/dev/null
-  /usr/bin/ditto -x -k "$dist/$update_artifact" "$verification/update"
-  "$root/scripts/validate-app.sh" "$verification/update/HEX.app" HEX.app "$version" "$build_number" >/dev/null
-  xcrun stapler validate "$verification/update/HEX.app"
-  diff -qr "$mountpoint/Hex.app" "$verification/update/HEX.app"
-  hdiutil detach -quiet "$mountpoint"
-  rm -rf "$verification"
-  trap - EXIT HUP INT TERM
-  wrangler r2 object put "$bucket/releases/$artifact" --remote \
-    --file "$dist/$artifact" \
-    --content-type application/x-apple-diskimage \
-    --cache-control 'public, max-age=31536000, immutable'
-  wrangler r2 object put "$bucket/releases/$update_artifact" --remote \
-    --file "$dist/$update_artifact" \
-    --content-type application/zip \
-    --cache-control 'public, max-age=31536000, immutable'
-  verification=$(mktemp -d "${TMPDIR:-/tmp}/hex-release-downloads.XXXXXX")
-  trap 'rm -rf "$verification"' EXIT HUP INT TERM
-  for file in "$artifact" "$update_artifact"; do
-    curl --fail --silent --show-error --proto '=https' \
-      --connect-timeout 15 --max-time 600 "$base_url/releases/$file" -o "$verification/$file"
-    cmp -s "$dist/$file" "$verification/$file"
-  done
-  sh "$root/scripts/publish-app-mirror.sh" "$version" "$dist/$artifact" \
-    "$release_notes" "$(git -C "$root" rev-parse HEAD)"
-  # Both artifact origins must serve the exact bytes before moving public pointers.
-  wrangler r2 object put "$bucket/releases/$latest_artifact" --remote \
-    --file "$dist/$artifact" \
-    --content-type application/x-apple-diskimage \
-    --cache-control 'no-cache'
-  curl --fail --silent --show-error --connect-timeout 15 --max-time 600 \
-    "$base_url/releases/$latest_artifact" -o "$verification/$latest_artifact"
-  cmp -s "$dist/$artifact" "$verification/$latest_artifact"
-  wrangler r2 object put "$bucket/appcast.xml" --remote \
-    --file "$updates/appcast.xml" \
-    --content-type application/xml \
-    --cache-control 'no-cache'
-  curl --fail --silent --show-error --connect-timeout 15 --max-time 60 \
-    "$base_url/appcast.xml" -o "$verification/appcast.xml"
-  cmp -s "$updates/appcast.xml" "$verification/appcast.xml"
-  echo "$base_url/releases/$artifact"
-  exit 0
-fi
-if [ ! -f "$release_notes" ]; then
-  echo "Add release notes at $release_notes or set HEX_RELEASE_NOTES." >&2
-  exit 1
 fi
 
+# Staging builds publish a prerelease (X.Y.Z-dev.N); the binary must report it.
+"$root/scripts/set-crate-version.sh" "$root" "$version"
 export HEX_VERSION="$version" HEX_BUILD_NUMBER="$build_number"
 bundle=$("$root/scripts/build-app.sh")
-bundle_name=$(basename "$bundle")
 "$root/scripts/validate-app.sh" "$bundle" Hex.app "$version" "$build_number" >/dev/null
-identity=$(hex_codesign_identity "$team_id")
-rm -rf "$dist/staging" "$dist/update-staging" "$updates"
-rm -f "$dist/HEX-$version.zip" "$dist/$artifact" "$dist/$update_artifact"
-mkdir -p "$dist/staging" "$dist/update-staging" "$updates"
+mkdir -p "$dist"
+rm -f "$dmg" "$zip"
+"$root/scripts/notarize-app.sh" "$bundle" "$dmg" Hex
+# The updater unpacks this beside the installed bundle and swaps it in.
+/usr/bin/ditto -c -k --sequesterRsrc --keepParent "$bundle" "$zip"
 
-# Notarize the app first so its ticket can be stapled inside the distributable DMG.
-/usr/bin/ditto -c -k --sequesterRsrc --keepParent "$bundle" "$dist/HEX-$version.zip"
-xcrun notarytool submit "$dist/HEX-$version.zip" --keychain-profile "$notary_profile" --wait
-xcrun stapler staple "$bundle"
-xcrun stapler validate "$bundle"
-
-/usr/bin/ditto "$bundle" "$dist/staging/$bundle_name"
-ln -s /Applications "$dist/staging/Applications"
-hdiutil create -quiet -fs APFS -format ULFO -volname Hex -srcfolder "$dist/staging" "$dist/$artifact"
-codesign --force --timestamp --sign "$identity" "$dist/$artifact"
-xcrun notarytool submit "$dist/$artifact" --keychain-profile "$notary_profile" --wait
-xcrun stapler staple "$dist/$artifact"
-xcrun stapler validate "$dist/$artifact"
-spctl --assess --type open --context context:primary-signature --verbose=2 "$dist/$artifact"
-
-# Sparkle 2.9.4 discovers updates by exact app filename or matching bundle ID.
-# Retain the old Rust archive name so 2.0.x can find the new bundle identity.
-/usr/bin/ditto "$bundle" "$dist/update-staging/HEX.app"
-/usr/bin/ditto -c -k --sequesterRsrc --keepParent "$dist/update-staging/HEX.app" "$dist/$update_artifact"
-cp "$dist/$update_artifact" "$updates/$update_artifact"
-cp "$release_notes" "$updates/HEX-$version-arm64.md"
-curl --fail --silent --show-error "$base_url/appcast.xml" -o "$updates/appcast.xml" || rm -f "$updates/appcast.xml"
-sparkle_dir=$("$root/scripts/setup-sparkle.sh")
-security find-generic-password \
-  -s 'https://sparkle-project.org' \
-  -a ed25519 \
-  -w | "$sparkle_dir/bin/generate_appcast" \
-  --ed-key-file - \
-  --download-url-prefix "$base_url/releases/" \
-  --embed-release-notes \
-  --maximum-deltas 0 \
-  --maximum-versions 5 \
-  "$updates"
-grep -Fq "$base_url/releases/$update_artifact" "$updates/appcast.xml"
-grep -Fq 'sparkle:edSignature=' "$updates/appcast.xml"
-
-echo "$dist/$artifact"
-echo "Prepared but not published. Run $0 publish after validation." >&2
+echo "$dmg"
+echo "$zip"

@@ -2064,13 +2064,34 @@ function finalBlast() {
           onImpact: () => {
             const pan = (tgt.x / W) * 1.2 - 0.6
             if (!isFinal) {
-              // Crisp, ducked glass-crack transient so the shouted words stay 100% intelligible
-              audio.sfx(idx % 2 === 0 ? "glass-crack-1" : "glass-crack-2", {
+              // Crisp, ducked glass-crack transient + pitch/time-spread propagation sweep (90–160 ms)
+              const primaryCrack = idx % 2 === 0 ? "glass-crack-1" : "glass-crack-2"
+              const secondaryCrack = idx % 2 === 0 ? "glass-crack-2" : "glass-crack-1"
+              audio.sfx(primaryCrack, {
                 bus: "impacts",
                 gain: 0.32,
-                rate: rnd(0.96, 1.08),
+                rate: rnd(0.95, 1.06),
                 pan,
+                dur: 0.22,
               })
+              setTimeout0(0.052, () =>
+                audio.sfx(secondaryCrack, {
+                  bus: "impacts",
+                  gain: 0.21,
+                  rate: rnd(1.18, 1.34),
+                  pan: clamp(pan * 1.25, -0.85, 0.85),
+                  dur: 0.18,
+                }),
+              )
+              setTimeout0(0.105, () =>
+                audio.sfx(primaryCrack, {
+                  bus: "impacts",
+                  gain: 0.14,
+                  rate: rnd(1.36, 1.54),
+                  pan: clamp(-pan * 0.75, -0.85, 0.85),
+                  dur: 0.15,
+                }),
+              )
               fx.push({ kind: 0, x: tgt.x, y: tgt.y, r: 0, rMax: 165 * v.fx, width: 2.8, t: 0, k: 1.1, age: 0, life: 0.34 })
               fx.push({ kind: 1, x: tgt.x, y: tgt.y, r: 68 * v.fx, t: 0, k: 1.15, age: 0, life: 0.08 })
               chip(tgt.x, tgt.y, 0, -1, 18, 0.9)

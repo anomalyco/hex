@@ -2,7 +2,8 @@
 
 set -euo pipefail
 
-destination="${1:-$HOME/Library/Application Support/voice-control/test-fixtures/dictation-protocol}"
+support="$HOME/Library/Application Support/hex"
+destination="${1:-$support/test-fixtures/dictation-protocol}"
 recording_pid=""
 
 names=(
@@ -93,4 +94,4 @@ done
 
 printf '\nCaptured %s fixtures.\n' "${#names[@]}"
 printf 'Run the fixture test with:\n\n'
-printf '  VOICE_CONTROL_DICTATION_FIXTURE_DIR=%q cargo test dictation_protocol_audio -- --ignored --nocapture\n' "$destination"
+printf '  HEX_DICTATION_FIXTURE_DIR=%q cargo test dictation_protocol_audio -- --ignored --nocapture\n' "$destination"

@@ -1,20 +1,31 @@
 name: Site
 
-# Builds hex.kitlangton.com and checks every download link it shows. On main it
-# deploys the Cloudflare Worker when the repository has a CLOUDFLARE_API_TOKEN
-# secret (Workers Scripts: Edit on the personal account); without one, deploy
-# from a Mac with `cd site && bun run build && bunx wrangler deploy`.
+# Builds site/ and checks every download link on pull requests; a push to dev
+# deploys dev (https://dev.anoma.ly/hex). Production (https://anoma.ly/hex)
+# deploys after a stable Release publishes, or by dispatching this workflow
+# with mode production from production.
 on:
   pull_request:
     paths:
       - "site/**"
       - ".github/workflows/site.yml"
+      - ".github/workflows/site-deploy.yml"
+      - ".github/release/deploy-site.sh"
+      - ".github/release/cf/**"
   push:
-    branches: [main]
+    branches: [dev]
     paths:
       - "site/**"
       - ".github/workflows/site.yml"
+      - ".github/workflows/site-deploy.yml"
+      - ".github/release/deploy-site.sh"
+      - ".github/release/cf/**"
   workflow_dispatch:
+    inputs:
+      mode:
+        type: choice
+        options: [dev, production]
+        default: dev
 
 permissions:
   contents: read
@@ -24,7 +35,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  site:
+  check:
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -36,15 +48,11 @@ jobs:
       - uses: oven-sh/setup-bun@v2
       - run: bun install --frozen-lockfile
       - run: bun run build
-      - name: Check every download link
-        run: bun run check:downloads
-      - name: Deploy
-        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-        run: |
-          if [ -z "$CLOUDFLARE_API_TOKEN" ]; then
-            echo "::notice::No CLOUDFLARE_API_TOKEN secret; deploy hex.kitlangton.com from a Mac."
-            exit 0
-          fi
-          bunx wrangler@4 deploy
+      - run: bun run check:downloads
+
+  deploy:
+    if: github.event_name == 'push' || inputs.mode == 'dev' || github.ref == 'refs/heads/production'
+    uses: ./.github/workflows/site-deploy.yml
+    with:
+      mode: ${{ github.event_name == 'workflow_dispatch' && inputs.mode || 'dev' }}
+    secrets: inherit

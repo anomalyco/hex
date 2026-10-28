@@ -1,16 +1,16 @@
 name: Bug report
-description: Report something that does not work as expected in HEX.
+description: Report something that does not work as expected in Hex.
 body:
   - type: markdown
     attributes:
       value: |
-        Thanks for helping improve HEX. Please search existing issues first.
+        Thanks for helping improve Hex. Please search existing issues first.
         Do not share private dictation, audio recordings, credentials, or full logs.
         Review and redact any diagnostic excerpts or screenshots before attaching them.
   - type: input
     id: version
     attributes:
-      label: HEX version
+      label: Hex version
       description: Include the commit if you built from source, or the package version for an SDK issue.
       placeholder: "2.1.13, installed from the signed DMG"
     validations:

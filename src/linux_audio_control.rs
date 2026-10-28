@@ -7,8 +7,7 @@
 use std::process::Command;
 use std::sync::mpsc::{self, Sender};
 
-use gtk::gio;
-use gtk::glib::{self, ToVariant};
+use glib::ToVariant;
 
 use crate::app_settings::RecordingAudioBehavior;
 
@@ -20,6 +19,8 @@ const DBUS_TIMEOUT_MS: i32 = 500;
 enum Request {
     Suppress,
     Restore,
+    /// Restores, running the callback once the output is audible again.
+    RestoreThen(Box<dyn FnOnce() + Send>),
 }
 
 pub(crate) struct AudioSuppressor {
@@ -46,6 +47,7 @@ impl AudioSuppressor {
                                 restore(suppressed);
                             }
                         }
+                        Request::RestoreThen(then) => restore_then(suppressed.take(), then),
                         Request::Suppress => {}
                     }
                 }
@@ -70,6 +72,20 @@ impl AudioSuppressor {
     pub(crate) fn restore(&self) {
         if let Some(requests) = &self.requests {
             let _ = requests.send(Request::Restore);
+        }
+    }
+
+    /// Restores what recording changed and runs `then` once a muted output
+    /// is unmuted, so a tone it plays is heard. Anything else runs `then` at
+    /// once, never behind a slow media player.
+    pub(crate) fn restore_then(&self, then: impl FnOnce() + Send + 'static) {
+        let Some(requests) = &self.requests else {
+            return then();
+        };
+        if let Err(mpsc::SendError(Request::RestoreThen(then))) =
+            requests.send(Request::RestoreThen(Box::new(then)))
+        {
+            then();
         }
     }
 }
@@ -102,6 +118,21 @@ fn restore(suppressed: Suppressed) {
         }
         Suppressed::Paused(players) => resume_players(&players),
         Suppressed::Nothing => {}
+    }
+}
+
+fn restore_then(suppressed: Option<Suppressed>, then: Box<dyn FnOnce() + Send>) {
+    match suppressed {
+        Some(muted @ Suppressed::Muted(_)) => {
+            restore(muted);
+            then();
+        }
+        other => {
+            then();
+            if let Some(other) = other {
+                restore(other);
+            }
+        }
     }
 }
 
@@ -239,5 +270,20 @@ mod tests {
         assert!(suppressor.requests.is_none());
         suppressor.suppress();
         suppressor.restore();
+        let (ran, done) = mpsc::channel();
+        suppressor.restore_then(move || ran.send(()).unwrap());
+        assert!(done.try_recv().is_ok());
+    }
+
+    #[test]
+    fn restoring_without_a_mute_runs_its_callback_first() {
+        let (order, events) = mpsc::channel();
+        let ran = order.clone();
+        restore_then(
+            Some(Suppressed::Paused(Vec::new())),
+            Box::new(move || ran.send("then").unwrap()),
+        );
+        restore_then(None, Box::new(move || order.send("idle").unwrap()));
+        assert_eq!(events.try_iter().collect::<Vec<_>>(), ["then", "idle"]);
     }
 }

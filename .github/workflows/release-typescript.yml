@@ -1,8 +1,13 @@
 name: Release TypeScript SDK
 
+# Pending changesets on dev open (or update) the "chore: release TypeScript
+# SDK" pull request into dev, which bumps versions and changelogs. Nothing is
+# published from dev. Publishing happens when production is fast-forwarded to
+# a dev commit whose SDK version is not on npm yet: changeset publish
+# publishes it, pushes its tag, and creates its GitHub release.
 on:
   push:
-    branches: [main]
+    branches: [dev, production]
     paths:
       - "sdk/**"
       - ".github/workflows/release-typescript.yml"
@@ -10,7 +15,7 @@ on:
 
 # Finish an in-flight publish before another run checks registry availability.
 concurrency:
-  group: release-typescript
+  group: release-typescript-${{ github.ref }}
   cancel-in-progress: false
 
 permissions:
@@ -19,8 +24,23 @@ permissions:
   pull-requests: write
 
 jobs:
-  release:
-    if: github.ref == 'refs/heads/main'
+  version:
+    if: github.ref == 'refs/heads/dev'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sdk
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - uses: changesets/action@v2
+        with:
+          cwd: sdk
+          pr-title: "chore: release TypeScript SDK"
+
+  publish:
+    if: github.ref == 'refs/heads/production'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -34,8 +54,17 @@ jobs:
           registry-url: https://registry.npmjs.org
       - run: npm install --global npm@latest
       - run: bun install --frozen-lockfile
-      - uses: changesets/action@v2
-        with:
-          cwd: sdk
-          publish-script: bun run release
-          pr-title: "chore: release TypeScript SDK"
+      - run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+      - run: bun run release
+      - name: Push tags and create GitHub releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for tag in $(git tag --points-at HEAD --list '@kitlangton/hex@*'); do
+            git push origin "refs/tags/$tag"
+            awk -v heading="## ${tag##*@}" '$0 == heading { on = 1; next } /^## / && on { exit } on' \
+              typescript/CHANGELOG.md > "$RUNNER_TEMP/notes.md"
+            gh release create "$tag" --verify-tag --title "$tag" --notes-file "$RUNNER_TEMP/notes.md"
+          done

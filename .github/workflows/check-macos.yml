@@ -2,36 +2,52 @@ name: Check macOS
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - "Cargo.toml"
       - "Cargo.lock"
       - "build.rs"
+      - "crates/**"
       - "src/**"
       - "native/**"
+      - "macos/HexMicrophoneDriver/Info.plist"
       - "resources/**"
       - "assets/**"
+      - "app/**"
+      - "scripts/validate-app.sh"
+      - "scripts/test-app-identity.sh"
+      - ".config/nextest.toml"
       - ".github/workflows/check-macos.yml"
   push:
-    branches: [main]
+    branches: [dev]
     paths:
       - "Cargo.toml"
       - "Cargo.lock"
       - "build.rs"
+      - "crates/**"
       - "src/**"
       - "native/**"
+      - "macos/HexMicrophoneDriver/Info.plist"
       - "resources/**"
       - "assets/**"
+      - "app/**"
+      - "scripts/validate-app.sh"
+      - "scripts/test-app-identity.sh"
+      - ".config/nextest.toml"
       - ".github/workflows/check-macos.yml"
 
 permissions:
   contents: read
 
+# A new push to a pull request cancels its stale run. Every push and manual run
+# keeps its own group, so each dev commit gets a result.
 concurrency:
-  group: macos-${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.event_name == 'pull_request' && format('{0}-pr-{1}', github.workflow, github.event.pull_request.number) || format('{0}-run-{1}', github.workflow, github.run_id) }}
   cancel-in-progress: true
 
 jobs:
   test:
+    if: ${{ !github.event.pull_request.draft }}
     runs-on: macos-26
     timeout-minutes: 60
     env:
@@ -44,8 +60,14 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest
       - name: Install the Metal toolchain
         run: xcrun --sdk macosx metal --version || xcodebuild -downloadComponent MetalToolchain
       - run: cargo fmt --all --check
-      - run: cargo clippy --locked --bin voice-control --tests -- -D warnings
-      - run: cargo test --locked --bin voice-control
+      - run: scripts/test-app-identity.sh
+      - run: cargo clippy --locked -p "$(cargo pkgid)" -p scrawl-capture --bin hex --lib --tests --features capture -- -D warnings
+      - run: cargo nextest run --locked --profile ci -p "$(cargo pkgid)" -p scrawl-capture --bin hex --lib --features capture
+      - name: No compromised eMudhra CA roots
+        run: cargo build --locked --bin hex && scripts/check-ca-roots.sh target/debug/hex

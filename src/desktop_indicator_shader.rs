@@ -363,8 +363,7 @@ pub fn shade(uv: [f32; 2], uniforms: &IndicatorUniforms) -> [f32; 4] {
 }
 
 /// Renders the indicator into a `width * height * 4` byte buffer of
-/// row-major, straight-alpha (unpremultiplied) 8-bit RGBA, which is what
-/// gpui's `Image::from_bytes` RGBA path expects.
+/// row-major, straight-alpha (unpremultiplied) 8-bit RGBA.
 pub fn render(uniforms: &IndicatorUniforms, width: usize, height: usize) -> Vec<u8> {
     fn to_byte(value: f32) -> u8 {
         (value.clamp(0.0, 1.0) * 255.0).round() as u8

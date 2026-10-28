@@ -14,40 +14,32 @@ use x11rb::protocol::xproto::{ConnectionExt, KeyButMask};
 use x11rb::protocol::xtest;
 use x11rb::rust_connection::RustConnection;
 
-use crate::linux_input::{
-    KEY_PRESS, KEY_RELEASE, WaylandModifierState, XK_CONTROL_L, XK_SHIFT_L, connect_x11,
-};
+use crate::linux_input::{KEY_PRESS, KEY_RELEASE, XK_CONTROL_L, XK_SHIFT_L, connect_x11};
 use crate::linux_session::LinuxSession;
 
 const XK_V: u32 = 0x76;
 const HELPER_TIMEOUT: Duration = Duration::from_secs(3);
 const PASTE_SETTLE: Duration = Duration::from_millis(100);
 
-pub struct LinuxPaster {
+pub(crate) struct LinuxPaster {
     backend: Backend,
     stop: Arc<AtomicBool>,
-    paste_with_shift: bool,
+    /// The terminal-paste preference, which the window changes live.
+    paste_with_shift: Arc<AtomicBool>,
 }
 
 enum Backend {
     X11(Box<X11Paster>),
-    Wayland(WaylandModifierState),
+    /// `wtype`'s virtual keyboard carries its own modifiers, so keys the
+    /// user still holds never turn its Ctrl+V into another chord.
+    Wayland,
 }
 
 impl LinuxPaster {
-    pub fn new(
-        stop: Arc<AtomicBool>,
-        paste_with_shift: bool,
-        wayland_modifiers: Option<WaylandModifierState>,
-    ) -> Result<Self> {
+    pub(crate) fn new(stop: Arc<AtomicBool>, paste_with_shift: Arc<AtomicBool>) -> Result<Self> {
         let backend = match LinuxSession::detect() {
             LinuxSession::X11 => Backend::X11(Box::new(X11Paster::new()?)),
-            LinuxSession::Wayland => {
-                let modifiers = wayland_modifiers.ok_or_else(|| {
-                    eyre!("Wayland paste requires the active hotkey modifier state")
-                })?;
-                Backend::Wayland(modifiers)
-            }
+            LinuxSession::Wayland => Backend::Wayland,
         };
         Ok(Self {
             backend,
@@ -58,7 +50,7 @@ impl LinuxPaster {
 
     /// The focused application's selected text: the primary selection,
     /// which X11 and Wayland compositors update as the user selects.
-    pub fn selected_text(&mut self) -> Option<String> {
+    pub(crate) fn selected_text(&mut self) -> Option<String> {
         let bytes = match &mut self.backend {
             Backend::X11(paster) => {
                 let atoms = &paster.clipboard.getter.atoms;
@@ -72,7 +64,7 @@ impl LinuxPaster {
                     )
                     .ok()?
             }
-            Backend::Wayland(_) => {
+            Backend::Wayland => {
                 let output = Command::new("wl-paste")
                     .args(["--primary", "--no-newline", "--type", "text/plain"])
                     .stdin(Stdio::null())
@@ -86,23 +78,22 @@ impl LinuxPaster {
         (!text.trim().is_empty()).then_some(text)
     }
 
-    pub fn paste(&mut self, text: &str) -> Result<()> {
+    pub(crate) fn paste(&mut self, text: &str) -> Result<()> {
         if text.trim().is_empty() {
             return Err(eyre!("refusing to paste an empty transcript"));
         }
+        let paste_with_shift = self.paste_with_shift.load(Ordering::Relaxed);
         match &mut self.backend {
-            Backend::X11(paster) => paster.paste(text, &self.stop, self.paste_with_shift)?,
-            Backend::Wayland(modifiers) => {
-                wait_for_modifiers(&self.stop, || Ok(modifiers.held()))?;
+            Backend::X11(paster) => paster.paste(text, &self.stop, paste_with_shift)?,
+            Backend::Wayland => {
                 let mut copy = Command::new("wl-copy");
                 copy.args(["--type", "text/plain;charset=utf-8"]);
                 run_helper(copy, text.as_bytes(), &self.stop, HELPER_TIMEOUT)
                     .wrap_err("could not own the Wayland clipboard; install wl-clipboard and check compositor support")?;
                 // wl-copy's parent exits only after the selection is installed.
                 // Never read a pipe inherited by its clipboard-serving daemon.
-                wait_for_modifiers(&self.stop, || Ok(modifiers.held()))?;
                 let mut keys = Command::new("wtype");
-                keys.args(paste_keys(self.paste_with_shift));
+                keys.args(paste_keys(paste_with_shift));
                 run_helper(keys, &[], &self.stop, HELPER_TIMEOUT)
                     .wrap_err("could not send the Wayland paste shortcut; install wtype and use a compositor supporting virtual keyboards")?;
             }
@@ -124,7 +115,7 @@ struct X11Paster {
 }
 
 impl X11Paster {
-    pub fn new() -> Result<Self> {
+    fn new() -> Result<Self> {
         let clipboard = Clipboard::new().wrap_err("could not open the X11 clipboard")?;
         let (connection, root, keymap) = connect_x11()?;
         Ok(Self {
@@ -412,14 +403,10 @@ mod tests {
         let path = std::env::var_os("HEX_WAYLAND_PASTE_OUTPUT")
             .expect("the isolated Wayland test runner must supply its output file");
         let expected = "Example dictation: --flags, punctuation, \u{6f22}\u{5b57}.\nSecond line.";
-        LinuxPaster::new(
-            Arc::new(AtomicBool::new(false)),
-            false,
-            Some(WaylandModifierState::default()),
-        )
-        .unwrap()
-        .paste(expected)
-        .unwrap();
+        LinuxPaster::new(Arc::new(AtomicBool::new(false)), Default::default())
+            .unwrap()
+            .paste(expected)
+            .unwrap();
         let deadline = Instant::now() + Duration::from_secs(3);
         loop {
             let actual = std::fs::read_to_string(&path).unwrap_or_default();

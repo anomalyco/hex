@@ -8,23 +8,18 @@
 //!   cargo test meeting_echo_replay -- --ignored --nocapture
 //! ```
 //!
-//! The first run transcribes both WAVs with Parakeet and replays them through
-//! the live Moonshine worker at `HEX_MEETING_LIVE_SPEED` (default 4) times
-//! real time, caching both in `HEX_MEETING_CACHE`; later runs only
-//! re-evaluate echo suppression. Delete `live.ndjson` there after changing
-//! the live worker. Each layer reports its `You` entries, how many
-//! repeat nearby remote words (echo-like), and how many labeled local
-//! utterances it lost. Labels are lines of `<start s> <end s> [note]` marking
+//! The first run transcribes both WAVs with Parakeet, caching the chunks in
+//! `HEX_MEETING_CACHE`; later runs only re-evaluate echo suppression. Delete
+//! `parakeet.json` there after changing the chunker. Each layer reports its
+//! `You` entries, how many repeat nearby remote words (echo-like), and how
+//! many labeled local utterances it lost. Labels are lines of `<start s> <end s> [note]` marking
 //! where the user really spoke. `HEX_MEETING_WINDOW=<from s>-<to s>` prints
 //! that part of each layer's turns.
 
-use std::collections::{HashMap, HashSet};
-use std::sync::atomic::AtomicU64;
-use std::sync::mpsc;
+use std::collections::HashSet;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use super::live::{Event, live_view};
 use super::transcript::{
     ReplayChunk, RollingLine, RollingView, replay_envelope, replay_resample, replay_track,
     replay_transcribe, replay_views,
@@ -37,8 +32,6 @@ const ECHO_OVERLAP: f32 = 0.6;
 /// A labeled utterance counts as shown when a `You` entry overlaps it
 /// within this margin.
 const LABEL_MARGIN_MS: u64 = 500;
-/// Live packets of 10 ms, as ScreenCaptureKit delivers the microphone.
-const PACKET_MS: u64 = 10;
 
 /// Float WAVs, including one still being recorded whose sizes are unset.
 fn read_float_wav(path: &Path) -> (u32, Vec<f32>) {
@@ -221,71 +214,6 @@ fn parakeet_cache(cache: &Path, tracks: &[(MeetingSource, Vec<f32>); 2]) -> [Vec
     chunks
 }
 
-/// The live worker's events for the recording, replayed at `speed` times
-/// real time.
-fn live_cache(
-    cache: &Path,
-    tracks: &[(MeetingSource, u32, Vec<f32>); 2],
-    speed: u32,
-) -> Vec<Event> {
-    let path = cache.join("live.ndjson");
-    if !path.exists() {
-        let output = cache.join("live-run");
-        fs::create_dir_all(&output).unwrap();
-        let (sender, receiver) = mpsc::sync_channel(live::QUEUE_CAPACITY);
-        let worker_output = output.clone();
-        let worker = thread::spawn(move || {
-            let drops = AtomicU64::new(0);
-            live::transcribe(
-                Path::new(env!("CARGO_MANIFEST_DIR")),
-                &worker_output,
-                receiver,
-                &drops,
-            )
-        });
-        let started = Instant::now();
-        let duration_ms = tracks
-            .iter()
-            .map(|(_, rate, samples)| samples.len() as u64 * 1_000 / u64::from(*rate))
-            .min()
-            .unwrap();
-        for step in 0..duration_ms / PACKET_MS {
-            let due = Duration::from_millis(step * PACKET_MS) / speed;
-            if let Some(wait) = due.checked_sub(started.elapsed()) {
-                thread::sleep(wait);
-            }
-            for (source, rate, samples) in tracks {
-                let per_packet = (*rate as u64 * PACKET_MS / 1_000) as usize;
-                let start = step as usize * per_packet;
-                sender
-                    .send(AudioPacket {
-                        source: *source,
-                        pts_us: None,
-                        arrival_us: step * PACKET_MS * 1_000,
-                        position: start as u64,
-                        sample_rate: *rate,
-                        samples: samples[start..start + per_packet].to_vec(),
-                    })
-                    .unwrap();
-            }
-        }
-        drop(sender);
-        worker.join().unwrap().unwrap();
-        println!("live: {:.1} s", started.elapsed().as_secs_f32());
-        fs::rename(output.join("transcript.live.ndjson"), &path).unwrap();
-        fs::remove_dir_all(output).unwrap();
-    }
-    read_ndjson(&path).unwrap()
-}
-
-fn latest_by(events: &[Event], until_ms: u64) -> HashMap<(MeetingSource, u64), Event> {
-    let mut latest = HashMap::new();
-    for event in events.iter().filter(|event| event.end_ms <= until_ms) {
-        latest.insert((event.source, event.line_id), event.clone());
-    }
-    latest
-}
-
 #[test]
 #[ignore = "requires HEX_MEETING_DIR and HEX_MEETING_CACHE; see the module documentation"]
 fn meeting_echo_replay() {
@@ -318,8 +246,6 @@ fn meeting_echo_replay() {
         .map(|(source, rate, samples)| (*source, replay_resample(*rate, samples)));
     let envelope = replay_envelope(&resampled[0].1, &resampled[1].1);
     let chunks = parakeet_cache(&cache, &resampled);
-    let speed = std::env::var("HEX_MEETING_LIVE_SPEED").map_or(4, |speed| speed.parse().unwrap());
-    let events = live_cache(&cache, &recorded, speed);
 
     let [system, microphone] = [
         (MeetingSource::System, &chunks[0]),
@@ -335,55 +261,30 @@ fn meeting_echo_replay() {
         .cloned()
         .collect::<Vec<_>>();
 
-    let live_path = directory.join("transcript.live.ndjson");
-    if live_path.exists() {
-        let recorded_events = read_ndjson::<Event>(&live_path).unwrap();
-        let rolling_path = directory.join(transcript::ROLLING_FILE);
-        let rolling: RollingView = if rolling_path.exists() {
-            read_ndjson::<RollingLine>(&rolling_path)
-                .unwrap()
-                .into_iter()
-                .collect()
-        } else {
-            RollingView::default()
-        };
-        let latest = latest_by(&recorded_events, duration_ms);
+    let rolling_path = directory.join(transcript::ROLLING_FILE);
+    if rolling_path.exists() {
+        let rolling: RollingView = read_ndjson::<RollingLine>(&rolling_path)
+            .unwrap()
+            .into_iter()
+            .collect();
         report(
             "pane as recorded",
-            &live_view(&rolling, latest.values()),
+            &rolling.entries,
             &remote,
             &labels,
             window,
         );
     }
-
-    let latest = latest_by(&events, u64::MAX);
-    report(
-        "draft only (rolling unavailable)",
-        &live_view(&RollingView::default(), latest.values()),
-        &remote,
-        &labels,
-        window,
-    );
     report(
         "pane, rolling caught up",
-        &live_view(&view, latest.values()),
+        &view.entries,
         &remote,
         &labels,
         window,
     );
-    let started = Instant::now();
-    for _ in 0..10 {
-        std::hint::black_box(live_view(&view, latest.values()));
-    }
-    println!(
-        "live_view over {} draft lines: {:.1} ms",
-        latest.len(),
-        started.elapsed().as_secs_f64() * 100.0
-    );
 
-    // While recording, rolling trails the live draft by whole chunks, and
-    // either track's chunk can finish first. Everything any snapshot showed
+    // While recording, rolling trails the call by whole chunks, and either
+    // track's chunk can finish first. Everything any snapshot showed
     // counts, since the user saw it.
     for (system_lag_ms, microphone_lag_ms) in
         [(60_000, 60_000), (60_000, 25_000), (300_000, 300_000)]
@@ -403,7 +304,7 @@ fn meeting_echo_replay() {
                 ),
             ];
             let (view, _, _) = replay_views(&tracks[0], &tracks[1], &envelope);
-            shown.extend(live_view(&view, latest_by(&events, now).values()));
+            shown.extend(view.entries);
         }
         let shown = shown.into_iter().collect::<Vec<_>>();
         let score = score(&shown, &remote, &labels);
@@ -447,41 +348,6 @@ fn meeting_echo_replay() {
             entry.text
         );
     }
-    println!("== every draft microphone line");
-    let shown = live_view(&RollingView::default(), latest.values())
-        .into_iter()
-        .collect::<HashSet<_>>();
-    let mut lines = latest
-        .values()
-        .filter(|event| event.source == MeetingSource::Microphone && !event.text.trim().is_empty())
-        .collect::<Vec<_>>();
-    lines.sort_by_key(|event| event.start_ms);
-    for event in lines {
-        let entry = TranscriptEntry {
-            source: event.source,
-            start_ms: event.start_ms,
-            end_ms: event.end_ms,
-            text: event.text.trim().into(),
-        };
-        println!(
-            "  {} {:>7.1} {:>7.1} {} {:<6} overlap={:.2} {}",
-            if shown.contains(&entry) {
-                "SHOW"
-            } else {
-                "hide"
-            },
-            entry.start_ms as f64 / 1_000.0,
-            entry.end_ms as f64 / 1_000.0,
-            if labels.local(&entry) { "L" } else { " " },
-            match event.signal {
-                Some(echo::Signal::Bleed) => "bleed",
-                Some(echo::Signal::Local) => "local",
-                None => "?",
-            },
-            remote_overlap(&entry, &remote),
-            entry.text
-        );
-    }
 }
 
 fn process_cpu_seconds() -> f64 {
@@ -489,119 +355,6 @@ fn process_cpu_seconds() -> f64 {
     unsafe { libc::getrusage(libc::RUSAGE_SELF, &mut usage) };
     let seconds = |time: libc::timeval| time.tv_sec as f64 + time.tv_usec as f64 / 1e6;
     seconds(usage.ru_utime) + seconds(usage.ru_stime)
-}
-
-/// CPU the live worker spends per second of meeting audio and how late its
-/// lines appear, replaying the first `HEX_MEETING_LIVE_SECONDS` (default
-/// 120) in real time. With `HEX_MEETING_CACHE`, the completed remote lines'
-/// text is written to `live-system.txt` there.
-#[test]
-#[ignore = "requires HEX_MEETING_DIR; see the module documentation"]
-fn meeting_live_cpu() {
-    let directory = PathBuf::from(std::env::var("HEX_MEETING_DIR").unwrap());
-    let seconds: u64 =
-        std::env::var("HEX_MEETING_LIVE_SECONDS").map_or(120, |value| value.parse().unwrap());
-    let tracks = [
-        (MeetingSource::System, "system.wav"),
-        (MeetingSource::Microphone, "microphone.wav"),
-    ]
-    .map(|(source, file)| {
-        let (rate, mut samples) = read_float_wav(&directory.join(file));
-        samples.truncate(rate as usize * seconds as usize);
-        (source, rate, samples)
-    });
-    let scratch = std::env::temp_dir().join(format!("hex-live-cpu-{}", std::process::id()));
-    fs::create_dir_all(&scratch).unwrap();
-    let (sender, receiver) = mpsc::sync_channel(live::QUEUE_CAPACITY);
-    let worker_scratch = scratch.clone();
-    let worker = thread::spawn(move || {
-        live::transcribe(
-            Path::new(env!("CARGO_MANIFEST_DIR")),
-            &worker_scratch,
-            receiver,
-            &AtomicU64::new(0),
-        )
-    });
-    let path = scratch.join("transcript.live.ndjson");
-    let mut reader = live::TranscriptReader::default();
-    let mut first_seen = HashMap::new();
-    let before = process_cpu_seconds();
-    let started = Instant::now();
-    let mut observe = |reader: &mut live::TranscriptReader| {
-        reader.read_live_tail(&path).unwrap();
-        let now_ms = started.elapsed().as_millis() as u64;
-        for event in reader.events() {
-            if event.source == MeetingSource::System {
-                first_seen
-                    .entry((
-                        event.line_id,
-                        event.phase == crate::events::TranscriptPhase::Completed,
-                    ))
-                    .or_insert((now_ms, event.end_ms));
-            }
-        }
-    };
-    for step in 0..seconds * 1_000 / PACKET_MS {
-        let due = Duration::from_millis(step * PACKET_MS);
-        if let Some(wait) = due.checked_sub(started.elapsed()) {
-            thread::sleep(wait);
-        }
-        for (source, rate, samples) in &tracks {
-            let per_packet = (*rate as u64 * PACKET_MS / 1_000) as usize;
-            let start = step as usize * per_packet;
-            sender
-                .send(AudioPacket {
-                    source: *source,
-                    pts_us: None,
-                    arrival_us: step * PACKET_MS * 1_000,
-                    position: start as u64,
-                    sample_rate: *rate,
-                    samples: samples[start..start + per_packet].to_vec(),
-                })
-                .unwrap();
-        }
-        if step % 10 == 0 {
-            observe(&mut reader);
-        }
-    }
-    drop(sender);
-    worker.join().unwrap().unwrap();
-    let cpu = process_cpu_seconds() - before;
-    observe(&mut reader);
-    let lag = |completed: bool| {
-        let mut lags = first_seen
-            .iter()
-            .filter(|((_, done), _)| *done == completed)
-            .map(|(_, (seen, end))| seen.saturating_sub(*end) as f64 / 1_000.0)
-            .collect::<Vec<_>>();
-        lags.sort_by(f64::total_cmp);
-        let at = |fraction: f64| lags[((lags.len() - 1) as f64 * fraction) as usize];
-        format!("p50 {:.2} s, p95 {:.2} s", at(0.5), at(0.95))
-    };
-    println!(
-        "live worker: {seconds} s of audio, {cpu:.1} CPU s ({:.0}% of one core); first text \
-         after its audio {}; completed line after its end {}",
-        cpu * 100.0 / seconds as f64,
-        lag(false),
-        lag(true)
-    );
-    if let Ok(cache) = std::env::var("HEX_MEETING_CACHE") {
-        let mut lines = reader
-            .events()
-            .filter(|event| {
-                event.source == MeetingSource::System
-                    && event.phase == crate::events::TranscriptPhase::Completed
-            })
-            .collect::<Vec<_>>();
-        lines.sort_by_key(|event| event.start_ms);
-        let text = lines
-            .iter()
-            .map(|event| event.text.trim())
-            .collect::<Vec<_>>()
-            .join("\n");
-        fs::write(PathBuf::from(cache).join("live-system.txt"), text).unwrap();
-    }
-    fs::remove_dir_all(scratch).unwrap();
 }
 
 /// How long the command recognizer's Moonshine updates take, the way

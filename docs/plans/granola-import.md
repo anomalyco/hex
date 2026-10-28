@@ -1,7 +1,7 @@
 # Granola Import (research, not implemented)
 
-Goal: bring older Granola meetings into HEX's meeting format so `hex mcp`
-can search them beside HEX recordings. Researched from Granola's public docs on
+Goal: bring older Granola meetings into Hex's meeting format so `hex mcp`
+can search them beside Hex recordings. Researched from Granola's public docs on
 2026-10-15; nothing was logged into, called, or decrypted.
 
 ## Official Paths
@@ -35,7 +35,7 @@ assuming old transcripts still exist.
 The local cache on the Pro (`cache-v6.json.enc`, `granola.db`) is encrypted.
 Do not reverse-engineer it; third-party scripts that do are unofficial.
 
-## Mapping To HEX
+## Mapping To Hex
 
 Granola's macOS transcript sources map directly: `microphone` -> `You`
 (`MeetingSource::Microphone`), `speaker` -> `Them` (`System`). Absolute
@@ -43,7 +43,7 @@ Granola's macOS transcript sources map directly: `microphone` -> `You`
 folder `meetings/granola-<not_id>/` with a `manifest.json` (status `complete`,
 `created_at_ms` from the meeting start, `app: "Granola import"`, title), a
 `transcript.ndjson`, and a `transcript.md` so the folder reads as published.
-Granola summaries are not HEX notes; keep them in a separate field or a
+Granola summaries are not Hex notes; keep them in a separate field or a
 Markdown file rather than impersonating Apple Intelligence `notes`.
 
 ## Recommendation

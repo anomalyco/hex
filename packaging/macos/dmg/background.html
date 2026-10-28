@@ -1,0 +1,24 @@
+<!doctype html>
+<!-- The installer window's background, 660×400 pt. render.sh draws it at 1×
+     and 2× into background.tiff. Finder draws the icons and their labels on
+     top: Hex at (170, 178), Applications at (490, 178), 128 pt. -->
+<html><head><meta charset="utf-8"><style>
+  html,body{margin:0;width:660px;height:400px;overflow:hidden}
+  body{background:linear-gradient(#f7f7f5,#efefec);font-family:-apple-system,system-ui,sans-serif;position:relative}
+  svg{position:absolute;inset:0}
+  .row{position:absolute;left:0;right:0;top:292px;height:72px;display:flex;justify-content:center;align-items:center;gap:6px}
+  /* Hex's own keycap (src/rune_ui/dmg_keycap.rs): a 56×48 pt canvas at 1.5×, the key centred in it. */
+  .row img{width:84px;height:72px;display:block;margin:0 -8px 0 -19px}
+  .line{font-size:16px;color:#2a2a2e;font-weight:600;letter-spacing:.005em;padding-bottom:2px}
+</style></head><body>
+<svg width="660" height="400" viewBox="0 0 660 400">
+  <g fill="none" stroke="#b4b4b9" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M268 178 H392"/>
+    <path d="M382 170 L392 178 L382 186"/>
+  </g>
+</svg>
+<div class="row">
+  <img srcset="keycap@1x.png 1x, keycap@2x.png 2x" alt="">
+  <div class="line">Hold it, say it, done.</div>
+</div>
+</body></html>

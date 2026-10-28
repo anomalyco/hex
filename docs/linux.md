@@ -1,100 +1,138 @@
 # Install The Linux Beta
 
-The Linux beta targets x86_64 Linux: i3/X11 and compatible wlroots-based Wayland
+The Linux beta targets x86_64 and ARM64 (aarch64) Linux: i3/X11 and compatible wlroots-based Wayland
 compositors such as Hyprland or Sway. Audio uses ALSA, including PipeWire systems
 with ALSA compatibility. Inference uses Vulkan when available and can fall back
-to the CPU. The GPUI Settings window still needs a Vulkan driver, even with CPU
+to the CPU. The window still needs a Vulkan driver, even with CPU
 inference; `vulkan-icd-loader` alone is not a driver. Install a driver for your GPU
-or a software Vulkan driver. See the Wayland requirements below before enabling
-native input.
+or a software Vulkan driver. See the Wayland requirements below.
 
 Linux opens the same window as macOS and Windows: Settings, Modes, Voice Action,
 and History. Voice commands, website mode rules, and meetings are macOS-only.
 This is not universal Wayland support: GNOME and KDE are not covered by the
-current clipboard, virtual-keyboard, and overlay protocol contract.
+current clipboard, virtual-keyboard, and overlay protocol contract. Shortcuts
+are general: the desktop's GlobalShortcuts portal when it has one, otherwise
+your desktop's own keybindings running `hex` commands (see
+[Shortcuts](#shortcuts)).
 
 For Nix/NixOS, use the [Nix guide](nix.md). Nix owns updates to that installation;
-HEX's signed updater owns only the direct-install layout below.
+Hex's signed updater owns only the direct-install layout below.
 
-## Background Service And Settings
+## One Hex Process
 
-The dictation runtime is a **per-user systemd service**, `hex.service`, not a
-system-wide/root daemon. It owns the microphone, hotkeys, model downloads and
-workers, sounds, paste, and History recording. Settings is a separate client:
-it saves `settings.json` and asks the service to reload it, asks the service to
-record shortcuts and prepare models, and reads History from the same file.
-Closing Settings stops neither dictation nor a model download. There is no
-Linux tray icon.
+Hex on Linux is **one process per user** (and per data directory), not a
+system-wide/root daemon. It owns the microphone, shortcuts, model downloads and
+workers, sounds, paste, History, the recording pill, and the window. The window
+is optional: closing it stops neither dictation nor a model download, and
+launching Hex again opens it. When the desktop has a tray (a
+StatusNotifierItem host, such as Waybar, KDE, or Omarchy's bar), Hex shows a
+tray icon: click it to open the window, or use its menu's **Show Hex** and
+**Quit Hex**. Without a tray, quit with **Quit Hex** at the bottom of the
+window's sidebar, the launcher's **Quit Hex** action, or `hex quit`.
 
-Settings live in `settings.json` in HEX's data directory, the same file macOS
-and Windows use. On first launch, an existing `linux-settings.json` is
-migrated once and kept as `linux-settings.json.migrated`.
+The window has one fixed size on Linux, 980×760 logical pixels (so fractional
+scaling keeps it sharp); it cannot be resized. Wayland has no way to ask a
+tiling compositor to float a window, but sway, Hyprland, and niri float a
+toplevel whose minimum and maximum size match, and X11 window managers such as
+i3 float a window whose size hints are fixed. The window therefore opens
+floating instead of taking a tile. macOS and Windows keep a resizable window.
+
+Settings live in `settings.json` in Hex's data directory, the same file macOS
+and Windows use.
 
 ```sh
-hex start                       # start the service and listen; no window
-hex app                         # open Settings; connect to/start the service
-hex status                      # query live service state, not an old log entry
-hex stop                        # stop the service and release microphone/hotkeys
-hex restart                     # restart using this desktop's environment
-journalctl --user -u hex.service # service diagnostics
+hex                             # open the window, starting Hex if needed
+hex start                       # start Hex in the background; no window
+hex status                      # query the running Hex, not an old log entry
+hex quit                        # finish accepted work, release the microphone, exit
+hex restart                     # restart the systemd unit in this desktop's environment
+                                # (over SSH: the one it last ran in)
+journalctl --user -u hex.service # diagnostics of the supervised process
 ```
 
-Settings also offers Start/Stop for the listener without stopping the service.
-An existing paused listener stays paused when Settings opens. A crashed client
-does not stop dictation. A disconnected client loses its uncommitted shortcut
-capture; the old binding and prior listening state are restored. The client
-reconnects after a service restart and never replays uncertain mutation requests.
+`hex app` is the same as `hex`, `hex app --hidden` the same as `hex start`, and
+`hex stop` the same as `hex quit`; older desktop and autostart entries keep
+working after an update replaces only the executable.
 
-The direct installer creates the user unit and an XDG autostart entry that runs
-`hex start`. The launcher writes an owner-only `session.env` containing only
-display/session variables before starting systemd; missing variables explicitly
-clear stale Wayland/X11 values inherited by the user manager. No permissions are
-granted. The service is `PartOf=graphical-session.target`; desktops managing a
-custom session target must bind its lifetime to their login/logout lifecycle.
-Restart-on-failure belongs to systemd, not the Settings process.
-There is one active desktop service per user: `hex start` hands it over with a
-restart if the display/session changed. Opening Settings alone never silently
-moves an existing runtime from another desktop.
+A launch first asks the running Hex over its socket. If one answers, it
+forwards `Activate` with the launcher's `XDG_ACTIVATION_TOKEN` or
+`DESKTOP_STARTUP_ID` and exits 0; the running process opens or focuses its
+window. If none runs and the installer's (or Home Manager's) `hex.service` user
+unit is loaded, the launch writes an owner-only `session.env` and starts the
+unit, which reports readiness to systemd (`Type=notify`) once its socket
+answers, then forwards `Activate`. Otherwise (a custom data directory,
+`cargo run`, a desktop without systemd) the launching process becomes Hex
+itself. Two racing launches produce one Hex; the loser forwards and exits 0.
 
-IPC uses an owner-only Unix socket in HEX's data directory, same-user peer
+`session.env` holds the display and session variables, the cursor theme and
+input method (`XCURSOR_THEME`, `XCURSOR_SIZE`, `XMODIFIERS`, `GTK_IM_MODULE`,
+`QT_IM_MODULE`), and, when set, `XDG_DATA_DIRS` and the locale (`LANG`,
+`LANGUAGE`, `LC_ALL`, `LC_CTYPE`, `LC_MESSAGES`). Missing display variables
+explicitly clear stale Wayland/X11 values inherited by the user manager; missing
+locale and data-directory variables are left to the user manager. No
+permissions are granted. The unit is `PartOf=graphical-session.target`;
+desktops managing a custom session target must bind its lifetime to their
+login/logout lifecycle. Systemd restarts a crashed Hex (`Restart=on-failure`)
+without a window; after **Update**, the restarted Hex reopens the window.
+There is one Hex per user: a launch from another desktop session restarts the
+supervised unit in the new session, and refuses to take over an unsupervised
+one (quit it first).
+
+The socket is owner-only in Hex's data directory, with same-user peer
 credentials, versioned bounded frames, bounded queues, and I/O deadlines. It is
-not a network API or the macOS embedded transcription SDK service.
+not a network API or the macOS embedded transcription SDK service. It carries
+only `Activate`, the shortcut commands, `Status`, and `Quit`; shortcut commands
+go straight from the socket to the listener, never through the window.
 
-For development or a non-systemd supervisor, run `cargo run -- service` in the
-foreground, then `cargo run -- app` separately. `hex dictate` remains an explicit
-foreground diagnostic listener and cannot coexist with the service's listener.
-With `HEX_APPLICATION_SUPPORT_DIR` set, clients only connect to an explicitly
-started service at that data root; they never start/restart the installed user
-unit. `hex stop` then shuts down only that custom service through its socket.
-Legacy `hex app --hidden` now means `hex start`; it never creates a hidden UI.
+For development, run `cargo run --release`. `hex dictate` remains an explicit
+foreground diagnostic listener without the window or HUD and cannot coexist
+with Hex's listener. With
+`HEX_APPLICATION_SUPPORT_DIR` set, launches never start, stop, or restart the
+installed user unit; they forward to the Hex using that data directory or
+become it. `HEX_SYSTEMD_UNIT` names another unit for isolated tests.
 `hex status --lines 40` retains the explicit diagnostic-log view.
+
+The window runs on Rune's app lifetime (`rune::App`): Hex starts it without a
+window, each `Activate` opens or focuses it with the forwarded token (on
+Wayland through `xdg_activation_v1`; without a token most compositors only
+mark it urgent), and closing it keeps the window's state for the next open.
 
 ## Install A Published Build
 
-The published build targets current x86_64 Arch Linux and needs glibc 2.44 or
-later. Install it with:
+Published builds exist for x86_64 and ARM64, as a bare executable, a `.deb`,
+and an `.rpm`. They are built on Ubuntu 24.04 and need glibc 2.39 or later:
+Ubuntu 24.04, Debian 13, Fedora 40, current Arch, or newer. ARM64 builds use
+Vulkan like x64 and fall back to the CPU.
+
+### Install script
+
+The script installs the bare executable for your architecture into a
+user-local layout (`~/.local/share/hex`) that updates itself. It installs the
+stable release, or the newest dev build (on the Dev update channel) while
+there is no stable release yet; set `HEX_INSTALL_CHANNEL=stable` or `=dev` to
+choose:
 
 ```sh
-curl -fsSL https://downloads.hex.kitlangton.com/install-linux.sh | sh
+curl -fsSL https://anoma.ly/hex/files/install-linux.sh | sh
 ```
 
-If a runtime library is missing, the installer names the Arch packages to
-install. Then open Hex from your application launcher, or run
-`~/.local/bin/hex app`; its first run downloads a speech model.
+If a runtime library is missing, the installer names the packages to install
+(with Arch names). Then open Hex from your application launcher, or run
+`~/.local/bin/hex`; its first run downloads a speech model.
 
 To install the dependencies up front, or to inspect the installer before
 running it:
 
 ```sh
-sudo pacman -S --needed alsa-lib curl gtk3 gtk-layer-shell jq libappindicator-gtk3 \
+sudo pacman -S --needed alsa-lib curl glib2 jq \
   libxkbcommon libxkbcommon-x11 libx11 libxcb openblas openssl util-linux \
   vulkan-icd-loader wl-clipboard wtype xxd
 curl --proto '=https' --tlsv1.2 -fsSLO \
-  https://downloads.hex.kitlangton.com/install-linux.sh
+  https://anoma.ly/hex/files/install-linux.sh
 less install-linux.sh
 sh install-linux.sh
 ~/.local/bin/hex model install
-~/.local/bin/hex app
+~/.local/bin/hex
 ```
 
 The installer verifies the signed release feed, exact artifact size, and
@@ -108,33 +146,71 @@ Remove the application while preserving logs and settings with:
 sh install-linux.sh uninstall
 ```
 
+### Debian, Ubuntu, Fedora, and openSUSE
+
+The `hex` package installs `/usr/bin/hex`, the desktop entry, and the systemd
+user unit `hex.service` (the same files as the AUR package below). Download
+it for your architecture from <https://anoma.ly/release/hex/desktop/stable/linux-x64-deb>
+(`linux-arm64-deb`, `linux-x64-rpm`, `linux-arm64-rpm`), then:
+
+```sh
+sudo apt install ./hex.deb            # Debian, Ubuntu
+sudo dnf install ./hex.rpm            # Fedora (zypper install on openSUSE)
+systemctl --user enable hex.service   # optional: start Hex at login
+```
+
+There is no apt or dnf repository yet. Hex never replaces a package-installed
+executable: when a new stable release is out, Settings shows the command that
+downloads and installs its package. Package installs follow the stable channel,
+so a package from the dev channel learns of the next stable release only.
+
+### AUR
+
+From the next release on, the AUR package `hex-bin` installs `/usr/bin/hex`,
+the desktop entry, and the systemd user unit `hex.service`, from the same
+release executable, for `x86_64` and `aarch64`. It is not on the AUR yet. With
+an AUR helper:
+
+```sh
+yay -S hex-bin
+systemctl --user enable hex.service   # optional: start Hex at login
+```
+
+pacman updates it; Hex never replaces a package-installed executable, and
+Settings says "Updated by your package manager". It is unrelated to the
+official `hex` package (a hex dump tool that installs `/usr/bin/hx`).
+
 ## Install From Source
 
 Install the native dependencies and, for a source build, the Rust toolchain:
 
 ```sh
 sudo pacman -S --needed base-devel git rustup python alsa-lib curl jq openssl xxd \
-  util-linux gtk3 gtk-layer-shell libappindicator-gtk3 libxkbcommon \
-  libxkbcommon-x11 libx11 libxcb openblas vulkan-headers vulkan-icd-loader \
+  util-linux glib2 libxkbcommon libxkbcommon-x11 libx11 libxcb openblas \
+  vulkan-headers vulkan-icd-loader \
   shaderc spirv-headers clang cmake pkgconf wl-clipboard wtype
 rustup default stable
 ```
 
-Build and install HEX as your desktop user:
+Build and install Hex as your desktop user:
 
 ```sh
 git clone https://github.com/anomalyco/hex.git
 cd hex
 ./scripts/install-linux.sh
 ~/.local/bin/hex model install
-~/.local/bin/hex app
+~/.local/bin/hex
 ```
 
 Do not run the installer as root. It installs a user-local binary, desktop
-launcher, and autostart entry in the same managed layout as published builds.
-Newer signed releases can therefore replace this installed source build through
-the in-app updater. `cargo run --release -- app` runs an unmanaged development
-binary instead.
+launcher, and autostart entry in the same layout as published builds, and
+marks the version as a source build (`source-build` beside the executable).
+The in-app updater never replaces a source build; Settings shows "Updated from
+your source checkout", and you update by pulling and running the installer
+again. Installing a published release over it switches back to signed
+updates. With a custom
+`HEX_APPLICATION_SUPPORT_DIR`, `cargo run --release` runs an
+unmanaged development Hex instead; without one it forwards to the installed Hex.
 
 ## Dictate
 
@@ -148,9 +224,9 @@ listener reads at start temporarily stops listening and restores the previous
 running state after the edit.
 
 Modes apply corrections, OpenCode rewriting, and transformations per
-application. On X11, HEX reads the frontmost application from the active
+application. On X11, Hex reads the frontmost application from the active
 window's process name (`code`, `firefox`); the application picker lists
-`.desktop` entries with their icons. Wayland doesn't report the focused window,
+`.desktop` entries. Wayland doesn't report the focused window,
 so the Global mode applies there. Completed dictations are kept in History.
 
 Voice Action, once enabled, records an instruction while you hold
@@ -160,16 +236,88 @@ OpenCode, and pastes the reply.
 **Microphone mode** can release the microphone between dictations; it then opens
 on the shortcut press without pre-roll. **While dictating** can mute the default
 output through `wpctl` (PipeWire) or `pactl` (PulseAudio), or pause playing
-MPRIS media players over D-Bus; HEX restores only what it changed.
+MPRIS media players over D-Bus, once the hold passes 300 ms, so shortcut chords
+and short taps never do; Hex restores only what it changed.
 Cancelling shortcut capture preserves the old binding unless the new binding
 has already been saved; listening resumes only if it was previously running.
 
-On X11, HEX first grabs Escape with any modifiers. If another application owns
-a modified Escape shortcut, HEX falls back to plain Escape with Caps/Num Lock
+## Shortcuts
+
+Hex gets its shortcuts one of three ways, and all of them drive the same
+dictation rules:
+
+- **X11:** Hex grabs the shortcuts Settings records.
+- **Wayland with the GlobalShortcuts portal** (for example niri with
+  `xdg-desktop-portal-gnome`, GNOME, or KDE): Hex asks the desktop for the
+  shortcuts Settings records. The desktop decides: it may grant them, assign
+  another key, or refuse one that it or another binding already uses. Settings
+  lists what the desktop granted under **Desktop shortcuts**, with an error for
+  any it refused. The portal identifies Hex by its installed `hex.desktop`
+  entry and by inspecting the Hex process, so run `hex service` directly:
+  a setgid wrapper such as `newgrp`, once used to grant input-device access,
+  makes the portal refuse Hex. The desktop delivers the keys to Hex, not to the
+  focused application.
+- **Hyprland** has the portal but takes every shortcut without a key, so
+  nothing happens until you bind one in your config, and the key Settings
+  records is not used. Hex can't tell whether your config binds it. For
+  example:
+
+```lua
+hl.bind("ALT + Z", hl.dsp.global("hex:dictation"))
+hl.bind("CTRL + ALT + V", hl.dsp.global("hex:paste-last"))
+```
+
+  Older Hyprland configs write `bind = ALT, Z, global, hex:dictation`.
+  Escape-cancel can't be bound this way; bind `hex dictation cancel` to a key
+  instead. Hyprland 0.56's Lua binds send no release when the modifier comes
+  up before the key (Alt before Z). Toggle is unaffected: the next press still
+  finishes. In Hold, recording continues until the next press and release, so
+  lift the key first or use Toggle.
+- **Wayland without the portal** (for example Sway): nothing registers global
+  shortcuts. Settings lists these commands; bind them in your desktop's own
+  keyboard configuration:
+
+```sh
+hex dictation start     # bind to a key's press: start recording
+hex dictation stop      # bind to the same key's release: stop and transcribe
+hex dictation toggle    # one key: start, then stop and transcribe
+hex dictation cancel    # discard the recording
+hex paste-last          # paste the last dictation again
+hex voice-action start  # Voice Action, when enabled: press
+hex voice-action stop   #   and release
+hex voice-action toggle
+```
+
+For example, hold-to-dictate on F9 in Sway, and a toggle in any desktop that
+runs commands on key presses only:
+
+```sh
+bindsym F9 exec hex dictation start
+bindsym --release F9 exec hex dictation stop
+bindsym Ctrl+Alt+d exec hex dictation toggle
+```
+
+The commands are safe to bind anywhere, including X11 beside the grabs. They
+talk to the running Hex and never start it: without one, or while Hex is
+not listening, they print a one-line error and exit non-zero. Starting while recording,
+stopping while idle, and cancelling while idle do nothing, so key repeat is
+harmless. Start and stop bypass Hold, Toggle, and double-tap: start records,
+stop finishes. A shortcut press also finishes a recording a command started.
+
+Escape cancels only while something records. On Wayland with the portal, Hex
+binds Escape, and Escape with the recording shortcut's modifiers, only for the
+length of the recording; the desktop then keeps that Escape from the focused
+application. Without the portal, bind `hex dictation cancel` instead.
+
+Shortcuts need a non-modifier key. Modifier-only shortcuts, such as Super
+alone, are not supported on Linux.
+
+On X11, Hex first grabs Escape with any modifiers. If another application owns
+a modified Escape shortcut, Hex falls back to plain Escape with Caps/Num Lock
 variants; release other modifiers before cancelling. If plain Escape also
 conflicts, dictation continues and Settings and `hex status` show
 `Escape cancel unavailable: another application holds Escape`. Finish with the
-dictation shortcut instead. HEX logs once per conflict episode and retries on
+dictation shortcut instead. Hex logs once per conflict episode and retries on
 the next capture; a successful grab clears the warning.
 
 Recording sounds are enabled at 50% volume by default, including when upgrading
@@ -183,10 +331,12 @@ the listener and preview the start sound unless set to Off. `hex dictate` uses
 the same saved volume. Playback uses the default audio output through a bounded
 background worker; unavailable audio output does not prevent dictation.
 
-Closing Settings leaves the service running on both X11 and Wayland. The
-service-owned recording/processing pill never takes focus or intercepts clicks,
-even with Settings closed: a layer-shell surface on Wayland, an override-redirect
-popup on X11. **Recording indicator** places it at the top or bottom of the
+Closing the window leaves Hex running on both X11 and Wayland. The
+recording/processing pill never takes focus or intercepts clicks, with or
+without the window open: a Rune overlay that is a layer-shell surface on
+Wayland and an override-redirect window on X11. It needs the window's event
+loop, so it is unavailable when the window cannot start (no display or GPU)
+and in `hex dictate`. **Recording indicator** places it at the top or bottom of the
 screen, or turns it off.
 
 Insertion uses the clipboard and **Ctrl-V** for new installations. Enable
@@ -201,7 +351,7 @@ application (see [#24](https://github.com/anomalyco/hex/issues/24)).
 ## Native Wayland Requirements
 
 - Export the compositor's nonempty `WAYLAND_DISPLAY` in the launch environment.
-  HEX, GTK, and GPUI select the same native backend even when XWayland's
+  Hex and its window (winit) select the same native backend even when XWayland's
   `DISPLAY` is also present. `XDG_SESSION_TYPE` alone does not select Wayland.
 - Install `wl-clipboard` and `wtype`. The compositor must support their clipboard
   and virtual-keyboard protocols. There is no silent XWayland, direct-typing, or
@@ -209,30 +359,20 @@ application (see [#24](https://github.com/anomalyco/hex/issues/24)).
   command-line arguments.
 - The overlay requires layer-shell. Settings reports when the HUD is unavailable
   rather than presenting a normal focus-taking window as an overlay.
-- The evdev backend requires read access to **every `/dev/input/event*` node**
-  so it can inspect which devices may hold modifier keys. An unreadable node
-  causes an explicit startup error, not a listener that reports ready but cannot
-  paste. Configure this deliberately using your distribution's input-group or
-  equivalent policy; HEX does not grant permissions or run as root.
-- **This access exposes all keyboard input to processes running as your user,
-  not only HEX's shortcut.** Do not make event devices world-readable. X11 does
-  not require this additional access.
-- Shortcut labels use physical evdev keys with US-layout names. The backend
-  observes keys without suppressing delivery to other applications. Reserve the
-  chosen chord with a no-op compositor binding if it would otherwise reach the
-  focused client. Modifier-only shortcuts are not supported.
-- Devices are rescanned once per second. Unchanged non-keyboard nodes are cached,
-  and udev mouse-classified nodes are excluded even when a receiver advertises
-  synthetic keyboard capabilities. Device loss or an input-stream gap cancels
-  an active recording rather than fabricating a release; a reconnected keyboard
-  can be used after the next scan. Paste reuses the monitor's live aggregate
-  modifier state instead of reopening every event node.
+- Shortcuts come from the GlobalShortcuts portal or from your own keybindings
+  for the `hex` commands ([Shortcuts](#shortcuts)). Hex reads no input devices
+  and needs no `input` group membership or other device permission. If the
+  desktop closes the portal session, the listener stops with an error and an
+  active recording is cancelled; enable it again from Settings or `hex start`.
+- Paste does not wait for held keys: `wtype`'s virtual keyboard sends its own
+  modifiers, so Ctrl+V stays Ctrl+V while you still hold a shortcut.
 
 ## Updates And Validation
 
-Managed installs check for signed updates when the service starts and every
-24 hours until an update is ready. HEX downloads, verifies, and activates an
-available update, then offers a **Restart** button in Settings for the service. The next launch
+Managed installs check for signed updates when Hex starts and every
+24 hours until an update is ready. Hex downloads, verifies, and activates an
+available update, then offers an **Update** button in the window that restarts
+the unit and reopens the window. The next launch
 through `~/.local/bin/hex` also uses the activated version. The signed update
 path is implemented but still awaiting a complete cross-version validation on
 the supported Arch/i3 host.
@@ -242,28 +382,34 @@ validation work. The native Wayland implementation builds on the feature
 proposed in [PR #28](https://github.com/anomalyco/hex/pull/28), with separate
 input-state, lifecycle, and paste regression coverage. Physical device,
 compositor, and target-application smoke tests remain necessary before a release.
-`scripts/test-wayland-paste.sh /path/to/compiled-test-executable /path/to/voice-control` runs the real
+`scripts/test-wayland-paste.sh /path/to/compiled-test-executable /path/to/hex` runs the real
 paste helpers against a GTK target under an isolated headless Sway compositor.
-It also launches an isolated service and Settings client, repeats paste while
-Settings remains open, and verifies that closing Settings leaves the service
-reachable. It requires the GTK development
+Its first paste runs while another virtual keyboard holds Ctrl and Alt.
+It also starts an isolated Hex, opens its window through a second `hex app`
+(the window must belong to the same process), repeats paste while the window is
+open, closes the window, checks that the same process still answers, opens the
+window again (`HEX_WAYLAND_REOPEN=0` skips that), and quits. It requires the GTK development
 libraries, Sway, `wl-clipboard`, `wtype`, `dbus-run-session`, and a Vulkan driver
 (Mesa's software driver is sufficient), and must run as a non-root user. It uses
 isolated app data and no microphone; CI runs it with the display-free suite and
 Xvfb hotkey tests.
 
-`scripts/test-linux-dictation.sh /path/to/voice-control /path/to/parakeet-unified-en-0.6b-Q8_0.gguf /path/to/jfk.wav`
+`scripts/test-linux-dictation.sh /path/to/hex /path/to/parakeet-unified-en-0.6b-Q8_0.gguf /path/to/jfk.wav`
 checks the complete X11 app dictation path with a private PulseAudio virtual
-microphone and Xvfb display. It opens and closes Settings while leaving the service
-running, replays the public JFK sample from whisper.cpp, holds and releases the real
+microphone and Xvfb display. It opens the window in the running Hex through a
+second `hex app`, replays the public JFK sample from whisper.cpp, holds and releases the real
 shortcut, verifies the transcribed words in a GTK editor, and checks orderly
 application shutdown and microphone release. It needs PulseAudio, its ALSA
 plugin, `xdotool`, Xvfb, the GTK development libraries, and a Vulkan driver for
-Settings (Mesa's software driver is sufficient). It runs as a normal user with
+the window (Mesa's software driver is sufficient). It runs as a normal user with
 temporary settings; it does not use physical audio devices or personal recordings.
 CI downloads and verifies the pinned model and sample for this check.
 
-`python3 scripts/test-linux-service.py /path/to/voice-control` is a display-free,
-device-free IPC/lifecycle check: same-user socket permissions, sole service
-ownership, client disconnects, shortcut-edit cleanup, invalid/oversized/stalled
-frames, persisted volume, crash/stale-socket recovery, and orderly shutdown.
+`python3 scripts/test-linux-service.py /path/to/hex` is a display-free,
+device-free single-instance check: commands fail fast without Hex, `hex start`
+becomes Hex, second launches (`start`, `app --hidden`, `service`, `app`) forward
+and exit 0, a window request without a display fails only the window,
+same-user socket permissions, version-1 clients get an error, invalid,
+oversized, and stalled frames, crash/stale-socket recovery, two racing launches
+yield one Hex, `hex quit` drains and removes the socket, and a custom data
+directory never runs `systemctl`.

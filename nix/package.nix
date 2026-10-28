@@ -9,12 +9,10 @@
   vulkan-loader,
   spirv-headers,
   openblas,
-  gtk3,
-  gtk-layer-shell,
+  glib,
   alsa-lib,
   alsa-plugins,
   pipewire,
-  systemd,
   openssl,
   libxkbcommon,
   wayland,
@@ -45,13 +43,11 @@ let
   runtimeEnv = {
     LD_LIBRARY_PATH = lib.makeLibraryPath [
       vulkan-loader
-      gtk-layer-shell
       openblas
       alsa-lib
       wayland
       libxkbcommon
       fontconfig
-      systemd
     ];
     ALSA_PLUGIN_DIR = symlinkJoin {
       name = "hex-alsa-plugins";
@@ -76,16 +72,16 @@ rustPlatform.buildRustPackage (finalAttrs: {
     fileset = lib.fileset.unions [
       ../Cargo.toml
       ../Cargo.lock
+      ../.cargo
       ../build.rs
+      ../crates
       ../src
       ../tests
       ../native
       ../resources
       ../assets
       ../packaging
-      ../sdk/commands/package.json
-      ../sdk/commands/src
-      ../sdk/commands/workspace-template
+      ../macos/HexMicrophoneDriver/Info.plist
     ];
   };
 
@@ -93,7 +89,8 @@ rustPlatform.buildRustPackage (finalAttrs: {
     lockFile = ../Cargo.lock;
     outputHashes = {
       "transcribe-rs-0.3.11" = "sha256-MJJiug3LfbKsuHcL2+LJk95+j5kk/MWzb5ihdBlHLmE=";
-      "gpui-0.2.2" = "sha256-qNatmP6l41a7KNJC4naV45XlwXnHaDFPvevD8D6awt0=";
+      "rune-0.0.1" = "sha256-u8PvmsuvIoeyOImEc+pD/0byDRfV7Vvpz1JzkJOpmcM=";
+      "transcribe-cpp-sys-0.4.1" = "sha256-lb6Q4e/hq8S84ZtFuPGpL+eEoneBVb2bVIr6yriVLaQ=";
     };
   };
 
@@ -110,15 +107,13 @@ rustPlatform.buildRustPackage (finalAttrs: {
     vulkan-loader
     spirv-headers
     openblas
-    gtk3
-    gtk-layer-shell
+    glib
     alsa-lib
     openssl
     libxkbcommon
     wayland
     fontconfig
     freetype
-    systemd
     libx11
     libxcb
     libxcursor
@@ -139,7 +134,6 @@ rustPlatform.buildRustPackage (finalAttrs: {
   '';
 
   postInstall = ''
-    mv $out/bin/voice-control $out/bin/hex
     install -Dm644 ${../packaging/hex.desktop} $out/share/applications/hex.desktop
     substituteInPlace $out/share/applications/hex.desktop \
       --replace-fail '@HEX_BIN@' "$out/bin/hex"

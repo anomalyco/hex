@@ -1,18 +1,18 @@
 use std::ffi::OsStr;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum LinuxSession {
+pub(crate) enum LinuxSession {
     X11,
     Wayland,
 }
 
 impl LinuxSession {
-    pub fn detect() -> Self {
+    pub(crate) fn detect() -> Self {
         Self::from_wayland_display(std::env::var_os("WAYLAND_DISPLAY").as_deref())
     }
 
     fn from_wayland_display(display: Option<&OsStr>) -> Self {
-        // Match GPUI's backend selection, including Wayland with XWayland present.
+        // Match winit's (Rune's) backend selection, including Wayland with XWayland present.
         if display.is_some_and(|display| !display.is_empty()) {
             Self::Wayland
         } else {
@@ -20,11 +20,11 @@ impl LinuxSession {
         }
     }
 
-    pub fn is_wayland(self) -> bool {
+    pub(crate) fn is_wayland(self) -> bool {
         self == Self::Wayland
     }
 
-    pub fn as_str(self) -> &'static str {
+    pub(crate) fn as_str(self) -> &'static str {
         match self {
             Self::X11 => "x11",
             Self::Wayland => "wayland",
@@ -37,7 +37,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn backend_selection_matches_gpui_without_mutating_the_environment() {
+    fn backend_selection_matches_winit_without_mutating_the_environment() {
         for display in [None, Some(OsStr::new(""))] {
             assert_eq!(
                 LinuxSession::from_wayland_display(display),
