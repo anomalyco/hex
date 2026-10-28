@@ -116,6 +116,11 @@ const KEYS: &[Key] = &[
         UNIT,
         "Tone volume from 0 to 1; 0 turns tones off",
     ),
+    key(
+        "sound_theme",
+        Kind::Choice(&["signature", "classic"]),
+        "Which feedback sounds play: Hex's signature set or the classic tones",
+    ),
     optional(
         "microphone",
         Kind::Text,
