@@ -38,8 +38,13 @@ case "$CHANNEL" in
     [ "$REF_NAME" = dev ] || die "The $CHANNEL channel runs from dev, not $REF_NAME."
     if [ "$EVENT" = workflow_dispatch ] && [ "$INPUT_REF" != dev ]; then die "The $CHANNEL channel builds ref dev, not $INPUT_REF."; fi
     # Display text only: installs follow the channel's current release.
-    release_channel=dev release_version="0.0.0-dev-$GITHUB_RUN_NUMBER" tag=""
-    if [ "$CHANNEL" = check ]; then tag="v0.0.0-test-$GITHUB_RUN_NUMBER"; fi
+    # Renaming the workflow to release.yml (2026-10-27) restarted its run
+    # numbers at 1, after release-desktop.yml had published up to
+    # 0.0.0-dev-45. Every build needs a version of its own (macOS identifies
+    # builds by it, and it names version directories), so continue past them.
+    number=$((GITHUB_RUN_NUMBER + 100))
+    release_channel=dev release_version="0.0.0-dev-$number" tag=""
+    if [ "$CHANNEL" = check ]; then tag="v0.0.0-test-$number"; fi
     notes="https://github.com/$GITHUB_REPOSITORY/commit/$SHA"
     ;;
   *) die "Unknown channel $CHANNEL." ;;
