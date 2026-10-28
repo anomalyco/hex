@@ -737,6 +737,9 @@ Record -> Release -> Transcribing/processing/paste -> Finished // dictate.feedba
      -> Voice Action takeover -> Retracted; Voice Action rings at its own hold
      -> Release microphone while idle -> Output warms on press; tone once
         the microphone is open and the hold counts
+  Dictation or Voice Action reply pasted -> Done tone         // dictate.done-tone
+     -> Empty, failed, cancelled, Paste Last, programmatic -> No done tone
+  Failure (macOS) -> Error tone; wake/sleep keep macOS Pop/Tink
   Tone requested -> Playback worker opens the default output, then plays
      -> Output stays open five minutes past the last tone, then releases
      -> Released output holds no macOS idle-sleep assertion
@@ -746,6 +749,23 @@ Record -> Release -> Transcribing/processing/paste -> Finished // dictate.feedba
   Cold audio stack exceeds preload admission -> Warn once; recognition continues
      -> Loader keeps running; later tones play once the output opens
 ```
+
+The sounds are Hex's own (2026-10-27), one kalimba-like FM voice playing one
+motif, D-B-A-D (a sixth, since "hex" is six): start D5 to B5 (116 ms), stop B5
+to A5 (230 ms), done D6 over A5 (330 ms), cancel B5 down to D5 (225 ms), error
+D4 then a minor D4+Bb4 (280 ms), and onboarding success, the whole motif
+landing on a D sixth chord (1.1 s), played when the first-run tour reaches
+its last step. They are 48 kHz mono WAVs in `resources/audio/`, each starting
+on its first sample, made by
+[`scripts/sounds/synth.py`](../../scripts/sounds/synth.py)
+(`uv run scripts/sounds/synth.py` rewrites them). Their levels match the
+sounds they replaced at the same volume: start like the old start clicks
+(-25.5 LUFS momentary), stop like the old swish, error like macOS Basso;
+cancel is far quieter than the old thud. Windows and Linux play start, stop,
+done, and cancel; their failures stay silent as before. Check:
+`bundled_sounds_are_short_and_sound_immediately` (each sound under its length
+budget, audible within 1 ms). The sounds were checked by waveform, spectrum
+and loudness only, never played aloud on a Mac.
 
 Feedback admission is advisory on every platform: a cold audio stack can exceed
 the two-second preload timeout, so the recognition worker logs a warning and

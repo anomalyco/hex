@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 use color_eyre::eyre::{Result, WrapErr, eyre};
 use rodio::buffer::SamplesBuffer;
 use rodio::cpal::BufferSize;
-use rodio::{Decoder, DeviceSinkBuilder, MixerDeviceSink, Source};
+use rodio::{DeviceSinkBuilder, MixerDeviceSink, Source};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Tone {
@@ -22,7 +22,11 @@ pub enum Tone {
     Error,
     DictationStart,
     DictationStop,
+    /// A dictation or Voice Action reply was pasted.
+    DictationDone,
     Cancel,
+    /// The first-run tour reached its last step.
+    OnboardingSuccess,
     /// A Scrawl capture started recording.
     #[cfg(hex_capture)]
     CaptureStart,
@@ -162,40 +166,13 @@ pub fn preload() -> Result<()> {
     let (sender, receiver) = mpsc::sync_channel::<Request>(8);
     let (ready_sender, ready_receiver) = mpsc::sync_channel(1);
     thread::spawn(move || {
-        let result = (|| -> Result<_> {
-            let start = decode(include_bytes!(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/resources/audio/startRecording.mp3"
-            )))?;
-            let stop = decode(include_bytes!(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/resources/audio/stopRecording.mp3"
-            )))?;
-            let cancel = decode(include_bytes!(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/resources/audio/cancel.mp3"
-            )))?;
-            #[cfg(hex_capture)]
-            let capture = capture_sounds()?;
-            Ok((
-                start,
-                stop,
-                cancel,
-                #[cfg(hex_capture)]
-                capture,
-            ))
-        })();
-        #[cfg(hex_capture)]
-        let Ok((start, stop, cancel, capture)) = result else {
-            let _ = ready_sender.send(result.map(|_| ()));
-            LOADER_STARTED.store(false, Ordering::Release);
-            return;
-        };
-        #[cfg(not(hex_capture))]
-        let Ok((start, stop, cancel)) = result else {
-            let _ = ready_sender.send(result.map(|_| ()));
-            LOADER_STARTED.store(false, Ordering::Release);
-            return;
+        let sounds = match Sounds::load() {
+            Ok(sounds) => sounds,
+            Err(error) => {
+                let _ = ready_sender.send(Err(error));
+                LOADER_STARTED.store(false, Ordering::Release);
+                return;
+            }
         };
         let mut output = FeedbackOutput::new();
         // The device opens for the first tone, not at startup, so an idle app
@@ -242,28 +219,13 @@ pub fn preload() -> Result<()> {
                 None => None,
             };
             if let Some(tone) = tone {
-                let sound = match tone {
-                    Tone::DictationStart => &start,
-                    Tone::DictationStop => &stop,
-                    Tone::Cancel => &cancel,
-                    #[cfg(hex_capture)]
-                    Tone::CaptureStart => &capture[0],
-                    #[cfg(hex_capture)]
-                    Tone::CaptureStop => &capture[1],
-                    #[cfg(hex_capture)]
-                    Tone::CaptureSent => &capture[2],
-                    #[cfg(hex_capture)]
-                    Tone::CaptureUndo => &capture[3],
-                    #[cfg(hex_capture)]
-                    Tone::CaptureFailed => &capture[4],
-                    #[cfg(target_os = "macos")]
-                    Tone::Wake | Tone::Sleep | Tone::Error => continue,
-                };
-                output.play(sound.clone(), tone);
+                if let Some(sound) = sounds.get(tone) {
+                    output.play(sound.clone(), tone);
+                }
             } else if timed_out && start_tone.is_due(Instant::now()) {
                 // Only an empty queue reaches here, so a retraction sent while
                 // the device opened always wins over the tone.
-                let (sound, retracted) = Retractable::new(start.clone());
+                let (sound, retracted) = Retractable::new(sounds.start.clone());
                 if output.play(sound, Tone::DictationStart) {
                     start_tone.sounding(retracted);
                 } else {
@@ -283,8 +245,84 @@ pub fn play(tone: Tone) {
     }
     match tone {
         #[cfg(target_os = "macos")]
-        Tone::Wake | Tone::Sleep | Tone::Error => play_system_sound(tone),
+        Tone::Wake | Tone::Sleep => play_system_sound(tone),
         _ => enqueue(DICTATION_PLAYER.get(), Request::Play(tone)),
+    }
+}
+
+/// Hex's own sounds, one voice and motif made by `scripts/sounds/synth.py`,
+/// which regenerates these files.
+macro_rules! bundled_sound {
+    ($name:literal) => {
+        include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/resources/audio/",
+            $name,
+            ".wav"
+        ))
+        .as_slice()
+    };
+}
+
+const START_SOUND: &[u8] = bundled_sound!("dictationStart");
+const STOP_SOUND: &[u8] = bundled_sound!("dictationStop");
+const DONE_SOUND: &[u8] = bundled_sound!("dictationDone");
+const CANCEL_SOUND: &[u8] = bundled_sound!("dictationCancel");
+#[cfg(any(target_os = "macos", test))]
+const ERROR_SOUND: &[u8] = bundled_sound!("error");
+const ONBOARDING_SUCCESS_SOUND: &[u8] = bundled_sound!("onboardingSuccess");
+
+/// The decoded sounds the playback worker plays. Wake and sleep stay the
+/// quieter macOS system sounds.
+struct Sounds {
+    start: SamplesBuffer,
+    stop: SamplesBuffer,
+    done: SamplesBuffer,
+    cancel: SamplesBuffer,
+    #[cfg(target_os = "macos")]
+    error: SamplesBuffer,
+    onboarding_success: SamplesBuffer,
+    #[cfg(hex_capture)]
+    capture: [SamplesBuffer; 5],
+}
+
+impl Sounds {
+    fn load() -> Result<Self> {
+        Ok(Self {
+            start: decode_wav(START_SOUND)?,
+            stop: decode_wav(STOP_SOUND)?,
+            done: decode_wav(DONE_SOUND)?,
+            cancel: decode_wav(CANCEL_SOUND)?,
+            #[cfg(target_os = "macos")]
+            error: decode_wav(ERROR_SOUND)?,
+            onboarding_success: decode_wav(ONBOARDING_SUCCESS_SOUND)?,
+            #[cfg(hex_capture)]
+            capture: capture_sounds()?,
+        })
+    }
+
+    fn get(&self, tone: Tone) -> Option<&SamplesBuffer> {
+        Some(match tone {
+            Tone::DictationStart => &self.start,
+            Tone::DictationStop => &self.stop,
+            Tone::DictationDone => &self.done,
+            Tone::Cancel => &self.cancel,
+            Tone::OnboardingSuccess => &self.onboarding_success,
+            #[cfg(target_os = "macos")]
+            Tone::Error => &self.error,
+            #[cfg(target_os = "macos")]
+            Tone::Wake | Tone::Sleep => return None,
+            #[cfg(hex_capture)]
+            Tone::CaptureStart => &self.capture[0],
+            #[cfg(hex_capture)]
+            Tone::CaptureStop => &self.capture[1],
+            #[cfg(hex_capture)]
+            Tone::CaptureSent => &self.capture[2],
+            #[cfg(hex_capture)]
+            Tone::CaptureUndo => &self.capture[3],
+            #[cfg(hex_capture)]
+            Tone::CaptureFailed => &self.capture[4],
+        })
     }
 }
 
@@ -504,7 +542,6 @@ fn play_system_sound(tone: Tone) {
     let sound = match tone {
         Tone::Wake => "Pop",
         Tone::Sleep => "Tink",
-        Tone::Error => "Basso",
         _ => return,
     };
     let volume = volume().to_string();
@@ -525,8 +562,27 @@ fn play_system_sound(tone: Tone) {
     }
 }
 
+/// Decodes one of Hex's bundled 16-bit PCM sounds.
+fn decode_wav(bytes: &'static [u8]) -> Result<SamplesBuffer> {
+    let reader =
+        hound::WavReader::new(Cursor::new(bytes)).wrap_err("could not decode feedback audio")?;
+    let spec = reader.spec();
+    let channels = std::num::NonZero::new(spec.channels)
+        .ok_or_else(|| eyre!("feedback audio has no channels"))?;
+    let sample_rate = std::num::NonZero::new(spec.sample_rate)
+        .ok_or_else(|| eyre!("feedback audio has no sample rate"))?;
+    let samples = reader
+        .into_samples::<i16>()
+        .map(|sample| sample.map(|sample| f32::from(sample) / f32::from(i16::MAX)))
+        .collect::<Result<Vec<_>, _>>()
+        .wrap_err("could not decode feedback audio")?;
+    Ok(SamplesBuffer::new(channels, sample_rate, samples))
+}
+
+#[cfg(hex_capture)]
 fn decode(bytes: &'static [u8]) -> Result<SamplesBuffer> {
-    let decoder = Decoder::new(Cursor::new(bytes)).wrap_err("could not decode feedback audio")?;
+    let decoder =
+        rodio::Decoder::new(Cursor::new(bytes)).wrap_err("could not decode feedback audio")?;
     let channels = decoder.channels();
     let sample_rate = decoder.sample_rate();
     Ok(SamplesBuffer::new(
@@ -546,35 +602,41 @@ mod tests {
         }
     }
 
-    fn leading_silence_ms(bytes: &'static [u8]) -> u128 {
-        let sound = decode(bytes).unwrap();
+    /// Every bundled sound with the longest it may run.
+    const BUNDLED: [(&str, &[u8], Duration); 6] = [
+        ("start", START_SOUND, Duration::from_millis(130)),
+        ("stop", STOP_SOUND, Duration::from_millis(250)),
+        ("done", DONE_SOUND, Duration::from_millis(350)),
+        ("cancel", CANCEL_SOUND, Duration::from_millis(250)),
+        ("error", ERROR_SOUND, Duration::from_millis(300)),
+        (
+            "onboarding success",
+            ONBOARDING_SUCCESS_SOUND,
+            Duration::from_millis(1_200),
+        ),
+    ];
+
+    fn leading_silence(sound: SamplesBuffer) -> Duration {
         let channels = usize::from(sound.channels().get());
-        let rate = sound.sample_rate().get() as usize;
+        let rate = sound.sample_rate().get();
         let samples = sound.collect::<Vec<f32>>();
         let first = samples
             .iter()
             .position(|sample| sample.abs() > 0.01)
             .unwrap_or(samples.len());
-        (first / channels * 1_000 / rate) as u128
+        Duration::from_secs_f64((first / channels) as f64 / f64::from(rate))
     }
 
     #[test]
-    fn feedback_tones_sound_immediately() {
-        for (name, bytes) in [
-            (
-                "start",
-                include_bytes!("../resources/audio/startRecording.mp3").as_slice(),
-            ),
-            (
-                "stop",
-                include_bytes!("../resources/audio/stopRecording.mp3").as_slice(),
-            ),
-        ] {
-            let silence = leading_silence_ms(bytes);
-            eprintln!("{name} tone leading silence: {silence} ms");
+    fn bundled_sounds_are_short_and_sound_immediately() {
+        for (name, bytes, budget) in BUNDLED {
+            let sound = decode_wav(bytes).unwrap();
+            let length = sound.total_duration().unwrap();
+            assert!(length <= budget, "{name} runs {length:?}, over {budget:?}");
+            let silence = leading_silence(sound);
             assert!(
-                silence < 40,
-                "{name} tone starts after {silence} ms of silence"
+                silence <= Duration::from_millis(1),
+                "{name} starts after {silence:?} of silence"
             );
         }
     }
@@ -836,7 +898,7 @@ mod tests {
                 .and_then(|device| rodio::DeviceTrait::description(&device).ok())
                 .map(|description| description.name().to_owned());
         eprintln!("default output: {device:?}");
-        let start = decode(include_bytes!("../resources/audio/startRecording.mp3")).unwrap();
+        let start = decode_wav(START_SOUND).unwrap();
         let open = || {
             if legacy {
                 let mut sink = DeviceSinkBuilder::open_default_sink().unwrap();
@@ -892,16 +954,15 @@ mod tests {
     }
 
     #[test]
-    fn bundled_recording_sounds_decode_without_an_audio_device() {
-        for bytes in [
-            include_bytes!("../resources/audio/startRecording.mp3").as_slice(),
-            include_bytes!("../resources/audio/stopRecording.mp3").as_slice(),
-            include_bytes!("../resources/audio/cancel.mp3").as_slice(),
-        ] {
-            let mut sound = decode(bytes).unwrap();
-            assert!(sound.total_duration().unwrap() > Duration::ZERO);
-            assert!(sound.any(|sample| sample.abs() > 0.0));
+    fn bundled_sounds_decode_without_an_audio_device() {
+        let sounds = Sounds::load().unwrap();
+        for (name, bytes, _) in BUNDLED {
+            let mut sound = decode_wav(bytes).unwrap();
+            assert!(sound.total_duration().unwrap() > Duration::ZERO, "{name}");
+            assert!(sound.any(|sample| sample.abs() > 0.0), "{name}");
         }
+        assert!(sounds.get(Tone::DictationDone).is_some());
+        assert!(sounds.get(Tone::OnboardingSuccess).is_some());
     }
 
     #[test]

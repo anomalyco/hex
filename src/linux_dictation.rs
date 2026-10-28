@@ -517,6 +517,7 @@ pub(crate) fn run(
             pending = pending.saturating_sub(1);
             match result {
                 Ok(text) => {
+                    feedback::play(Tone::DictationDone);
                     events.emit(&VoiceEvent::Transcript {
                         timestamp_ms: now_ms(),
                         phase: TranscriptPhase::Completed,

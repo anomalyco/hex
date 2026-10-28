@@ -247,6 +247,8 @@ the relaunch guard and resume marker, grants waiting for a restart
 `onboarding_downloads_the_model_through_the_service`), and every macOS step
 is a scene (`mac-onboarding`, `-setup`, `-progress`, `-denied`, `-restart`,
 `-download-failed`, `-try`, `-listening`, `-landed`, `-reopen`, `-done`).
+Reaching the last step in a live tour plays the onboarding success sound
+(`remember_step`; fixtures stay silent), checked by reading the code.
 The default model comes from `desktop_i18n::preferred_language` (macOS:
 `NSLocale.preferredLanguages`) through `recommended_selection`; existing
 settings keep their saved model.
@@ -1039,11 +1041,13 @@ Capture                                  // hex app and hex dictate
 │   tail is still captured; a muted output unmutes first   // dictate.stop-tone
 │   └── Clip turns out near-silent -> Stop sound already played, nothing pasted
 ├── Brief discarded tap -> Start sound, but no stop sound or transcription
+├── Dictation or Voice Action pasted -> Done sound; failures stay silent
 └── Cancel active capture -> Cancel sound; idle Escape stays silent
 ```
 
-The shared [feedback player](../../src/feedback.rs) uses the bundled recording
-sounds on both platforms; only macOS wake/sleep/error tones use `afplay`.
+The shared [feedback player](../../src/feedback.rs) uses Hex's bundled sounds
+([Feedback](dictation.md#feedback)) on every platform; only macOS wake/sleep
+use `afplay`.
 Decoding happens before the Linux capture loop; the output device opens for
 the first tone and is released five minutes after the last one, as described
 in [macOS feedback](dictation.md#feedback). Playback admission is bounded and
@@ -1056,7 +1060,7 @@ requests it when the capture's audio reaches 300 ms past the press, and not
 during a release tail. Until 2026-10-22 the service muted at the press. This
 ordering is checked by reading the loop, not by a test or a muted device.
 
-Checks: `bundled_recording_sounds_decode_without_an_audio_device` and
+Checks: `bundled_sounds_decode_without_an_audio_device` and
 `feedback_admission_never_waits_for_playback` in the player, plus
 `files_that_predate_a_setting_keep_the_beta_defaults` and
 `a_muted_beta_keeps_the_remembered_volume` in

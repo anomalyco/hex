@@ -159,13 +159,17 @@ pub(super) fn input(ui: &mut Ui, input: Input) {
     remember_step(ui, step);
 }
 
-/// Saves a new step so a tour quit part-way resumes there.
+/// Saves a new step so a tour quit part-way resumes there, and sounds the
+/// success chime on reaching the last one.
 fn remember_step(ui: &Ui, before: Step) {
     if let Some(tour) = &ui.tour
         && tour.flow.step() != before
         && ui.live()
     {
         crate::onboarding::record_step(tour.flow.step());
+        if tour.flow.step() == Step::Done {
+            crate::feedback::play(crate::feedback::Tone::OnboardingSuccess);
+        }
     }
 }
 

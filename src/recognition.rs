@@ -3256,6 +3256,7 @@ fn handle_dictation_event(
                 TranscriptionTarget::Paste | TranscriptionTarget::Send => DictationPhase::Pasted,
                 TranscriptionTarget::Service => return Ok(()),
             };
+            feedback::play(Tone::DictationDone);
             events.processed_dictation(phase, text, processing)?;
             if let Some(indicator) = indicator {
                 indicator.send(DictationIndicatorEvent::JobCompleted {
