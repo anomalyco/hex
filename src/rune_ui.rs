@@ -1356,7 +1356,7 @@ fn footer(ui: &Ui, p: Paint) -> El {
         }
         Some(DesktopUpdateStatus::SourceBuild) => Some(line(
             "update-status",
-            if crate::app_paths::is_local_build() {
+            if ui.build_preview.unwrap_or_else(build_kind) == BuildKind::Local {
                 tr("Local build · updates off")
             } else {
                 tr("Updated from your source checkout")
