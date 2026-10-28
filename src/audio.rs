@@ -255,6 +255,8 @@ pub enum Selection {
 }
 
 /// What resolving and opening the configured input found.
+// One is made per stream open, so the Windows stream's size doesn't matter.
+#[allow(clippy::large_enum_variant)]
 pub enum Opened {
     Input(AudioInput),
     /// The input resolved to the device already open, which was kept.
