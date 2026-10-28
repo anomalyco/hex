@@ -460,7 +460,11 @@ impl ProcessTapSource {
         source.resample = To16k::new(rate)?;
         // SAFETY: Reading the UUID of a live description.
         let tap_uid = unsafe { description.UUID() }.UUIDString();
-        source.aggregate = create_tap_aggregate(&tap_uid)?;
+        source.aggregate = create_tap_aggregate(
+            &tap_uid,
+            "Hex Meeting System Audio",
+            &format!("anomaly.hex.meeting-tap.{}", std::process::id()),
+        )?;
 
         let channels = format.mChannelsPerFrame.max(1) as usize;
         let non_interleaved = format.mFormatFlags & kAudioFormatFlagIsNonInterleaved != 0;
@@ -636,7 +640,13 @@ fn object<T: objc2::Message>(value: Retained<T>) -> Retained<AnyObject> {
     unsafe { Retained::cast_unchecked(value) }
 }
 
-fn create_tap_aggregate(tap_uid: &NSString) -> Result<AudioObjectID> {
+/// A private aggregate device that reads one process tap. `uid` must differ
+/// for each concurrent tap of this process.
+pub(crate) fn create_tap_aggregate(
+    tap_uid: &NSString,
+    name: &str,
+    uid: &str,
+) -> Result<AudioObjectID> {
     fn key(name: &CStr) -> Retained<NSString> {
         NSString::from_str(name.to_str().unwrap_or_default())
     }
@@ -651,7 +661,6 @@ fn create_tap_aggregate(tap_uid: &NSString) -> Result<AudioObjectID> {
         ],
     );
     let taps = NSArray::from_retained_slice(&[sub_tap]);
-    let uid = format!("anomaly.hex.meeting-tap.{}", std::process::id());
     let description: Retained<NSDictionary<NSString, AnyObject>> =
         NSDictionary::from_retained_objects(
             &[
@@ -662,8 +671,8 @@ fn create_tap_aggregate(tap_uid: &NSString) -> Result<AudioObjectID> {
                 &*key(kAudioAggregateDeviceTapListKey),
             ],
             &[
-                object(NSString::from_str("Hex Meeting System Audio")),
-                object(NSString::from_str(&uid)),
+                object(NSString::from_str(name)),
+                object(NSString::from_str(uid)),
                 object(NSNumber::new_bool(true)),
                 object(NSNumber::new_bool(true)),
                 object(taps),
