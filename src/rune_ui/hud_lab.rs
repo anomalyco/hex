@@ -1,4 +1,5 @@
-//! HUD Lab (macOS debug builds): tunes the dictation indicator live. Pick a
+//! HUD Lab (macOS debug builds, and release builds while the `dot-scope`
+//! experiment is on): tunes the dictation indicator live. Pick a
 //! style, the state it shows and how many dictations wait behind it, and
 //! drag the look's sliders; every change goes to the indicator as
 //! `PlatformRequest::ConfigureHud`. Copy preset copies the tuning as one
@@ -6,7 +7,9 @@
 //!
 //! With the `dot-scope` experiment on, the HUD draws Dot scope and HUD Lab
 //! tunes it instead: its sliders, Save (`dot-scope.json`, loaded at launch),
-//! Copy values (the same JSON), and Reset to the prototype's values.
+//! Copy values (the same JSON), and Reset to the prototype's values. Only
+//! that section shows then, so a release build never shows the capsule's
+//! styles.
 
 use rune::{El, Tx, col, row, text};
 
@@ -127,16 +130,25 @@ fn preset(t: &HudTuning) -> String {
     )
 }
 
-/// Applies a change and shows it on the indicator.
+/// Applies a change and shows it on the indicator. A tuning-only change
+/// applies live to whatever the HUD shows; anything else restarts the demo.
 fn configure(ui: &mut Ui, change: impl FnOnce(&mut HudLab)) {
-    let mut lab = ui.platform.hud;
+    let old = ui.platform.hud;
+    let mut lab = old;
     change(&mut lab);
-    if lab != ui.platform.hud {
+    let tuned = lab.tuning != old.tuning || lab.dot_scope != old.dot_scope;
+    if tuned {
         ui.hud_copied = false;
         ui.hud_saved = false;
     }
     ui.platform.hud = lab;
-    ui.ask(PlatformRequest::ConfigureHud(lab));
+    ui.ask(
+        if tuned && lab.demo == old.demo && lab.queued == old.queued {
+            PlatformRequest::TuneHud(lab)
+        } else {
+            PlatformRequest::ConfigureHud(lab)
+        },
+    );
 }
 
 /// Dot scope's sliders, grouped as HUD Lab shows them, by `KNOBS` key.

@@ -886,10 +886,23 @@ Dot scope                                    // dot_scope
 
 The simulation steps at a fixed 240 Hz, so any frame rate draws the same
 picture. Its window is 176×84 pt so the widest plate and its shadow fit; the
-plate's top sits where the capsule's did. HUD Lab (debug builds) tunes it
-live: field, braid, response, light, and transition sliders; Recording
-follows a synthetic voice; Save writes `dot-scope.json` in Application
-Support, which the HUD loads at launch; Copy values copies the same JSON.
+plate's top sits where the capsule's did. HUD Lab tunes it live, in release
+builds too while the experiment is on (Settings › Experiments › HUD Lab,
+showing only Dot scope's section; debug builds alone keep the capsule's
+styles):
+
+```ts
+HUD Lab (dot-scope on)
+├── Open -> The HUD shows a demo: Recording follows a synthetic voice
+├── Move a slider -> Applies live to whatever the HUD shows, a real
+│   dictation included; the demo doesn't restart
+├── Recording / Transcribing / Processing -> Restarts the demo in that state
+├── Save -> Writes dot-scope.json in Application Support; the HUD loads it at launch
+├── Copy values -> The same JSON; Reset -> the prototype's values
+└── Leave the pane or close the window -> The demo hides; unsaved values
+    stay on the HUD until Hex restarts
+```
+
 Hex meters no spectrum, so the prototype's band emphasis is the same for
 every component.
 

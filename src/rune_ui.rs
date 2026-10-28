@@ -216,6 +216,12 @@ fn on_close(ui: &mut Ui, _: &mut Tx) {
     models::close(ui);
     picker::close(ui);
     explainer::close(ui);
+    // HUD Lab's demo would otherwise stay on screen; reopening starts at
+    // General, and coming back to HUD Lab starts the demo again.
+    if ui.pane == Pane::HudLab {
+        ui.ask(platform::PlatformRequest::EndHudDemo);
+        ui.pane = Pane::General;
+    }
     if let Service::Live(backend) = &mut ui.service {
         backend.closed();
     }
@@ -469,7 +475,11 @@ impl Pane {
                             .is_some_and(|status| status.driver_bundle_installed),
                     )
             }
-            Pane::HudLab => caps.hud_lab && ui.platform.developer,
+            // Release builds too while the `dot-scope` experiment is on, when
+            // HUD Lab tunes only Dot scope.
+            Pane::HudLab => {
+                caps.hud_lab && (ui.platform.developer || ui.platform.hud.dot_scope.is_some())
+            }
             Pane::Activity => ui.platform.developer,
             #[cfg(hex_capture)]
             Pane::Scrawl => ui.platform.scrawl.is_some(),
@@ -956,6 +966,9 @@ impl Ui {
         models::close(self);
         picker::close(self);
         explainer::close(self);
+        if self.pane == Pane::HudLab {
+            self.ask(platform::PlatformRequest::EndHudDemo);
+        }
         self.pane = pane;
         match pane {
             Pane::History => self.history.reload(),
@@ -2035,9 +2048,9 @@ const SCENES: &[Scene] = &[
         ui.platform.hud.queued = 2;
         ui.pane = Pane::HudLab;
     }),
+    // A release build with the `dot-scope` experiment on.
     ("mac-hud-lab-dot-scope", |ui| {
         *ui = mac_fixture();
-        ui.platform.developer = true;
         ui.platform.hud.dot_scope = Some(crate::dot_scope::Tuning::default());
         ui.pane = Pane::HudLab;
     }),

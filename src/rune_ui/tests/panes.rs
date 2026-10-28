@@ -1552,6 +1552,33 @@ fn hud_lab_tunes_dot_scope_when_its_experiment_is_on() {
 }
 
 #[test]
+fn release_builds_show_hud_lab_only_for_dot_scope() {
+    // The scene is a release build (no developer panes) with the experiment on.
+    let mut rt = runtime("mac-hud-lab-dot-scope", true, PANE_SIZE);
+    assert!(!rt.state.platform.developer);
+    assert!(rt.find("nav-hud-lab").is_some());
+    assert!(rt.find("nav-activity").is_none());
+    let (x, y) = rt.find("dot-spacing/track").expect("a Dot scope slider");
+    rt.pointer_down(x - 100.0, y);
+    rt.pointer_up(x - 100.0, y);
+    settle(&mut rt);
+    assert!(
+        matches!(asked(&rt).last(), Some(PlatformRequest::TuneHud(_))),
+        "a slider tunes the HUD live without restarting its demo: {:?}",
+        asked(&rt)
+    );
+    tap(&mut rt, "nav-general");
+    assert!(matches!(
+        asked(&rt).last(),
+        Some(PlatformRequest::EndHudDemo)
+    ));
+    let mut rt = runtime("mac-hud-lab-dot-scope", true, PANE_SIZE);
+    rt.state.platform.hud.dot_scope = None;
+    refresh(&mut rt);
+    assert!(rt.find("nav-hud-lab").is_none());
+}
+
+#[test]
 fn hud_lab_controls_round_trip() {
     use hud_lab::Control;
     let mut tuning = platform::HudTuning::default();

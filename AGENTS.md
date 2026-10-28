@@ -35,7 +35,9 @@ existing settings without an explicit enabled flag. Meetings (beta) is a third
 persisted opt-in (`meetings.enabled`, default off) that adds call detection, the
 Meetings pane, menu-bar recording controls, and meeting paste in release builds.
 `DEVELOPER_FEATURES_ENABLED` keeps meetings always available in debug builds and
-keeps the meeting CLI, Activity, and HUD Lab debug-only.
+keeps the meeting CLI, Activity, and HUD Lab debug-only. One exception: while
+the `dot-scope` experiment is on, release builds show HUD Lab with only its
+Dot scope section.
 
 ## Feature Map
 
@@ -278,7 +280,8 @@ substitute for source inspection or a second roadmap.
   `rune-kit` and the OpenCode theme: General, Modes with mode-owned
   corrections and processing, Voice Action, opt-in Commands, Meetings (each
   feature owns its settings), History, and under Experiments the Voice Filter
-  and developer-only HUD Lab and Activity, the transcription
+  and developer-only HUD Lab (release too while `dot-scope` is on, Dot scope
+  only) and Activity, the transcription
   picker, the onboarding tour, the macOS meeting capsules, and the `--snap`
   fixture scenes. `platform::Capabilities` decides which panes and rows exist;
   `rune_ui/linux_host.rs`, `windows_host.rs`, and `macos_host.rs` connect it to

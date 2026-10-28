@@ -327,8 +327,9 @@ pub(super) struct PlatformState {
     pub(super) calendar: CalendarView,
     /// The tour's relaunch failed; the person must reopen Hex.
     pub(super) relaunch_failed: bool,
-    /// Developer builds: the Activity and HUD Lab panes
-    /// (`crate::DEVELOPER_FEATURES_ENABLED` on a native host).
+    /// Developer builds: the Activity pane, and HUD Lab without the
+    /// `dot-scope` experiment (`crate::DEVELOPER_FEATURES_ENABLED` on a
+    /// native host).
     pub(super) developer: bool,
     /// The `vocabulary` experiment: the Vocabulary card under Dictation
     /// (`crate::vocabulary::enabled` on a native host).
@@ -684,6 +685,11 @@ pub(super) enum PlatformRequest {
     /// Configure` with the tuning, then `Reset` and the demonstrated state
     /// with `queued` jobs behind it.
     ConfigureHud(HudLab),
+    /// Only the tuning, live on whatever the indicator shows (a dictation
+    /// or the demo): `Configure` and `ConfigureDotScope`, no `Reset`.
+    TuneHud(HudLab),
+    /// Leaving HUD Lab: `Reset` hides its demo.
+    EndHudDemo,
     /// Save Dot scope's tuning as `dot-scope.json`, which the HUD loads at
     /// launch.
     SaveDotScope(crate::dot_scope::Tuning),

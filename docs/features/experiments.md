@@ -48,7 +48,8 @@ The known experiments are compiled into
   [Dot scope](dictation.md#dot-scope-experiment-dot-scope)). The gate is
   where the work starts: the HUD builds no Dot scope pipeline or simulation
   and keeps today's window size while it is off. On, HUD Lab tunes Dot scope
-  instead of the capsule's styles.
+  instead of the capsule's styles, and release builds show HUD Lab too
+  (only its Dot scope section).
 - `live-chapters`: chapter a meeting's transcript live while it records
   (macOS, Apple Intelligence; see
   [Live Chapters](meetings.md#live-chapters-experiment-live-chapters)). The

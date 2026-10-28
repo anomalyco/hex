@@ -1139,7 +1139,8 @@ microphone behavior.
 ```ts
 macOS debug runtime                      // not release navigation
 ├── Meetings -> Always available; release builds need the Meetings opt-in (its pane's card or Meetings › Settings)
-└── Activity / HUD Lab / hex dev -> Observation and developer controls
+├── Activity / HUD Lab / hex dev -> Observation and developer controls
+└── HUD Lab in release -> Only while dot-scope is on, Dot scope's section only
 
 `hex app -- --snap OUT --scene NAME` -> Rendered fixtures    // not proof capture/download/update happened
 Linux `hex` -> the Linux window on Rune, in the Hex process // dev.rune-ui
