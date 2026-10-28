@@ -47,6 +47,8 @@ mod dictation_indicator;
 mod dictation_modes;
 #[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
 mod dictation_processor;
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+mod dot_scope;
 #[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
 mod events;
 mod experiments;

@@ -407,6 +407,9 @@ pub(super) struct HudLab {
     pub(super) tuning: HudTuning,
     pub(super) demo: HudDemo,
     pub(super) queued: usize,
+    /// Dot scope's tuning while the `dot-scope` experiment is on, when HUD
+    /// Lab tunes Dot scope instead of the capsule's styles.
+    pub(super) dot_scope: Option<crate::dot_scope::Tuning>,
 }
 
 /// The Voice Filter pane's demo controls (`hex_microphone`'s demo functions).
@@ -677,6 +680,9 @@ pub(super) enum PlatformRequest {
     /// Configure` with the tuning, then `Reset` and the demonstrated state
     /// with `queued` jobs behind it.
     ConfigureHud(HudLab),
+    /// Save Dot scope's tuning as `dot-scope.json`, which the HUD loads at
+    /// launch.
+    SaveDotScope(crate::dot_scope::Tuning),
     #[cfg(hex_capture)]
     Scrawl(ScrawlRequest),
 }

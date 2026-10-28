@@ -1513,6 +1513,45 @@ fn hud_lab_drives_the_indicator() {
 }
 
 #[test]
+fn hud_lab_tunes_dot_scope_when_its_experiment_is_on() {
+    let mut rt = runtime("mac-hud-lab", true, PANE_SIZE);
+    assert!(rt.find("dot-columns").is_none(), "the styles without it");
+    let mut rt2 = runtime("mac-hud-lab-dot-scope", true, PANE_SIZE);
+    assert!(rt2.find("hud-styles").is_none());
+    assert!(rt2.find("dot-glow").is_some());
+    rt2.state.platform.hud.dot_scope = Some(crate::dot_scope::Tuning {
+        glow: 2.0,
+        ..Default::default()
+    });
+    refresh(&mut rt2);
+    tap(&mut rt2, "hud-demo/segment1");
+    let Some(PlatformRequest::ConfigureHud(lab)) = asked(&rt2).last().cloned() else {
+        panic!("{:?}", asked(&rt2));
+    };
+    assert_eq!(lab.dot_scope.map(|t| t.glow), Some(2.0));
+    tap(&mut rt2, "dot-scope-copy");
+    assert!(
+        rt2.copy_request
+            .as_deref()
+            .is_some_and(|json| json.contains("\"glow\": 2.0"))
+    );
+    tap(&mut rt2, "dot-scope-save");
+    assert!(matches!(
+        asked(&rt2).last(),
+        Some(PlatformRequest::SaveDotScope(tuning)) if tuning.glow == 2.0
+    ));
+    assert!(rt2.state.hud_saved);
+    tap(&mut rt2, "dot-scope-reset");
+    assert_eq!(
+        rt2.state.platform.hud.dot_scope,
+        Some(crate::dot_scope::Tuning::default())
+    );
+    assert!(!rt2.state.hud_saved);
+    tap(&mut rt, "hud-style0");
+    assert_eq!(rt.state.platform.hud.dot_scope, None);
+}
+
+#[test]
 fn hud_lab_controls_round_trip() {
     use hud_lab::Control;
     let mut tuning = platform::HudTuning::default();
@@ -1598,6 +1637,7 @@ fn experiment_goldens() {
     for dark in [true, false] {
         check_golden("mac-voice-filter", dark, PANE_SIZE);
         check_golden("mac-hud-lab", dark, PANE_SIZE);
+        check_golden("mac-hud-lab-dot-scope", dark, PANE_SIZE);
     }
     check_golden("mac-voice-filter-muted", true, PANE_SIZE);
     check_golden("mac-voice-filter-driver-missing", false, PANE_SIZE);

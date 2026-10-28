@@ -23,7 +23,11 @@ use objc2_foundation::{NSPoint, NSRect, NSSize};
 use objc2_quartz_core::CALayer;
 
 use crate::app_settings::IndicatorPosition;
+use crate::dot_scope::{self, Stage};
 use crate::spring::{REDUCED_FADE, Spec, Spring, reduced_motion};
+
+mod dot_scope_view;
+use dot_scope_view::DotScopeView;
 
 #[link(name = "CoreGraphics", kind = "framework")]
 unsafe extern "C" {
@@ -59,23 +63,91 @@ const HIDDEN_SOFTNESS: f32 = 4.0;
 const PROCESSING_MORPH_DURATION: Duration = Duration::from_millis(250);
 const COMPLETED_VISIBLE_DURATION: Duration = Duration::from_millis(240);
 const RECORDING_FLASH_HALF_LIFE: Duration = Duration::from_millis(280);
+/// Dot scope's done wipe (0.3 s) and a beat of the dark plate after it.
+const DOT_SCOPE_COMPLETED_VISIBLE_DURATION: Duration = Duration::from_millis(340);
+
+/// The HUD window and the capsule it centres.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Geometry {
+    width: f32,
+    height: f32,
+    capsule_height: f32,
+}
+
+impl Geometry {
+    const CAPSULE: Self = Self {
+        width: WINDOW_WIDTH,
+        height: WINDOW_HEIGHT,
+        capsule_height: CAPSULE_HEIGHT,
+    };
+    /// Room for Dot scope's widest plate and its drop shadow.
+    const DOT_SCOPE: Self = Self {
+        width: 176.0,
+        height: 84.0,
+        capsule_height: dot_scope::PLATE_HEIGHT,
+    };
+
+    /// The window's top edge for the top position: the capsule sits under
+    /// the menu bar, or under the notch where a fullscreen space hides the
+    /// menu bar and `visibleFrame` reaches the top of a notched screen.
+    fn top_window_edge(self, screen_top: f64, visible_top: f64, safe_area_top: f64) -> f64 {
+        visible_top.min(screen_top - safe_area_top) + self.capsule_margin() - TOP_OFFSET
+    }
+
+    fn capsule_margin(self) -> f64 {
+        f64::from((self.height - self.capsule_height) / 2.0)
+    }
+}
+
+/// Dot scope's window while its experiment is on, else the capsule's.
+fn geometry() -> Geometry {
+    if dot_scope_enabled() {
+        Geometry::DOT_SCOPE
+    } else {
+        Geometry::CAPSULE
+    }
+}
+
+fn dot_scope_enabled() -> bool {
+    crate::experiments::enabled(crate::experiments::Experiment::DotScope)
+}
 
 #[derive(Clone, Copy, Debug)]
 pub enum DictationIndicatorEvent {
     Reset,
     Configure(HudTuning),
+    /// Dot scope's tuning (experiment `dot-scope`).
+    ConfigureDotScope(dot_scope::Tuning),
+    /// HUD Lab: Dot scope follows a synthetic voice instead of the meter
+    /// until the next `Reset`.
+    DemoVoice,
     Started,
     EditingStarted,
     PromotedToVoiceAction,
-    Meter { average: f32, peak: f32 },
-    Submitted { job_id: u64 },
-    Transcribing { job_id: u64 },
-    Processing { job_id: u64 },
+    Meter {
+        average: f32,
+        peak: f32,
+    },
+    Submitted {
+        job_id: u64,
+    },
+    Transcribing {
+        job_id: u64,
+    },
+    Processing {
+        job_id: u64,
+    },
     Discarded,
     Cancelled,
-    JobCompleted { job_id: u64 },
-    JobCancelled { job_id: u64 },
-    JobFailed { job_id: u64 },
+    JobCompleted {
+        job_id: u64,
+    },
+    JobCancelled {
+        job_id: u64,
+    },
+    JobFailed {
+        job_id: u64,
+    },
     Failed,
 }
 
@@ -264,6 +336,7 @@ fn output_timestamp(output_time: *const CVTimeStamp) -> Option<DisplayOutputTime
 
 struct MetalIndicator {
     window: Retained<NSPanel>,
+    geometry: Geometry,
     renderer: Arc<SharedRenderer>,
     display_link: Option<AttachedDisplayLink>,
     display_link_retry_delay: Duration,
@@ -274,10 +347,11 @@ struct MetalIndicator {
 impl MetalIndicator {
     fn new() -> Result<Self, String> {
         let mtm = MainThreadMarker::new().ok_or("indicator must be created on the main thread")?;
-        let renderer = Arc::new(SharedRenderer::new()?);
+        let geometry = geometry();
+        let renderer = Arc::new(SharedRenderer::new(geometry)?);
         let frame = NSRect::new(
             NSPoint::new(0.0, 0.0),
-            NSSize::new(f64::from(WINDOW_WIDTH), f64::from(WINDOW_HEIGHT)),
+            NSSize::new(f64::from(geometry.width), f64::from(geometry.height)),
         );
         let window = NSPanel::initWithContentRect_styleMask_backing_defer(
             mtm.alloc(),
@@ -315,6 +389,7 @@ impl MetalIndicator {
         let now = Instant::now();
         let mut indicator = Self {
             window,
+            geometry,
             renderer,
             display_link: None,
             display_link_retry_delay: DISPLAY_LINK_RETRY_INITIAL,
@@ -354,6 +429,12 @@ impl MetalIndicator {
     }
 
     fn handle(&mut self, event: DictationIndicatorEvent) {
+        if matches!(
+            event,
+            DictationIndicatorEvent::Started | DictationIndicatorEvent::EditingStarted
+        ) {
+            self.renderer.set_dark(dot_scope_view::system_is_dark());
+        }
         self.renderer.handle(event);
         if matches!(
             event,
@@ -427,19 +508,20 @@ impl MetalIndicator {
         };
         let screen_frame = screen.frame();
         let visible = screen.visibleFrame();
-        let capsule_margin = f64::from((WINDOW_HEIGHT - CAPSULE_HEIGHT) / 2.0);
+        let geometry = self.geometry;
         let top = match crate::app_settings::indicator_position() {
             IndicatorPosition::Bottom => {
-                visible.origin.y + BOTTOM_OFFSET - capsule_margin + f64::from(WINDOW_HEIGHT)
+                visible.origin.y + BOTTOM_OFFSET - geometry.capsule_margin()
+                    + f64::from(geometry.height)
             }
-            IndicatorPosition::Top | IndicatorPosition::Hidden => top_window_edge(
+            IndicatorPosition::Top | IndicatorPosition::Hidden => geometry.top_window_edge(
                 screen_frame.origin.y + screen_frame.size.height,
                 visible.origin.y + visible.size.height,
                 screen.safeAreaInsets().top,
             ),
         };
         let top_left = NSPoint::new(
-            screen_frame.origin.x + (screen_frame.size.width - f64::from(WINDOW_WIDTH)) / 2.0,
+            screen_frame.origin.x + (screen_frame.size.width - f64::from(geometry.width)) / 2.0,
             top,
         );
         let frame = self.window.frame();
@@ -450,14 +532,6 @@ impl MetalIndicator {
         }
         self.renderer.set_scale(screen.backingScaleFactor() as f32);
     }
-}
-
-/// The window's top edge for the top position: the capsule sits under the
-/// menu bar, or under the notch where a fullscreen space hides the menu bar
-/// and `visibleFrame` reaches the top of a notched screen.
-fn top_window_edge(screen_top: f64, visible_top: f64, safe_area_top: f64) -> f64 {
-    let capsule_margin = f64::from((WINDOW_HEIGHT - CAPSULE_HEIGHT) / 2.0);
-    visible_top.min(screen_top - safe_area_top) + capsule_margin - TOP_OFFSET
 }
 
 impl Drop for MetalIndicator {
@@ -491,9 +565,9 @@ unsafe impl Send for SharedRenderer {}
 unsafe impl Sync for SharedRenderer {}
 
 impl SharedRenderer {
-    fn new() -> Result<Self, String> {
+    fn new(geometry: Geometry) -> Result<Self, String> {
         Ok(Self {
-            renderer: Mutex::new(MetalRenderer::new()?),
+            renderer: Mutex::new(MetalRenderer::new(geometry)?),
             active: AtomicBool::new(false),
         })
     }
@@ -510,6 +584,12 @@ impl SharedRenderer {
 
     fn set_scale(&self, scale: f32) {
         self.renderer.lock().unwrap().set_scale(scale);
+    }
+
+    fn set_dark(&self, dark: bool) {
+        if let Some(view) = &mut self.renderer.lock().unwrap().dot_scope {
+            view.set_dark(dark);
+        }
     }
 
     fn draw(&self, output_time: Option<DisplayOutputTime>) {
@@ -636,10 +716,17 @@ struct MetalRenderer {
     processing: Spring,
     post_processing: Spring,
     tuning: HudTuning,
+    geometry: Geometry,
+    /// Drawn instead of the capsule while the `dot-scope` experiment is on.
+    dot_scope: Option<DotScopeView>,
+    /// The microphone level for Dot scope (`dot_scope::level_from_rms`).
+    level: f32,
+    /// HUD Lab's synthetic voice and how far into it Dot scope is.
+    demo_voice: Option<f32>,
 }
 
 impl MetalRenderer {
-    fn new() -> Result<Self, String> {
+    fn new(geometry: Geometry) -> Result<Self, String> {
         let device = Device::system_default().ok_or("Metal is unavailable")?;
         let layer = MetalLayer::new();
         layer.set_device(&device);
@@ -658,8 +745,8 @@ impl MetalRenderer {
         layer.set_display_sync_enabled(true);
         layer.set_contents_scale(2.0);
         layer.set_drawable_size(CGSize::new(
-            f64::from(WINDOW_WIDTH * 2.0),
-            f64::from(WINDOW_HEIGHT * 2.0),
+            f64::from(geometry.width * 2.0),
+            f64::from(geometry.height * 2.0),
         ));
 
         let library = device
@@ -685,6 +772,15 @@ impl MetalRenderer {
         let pipeline = device
             .new_render_pipeline_state(&descriptor)
             .map_err(|error| format!("could not create indicator pipeline: {error}"))?;
+        let dot_scope = if geometry == Geometry::DOT_SCOPE {
+            Some(DotScopeView::new(
+                &device,
+                &library,
+                dot_scope::Tuning::load(),
+            )?)
+        } else {
+            None
+        };
         let command_queue = device.new_command_queue();
         // Prewarm the command queue so the first keypress never pays driver submission setup.
         let prewarm = command_queue.new_command_buffer();
@@ -716,6 +812,10 @@ impl MetalRenderer {
             processing: Spring::at(0.0),
             post_processing: Spring::at(0.0),
             tuning: HudTuning::default(),
+            geometry,
+            dot_scope,
+            level: 0.0,
+            demo_voice: None,
         })
     }
 
@@ -730,10 +830,20 @@ impl MetalRenderer {
                 self.phase = Phase::Hidden;
                 self.completion_pending = false;
                 self.last_output_seconds = None;
+                self.level = 0.0;
+                self.demo_voice = None;
                 self.freeze_visual_state();
             }
             DictationIndicatorEvent::Configure(tuning) => {
                 self.tuning = tuning;
+            }
+            DictationIndicatorEvent::ConfigureDotScope(tuning) => {
+                if let Some(view) = &mut self.dot_scope {
+                    view.tune(tuning);
+                }
+            }
+            DictationIndicatorEvent::DemoVoice => {
+                self.demo_voice = Some(0.0);
             }
             DictationIndicatorEvent::Started | DictationIndicatorEvent::EditingStarted => {
                 self.capturing = true;
@@ -758,6 +868,10 @@ impl MetalRenderer {
                     .jump(if reduce { 0.0 } else { HIDDEN_SOFTNESS });
                 self.processing.jump(0.0);
                 self.post_processing.jump(0.0);
+                self.level = 0.0;
+                if let Some(view) = &mut self.dot_scope {
+                    view.restart(reduce);
+                }
             }
             DictationIndicatorEvent::PromotedToVoiceAction => {
                 self.editing = true;
@@ -765,6 +879,7 @@ impl MetalRenderer {
             DictationIndicatorEvent::Meter { average, peak } => {
                 self.target_average = (average * 9.0).clamp(0.0, 1.0);
                 self.target_peak = (peak * 3.0).clamp(0.0, 1.0);
+                self.level = dot_scope::level_from_rms(average);
             }
             DictationIndicatorEvent::Submitted { job_id } => {
                 self.capturing = false;
@@ -871,8 +986,8 @@ impl MetalRenderer {
         self.scale = scale;
         self.layer.set_contents_scale(f64::from(scale));
         self.layer.set_drawable_size(CGSize::new(
-            f64::from(WINDOW_WIDTH * scale),
-            f64::from(WINDOW_HEIGHT * scale),
+            f64::from(self.geometry.width * scale),
+            f64::from(self.geometry.height * scale),
         ));
     }
 
@@ -893,6 +1008,50 @@ impl MetalRenderer {
         dt.clamp(1.0 / 240.0, 1.0 / 20.0)
     }
 
+    /// Steps and draws Dot scope; true while it still needs frames.
+    fn draw_dot_scope(&mut self, dt: f32, visible: bool, reduce: bool) -> bool {
+        let stage = match self.phase {
+            Phase::Recording => Some(Stage::Recording),
+            Phase::Transcribing => Some(Stage::Processing),
+            Phase::Completed => Some(Stage::Done),
+            Phase::Failed => Some(Stage::Failed),
+            Phase::Hidden | Phase::Cancelled => None,
+        };
+        let level = match &mut self.demo_voice {
+            Some(time) => {
+                *time += dt;
+                dot_scope::demo_level(*time)
+            }
+            None => self.level,
+        };
+        let resolution = [
+            self.geometry.width * self.scale,
+            self.geometry.height * self.scale,
+        ];
+        let scale = self.scale;
+        let Some(view) = &mut self.dot_scope else {
+            return false;
+        };
+        view.advance(dt, stage, visible, level, reduce);
+        let needs_frames = visible || !view.settled();
+        let Some(drawable) = self.layer.next_drawable() else {
+            return needs_frames;
+        };
+        let descriptor = RenderPassDescriptor::new();
+        let attachment = descriptor.color_attachments().object_at(0).unwrap();
+        attachment.set_texture(Some(drawable.texture()));
+        attachment.set_load_action(MTLLoadAction::Clear);
+        attachment.set_clear_color(metal::MTLClearColor::new(0.0, 0.0, 0.0, 0.0));
+        attachment.set_store_action(MTLStoreAction::Store);
+        let command_buffer = self.command_queue.new_command_buffer();
+        let encoder = command_buffer.new_render_command_encoder(descriptor);
+        view.encode(encoder, resolution, scale);
+        encoder.end_encoding();
+        command_buffer.present_drawable(drawable);
+        command_buffer.commit();
+        needs_frames
+    }
+
     fn draw(&mut self, output_time: Option<DisplayOutputTime>) -> bool {
         let now = Instant::now();
         if self.completion_pending
@@ -911,11 +1070,17 @@ impl MetalRenderer {
             self.shader_time += dt;
         }
         let elapsed = now.duration_since(self.phase_started);
-        let terminal_finished = self
-            .phase
-            .visible_duration()
-            .is_some_and(|duration| elapsed >= duration);
+        let visible_duration = match self.phase {
+            Phase::Completed if self.dot_scope.is_some() => {
+                Some(DOT_SCOPE_COMPLETED_VISIBLE_DURATION)
+            }
+            phase => phase.visible_duration(),
+        };
+        let terminal_finished = visible_duration.is_some_and(|duration| elapsed >= duration);
         let visible = !matches!(self.phase, Phase::Hidden) && !terminal_finished;
+        if self.dot_scope.is_some() {
+            return self.draw_dot_scope(dt, visible, reduce);
+        }
         if !visible && !self.exiting {
             // Reversing an in-flight entrance velocity would briefly grow or sharpen the HUD.
             self.opacity.v = 0.0;
@@ -996,7 +1161,10 @@ impl MetalRenderer {
         let encoder = command_buffer.new_render_command_encoder(descriptor);
         encoder.set_render_pipeline_state(&self.pipeline);
         let uniforms = Uniforms {
-            resolution: [WINDOW_WIDTH * self.scale, WINDOW_HEIGHT * self.scale],
+            resolution: [
+                self.geometry.width * self.scale,
+                self.geometry.height * self.scale,
+            ],
             time: self.shader_time,
             width: self.width.x,
             height: CAPSULE_HEIGHT,
@@ -1070,7 +1238,26 @@ mod tests {
 
     /// The capsule's top edge for a window whose top edge is `window_top`.
     fn capsule_top(window_top: f64) -> f64 {
-        window_top - f64::from((WINDOW_HEIGHT - CAPSULE_HEIGHT) / 2.0)
+        window_top - Geometry::CAPSULE.capsule_margin()
+    }
+
+    fn top_window_edge(screen_top: f64, visible_top: f64, safe_area_top: f64) -> f64 {
+        Geometry::CAPSULE.top_window_edge(screen_top, visible_top, safe_area_top)
+    }
+
+    #[test]
+    fn dot_scope_plate_sits_where_the_capsule_did() {
+        let capsule = Geometry::CAPSULE.top_window_edge(956.0, 923.0, 32.0)
+            - Geometry::CAPSULE.capsule_margin();
+        let plate = Geometry::DOT_SCOPE.top_window_edge(956.0, 923.0, 32.0)
+            - Geometry::DOT_SCOPE.capsule_margin();
+        assert_eq!(capsule, plate);
+        let widest = dot_scope::KNOBS
+            .iter()
+            .find(|knob| knob.key == "dot-width")
+            .unwrap()
+            .max;
+        assert!(widest + 24.0 <= Geometry::DOT_SCOPE.width);
     }
 
     // Geometry measured on a 14" MacBook Air: frame height 956, menu bar

@@ -42,6 +42,13 @@ The known experiments are compiled into
   default off) is the second gate. Check:
   `capture_exists_only_with_its_build_option` in
   [experiments.rs](../../src/experiments.rs).
+- `dot-scope`: the macOS recording HUD as Dot scope, a plate of dots lit
+  by a braided pair of oscilloscope traces that follow the microphone level,
+  ironed flat into a blue processing beam, and wiped dark when done (see
+  [Dot scope](dictation.md#dot-scope-experiment-dot-scope)). The gate is
+  where the work starts: the HUD builds no Dot scope pipeline or simulation
+  and keeps today's window size while it is off. On, HUD Lab tunes Dot scope
+  instead of the capsule's styles.
 - `live-chapters`: chapter a meeting's transcript live while it records
   (macOS, Apple Intelligence; see
   [Live Chapters](meetings.md#live-chapters-experiment-live-chapters)). The

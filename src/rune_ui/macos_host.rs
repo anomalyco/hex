@@ -660,6 +660,9 @@ impl NativeHost for MacHost {
                 DemoRequest::StopPlayback => crate::hex_microphone::stop_demo_playback(),
             },
             PlatformRequest::ConfigureHud(lab) => configure_hud(&self.runtime()?, lab),
+            PlatformRequest::SaveDotScope(tuning) => {
+                tuning.save().map_err(|error| format!("{error:#}"))?;
+            }
             #[cfg(hex_capture)]
             PlatformRequest::Scrawl(request) => self.scrawl.send(request),
         }
@@ -1408,6 +1411,9 @@ fn configure_hud(runtime: &RuntimeHandle, lab: HudLab) {
         light_angle: t.light_angle,
         outline: t.outline,
     }));
+    if let Some(tuning) = lab.dot_scope {
+        runtime.indicator(Event::ConfigureDotScope(tuning));
+    }
     runtime.indicator(Event::Reset);
     match lab.demo {
         HudDemo::Recording => {
@@ -1420,6 +1426,9 @@ fn configure_hud(runtime: &RuntimeHandle, lab: HudLab) {
                 average: 0.08,
                 peak: 0.42,
             });
+            if lab.dot_scope.is_some() {
+                runtime.indicator(Event::DemoVoice);
+            }
         }
         HudDemo::Transcribing | HudDemo::Processing => {
             runtime.indicator(Event::Submitted { job_id: 0 });

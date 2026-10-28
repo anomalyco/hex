@@ -307,3 +307,118 @@ fragment float4 indicator_fragment(
     }
     return result;
 }
+
+// Dot scope (experiment `dot-scope`): a plate of dots lit by `dot_scope.rs`.
+// Each dot's (brightness, freshness) arrives as normalized ushort2s, row by
+// row; the plate, glow, and dot shapes follow the t422 prototype's look A.
+struct DotUniforms {
+    float2 resolution;
+    float backing_scale;
+    float width;
+    float height;
+    float opacity;
+    float scale;
+    float softness;
+    float pitch;
+    float columns;
+    float rows;
+    float glow;
+    float grid;
+    float live;
+    float cool;
+    float dark;
+    float4 base;
+    float4 core;
+    float4 plate;
+    float4 rim;
+    float4 shadow;
+};
+
+fragment float4 dot_scope_fragment(
+    VertexOutput input [[stage_in]],
+    constant DotUniforms &u [[buffer(0)]],
+    constant ushort2 *dots [[buffer(1)]])
+{
+    float scale = max(u.scale, 0.001);
+    float2 point = (input.uv * u.resolution - u.resolution * 0.5) / u.backing_scale / scale;
+    float pixel = 1.0 / (u.backing_scale * scale);
+    float softness = max(u.softness, 0.0);
+    float aa = pixel * 0.75 + softness * 0.72;
+    float2 half_size = float2(u.width, u.height) * 0.5;
+    float radius = u.height * 0.5;
+    float distance = rounded_box(point, half_size, radius);
+    bool dark = u.dark > 0.5;
+    float4 result = 0.0;
+
+    // A soft drop shadow 3 pt below, as the prototype's 16 pt canvas blur.
+    float shadow_distance = rounded_box(point - float2(0.0, 3.0), half_size, radius);
+    composite(result, u.shadow.rgb, u.shadow.a * (0.5 - 0.5 * tanh(shadow_distance / 6.5)));
+
+    float shape = coverage(distance, aa);
+    composite(result, u.plate.rgb, u.plate.a * shape);
+    composite(result, u.rim.rgb, u.rim.a * coverage(abs(distance) - 0.3, aa));
+
+    if (u.glow > 0.01) {
+        float reach = 34.0 + 20.0 * u.glow;
+        float t = clamp(length(point) / reach, 0.0, 1.0);
+        float strength = (dark ? 0.3 : 0.19) * 0.55 * min(1.0, u.glow);
+        float3 middle = mix(u.base.rgb, u.core.rgb, 0.5);
+        composite(result, mix(middle, u.base.rgb, t), strength * (1.0 - t) * shape);
+    }
+
+    int columns = int(u.columns + 0.5);
+    int rows = int(u.rows + 0.5);
+    float pitch = u.pitch;
+    float2 center_offset = float2(float(columns) - 1.0, float(rows) - 1.0) * 0.5;
+    int i0 = int(round(point.x / pitch + center_offset.x));
+    int j0 = int(round(point.y / pitch + center_offset.y));
+    float unlit = dark ? 0.07 : 0.085;
+    float full = dark ? 0.96 : 1.0;
+    float curve = dark ? 0.9 : 0.75;
+    float presence = 0.5 + 0.5 * max(u.live, u.cool);
+    for (int dj = -1; dj <= 1; dj++) {
+        for (int di = -1; di <= 1; di++) {
+            int i = i0 + di;
+            int j = j0 + dj;
+            if (i < 0 || j < 0 || i >= columns || j >= rows) {
+                continue;
+            }
+            float2 center = (float2(float(i), float(j)) - center_offset) * pitch;
+            float cap_dx = max(abs(center.x) - (u.width * 0.5 - radius), 0.0);
+            float cap = radius - length(float2(cap_dx, center.y));
+            float mask = smoothstep(1.4, 4.6, cap);
+            if (mask <= 0.0) {
+                continue;
+            }
+            float2 value = float2(dots[j * columns + i]) / 65535.0;
+            float power = max(value.x, 1e-5);
+            float fresh = value.y;
+            float row = abs(center.y) / radius;
+            float floor_alpha = unlit * (1.0 - 0.7 * smoothstep(0.35, 0.95, row)) * presence * u.grid;
+            float alpha = floor_alpha + (full - floor_alpha) * pow(power, curve * mix(1.4, 1.0, fresh));
+            float dot_radius = (0.25 + 0.17 * pow(power, 0.6))
+                * mix(1.0, mix(0.82, 1.0, fresh), smoothstep(0.03, 0.2, power)) * pitch;
+            float core = clamp(power * power * 1.1, 0.0, 0.9) * mix(0.3, 1.0, fresh);
+            float3 color = mix(u.base.rgb, u.core.rgb, core);
+            float from_center = length(point - center);
+            if (power > 0.05) {
+                composite(
+                    result,
+                    color,
+                    0.132 * power * power * mask * shape * coverage(from_center - dot_radius * 2.0, aa));
+            }
+            composite(result, color, alpha * mask * shape * coverage(from_center - dot_radius, aa));
+        }
+    }
+
+    result *= u.opacity;
+    if (result.a > 0.0) {
+        float2 pixel_position = floor(input.position.xy);
+        float n1 = fract(52.9829189 * fract(dot(pixel_position, float2(0.06711056, 0.00583715))));
+        float n2 = fract(52.9829189
+            * fract(dot(pixel_position + float2(17.0, 31.0), float2(0.06711056, 0.00583715))));
+        float dither = ((n1 - n2) / 255.0) * result.a;
+        result.rgb = clamp(result.rgb + float3(dither), float3(0.0), float3(result.a));
+    }
+    return result;
+}

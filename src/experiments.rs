@@ -30,6 +30,7 @@ pub const ENV: &str = "HEX_EXPERIMENTS";
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Experiment {
     Capture,
+    DotScope,
     LiveChapters,
     Playground,
     SmartTurn,
@@ -40,8 +41,9 @@ pub enum Experiment {
 impl Experiment {
     /// Every experiment, including those behind a build option;
     /// [`Self::available`] lists the ones this build offers.
-    const ALL: [Self; 6] = [
+    const ALL: [Self; 7] = [
         Self::Capture,
+        Self::DotScope,
         Self::LiveChapters,
         Self::Playground,
         Self::SmartTurn,
@@ -67,6 +69,7 @@ impl Experiment {
     pub const fn name(self) -> &'static str {
         match self {
             Self::Capture => "capture",
+            Self::DotScope => "dot-scope",
             Self::LiveChapters => "live-chapters",
             Self::Playground => "playground",
             Self::SmartTurn => "smart-turn",
@@ -79,6 +82,9 @@ impl Experiment {
         match self {
             Self::Capture => {
                 "Scrawl's capture engine (`hex capture`; macOS, the `capture` build option)."
+            }
+            Self::DotScope => {
+                "Dot scope: the recording indicator as a braided dot oscilloscope, tuned in HUD Lab (macOS)."
             }
             Self::LiveChapters => "Chapter a meeting's transcript live while it records.",
             Self::Playground => {
@@ -674,6 +680,12 @@ mod tests {
                 "version": 1,
                 "file": "/home/kit/.config/hex/experiments",
                 "experiments": [
+                    {
+                        "name": "dot-scope",
+                        "description": Experiment::DotScope.description(),
+                        "enabled": false,
+                        "sources": [],
+                    },
                     {
                         "name": "live-chapters",
                         "description": Experiment::LiveChapters.description(),

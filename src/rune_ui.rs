@@ -604,6 +604,8 @@ pub(crate) struct Ui {
     activity: activity::ActivityPane,
     /// HUD Lab's preset was copied since it last changed.
     hud_copied: bool,
+    /// HUD Lab saved Dot scope's tuning, until the next change.
+    hud_saved: bool,
     /// Settings saves and Quit Hex a fixture recorded.
     saved: usize,
     quit_requested: bool,
@@ -638,6 +640,9 @@ impl Ui {
         ui.platform.vocabulary = crate::vocabulary::enabled();
         ui.platform.voice_filter =
             crate::experiments::enabled(crate::experiments::Experiment::VoiceFilter);
+        if crate::experiments::enabled(crate::experiments::Experiment::DotScope) {
+            ui.platform.hud.dot_scope = Some(crate::dot_scope::Tuning::load());
+        }
         ui.tour = onboarding::Tour::start(&ui.settings, &ui.platform);
         ui.platform.set_login_item(host::launch_at_login());
         ui
@@ -681,6 +686,7 @@ impl Ui {
             fun: fun::FunPane::default(),
             activity: activity::ActivityPane::default(),
             hud_copied: false,
+            hud_saved: false,
             saved: 0,
             quit_requested: false,
             window: None,
@@ -1942,6 +1948,12 @@ const SCENES: &[Scene] = &[
         *ui = mac_fixture();
         ui.platform.developer = true;
         ui.platform.hud.queued = 2;
+        ui.pane = Pane::HudLab;
+    }),
+    ("mac-hud-lab-dot-scope", |ui| {
+        *ui = mac_fixture();
+        ui.platform.developer = true;
+        ui.platform.hud.dot_scope = Some(crate::dot_scope::Tuning::default());
         ui.pane = Pane::HudLab;
     }),
     ("mac-activity", |ui| {

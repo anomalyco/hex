@@ -837,6 +837,40 @@ and normal Spaces keep their position. Check: `scripts/check
 dictation_indicator::tests::top_capsule` covers the math only; placement over a
 fullscreen app on a notched Mac is not yet observed.
 
+### Dot scope (experiment `dot-scope`)
+
+With the `dot-scope` experiment on, the macOS HUD draws Dot scope instead of
+the capsule ([dot_scope.rs](../../src/dot_scope.rs),
+`dot_scope_fragment` in [dictation_indicator.metal](../../src/dictation_indicator.metal)).
+It is the t422 prototype's look A with its values.
+
+```ts
+Dot scope                                    // dot_scope
+├── Recording -> A scanner unfolds a resting braid; the level (RMS, −40 to −10 dB) widens it
+│   └── Warm pearl; history travels out from the centre; phosphor tail 0.6 s
+├── Transcribing / Processing -> Braid irons flat; a cool beam sweeps 76 pt
+├── Completed -> The beam wipes the field dark (0.3 s), then fades
+├── Failed -> Coral, then fades
+├── Reduce Motion -> A still braid; opacity fades only
+├── Dark / light -> Read from AppleInterfaceStyle at each capture start
+└── Queued jobs -> Not drawn                // gap
+```
+
+The simulation steps at a fixed 240 Hz, so any frame rate draws the same
+picture. Its window is 176×84 pt so the widest plate and its shadow fit; the
+plate's top sits where the capsule's did. HUD Lab (debug builds) tunes it
+live: field, braid, response, light, and transition sliders; Recording
+follows a synthetic voice; Save writes `dot-scope.json` in Application
+Support, which the HUD loads at launch; Copy values copies the same JSON.
+Hex meters no spectrum, so the prototype's band emphasis is the same for
+every component.
+
+Check: `scripts/check dot_scope` (defaults, knobs, frame-rate independence,
+Reduce Motion, the stages) and
+`dot_scope_view::tests::dot_scope_frames` (ignored; renders the real
+shader offscreen from a WAV into PNG frames). Not yet observed on a real
+display through a real dictation.
+
 Hex itself never activates on paste. Another app's modifier-tap hotkey once
 switched Spaces before the paste; the [chord breaker](#hold-and-short-taps)
 keeps a held bare-modifier dictation from reading as a tap.
