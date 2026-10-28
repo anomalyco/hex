@@ -1999,12 +1999,6 @@ checksum = "e17592d60ebacc7d5e169f4663c5f84f9161cc90328abcfe8456f41e4dfcb284"
 
 [[package]]
 name = "hex"
-version = "0.4.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
-
-[[package]]
-name = "hex"
 version = "0.0.0"
 dependencies = [
  "anyhow",
@@ -2076,6 +2070,12 @@ dependencies = [
  "x11-clipboard",
  "x11rb 0.14.0",
 ]
+
+[[package]]
+name = "hex"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
 
 [[package]]
 name = "hmac-sha256"
@@ -4851,7 +4851,7 @@ dependencies = [
 [[package]]
 name = "rune"
 version = "0.0.1"
-source = "git+https://github.com/anomalyco/rune.git?rev=917aea36a22ff62f480a27c3fe8acc9eeb688512#917aea36a22ff62f480a27c3fe8acc9eeb688512"
+source = "git+https://github.com/anomalyco/rune.git?rev=89b96f61d195c90304c507ad733c7390fdea051b#89b96f61d195c90304c507ad733c7390fdea051b"
 dependencies = [
  "arboard",
  "blake3",
@@ -4914,7 +4914,7 @@ dependencies = [
 [[package]]
 name = "rune-kit"
 version = "0.0.1"
-source = "git+https://github.com/anomalyco/rune.git?rev=917aea36a22ff62f480a27c3fe8acc9eeb688512#917aea36a22ff62f480a27c3fe8acc9eeb688512"
+source = "git+https://github.com/anomalyco/rune.git?rev=89b96f61d195c90304c507ad733c7390fdea051b#89b96f61d195c90304c507ad733c7390fdea051b"
 dependencies = [
  "rune",
  "rune-motion",
@@ -4924,12 +4924,12 @@ dependencies = [
 [[package]]
 name = "rune-motion"
 version = "0.1.0"
-source = "git+https://github.com/anomalyco/rune.git?rev=917aea36a22ff62f480a27c3fe8acc9eeb688512#917aea36a22ff62f480a27c3fe8acc9eeb688512"
+source = "git+https://github.com/anomalyco/rune.git?rev=89b96f61d195c90304c507ad733c7390fdea051b#89b96f61d195c90304c507ad733c7390fdea051b"
 
 [[package]]
 name = "rune-theme-opencode"
 version = "0.0.1"
-source = "git+https://github.com/anomalyco/rune.git?rev=917aea36a22ff62f480a27c3fe8acc9eeb688512#917aea36a22ff62f480a27c3fe8acc9eeb688512"
+source = "git+https://github.com/anomalyco/rune.git?rev=89b96f61d195c90304c507ad733c7390fdea051b#89b96f61d195c90304c507ad733c7390fdea051b"
 dependencies = [
  "rune",
  "rune-kit",
