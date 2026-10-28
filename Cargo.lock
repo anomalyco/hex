@@ -1867,6 +1867,7 @@ dependencies = [
  "oxc_span",
  "png 0.18.1",
  "pollster",
+ "procwatch",
  "ratatui",
  "realfft",
  "regex",
@@ -4119,6 +4120,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "985e7ec9bb745e6ce6535b544d84d6cd6f7ad8bd711c398938ae983b91a766d9"
 dependencies = [
  "unicode-ident",
+]
+
+[[package]]
+name = "procwatch"
+version = "0.1.0"
+source = "git+https://github.com/anomalyco/rune.git?rev=89b96f61d195c90304c507ad733c7390fdea051b#89b96f61d195c90304c507ad733c7390fdea051b"
+dependencies = [
+ "libc",
 ]
 
 [[package]]

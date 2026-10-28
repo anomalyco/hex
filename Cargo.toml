@@ -90,7 +90,7 @@ objc2-quartz-core = { version = "0.3.2", features = ["CALayer"] }
 objc2-service-management = { version = "0.3.2", features = ["SMAppService"] }
 # Smart Turn: loads the ONNX Runtime dylib Moonshine already ships.
 ort = { version = "=2.0.0-rc.12", default-features = false, features = ["load-dynamic", "api-23"] }
-procwatch = { git = "https://github.com/anomalyco/rune.git", rev = "917aea36a22ff62f480a27c3fe8acc9eeb688512" }
+procwatch = { git = "https://github.com/anomalyco/rune.git", rev = "89b96f61d195c90304c507ad733c7390fdea051b" }
 ratatui = "0.30.2"
 realfft = "3.5.0"
 rmcp = { version = "3.5.1", default-features = false, features = ["server", "macros", "transport-io"] }

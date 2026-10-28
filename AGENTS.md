@@ -144,7 +144,9 @@ substitute for source inspection or a second roadmap.
   handoff, bounded HTTP parsing, model preparation progress, and raw
   transcription routes, the `/streams` routes (contract:
   [`docs/streams.md`](docs/streams.md)), plus the always-on authenticated
-  `POST /control`.
+  `POST /control`, and `GET /profile/vitals` (process footprint and CPU from
+  Rune's `procwatch`, sampled by `macos_rune`; debug builds also count the heap
+  and report the `speech.model_weights` gauge from `parakeet`).
 - `control`: the release `hex` control surface: the versioned
   `ControlRequest`/`ControlReply` protocol, the settings registry behind
   `hex settings` (one dotted key per persisted setting, with the window's
