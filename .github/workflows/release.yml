@@ -557,12 +557,18 @@ jobs:
             build-linux-aarch64=${{ needs.build.outputs.linux-arm64-digest }}
       - name: Stage and test hex-bin
         run: |
-          stage="$RUNNER_TEMP/aur"
           x64="$RUNNER_TEMP/in/build-linux-x86_64/hex-$HEX_VERSION-linux-x64"
           arm64="$RUNNER_TEMP/in/build-linux-aarch64/hex-$HEX_VERSION-linux-arm64"
-          chown -R builder: "$GITHUB_WORKSPACE" "$RUNNER_TEMP"
-          runuser -u builder -- scripts/release-aur.sh stage "$HEX_VERSION" "$x64" "$LINUX_X64_URL" "$arm64" "$LINUX_ARM64_URL" "$stage"
-          runuser -u builder -- scripts/release-aur.sh test "$stage"
+          # makepkg refuses root, so builder stages and builds in its own home from
+          # copies; the runner's files in the workspace and RUNNER_TEMP keep their owner.
+          src=/home/builder/src
+          stage=/home/builder/aur
+          mkdir "$src"
+          cp -R scripts packaging LICENSE "$x64" "$arm64" "$src/"
+          chown -R builder: "$src"
+          runuser -u builder -- "$src/scripts/release-aur.sh" stage "$HEX_VERSION" \
+            "$src/${x64##*/}" "$LINUX_X64_URL" "$src/${arm64##*/}" "$LINUX_ARM64_URL" "$stage"
+          runuser -u builder -- "$src/scripts/release-aur.sh" test "$stage"
           pacman -U --noconfirm "$stage"/hex-bin-*.pkg.tar.zst
           test "$(hex --version | awk 'NF { value=$NF } END { print value }')" = "$HEX_VERSION"
           # The PKGBUILD's sources are the published files.
