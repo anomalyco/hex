@@ -1388,6 +1388,8 @@ fn platform_goldens() {
     check_golden("mac-onboarding-listening", true, PANE_SIZE);
     check_golden("mac-onboarding-reopen", false, PANE_SIZE);
     check_golden("mac-onboarding-done", true, PANE_SIZE);
+    check_golden("mac-onboarding-mic-open", true, PANE_SIZE);
+    check_golden("mac-onboarding-mic-silent", false, PANE_SIZE);
 }
 
 #[test]

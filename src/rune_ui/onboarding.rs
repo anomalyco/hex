@@ -53,18 +53,6 @@ pub(super) struct Tour {
     pub(super) hero_still: bool,
     /// What the practice dictation's microphone hears.
     pub(super) mic: MicMeter,
-    /// How the microphone line draws its level, while both are on trial.
-    pub(super) mic_style: MicStyle,
-}
-
-/// How the microphone line under the practice field draws its level.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(super) enum MicStyle {
-    /// The microphone glyph fills from the bottom.
-    #[default]
-    Glyph,
-    /// Three short bars.
-    Bars,
 }
 
 /// The practice dictation's level, and whether Hex heard nothing from the
@@ -126,7 +114,6 @@ impl Tour {
             practice: TextEdit::default(),
             hero_still: false,
             mic: MicMeter::default(),
-            mic_style: MicStyle::default(),
         }
     }
 
@@ -723,10 +710,7 @@ fn microphone(ui: &Ui, p: Paint, tour: &Tour, layer: &mut Vec<El>) -> El {
     } else {
         p.faint()
     };
-    let meter = match tour.mic_style {
-        MicStyle::Glyph => mic_glyph(p, level, tint),
-        MicStyle::Bars => mic_bars(p, level, tint),
-    };
+    let meter = mic_bars(p, level, tint);
     let c = &p.k.c;
     let chevron = if open {
         p.k.glyph.chevron_up
@@ -792,44 +776,14 @@ fn microphone(ui: &Ui, p: Paint, tour: &Tour, layer: &mut Vec<El>) -> El {
         }))
 }
 
-const MIC_GLYPH: f32 = 14.0;
-/// The glyph's head, stroke included, at `MIC_GLYPH`: left, top, width, height.
-const MIC_HEAD: [f32; 4] = [4.375, 0.875, 5.25, 7.875];
-
-/// The microphone glyph, its head filling from the bottom as loud as Hex
-/// hears it.
-fn mic_glyph(p: Paint, level: f32, tint: Color) -> El {
-    let [left, top, width, height] = MIC_HEAD;
-    let rise = level * height;
-    el().key("level")
-        .size(MIC_GLYPH, MIC_GLYPH)
-        .child(
-            rune::icon(&glyphs::MIC, MIC_GLYPH)
-                .key("glyph")
-                .color(tint)
-                .absolute(0.0, 0.0),
-        )
-        .child(
-            el().key("fill")
-                .absolute(left, top + height - rise)
-                .size(width, rise)
-                .clip_rounded(0.0)
-                .child(
-                    el().key("head")
-                        .absolute(0.0, rise - height)
-                        .size(width, height)
-                        .radius(width / 2.0)
-                        .fill(p.text()),
-                ),
-        )
-}
+const MIC_LEVEL: f32 = 14.0;
 
 /// Three short bars, as tall as Hex hears it.
 fn mic_bars(p: Paint, level: f32, tint: Color) -> El {
     const WEIGHTS: [f32; 3] = [0.6, 1.0, 0.75];
     let mut bars = row()
         .key("level")
-        .size(MIC_GLYPH, MIC_GLYPH)
+        .size(MIC_LEVEL, MIC_LEVEL)
         .gap(2.0)
         .center();
     for (index, weight) in WEIGHTS.into_iter().enumerate() {

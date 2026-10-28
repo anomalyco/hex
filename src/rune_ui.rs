@@ -2125,29 +2125,13 @@ const SCENES: &[Scene] = &[
     ("mac-onboarding-done", |ui| {
         mac_tour(ui, onboarding::MacStep::Done)
     }),
-    ("mac-onboarding-mic-glyph", |ui| {
-        mic_tour(ui, onboarding::MicStyle::Glyph, MicScene::Hearing)
+    ("mac-onboarding-mic", |ui| mic_tour(ui, MicScene::Hearing)),
+    ("mac-onboarding-mic-open", |ui| mic_tour(ui, MicScene::Open)),
+    ("mac-onboarding-mic-silent", |ui| {
+        mic_tour(ui, MicScene::Silent)
     }),
-    ("mac-onboarding-mic-glyph-open", |ui| {
-        mic_tour(ui, onboarding::MicStyle::Glyph, MicScene::Open)
-    }),
-    ("mac-onboarding-mic-glyph-silent", |ui| {
-        mic_tour(ui, onboarding::MicStyle::Glyph, MicScene::Silent)
-    }),
-    ("mac-onboarding-mic-glyph-lid", |ui| {
-        mic_tour(ui, onboarding::MicStyle::Glyph, MicScene::LidClosed)
-    }),
-    ("mac-onboarding-mic-bars", |ui| {
-        mic_tour(ui, onboarding::MicStyle::Bars, MicScene::Hearing)
-    }),
-    ("mac-onboarding-mic-bars-open", |ui| {
-        mic_tour(ui, onboarding::MicStyle::Bars, MicScene::Open)
-    }),
-    ("mac-onboarding-mic-bars-silent", |ui| {
-        mic_tour(ui, onboarding::MicStyle::Bars, MicScene::Silent)
-    }),
-    ("mac-onboarding-mic-bars-lid", |ui| {
-        mic_tour(ui, onboarding::MicStyle::Bars, MicScene::LidClosed)
+    ("mac-onboarding-mic-lid", |ui| {
+        mic_tour(ui, MicScene::LidClosed)
     }),
     // The welcome hero animating (`--video`, or a live window), and settled as
     // Reduce Motion shows it.
@@ -2249,7 +2233,7 @@ enum MicScene {
     LidClosed,
 }
 
-fn mic_tour(ui: &mut Ui, style: onboarding::MicStyle, scene: MicScene) {
+fn mic_tour(ui: &mut Ui, scene: MicScene) {
     let recording = matches!(scene, MicScene::Hearing | MicScene::Silent);
     mac_tour(
         ui,
@@ -2284,7 +2268,6 @@ fn mic_tour(ui: &mut Ui, style: onboarding::MicStyle, scene: MicScene) {
     }
     let microphone = ui.settings.microphone.clone();
     if let Some(tour) = &mut ui.tour {
-        tour.mic_style = style;
         match scene {
             MicScene::Hearing => tour.mic.level = 0.6,
             MicScene::Silent => tour.mic.silent = Some(microphone),
