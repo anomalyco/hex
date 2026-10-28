@@ -161,8 +161,10 @@ understands.
 - A system stream stop is not an output failure. If the output still finishes, the MP4 is kept.
 - ScreenCaptureKit writes a frame only when the screen changes, so a video track can end at the
   last change while audio runs to the stop. The final frame is held to the recorded end by
-  lengthening its sample in place, so every reader sees the full length. If that fails, the
-  original file is kept.
+  lengthening its sample in place, so every reader sees the full length. When B-frames decode
+  the final frame before another, a skipped H.264 picture that copies it exactly is appended
+  instead; no existing sample is re-encoded or moved. If either fails, the original file is
+  kept.
 - Logging goes through `tracing`.
 
 ## Tests

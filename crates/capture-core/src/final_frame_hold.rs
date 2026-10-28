@@ -4,10 +4,11 @@
 //! screen ends its video track at the last change while audio continues to the real stop time.
 //! The hold lengthens the final sample in the video track's own sample table (`stts`), so every
 //! reader agrees: `AVFoundation`, `FFmpeg`, and external players. A movie-level time-scale edit
-//! would be stored as an edit-list media rate, which `FFmpeg` ignores. Only the movie header
-//! changes: no sample data is copied or re-encoded. The edit is applied to an APFS clone in the
-//! same directory, verified, and atomically renamed over the original, so a failure always leaves
-//! the original recording intact.
+//! would be stored as an edit-list media rate, which `FFmpeg` ignores. When B-frames put a frame
+//! presented earlier last in decode order, one skipped picture repeating the final frame is
+//! appended instead ([`skip_frame`]). Nothing is re-encoded and no existing sample moves. The
+//! edit is applied to an APFS clone in the same directory, verified, and atomically renamed over
+//! the original, so a failure always leaves the original recording intact.
 
 use std::fmt;
 use std::fs::{self, File, OpenOptions};
@@ -17,6 +18,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::probe::{Probe, probe};
 use crate::time::MediaTime;
+
+mod h264;
+mod skip_frame;
 
 const CONTAINER_BOXES: [&[u8; 4]; 6] = [b"moov", b"trak", b"mdia", b"minf", b"stbl", b"edts"];
 // A movie header is small; refuse anything implausible rather than reading it into memory.
@@ -106,17 +110,32 @@ pub fn hold_final_video_frame(
         return Ok(FinalFrameHold::Covered { video_end });
     }
     let held_end = movie_time(plan.target_end, plan.movie_timescale)?;
+    let untouched = other_tracks(&moov, plan.video_track)?;
+    let appended = if plan.reordered {
+        skip_frame::append_skip_frame(
+            &mut moov,
+            &plan,
+            &mut File::open(path)?,
+            layout.append_offset() + 8,
+        )?
+    } else {
+        Vec::new()
+    };
     apply_hold(&mut moov, &plan)?;
     let header = serialize_boxes(&moov)?;
 
     let before = probe(path).map_err(FinalFrameHoldError::Probe)?;
     let staging = staging_path(path)?;
-    let result = write_staged(path, &staging, &layout, &header).and_then(|()| {
+    let result = write_staged(path, &staging, &layout, &appended, &header).and_then(|()| {
         verify(
             &before,
             &probe(&staging).map_err(FinalFrameHoldError::Probe)?,
             held_end,
         )?;
+        let staged = parse_boxes(&read_layout(&staging)?.moov, false)?;
+        if other_tracks(&staged, plan.video_track)? != untouched {
+            return Err(FinalFrameHoldError::Verification("another track changed"));
+        }
         fs::rename(&staging, path)?;
         if let Some(directory) = path.parent() {
             let _ = File::open(directory).and_then(|directory| directory.sync_all());
@@ -133,9 +152,21 @@ pub fn hold_final_video_frame(
 }
 
 struct Layout {
+    file_len: u64,
     moov_offset: u64,
     moov_is_last: bool,
     moov: Vec<u8>,
+}
+
+impl Layout {
+    /// Where a box appended by [`write_staged`] begins.
+    fn append_offset(&self) -> u64 {
+        if self.moov_is_last {
+            self.moov_offset
+        } else {
+            self.file_len
+        }
+    }
 }
 
 fn read_layout(path: &Path) -> Result<Layout, FinalFrameHoldError> {
@@ -153,6 +184,10 @@ fn read_layout(path: &Path) -> Result<Layout, FinalFrameHoldError> {
         file.read_exact(&mut header[..available])?;
         let kind = [header[4], header[5], header[6], header[7]];
         let size = match u32::from_be_bytes([header[0], header[1], header[2], header[3]]) {
+            // Anything written after a box that runs to the end of the file would be inside it.
+            0 if &kind != b"moov" => {
+                return Err(FinalFrameHoldError::Unsupported("open-ended box"));
+            }
             0 => file_len - offset,
             1 if available == 16 => u64::from_be_bytes(header[8..16].try_into().unwrap_or([0; 8])),
             1 => return Err(FinalFrameHoldError::Malformed("truncated large box header")),
@@ -180,31 +215,37 @@ fn read_layout(path: &Path) -> Result<Layout, FinalFrameHoldError> {
     file.seek(SeekFrom::Start(moov_offset))?;
     file.read_exact(&mut bytes)?;
     Ok(Layout {
+        file_len,
         moov_offset,
         moov_is_last: moov_offset + moov_size == file_len,
         moov: bytes,
     })
 }
 
-/// Writes the edited movie header into an APFS clone of the original. A trailing header is
-/// replaced in place; a leading one becomes a `free` box so no sample offsets move.
+/// Writes `appended` boxes and the edited movie header into an APFS clone of the original. A
+/// trailing header is replaced in place; a leading one becomes a `free` box so no sample offsets
+/// move.
 fn write_staged(
     path: &Path,
     staging: &Path,
     layout: &Layout,
+    appended: &[u8],
     header: &[u8],
 ) -> Result<(), FinalFrameHoldError> {
     fs::copy(path, staging)?;
     let mut file = OpenOptions::new().write(true).open(staging)?;
     if layout.moov_is_last {
         file.seek(SeekFrom::Start(layout.moov_offset))?;
+        file.write_all(appended)?;
         file.write_all(header)?;
-        let header_len = u64::try_from(header.len()).map_err(|_| FinalFrameHoldError::Overflow)?;
-        file.set_len(layout.moov_offset + header_len)?;
+        let written = u64::try_from(appended.len() + header.len())
+            .map_err(|_| FinalFrameHoldError::Overflow)?;
+        file.set_len(layout.moov_offset + written)?;
     } else {
         file.seek(SeekFrom::Start(layout.moov_offset + 4))?;
         file.write_all(b"free")?;
-        file.seek(SeekFrom::End(0))?;
+        file.seek(SeekFrom::Start(layout.file_len))?;
+        file.write_all(appended)?;
         file.write_all(header)?;
     }
     file.sync_all()?;
@@ -248,6 +289,19 @@ fn verify(before: &Probe, after: &Probe, held_end: MediaTime) -> Result<(), Fina
         ));
     }
     Ok(())
+}
+
+/// Serialized bytes of every track other than the video track, which the hold must not change.
+fn other_tracks(moov: &[Mp4Box], video_track: usize) -> Result<Vec<Vec<u8>>, FinalFrameHoldError> {
+    let moov = moov
+        .first()
+        .ok_or(FinalFrameHoldError::Malformed("movie header"))?;
+    children(moov)
+        .iter()
+        .enumerate()
+        .filter(|(index, item)| item.kind == *b"trak" && *index != video_track)
+        .map(|(_, trak)| serialize_boxes(std::slice::from_ref(trak)))
+        .collect()
 }
 
 fn movie_time(value: u64, timescale: u32) -> Result<MediaTime, FinalFrameHoldError> {
@@ -376,6 +430,10 @@ struct HoldPlan {
     video_end: u64,
     target_end: u64,
     media_extension: u64,
+    /// Media time where the held video's final edit ends, when the track has an edit list.
+    edit_media_end: Option<u64>,
+    /// The final sample in decode order is not presented last.
+    reordered: bool,
 }
 
 fn plan_hold(moov: &[Mp4Box], recorded_end: MediaTime) -> Result<HoldPlan, FinalFrameHoldError> {
@@ -429,6 +487,8 @@ fn plan_hold(moov: &[Mp4Box], recorded_end: MediaTime) -> Result<HoldPlan, Final
             video_end,
             target_end,
             media_extension: 0,
+            edit_media_end: None,
+            reordered: false,
         });
     }
 
@@ -438,6 +498,7 @@ fn plan_hold(moov: &[Mp4Box], recorded_end: MediaTime) -> Result<HoldPlan, Final
     if media_timescale == 0 {
         return Err(FinalFrameHoldError::Malformed("media timescale"));
     }
+    let mut edit_media_end = None;
     if let Some(elst) = leaf(trak, &[b"edts", b"elst"]) {
         let last = edit_entries(elst)?
             .pop()
@@ -447,8 +508,19 @@ fn plan_hold(moov: &[Mp4Box], recorded_end: MediaTime) -> Result<HoldPlan, Final
                 "final edit is not plain playback",
             ));
         }
+        let held_duration = last
+            .duration
+            .checked_add(target_end - video_end)
+            .ok_or(FinalFrameHoldError::Overflow)?;
+        edit_media_end = Some(
+            last.media_time.cast_unsigned()
+                + ceil_ratio(
+                    held_duration,
+                    u64::from(media_timescale),
+                    u64::from(movie_timescale),
+                )?,
+        );
     }
-    ensure_final_decode_sample_is_presented_last(trak)?;
     Ok(HoldPlan {
         movie_timescale,
         video_track,
@@ -459,17 +531,19 @@ fn plan_hold(moov: &[Mp4Box], recorded_end: MediaTime) -> Result<HoldPlan, Final
             u64::from(media_timescale),
             u64::from(movie_timescale),
         )?,
+        edit_media_end,
+        reordered: !final_decode_sample_is_presented_last(trak)?,
     })
 }
 
-/// The final sample in decode order is the one whose duration is lengthened, so it must also be
-/// the final frame shown.
-fn ensure_final_decode_sample_is_presented_last(trak: &Mp4Box) -> Result<(), FinalFrameHoldError> {
+/// Whether the final sample in decode order is also the final frame shown, so lengthening it
+/// holds that frame.
+fn final_decode_sample_is_presented_last(trak: &Mp4Box) -> Result<bool, FinalFrameHoldError> {
     let stbl = [b"mdia", b"minf", b"stbl"];
     let stts = leaf(trak, &[stbl[0], stbl[1], stbl[2], b"stts"])
         .ok_or(FinalFrameHoldError::Malformed("missing stts"))?;
     let Some(ctts) = leaf(trak, &[stbl[0], stbl[1], stbl[2], b"ctts"]) else {
-        return Ok(());
+        return Ok(true);
     };
     let mut decode_times = Vec::new();
     let mut decode_time = 0_i64;
@@ -496,12 +570,7 @@ fn ensure_final_decode_sample_is_presented_last(trak: &Mp4Box) -> Result<(), Fin
     let (last, earlier) = presentation_times
         .split_last()
         .ok_or(FinalFrameHoldError::Malformed("ctts sample count"))?;
-    if earlier.iter().any(|time| time > last) {
-        return Err(FinalFrameHoldError::Unsupported(
-            "final decoded frame is not presented last",
-        ));
-    }
-    Ok(())
+    Ok(earlier.iter().all(|time| time < last))
 }
 
 fn apply_hold(moov: &mut [Mp4Box], plan: &HoldPlan) -> Result<(), FinalFrameHoldError> {
@@ -519,6 +588,10 @@ fn apply_hold(moov: &mut [Mp4Box], plan: &HoldPlan) -> Result<(), FinalFrameHold
     set_tkhd_duration(tkhd, plan.target_end)?;
     if let Some(elst) = leaf_mut(trak, &[b"edts", b"elst"]) {
         extend_last_edit(elst, movie_extension)?;
+    }
+    if plan.reordered {
+        // The appended picture already carries the held media time.
+        return Ok(());
     }
     let mdhd = leaf_mut(trak, &[b"mdia", b"mdhd"]).ok_or(FinalFrameHoldError::Malformed("mdhd"))?;
     let (_, media_duration) = timescale_and_duration(mdhd)?;
@@ -567,6 +640,7 @@ fn time_to_sample_entries(stts: &[u8]) -> Result<Vec<(u32, u32)>, FinalFrameHold
 }
 
 struct Edit {
+    duration: u64,
     media_time: i64,
     rate: u32,
 }
@@ -579,11 +653,13 @@ fn edit_entries(elst: &[u8]) -> Result<Vec<Edit>, FinalFrameHoldError> {
             let offset = 8 + entry * entry_len;
             Ok(if entry_len == 20 {
                 Edit {
+                    duration: be_u64(elst, offset)?,
                     media_time: be_u64(elst, offset + 8)?.cast_signed(),
                     rate: be_u32(elst, offset + 16)?,
                 }
             } else {
                 Edit {
+                    duration: u64::from(be_u32(elst, offset)?),
                     media_time: i64::from(be_u32(elst, offset + 4)?.cast_signed()),
                     rate: be_u32(elst, offset + 8)?,
                 }

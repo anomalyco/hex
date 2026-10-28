@@ -221,8 +221,10 @@ pub(crate) mod fixtures {
     use std::ptr::NonNull;
 
     use objc2_av_foundation::{
-        AVAssetWriterInputPixelBufferAdaptor, AVFileTypeMPEG4, AVMediaTypeVideo, AVVideoCodecKey,
-        AVVideoCodecTypeH264, AVVideoHeightKey, AVVideoWidthKey,
+        AVAssetWriterInputPixelBufferAdaptor, AVFileTypeMPEG4, AVMediaTypeVideo,
+        AVVideoAllowFrameReorderingKey, AVVideoCodecKey, AVVideoCodecTypeH264,
+        AVVideoCompressionPropertiesKey, AVVideoHeightKey, AVVideoProfileLevelH264HighAutoLevel,
+        AVVideoProfileLevelKey, AVVideoWidthKey,
     };
     use objc2_core_audio_types::{
         AudioStreamBasicDescription, kAudioFormatFlagIsFloat, kAudioFormatFlagIsPacked,
@@ -252,6 +254,26 @@ pub(crate) mod fixtures {
     impl AvWriter {
         /// An H.264 MP4 writer at `width`×`height`, with an AAC input when `with_audio`.
         pub(crate) fn mp4(path: &Path, width: usize, height: usize, with_audio: bool) -> Self {
+            Self::mp4_with(path, width, height, with_audio, false)
+        }
+
+        /// Like [`Self::mp4`], but High profile with frame reordering (B-frames) allowed.
+        pub(crate) fn mp4_reordered(
+            path: &Path,
+            width: usize,
+            height: usize,
+            with_audio: bool,
+        ) -> Self {
+            Self::mp4_with(path, width, height, with_audio, true)
+        }
+
+        fn mp4_with(
+            path: &Path,
+            width: usize,
+            height: usize,
+            with_audio: bool,
+            reordered: bool,
+        ) -> Self {
             // SAFETY: Framework constants are immutable process-lifetime objects.
             let file_type = unsafe { AVFileTypeMPEG4 }.expect("AVFileTypeMPEG4");
             let writer = create(path, file_type).expect("create writer");
@@ -267,14 +289,31 @@ pub(crate) mod fixtures {
             };
             let width_number = NSNumber::new_usize(width);
             let height_number = NSNumber::new_usize(height);
-            let settings = NSDictionary::from_slices(
-                &[codec_key, width_key, height_key],
-                &[
-                    codec as &AnyObject,
-                    &*width_number as &AnyObject,
-                    &*height_number as &AnyObject,
-                ],
+            let mut keys = vec![codec_key, width_key, height_key];
+            let mut values = vec![
+                codec as &AnyObject,
+                &*width_number as &AnyObject,
+                &*height_number as &AnyObject,
+            ];
+            // SAFETY: Framework constants are immutable process-lifetime objects.
+            let (compression_key, reorder_key, profile_key, high_profile) = unsafe {
+                (
+                    AVVideoCompressionPropertiesKey.expect("compression key"),
+                    AVVideoAllowFrameReorderingKey.expect("reordering key"),
+                    AVVideoProfileLevelKey.expect("profile key"),
+                    AVVideoProfileLevelH264HighAutoLevel.expect("high profile"),
+                )
+            };
+            let allow = NSNumber::new_bool(true);
+            let compression = NSDictionary::from_slices(
+                &[reorder_key, profile_key],
+                &[&*allow as &AnyObject, high_profile as &AnyObject],
             );
+            if reordered {
+                keys.push(compression_key);
+                values.push(&*compression as &AnyObject);
+            }
+            let settings = NSDictionary::from_slices(&keys, &values);
             // SAFETY: The settings fully specify H.264 output.
             let input = unsafe {
                 AVAssetWriterInput::assetWriterInputWithMediaType_outputSettings(
@@ -351,6 +390,15 @@ pub(crate) mod fixtures {
         height: usize,
         color: [u8; 4],
     ) -> CFRetained<CVPixelBuffer> {
+        bgra(width, height, |_, _| color)
+    }
+
+    /// A BGRA pixel buffer with each pixel's color from `pixel(x, y)`.
+    pub(crate) fn bgra(
+        width: usize,
+        height: usize,
+        pixel: impl Fn(usize, usize) -> [u8; 4],
+    ) -> CFRetained<CVPixelBuffer> {
         let mut buffer = std::ptr::null_mut();
         // SAFETY: Valid dimensions and format; CoreVideo writes a +1 buffer to `buffer`.
         let status = unsafe {
@@ -376,6 +424,7 @@ pub(crate) mod fixtures {
             let bytes_per_row = CVPixelBufferGetBytesPerRow(&buffer);
             for y in 0..height {
                 for x in 0..width {
+                    let color = pixel(x, y);
                     base.add(y * bytes_per_row + x * 4)
                         .copy_from_nonoverlapping(color.as_ptr(), color.len());
                 }
