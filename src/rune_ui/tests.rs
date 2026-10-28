@@ -521,11 +521,11 @@ fn every_scene_stops_asking_for_frames() {
 
 #[test]
 fn the_sidebar_has_no_modes_without_the_experiment() {
-    let mut rt = runtime("modes-off", true, PANE_SIZE);
+    let rt = runtime("modes-off", true, PANE_SIZE);
     assert!(rt.find("nav-modes").is_none());
     assert!(rt.find("nav-voice-action").is_some());
     assert!(!Pane::Modes.shown(&rt.state));
-    let mut rt = runtime("modes", true, PANE_SIZE);
+    let rt = runtime("modes", true, PANE_SIZE);
     assert!(rt.find("nav-modes").is_some());
 }
 
