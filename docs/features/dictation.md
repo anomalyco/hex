@@ -185,6 +185,9 @@ General > Shortcut mode = Toggle
   -> Escape -> Cancel
   // Double-tap to lock and Double-tap only are hidden and ignored
   // Shortcut chords during the first 300 ms still discard
+  Linux: release never arrives (Hyprland Lua bind, Alt up before Z)
+  ├── Press 1 s or more after the last press -> Finish
+  └── Sooner -> Ignored as a key repeat (KWin repeats held shortcuts)
 ```
 
 Toggle reuses the lock state on every platform: each press behaves as the
@@ -194,9 +197,14 @@ each platform's settings; files without it load as Hold. Checks:
 `toggle_mode_escape_cancels_a_locked_capture` in
 [suppression.rs](../../src/suppression.rs) (macOS reducer), the same names in
 [windows_input.rs](../../src/windows_input.rs), and
-`toggle_mode_starts_on_a_tap_and_finishes_on_the_next` in
+`toggle_mode_starts_on_a_tap_and_finishes_on_the_next`,
+`a_capture_that_would_lock_finishes_when_the_desktop_drops_its_release`, and
+`a_repeating_held_press_never_finishes_the_capture` in
 [linux_input.rs](../../src/linux_input.rs), whose one state machine serves X11
-grabs, Wayland portal shortcuts, and the `hex dictation` commands alike. Only
+grabs, Wayland portal shortcuts, and the `hex dictation` commands alike. The
+dropped release was observed on 2026-10-28 on Hyprland 0.56.2 with
+xdg-desktop-portal-hyprland 1.4.1: uinput Alt+Z sent no `Deactivated` when Alt
+came up first (the fix itself has not been run there yet). Only
 the Windows build was compiled and tested locally (2026-10-19); macOS relies on
 CI. The Linux state machine and X11 grab tests ran on 2026-10-22 (the grabs on
 an isolated Xwayland display). No physical keyboard check yet.

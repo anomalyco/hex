@@ -267,7 +267,10 @@ hl.bind("CTRL + ALT + V", hl.dsp.global("hex:paste-last"))
 
   Older Hyprland configs write `bind = ALT, Z, global, hex:dictation`.
   Escape-cancel can't be bound this way; bind `hex dictation cancel` to a key
-  instead.
+  instead. Hyprland 0.56's Lua binds send no release when the modifier comes
+  up before the key (Alt before Z). Toggle is unaffected: the next press still
+  finishes. In Hold, recording continues until the next press and release, so
+  lift the key first or use Toggle.
 - **Wayland without the portal** (for example Sway): nothing registers global
   shortcuts. Settings lists these commands; bind them in your desktop's own
   keyboard configuration:

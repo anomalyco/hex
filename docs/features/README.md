@@ -913,7 +913,9 @@ closing it leaves the same process answering.
 Shortcut rules are pure and tested once for every source in
 [linux_input.rs](../../src/linux_input.rs): hold, double-tap lock, toggle,
 double-tap only, Escape, Paste Last, Voice Action, and command idempotence,
-plus X11 auto-repeat filtering. The X11 grab tests run on an isolated display in
+plus X11 auto-repeat filtering and a portal release that never arrives
+(Hyprland's Lua binds drop it when the modifier comes up first; see
+[dictation.md](dictation.md)). The X11 grab tests run on an isolated display in
 CI; `commands_and_grabs_share_the_x11_listener` drives grabs and commands
 through one listener. [scripts/test-linux-service.py](../../scripts/test-linux-service.py)
 checks that commands fail without a listening Hex.
