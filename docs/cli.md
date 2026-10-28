@@ -298,6 +298,8 @@ an unsaved edit.
 
 - Booleans take `on`/`off`, `true`/`false`, `yes`/`no`, or `1`/`0`.
 - Optional settings take `none` to clear them.
+- `microphone` takes a device name exactly as Settings lists it, or
+  `system-default` (or `none`) to follow the OS default input.
 - Shortcuts take text such as `option`, `right-command`, `option+shift+v`,
   `control+space`, `fn`, or `f5`. Key names resolve on the active keyboard
   layout, the OS's rules for Settings' recorder apply, and a binding another
@@ -308,11 +310,20 @@ an unsaved edit.
 - `commands_enabled on` while `release_microphone_while_idle` is on, and the
   reverse, need `--yes`, because each turns the other off.
 - `voice_action.enabled on` needs a free Voice Action shortcut.
+- `updates.channel` takes `stable`, `dev`, or `none` (follow the build: the
+  channel it was published on), and checks for updates at once. Choosing
+  another channel than the build's offers that channel's current release
+  ("Switch to Stable 2.3.1" in the window); Hex installs it only once you
+  confirm there. Versions are never compared.
 - With the `capture` build option and experiment, `capture.*` keys appear:
   `capture.enabled`, `capture.hotkey` (default `option+shift+s`),
   `capture.list_hotkey` (the capsule's send-to list, default
   `option+shift+v`), `capture.transcriber`, `capture.folder`,
-  `capture.media_days`, `capture.bundle_days`, and `capture.routing`. Both
+  `capture.media_days`, `capture.bundle_days`, `capture.routing`,
+  `capture.show_overlays_in_recordings` (default off; on lets screen
+  recordings, Hex's captures included, show its overlays), and
+  `capture.capsule_flow` (`list`, the default, `toast`, `menu_bar`, `cursor`
+  or `notch`: the capsule's flow after a capture, prototypes to compare). Both
   capture shortcuts need a key, and `capture.enabled on` needs both free; on
   a Mac whose Paste Last is still ⌥⇧V, rebind one of the two first.
 - `transcription.model` and `transcription.language` are read-only here: use
@@ -334,7 +345,7 @@ Writable keys: `commands_enabled`, `release_microphone_while_idle`,
 `experimental.hex_microphone`, `experimental.hex_microphone_mode`,
 `experimental.hex_microphone_comfort_noise`,
 `experimental.hex_microphone_strength`, `enable_on_launch`,
-`paste_with_shift`, `ui_language`, `indicator_position`.
+`paste_with_shift`, `ui_language`, `indicator_position`, `updates.channel`.
 
 A test (`control::settings::tests::every_persisted_setting_has_a_cli_key`)
 fails when a new persisted setting has no key here.

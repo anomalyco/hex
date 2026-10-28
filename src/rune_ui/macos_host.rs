@@ -96,7 +96,9 @@ impl Backend {
             Request::Desktop(
                 action @ (DesktopAction::CheckForUpdates
                 | DesktopAction::OpenUpdate
-                | DesktopAction::RestartIntoUpdate),
+                | DesktopAction::RestartIntoUpdate
+                | DesktopAction::ConfirmUpdateSwitch
+                | DesktopAction::WindowFocused),
             ) => crate::macos_rune::update_action(&action),
             request => match &self.runtime {
                 Some(runtime) => runtime.send(request),

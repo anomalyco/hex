@@ -187,7 +187,7 @@ pub fn run(
     let mut device_label = if input.is_open() {
         input.device_name().to_string()
     } else {
-        device.clone().unwrap_or_else(|| "microphone".into())
+        device.clone().unwrap_or_else(|| "System default".into())
     };
     // A hotkey press that arrived while the released microphone was still
     // opening; recording begins at the first chunk.
@@ -318,7 +318,7 @@ pub fn run(
                 device_label = if input.is_open() {
                     input.device_name().to_string()
                 } else {
-                    device.clone().unwrap_or_else(|| "microphone".into())
+                    device.clone().unwrap_or_else(|| "System default".into())
                 };
                 emit_current_state(&mut events, recording, pending, &device_label)?;
             }
@@ -566,7 +566,10 @@ pub fn run(
             emit_current_state(&mut events, recording, pending, &device_label)?;
         }
 
-        match input.recv_timeout(UPDATE_INTERVAL, !recording) {
+        match input.recv_timeout(
+            UPDATE_INTERVAL,
+            crate::audio::capture_idle(recording, start_pending, finishing.is_some()),
+        ) {
             RecoveringAudioInputEvent::Chunk {
                 samples,
                 captured_through: chunk_captured_through,
@@ -647,6 +650,7 @@ pub fn run(
                 capture = DictationCapture::new(input.sample_rate());
                 audio_ready = false;
                 device_label = input.device_name().to_string();
+                emit_current_state(&mut events, recording, pending, &device_label)?;
             }
             RecoveringAudioInputEvent::OpenFailed(error) => {
                 if !release_while_idle {

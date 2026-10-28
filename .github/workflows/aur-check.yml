@@ -14,11 +14,13 @@ jobs:
     runs-on: ubuntu-24.04
     environment: release
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          sparse-checkout: /.github/release/
+          sparse-checkout-cone-mode: false
           persist-credentials: false
       - name: List the AUR account's packages with the key
         shell: bash
         env:
           AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
-        run: scripts/release-aur.sh check | tee -a "$GITHUB_STEP_SUMMARY"
+        run: bash .github/release/push-aur.sh check | tee -a "$GITHUB_STEP_SUMMARY"

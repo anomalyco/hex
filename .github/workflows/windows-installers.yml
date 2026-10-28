@@ -1,0 +1,114 @@
+name: Windows installers
+
+# Builds Hex-Setup-<version>-windows-<x64|arm64>.exe (packaging/windows/hex.iss)
+# around the Windows executables in the artifacts that match `pattern`, then
+# installs, reinstalls, installs over another version, and uninstalls each
+# silently on native x64 and ARM64 runners. Release passes the signed
+# executables and signs the installers afterwards; Test builds passes the
+# unsigned ones. Repository code runs here, so there is no environment, no
+# secret, and no id-token; artifacts are checked against the digests their
+# jobs reported (.github/release/verify-artifacts.sh).
+on:
+  workflow_call:
+    inputs:
+      sha:
+        required: true
+        type: string
+      version:
+        required: true
+        type: string
+      pattern:
+        description: Artifact name pattern of the executables
+        required: true
+        type: string
+      digests:
+        description: Space-separated name=digest pairs for those artifacts
+        required: true
+        type: string
+      artifact-name:
+        description: The installers' artifact
+        required: true
+        type: string
+      retention-days:
+        type: number
+        default: 0
+    outputs:
+      digest:
+        value: ${{ jobs.package.outputs.digest }}
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    name: Build the installers
+    runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      HEX_VERSION: ${{ inputs.version }}
+    outputs:
+      digest: ${{ steps.upload.outputs.digest }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.sha }}
+          persist-credentials: false
+      - uses: ./.github/release/download
+        with:
+          pattern: ${{ inputs.pattern }}
+          digests: ${{ inputs.digests }}
+      - name: Build the installers around the executables
+        shell: pwsh
+        run: |
+          $out = New-Item -ItemType Directory -Force "$env:RUNNER_TEMP/installers"
+          foreach ($arch in 'x86_64', 'aarch64') {
+            $label = if ($arch -eq 'x86_64') { 'x64' } else { 'arm64' }
+            $exe = @(Get-ChildItem "$env:RUNNER_TEMP/in" -Recurse -Filter "Hex-$env:HEX_VERSION-windows-$label.exe")
+            if ($exe.Count -ne 1) { throw "Expected one Hex-$env:HEX_VERSION-windows-$label.exe, found $($exe.Count)." }
+            scripts/build-windows-installer.ps1 -Executable $exe[0].FullName -Version $env:HEX_VERSION -Arch $arch -OutDir $out
+          }
+          Get-ChildItem $out | Where-Object { $_.Name -notlike 'Hex-Setup-*.exe' } | Remove-Item -Recurse -Force
+      - id: upload
+        uses: ./.github/release/upload
+        with:
+          name: ${{ inputs.artifact-name }}
+          path: ${{ runner.temp }}/installers
+          retention-days: ${{ inputs.retention-days }}
+
+  test:
+    name: Test the ${{ matrix.label }} installer
+    needs: package
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: x64
+            runner: windows-latest
+          - label: arm64
+            runner: windows-11-arm
+    env:
+      HEX_VERSION: ${{ inputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.sha }}
+          persist-credentials: false
+      - uses: ./.github/release/download
+        with:
+          pattern: "{${{ inputs.pattern }},${{ inputs.artifact-name }}}"
+          digests: ${{ inputs.digests }} ${{ inputs.artifact-name }}=${{ needs.package.outputs.digest }}
+      - name: Install, reinstall, install over another version, and uninstall silently
+        shell: pwsh
+        run: |
+          $exe = @(Get-ChildItem "$env:RUNNER_TEMP/in" -Recurse -Filter "Hex-$env:HEX_VERSION-windows-${{ matrix.label }}.exe")[0].FullName
+          $setup = @(Get-ChildItem "$env:RUNNER_TEMP/in" -Recurse -Filter "Hex-Setup-$env:HEX_VERSION-windows-${{ matrix.label }}.exe")[0].FullName
+          scripts/test-windows-installer.ps1 -Installer $setup -Executable $exe -Version $env:HEX_VERSION
+      - name: Upload installer logs
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: windows-installer-logs-${{ matrix.label }}
+          path: ${{ runner.temp }}/hex-installer-logs
+          if-no-files-found: ignore

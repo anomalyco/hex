@@ -2,11 +2,11 @@
 //! that turns spoken instructions into paste-ready text. Enabling checks the
 //! saved shortcut against the others first.
 
-use rune::{El, col};
+use rune::El;
 
 use super::ShortcutTarget;
 use super::Ui;
-use super::controls::{Paint, card, described_row, folding, note, section, toggle_row};
+use super::controls::{Paint, card, described_row, folding, note, page, section, toggle_row};
 use super::models::{self, Target};
 use super::settings::{cancel_capture, shortcut_control};
 use crate::app_settings::AppSettings;
@@ -53,7 +53,7 @@ fn toggle(ui: &mut Ui) {
 
 pub(super) fn pane(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
     let enabled = ui.settings.voice_action.enabled;
-    let mut content = col().key("content").px(24.0).pt(4.0).gap(24.0);
+    let mut content = page("content");
     let enable = vec![
         toggle_row(
             p,

@@ -1,11 +1,18 @@
 name: Site deploy
 
 # Builds site/ for one environment and deploys its Worker (the site at /hex and
-# the files bucket at /hex/files) with `cf deploy --prebuilt --mode <mode>`:
-# dev -> https://dev.anoma.ly/hex, production -> https://anoma.ly/hex. The
-# github-actions-hex token lives in the release environment (dev, production
-# and app-v* only; dev so pushes to dev can deploy the dev site). Called by
-# Site for dev and by Release after a stable publish.
+# the files bucket at /hex/files): dev -> https://dev.anoma.ly/hex,
+# production -> https://anoma.ly/hex. Split like Release (docs/releasing.md):
+#
+# - build runs repository code (bun install, site/scripts/build.ts) with no
+#   environment and no secrets, and uploads the Worker's Build Output with a
+#   SHA256SUMS whose digest it reports.
+# - deploy runs in the release environment, which holds the hex-site-deploy
+#   token. It checks out only .github/release/, verifies the artifact against
+#   that digest, and runs only .github/release/deploy-site.sh, which pins the
+#   Worker, routes, and bindings and deploys with the cf CLI locked in
+#   .github/release/cf/.
+# - verify checks the live site and every download link without secrets.
 on:
   workflow_call:
     inputs:
@@ -17,32 +24,81 @@ permissions:
   contents: read
 
 jobs:
-  deploy:
-    runs-on: ubuntu-latest
-    environment: release
-    concurrency:
-      group: site-deploy-${{ inputs.mode }}
-      cancel-in-progress: false
+  build:
+    runs-on: ubuntu-24.04
+    outputs:
+      digest: ${{ steps.upload.outputs.digest }}
     defaults:
       run:
         working-directory: site
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ github.sha }}
           persist-credentials: false
-      - uses: actions/setup-node@v5
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+      - run: bun install --frozen-lockfile
+      - name: Build
+        env:
+          MODE: ${{ inputs.mode }}
+        run: |
+          case "$MODE" in dev|production) ;; *) exit 1 ;; esac
+          bun run build --mode "$MODE"
+          # Vite's build manifest is not deployed, and artifacts drop hidden files.
+          rm -r .cloudflare/output/v0/workers/default/bundle/.vite
+      - id: upload
+        uses: ./.github/release/upload
+        with:
+          name: site-${{ inputs.mode }}
+          path: site/.cloudflare/output
+          retention-days: 7
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-24.04
+    environment: release
+    concurrency:
+      group: site-deploy-${{ inputs.mode }}
+      cancel-in-progress: false
+    steps:
+      - name: Check out the release scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          sparse-checkout: /.github/release/
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
-      - uses: oven-sh/setup-bun@v2
-      - run: bun install --frozen-lockfile
-      - name: Build and deploy
+      - name: Install the pinned cf CLI
+        working-directory: .github/release/cf
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Download
+        uses: ./.github/release/download
+        with:
+          pattern: site-${{ inputs.mode }}
+          digests: site-${{ inputs.mode }}=${{ needs.build.outputs.digest }}
+      - name: Deploy
         env:
           MODE: ${{ inputs.mode }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
-        run: |
-          case "$MODE" in dev|production) ;; *) exit 1 ;; esac
-          bun run "deploy:$MODE"
+        run: bash .github/release/deploy-site.sh "$MODE" "$RUNNER_TEMP/in/site-$MODE"
+
+  verify:
+    needs: deploy
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: site
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+      - run: bun install --frozen-lockfile
       - name: Check the live site and every download link
         env:
           MODE: ${{ inputs.mode }}
@@ -54,4 +110,5 @@ jobs:
             sleep 10
           done
           test "$status" = 200
+          bun scripts/release-data.ts --mode "$MODE"
           bun run check:downloads

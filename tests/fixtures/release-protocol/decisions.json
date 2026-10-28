@@ -2,7 +2,7 @@
   "description": "Client decisions. Run decide(input with manifest = manifests[input.manifest].manifest) and compare the whole result to expect.",
   "cases": [
     {
-      "name": "direct newer inside rollout",
+      "name": "another build inside the rollout",
       "input": {
         "app": "example",
         "artifact": "desktop",
@@ -17,7 +17,7 @@
       },
       "expect": {
         "action": "install",
-        "reason": "newer",
+        "reason": "update",
         "version": "2.4.0",
         "target": {
           "url": "/release/example/files/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/example-2.4.0-macos-arm64.zip",
@@ -27,7 +27,7 @@
       }
     },
     {
-      "name": "direct newer at the rollout boundary is deferred",
+      "name": "another build at the rollout boundary is deferred",
       "input": {
         "app": "example",
         "artifact": "desktop",
@@ -46,7 +46,7 @@
       }
     },
     {
-      "name": "below minimum bypasses rollout",
+      "name": "versions are never ordered: a higher running version still updates",
       "input": {
         "app": "example",
         "artifact": "desktop",
@@ -55,13 +55,13 @@
         "install": {
           "target": "macos-arm64",
           "distribution": "direct",
-          "rollout_bucket": 99,
-          "version": "1.9.0"
+          "rollout_bucket": 0,
+          "version": "9.0.0"
         }
       },
       "expect": {
         "action": "install",
-        "reason": "required",
+        "reason": "update",
         "version": "2.4.0",
         "target": {
           "url": "/release/example/files/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/example-2.4.0-macos-arm64.zip",
@@ -71,7 +71,7 @@
       }
     },
     {
-      "name": "revoked version bypasses rollout",
+      "name": "the running build is identified by its file",
       "input": {
         "app": "example",
         "artifact": "desktop",
@@ -80,13 +80,34 @@
         "install": {
           "target": "macos-arm64",
           "distribution": "direct",
-          "rollout_bucket": 99,
-          "version": "2.3.9"
+          "rollout_bucket": 0,
+          "version": "2.3.8",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "expect": {
+        "action": "none",
+        "reason": "up_to_date"
+      }
+    },
+    {
+      "name": "a different file with the same version is another build",
+      "input": {
+        "app": "example",
+        "artifact": "desktop",
+        "channel": "stable",
+        "manifest": "base",
+        "install": {
+          "target": "macos-arm64",
+          "distribution": "direct",
+          "rollout_bucket": 0,
+          "version": "2.4.0",
+          "sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
         }
       },
       "expect": {
         "action": "install",
-        "reason": "revoked",
+        "reason": "update",
         "version": "2.4.0",
         "target": {
           "url": "/release/example/files/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/example-2.4.0-macos-arm64.zip",
@@ -96,7 +117,7 @@
       }
     },
     {
-      "name": "same version is up to date",
+      "name": "without its file, the same version is the running build",
       "input": {
         "app": "example",
         "artifact": "desktop",
@@ -115,47 +136,48 @@
       }
     },
     {
-      "name": "newer local prerelease is up to date",
+      "name": "required bypasses the rollout",
       "input": {
         "app": "example",
         "artifact": "desktop",
         "channel": "stable",
-        "manifest": "base",
+        "manifest": "required",
         "install": {
           "target": "macos-arm64",
           "distribution": "direct",
-          "rollout_bucket": 0,
-          "version": "2.5.0-beta.1"
-        }
-      },
-      "expect": {
-        "action": "none",
-        "reason": "up_to_date"
-      }
-    },
-    {
-      "name": "a prerelease of the release version is older",
-      "input": {
-        "app": "example",
-        "artifact": "desktop",
-        "channel": "stable",
-        "manifest": "base",
-        "install": {
-          "target": "macos-arm64",
-          "distribution": "direct",
-          "rollout_bucket": 0,
-          "version": "2.4.0-beta.3"
+          "rollout_bucket": 99,
+          "version": "2.3.8"
         }
       },
       "expect": {
         "action": "install",
-        "reason": "newer",
+        "reason": "required",
         "version": "2.4.0",
         "target": {
           "url": "/release/example/files/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/example-2.4.0-macos-arm64.zip",
           "size": 1000,
           "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
         }
+      }
+    },
+    {
+      "name": "required leaves the running build alone",
+      "input": {
+        "app": "example",
+        "artifact": "desktop",
+        "channel": "stable",
+        "manifest": "required",
+        "install": {
+          "target": "macos-arm64",
+          "distribution": "direct",
+          "rollout_bucket": 0,
+          "version": "2.3.8",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "expect": {
+        "action": "none",
+        "reason": "up_to_date"
       }
     },
     {
@@ -193,7 +215,7 @@
       },
       "expect": {
         "action": "notify",
-        "reason": "newer",
+        "reason": "update",
         "version": "2.4.0",
         "distribution": "brew",
         "command": "brew upgrade --cask anomalyco/tap/example",
@@ -235,7 +257,7 @@
       },
       "expect": {
         "action": "notify",
-        "reason": "newer",
+        "reason": "update",
         "version": "2.3.8",
         "distribution": "npm",
         "command": "npm install -g @example/cli@latest",
@@ -315,7 +337,7 @@
       },
       "expect": {
         "action": "notify",
-        "reason": "newer",
+        "reason": "update",
         "version": "2.4.0",
         "distribution": "unknown",
         "notes_url": "https://anoma.ly/example/releases/2.4.0"
@@ -341,32 +363,7 @@
       }
     },
     {
-      "name": "halted rollout still enforces the minimum",
-      "input": {
-        "app": "example",
-        "artifact": "desktop",
-        "channel": "stable",
-        "manifest": "halted",
-        "install": {
-          "target": "macos-arm64",
-          "distribution": "direct",
-          "rollout_bucket": 0,
-          "version": "1.0.0"
-        }
-      },
-      "expect": {
-        "action": "install",
-        "reason": "required",
-        "version": "2.4.0",
-        "target": {
-          "url": "/release/example/files/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/example-2.4.0-macos-arm64.zip",
-          "size": 1000,
-          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-        }
-      }
-    },
-    {
-      "name": "rollback reinstalls the older version over a revoked one",
+      "name": "rollback reinstalls the earlier release",
       "input": {
         "app": "example",
         "artifact": "desktop",
@@ -376,22 +373,23 @@
           "target": "macos-arm64",
           "distribution": "direct",
           "rollout_bucket": 99,
-          "version": "2.4.0"
+          "version": "2.4.0",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
         }
       },
       "expect": {
         "action": "install",
-        "reason": "revoked",
+        "reason": "update",
         "version": "2.3.8",
         "target": {
-          "url": "/release/example/files/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/example-2.4.0-macos-arm64.zip",
-          "size": 1000,
-          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          "url": "/release/example/files/cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc/example-2.3.8-macos-arm64.zip",
+          "size": 900,
+          "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
         }
       }
     },
     {
-      "name": "rollback leaves the restored version alone",
+      "name": "rollback leaves the restored build alone",
       "input": {
         "app": "example",
         "artifact": "desktop",
@@ -401,26 +399,8 @@
           "target": "macos-arm64",
           "distribution": "direct",
           "rollout_bucket": 0,
-          "version": "2.3.8"
-        }
-      },
-      "expect": {
-        "action": "none",
-        "reason": "up_to_date"
-      }
-    },
-    {
-      "name": "rollback never downgrades an unrevoked newer version",
-      "input": {
-        "app": "example",
-        "artifact": "desktop",
-        "channel": "stable",
-        "manifest": "rollback",
-        "install": {
-          "target": "macos-arm64",
-          "distribution": "direct",
-          "rollout_bucket": 0,
-          "version": "2.4.1"
+          "version": "2.3.8",
+          "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
         }
       },
       "expect": {
@@ -438,13 +418,13 @@
         "install": {
           "target": "macos-arm64",
           "distribution": "brew",
-          "rollout_bucket": 99,
+          "rollout_bucket": 0,
           "version": "2.4.0"
         }
       },
       "expect": {
         "action": "notify",
-        "reason": "revoked",
+        "reason": "update",
         "version": "2.3.8",
         "distribution": "brew",
         "command": "brew upgrade --cask anomalyco/tap/example",
@@ -452,7 +432,7 @@
       }
     },
     {
-      "name": "dev numeric prerelease ordering",
+      "name": "dev builds follow the channel from a legacy version",
       "input": {
         "app": "example",
         "artifact": "desktop",
@@ -462,13 +442,88 @@
           "target": "macos-arm64",
           "distribution": "direct",
           "rollout_bucket": 99,
-          "version": "2.5.0-dev.9"
+          "version": "2.3.2-dev.29"
         }
       },
       "expect": {
         "action": "install",
-        "reason": "newer",
-        "version": "2.5.0-dev.10",
+        "reason": "update",
+        "version": "0.0.0-dev-42",
+        "target": {
+          "url": "/release/example/files/dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd/example-0.0.0-dev-42-macos-arm64.zip",
+          "size": 1100,
+          "sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+        }
+      }
+    },
+    {
+      "name": "dev build already running",
+      "input": {
+        "app": "example",
+        "artifact": "desktop",
+        "channel": "dev",
+        "manifest": "dev",
+        "install": {
+          "target": "macos-arm64",
+          "distribution": "direct",
+          "rollout_bucket": 0,
+          "version": "0.0.0-dev-42",
+          "sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "channel": "dev"
+        }
+      },
+      "expect": {
+        "action": "none",
+        "reason": "up_to_date"
+      }
+    },
+    {
+      "name": "switching stable to dev installs the dev build",
+      "input": {
+        "app": "example",
+        "artifact": "desktop",
+        "channel": "dev",
+        "manifest": "dev",
+        "install": {
+          "target": "macos-arm64",
+          "distribution": "direct",
+          "rollout_bucket": 99,
+          "version": "2.4.0",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "channel": "stable"
+        }
+      },
+      "expect": {
+        "action": "install",
+        "reason": "switch",
+        "version": "0.0.0-dev-42",
+        "target": {
+          "url": "/release/example/files/dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd/example-0.0.0-dev-42-macos-arm64.zip",
+          "size": 1100,
+          "sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+        }
+      }
+    },
+    {
+      "name": "switching dev to stable ignores the rollout",
+      "input": {
+        "app": "example",
+        "artifact": "desktop",
+        "channel": "stable",
+        "manifest": "base",
+        "install": {
+          "target": "macos-arm64",
+          "distribution": "direct",
+          "rollout_bucket": 99,
+          "version": "0.0.0-dev-42",
+          "sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "channel": "dev"
+        }
+      },
+      "expect": {
+        "action": "install",
+        "reason": "switch",
+        "version": "2.4.0",
         "target": {
           "url": "/release/example/files/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/example-2.4.0-macos-arm64.zip",
           "size": 1000,
@@ -477,17 +532,19 @@
       }
     },
     {
-      "name": "dev same prerelease",
+      "name": "switching to the running build is up to date",
       "input": {
         "app": "example",
         "artifact": "desktop",
-        "channel": "dev",
-        "manifest": "dev",
+        "channel": "stable",
+        "manifest": "base",
         "install": {
           "target": "macos-arm64",
           "distribution": "direct",
           "rollout_bucket": 0,
-          "version": "2.5.0-dev.10"
+          "version": "2.4.0",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "channel": "beta"
         }
       },
       "expect": {
@@ -496,22 +553,66 @@
       }
     },
     {
-      "name": "stable on the dev channel is newer than its prereleases",
+      "name": "switching through brew notifies",
       "input": {
         "app": "example",
         "artifact": "desktop",
-        "channel": "dev",
-        "manifest": "dev",
+        "channel": "stable",
+        "manifest": "base",
         "install": {
           "target": "macos-arm64",
+          "distribution": "brew",
+          "rollout_bucket": 99,
+          "version": "0.0.0-dev-42",
+          "channel": "dev"
+        }
+      },
+      "expect": {
+        "action": "notify",
+        "reason": "switch",
+        "version": "2.4.0",
+        "distribution": "brew",
+        "command": "brew upgrade --cask anomalyco/tap/example",
+        "notes_url": "https://anoma.ly/example/releases/2.4.0"
+      }
+    },
+    {
+      "name": "switching without the target",
+      "input": {
+        "app": "example",
+        "artifact": "desktop",
+        "channel": "stable",
+        "manifest": "base",
+        "install": {
+          "target": "windows-arm64",
           "distribution": "direct",
           "rollout_bucket": 0,
-          "version": "2.5.0"
+          "version": "0.0.0-dev-42",
+          "channel": "dev"
         }
       },
       "expect": {
         "action": "none",
-        "reason": "up_to_date"
+        "reason": "no_target"
+      }
+    },
+    {
+      "name": "legacy minimum and revoked versions are ignored",
+      "input": {
+        "app": "example",
+        "artifact": "desktop",
+        "channel": "stable",
+        "manifest": "legacy",
+        "install": {
+          "target": "macos-arm64",
+          "distribution": "direct",
+          "rollout_bucket": 99,
+          "version": "1.0.0"
+        }
+      },
+      "expect": {
+        "action": "none",
+        "reason": "rollout_deferred"
       }
     },
     {
@@ -530,7 +631,7 @@
       },
       "expect": {
         "action": "install",
-        "reason": "newer",
+        "reason": "update",
         "version": "2.4.0",
         "target": {
           "url": "/release/example/files/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/example-2.4.0-macos-arm64.zip",
@@ -546,6 +647,25 @@
         "artifact": "desktop",
         "channel": "stable",
         "manifest": "malformed",
+        "install": {
+          "target": "macos-arm64",
+          "distribution": "direct",
+          "rollout_bucket": 0,
+          "version": "2.3.8"
+        }
+      },
+      "expect": {
+        "action": "reject",
+        "reason": "malformed"
+      }
+    },
+    {
+      "name": "required must be a boolean",
+      "input": {
+        "app": "example",
+        "artifact": "desktop",
+        "channel": "stable",
+        "manifest": "not-required",
         "install": {
           "target": "macos-arm64",
           "distribution": "direct",

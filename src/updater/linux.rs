@@ -14,7 +14,7 @@ use color_eyre::eyre::{Result, WrapErr, bail};
 use fs2::FileExt;
 
 use super::Method;
-use super::protocol::Version;
+use super::protocol::is_version_name;
 
 pub const TARGET: &str = "linux-x64";
 pub const DOWNLOAD_TARGET: &str = "linux-x64";
@@ -62,6 +62,12 @@ pub fn method() -> Method {
 
 pub fn updates_disabled_by_policy() -> bool {
     false
+}
+
+/// The `linux-x64` target is the bare executable, so this build is the file
+/// whose SHA-256 it has.
+pub fn running_sha256() -> Option<String> {
+    crate::transcription_models::sha256_hex(&std::env::current_exe().ok()?, None).ok()
 }
 
 /// The support directory and this executable's version directory, when it
@@ -132,8 +138,8 @@ fn validate_executable(path: &Path, version: &str) -> Result<()> {
 }
 
 /// Stages the executable into its version directory and switches `current`
-/// atomically; the running version's files are never touched, and versions
-/// older than the previous one are pruned.
+/// atomically; the running version's files are never touched, and every
+/// version but the new and previous one is pruned.
 fn activate(support: &Path, version: &str, staging: &Path) -> Result<PathBuf> {
     let versions = support.join("versions");
     let version_dir = versions.join(version);
@@ -163,9 +169,7 @@ fn activate(support: &Path, version: &str, staging: &Path) -> Result<PathBuf> {
         let name = entry.file_name();
         if name.to_str() != Some(version)
             && previous.as_ref() != Some(&name)
-            && name
-                .to_str()
-                .is_some_and(|name| Version::parse(name).is_some())
+            && name.to_str().is_some_and(is_version_name)
             && let Err(error) = fs::remove_dir_all(entry.path())
         {
             tracing::warn!(%error, path = %entry.path().display(), "could not prune an old Hex version");

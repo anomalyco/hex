@@ -8,7 +8,9 @@ use rune::{El, TextEdit, Tx, col, row, text};
 use rune_kit::TextInput;
 
 use super::Ui;
-use super::controls::{ButtonKind, DESCRIPTION, Paint, button, card, setting_row, toggle_row};
+use super::controls::{
+    ButtonKind, DESCRIPTION, METRICS, Paint, button, card, setting_row, toggle_row,
+};
 use super::lists::{
     detail_header, detail_title, error_panel, fact, group_label, list_row, message, placeholder,
     source_list, split,
@@ -241,8 +243,7 @@ pub(super) fn pane(ui: &Ui, p: Paint) -> (Vec<El>, El) {
             .child(
                 col()
                     .key("notices")
-                    .px(24.0)
-                    .pt(4.0)
+                    .px(METRICS.gutter)
                     .pb(12.0)
                     .gap(8.0)
                     .children(top),
@@ -385,7 +386,7 @@ fn detail(ui: &Ui, p: Paint, command: Option<&CatalogCommand>) -> El {
         .key("command-detail")
         .grow(1.0)
         .shrink()
-        .px(24.0)
+        .px(METRICS.gutter)
         .pb(16.0)
         .child(detail_header(
             detail_title(p, &command.phrase),

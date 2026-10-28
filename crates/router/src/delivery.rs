@@ -103,6 +103,10 @@ pub struct Pending {
     pub first_at: u64,
     pub next_at: u64,
     pub last_error: String,
+    /// The Mac that wrote it ([`crate::util::machine_id`]). Only that Mac retries it, so a
+    /// bundle copied to another keeps being sent once; markers without one retry anywhere.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub machine: Option<String>,
 }
 
 impl Pending {
@@ -116,6 +120,15 @@ impl Pending {
             first_at: now,
             next_at: now + backoff_ms(1),
             last_error: short(error),
+            machine: crate::util::machine_id(),
+        }
+    }
+
+    /// Whether `machine` may retry it.
+    fn retried_on(&self, machine: Option<&str>) -> bool {
+        match (self.machine.as_deref(), machine) {
+            (Some(wrote), Some(here)) => wrote == here,
+            _ => true,
         }
     }
 
@@ -198,6 +211,11 @@ pub struct Report {
 
 /// Tries every pending delivery in `captures` that is due at `now`.
 pub fn retry_due(captures: &Path, now: u64, forward: Forward) -> Report {
+    retry_due_on(captures, now, forward, crate::util::machine_id().as_deref())
+}
+
+/// [`retry_due`] on `machine`, skipping markers another Mac wrote.
+fn retry_due_on(captures: &Path, now: u64, forward: Forward, machine: Option<&str>) -> Report {
     let mut report = Report::default();
     let Ok(entries) = std::fs::read_dir(captures) else {
         return report;
@@ -220,6 +238,14 @@ pub fn retry_due(captures: &Path, now: u64, forward: Forward) -> Report {
                 continue;
             }
         };
+        if !pending.retried_on(machine) {
+            // Copied from another Mac, which retries its own; once that Mac would have given
+            // up, it stops keeping the bundle from retention here.
+            if now.saturating_sub(pending.first_at) >= GIVE_UP_AFTER_MS {
+                let _ = std::fs::rename(dir.join(PENDING), dir.join(FAILED));
+            }
+            continue;
+        }
         if pending.next_at > now {
             continue;
         }
@@ -382,6 +408,59 @@ mod tests {
 
     fn down(_: &Path, _: &str) -> Result<()> {
         anyhow::bail!("OpenCode API failed: offline")
+    }
+
+    static COPIED_TRIES: AtomicUsize = AtomicUsize::new(0);
+
+    fn counted_forward(_: &Path, _: &str) -> Result<()> {
+        COPIED_TRIES.fetch_add(1, Ordering::SeqCst);
+        Ok(())
+    }
+
+    #[test]
+    fn only_the_mac_that_wrote_a_marker_retries_it() {
+        let captures = temp_captures();
+        let marker = |name: &str, machine: Option<&str>| {
+            let bundle = captures.join(name);
+            std::fs::create_dir_all(&bundle).unwrap();
+            let mut pending = Pending::new("ses_x", "X", None, "offline", 0);
+            pending.machine = machine.map(str::to_owned);
+            pending.write(&bundle).unwrap();
+            bundle
+        };
+        let copied = marker("scrawl-1-air.scrawl", Some("AIR"));
+        let ours = marker("scrawl-2-studio.scrawl", Some("STUDIO"));
+        let old = marker("scrawl-3-old.scrawl", None);
+        assert!(
+            !std::fs::read_to_string(old.join(PENDING))
+                .unwrap()
+                .contains("machine"),
+            "a marker without a machine reads as an old one"
+        );
+
+        let report = retry_due_on(&captures, 60_000, counted_forward, Some("STUDIO"));
+        assert_eq!(report.sent.len(), 2);
+        assert_eq!(COPIED_TRIES.load(Ordering::SeqCst), 2);
+        assert!(
+            copied.join(PENDING).exists(),
+            "the Air's marker is left alone"
+        );
+        assert!(!ours.join(PENDING).exists() && !old.join(PENDING).exists());
+
+        // Once the Air would have given up, the copy stops counting as pending here.
+        let report = retry_due_on(&captures, GIVE_UP_AFTER_MS, counted_forward, Some("STUDIO"));
+        assert_eq!(report, Report::default());
+        assert_eq!(COPIED_TRIES.load(Ordering::SeqCst), 2);
+        assert!(!copied.join(PENDING).exists() && copied.join(FAILED).exists());
+        std::fs::remove_dir_all(captures).unwrap();
+    }
+
+    #[test]
+    fn a_new_marker_names_this_mac() {
+        let pending = Pending::new("ses_x", "X", None, "offline", 0);
+        assert_eq!(pending.machine, crate::util::machine_id());
+        #[cfg(target_os = "macos")]
+        assert_eq!(pending.machine.as_deref().map(str::len), Some(32));
     }
 
     #[test]

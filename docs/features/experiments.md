@@ -47,6 +47,19 @@ The known experiments are compiled into
   [Live Chapters](meetings.md#live-chapters-experiment-live-chapters)). The
   gate is where the work starts: the recorder's chapter worker, recording
   chapters in the manifest, and the boundary pass after Stop.
+- `playground`: Rune's playground in the window (every OS). ⇧⌘D (View ›
+  Playground on macOS) or Ctrl+Shift+D swaps the window for every fixture
+  scene, grouped by pane (the tour, the model picker, and the shortcut
+  explainer each get their own group), and, in builds with captures, the
+  capture capsule's states as stories with its flow, tuning, and log. Each
+  story starts from a fresh fixture; the real window keeps running
+  underneath. While it is on, the window resizes everywhere (Linux and the
+  macOS tour otherwise keep one fixed size), so the stage beside the
+  playground's columns has room. Off, nothing is attached: no shortcut, menu item, or scene list.
+  Headless renders take `--playground [story]` while it is on, e.g.
+  `HEX_EXPERIMENTS=playground hex app -- --snap out.png --playground
+  "General/mac-settings"`. Check: `every_scene_but_live_lists_under_its_pane`
+  in [playground.rs](../../src/rune_ui/playground.rs).
 - `smart-turn`: finish hands-free dictation when Pipecat's Smart Turn model
   hears the end of a turn (macOS; see
   [Smart Turn](dictation.md#smart-turn-auto-stop-experiment-smart-turn)). The

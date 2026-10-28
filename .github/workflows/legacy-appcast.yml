@@ -5,6 +5,8 @@ name: Legacy appcast
 # packaging/macos/legacy-appcast.xml: the 2.3.1 items plus one informational
 # item that points those installs at https://anoma.ly/hex. Run once, with the
 # first release on the release service (docs/releasing.md, "Old clients").
+# The job holds the R2 key, so it checks out only .github/release/ and the
+# appcast, which it treats as data, and uploads with .github/release/r2-put.sh.
 on:
   workflow_dispatch:
 
@@ -20,6 +22,10 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          sparse-checkout: |
+            /.github/release/
+            /packaging/macos/legacy-appcast.xml
+          sparse-checkout-cone-mode: false
           persist-credentials: false
       - name: Check the appcast
         run: |
@@ -34,6 +40,6 @@ jobs:
           R2_ACCESS_KEY_ID: ${{ vars.R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
         run: |
-          scripts/r2-put.sh appcast.xml packaging/macos/legacy-appcast.xml application/xml no-cache
+          sh .github/release/r2-put.sh appcast.xml packaging/macos/legacy-appcast.xml application/xml no-cache
           curl -fsS -H 'Cache-Control: no-cache' "https://anoma.ly/hex/files/appcast.xml?check=$(date +%s)" \
             | cmp - packaging/macos/legacy-appcast.xml

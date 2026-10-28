@@ -347,7 +347,13 @@ Detected app leaves the microphone for about 3 s     // meetings.call-ended
   -> No timeout; nothing stops automatically
 
 Capture sources (meeting_capture.rs)                // meetings.capture
-├── Microphone -> selected input via cpal, resampled to 16 kHz
+├── Microphone -> dictation's input (saved device, else System default) via cpal, resampled to 16 kHz
+│   ├── System default changes, the Settings microphone changes, or a missing
+│   │   saved device returns, mid-meeting
+│   │   -> New input opens before the old drops; same track, no retry gap
+│   │      // macOS only (meetings are macOS); a failed open keeps the old input
+│   └── Saved device listed but would not open -> System default stands in
+│       -> tried again after 1, 2, 4, 8, 16, 30, 30, 30 s, then only on a change
 └── System audio -> Core Audio process tap (global, excluding Hex) on a private
     aggregate device; no display dependency
     └── Tap not authorized + Screen Recording granted -> ScreenCaptureKit fallback

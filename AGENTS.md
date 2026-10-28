@@ -2,11 +2,19 @@
 
 ## Private Kit Tool
 
-Commit and push straight to `dev` (the default branch), no PRs. Merge any open
-PR without asking. After pushing, update the installed copy. See
+`dev` and `production` take changes only through pull requests (Dax's
+ruleset; `.github/` changes also need Dax). Branch from `dev`, open a PR to
+`dev`, and merge it yourself once its checks pass; merge any open PR without
+asking. After merging, update the installed copy. See
 `~/code/control/AGENTS.md`. `production` holds what was released and moves
-only by a fast-forward from `dev` (`git push origin dev:production`) when Kit
-releases; never commit to it. There is no `main`.
+only by a fast-forward from `dev` when Kit releases; never commit to it.
+There is no `main`.
+
+Any change to what the window draws regenerates the goldens in the same PR:
+run `HEX_UPDATE_GOLDENS=1 cargo test --locked --bin voice-control rune_ui`
+on Linux (the golden tests only run there; from a Mac, dispatch
+`check-linux.yml` on the branch and take its `golden-actual` artifact),
+look at every changed image, and commit them with the change.
 
 `dev` is canonical and contains the Rune front end on every OS; GPUI is
 removed. The `rune-ui` integration branch is merged and kept only for history:
@@ -55,8 +63,10 @@ substitute for source inspection or a second roadmap.
 
 ## Architecture
 
-- `audio`: `cpal` device enumeration and timestamped mono float PCM delivery,
-  live selection, and bounded stream recovery.
+- `audio`: `cpal` device enumeration, input resolution (`--device`, the saved
+  microphone, else the system default, never Hex Microphone), the CoreAudio
+  default-input and device-list listeners, timestamped mono float PCM
+  delivery, live selection, and bounded stream recovery.
 - `moonshine`, `moonshine_lab`: the only Moonshine C adapter, the streaming
   recognizer, and the debug interactive/batch command-fixture evaluator.
 - `suppression`: the macOS event taps, shortcut suppression, and the
@@ -73,7 +83,8 @@ substitute for source inspection or a second roadmap.
   (`open_capture_sink`/`close_capture_sink`) that copies the same timeline to
   a Scrawl capture.
 - `recording_environment`: serialized RAII ownership of idle-sleep prevention,
-  output muting, and supported media-player pause/resume behavior.
+  output muting, and supported media-player pause/resume behavior, each held
+  from the first dictation or capture session that wants it to the last.
 - `dictation_processor`: the one OpenCode client and ordered processing policy
   for macOS, Windows, and Linux: context-selected corrections, deadline-bounded
   OpenCode rewrite profiles with corrected-transcript fallback, the ranked
@@ -118,9 +129,16 @@ substitute for source inspection or a second roadmap.
   normalization, cancellation, and inference. In the app, clips up to 30 s run
   on the dictation engine's model when it is the one requested; otherwise the
   service loads its own, released after a long clip when the engine holds it.
+- `transcription_stream`: live `/streams` transcription of another app's
+  pushed audio on the engine's loaded model: pause-cut windows fed through
+  yielding engine streams that any dictation request closes, a bounded
+  backlog held while dictation is busy, offline fallback windows, the lease,
+  and one live stream at a time.
 - `local_api`: authenticated loopback discovery or direct-child endpoint
   handoff, bounded HTTP parsing, model preparation progress, and raw
-  transcription routes, plus the always-on authenticated `POST /control`.
+  transcription routes, the `/streams` routes (contract:
+  [`docs/streams.md`](docs/streams.md)), plus the always-on authenticated
+  `POST /control`.
 - `control`: the release `hex` control surface: the versioned
   `ControlRequest`/`ControlReply` protocol, the settings registry behind
   `hex settings` (one dotted key per persisted setting, with the window's
@@ -153,7 +171,7 @@ substitute for source inspection or a second roadmap.
   only.
 - `text_replacements`: phrase-boundary-aware compilation of configured text
   replacements applied longest-match-first to transcripts.
-- `config`: compiled commands, preferred input devices, and dictation profiles.
+- `config`: compiled commands and dictation profiles.
 - `context`: the foreground context snapshot and selectors shared by commands
   and modes, plus native macOS capture. Browser host is the domain concept;
   Brave AppleScript is the first macOS adapter and `windows_context` reads any
@@ -404,6 +422,18 @@ CoreAudio formats, AppleScript details, or event serialization.
   no pending input, and no hold or pending gesture. A lock is repaired only when
   it tracks a held key, and it stays locked so a fresh press can still finish it.
   It emits no capture actions.
+  One exception skips the 100 ms wait: when tracked keys alone block a press of
+  the binding itself (Idle, or Dirty for any binding; never Locked or a pending
+  gesture), the press resynchronizes and counts as a fresh press only if a
+  modifier-change event reported no modifiers after each tracked key's own
+  press (typing in between is fine), only the binding's modifiers went down
+  since, and every tracked key and every other modifier reads up in
+  combined-session state (Fn metadata as below). It fences input stamped
+  before the press, not at it, so a same-tick chord still discards, and keeps
+  the binding's key safe from an older delayed release. Fenced edges, edges
+  from before a disabled tap, and a suspension leave no modifier evidence.
+  Any other press stays ignored and logs `shortcut press ignored` with its
+  reason and key codes.
   Native `SecondaryFn` navigation metadata may be ignored only with timestamped
   modifier-change evidence that Fn is up; the full key scan and delayed-event
   fences remain required. Never strip Fn globally from shortcut matching.
@@ -418,6 +448,14 @@ CoreAudio formats, AppleScript details, or event serialization.
 - Recording audio behavior and idle-sleep prevention begin only after the
   intentional-hold threshold. Ordinary shortcut chords must not mute output,
   pause media, or prevent sleep.
+- A modifier-only shortcut (not Globe/Fn) passes through, so once Hex owns
+  the press (hold past the threshold, Toggle start after the 40 ms chord
+  grace, lock-finishing press) it posts one marked press of unassigned key
+  code 0x44 at HID while exactly its modifiers are still down, so other
+  apps' modifier-tap hotkeys read a chord. Hex's annotated-session key tap
+  drops it, so the focused app never receives it (and never beeps). Short
+  taps, chords, and presses during voice-delimited dictation never get one,
+  and it never reaches Hex's state machines.
 - The start tone confirms the shortcut press itself, not the hold threshold: it
   is provisional, sounds after a 40 ms chord grace, and a chord, short tap,
   cancel, or Voice Action takeover retracts it (silently inside the grace, else
@@ -474,6 +512,9 @@ CoreAudio formats, AppleScript details, or event serialization.
   fabricate a release timestamp from later physical state.
 - Escape cancels the active capture first, then the newest unfinished dictation.
   Cancelled jobs never paste, update the last result, or block later output.
+- Escape never cancels a programmatic dictation; its owner cancels through the
+  API, and the lease ends an abandoned one. While one records, Hex claims no
+  Escape at all, even with other jobs queued.
 - Model switches activate only after the pinned artifact is checksum-verified,
   loaded on strict Metal, and prewarmed. A failed switch preserves the active
   model and persisted selection.
@@ -485,16 +526,28 @@ CoreAudio formats, AppleScript details, or event serialization.
 - Cohere's advertised encoder input capacity is not its recommended inference
   window. Both GGUF adapters cap Cohere chunks at the reference processor's
   35 seconds (or a stricter advertised bound); capture duration remains unlimited.
-- A selected microphone switches live only while capture is idle. Opening the
-  replacement must succeed before the old stream is dropped. If the persisted
-  device is unavailable at startup, log the failure and fall back through the
-  compiled preferred-device order to the macOS default. An explicit CLI
-  `--device` remains authoritative for that listener process. A runtime stream
-  failure cancels an incomplete capture, discards stale chunks, and retries the
-  same selection with bounded backoff; it must not require a settings change or
-  process restart. An initial open failure uses the same bounded recovery without
-  stopping the listener. Cancellation does not stop warm-microphone retries;
-  enabling release-while-idle stops them once capture is idle.
+- The microphone is either System default (`microphone` unset) or one saved
+  device. System default follows the OS default input live: macOS through
+  CoreAudio listeners on the default input and the device list (their callbacks
+  only bump a counter, never on the audio callback), Windows through the
+  default-input stream's change report, and Linux at the next stream open
+  (ALSA's default resolves when it opens). Hex never captures from Hex
+  Microphone: a Hex Microphone default stands in with the built-in microphone,
+  else the first real input, logged and shown in Settings. A saved microphone
+  that is missing or will not open falls back to the system default without
+  changing the setting, and Hex switches back when it returns. Any switch
+  (selection, default, or device list) happens only while capture is idle,
+  after the current capture, and opening the replacement must succeed before
+  the old stream is dropped; a device that resolves to the one already open is
+  kept. An explicit CLI `--device` remains authoritative for that listener
+  process and never falls back. A runtime stream failure cancels an incomplete
+  capture (a programmatic one keeps the audio delivered before the failure for
+  its owner's `/finish`, which answers `microphone-lost` when there is none),
+  discards stale chunks, and retries with bounded backoff; it must not
+  require a settings change or process restart. An initial open failure uses
+  the same bounded recovery without stopping the listener. Cancellation does
+  not stop warm-microphone retries; enabling release-while-idle stops them once
+  capture is idle.
 - Feedback volume is persisted from zero through one; zero disables tones.
   Volume changes apply immediately and preview one recording-start tone.
 - Launch at Login uses `SMAppService` for the signed main app. Treat both
@@ -655,12 +708,21 @@ CoreAudio formats, AppleScript details, or event serialization.
   capture records, through a bounded queue that drops rather than block; they
   never reach the listener. Scrawl's settings are imported once, read-only;
   Screen Recording is asked at the first capture or from the pane, never in
-  onboarding. A capture never opens a
+  onboarding. The capsule, picker, and ink are left out of every screen
+  recording, and a capture leaves out all of Hex's chrome, unless
+  `capture.show_overlays_in_recordings` (default off; the pane's Show in
+  screen recordings or the menu bar's checkmark) is on; it applies at once
+  to open overlays and a recording capture, never recreating a window. A
+  capture never opens a
   microphone, installs a tap of its own, or loads a model: it copies the dictation
   timeline through a bounded sink that records a gap rather than block, so a
   stalled capture never stalls dictation, and while a sink is open the
-  release-while-idle close waits for it. One capture engine per process, one
-  capture recording at a time. Its words are foreground requests on the
+  release-while-idle close waits for it. While a capture records it holds a
+  recording-environment session with the same "While dictating" policy
+  (`recording_audio_behavior`, read at each start; no capture setting),
+  released at stop, cancel, or quit; it composes with dictation's,
+  so neither restores what the other still holds. One capture engine per
+  process, one capture recording at a time. Its words are foreground requests on the
   dictation engine's loaded model in 30 s chunks: after dictation already
   sent, before meeting chunks, never a second model, and dictation output is
   unchanged. A chunk waits while dictation captures or transcribes and never
@@ -751,11 +813,19 @@ CoreAudio formats, AppleScript details, or event serialization.
   root, Rune overlay HUD). Closing the window never stops the runtime, listener,
   HUD, or accepted work.
 - Updates follow the release protocol's client rules exactly (the shared
-  vectors must pass): a strictly newer version unless the running one is
-  revoked, the minimum version before rollout, and a rollout bucket drawn once
-  from the OS's secure random source, kept in `<support>/update-bucket`, and
-  never sent. Requests carry nothing about the install. Checks run 10 seconds
-  after launch, hourly, and on the sidebar footer's Check for updates, backing off on errors; manifests are
+  vectors must pass). Versions are display text and never compared: each
+  channel has one current release, and Hex takes it whenever it is not the
+  running build (Linux and Windows: the executable's SHA-256 against the
+  target's; macOS: the exact version). A rollback is the service making an
+  earlier release current. `required` releases install without waiting for
+  the rollout; others wait for a rollout bucket drawn once from the OS's
+  secure random source, kept in `<support>/update-bucket`, and never sent.
+  Each build knows the channel it was published on (`HEX_BUILD_CHANNEL`,
+  stamped by Release); when the Update channel setting names another, Hex
+  offers that channel's current release as "Switch to Stable 2.3.1" and
+  installs it only once the user confirms, never by itself. Dev builds are
+  `0.0.0-dev-<run number>`, as OpenCode numbers them. Requests carry nothing about the install. Checks run 10 seconds
+  after launch, hourly (every 10 minutes and on window focus, at most once a minute, on the Dev channel), and on the sidebar footer's Check for updates, backing off on errors; manifests are
   not signed, so nothing runs before the download's size and SHA-256 match
   the manifest and, on macOS and Windows, its code signature passes: macOS
   `app/update-requirement.txt` (Developer ID team `5NZ4Q7NXJ4`, `anomaly.hex`,
@@ -766,7 +836,7 @@ CoreAudio formats, AppleScript details, or event serialization.
   names the channel) and the version layout, macOS a `Hex.app` this user can
   rename in a writable, non-translocated folder. A read-only macOS location
   shows Download update (the DMG); package-managed installs (pacman, Nix) show
-  their manager's command once it serves the newer version; source and test
+  their manager's command once it serves another version; source and test
   builds never check; `DisableUpdates` (macOS `anomaly.hex` defaults domain,
   Windows `SOFTWARE\Policies\Anomaly\Hex` in HKLM or HKCU) turns checks off.
   Never escalate privileges, and never overwrite development, root, or
@@ -932,22 +1002,22 @@ optional Home Manager autostart. Native Linux PR checks do not replace real
 X11/Wayland, portal or keybinding shortcuts, microphone, and target-application
 smoke tests.
 
-Automatic microphone selection follows the compiled preference order in
-`src/config.rs`, then falls back to the macOS default. A saved microphone takes
-precedence while available; override everything with `--device`. The app bundle
-build requires Xcode 26 for Icon Composer compilation and a Developer ID signing
-identity. `scripts/release-app.sh prepare` builds the notarized and stapled
+Microphone selection is System default (the OS default input, live) unless a
+saved microphone is connected; override everything with `--device`. The app
+bundle build requires Xcode 26 for Icon Composer compilation and a Developer ID
+signing identity. `scripts/release-app.sh prepare` builds the notarized and stapled
 DMG and ZIP the Release workflow publishes. Hex publishes every platform to
-the Anomaly release service (`anomalyco/release`; `https://anoma.ly/release`,
-dev `https://dev.anoma.ly/release`) from the Release workflow with curl and its
+the Anomaly release service (`anomalyco/release`, `https://anoma.ly/release`;
+its dev stage, `dev.anoma.ly/release`, only tests the service itself, and Hex
+never publishes to or reads from it) from the Release workflow with curl and its
 GitHub OIDC token, under app `hex`, artifact `desktop`;
 [`docs/plans/release-service.md`](docs/plans/release-service.md) pins the
 target and file names and the direct-install receipt, and
 [`docs/releasing.md`](docs/releasing.md) owns the workflow, channels, secrets,
 and old clients. The 2.3.1 feeds and appcast at `https://anoma.ly/hex/files`
 (and Kit's `downloads.hex.kitlangton.dev`/`.com`, which must keep redirecting
-there) stay frozen. GitHub app releases use
-`app-v<VERSION>` tags with `--latest=false`, keeping them distinct from SDK
+there) stay frozen. GitHub app releases use `v<VERSION>` tags (`app-v…`
+through 2.3.1) with `--latest=false`, keeping them distinct from SDK
 releases. Never overwrite a published artifact with different bytes.
 `https://anoma.ly/hex` (in-repo `site/`) is the only Hex website. One
 `site/cloudflare.config.ts` defines the production Worker `hex-production-site` (anoma.ly/hex,
@@ -1004,28 +1074,42 @@ the user's original login-item state after the test. Do not add release test
 hooks or persist a second launch-at-login flag.
 
 Every platform is built, signed, and published by one run of
-`.github/workflows/release-desktop.yml` ("Release"; see `docs/releasing.md`).
-Run it with `workflow_dispatch` (`ref`, `channel`: `staging` publishes the
-release to the dev service with a draft GitHub release, `stable` to
-production), or push an `app-v<VERSION>` tag, which must match the crate
-version. It builds Linux x86_64 in an Arch container (`scripts/build-linux.sh`)
-and Windows x64 and ARM64 on native runners (`scripts/build-windows.sh`)
-through the reusable `.github/workflows/build-desktop.yml`, and macOS through
-`build-macos.yml`. `.github/workflows/test-builds.yml` calls the same desktop
+`.github/workflows/release.yml` ("Release"; see `docs/releasing.md`).
+Run it with `workflow_dispatch` (`ref`, `channel`: `check` builds and
+verifies without publishing, `dev` publishes the dev channel, `stable` the
+public release; dispatched from `production` only). Tags never start a
+release: like OpenCode, the stable run tags `v<VERSION>` (the crate version)
+on the released commit only after every platform published, then creates the
+GitHub release with the built-in `GITHUB_TOKEN`, so a failed run leaves no
+tag; `v*` tags are unrestricted because nothing triggers on them. Like OpenCode's release, build jobs (Linux x86_64 in an Arch
+container, Windows x64 and ARM64 through `.github/workflows/build-desktop.yml`,
+macOS as an ad-hoc signed `HEX_RELEASE_UNSIGNED=1` app, installers through
+`windows-installers.yml`, AUR and Homebrew staging) run repository code with
+no environment, secret, or id-token; sign and publish jobs run in `release`,
+check out only `.github/release/`, and run only those scripts and SHA-pinned
+actions on artifacts treated as data (macOS Developer ID signing,
+notarization, and stapling; Azure Authenticode; the release service through
+OIDC; the AUR and Homebrew pushes). Every artifact carries a `SHA256SUMS`
+whose digest its job reports and every consumer checks. Site deploy follows
+the same split: its build job has no secret, and its `release` job runs only
+`.github/release/deploy-site.sh`, which deploys the verified Build Output only
+when it names exactly that mode's site Worker, routes, and bindings, with the
+cf CLI locked in `.github/release/cf/`; Legacy appcast checks out only
+`.github/release/` and the appcast. Keep that boundary:
+never add a step that builds, installs dependencies, or runs repository code
+to a job that holds a secret or an OIDC token, and pin every action by SHA.
+`.github/` changes need Dax (CODEOWNERS and the "release boundary" ruleset).
+`.github/workflows/test-builds.yml` calls the same desktop
 workflow on every push to `dev` with `test-build`, plus an ad-hoc signed
 `Hex Test.app` (`HEX_TEST_BUILD=1 scripts/build-app.sh`: bundle ID
 `anomaly.hex.test`, its own `hex-test` data folder and `~/.config/hex-test`;
 it must never read the real `hex` data), as unsigned 14-day artifacts for
 teammates (`docs/test-builds.md`). `HEX_TEST_BUILD=1` builds never update
-themselves. The `collect` job checks the files, the absence of Visual C++
-runtime imports, and (stable) Authenticode signatures; `publish` uploads each
-target and then the release with `scripts/release-service.sh`, the only job
-holding `id-token: write` for the service, with no other secrets and actions
-pinned by SHA. The GitHub release mirror, the AUR package (built from the
-published Linux file), the Homebrew cask (pushed to `anomalyco/homebrew-tap`
-with its own deploy key), and the AUR/brew/nix distribution records follow.
-The `release` environment is limited to `dev` (dev site and staging),
-`production`, and `app-v*` tags; stable runs only from `production` or a tag. Rerunning
+themselves. Every push to `dev` (except docs/site-only changes) publishes a dev-channel
+build (the service lets a run from `dev` publish only the `dev` channel, and
+only signed platforms are published). Stable runs only from `production`.
+Like OpenCode, every run uses the one `release` environment, with no
+required reviewer; its deployment policy admits `dev` and `production`. Rerunning
 after an interruption is safe: the service stores files by hash and accepts
 the same version again.
 
@@ -1037,18 +1121,18 @@ layout `install-windows.ps1` creates, so self-updates keep working:
 `install.json` direct-install receipt, and a Start Menu shortcut carrying the
 managed mark. Its uninstaller lives in `voice-control\uninstall` because
 updates prune old version directories; it removes every version, the
-receipt, the shortcut, and Launch at login, and keeps settings. It refuses to
-roll back a newer self-updated version. Keep its `AppId` forever: the updater
-rewrites that Apps & Features entry's version. Release and the Windows
-installer workflow install, reinstall, refuse a downgrade with, and uninstall
+receipt, the shortcut, and Launch at login, and keeps settings. It installs
+its version over whatever is installed (versions are never compared). Keep
+its `AppId` forever: the updater rewrites that Apps & Features entry's
+version. Release and the Windows installer workflow install, reinstall,
+install over another version with, and uninstall
 it silently on x64 and ARM64 runners (`scripts/test-windows-installer.ps1`).
-With `sign-windows` (Release), Build desktop's `windows-package` job, the only
-one in the `release` environment, Authenticode-signs both `hex.exe` through
-Azure Artifact Signing (GitHub OIDC, SHA-256, RFC 3161 timestamp) before
-building the installers, then signs the installers
-(`scripts/windows-authenticode.ps1` checks them). Compile jobs and test builds
-never hold signing credentials, and signing is skipped with a warning until
-the Azure values exist in `release`. See `docs/windows-signing.md`.
+Release's `sign-windows` job Authenticode-signs both `hex.exe` through Azure
+Artifact Signing (GitHub OIDC, SHA-256, RFC 3161 timestamp), the installers
+are built around the signed bytes, and `sign-windows-installers` signs them
+(`.github/release/verify-authenticode.ps1` checks both). Compile jobs and test
+builds never hold signing credentials; until the Azure values exist in
+`release`, dev and check runs have no Windows targets. See `docs/windows-signing.md`.
 
 Run `scripts/build-linux.sh` on x86_64 Linux and `scripts/build-windows.sh`
 from Git Bash once per architecture with `HEX_WINDOWS_ARCH=x86_64` (the

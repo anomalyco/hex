@@ -6,7 +6,15 @@ root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 # HEX_TEST_BUILD=1 builds the CI test app: ad-hoc signed, under its own
 # name and bundle ID so it installs beside the released Hex and never
 # touches its permissions; it never checks for updates.
-if [ "${HEX_TEST_BUILD:-}" = 1 ]; then
+# HEX_RELEASE_UNSIGNED=1 builds the release app (Hex, anomaly.hex) ad-hoc
+# signed: the Release workflow's build job, which holds no credentials. Its
+# sign-macos job signs it with the Developer ID (.github/release/sign-macos.sh).
+if [ "${HEX_RELEASE_UNSIGNED:-}" = 1 ]; then
+  team_id=
+  identity=-
+  app_name=Hex
+  bundle_id=anomaly.hex
+elif [ "${HEX_TEST_BUILD:-}" = 1 ]; then
   team_id=
   identity=-
   app_name="Hex Test"
@@ -114,6 +122,6 @@ if [ -n "$capture" ]; then
   # process.
   sign --identifier "$bundle_id.scrawl-helper" "$bundle/Contents/MacOS/scrawl-helper"
 fi
-sign --entitlements "$root/app/VoiceControl.entitlements" "$bundle"
+sign --entitlements "$root/.github/release/hex.entitlements" "$bundle"
 codesign --verify --deep --strict --verbose=2 "$bundle"
 echo "$bundle"

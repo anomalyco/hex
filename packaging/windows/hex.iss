@@ -86,59 +86,11 @@ Type: files; Name: "{app}\current-version.partial"
 Type: files; Name: "{app}\install.json"
 
 [Code]
-function VersionPart(var Text: String): Integer;
-var
-  Dot: Integer;
-begin
-  Dot := Pos('.', Text);
-  if Dot = 0 then
-  begin
-    Result := StrToIntDef(Text, 0);
-    Text := '';
-  end else
-  begin
-    Result := StrToIntDef(Copy(Text, 1, Dot - 1), 0);
-    Text := Copy(Text, Dot + 1, Length(Text));
-  end;
-end;
-
-{ Negative when A is older than B, zero when equal, positive when newer. }
-function CompareVersions(A, B: String): Integer;
-var
-  I: Integer;
-begin
-  Result := 0;
-  for I := 1 to 3 do
-  begin
-    Result := VersionPart(A) - VersionPart(B);
-    if Result <> 0 then
-      Exit;
-  end;
-end;
-
-function InstalledVersion(): String;
-var
-  Pointer: AnsiString;
-begin
-  Result := '';
-  if LoadStringFromFile(ExpandConstant('{userappdata}\voice-control\current-version'), Pointer) then
-    Result := Trim(String(Pointer));
-end;
-
 function InitializeSetup(): Boolean;
-var
-  Installed: String;
 begin
   Result := True;
-  { Hex updates itself, so an older installer must never roll it back. }
-  Installed := InstalledVersion();
-  if (Installed <> '') and (CompareVersions(Installed, '{#AppVersion}') > 0) then
-  begin
-    SuppressibleMsgBox('Hex ' + Installed + ' is already installed, which is newer than this installer ({#AppVersion}). Open Hex from the Start menu.',
-      mbInformation, MB_OK, IDOK);
-    Result := False;
-    Exit;
-  end;
+  { Installs this version whatever is installed now: versions are never
+    compared, and the self-updater follows the channel's current release. }
 #if Arch == "x64"
   { The x64 build decodes on the GPU through Vulkan. Its loader ships with
     NVIDIA, AMD, and Intel graphics drivers, not with Windows. }

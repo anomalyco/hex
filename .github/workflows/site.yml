@@ -10,12 +10,16 @@ on:
       - "site/**"
       - ".github/workflows/site.yml"
       - ".github/workflows/site-deploy.yml"
+      - ".github/release/deploy-site.sh"
+      - ".github/release/cf/**"
   push:
     branches: [dev]
     paths:
       - "site/**"
       - ".github/workflows/site.yml"
       - ".github/workflows/site-deploy.yml"
+      - ".github/release/deploy-site.sh"
+      - ".github/release/cf/**"
   workflow_dispatch:
     inputs:
       mode:

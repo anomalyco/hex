@@ -2,7 +2,7 @@
 # Signing to every executable and installer in the given folders. Run after
 # both the executables and the installers are signed.
 #
-#   scripts/windows-authenticode.ps1 -Folders dist, installers
+#   .github/release/verify-authenticode.ps1 -Folders work
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)] [string[]]$Folders

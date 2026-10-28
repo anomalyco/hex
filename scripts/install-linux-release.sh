@@ -6,7 +6,16 @@ set -eu
 # SHA-256, and install.json marks the install as one Hex updates itself.
 origin=${HEX_RELEASE_BASE_URL:-https://anoma.ly/release}
 origin=${origin%/}
-channel=stable
+# HEX_INSTALL_CHANNEL=dev installs the newest dev build and keeps the
+# install on the Dev update channel.
+channel=${HEX_INSTALL_CHANNEL:-stable}
+case "$channel" in
+  stable | dev) ;;
+  *)
+    echo "HEX_INSTALL_CHANNEL must be stable or dev." >&2
+    exit 1
+    ;;
+esac
 install_dir=${HEX_INSTALL_DIR:-"$HOME/.local/bin"}
 data_home=${XDG_DATA_HOME:-$HOME/.local/share}
 config_home=${XDG_CONFIG_HOME:-$HOME/.config}
@@ -195,7 +204,8 @@ if [ -z "${HEX_INSTALL_ARTIFACT:-}" ]; then
     || fail "Downloaded Linux release checksum does not match."
   chmod 755 "$artifact_path"
 fi
-printf '%s\n' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-(beta|dev)\.[0-9]+)?$' \
+# The version is display text that names a directory, never compared.
+printf '%s\n' "$version" | grep -Eq '^[0-9A-Za-z][0-9A-Za-z.+_-]{0,127}$' \
   || fail "Linux release has an invalid version."
 test -x "$artifact_path" || fail "HEX executable is missing: $artifact_path"
 
@@ -263,26 +273,14 @@ if ! flock -n 9; then
   exit 1
 fi
 current="$support_dir/current"
-current_executable=
+# Installs what was asked for, whatever version is installed now: versions
+# are never compared.
 if [ -e "$current" ] || [ -L "$current" ]; then
   if [ ! -L "$current" ]; then
     fail "Refusing unmanaged current version path: $current"
   fi
-  current_target=$(readlink "$current")
-  printf '%s\n' "$current_target" \
-    | grep -Eq '^versions/[0-9]+\.[0-9]+\.[0-9]+(-(beta|dev)\.[0-9]+)?$' \
+  readlink "$current" | grep -Eq '^versions/[0-9A-Za-z][0-9A-Za-z.+_-]{0,127}$' \
     || fail "Installed HEX has an invalid current version link."
-  current_executable="$support_dir/$current_target/hex"
-fi
-if [ -n "$current_executable" ] && [ -x "$current_executable" ]; then
-  current_version=$("$current_executable" --version \
-    | awk 'NF { value=$NF } END { print value }')
-  printf '%s\n' "$current_version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-(beta|dev)\.[0-9]+)?$' \
-    || fail "Installed HEX reports an invalid version."
-  newest=$(printf '%s\n%s\n' "$current_version" "$version" | sort -V | tail -1)
-  if [ "$newest" != "$version" ]; then
-    fail "Refusing to downgrade HEX from $current_version to $version."
-  fi
 fi
 version_dir="$support_dir/versions/$version"
 managed_directory "$version_dir"

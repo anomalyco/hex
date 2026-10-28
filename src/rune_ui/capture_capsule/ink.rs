@@ -264,7 +264,7 @@ impl InkOverlay {
                 placement: Some(OverlayPlacement::FullScreen),
                 display: DisplayTarget::Primary,
                 level: OverlayLevel::AboveStatus,
-                exclude_from_capture: true,
+                exclude_from_capture: !crate::capture_host::own_windows_recorded(),
                 input: OverlayInput::None,
                 prewarm: true,
                 ..Default::default()
@@ -284,6 +284,11 @@ impl InkOverlay {
         let handle = overlay.clone();
         overlay.update(move |s, _| s.overlay = Some(handle));
         Self { overlay }
+    }
+
+    /// Lets screen recordings see the ink, or keeps it out.
+    pub(crate) fn show_in_recordings(&self, shown: bool) {
+        self.overlay.set_exclude_from_capture(!shown);
     }
 
     /// Looks for a recording capture's strokes now; it keeps looking while

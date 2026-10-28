@@ -267,6 +267,7 @@ pub fn run(shutdown: &'static AtomicBool, listener: ListenerConfig) -> Result<()
             developer_control: crate::DEVELOPER_FEATURES_ENABLED.then(|| developer_sender.clone()),
             dictation_control: Some(recognition_controls.clone()),
             control: Some(control_sender),
+            ..Default::default()
         },
     )?;
     let (controller_events_sender, controller_events) = mpsc::sync_channel(32);
@@ -399,22 +400,15 @@ pub fn run(shutdown: &'static AtomicBool, listener: ListenerConfig) -> Result<()
             },
         )
     };
-    // The capture capsule and ink overlay, with the `capture` experiment on.
+    // The capture capsule, picker, and ink, with the `capture` experiment on.
     #[cfg(hex_capture)]
-    if crate::app_settings::capture_available() {
-        use crate::rune_ui::capture_capsule::{
-            CaptureCapsule, feed, ink::InkOverlay, picker::PickerOverlay,
-        };
-        let picker = PickerOverlay::install(&mut app, feed::act);
-        let aim = picker.clone();
-        let capsule =
-            CaptureCapsule::install(&mut app, move |action| feed::act(aim.resolve(action)));
-        capsule.attach(picker);
-        feed::follow(capsule, InkOverlay::install(&mut app));
-    }
+    let capture_overlays = crate::app_settings::capture_available()
+        .then(|| crate::rune_ui::capture_capsule::feed::CaptureOverlays::install(&mut app));
     let pump = Pump {
         window: window.clone(),
         capsules,
+        #[cfg(hex_capture)]
+        capture_overlays,
         runtime: handle,
         shutdown,
         indicator_events,
@@ -653,6 +647,8 @@ impl Runtime {
 struct Pump {
     window: rune::AppHandle<Ui>,
     capsules: crate::rune_ui::meeting_capsules::MeetingCapsules,
+    #[cfg(hex_capture)]
+    capture_overlays: Option<crate::rune_ui::capture_capsule::feed::CaptureOverlays>,
     runtime: RuntimeHandle,
     shutdown: &'static AtomicBool,
     indicator_events: Receiver<DictationIndicatorEvent>,
@@ -829,6 +825,14 @@ impl Pump {
             self.meeting_menu_at = Instant::now();
         }
         self.settle_meeting_waiters(None);
+        #[cfg(hex_capture)]
+        if let Some(shown) = self
+            .capture_overlays
+            .as_mut()
+            .and_then(|overlays| overlays.follow_recordings())
+        {
+            crate::status_item::update_overlays_in_recordings(shown);
+        }
         if self.status_actions.is_none() {
             return;
         }
@@ -912,9 +916,30 @@ impl Pump {
                 }
             }
             StatusItemAction::OpenMeetings => show(&self.window, Destination::Meetings(None)),
+            #[cfg(hex_capture)]
+            StatusItemAction::ToggleOverlaysInRecordings => self.toggle_overlays_in_recordings(),
             StatusItemAction::Quit => {
                 self.runtime_cancel();
                 self.window.quit();
+            }
+        }
+    }
+
+    /// Saves the flipped setting as the window would; the overlays and the
+    /// menu item follow it from [`Pump::tick`].
+    #[cfg(hex_capture)]
+    fn toggle_overlays_in_recordings(&self) {
+        let saved = AppSettings::load().and_then(|mut settings| {
+            settings.capture.show_overlays_in_recordings =
+                !settings.capture.show_overlays_in_recordings;
+            settings.save()
+        });
+        match saved {
+            Ok(()) => {
+                let _ = self.runtime.send(Request::ReloadSettings);
+            }
+            Err(error) => {
+                tracing::warn!(error = %format!("{error:#}"), "could not save the recordings setting");
             }
         }
     }
@@ -1080,6 +1105,11 @@ objc2::define_class!(
             with_window(|window| window.close());
         }
 
+        #[unsafe(method(togglePlayground:))]
+        fn toggle_playground(&self, _sender: Option<&AnyObject>) {
+            with_window(|window| window.update(|_, tx| tx.toggle_playground()));
+        }
+
         #[unsafe(method(minimizeWindow:))]
         fn minimize_window(&self, _sender: Option<&AnyObject>) {
             let mtm = self.mtm();
@@ -1120,7 +1150,8 @@ fn with_window(f: impl FnOnce(&rune::AppHandle<Ui>)) {
     }
 }
 
-/// The menu bar while the window is active: Hex, File, Window.
+/// The menu bar while the window is active: Hex, File, View (with the
+/// `playground` experiment), Window.
 /// Rune draws no Edit menu items, so ⌘C/⌘V reach its text fields as keys.
 fn install_main_menu(target: &MenuTarget, mtm: MainThreadMarker) {
     let main = NSMenu::new(mtm);
@@ -1138,17 +1169,26 @@ fn install_main_menu(target: &MenuTarget, mtm: MainThreadMarker) {
         None,
         Some((quit.as_str(), sel!(quitHex:), "q")),
     ]);
-    for (title, items) in [
+    let mut menus = vec![
         (name, application),
         (
             "File",
             vec![Some(("Close Window", sel!(closeWindow:), "w"))],
         ),
-        (
-            "Window",
-            vec![Some(("Minimize", sel!(minimizeWindow:), "m"))],
-        ),
-    ] {
+    ];
+    // Rune's own View › Playground item, which this menu bar replaces. A
+    // capital letter adds Shift: ⇧⌘D.
+    if crate::rune_ui::playground::enabled() {
+        menus.push((
+            "View",
+            vec![Some(("Playground", sel!(togglePlayground:), "D"))],
+        ));
+    }
+    menus.push((
+        "Window",
+        vec![Some(("Minimize", sel!(minimizeWindow:), "m"))],
+    ));
+    for (title, items) in menus {
         let menu = NSMenu::initWithTitle(NSMenu::alloc(mtm), &NSString::from_str(title));
         for item in items {
             match item {

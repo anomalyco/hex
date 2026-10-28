@@ -11,8 +11,8 @@ use rune::{El, LineCap, Shape, canvas, col, row, text};
 
 use super::Ui;
 use super::controls::{
-    ButtonKind, DESCRIPTION, Paint, button, card, pulsing_dot, segmented, setting_row, status_dot,
-    toggle_row,
+    ButtonKind, DESCRIPTION, METRICS, Paint, button, card, page, pulsing_dot, segmented,
+    setting_row, status_dot, toggle_row,
 };
 use super::lists::{Tone, slider, small_button, tone_tag};
 use super::platform::{DemoRequest, PlatformRequest};
@@ -265,7 +265,7 @@ pub(super) fn pane(ui: &Ui, p: Paint) -> El {
     };
     let mut tuning = col()
         .key("tuning")
-        .px(12.0)
+        .px(METRICS.row_px)
         .py(10.0)
         .gap(12.0)
         .child(
@@ -345,24 +345,7 @@ pub(super) fn pane(ui: &Ui, p: Paint) -> El {
                 .child(tunable(ui, p, Tunable::MuffledLevel, tr("Level"))),
         );
     }
-    let mut rows = vec![
-        row()
-            .key("card-header")
-            .px(12.0)
-            .py(8.0)
-            .gap(8.0)
-            .center_y()
-            .justify_between()
-            .child(
-                text(tr("Hex Microphone"))
-                    .key("title")
-                    .font(p.k.ty.ui_medium)
-                    .color(p.text()),
-            )
-            .child(header_status(ui, p)),
-        super::platform_settings::driver_row(ui, p),
-        tuning,
-    ];
+    let mut rows = vec![super::platform_settings::driver_row(ui, p), tuning];
     if mode == VoiceFilterMode::Muted {
         rows.push(toggle_row(
             p,
@@ -377,13 +360,21 @@ pub(super) fn pane(ui: &Ui, p: Paint) -> El {
         ));
     }
     rows.push(try_it(ui, p));
-    let content =
-        col()
-            .key("content")
-            .px(24.0)
-            .pt(4.0)
-            .gap(24.0)
-            .child(card(p, "fun-hex-microphone", rows));
+    let section = col()
+        .key("fun-hex-microphone")
+        .gap(METRICS.label_gap)
+        .child(
+            row()
+                .key("header-row")
+                .mx(METRICS.row_px)
+                .gap(8.0)
+                .center_y()
+                .justify_between()
+                .child(p.section_label(tr("Hex Microphone")))
+                .child(header_status(ui, p)),
+        )
+        .child(card(p, "card", rows));
+    let content = page("content").child(section);
     super::scroll_body("fun-scroll", content)
 }
 
@@ -497,7 +488,7 @@ fn try_it(ui: &Ui, p: Paint) -> El {
         );
     col()
         .key("fun-try-it")
-        .px(12.0)
+        .px(METRICS.row_px)
         .py(10.0)
         .gap(12.0)
         .child(

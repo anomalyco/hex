@@ -38,17 +38,23 @@ jobs:
 
   desktop:
     needs: resolve
-    # Build desktop's Windows packaging job can sign for releases; test
-    # builds never set sign-windows, so this token goes unused.
-    permissions:
-      contents: read
-      id-token: write
     uses: ./.github/workflows/build-desktop.yml
     with:
       sha: ${{ needs.resolve.outputs.sha }}
       version: ${{ needs.resolve.outputs.version }}
       test-build: true
       artifact-prefix: hex-test-${{ needs.resolve.outputs.short }}
+      retention-days: 14
+
+  installers:
+    needs: [resolve, desktop]
+    uses: ./.github/workflows/windows-installers.yml
+    with:
+      sha: ${{ needs.resolve.outputs.sha }}
+      version: ${{ needs.resolve.outputs.version }}
+      pattern: hex-test-${{ needs.resolve.outputs.short }}-windows-*
+      digests: hex-test-${{ needs.resolve.outputs.short }}-windows-x86_64=${{ needs.desktop.outputs.windows-x64-digest }} hex-test-${{ needs.resolve.outputs.short }}-windows-aarch64=${{ needs.desktop.outputs.windows-arm64-digest }}
+      artifact-name: hex-test-${{ needs.resolve.outputs.short }}-windows-installers
       retention-days: 14
 
   macos:
@@ -92,7 +98,7 @@ jobs:
           if-no-files-found: error
 
   summary:
-    needs: [resolve, desktop, macos]
+    needs: [resolve, desktop, installers, macos]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-24.04
     permissions:
@@ -120,6 +126,6 @@ jobs:
           Unsigned builds for testing; they never update themselves. Sign in to GitHub to download. Kept 14 days. Full instructions: [docs/test-builds.md]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/blob/dev/docs/test-builds.md).
 
           - **macOS (Apple silicon):** $(link macos-arm64). Quit Hex, open the DMG, drag **Hex Test** to Applications, run \`xattr -dr com.apple.quarantine "/Applications/Hex Test.app"\`, then open it and grant the permissions again.
-          - **Windows x64:** $(link windows-x86_64). **Windows ARM64:** $(link windows-aarch64). Quit Hex from the tray, run \`Hex-Setup-$VERSION-windows-<x64|arm64>.exe\`, and choose More info, Run anyway at the SmartScreen warning. The bare \`Hex-*.exe\` also runs without installing.
+          - **Windows:** installers $(link windows-installers); bare executables x64 $(link windows-x86_64), ARM64 $(link windows-aarch64). Quit Hex from the tray, run \`Hex-Setup-$VERSION-windows-<x64|arm64>.exe\`, and choose More info, Run anyway at the SmartScreen warning. The bare \`Hex-*.exe\` also runs without installing.
           - **Linux x86_64 (Arch):** $(link linux-x86_64). Run \`hex quit\`, \`chmod +x hex-*-linux-x64\`, start it with \`./hex-*-linux-x64 service\`, and open the window with \`./hex-*-linux-x64\` in another terminal.
           EOF

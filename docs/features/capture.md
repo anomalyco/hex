@@ -42,6 +42,9 @@ Settings › Experiments › Scrawl          // capture.pane
 │       Settings' list (PermissionKind::ScreenRecording), as for Input
 │       Monitoring; flips to Allowed on the next read. Never part of onboarding
 │       (macOS also asks at the first capture). Check: rune_ui::scrawl tests
+├── Show in screen recordings (capture.show_overlays_in_recordings, default
+│   off; also the menu bar's Show Hex in Screen Recordings checkmark) -> see
+│   capture.own-windows; applies at once, to open windows and a recording capture
 ├── Transcriber (capture.transcriber) -> Parakeet (default) | Apple
 ├── Captures folder (capture.folder, default Scrawl's) -> Reveal | choose another
 ├── Keep (capture.media_days / bundle_days) -> Scrawl's presets, or imported days
@@ -71,6 +74,21 @@ First launch with the experiment on      // capture.import
 │   and Hex's tap lets it through (only a dictation hold under it is cancelled)
 ├── The binding is swallowed, never chord evidence for dictation
 └── Hold the dictation shortcut mid-capture -> dictation pastes as usual
+
+While a capture records                  // capture.quiet
+├── Start -> a recording-environment session with General's While dictating
+│   (read at each start; captures have no setting of their own): mutes output
+│   or pauses Music, Spotify, VLC; Do nothing changes nothing. No idle-sleep
+│   assertion, and it never counts as an intentional dictation
+├── Stop, cancel, discard, failed start, captures off, quit -> released; a
+│   switch carries it to the next capture without restoring in between
+└── Dictation mid-capture -> each effect is held from the first session that
+    wants it to the last, so neither unmutes or resumes what the other still
+    holds; a While dictating change mid-capture composes too (the capture keeps
+    media paused, the dictation mutes). Only what Hex
+    changed is restored. The dictation stop tone plays at once while the capture
+    keeps output muted. Check: recording_environment tests (overlap both ways),
+    capture_host a_capture_stays_quiet_until_it_stops_is_cancelled_or_hex_quits
 
 Switching target                         // capture.switch; the capsule's chips
 ├── Started by the shortcut -> the snapshot's recording says `target: Pointer`,
@@ -122,12 +140,12 @@ The capsule                              // capture.capsule (rune_ui/capture_cap
 │   recreated window replaces the old one), so recordings leave it out
 ├── Follows `capture_host::watch()`: Recording from the instant `recording` is
 │   Some (the bundle's t0; timer, meter, ✓ finish, ✕ cancel) -> Processing ->
-│   Copied, Failed, or Cancelled, then leaves on its own; a written capture
-│   whose transcript has no words reads "Copied", "no speech heard"
+│   done (the lead alone, no word), Failed, or Cancelled, then leaves on its
+│   own; a written capture whose transcript has no words reads "no speech"
 ├── Tones (`feedback::Tone::Capture*`, at the dictation volume; zero is
 │   silent): start, stop, a rule's send going, an Undo, a failure
-├── Failed -> "Couldn't start the capture" until the engine reports it
-│   recording (`screen`), then "Couldn't save the capture"; a failed send ->
+├── Failed -> "Couldn't start" until the engine reports it
+│   recording (`screen`), then "Couldn't save"; a failed send ->
 │   "Couldn't send to X". Each keeps its `error`, or "Screen Recording is off"
 │   when it isn't granted; a start that fails before any snapshot showed it
 │   recording still shows, but never over a newer recording, and a capture
@@ -135,7 +153,7 @@ The capsule                              // capture.capsule (rune_ui/capture_cap
 ├── A shown recording that leaves with no outcome (a discard, from a chip or
 │   `hex capture discard`) -> the capsule leaves; the picker a chip opened
 │   stays. A switch that can't start settles the recording it discarded as
-│   failed, which the capsule shows as "Couldn't start the capture"
+│   failed, which the capsule shows as "Couldn't start"
 ├── A shortcut start (`target: Pointer`) -> Area · Window · Screen chips, plus
 │   iPhone while the snapshot names a cabled phone, for 3.5 s
 │   ├── `worked` -> they fold once seen for 0.9 s; never while the pointer is on
@@ -157,40 +175,52 @@ The capsule                              // capture.capsule (rune_ui/capture_cap
 │   only the send going (its tone), Queued (then Sent), how an Undo ended,
 │   and a failed send
 │   ├── A rule Kit saved -> the only send that goes by itself, at once, with
-│   │   no countdown: "Sent to X" and the same quiet Undo (esc) for 5 s that a
+│   │   no countdown: "Sent to X" and the same quiet Undo (click only, no key)
+│   │   for 5 s that a
 │   │   pick gets, no ring or drain; ✕ closes. The Sent tone plays when the
 │   │   router says it went. No runner-up chip, since the router names none
-│   │   beside a saved rule; once the Undo window ends, an "Elsewhere…" chip
-│   │   opens the list. Picking the rule's own session there (without
+│   │   beside a saved rule; when the Undo window ends the capsule leaves by
+│   │   itself (with the list open it stays; the pointer on it holds it, and a
+│   │   folded list gives it a brief hold). Picking the rule's own session there (without
 │   │   "Always") only closes the list; nothing is sent again
 │   ├── The Undo chip counts nothing down: the capsule reads the same for the
 │   │   whole window and wakes once, when it ends
 │   ├── Anything else with somewhere to go (a guess, nothing fitting, no
-│   │   answer) -> "Copied" with the suggestions open under it, Paste and
-│   │   Inspect still beside it; nothing sends until Kit picks
-│   │   ├── Up to three rows, suggested then recent, numbered 1-3; the first
-│   │   │   carries its reason in the accent
-│   │   ├── "Always send <site> here" (a guess with a site) -> ticked, the pick
-│   │   │   also saves that rule
-│   │   ├── 1-3 or a click -> sends at once: "Sent to X", the Sent tone, and a
-│   │   │   quiet Undo (esc) for the same 5 s, with no ring or drain; ✕ closes
-│   │   ├── The list shortcut or "Elsewhere…" -> the full list with its search field
-│   │   ├── Esc -> folds them to a "Send to…" ask
+│   │   answer) -> the lead alone with the suggestions open under it and Paste
+│   │   beside it; nothing sends until Kit picks
+│   │   ├── Up to five rows, suggested then recent, numbered 1-5; the first
+│   │   │   carries its reason in the accent. A reason is a real one in plain
+│   │   │   words ("you were just in it", "same page", "mentioned", "recent")
+│   │   │   or nothing; never "guess"
+│   │   ├── Shift down (a guess or rule with a site or app) -> the footer reads
+│   │   │   "Always send [site] to [row]", the site and the highlighted row's
+│   │   │   name each in a rounded-rect badge with its kind's icon (a globe for
+│   │   │   a site, a window for an app, a bubble for the session), and that
+│   │   │   row reads "always"; up, the
+│   │   │   footer is "Send 1–5  Always ⇧" again. Shift+1-5 or Shift+click
+│   │   │   sends and saves the rule: "Sent to X · saved rule", and its Undo
+│   │   │   takes back the send and the rule (what the key held before, or
+│   │   │   nothing, comes back)
+│   │   ├── 1-5 or a click -> sends at once: "Sent to X", the Sent tone, and a
+│   │   │   quiet Undo for the same 5 s, with no ring or drain; ✕ closes;
+│   │   │   the capsule then leaves by itself with its exit
+│   │   ├── The list shortcut -> the full list with its search field
+│   │   ├── Esc -> not Hex's here: it goes to the app in front
 │   │   └── Unpicked -> they leave with the capsule after the done hold
 │   ├── Taken back (a rule's send or a pick) -> never
 │   │   ends the capture: the list opens again with the same sessions, the one
 │   │   it went to (by session id) once, last of all ("taken back"), with 1-9,
 │   │   typing, and ⇧⏎ as before. Open, it stays, sent nowhere; a click away
-│   │   folds it to "Taken back" with "Elsewhere…", gives Esc back to the app,
-│   │   and it leaves after the done hold. Esc or ✕ dismisses: "Kept ·
-│   │   hex capture send latest", the bundle untouched. Either way it then
+│   │   folds it to "Taken back" with "Send to…", and it leaves after the done
+│   │   hold; nothing here takes Esc. ✕ (or Esc in the typed list) dismisses:
+│   │   "Kept", the bundle untouched. Either way it then
 │   │   waits for the list shortcut, even after the router said the pick went.
 │   │   News of the send being taken back (it went, queued, or failed) leaves
 │   │   that list alone, and a pick made before the router answers the Undo
 │   │   stands: the Undo's answer and the earlier send's news never take it back
 │   ├── Too late to take back -> the same list, the session marked "has it",
-│   │   folded "Sent to X · too late to take back"; a pick sends a copy there,
-│   │   and Esc or ✕ just closes. Closed, it doesn't wait for the list shortcut.
+│   │   folded "Sent to X · too late"; a pick sends a copy there,
+│   │   and ✕ just closes (it leaves by itself after the brief hold). Closed, it doesn't wait for the list shortcut.
 │   │   An Undo OpenCode refuses (an error) reads as too late
 │   ├── Sends -> CaptureCommand::Send{to} and Undo, naming the
 │   │   session by id (`RouteDest.session`), so sessions sharing a title never
@@ -198,21 +228,25 @@ The capsule                              // capture.capsule (rune_ui/capture_cap
 │   ├── Keys (capture_host::take_keys), never taking focus:
 │   │   ├── Picker -> ⌥⇧S and Esc through the listener
 │   │   ├── Routed -> the send-to list shortcut (capture.list_hotkey; the
-│   │   │   "Elsewhere…" chip shows it) opens the list; Esc too while a send
-│   │   │   can be undone or a taken-back list is open.
+│   │   │   "Send to…" chip shows it) opens the list; never Esc, so a send is
+│   │   │   taken back only by clicking Undo.
 │   │   │   Unreachable has no list, so the shortcut reaches the app in front
 │   │   ├── Closed, waiting for a pick (a guess or taken-back capture closed
-│   │   │   by Esc, ✕, or its hold, with nothing sent) -> the list shortcut
+│   │   │   by ✕ or its hold, with nothing sent) -> the list shortcut
 │   │   │   brings the capsule back with its list open, until a pick, Paste,
 │   │   │   Inspect, a send from `hex capture send`, or the next capture
 │   │   ├── Otherwise -> the list shortcut isn't Hex's: runtime_hotkeys has it
 │   │   │   only while the capsule takes it (capture_host::list_key_wanted),
 │   │   │   so suppression passes it through
-│   │   ├── A send from the list still undoable -> Esc only (CapsuleKeys::Undo)
-│   │   ├── Suggestions -> Esc and the list shortcut through the listener,
-│   │   │   and at the session tap only 1 to the number of rows with no
-│   │   │   modifier (`capture_host::suggesting`); every other key goes on to
-│   │   │   the app
+│   │   ├── A send from the list still undoable -> no keys; Esc and ⌥⇧V go to the
+│   │   │   app, and the Undo button is the only way back
+│   │   ├── Suggestions -> the list shortcut through the listener,
+│   │   │   and at the session tap only 1 to the number of rows, with no
+│   │   │   modifier or Shift (`capture_host::suggesting`; Shift's digits read
+│   │   │   by key position), and a mouse press, which folds them (the click
+│   │   │   still reaches the app); every other key, Esc included, goes on to
+│   │   │   the app. Shift's presses and releases (flagsChanged) reach the
+│   │   │   capsule too (`CapsuleKey::Shift`) and still go on to the app
 │   │   └── List open -> the session tap takes every key press without ⌘ or ⌃
 │   │       that isn't a Hex shortcut: text in the active layout, ⌫, ↑↓, ⏎,
 │   │       ⇧⏎ (always), 1-9, Esc; their releases too. A send, Esc, or a
@@ -220,14 +254,64 @@ The capsule                              // capture.capsule (rune_ui/capture_cap
 │   │       is open, and still delivers them) closes the list and gives the
 │   │       keys back; hiding drops the grab
 │   ├── `offer` (a rule offer) -> not drawn; Scrawl's capsule doesn't draw it
-│   ├── Every written capture -> Paste (the one accent action) and Inspect, as
-│   │   Scrawl's capsule has
+│   ├── The top line is calm: the label, its note, one action, and ✕. Undo
+│   │   while a send can be taken back, else Paste and Inspect as two quiet
+│   │   icons (tooltips "Paste the capture", "Open the capture") for a written
+│   │   capture. Where to send it is only ever the list
+│   │   under the capsule, which is never narrower than LIST_W; the capsule
+│   │   widens with it. The capsule is a rounded rect with the list's 14 pt
+│   │   corners (`SHELL_RADIUS`), not a pill, and its chips and icon buttons
+│   │   round concentrically inside it. Two looks while Kit picks (tuning `top_line`):
+│   │   TopLine::Quiet (default) says the label in quiet MEDIUM ink;
+│   │   TopLine::Icons says it in STRONG. A capture that only copied has no
+│   │   label, the lead alone
+│   ├── The lead is the capture's first frame (`frames/frame-01.png`, else the
+│   │   contact sheet), cropped to a small rounded card once the bundle is
+│   │   written and decoded off the UI thread; until then, or without one, a
+│   │   check. A warning keeps its glyph
 │   │   ├── Paste -> CaptureCommand::Paste: the contact sheet, then the summary,
 │   │   │   into the app in front; a send still in its Undo window is taken back
-│   │   └── Inspect -> CaptureCommand::Inspect: opens the contact sheet (Hex has
-│   │       no review window, and opening the bundle could launch Scrawl.app)
+│   │   └── Inspect -> CaptureCommand::Inspect: opens the contact sheet (Hex
+│   │       has no review window, and opening the bundle could launch
+│   │       Scrawl.app)
+│   ├── Undo is a click only, with no shortcut: Escape meant for another app
+│   │   was taking sends back
+│   ├── Shortcuts read as quiet text after what they do, never a keycap per
+│   │   key (those are Settings'): a hint's keys sit in one small rounded rect,
+│   │   on a quiet fill. The list's
+│   │   footer reads "Send 1–5  Always ⇧", "Send ⏎", "Keep esc", "Always ⇧⏎"; the
+│   │   cursor's and the notch's cards end in "Send 1–5" under their guesses.
+│   │   The footer sits apart from the rows in one of
+│   │   two looks while Kit picks (tuning `list_footer`): ListFooter::Band
+│   │   (default), a full-width band on its own fill under a rule, or
+│   │   ListFooter::Well, a rounded well inset like the rows
 │   └── Long names give way together so the widest row stays inside the panel
-└── Reduce Motion -> travel jumps, nothing blurs; opacity still fades
+├── Every change moves at once, as Dynamic Island's: the walls and what stays
+│   travel on `island` (0.30 s, bounce 0.12), while everything leaving and
+│   everything arriving blurs (`content_blur` 3 pt), scales toward the
+│   capsule's middle (`content_scale` 0.92), and fades over that same move
+│   (`content_in` 0.30 s, `content_out` 0.24 s). Nothing staggers, and nothing
+│   waits for a wall or for other content; only an entry takes two frames
+│   (the origin pose, then rest). The list under the capsule comes and goes
+│   on the same springs. The playground's Transition card tunes all of it
+├── Reduce Motion -> travel jumps, nothing blurs or scales; opacity still fades
+└── After a capture, one of five flows (`capture.capsule_flow`, the
+    playground's "Flow after a capture"; prototypes to compare, clips in
+    r22-flows). Only the guesses' look changes; rules, Undo, ✕ and the
+    keys the capsule takes stay the same
+    ├── list (default) -> today's list under the capsule, as above
+    ├── toast -> one line "Send to X ⏎" with "Next ⇥" for more than one
+    │   guess; ⇥/⇧⇥ cycle (CapsuleKeys::Suggest { cycle }), ⏎ or a click on
+    │   the line sends the one shown
+    ├── menu_bar -> the frame plus "NAME 1/2/3" chips for MENU_HINT_S (4 s),
+    │   then the capsule folds into the menu-bar item; the list shortcut still
+    │   reaches the capture
+    ├── cursor -> recording stays under the menu bar; the "Send to" card
+    │   (number, name, reason) opens at the pointer and its Sent stays there
+    └── notch -> the pill hangs from the top edge (only its bottom corners
+        round) and grows down into the same card
+    Gap: only the shapes are prototyped; the menu-bar item's capture list
+    and a real notch inset are not, and no flow but list has run live
 
 The on-screen picker                     // capture.picker (capture_capsule/picker.rs)
 ├── A full-screen Rune overlay on the pointer's display, under the capsule,
@@ -250,6 +334,14 @@ Hex's own windows                        // capture.own-windows
 ├── Chrome (the capsule, ink, picker, HUDs, meeting capsules: Hex's named
 │   windows and any of its windows above the normal level) -> never recorded,
 │   never in the window log, never the target, clicks on it not logged
+│   ├── Other recorders -> the capsule, picker, and ink are left out
+│   │   (sharingType none); the dictation HUD and meeting capsules show
+│   ├── Show in screen recordings on -> every recorder, Hex's captures
+│   │   included, shows all of it (sharingType readOnly, no SCK exclusions);
+│   │   still never in the window log or the target. Rune's
+│   │   OverlayHandle::set_exclude_from_capture flips open windows, and the
+│   │   sampler rebuilds its filter mid-recording (OwnWindows::recorded)
+│   └── Not proven natively end to end yet
 │   └── Click-through chrome (the full-screen ink overlay, the capsule's
 │       640×424 panel outside its pill) -> clicks there count for the app
 │       beneath; only the pill's (capture_host::set_capsule_pill) are Hex's
@@ -337,7 +429,7 @@ Where it goes                            // capture.route; capture.routing's aut
 │   `last.route` follows: Looking -> Rule | Guess | Nothing | NoAnswer |
 │   Unreachable
 │   ├── Rule -> only a rule the person saved (`routing.sites`, `routing.apps`,
-│   │   an "Always send … here"): sent at once, Sending -> Sent, or Queued
+│   │   a Shift pick's): sent at once, Sending -> Sent, or Queued
 │   │   when OpenCode didn't take it; Undo takes it back as it does a pick. Whatever
 │   │   autoSend, smartRouting, or jevRouting say, a saved rule sends and
 │   │   nothing else sends on its own. smartRouting off decides with the port
@@ -347,10 +439,11 @@ Where it goes                            // capture.route; capture.routing's aut
 │   │   publisher, a name that was said, the captured app's checkout (the one
 │   │   open session folder named like the app, such as `…/hex` for Hex's own
 │   │   Settings; smartRouting only), the port ladder) is suggestion #1, its
-│   │   reason as the row's word ("Jev's pick", "dev server", "this page"), then
+│   │   reason as the row's word ("dev server", "same page", "mentioned"; none
+│   │   for Jev's pick or fallback), then
 │   │   the runners-up and recent sessions; nothing sent until one is picked.
-│   │   `site` names what "Always send <site> here" (⇧⏎ in the list, or
-│   │   `send --always`) would save, after which that site's captures are Rules;
+│   │   `site` names what a Shift pick (Shift+digit or click, ⇧⏎ in the list,
+│   │   or `send --always`) would save, after which that site's captures are Rules;
 │   │   ⇧⏎ in a Rule's list saves the rule for the session picked instead
 │   ├── Each Rule or Guess -> routing.json's `shown`: `as` rule or guess, and
 │   │   `why`, the router's leading reason; `hex capture route` prints it
@@ -358,8 +451,8 @@ Where it goes                            // capture.route; capture.routing's aut
 │   └── Unreachable -> the look read no sessions (OpenCode slow past the look's
 │       deadline, down, or refusing); a warning in process.log with the error, and
 │       the capsule reads "Couldn't reach OpenCode" with why ("didn't answer in
-│       time"), keeping Paste and Inspect
-├── An answer for a capsule already closed (dismissed, or past its 25 s hold)
+│       time"), keeping Paste
+├── An answer for a capsule already closed (dismissed, or past its hold)
 │   leaves it closed; `hex capture list` and `send` still offer the capture
 ├── The capsule's commands act only on `last`, the newest routed capture:
 │   ├── Send{to} -> the Rule's own session, already sent, does nothing; any
@@ -371,7 +464,9 @@ Where it goes                            // capture.route; capture.routing's aut
 │   send straight there
 ├── Queued sends -> retried every 15 s, unless Scrawl.app runs or something
 │   serves the ingest port (that process retries); a retried send can't be
-│   undone, so its "Sent to X" has no Undo
+│   undone, so its "Sent to X" has no Undo. A queued or too-late-to-undo send
+│   leaves after the brief hold (4 s) rather than the 25 s done hold; a taken
+│   back capture with nothing to list ('Taken back') does too
 └── autoSend off -> no look, no route; the capture is only copied
 
 hex capture list|show|send|route         // capture.cli; docs/cli.md
@@ -521,17 +616,26 @@ Checks:
   `picking_the_rules_own_session_just_closes_the_list`,
   `too_late_to_take_back_offers_the_list_for_a_copy`,
   `shift_return_in_a_rules_list_saves_a_rule_elsewhere`,
+  `shift_shows_the_rule_and_a_shift_pick_saves_it`,
   `an_answer_after_the_capsule_closed_leaves_it_closed`,
   `the_capsule_takes_only_the_keys_its_state_needs`,
-  `the_hints_keys_stay_inside_their_trays`, goldens
+  `shortcuts_read_as_one_quiet_word`, `the_capsule_draws_no_keycaps`,
+  `a_written_copy_offers_paste_and_inspect_as_icons`,
+  `every_change_moves_at_once`,
+  `entry_lands_the_pose_instantly_then_springs_to_rest_with_its_content`,
+  `the_toast_cycles_its_guesses_and_return_sends_the_one_shown`,
+  `the_menu_bar_hint_is_brief_and_its_chips_send`,
+  `the_cursor_card_lists_its_guesses_at_the_pointer`,
+  `the_notch_hangs_from_the_top_edge`,
+  `the_menu_bar_flow_folds_up_toward_the_menu_bar`, goldens
   `tests/golden/capture-capsule-*.png`, and
   `the_capsule_moves_inside_its_panel_and_comes_to_rest`, which traces every
   scripted state change per frame, Calm and Reduce Motion, for no pops,
   jumps, or jiggle. `HEX_CAPSULE_MOTION` also writes rune-motion traces for
   motion-lint. `cues_mark_start_stop_sent_and_taking_back`,
   `nothing_heard_says_so`, and `a_capture_with_no_words_says_nothing_was_heard`
-  cover the tones and the empty transcript. Observed (Oct 26, pro, before rules sent at once): all 22
-  capsule runs pass lint.
+  cover the tones and the empty transcript. Observed (Oct 27, worker, r19 motion): all 28
+  capsule runs, Calm and Reduce Motion, pass lint.
 - Playground: `hex capsule-playground` (feature builds; hidden), or
   `scripts/build-capsule-playground.sh` for an ad-hoc signed
   `Hex Playground.app`, runs the real capsule in a window of its own against a
@@ -540,7 +644,7 @@ Checks:
   "Copy values" copies its `DEFAULT`). It reads and writes no Hex data and
   records or sends nothing. The whole flow picks the first suggestion;
   its "Saved rule" toggle plays a rule's send, sent at once, instead.
-  `--snap --scene suggestions|always|elsewhere|picked|rule|recording`
+  `--snap --scene suggestions|shift|sent-rule|search|picked|rule|recording`
   renders it. The tones were checked by waveform and level only, never on
   speakers.
 - Picker, in capture_capsule/picker.rs and tests.rs: geometry, label, and

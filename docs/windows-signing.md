@@ -8,26 +8,26 @@ installing an update.
 
 ## Pipeline
 
-`.github/workflows/build-desktop.yml`, called by Release with
-`sign-windows: true`:
+`.github/workflows/release.yml`, split like OpenCode's release:
 
 ```ts
-windows (x64 runner, ARM64 runner)          // compiles; no credentials
-└── unsigned-windows-<arch>: Hex-<v>-windows-<x64|arm64>.exe
-windows-package (one x64 runner, environment: release when signing)
+build (build-desktop.yml; x64 and ARM64 runners)   // compiles; no environment or secrets
+└── build-windows-<arch>: Hex-<v>-windows-<x64|arm64>.exe (+ SHA256SUMS, digest output)
+sign-windows (release env, .github/release only)
+├── verify the artifacts' digests
 ├── azure/login (OIDC, no client secret)
 ├── artifact-signing-action: both hex.exe     // SHA-256, RFC 3161 timestamp
+└── verify-authenticode.ps1                   // every exe Valid + timestamped
+installers (windows-installers.yml)            // no secrets
 ├── build-windows-installer.ps1 x64 + arm64   // Inno embeds the signed bytes
-├── artifact-signing-action: both Hex-Setup-*.exe
-├── scripts/windows-authenticode.ps1          // every exe Valid + timestamped
-└── hex-windows-<arch>: Hex-<v>-windows-<arch>.exe, Hex-Setup-<v>-windows-<arch>.exe
-windows-installer (native x64, ARM64)        // test-windows-installer.ps1
-Release collect + publish                     // stable requires the signatures; uploads both
+└── test-windows-installer.ps1 on native x64 and ARM64
+sign-windows-installers (release env)          // signs and checks both Hex-Setup-*.exe
+publish                                       // stable requires the signatures
 ```
 
-- The compile jobs never hold signing credentials. Only `windows-package`
-  enters the `release` environment, and only when the caller sets
-  `sign-windows`. Test builds never set it, so they stay unsigned.
+- The compile jobs never hold signing credentials. Only the two signing
+  jobs enter the `release` environment, and they run no repository code.
+  Test builds never sign.
 - Signing is skipped while any Azure value is missing. The run then warns
   and writes "not Authenticode-signed" to its summary; everything else still
   runs, including the installer tests.
@@ -61,7 +61,7 @@ self-service setup.
 
 - Artifact Signing issues a short-lived certificate (about three days) for
   each signing session. Without the timestamp, a signature would expire with
-  its certificate, so `windows-authenticode.ps1` rejects any signature that
+  its certificate, so `verify-authenticode.ps1` rejects any signature that
   lacks one.
 - SmartScreen builds reputation per publisher identity, not per certificate.
   The daily certificate rotation does not reset it. A new publisher can still

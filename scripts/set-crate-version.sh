@@ -1,8 +1,8 @@
 #!/bin/sh
-# Stamps a prerelease of the checked-out version into Cargo.toml and
-# Cargo.lock, so a staging build reports the version the release service
-# publishes (X.Y.Z-dev.N or X.Y.Z-beta.N). Release builds only; the change is
-# never committed.
+# Stamps the version the release service publishes into Cargo.toml and
+# Cargo.lock, so the binaries report it: a dev build's 0.0.0-dev-<run number>
+# (as OpenCode numbers its dev builds) or a prerelease X.Y.Z-beta.N of the
+# checked-out version. Release builds only; the change is never committed.
 #
 #   set-crate-version.sh <source root> <version>
 set -eu
@@ -11,14 +11,10 @@ root=$1
 version=$2
 current=$(sed -n 's/^version = "\([^"]*\)"/\1/p' "$root/Cargo.toml" | head -1)
 [ "$version" = "$current" ] && exit 0
-case "$version" in
-  "$current"-dev.[0-9]* | "$current"-beta.[0-9]*) ;;
-  *)
-    echo "Can only stamp a prerelease of $current, not $version." >&2
-    exit 1
-    ;;
-esac
-printf '%s\n' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+-(dev|beta)\.[0-9]+$'
+printf '%s\n' "$version" | grep -Eq "^(0\.0\.0-dev-[1-9][0-9]*|$(printf '%s' "$current" | sed 's/\./\\./g')-beta\.[0-9]+)\$" || {
+  echo "Can only stamp 0.0.0-dev-<run> or a $current-beta.N prerelease, not $version." >&2
+  exit 1
+}
 # awk, not sed's GNU-only 0,/re/ address: this also runs on the macOS runner.
 awk -v current="$current" -v version="$version" '
   !done && $0 == "version = \"" current "\"" { $0 = "version = \"" version "\""; done = 1 }

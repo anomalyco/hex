@@ -14,7 +14,7 @@ use color_eyre::eyre::{Result, WrapErr, bail};
 use fs2::FileExt;
 
 use super::Method;
-use super::protocol::Version;
+use super::protocol::is_version_name;
 
 #[cfg(target_arch = "x86_64")]
 pub const TARGET: &str = "windows-x64";
@@ -54,6 +54,12 @@ pub fn method() -> Method {
         Some(channel) => Method::Direct { channel },
         None => Method::Unknown,
     }
+}
+
+/// The `windows-*` target is the signed executable our installers copy
+/// unchanged, so this build is the file whose SHA-256 it has.
+pub fn running_sha256() -> Option<String> {
+    crate::transcription_models::sha256_hex(&std::env::current_exe().ok()?, None).ok()
 }
 
 pub fn updates_disabled_by_policy() -> bool {
@@ -211,7 +217,8 @@ fn sync_file(path: &Path) -> Result<()> {
 
 /// Stage the executable into its version directory and switch the
 /// `current-version` pointer atomically; the running version's files are
-/// never touched, and versions older than the previous one are pruned.
+/// never touched, and every version but the new, running, and previous one
+/// is pruned.
 fn activate(support: &Path, version: &str, staging: &Path) -> Result<PathBuf> {
     let versions = support.join("versions");
     let version_dir = versions.join(version);
@@ -241,7 +248,7 @@ fn activate(support: &Path, version: &str, staging: &Path) -> Result<PathBuf> {
         if name != version
             && name != running
             && previous.as_deref() != Some(name)
-            && Version::parse(name).is_some()
+            && is_version_name(name)
             && let Err(error) = fs::remove_dir_all(entry.path())
         {
             tracing::warn!(%error, path = %entry.path().display(), "could not prune an old Hex version");

@@ -274,6 +274,15 @@ language, explaining how to switch. Language routing already keeps their model
 and lists it in the picker ([plan](docs/plans/language-recommendations.md)); the
 hint never switches or downloads anything itself.
 
+## Shared Engine Service
+
+Later, not started. Move the engine into a launchd service
+(`anomaly.hex.engine`) serving the same `/streams` and `/transcriptions` API;
+the Hex UI becomes a client. Today the running app serves
+[`/streams`](docs/streams.md) on dictation's loaded model, with dictation
+first; the service keeps that contract, so stream clients such as Seer don't
+change.
+
 ## Deliberate Deferrals
 
 The iOS prototype needs explicit accepted-job behavior when its keyboard session

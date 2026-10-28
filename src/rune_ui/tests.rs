@@ -137,7 +137,7 @@ fn a_refused_note_sits_with_the_shortcut_the_desktop_kept() {
 }
 
 #[test]
-fn advanced_stays_open_while_in_use_and_collapsing_drops_its_question() {
+fn advanced_opens_while_in_use_and_always_closes() {
     let mut rt = runtime("portal", true, GOLDEN_SIZE);
     assert!(rt.find("microphone-mode").is_none());
     tap(&mut rt, "advanced-toggle");
@@ -147,12 +147,17 @@ fn advanced_stays_open_while_in_use_and_collapsing_drops_its_question() {
     assert!(!rt.state.confirm_release, "collapsing drops the question");
     assert!(rt.find("microphone-mode").is_none());
 
+    rt.state.advanced = None;
     rt.state.settings.release_microphone_while_idle = true;
     rt.invalidate();
     settle(&mut rt);
     assert!(rt.find("microphone-mode").is_some(), "in use opens it");
     tap(&mut rt, "advanced-toggle");
-    assert!(rt.find("microphone-mode").is_some(), "and keeps it open");
+    assert!(rt.find("microphone-mode").is_none(), "but it still closes");
+    tap(&mut rt, "advanced-toggle");
+    assert!(rt.find("microphone-mode").is_some());
+
+    rt.state.advanced = None;
 
     rt.state.settings.release_microphone_while_idle = false;
     rt.state.settings.double_tap_lock = true;
@@ -185,6 +190,53 @@ fn toggles_save_through_the_host() {
     assert!(!rt.state.settings.paste_with_shift);
     assert_eq!(saved(&rt), 1);
     assert!(sent(&rt).is_empty());
+}
+
+#[test]
+fn choosing_an_update_channel_saves_it_and_checks_now() {
+    let mut rt = runtime("portal", true, GOLDEN_SIZE);
+    tap(&mut rt, "advanced-toggle");
+    assert_eq!(rt.state.settings.updates.channel, None);
+    tap(&mut rt, "update-channel-control/segment1");
+    assert_eq!(
+        rt.state.settings.updates.channel,
+        Some(crate::app_settings::UpdateChannel::Dev)
+    );
+    assert_eq!(saved(&rt), 1);
+    assert!(matches!(
+        sent(&rt),
+        [Request::Desktop(DesktopAction::CheckForUpdates)]
+    ));
+    tap(&mut rt, "update-channel-control/segment1");
+    assert_eq!(
+        saved(&rt),
+        1,
+        "choosing the same channel again saves nothing"
+    );
+}
+
+#[test]
+fn choosing_the_channel_in_effect_keeps_following_the_build() {
+    let mut rt = runtime("portal", true, GOLDEN_SIZE);
+    tap(&mut rt, "advanced-toggle");
+    assert_eq!(rt.state.settings.updates.channel, None);
+    tap(&mut rt, "update-channel-control/segment0");
+    assert_eq!(rt.state.settings.updates.channel, None);
+    assert_eq!(saved(&rt), 0);
+    assert!(sent(&rt).is_empty());
+}
+
+#[test]
+fn installs_that_never_update_hide_the_update_channel() {
+    let mut rt = runtime("portal", true, GOLDEN_SIZE);
+    tap(&mut rt, "advanced-toggle");
+    assert!(rt.find("update-channel").is_some());
+    if let Some(view) = &mut rt.state.view {
+        view.update_status = DesktopUpdateStatus::PackageManager;
+    }
+    rt.invalidate();
+    settle(&mut rt);
+    assert!(rt.find("update-channel").is_none());
 }
 
 #[test]
@@ -610,7 +662,7 @@ fn a_settings_row_shows_no_hover_or_press_of_its_own() {
 fn hover_leaves_at_once() {
     let mut rt = runtime("mac-settings", true, PANE_SIZE);
     for key in [
-        "check-for-updates",
+        "update-status",
         "dictation-hotkey",
         "microphone-control-field-trigger",
     ] {
@@ -1133,6 +1185,19 @@ fn recognition_hints_save_when_typing_pauses() {
         ui.settings.transcription.recognition_hints,
         "OpenCode, Effect"
     );
+}
+
+#[test]
+fn the_microphone_field_names_the_input_in_use() {
+    let field = |rt: &Runtime<Ui>| element(rt, "microphone-control-field-trigger").label;
+    let rt = runtime("mac-settings", true, PANE_SIZE);
+    assert_eq!(field(&rt).as_deref(), Some("System default, Kit Pods"));
+
+    let rt = runtime("mac-microphone-missing", true, PANE_SIZE);
+    assert_eq!(field(&rt).as_deref(), Some("System default, Kit Pods"));
+    let texts = texts(&rt);
+    assert!(texts.contains(&"not connected".to_owned()), "{texts:?}");
+    assert!(texts.contains(&"Shure MV7 isn't connected; using your Mac's input".to_owned()));
 }
 
 // ---------------------------------------------------------------------------

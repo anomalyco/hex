@@ -33,6 +33,7 @@ mod onboarding;
 mod picker;
 mod platform;
 mod platform_settings;
+pub(crate) mod playground;
 #[cfg(hex_capture)]
 mod scrawl;
 mod settings;
@@ -53,7 +54,7 @@ use crate::desktop_host::{
 };
 use crate::desktop_i18n::{tr, tr_fill};
 use crate::transcription_models::TranscriptionModelId;
-use controls::Paint;
+use controls::{METRICS, Paint};
 use host::{Backend, Request, ShortcutTarget};
 use settings::Capture;
 
@@ -163,12 +164,34 @@ pub(crate) fn run_app(
 }
 
 /// The window as a Rune app whose lifetime the caller chooses, connected to
-/// its host through `connect`.
+/// its host through `connect`, with the playground when its experiment is on.
 pub(crate) fn app(connect: host::Connect) -> rune::App<Ui> {
-    let app = rune::App::new(spec())
+    build(connect, playground::enabled())
+}
+
+/// `hex app -- --snap …`: a headless render of a fixture scene. With the
+/// `playground` experiment on, `--playground [story]` renders the playground.
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+pub(crate) fn render_app(rune_args: Vec<String>) -> rune::App<Ui> {
+    let playground = rune_args.iter().any(|arg| arg == "--playground");
+    build(Default::default(), playground && playground::enabled()).args(rune_args)
+}
+
+fn build(connect: host::Connect, with_playground: bool) -> rune::App<Ui> {
+    let spec = if with_playground {
+        playground::spec(spec())
+    } else {
+        spec()
+    };
+    let app = rune::App::new(spec)
         .init(move || Ui::load_with(connect))
         .on_close(on_close)
         .compositor(hero::HeroCompositor::default());
+    let app = if with_playground {
+        playground::attach(app)
+    } else {
+        app
+    };
     let window = app.handle();
     // Nothing shown reads the handle, so this asks for no frame. The first
     // frame's poll ran without it, so the window's tick starts from here.
@@ -310,7 +333,14 @@ pub(crate) fn meeting_failed(ui: &mut Ui, error: String) {
 /// scene, or `live` for the running Hex's `hex status`.
 #[cfg(target_os = "linux")]
 pub(crate) fn render() {
-    rune::run_with(spec(), hero::HeroCompositor::default());
+    let with_playground =
+        std::env::args().any(|arg| arg == "--playground") && playground::enabled();
+    if !with_playground {
+        rune::run_with(spec(), hero::HeroCompositor::default());
+        return;
+    }
+    let app = rune::App::new(playground::spec(spec())).compositor(hero::HeroCompositor::default());
+    playground::attach(app).run();
 }
 
 /// The window's logical size, which every pane and the picker fit.
@@ -319,9 +349,13 @@ const WINDOW_SIZE: (f32, f32) = (980.0, 760.0);
 /// One fixed size the user cannot change. Tiling window managers float such
 /// a window instead of tiling it: sway, Hyprland, niri, and i3 on Linux
 /// (Wayland has no other way to ask for floating), and AeroSpace, yabai, and
-/// Spaceman on macOS, where the first-run tour opens centred this way.
+/// Spaceman on macOS, where the first-run tour opens centred this way. With
+/// the playground, it resizes, so the stage beside its columns has room.
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 pub(crate) fn fixed_window() -> rune::WindowOptions {
+    if playground::enabled() {
+        return rune::WindowOptions::default();
+    }
     rune::WindowOptions {
         min_size: Some(WINDOW_SIZE),
         max_size: Some(WINDOW_SIZE),
@@ -534,10 +568,19 @@ pub(crate) struct Ui {
     pane: Pane,
     open: Option<Menu>,
     // General
-    microphones: Result<Vec<String>, String>,
+    microphones: Result<crate::audio::InputDevices, String>,
+    /// The [`crate::audio::input_route_generation`] `microphones` was listed at.
+    microphones_route: Option<u64>,
+    /// The poll clock `microphones` was last listed at.
+    microphones_listed_at: f64,
+    /// A listing in flight. Listing reads CoreAudio or COM endpoint
+    /// properties, which can block, so it runs off the UI thread.
+    microphones_listing:
+        Option<std::sync::mpsc::Receiver<Result<crate::audio::InputDevices, String>>>,
     confirm_release: bool,
-    /// General's Advanced disclosure is open.
-    advanced: bool,
+    /// General's Advanced disclosure, once pressed: open or closed. Until
+    /// then it is open only while an advanced setting is in use.
+    advanced: Option<bool>,
     capture: Capture,
     hints: TextEdit,
     vocabulary: vocabulary::VocabularyEditor,
@@ -613,9 +656,12 @@ impl Ui {
             service_settings: None,
             pane: Pane::General,
             open: None,
-            microphones: Ok(Vec::new()),
+            microphones: Ok(Default::default()),
+            microphones_route: None,
+            microphones_listed_at: 0.0,
+            microphones_listing: None,
             confirm_release: false,
-            advanced: false,
+            advanced: None,
             capture: Capture::Idle,
             hints,
             vocabulary,
@@ -994,6 +1040,19 @@ fn poll(ui: &mut Ui, clock: f64, tx: &mut Tx) -> bool {
     changed |= ui.modes.poll(ui.live());
     changed |= modes::poll_chooser(ui);
     let login_unknown = ui.platform.login_item.is_none();
+    changed |= settings::poll_microphones(ui);
+    // General names the input in use; list again when the OS reports an
+    // input change. Windows reports a default change only to an open
+    // default stream, so there the list is also refreshed every few seconds.
+    if ui.pane == Pane::General
+        && ui.live()
+        && ui.window.as_ref().is_some_and(rune::AppHandle::is_visible)
+        && (ui.microphones_route != Some(crate::audio::input_route_generation())
+            || (cfg!(target_os = "windows") && clock >= ui.microphones_listed_at + 3.0))
+    {
+        settings::refresh_microphones(ui);
+        ui.microphones_listed_at = clock;
+    }
     changed |= ui.host.poll(&mut ui.platform);
     // macOS reports the login item moments after launch; its switch replaces
     // "Checking…" at once instead of fading in and reflowing the row.
@@ -1055,6 +1114,10 @@ fn poll(ui: &mut Ui, clock: f64, tx: &mut Tx) -> bool {
 
 fn view(ui: &Ui, cx: &mut Cx<Ui>) -> El {
     let p = Paint::new(cx.system_dark(), cx.env().scale);
+    // The native title bar takes the window's background, so it follows a
+    // system theme switch along with the rest of the window.
+    #[cfg(target_os = "windows")]
+    crate::windows_rune::match_title_bar(p.k.c.bg_deep);
     // Menus and popovers mount above the page (rune-kit overlays).
     let mut layer = Vec::new();
     let (actions, body) = match ui.pane {
@@ -1113,6 +1176,9 @@ fn view(ui: &Ui, cx: &mut Cx<Ui>) -> El {
 
 fn window_focused(ui: &mut Ui, focused: bool, tx: &mut Tx) {
     explainer::window_focused(ui, focused, tx);
+    if focused {
+        ui.send(Request::Desktop(DesktopAction::WindowFocused));
+    }
     // Screen Recording is often switched on in System Settings, so the
     // Scrawl pane reads it again as soon as Hex comes back.
     #[cfg(hex_capture)]
@@ -1184,12 +1250,17 @@ fn sidebar(ui: &Ui, p: Paint) -> El {
         nav = nav.child(slot);
     }
     let action = match ui.view.as_ref().map(|view| &view.update_status) {
-        Some(DesktopUpdateStatus::ReadyToRestart) => {
-            Some((tr("Restart to update"), DesktopAction::RestartIntoUpdate))
-        }
+        Some(DesktopUpdateStatus::ReadyToRestart) => Some((
+            tr("Restart to update").to_owned(),
+            DesktopAction::RestartIntoUpdate,
+        )),
         Some(DesktopUpdateStatus::Available) => {
-            Some((tr("Download update"), DesktopAction::OpenUpdate))
+            Some((tr("Download update").to_owned(), DesktopAction::OpenUpdate))
         }
+        Some(DesktopUpdateStatus::SwitchAvailable { channel, version }) => Some((
+            crate::updater::switch_label(channel, version),
+            DesktopAction::ConfirmUpdateSwitch,
+        )),
         _ => None,
     };
     // An available update is a state, not the screen's main action.
@@ -1203,7 +1274,7 @@ fn sidebar(ui: &Ui, p: Paint) -> El {
             .child(controls::button(
                 p,
                 "sidebar-update",
-                label,
+                &label,
                 controls::ButtonKind::Secondary,
                 move |ui: &mut Ui, _| ui.send(Request::Desktop(action.clone())),
             ))
@@ -1221,69 +1292,94 @@ fn sidebar(ui: &Ui, p: Paint) -> El {
         .child(el().key("spacer").grow(1.0))
         .children(update)
         .children(host::QUIT_IN_WINDOW.then(|| quit_item(p)))
-        .child(
-            text(version_label())
-                .key("version")
-                .font(p.k.ty.small)
-                .color(p.faint())
-                .pl(6.0)
-                .pt(8.0),
-        )
-        .children(update_status(ui, p))
+        .child(footer(ui, p))
 }
 
-/// Under the version: a manual check, or what the updater is doing. An
-/// available update is the Update button above.
-fn update_status(ui: &Ui, p: Paint) -> Option<El> {
-    let status = |label: &str| {
-        text(label)
-            .key("update-status")
-            .font(p.k.ty.small)
-            .color(p.faint())
-            .pl(6.0)
-            .pt(2.0)
+/// The version and, under it, a manual check or what the updater is doing.
+/// Both lines keep their place in every state, so a check never moves the
+/// version, and the status line is one element whose words change in place
+/// rather than two that cross-fade over each other. An available update is
+/// the Update button above.
+fn footer(ui: &Ui, p: Paint) -> El {
+    let c = &p.k.c;
+    let line = |key: &str, words: &str, color| {
+        row()
+            .key(key)
+            .h(FOOTER_LINE)
+            .px(6.0)
+            .center_y()
+            .self_start()
+            .radius(p.k.radius.sm)
+            .child(
+                text(words)
+                    .key("label")
+                    .font(p.k.ty.small)
+                    .color(color)
+                    .truncate(),
+            )
     };
-    Some(match &ui.view.as_ref()?.update_status {
-        DesktopUpdateStatus::Unavailable
-        | DesktopUpdateStatus::Available
-        | DesktopUpdateStatus::ReadyToRestart => return None,
-        DesktopUpdateStatus::Managed => status(tr("Managed by your organization")),
-        DesktopUpdateStatus::Checking => status(tr("Checking for updates…")),
-        DesktopUpdateStatus::Downloading => status(tr("Downloading update")),
-        DesktopUpdateStatus::Current | DesktopUpdateStatus::Failed => {
-            let c = &p.k.c;
-            row()
-                .key("check-for-updates")
+    let status = ui.view.as_ref().map(|view| &view.update_status);
+    let status = match status {
+        None
+        | Some(
+            DesktopUpdateStatus::Unavailable
+            | DesktopUpdateStatus::Available
+            | DesktopUpdateStatus::ReadyToRestart
+            | DesktopUpdateStatus::SwitchAvailable { .. },
+        ) => None,
+        Some(DesktopUpdateStatus::Current | DesktopUpdateStatus::Failed) => Some(
+            line("update-status", tr("Check for updates"), c.text_muted)
                 .role("button")
                 .label(tr("Check for updates"))
-                .h(20.0)
-                .px(6.0)
-                .center_y()
-                .radius(p.k.radius.sm)
                 .hover(c.hover)
                 .press(c.pressed)
                 .focusable(true)
                 .focus_ring(2.0, -2.0, c.border_focus)
-                .on_press(|ui: &mut Ui| ui.send(Request::Desktop(DesktopAction::CheckForUpdates)))
-                .child(
-                    text(tr("Check for updates"))
-                        .key("label")
-                        .font(p.k.ty.small)
-                        .color(c.text_muted)
-                        .truncate(),
-                )
+                .on_press(|ui: &mut Ui| ui.send(Request::Desktop(DesktopAction::CheckForUpdates))),
+        ),
+        // The same words, quieter, while it checks: the hourly check and a
+        // pressed one read the same and never swap the line's words.
+        Some(DesktopUpdateStatus::Checking) => Some(
+            line("update-status", tr("Check for updates"), p.faint())
+                .label(tr("Checking for updates…")),
+        ),
+        Some(DesktopUpdateStatus::Managed) => Some(line(
+            "update-status",
+            tr("Managed by your organization"),
+            p.faint(),
+        )),
+        Some(DesktopUpdateStatus::Downloading) => {
+            Some(line("update-status", tr("Downloading update"), p.faint()))
         }
-        DesktopUpdateStatus::SourceBuild => status(tr("Updated from your source checkout")),
-        DesktopUpdateStatus::PackageManager => status(tr("Updated by your package manager")),
-        DesktopUpdateStatus::PackageUpdate { command } => text(command)
-            .key("update-command")
-            .font(p.k.ty.small)
-            .color(p.faint())
-            .wrap()
-            .pl(6.0)
-            .pt(2.0),
-    })
+        Some(DesktopUpdateStatus::SourceBuild) => Some(line(
+            "update-status",
+            tr("Updated from your source checkout"),
+            p.faint(),
+        )),
+        Some(DesktopUpdateStatus::PackageManager) => Some(line(
+            "update-status",
+            tr("Updated by your package manager"),
+            p.faint(),
+        )),
+        Some(DesktopUpdateStatus::PackageUpdate { command }) => Some(
+            text(command.clone())
+                .key("update-command")
+                .font(p.k.ty.small)
+                .color(p.faint())
+                .wrap()
+                .px(6.0)
+                .py(2.0),
+        ),
+    };
+    col()
+        .key("footer")
+        .mt(8.0)
+        .child(line("version", &version_label(), p.faint()))
+        .children(status)
 }
+
+/// The footer's lines: as tall as each other, so a check moves nothing.
+const FOOTER_LINE: f32 = 20.0;
 
 /// Test builds also name their commit: main moves past a release without
 /// changing the version.
@@ -1395,7 +1491,7 @@ fn pane_header(p: Paint, title: &str, switch: Option<El>, actions: Vec<El>) -> E
     title_bar(row())
         .key("pane-header")
         .h(52.0)
-        .px(24.0)
+        .px(METRICS.gutter)
         .gap(8.0)
         .center_y()
         .child(
@@ -1477,10 +1573,11 @@ const SCENES: &[Scene] = &[
     ("menus", |ui| {
         *ui = portal_fixture();
         ui.open = Some(Menu::Microphone);
-        ui.microphones = Ok(vec![
-            "Built-in Audio Analog Stereo".into(),
-            "Shure MV7".into(),
-        ]);
+        ui.microphones = Ok(crate::audio::InputDevices {
+            names: vec!["Built-in Audio Analog Stereo".into(), "Shure MV7".into()],
+            system_default: Some("Shure MV7".into()),
+            default_is_hex_microphone: false,
+        });
         ui.confirm_release = true;
     }),
     ("voice-action", |ui| {
@@ -1605,6 +1702,11 @@ const SCENES: &[Scene] = &[
     }),
     // macOS and Windows surfaces, from preview data (see `platform`).
     ("mac-settings", |ui| *ui = mac_fixture()),
+    ("mac-microphone-missing", |ui| {
+        *ui = mac_fixture();
+        ui.settings.microphone = Some("Shure MV7".into());
+        ui.open = Some(Menu::Microphone);
+    }),
     ("mac-settings-vocabulary", |ui| {
         *ui = mac_fixture();
         vocabulary::fixture(ui, true);
@@ -1639,12 +1741,28 @@ const SCENES: &[Scene] = &[
     }),
     ("mac-settings-advanced", |ui| {
         *ui = mac_fixture();
-        ui.advanced = true;
+        ui.advanced = Some(true);
+    }),
+    ("mac-settings-dev-channel", |ui| {
+        *ui = mac_fixture();
+        ui.settings.updates.channel = Some(crate::app_settings::UpdateChannel::Dev);
     }),
     ("mac-update-ready", |ui| {
         *ui = mac_fixture();
         if let Some(view) = &mut ui.view {
             view.update_status = DesktopUpdateStatus::ReadyToRestart;
+        }
+    }),
+    ("mac-update-checking", |ui| {
+        *ui = mac_fixture();
+        if let Some(view) = &mut ui.view {
+            view.update_status = DesktopUpdateStatus::Checking;
+        }
+    }),
+    ("mac-update-downloading", |ui| {
+        *ui = mac_fixture();
+        if let Some(view) = &mut ui.view {
+            view.update_status = DesktopUpdateStatus::Downloading;
         }
     }),
     ("windows-settings", |ui| {
@@ -1882,6 +2000,15 @@ fn mac_fixture() -> Ui {
         },
     ];
     ui.settings.experimental.hex_microphone = true;
+    ui.microphones = Ok(crate::audio::InputDevices {
+        names: vec![
+            "Kit Pods".into(),
+            "MacBook Pro Microphone".into(),
+            "Studio Display Microphone".into(),
+        ],
+        system_default: Some("Kit Pods".into()),
+        default_is_hex_microphone: false,
+    });
     ui.meetings = meetings::MeetingsPane::fixture();
     ui
 }

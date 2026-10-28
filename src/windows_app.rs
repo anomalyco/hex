@@ -234,7 +234,9 @@ impl WindowsDesktopHost {
             DesktopAction::ClearError => self.error = None,
             DesktopAction::CheckForUpdates
             | DesktopAction::OpenUpdate
-            | DesktopAction::RestartIntoUpdate => match self.updater.act(&action) {
+            | DesktopAction::RestartIntoUpdate
+            | DesktopAction::ConfirmUpdateSwitch
+            | DesktopAction::WindowFocused => match self.updater.act(&action) {
                 // Ends the app so the new version can take the named event.
                 Ok(quit) if quit => {
                     self.stop();

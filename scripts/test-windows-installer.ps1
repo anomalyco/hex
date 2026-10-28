@@ -1,7 +1,7 @@
-# Silently installs, reinstalls, refuses a downgrade with, and uninstalls a
-# Hex-Setup-*.exe on a disposable Windows machine (CI), checking the managed
-# layout that src/windows_updater.rs expects at every step. It uses the real
-# %APPDATA%, so never run it on a machine with Hex installed.
+# Silently installs, reinstalls, installs over another version with, and
+# uninstalls a Hex-Setup-*.exe on a disposable Windows machine (CI), checking
+# the managed layout that src/updater/windows.rs expects at every step. It
+# uses the real %APPDATA%, so never run it on a machine with Hex installed.
 #
 #   scripts/test-windows-installer.ps1 -Installer dist\Hex-Setup-2.4.0-windows-x64.exe `
 #     -Executable dist\Hex-2.4.0-windows-x64.exe -Version 2.4.0
@@ -66,10 +66,10 @@ if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64' -or (Test-Path "$env:SystemRoot\Syst
 Check ((Run-Setup 'reinstall') -eq 0) 'reinstalling the same version exits 0'
 Check ((Get-FileHash -Algorithm SHA256 $installed).Hash -eq $expected) 'reinstall keeps the release bytes'
 
-# A self-update to a newer version must never be rolled back by this installer.
+# Versions are never compared: the installer installs its own over any other.
 Set-Content -Path $pointer -Value '99.0.0' -NoNewline
-Check ((Run-Setup 'downgrade') -ne 0) 'an installer older than the installed version refuses to run'
-Check ((Get-Content $pointer -Raw).Trim() -eq '99.0.0') 'the refused downgrade leaves current-version alone'
+Check ((Run-Setup 'over-another') -eq 0) 'installing over another version exits 0'
+Check ((Get-Content $pointer -Raw).Trim() -eq $Version) 'current-version names this installer''s version'
 
 # Simulate what a self-update and Launch at login leave behind.
 $updated = Join-Path $support 'versions\99.0.0\hex.exe'

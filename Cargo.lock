@@ -918,7 +918,7 @@ dependencies = [
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
- "windows 0.62.2",
+ "windows 0.61.3",
 ]
 
 [[package]]
@@ -3641,7 +3641,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7d8fae84b431384b68627d0f9b3b1245fcf9f46f6c0e3dc902e9dce64edd1967"
 dependencies = [
  "libc",
- "windows-sys 0.45.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4484,7 +4484,7 @@ dependencies = [
 [[package]]
 name = "rune"
 version = "0.0.1"
-source = "git+https://github.com/anomalyco/rune.git?rev=b59ea8e283d3bbf7d1a11db10cb16d9d592dbdc8#b59ea8e283d3bbf7d1a11db10cb16d9d592dbdc8"
+source = "git+https://github.com/anomalyco/rune.git?rev=ea59c4961db739be2c240d6273ec3a38f208cb45#ea59c4961db739be2c240d6273ec3a38f208cb45"
 dependencies = [
  "arboard",
  "blake3",
@@ -4547,7 +4547,7 @@ dependencies = [
 [[package]]
 name = "rune-kit"
 version = "0.0.1"
-source = "git+https://github.com/anomalyco/rune.git?rev=b59ea8e283d3bbf7d1a11db10cb16d9d592dbdc8#b59ea8e283d3bbf7d1a11db10cb16d9d592dbdc8"
+source = "git+https://github.com/anomalyco/rune.git?rev=ea59c4961db739be2c240d6273ec3a38f208cb45#ea59c4961db739be2c240d6273ec3a38f208cb45"
 dependencies = [
  "rune",
  "rune-motion",
@@ -4557,12 +4557,12 @@ dependencies = [
 [[package]]
 name = "rune-motion"
 version = "0.1.0"
-source = "git+https://github.com/anomalyco/rune.git?rev=b59ea8e283d3bbf7d1a11db10cb16d9d592dbdc8#b59ea8e283d3bbf7d1a11db10cb16d9d592dbdc8"
+source = "git+https://github.com/anomalyco/rune.git?rev=ea59c4961db739be2c240d6273ec3a38f208cb45#ea59c4961db739be2c240d6273ec3a38f208cb45"
 
 [[package]]
 name = "rune-theme-opencode"
 version = "0.0.1"
-source = "git+https://github.com/anomalyco/rune.git?rev=b59ea8e283d3bbf7d1a11db10cb16d9d592dbdc8#b59ea8e283d3bbf7d1a11db10cb16d9d592dbdc8"
+source = "git+https://github.com/anomalyco/rune.git?rev=ea59c4961db739be2c240d6273ec3a38f208cb45#ea59c4961db739be2c240d6273ec3a38f208cb45"
 dependencies = [
  "rune",
  "rune-kit",

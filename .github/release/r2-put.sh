@@ -1,7 +1,8 @@
 #!/bin/sh
 # Upload one object to a Hex files bucket (HEX_RELEASE_BUCKET:
 # hex-production-files or hex-dev-files) through its S3 API, using the
-# bucket-scoped CI credentials (R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY).
+# bucket-scoped CI credentials (R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY). It is
+# part of the release boundary (lib.sh): it reads only the file it uploads.
 # HEX_RELEASE_PREFIX (e.g. staging/<run>/) is prepended to every key.
 #
 #   r2-put.sh <key> <file> <content-type> <cache-control> [content-disposition]

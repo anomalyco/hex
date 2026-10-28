@@ -54,13 +54,13 @@ Download Hex                              // setup.download-recovery
 │   └── Other platforms -> every build, Homebrew, the GitHub release
 ├── Website, README, installers, apps, feeds, appcast -> anoma.ly/hex/files -> R2 bytes (Worker hex-production-site)
 ├── Releases up to 2.3.1, Homebrew -> downloads.hex.kitlangton.dev -> redirect to the same bytes
-├── GitHub app-v<version> -> identical DMG, Setup.exe, and Linux bytes
+├── GitHub v<version> (app-v through 2.3.1) -> identical DMG, Setup.exe, and Linux bytes
 └── Older app cannot reach its update feed -> manually install the DMG
 
 Install on Windows                        // setup.windows-installer
 ├── Setup.exe, per user, no admin -> managed versions\<version>\hex.exe
 │   ├── x64 without vulkan-1.dll -> stop with driver guidance
-│   ├── newer self-updated version installed -> refuse, nothing changed
+│   ├── another version installed (e.g. self-updated) -> install this one over it
 │   └── finish -> Open Hex -> first-run tour downloads a model
 └── Settings › Apps -> uninstall every version, shortcut, Launch at login; keep data
 
@@ -75,7 +75,7 @@ Prepare local models                      // separate network dependency
 ```
 
 The website shows the pinned macOS version and platform requirements beside its
-download links. App mirrors use explicit `app-v…` release tags rather than GitHub's
+download links. App mirrors use explicit `v…` release tags (`app-v…` through 2.3.1) rather than GitHub's
 repository-wide latest release, which may refer to the SDK. Builds on the release
 service update from `https://anoma.ly/release` (docs/releasing.md); the 2.3.1
 feeds, appcast, and the legacy `r2.dev` endpoint stay frozen for installed
@@ -90,15 +90,15 @@ Headless Chromium renders of the WebGPU, Canvas 2D, reduced-motion and phone pat
 showed no console errors; a deterministic 60 fps capture was reviewed frame by
 frame. These checks do not exercise real speakers or a physical phone.
 
-The Windows installer is silently installed, reinstalled, refused as a
-downgrade, and uninstalled on x64 and ARM64 runners by
+The Windows installer is silently installed, reinstalled, installed over
+another version, and uninstalled on x64 and ARM64 runners by
 [test-windows-installer.ps1](../../scripts/test-windows-installer.ps1); no
 interactive install, SmartScreen prompt, or first launch on a real PC has been
 observed. The Linux library diagnosis has no automated check. The site's
 platform states were captured once in headless Chromium with `?platform=`.
 
 Sources: [website](../../site/src/Download.tsx), [installer](../../packaging/windows/hex.iss),
-[release publisher](../../scripts/release-service.sh),
+[release publisher](../../.github/release/release-service.sh),
 [mirror publisher](../../scripts/publish-app-mirror.sh),
 [macOS release publisher](../../scripts/release-app.sh),
 [Linux installer](../../scripts/install-linux-release.sh), and
@@ -396,9 +396,17 @@ General                                  // settings
 │   ├── Shortcut mode > How it works -> Hold/Toggle explainer modal (dictation.md)
 │   └── A row that hides or shows (Double-tap to lock, Advanced, a microphone error)
 │       -> Folds under a clip as the rows below slide over it; no fade in place
-├── Microphone -> Automatic or saved device
-│   ├── Automatic -> Compiled preferences, then the macOS default
-│   │   └── Default is a Bluetooth headset -> Built-in mic when present // avoids the call profile
+├── Microphone -> Field always names the input in use            // settings.microphone
+│   ├── "System default" + faint "KIT PODS", or a saved device
+│   ├── Re-listed on a device or default change while General shows (Windows: also every 3 s)
+│   ├── System default -> The OS default input, followed live      // a Bluetooth default is kept
+│   │   ├── Default changes -> Switch once capture is idle; new stream opens before the old drops
+│   │   └── Default is Hex Microphone -> Built-in mic, else first real input; row says so
+│   ├── Saved device missing -> System default stands in, field names it
+│   │   ├── Row says "SHURE MV7 isn't connected; using your Mac's input"
+│   │   ├── Menu keeps "SHURE MV7" checked with a faint "not connected"
+│   │   └── Device returns -> Switch back once idle; the setting never changes
+│   ├── Menu lists real inputs only                                // never Hex Microphone
 │   └── Open menu covers the controls beneath it; click elsewhere dismisses
 ├── Advanced ▸ (Dictation header) -> rows at the end of the Dictation card
 │   ├── Open while Release when idle or Double-tap only (Hold) is on
@@ -441,15 +449,21 @@ The script check does not prove subprocess avoidance or exercise Music, Spotify,
 or VLC through Automation. An opt-in native
 assertion smoke exercises IOKit without starting microphone capture.
 
-**Fixed after 2.1.22:** Automatic selection opened a Bluetooth headset when it was
-the macOS default input, which switches AirPods and similar headsets into a
-low-quality call profile for all audio, including music
-([#106](https://github.com/anomalyco/hex/issues/106),
-[#88](https://github.com/anomalyco/hex/issues/88)). It now prefers a built-in
-microphone and keeps the headset only when none exists; an explicitly saved
-headset is still opened. `automatic_input_prefers_built_in_over_a_bluetooth_default`
-in [audio.rs](../../src/audio.rs) covers the choice, not CoreAudio's transport
-report or a connected headset.
+**Changed after 2.3.1:** Automatic was a compiled preference list (Universal
+Audio Thunderbolt, Studio Display Microphone), then the macOS default with a
+Bluetooth default swapped for the built-in microphone (the 2.1.22 fix for
+[#106](https://github.com/anomalyco/hex/issues/106) and
+[#88](https://github.com/anomalyco/hex/issues/88)). That skipped a user's
+AirPods default, and Hex Microphone then passed the wrong microphone on to
+calls. Automatic is now System default: exactly the OS default input, followed
+live, so a Bluetooth default does open the headset (and its call profile); pick
+the built-in microphone to avoid that. Checks in [audio.rs](../../src/audio.rs):
+`inputs_resolve_to_the_selection_then_the_system_default`,
+`device_override_wins_and_never_falls_back`,
+`a_default_change_switches_only_while_capture_is_idle`, and
+`a_missing_selection_uses_the_default_until_it_returns`, with injected device
+lists and opens. Not verified: the CoreAudio listeners against a real default
+change, or Windows' default-change report on a real PC.
 
 **Fixed after 2.1.20:** through 2.1.20 the microphone menu was painted without
 occluding the panel, so hovering or clicking a device also reached the setting
@@ -570,7 +584,7 @@ or the driver installed                  // fun.hex-microphone; macOS
 │       ├── Dual waveform -> You vs Call hears with highlighted dictation span
 │       └── Explicit playback -> Play what call hears | Play your voice
 ├── Live microphone capture -> Raw audio to Hex transcription (unmodified)
-│   ├── Source -> Hex's dictation microphone (Automatic skips a Bluetooth headset), never a meeting's second stream
+│   ├── Source -> Hex's dictation microphone (System default follows the OS default, never Hex Microphone itself), never a meeting's second stream
 │   ├── Lock-free ring -> 48 kHz virtual sink -> Raised-cosine fade on intentional hold
 │   │   └── Not dictating -> bit-exact pass-through; non-48 kHz inputs resample continuously
 │   └── Ring underflows/overflows -> process.log each minute while an app reads it, and on sink stop
@@ -717,8 +731,17 @@ failed; no visual or installed-app startup verification is claimed.
 
 ```ts
 Hex checks the release service            // maintain.updates
-├── 10 s after launch, hourly, and sidebar Check for updates -> anoma.ly/release/hex/desktop/<channel>.json
-├── Protocol client rules (shared vectors) -> newer, required (minimum), revoked, or none
+├── 10 s after launch, hourly (Dev channel: every 10 min and on window focus), and Check for updates -> anoma.ly/release/hex/desktop/<channel>.json
+│   └── <channel> -> updates.channel (General › Application › Update channel: Stable | Dev,
+│       or `hex settings set updates.channel`), else the channel the build was published on
+│       (HEX_BUILD_CHANNEL; older builds: dev for a dev version, else the receipt's);
+│       package managers always stable
+│       └── Choosing a channel -> checks now; a staged update stays staged
+├── Versions never compared: channel's current release != running build -> take it
+│   ├── Running build -> Linux/Windows: executable SHA-256 = target's; macOS: same version
+│   ├── Another channel than the build's -> sidebar, tray, menu bar: Switch to Stable 2.3.1
+│   │   └── Only after the user confirms -> download -> stage (never switches by itself)
+│   ├── required -> install without waiting for the rollout
 │   └── Rollout -> device-local bucket in <support>/update-bucket, never sent
 ├── Direct install -> download (resumable) -> size + SHA-256 -> code signature -> stage
 │   ├── macOS -> unpack beside Hex.app -> Developer ID 5NZ4Q7NXJ4, anomaly.hex, notarized
@@ -727,7 +750,7 @@ Hex checks the release service            // maintain.updates
 │   └── Sidebar Update, menu bar / tray: Restart to update
 │       └── macOS -> renamex_np swap (also at quit) -> relaunch -> old bundle removed at launch
 ├── macOS location not replaceable (read-only, translocated, root-owned) -> Download update (DMG)
-├── Package manager (pacman, Nix) -> its command, once it serves the newer version
+├── Package manager (pacman, Nix) -> its command, once it serves another version
 ├── Source build, test build -> never checks
 └── Failure -> keep the running version, back off, Check for updates retries
 
@@ -751,8 +774,14 @@ window, menu bar, and tray show; `updater/protocol.rs` passes the release
 service's shared test vectors (`tests/fixtures/release-protocol`), and the
 per-OS modules have tests for activation, the macOS bundle swap and
 signature checks (ad-hoc fixtures against the real requirement), the rollout
-bucket, receipts, and Windows Authenticode (a Microsoft-signed system file).
-Not yet observed: a real update on any OS from the release service, the macOS
+bucket, receipts, the channel choice, never comparing versions (a legacy
+2.3.2-dev.29 follows 0.0.0-dev-N; dev to stable is a switch), the switch
+waiting for confirmation, and Windows Authenticode (a Microsoft-signed system file). The
+Update channel row shows only while this install updates itself (not test,
+source, managed, or package-manager installs); the `mac-settings-dev-channel`
+scene renders it, and `rune_ui` tests cover saving and hiding it.
+Not yet observed: a published dev channel release, a switch between channels on
+a real install, a real update on any OS from the release service, the macOS
 swap and relaunch of a Developer ID build, a Windows update of a signed build.
 Manifests are unsigned; on Linux a compromised HTTPS origin could serve any
 executable with a matching manifest, which Linux code signing cannot catch.
@@ -819,6 +848,8 @@ Linux beta                               // not macOS feature parity
 │       ├── No layer-shell -> `hex status` reports the HUD limitation
 │       └── No window loop (no GPU or display, `hex dictate`) -> no HUD
 ├── X11 -> No tray; status and sounds remain available
+├── Microphone -> System default or a saved device; `--device` overrides
+│   └── System default -> ALSA's default, resolved at each stream open // no live follow
 ├── Microphone failure -> Listener exits, not macOS automatic recovery
 │   └── Overload (Xrun) glitch -> Logged; not a failure
 └── Paste -> Retain transcript clipboard, not restore previous contents
@@ -831,9 +862,12 @@ Windows beta                             // x64 (Vulkan GPU) and ARM64 (CPU)
 ├── Launch again -> Running app shows its window; hidden (login) launch -> no-op
 ├── Ctrl+Space -> Hold or Toggle -> Capture -> Stream (GPU) -> Paste
 ├── Escape -> Cancel; a held modifier alone never ends or cancels a capture
+├── Microphone -> System default or a saved device
+│   └── Windows default input changes -> Switch once capture is idle // cpal's default-device report
 ├── Paste -> Waits for Shift, Alt, and Win; a held Ctrl is kept and harmless
 ├── Update staged (managed install) -> Tray, sidebar footer: Restart to update
-├── Newer release (unmanaged install) -> Tray, sidebar footer: Download update
+├── Another release (unmanaged install) -> Tray, sidebar footer: Download update
+├── Another channel chosen -> Tray, sidebar footer: Switch to Stable 2.3.1 (confirm)
 ├── Otherwise -> Sidebar footer: Check for updates
 └── Modes, Voice Action, History, Activity, transformations -> as on macOS
 ```
@@ -1043,6 +1077,8 @@ layout evidence.
 ```ts
 TypeScript SDK + macOS local service
 ├── Caller records audio -> Explicit helper -> Raw transcription
+├── Caller streams audio -> Running app's /streams -> Partials, segments, final
+│   └── Dictation first; uses the loaded model only (docs/streams.md)
 ├── Running desktop capture API -> Separate microphone ownership protocol
 │   └── No silence gate                  // raw model output, unlike hotkey dictation
 └── Distribution
@@ -1060,6 +1096,13 @@ Developer ID identity validation as the app; identity fixtures do not establish
 a signed helper distribution. Low-level blocking-peek and
 FIN/half-close limitations in [local_api.rs](../../src/local_api.rs) must not be
 generalized to every SDK cancellation path.
+
+Live streams (`/streams`, [contract](../streams.md)) are exercised by fake
+engines only: `transcription_stream` tests cover windows, partials, the
+backlog during dictation, preemption and offline fallback, the lease, cancel,
+and busy; `local_api::streams` tests cover routes, auth, and bounds; and
+`transcription_engine` tests cover yielding streams closed by dictation. No
+real-model or live-app stream has been run.
 
 Model progress and dictation levels share bounded SSE framing in
 [sse.ts](../../sdk/typescript/src/sse.ts). In-memory

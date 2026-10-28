@@ -863,6 +863,7 @@ fn router_env_from(path: &Path) -> scrawl_router::env::Env {
         })),
         summary: Some(crate::sketch::summary_markdown),
         pages: Some(crate::web::lookup),
+        opencode: None,
         live: true,
     }
 }
